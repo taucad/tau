@@ -26,7 +26,7 @@ type UseEventSourceProperties<T, U> = {
   onStreamEvent: (data: T) => void;
   onStreamStart?: () => void;
   onStreamEnd?: () => void;
-  onStreamError?: (error: Error) => void;
+  onStreamError?: (error: unknown) => void;
 }
 
 /**

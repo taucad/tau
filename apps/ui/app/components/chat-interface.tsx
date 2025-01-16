@@ -8,6 +8,7 @@ import { Avatar } from "./ui/avatar"
 import { Taucad } from "./icons/taucad"
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 // import { dark } from 'react-syntax-highlighter/dist/esm/styles/prism/index.js'
 
 function ChatMessage({ message }: { message: MessageSchema }) {
@@ -67,54 +68,58 @@ export default function ChatInterface() {
     }, [messages]);
 
     return (
-        <div className="flex h-[calc(100vh-48px)] bg-background">
+        <ResizablePanelGroup direction="horizontal" className="flex h-[calc(100vh-48px)] bg-background">
             {/* Left Pane - Chat History */}
-            <div className="w-full lg:w-[600px] border-r flex flex-col">
-                <div className="flex-1 overflow-auto p-4 space-y-2 text-primary-foreground">
-                    {messages.map((message, index) => (
-                        <ChatMessage message={message} key={index} />
-                    ))}
-                    <div ref={chatEndReference} />
-                </div>
-                {/* Input Area */}
-                <div className="p-4 border-t text-primary-foreground">
-                    <div className="relative">
-                        <textarea
-                            className="bg-background w-full p-3 pr-12 rounded-lg border min-h-24"
-                            rows={3}
-                            value={inputText}
-                            onChange={(e) => setInputText(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault(); // Prevents adding a new line
+            <ResizablePanel minSize={30} maxSize={50} defaultSize={40} className="flex flex-col">
+                <ResizablePanelGroup direction="vertical">
+                    <ResizablePanel defaultSize={85} style={{ overflowY: 'auto' }} className="flex-1 p-4 space-y-4 text-primary-foreground">
+                        {messages.map((message, index) => (
+                            <ChatMessage message={message} key={index} />
+                        ))}
+                        <div ref={chatEndReference} />
+                    </ResizablePanel>
+                    <ResizableHandle />
+                    {/* Input Area */}
+                    <ResizablePanel minSize={15} maxSize={50} defaultSize={15} className="p-4 text-primary-foreground">
+                        <div className="relative h-full">
+                            <textarea
+                                className="bg-background w-full p-3 pr-12 rounded-lg border h-full resize-none"
+                                rows={3}
+                                value={inputText}
+                                onChange={(event) => setInputText(event.target.value)}
+                                onKeyDown={(event) => {
+                                    if (event.key === 'Enter' && !event.shiftKey) {
+                                        event.preventDefault(); // Prevents adding a new line
+                                        onSubmit();
+                                    }
+                                }}
+                                placeholder="Type your message..."
+                            />
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                className="absolute right-2 top-2"
+                                onClick={() => {
                                     onSubmit();
-                                }
-                            }}
-                            placeholder="Type your message..."
-                        />
-                        <Button
-                            size="icon"
-                            variant="ghost"
-                            className="absolute right-2 top-2"
-                            onClick={() => {
-                                onSubmit();
-                            }}
-                        >
-                            <Send className="w-4 h-4 rotate-45 -translate-x-0.5" />
-                        </Button>
-                        <Button
-                            size="icon"
-                            variant="ghost"
-                            className="absolute right-2 bottom-3"
-                        >
-                            <Mic className="w-4 h-4" />
-                        </Button>
-                    </div>
-                </div>
-            </div>
+                                }}
+                            >
+                                <Send className="w-4 h-4 rotate-45 -translate-x-0.5" />
+                            </Button>
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                className="absolute right-2 bottom-3"
+                            >
+                                <Mic className="w-4 h-4" />
+                            </Button>
+                        </div>
+                    </ResizablePanel>
+                </ResizablePanelGroup>
+            </ResizablePanel>
+            <ResizableHandle className="hidden lg:flex" />
 
             {/* Right Pane - Main Chat Area */}
-            <div className="flex-1 flex-col hidden lg:flex">
+            <ResizablePanel defaultSize={60} className="flex-1 flex-col hidden lg:flex">
                 {/* Header */}
                 <div className="border-b p-3 flex items-center justify-between">
                     <div className="flex items-center space-x-2">
@@ -142,8 +147,8 @@ export default function ChatInterface() {
                 <div className="flex-1 p-4 overflow-auto">
                     <Viewer />
                 </div>
-            </div>
-        </div>
+            </ResizablePanel>
+        </ResizablePanelGroup>
     )
 }
 

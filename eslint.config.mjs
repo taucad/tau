@@ -28,6 +28,13 @@ export default [
     },
   },
   {
+    files: ['**/*.tsx', '**/*.jsx'],
+    // Override or add rules here
+    rules: {
+      'unicorn/no-keyword-prefix': 'off',
+    },
+  },
+  {
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
     // Override or add rules here
     rules: {},

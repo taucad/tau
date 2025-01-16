@@ -1,14 +1,14 @@
 import { createGlobPatternsForDependencies } from '@nx/react/tailwind';
-import { join, dirname } from 'node:path';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('tailwindcss').Config} */
 export default {
 	darkMode: ['class'],
 	content: [
-		join(
+		path.join(
 			__dirname,
 			'{src,pages,components,app}/**/*!(*.stories|*.spec).{ts,tsx,html}'
 		),
@@ -266,5 +266,6 @@ export default {
 			})
 		}
 	},
+	// eslint-disable-next-line unicorn/prefer-module
 	plugins: [require('tailwindcss-animate'), require('@tailwindcss/typography'),],
 };

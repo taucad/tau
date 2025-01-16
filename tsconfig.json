@@ -1,0 +1,5 @@
+{
+    "#comment": "This exists to make ShadCN be happy with a default tsconfig.json",
+    "extends": "./tsconfig.base.json"
+}
+  

@@ -1,0 +1,12 @@
+services:
+  search:
+    image: docker.io/searxng/searxng:latest
+    ports:
+      - "42114:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:42114/
+
+volumes:
+  search:

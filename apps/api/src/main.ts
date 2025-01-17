@@ -13,7 +13,6 @@ async function bootstrap() {
   const globalPrefix = 'v1';
   app.setGlobalPrefix(globalPrefix);
   app.enableCors();
-  console.log(process.env)
   const port = process.env.PORT || 3000;
   await app.listen(port);
   Logger.log(

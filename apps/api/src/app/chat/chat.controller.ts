@@ -29,7 +29,7 @@ const STREAMED_EVENTS = [ChatEvent.OnChatModelStream, ChatEvent.OnChatModelEnd, 
 export class ChatController {
   @Post()
   @Sse('sse')
-  async getData(@Body() body: any): Promise<Observable<{ data: {status: string, timestamp: number, content?: string } }>> {
+  async getData(@Body() body: any): Promise<Observable<{ data: { status: string, timestamp: number, content?: string } }>> {
     console.log(body);
     // Define the tools for the agent to use
     const tools = [
@@ -104,26 +104,26 @@ export class ChatController {
       (async () => {
         for await (const event of eventStream) {
           switch (event.event) {
-          case ChatEvent.OnChatModelStream: {
-            observer.next({ data: { status: event.event, timestamp: Date.now(), content: event.data.chunk.content } });
-          
-          break;
-          }
-          case ChatEvent.OnChatModelStart: {
-            Logger.log("Starting chat model");
-            Logger.log(event);
-            observer.next({ data: { status: event.event, timestamp: Date.now() } });
-          
-          break;
-          }
-          case ChatEvent.OnChatModelEnd: {
-            observer.next({ data: { status: event.event, timestamp: Date.now()  } });
-          
-          break;
-          }
-          default: {
-            Logger.log(event.event);
-          }
+            case ChatEvent.OnChatModelStream: {
+              observer.next({ data: { status: event.event, timestamp: Date.now(), content: event.data.chunk.content } });
+
+              break;
+            }
+            case ChatEvent.OnChatModelStart: {
+              Logger.log("Starting chat model");
+              Logger.log(event);
+              observer.next({ data: { status: event.event, timestamp: Date.now() } });
+
+              break;
+            }
+            case ChatEvent.OnChatModelEnd: {
+              observer.next({ data: { status: event.event, timestamp: Date.now() } });
+
+              break;
+            }
+            default: {
+              Logger.log(event.event);
+            }
           }
         }
         observer.complete();

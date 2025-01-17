@@ -8,3 +8,5 @@ build
 .env
 
 vite.config.*.timestamp*
+
+dist

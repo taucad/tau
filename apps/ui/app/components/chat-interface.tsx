@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import Markdown from 'react-markdown'
-import { Mic, ChevronLeft, ChevronRight, RotateCcw, Eye, Code, Terminal, Send } from 'lucide-react'
+import { Mic, ChevronLeft, ChevronRight, RotateCcw, Eye, Code, Terminal, ArrowRight } from 'lucide-react'
 import { Button } from "@/components/ui/button"
 import Viewer from "./viewer"
 import { MessageRole, MessageSchema, useChat } from "@/hooks/use-chat"
@@ -9,6 +9,7 @@ import { Taucad } from "./icons/taucad"
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { Textarea } from "@/components/ui/textarea"
 // import { dark } from 'react-syntax-highlighter/dist/esm/styles/prism/index.js'
 
 function ChatMessage({ message }: { message: MessageSchema }) {
@@ -86,7 +87,7 @@ export default function ChatInterface() {
                     {/* Input Area */}
                     <ResizablePanel minSize={15} maxSize={50} defaultSize={15} className="p-4 text-primary-foreground">
                         <div className="relative h-full">
-                            <textarea
+                            <Textarea
                                 className="bg-background w-full p-3 pr-12 rounded-lg border h-full resize-none"
                                 rows={3}
                                 value={inputText}
@@ -106,8 +107,9 @@ export default function ChatInterface() {
                                 onClick={() => {
                                     onSubmit();
                                 }}
+                                disabled={inputText.length === 0}
                             >
-                                <Send className="w-4 h-4 rotate-45 -translate-x-0.5" />
+                                <ArrowRight className="w-4 h-4" />
                             </Button>
                             <Button
                                 size="icon"

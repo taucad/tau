@@ -19,6 +19,10 @@ function ChatMessage({ message }: { message: MessageSchema }) {
                 <Markdown
                     remarkPlugins={[remarkGfm]}
                     components={{
+                        a: (properties) => {
+                            const { children, ...rest } = properties
+                            return <a {...rest} target="_blank" rel="noopener noreferrer">{children}</a>
+                        },
                         code: (properties) => {
                             const { children, className, node, ref, style, ...rest } = properties
                             const match = /language-(\w+)/.exec(className || '')

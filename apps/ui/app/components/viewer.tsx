@@ -5,7 +5,8 @@ const MODELS = {
     Beech: 'https://vazxmixjsiawhamofees.supabase.co/storage/v1/object/public/models/tree-beech/model.gltf',
     Lime: 'https://vazxmixjsiawhamofees.supabase.co/storage/v1/object/public/models/tree-lime/model.gltf',
     Spruce: 'https://vazxmixjsiawhamofees.supabase.co/storage/v1/object/public/models/tree-spruce/model.gltf',
-    Camera: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/refs/heads/main/2.0/AntiqueCamera/glTF/AntiqueCamera.gltf'
+    Camera: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/refs/heads/main/2.0/AntiqueCamera/glTF/AntiqueCamera.gltf',
+    CarWheel: '/car-wheel.gltf'
 }
 
 const Model = ({ url, ...properties }: { url: string } & MeshProps) => {
@@ -21,11 +22,11 @@ export default function Viewer() {
     // const isLoading = url !== deferred
     // const { scene } = useGLTF(deferred)
 
-    return <Canvas camera={{ position: [-10, 20, 40], fov: 10 }}>
+    return <Canvas camera={{ position: [0, 0, 20], fov: 2 }}>
         <ambientLight intensity={Math.PI / 2} />
         <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} decay={0} intensity={Math.PI} />
-        <pointLight position={[-10, -10, -10]} decay={0} intensity={Math.PI} />
-        <Model url={MODELS.Camera} position={[0, -5, 0]} rotation={[0.1, -5.7, 0]} />
+        <pointLight position={[-10, -10, -10]} decay={0} intensity={2 * Math.PI} />
+        <Model url={MODELS.CarWheel} position={[0, 0, 0]} rotation={[0.3, -5.7, 0]} />
 
         <OrbitControls />
     </Canvas>;

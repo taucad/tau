@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/prefer-module */
 import { createGlobPatternsForDependencies } from '@nx/react/tailwind';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -219,6 +220,10 @@ export default {
       }),
     },
   },
-  // eslint-disable-next-line unicorn/prefer-module
-  plugins: [require('tailwindcss-animate'), require('@tailwindcss/typography'), require('tailwind-scrollbar')],
+
+  plugins: [
+    require('tailwindcss-animate'),
+    require('@tailwindcss/typography'),
+    require('tailwind-scrollbar')({ nocompatible: true }),
+  ],
 };

@@ -160,7 +160,7 @@
 
 @layer base {
   * {
-    @apply border-border focus-visible:outline-primary scrollbar-track-transparent scrollbar-thin scrollbar-thumb-border;
+    @apply border-border focus-visible:outline-primary scrollbar-track-transparent scrollbar-thin scrollbar-thumb-border scrollbar-thumb-rounded-full;
   }
 
   html {

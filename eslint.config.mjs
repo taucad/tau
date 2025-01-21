@@ -1,11 +1,13 @@
 import nx from '@nx/eslint-plugin';
 import eslintPluginUnicorn from 'eslint-plugin-unicorn';
+import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
 
 export default [
   ...nx.configs['flat/base'],
   ...nx.configs['flat/typescript'],
   ...nx.configs['flat/javascript'],
   eslintPluginUnicorn.configs['flat/all'],
+  eslintPluginPrettierRecommended,
   {
     ignores: ['**/dist'],
   },

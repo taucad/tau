@@ -1,26 +1,26 @@
 import { Body, Controller, Get, Post, Logger, Sse, Req } from '@nestjs/common';
 import { Observable } from 'rxjs';
 
-import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
-import { SearxngSearch } from "@langchain/community/tools/searxng_search";
-import { ChatOpenAI } from "@langchain/openai";
-import { ChatOllama } from "@langchain/ollama";
-import { HumanMessage } from "@langchain/core/messages";
-import { ToolNode } from "@langchain/langgraph/prebuilt";
-import { StateGraph, MessagesAnnotation, END, START } from "@langchain/langgraph";
+import { TavilySearchResults } from '@langchain/community/tools/tavily_search';
+import { SearxngSearch } from '@langchain/community/tools/searxng_search';
+import { ChatOpenAI } from '@langchain/openai';
+import { ChatOllama } from '@langchain/ollama';
+import { HumanMessage } from '@langchain/core/messages';
+import { ToolNode } from '@langchain/langgraph/prebuilt';
+import { StateGraph, MessagesAnnotation, END, START } from '@langchain/langgraph';
 import { CreateChatInput } from './usecases/create-chat.usecase';
 
 enum ChatNode {
   Start = START,
   End = END,
-  Agent = "agent",
-  Tools = "tools",
+  Agent = 'agent',
+  Tools = 'tools',
 }
 
 enum ChatEvent {
-  OnChatModelStart = "on_chat_model_start",
-  OnChatModelEnd = "on_chat_model_end",
-  OnChatModelStream = "on_chat_model_stream",
+  OnChatModelStart = 'on_chat_model_start',
+  OnChatModelEnd = 'on_chat_model_end',
+  OnChatModelStream = 'on_chat_model_stream',
 }
 
 const STREAMED_EVENTS = [ChatEvent.OnChatModelStream, ChatEvent.OnChatModelEnd, ChatEvent.OnChatModelStart];
@@ -29,17 +29,19 @@ const STREAMED_EVENTS = [ChatEvent.OnChatModelStream, ChatEvent.OnChatModelEnd, 
 export class ChatController {
   @Post()
   @Sse('sse')
-  async getData(@Body() body: any): Promise<Observable<{ data: { status: string, timestamp: number, content?: string } }>> {
+  async getData(
+    @Body() body: any,
+  ): Promise<Observable<{ data: { status: string; timestamp: number; content?: string } }>> {
     console.log(body);
     // Define the tools for the agent to use
     const tools = [
       // new TavilySearchResults({ maxResults: 3 }),
       new SearxngSearch({
         params: {
-          format: "json", // Do not change this, format other than "json" is will throw error
-          engines: "google",
+          format: 'json', // Do not change this, format other than "json" is will throw error
+          engines: 'google',
         },
-        apiBase: "http://localhost:42114",
+        apiBase: 'http://localhost:42114',
         // Custom Headers to support rapidAPI authentication Or any instance that requires custom headers
         headers: {},
       }),
@@ -56,7 +58,7 @@ export class ChatController {
     //   temperature: 0,
     // }).bindTools(tools,{tools});
     const model = new ChatOpenAI({
-      model: "gpt-4o-mini",
+      model: 'gpt-4o-mini',
       temperature: 0,
     }).bindTools(tools);
 
@@ -100,17 +102,19 @@ export class ChatController {
       version: 'v2',
     });
 
-    return new Observable(observer => {
+    return new Observable((observer) => {
       (async () => {
         for await (const event of eventStream) {
           switch (event.event) {
             case ChatEvent.OnChatModelStream: {
-              observer.next({ data: { status: event.event, timestamp: Date.now(), content: event.data.chunk.content } });
+              observer.next({
+                data: { status: event.event, timestamp: Date.now(), content: event.data.chunk.content },
+              });
 
               break;
             }
             case ChatEvent.OnChatModelStart: {
-              Logger.log("Starting chat model");
+              Logger.log('Starting chat model');
               Logger.log(event);
               observer.next({ data: { status: event.event, timestamp: Date.now() } });
 
@@ -127,7 +131,7 @@ export class ChatController {
           }
         }
         observer.complete();
-      })().catch(error => observer.error(error));
+      })().catch((error) => observer.error(error));
     });
   }
 }

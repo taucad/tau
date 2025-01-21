@@ -15,9 +15,7 @@ async function bootstrap() {
   app.enableCors();
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  Logger.log(
-    `🚀 Application is running on: http://localhost:${port}/${globalPrefix}`
-  );
+  Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`);
 }
 
 // eslint-disable-next-line unicorn/prefer-top-level-await

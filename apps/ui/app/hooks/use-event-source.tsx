@@ -1,6 +1,5 @@
 import { fetchEventSource } from '@/utils/fetch-event-source/fetch';
-import { useEffect, useState, createContext, useContext, useRef } from 'react';
-import { ChatEvent } from './use-chat';
+import { useEffect, createContext, useRef } from 'react';
 
 // EventSource implementation borrowed from `remix-util` package
 // Updated to support async data decoding
@@ -16,7 +15,7 @@ const context = createContext<EventSourceMap>(new Map<string, { count: number; s
 
 export const EventSourceProvider = context.Provider;
 
-type UseEventSourceProperties<T, U> = {
+type UseEventSourceProperties<T> = {
   url: string;
   onStreamEvent: (data: T) => void;
   onStreamStart?: () => void;
@@ -30,7 +29,7 @@ type UseEventSourceProperties<T, U> = {
  * @param options The options to pass to the EventSource constructor
  * @returns The last event received from the server
  */
-export function useEventSource<T, U>(properties: UseEventSourceProperties<T, U>) {
+export function useEventSource<T, U>(properties: UseEventSourceProperties<T>) {
   const abortControllerReference = useRef<AbortController | null>(null);
 
   const stream = async (body: U) => {
@@ -70,7 +69,6 @@ export function useEventSource<T, U>(properties: UseEventSourceProperties<T, U>)
 
   useEffect(() => {
     return () => {
-      console.log('abort called');
       if (abortControllerReference.current) {
         abortControllerReference.current.abort();
       }

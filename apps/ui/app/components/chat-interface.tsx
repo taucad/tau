@@ -42,6 +42,7 @@ function ChatMessage({ message }: { message: MessageSchema }) {
               );
             },
             code: (properties) => {
+              // eslint-disable-next-line @typescript-eslint/no-unused-vars
               const { children, className, ref, node, style, ...rest } = properties;
               const match = /language-(\w+)/.exec(className || '');
               const language = match ? match[1] : 'text';
@@ -100,7 +101,7 @@ function ChatMessage({ message }: { message: MessageSchema }) {
 
 export default function ChatInterface() {
   const [inputText, setInputText] = useState('');
-  const { sendMessage, status, messages } = useChat();
+  const { sendMessage, messages } = useChat();
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
 

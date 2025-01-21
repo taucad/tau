@@ -5,7 +5,8 @@ import stylesUrl from './styles/global.css?url';
 import Page from './components/page';
 import { themeSessionResolver } from './sessions.server';
 import { PreventFlashOnWrongTheme, ThemeProvider, useTheme } from 'remix-themes';
-import { cn } from './utils/ui';
+import { cn } from '@/utils/ui';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesUrl }];
 
@@ -30,7 +31,9 @@ export default function AppWithProviders() {
   const data = useLoaderData<typeof loader>();
   return (
     <ThemeProvider specifiedTheme={data.theme} themeAction="/action/set-theme">
-      <App />
+      <TooltipProvider delayDuration={0}>
+        <App />
+      </TooltipProvider>
     </ThemeProvider>
   );
 }

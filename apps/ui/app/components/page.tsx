@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export default function Page(
   properties: React.ComponentProps<'div'> & { defaultOpen?: boolean; onSidebarOpenChange?: (open: boolean) => void },
@@ -22,7 +22,7 @@ export default function Page(
         <header className="flex h-12 shrink-0 items-center border-b-[1px] border-neutral-200 gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
           <div className="flex items-center gap-2 px-4">
             <Tooltip>
-              <TooltipTrigger>
+              <TooltipTrigger asChild>
                 <SidebarTrigger className="-ml-1" />
               </TooltipTrigger>
               <TooltipContent>Toggle sidebar (⌘+B)</TooltipContent>

@@ -51,7 +51,7 @@ function ChatMessage({ message }: { message: MessageSchema }) {
 
               return match ? (
                 <div className="flex flex-col border border-neutral-200 rounded-md font-sans">
-                  <div className="flex flex-row justify-between items-center px-3 pt-1 text-foreground-500">
+                  <div className="flex flex-row justify-between items-center pl-3 pr-1 pt-1 text-foreground-500">
                     <div className="text-xs">{language}</div>
                     <CopyButton className="flex rounded-sm [&_svg]:size-3 hover:bg-neutral-50" text={text} />
                   </div>

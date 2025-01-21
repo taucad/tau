@@ -51,7 +51,6 @@ export default {
         800: 'hsl(var(--neutral-800))',
         900: 'hsl(var(--neutral-900))',
         950: 'hsl(var(--neutral-950))',
-        1000: 'hsl(var(--neutral-1000))',
         DEFAULT: 'hsl(var(--neutral))',
         foreground: 'hsl(var(--neutral-foreground))',
       },
@@ -113,6 +112,9 @@ export default {
         DEFAULT: 'hsl(var(--popover))',
         foreground: 'hsl(var(--popover-foreground))',
       },
+      code: {
+        DEFAULT: 'rgb(245, 242, 240)',
+      },
     },
     fontSize: {
       '2xs': ['0.625rem', '0.875rem'],
@@ -143,17 +145,6 @@ export default {
         sm: 'calc(var(--radius) - 4px)',
       },
       keyframes: {
-        'pulse-shadow': {
-          '0%': {
-            boxShadow: '0 0 0 0 hsl(var(--pulse-color))',
-          },
-          '70%': {
-            boxShadow: '0 0 0 var(--pulse-size, 6px) rgba(255, 82, 82, 0)',
-          },
-          '100%': {
-            boxShadow: '0 0 0 0 rgba(255, 82, 82, 0)',
-          },
-        },
         gradient: {
           '0%, 100%': {
             backgroundPosition: '0% 50%',
@@ -170,34 +161,10 @@ export default {
             opacity: '0.85',
           },
         },
-        'accordion-down': {
-          from: {
-            height: '0',
-          },
-          to: {
-            height: 'var(--radix-accordion-content-height)',
-          },
-        },
-        'accordion-up': {
-          from: {
-            height: 'var(--radix-accordion-content-height)',
-          },
-          to: {
-            height: '0',
-          },
-        },
       },
       animation: {
-        'accordion-down': 'accordion-down 0.2s ease-out',
-        'accordion-up': 'accordion-up 0.2s ease-out',
         'pulse-subtle': 'pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        swing: 'swing 3s ease-in-out',
-        jingle: 'jingle 3s ease-in-out',
         gradient: 'gradient 5s ease infinite',
-      },
-      backgroundImage: {
-        'test-pattern':
-          'repeating-linear-gradient(135deg, hsl(var(--neutral-100)) 0, hsl(var(--neutral-100)) 2px, hsl(var(--neutral-200)) 2px, hsl(var(--neutral-200)) 4px)',
       },
       typography: ({ theme }) => ({
         DEFAULT: {
@@ -214,7 +181,18 @@ export default {
             '--tw-prose-quote-borders': theme('colors.primary.foreground'),
             '--tw-prose-captions': theme('colors.primary.foreground'),
             '--tw-prose-code': theme('colors.primary.foreground'),
-            '--tw-prose-pre-bg': 'rgb(245, 242, 240)',
+            '--tw-prose-pre-bg': theme('colors.code.DEFAULT'),
+            code: {
+              '&::after': {
+                content: 'none !important',
+              },
+              '&::before': {
+                content: 'none !important',
+              },
+              backgroundColor: theme('colors.code.DEFAULT'),
+              padding: theme('spacing.1'),
+              borderRadius: theme('borderRadius.sm'),
+            },
           },
         },
       }),

@@ -26,7 +26,7 @@ function ChatMessage({ message }: { message: MessageSchema }) {
       </Avatar>
       <div
         className={cn(
-          'text-sm prose prose-pre:p-0 prose-pre:ps-0 prose-pre:pe-0',
+          'text-sm prose prose-pre:p-0 prose-pre:ps-0 prose-pre:pe-0 prose-pre:after:content-none',
           isUser ? 'bg-neutral-200 p-2 rounded-xl text-right' : 'pt-[6px]',
         )}
       >

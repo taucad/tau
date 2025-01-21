@@ -1,8 +1,8 @@
 import { createWatchPaths } from '@nx/remix';
-import { dirname } from 'path';
-import { fileURLToPath } from 'url';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * @type {import('@remix-run/dev').AppConfig}

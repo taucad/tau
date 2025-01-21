@@ -1,6 +1,6 @@
-import { fetchEventSource } from "@/utils/fetch-event-source/fetch";
-import { useEffect, useState, createContext, useContext, useRef } from "react";
-import { ChatEvent } from "./use-chat";
+import { fetchEventSource } from '@/utils/fetch-event-source/fetch';
+import { useEffect, useState, createContext, useContext, useRef } from 'react';
+import { ChatEvent } from './use-chat';
 
 // EventSource implementation borrowed from `remix-util` package
 // Updated to support async data decoding
@@ -10,14 +10,9 @@ export interface EventSourceOptions {
   event?: string;
 }
 
-export type EventSourceMap = Map<
-  string,
-  { count: number; source: EventSource }
->;
+export type EventSourceMap = Map<string, { count: number; source: EventSource }>;
 
-const context = createContext<EventSourceMap>(
-  new Map<string, { count: number; source: EventSource }>()
-);
+const context = createContext<EventSourceMap>(new Map<string, { count: number; source: EventSource }>());
 
 export const EventSourceProvider = context.Provider;
 
@@ -27,7 +22,7 @@ type UseEventSourceProperties<T, U> = {
   onStreamStart?: () => void;
   onStreamEnd?: () => void;
   onStreamError?: (error: unknown) => void;
-}
+};
 
 /**
  * Subscribe to an event source and return the latest event.
@@ -41,9 +36,9 @@ export function useEventSource<T, U>(properties: UseEventSourceProperties<T, U>)
   const stream = async (body: U) => {
     abortControllerReference.current = new AbortController();
     await fetchEventSource(properties.url, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        Accept: "text/event-stream",
+        Accept: 'text/event-stream',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
@@ -51,13 +46,9 @@ export function useEventSource<T, U>(properties: UseEventSourceProperties<T, U>)
       async onopen(response) {
         properties.onStreamStart?.();
         if (response.ok && response.status === 200) {
-          console.log("Connection made", response);
-        } else if (
-          response.status >= 400 &&
-          response.status < 500 &&
-          response.status !== 429
-        ) {
-          console.log("Client side error", response);
+          console.log('Connection made', response);
+        } else if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+          console.log('Client side error', response);
         }
       },
       onmessage(event) {
@@ -67,11 +58,11 @@ export function useEventSource<T, U>(properties: UseEventSourceProperties<T, U>)
         }
       },
       onclose() {
-        console.log("Connection closed by the server");
+        console.log('Connection closed by the server');
         properties.onStreamEnd?.();
       },
       onerror(error) {
-        console.log("There was an error from server", error);
+        console.log('There was an error from server', error);
         properties.onStreamError?.(error);
       },
     });
@@ -79,7 +70,7 @@ export function useEventSource<T, U>(properties: UseEventSourceProperties<T, U>)
 
   useEffect(() => {
     return () => {
-      console.log("abort called");
+      console.log('abort called');
       if (abortControllerReference.current) {
         abortControllerReference.current.abort();
       }

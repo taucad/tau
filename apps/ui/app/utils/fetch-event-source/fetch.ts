@@ -6,54 +6,56 @@ const DefaultRetryInterval = 1000;
 const LastEventId = 'last-event-id';
 
 export interface FetchEventSourceInit extends RequestInit {
-    /**
-     * The request headers. FetchEventSource only supports the Record<string,string> format.
-     */
-    headers?: Record<string, string>,
+  /**
+   * The request headers. FetchEventSource only supports the Record<string,string> format.
+   */
+  headers?: Record<string, string>;
 
-    /**
-     * Called when a response is received. Use this to validate that the response
-     * actually matches what you expect (and throw if it doesn't.) If not provided,
-     * will default to a basic validation to ensure the content-type is text/event-stream.
-     */
-    onopen?: (response: Response) => Promise<void>,
+  /**
+   * Called when a response is received. Use this to validate that the response
+   * actually matches what you expect (and throw if it doesn't.) If not provided,
+   * will default to a basic validation to ensure the content-type is text/event-stream.
+   */
+  onopen?: (response: Response) => Promise<void>;
 
-    /**
-     * Called when a message is received. NOTE: Unlike the default browser
-     * EventSource.onmessage, this callback is called for _all_ events,
-     * even ones with a custom `event` field.
-     */
-    onmessage?: (event_: EventSourceMessage) => void;
+  /**
+   * Called when a message is received. NOTE: Unlike the default browser
+   * EventSource.onmessage, this callback is called for _all_ events,
+   * even ones with a custom `event` field.
+   */
+  onmessage?: (event_: EventSourceMessage) => void;
 
-    /**
-     * Called when a response finishes. If you don't expect the server to kill
-     * the connection, you can throw an exception here and retry using onerror.
-     */
-    onclose?: () => void;
+  /**
+   * Called when a response finishes. If you don't expect the server to kill
+   * the connection, you can throw an exception here and retry using onerror.
+   */
+  onclose?: () => void;
 
-    /**
-     * Called when there is any error making the request / processing messages /
-     * handling callbacks etc. Use this to control the retry strategy: if the
-     * error is fatal, rethrow the error inside the callback to stop the entire
-     * operation. Otherwise, you can return an interval (in milliseconds) after
-     * which the request will automatically retry (with the last-event-id).
-     * If this callback is not specified, or it returns undefined, fetchEventSource
-     * will treat every error as retriable and will try again after 1 second.
-     */
-    onerror?: (error: unknown) => number | null | undefined | void,
+  /**
+   * Called when there is any error making the request / processing messages /
+   * handling callbacks etc. Use this to control the retry strategy: if the
+   * error is fatal, rethrow the error inside the callback to stop the entire
+   * operation. Otherwise, you can return an interval (in milliseconds) after
+   * which the request will automatically retry (with the last-event-id).
+   * If this callback is not specified, or it returns undefined, fetchEventSource
+   * will treat every error as retriable and will try again after 1 second.
+   */
+  onerror?: (error: unknown) => number | null | undefined | void;
 
-    /**
-     * If true, will keep the request open even if the document is hidden.
-     * By default, fetchEventSource will close the request and reopen it
-     * automatically when the document becomes visible again.
-     */
-    openWhenHidden?: boolean;
+  /**
+   * If true, will keep the request open even if the document is hidden.
+   * By default, fetchEventSource will close the request and reopen it
+   * automatically when the document becomes visible again.
+   */
+  openWhenHidden?: boolean;
 
-    /** The Fetch function to use. Defaults to window.fetch */
-    fetch?: typeof fetch;
+  /** The Fetch function to use. Defaults to window.fetch */
+  fetch?: typeof fetch;
 }
 
-export function fetchEventSource(input: RequestInfo, {
+export function fetchEventSource(
+  input: RequestInfo,
+  {
     signal: inputSignal,
     headers: inputHeaders,
     onopen: inputOnOpen,
@@ -63,92 +65,102 @@ export function fetchEventSource(input: RequestInfo, {
     openWhenHidden,
     fetch: inputFetch,
     ...rest
-}: FetchEventSourceInit) {
-    return new Promise<void>((resolve, reject) => {
-        // make a copy of the input headers since we may modify it below:
-        const headers = { ...inputHeaders };
-        if (!headers.accept) {
-            headers.accept = EventStreamContentType;
-        }
+  }: FetchEventSourceInit,
+) {
+  return new Promise<void>((resolve, reject) => {
+    // make a copy of the input headers since we may modify it below:
+    const headers = { ...inputHeaders };
+    if (!headers.accept) {
+      headers.accept = EventStreamContentType;
+    }
 
-        let currentRequestController: AbortController;
-        function onVisibilityChange() {
-            currentRequestController.abort(); // close existing request on every visibility change
-            if (!document.hidden) {
-                create(); // page is now visible again, recreate request.
-            }
-        }
+    let currentRequestController: AbortController;
+    function onVisibilityChange() {
+      currentRequestController.abort(); // close existing request on every visibility change
+      if (!document.hidden) {
+        create(); // page is now visible again, recreate request.
+      }
+    }
 
-        if (!openWhenHidden) {
-            document.addEventListener('visibilitychange', onVisibilityChange);
-        }
+    if (!openWhenHidden) {
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
 
-        let retryInterval = DefaultRetryInterval;
-        let retryTimer: ReturnType<typeof setTimeout>;
-        function dispose() {
-            document.removeEventListener('visibilitychange', onVisibilityChange);
-            globalThis.clearTimeout(retryTimer);
-            currentRequestController.abort();
-        }
+    let retryInterval = DefaultRetryInterval;
+    let retryTimer: ReturnType<typeof setTimeout>;
+    function dispose() {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      globalThis.clearTimeout(retryTimer);
+      currentRequestController.abort();
+    }
 
-        // if the incoming signal aborts, dispose resources and resolve:
-        inputSignal?.addEventListener('abort', () => {
-            dispose();
-            resolve(); // don't waste time constructing/logging errors
+    // if the incoming signal aborts, dispose resources and resolve:
+    inputSignal?.addEventListener('abort', () => {
+      dispose();
+      resolve(); // don't waste time constructing/logging errors
+    });
+
+    const fetch = inputFetch ?? globalThis.fetch;
+    const onopen = inputOnOpen ?? defaultOnOpen;
+    async function create() {
+      currentRequestController = new AbortController();
+      try {
+        const response = await fetch(input, {
+          ...rest,
+          headers,
+          signal: currentRequestController.signal,
         });
 
-        const fetch = inputFetch ?? globalThis.fetch;
-        const onopen = inputOnOpen ?? defaultOnOpen;
-        async function create() {
-            currentRequestController = new AbortController();
-            try {
-                const response = await fetch(input, {
-                    ...rest,
-                    headers,
-                    signal: currentRequestController.signal,
-                });
+        await onopen(response);
 
-                await onopen(response);
-                
-                await getBytes(response.body!, getLines(getMessages(id => {
-                    if (id) {
-                        // store the id and send it back on the next retry:
-                        headers[LastEventId] = id;
-                    } else {
-                        // don't send the last-event-id header anymore:
-                        delete headers[LastEventId];
-                    }
-                }, retry => {
-                    retryInterval = retry;
-                }, onmessage)));
-
-                onclose?.();
-                dispose();
-                resolve();
-            } catch (error) {
-                if (!currentRequestController.signal.aborted) {
-                    // if we haven't aborted the request ourselves:
-                    try {
-                        // check if we need to retry:
-                        const interval = onerror?.(error) ?? retryInterval;
-                        globalThis.clearTimeout(retryTimer);
-                        retryTimer = globalThis.setTimeout(create, interval);
-                    } catch (error) {
-                        // we should not retry anymore:
-                        dispose();
-                        reject(error);
-                    }
+        await getBytes(
+          response.body!,
+          getLines(
+            getMessages(
+              (id) => {
+                if (id) {
+                  // store the id and send it back on the next retry:
+                  headers[LastEventId] = id;
+                } else {
+                  // don't send the last-event-id header anymore:
+                  delete headers[LastEventId];
                 }
-            }
-        }
+              },
+              (retry) => {
+                retryInterval = retry;
+              },
+              onmessage,
+            ),
+          ),
+        );
 
-        create();
-    });
+        onclose?.();
+        dispose();
+        resolve();
+      } catch (error) {
+        if (!currentRequestController.signal.aborted) {
+          // if we haven't aborted the request ourselves:
+          try {
+            // check if we need to retry:
+            const interval = onerror?.(error) ?? retryInterval;
+            globalThis.clearTimeout(retryTimer);
+            retryTimer = globalThis.setTimeout(create, interval);
+          } catch (error) {
+            // we should not retry anymore:
+            dispose();
+            reject(error);
+          }
+        }
+      }
+    }
+
+    create();
+  });
 }
 
 function defaultOnOpen(response: Response) {
-    const contentType = response.headers.get('content-type');
-    if (!contentType?.startsWith(EventStreamContentType)) {
-        throw new Error(`Expected content-type to be ${EventStreamContentType}, Actual: ${contentType}`);
-    }
+  const contentType = response.headers.get('content-type');
+  if (!contentType?.startsWith(EventStreamContentType)) {
+    throw new Error(`Expected content-type to be ${EventStreamContentType}, Actual: ${contentType}`);
+  }
 }

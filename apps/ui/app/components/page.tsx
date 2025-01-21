@@ -1,5 +1,5 @@
-import { Outlet } from "@remix-run/react"
-import { AppSidebar } from "./app-sidebar"
+import { Outlet } from '@remix-run/react';
+import { AppSidebar } from './app-sidebar';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -7,18 +7,16 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip"
+} from '@/components/ui/breadcrumb';
+import { Separator } from '@/components/ui/separator';
+import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
-export default function Page() {
+export default function Page(
+  properties: React.ComponentProps<'div'> & { defaultOpen?: boolean; onSidebarOpenChange?: (open: boolean) => void },
+) {
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={properties.defaultOpen} onOpenChange={properties.onSidebarOpenChange}>
       <AppSidebar />
       <SidebarInset>
         <header className="flex h-12 shrink-0 items-center border-b-[1px] border-neutral-200 gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
@@ -33,9 +31,7 @@ export default function Page() {
             <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="#">
-                    Build anything
-                  </BreadcrumbLink>
+                  <BreadcrumbLink href="#">Build anything</BreadcrumbLink>
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
@@ -50,5 +46,5 @@ export default function Page() {
         </div>
       </SidebarInset>
     </SidebarProvider>
-  )
+  );
 }

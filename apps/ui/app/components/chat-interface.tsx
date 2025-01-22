@@ -30,12 +30,6 @@ export default function ChatInterface() {
     }
   }, [messages]);
 
-  useEffect(() => {
-    scrollTo();
-  }, []);
-
-  console.log({ isScrolledTo });
-
   return (
     <ResizablePanelGroup direction="horizontal" className="flex h-[calc(100vh-48px)] bg-background">
       {/* Left Pane - Chat History */}
@@ -50,7 +44,7 @@ export default function ChatInterface() {
                 <ArrowDown className="w-4 h-4" />
               </Button>
             </div>
-            <div ref={chatEndReference} />
+            <div ref={chatEndReference} className="mb-px" />
           </ResizablePanel>
           <ResizableHandle />
           {/* Input Area */}

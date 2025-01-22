@@ -6,11 +6,11 @@ export type ScrollToProperties = {
 };
 
 export function useScroll({ behavior, reference }: ScrollToProperties) {
-  const [isScrolledTo, setIsScrolledTo] = useState(true);
+  const [isScrolledTo, setIsScrolledTo] = useState(false);
 
   const scrollTo = () => {
     if (!isScrolledTo) {
-      reference.current?.scrollIntoView({ behavior: behavior || 'smooth' });
+      reference.current?.scrollIntoView({ behavior: behavior || 'smooth', block: 'end' });
     }
   };
 

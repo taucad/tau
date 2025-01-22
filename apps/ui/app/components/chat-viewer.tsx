@@ -15,7 +15,7 @@ const Model = ({ url, ...properties }: { url: string } & MeshProps) => {
   return <primitive object={scene} {...properties} />;
 };
 
-export default function Viewer() {
+export function ChatViewer() {
   // useDeferredValue allows us to defer updates, the component is market by React
   // so that it does *not* run into the fallback when something new loads
   // const deferred = useDeferredValue(MODELS.Beech)

@@ -37,6 +37,7 @@ export default {
         800: 'hsl(var(--foreground-800))',
         900: 'hsl(var(--foreground-900))',
         950: 'hsl(var(--foreground-950))',
+        DEFAULT: 'hsl(var(--foreground))',
       },
       neutral: {
         0: 'hsl(var(--neutral-0))',
@@ -56,7 +57,6 @@ export default {
       },
       primary: {
         DEFAULT: 'hsl(var(--primary))',
-        foreground: 'hsl(var(--primary-foreground))',
       },
       accent: {
         DEFAULT: 'hsl(var(--accent))',
@@ -112,9 +112,6 @@ export default {
         DEFAULT: 'hsl(var(--popover))',
         foreground: 'hsl(var(--popover-foreground))',
       },
-      code: {
-        DEFAULT: 'rgb(245, 242, 240)',
-      },
     },
     fontSize: {
       '2xs': ['0.625rem', '0.875rem'],
@@ -166,36 +163,6 @@ export default {
         'pulse-subtle': 'pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         gradient: 'gradient 5s ease infinite',
       },
-      typography: ({ theme }) => ({
-        DEFAULT: {
-          css: {
-            '--tw-prose-body': theme('colors.primary.foreground'),
-            '--tw-prose-headings': theme('colors.primary.foreground'),
-            '--tw-prose-lead': theme('colors.primary.foreground'),
-            '--tw-prose-links': theme('colors.primary.foreground'),
-            '--tw-prose-bold': theme('colors.primary.foreground'),
-            '--tw-prose-counters': theme('colors.primary.foreground'),
-            '--tw-prose-bullets': theme('colors.primary.foreground'),
-            '--tw-prose-hr': theme('colors.primary.foreground'),
-            '--tw-prose-quotes': theme('colors.primary.foreground'),
-            '--tw-prose-quote-borders': theme('colors.primary.foreground'),
-            '--tw-prose-captions': theme('colors.primary.foreground'),
-            '--tw-prose-code': theme('colors.primary.foreground'),
-            '--tw-prose-pre-bg': theme('colors.code.DEFAULT'),
-            code: {
-              '&::after': {
-                content: 'none !important',
-              },
-              '&::before': {
-                content: 'none !important',
-              },
-              backgroundColor: theme('colors.code.DEFAULT'),
-              padding: theme('spacing.1'),
-              borderRadius: theme('borderRadius.sm'),
-            },
-          },
-        },
-      }),
     },
   },
 

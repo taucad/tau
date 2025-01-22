@@ -16,7 +16,7 @@ export default {
   future: {
     v3_singleFetch: true,
   },
-  watchPaths: () => createWatchPaths(__dirname),
+  watchPaths: async () => [...(await createWatchPaths(__dirname)), 'tailwind.config.js'],
   tailwind: true,
   postcss: true,
 };

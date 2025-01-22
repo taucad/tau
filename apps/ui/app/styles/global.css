@@ -6,6 +6,7 @@
   :root {
     --background: 0 0% 100%;
 
+    --foreground: 222.2 47.4% 11.2%;
     --foreground-0: 210 10% 100%;
     --foreground-50: 210 10% 96%;
     --foreground-100: 210 30% 96%;
@@ -66,8 +67,6 @@
     --input: 220 18% 90%;
     --ring: 217.2 91.2% 59.8%;
 
-    --radius: 0.5rem;
-
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 47.4% 11.2%;
 
@@ -79,12 +78,16 @@
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* RADIUS */
+    --radius: 0.5rem;
   }
 
   .dark,
   :root[class~="dark"] {
     --background: 240 5.9% 10%;
 
+    --foreground: 210 40% 96.1%;
     --foreground-50: 240 4.8% 86%;
     --foreground-100: 240 4.8% 81%;
     --foreground-200: 240 4.8% 76%;

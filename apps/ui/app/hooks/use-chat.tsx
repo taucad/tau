@@ -36,7 +36,7 @@ export enum ChatEvent {
 }
 
 export const useChat = () => {
-  const [messages, setMessages] = useState<MessageSchema[]>(MOCK_CHAT_MESSAGES as MessageSchema[]);
+  const [messages, setMessages] = useState<MessageSchema[]>([]);
   const [status, setStatus] = useState<ChatEvent | undefined>();
 
   const { stream } = useEventSource<MessageEventSchema, { messages: MessageSchema[] }>({

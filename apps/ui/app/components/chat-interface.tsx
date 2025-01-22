@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Mic, ChevronLeft, ChevronRight, RotateCcw, Eye, Code, Terminal, ArrowRight, ArrowDown } from 'lucide-react';
+import { Mic, Eye, Code, Terminal, ArrowRight, ArrowDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MessageRole, MessageStatus, useChat } from '@/hooks/use-chat';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
@@ -8,6 +8,10 @@ import { useScroll } from '@/hooks/use-scroll';
 import { ChatMessage } from '@/components/chat-message';
 import { ChatViewer } from '@/components/chat-viewer';
 import { cn } from '@/utils/ui';
+
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { CodeViewer } from '@/components/code-viewer';
+import { mockCode } from '@/components/mock-code';
 
 export default function ChatInterface() {
   const [inputText, setInputText] = useState('');
@@ -36,9 +40,11 @@ export default function ChatInterface() {
       <ResizablePanel minSize={30} maxSize={50} defaultSize={40} className="flex flex-col">
         <ResizablePanelGroup direction="vertical">
           <ResizablePanel defaultSize={85} style={{ overflowY: 'auto' }} className="relative flex-1 p-4 pb-0">
-            {messages.map((message, index) => (
-              <ChatMessage message={message} key={index} />
-            ))}
+            <div className="space-y-4">
+              {messages.map((message, index) => (
+                <ChatMessage message={message} key={index} />
+              ))}
+            </div>
             <div className={cn('sticky flex justify-center bottom-2', isScrolledTo && 'opacity-0')}>
               <Button size="icon" variant="outline" className={cn('rounded-full')} onClick={scrollTo}>
                 <ArrowDown className="w-4 h-4" />
@@ -83,35 +89,35 @@ export default function ChatInterface() {
       </ResizablePanel>
       <ResizableHandle className="hidden lg:flex" />
 
-      {/* Right Pane - Main Chat Area */}
       <ResizablePanel defaultSize={60} className="flex-1 flex-col hidden lg:flex">
-        {/* Header */}
-        <div className="border-b p-3 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <ChevronLeft className="w-4 h-4" />
-            <ChevronRight className="w-4 h-4" />
-            <RotateCcw className="w-4 h-4" />
-          </div>
-          <div className="flex items-center space-x-2">
-            <Button variant="ghost" size="sm">
+        <Tabs defaultValue="preview" className="flex-1 overflow-hidden">
+          <TabsList className="grid w-full grid-cols-3 m-2">
+            <TabsTrigger value="preview">
               <Eye className="w-4 h-4 mr-2" />
               Preview
-            </Button>
-            <Button variant="ghost" size="sm">
+            </TabsTrigger>
+            <TabsTrigger value="code">
               <Code className="w-4 h-4 mr-2" />
               Code
-            </Button>
-            <Button variant="ghost" size="sm">
+            </TabsTrigger>
+            <TabsTrigger value="console">
               <Terminal className="w-4 h-4 mr-2" />
               Console
-            </Button>
-          </div>
-        </div>
-
-        {/* Main Content Area */}
-        <div className="flex-1 overflow-auto">
-          <ChatViewer />
-        </div>
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="preview">
+            <ChatViewer />
+          </TabsContent>
+          <TabsContent value="code">
+            <CodeViewer
+              className="text-sm"
+              showLineNumbers
+              showInlineLineNumbers
+              children={mockCode}
+              language="javascript"
+            />
+          </TabsContent>
+        </Tabs>
       </ResizablePanel>
     </ResizablePanelGroup>
   );

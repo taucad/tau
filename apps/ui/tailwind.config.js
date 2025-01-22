@@ -68,6 +68,10 @@ export default {
         DEFAULT: 'hsl(var(--destructive))',
         foreground: 'hsl(var(--destructive-foreground))',
       },
+      muted: {
+        DEFAULT: 'hsl(var(--muted))',
+        foreground: 'hsl(var(--muted-foreground))',
+      },
       success: {
         DEFAULT: 'hsl(var(--success))',
       },

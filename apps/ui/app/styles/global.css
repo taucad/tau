@@ -5,8 +5,11 @@
 @layer base {
   :root {
     --background: 0 0% 100%;
-
     --foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
     --foreground-0: 210 10% 100%;
     --foreground-50: 210 10% 96%;
     --foreground-100: 210 30% 96%;
@@ -86,8 +89,11 @@
   .dark,
   :root[class~="dark"] {
     --background: 240 5.9% 10%;
-
     --foreground: 210 40% 96.1%;
+
+    --muted: 223 47% 11%;
+    --muted-foreground: 215.4 16.3% 56.9%;
+
     --foreground-50: 240 4.8% 86%;
     --foreground-100: 240 4.8% 81%;
     --foreground-200: 240 4.8% 76%;
@@ -166,12 +172,8 @@
     @apply border-border focus-visible:outline-primary scrollbar-track-transparent scrollbar-thin scrollbar-thumb-border scrollbar-thumb-rounded-full;
   }
 
-  html {
-    @apply font-sans;
-  }
-
   body {
-    @apply bg-background text-foreground-950 text-base;
+    @apply font-sans bg-background text-foreground antialiased;
   }
 
   body,

@@ -1,8 +1,8 @@
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { cn } from '@/utils/ui';
 import { CopyButton } from '@/components/copy-button';
+import { CodeViewer } from '@/components/code-viewer';
 
 export const MarkdownViewer = ({ children }: { children: string }) => {
   return (
@@ -37,27 +37,7 @@ export const MarkdownViewer = ({ children }: { children: string }) => {
                 <CopyButton className="flex rounded-sm [&_svg]:size-3 hover:bg-neutral-50" text={text} />
               </div>
               <div className="overflow-x-scroll">
-                <SyntaxHighlighter
-                  {...rest}
-                  customStyle={{
-                    backgroundColor: 'transparent',
-                    color: 'hsl(var(--foreground))',
-                  }}
-                  codeTagProps={{
-                    className: cn(
-                      /* Text shadow, remove it */
-                      '[text-shadow:none]',
-                      /* Dark mode, make it brighter and more contrast */
-                      'dark:brightness-150 dark:contrast-100',
-                      /* Some tokens have a background applied which we need to remove */
-                      '[&_*]:!bg-transparent',
-                    ),
-                  }}
-                  ref={ref as React.Ref<SyntaxHighlighter>}
-                  PreTag="pre"
-                  children={text}
-                  language={language}
-                />
+                <CodeViewer {...rest} children={text} language={language} />
               </div>
             </div>
           ) : (

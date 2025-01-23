@@ -22,7 +22,7 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
         </div>
         {!isUser && message.status === MessageStatus.Success && (
           <div className="flex flex-row justify-start items-center text-foreground-500">
-            <CopyButton showText={false} text={message.content} />
+            <CopyButton size="sm" text={message.content} />
           </div>
         )}
       </div>

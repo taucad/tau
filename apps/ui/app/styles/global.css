@@ -44,7 +44,7 @@
     --neutral: 0 0% 0%;
     --neutral-foreground: 0 0% 100%;
 
-    --accent: 0 0% 96.1%;
+    --accent: 220 23.7% 90.9%;
 
     --border: 220 18% 90%;
 
@@ -91,7 +91,7 @@
     --background: 240 5.9% 10%;
     --foreground: 210 40% 96.1%;
 
-    --muted: 223 47% 11%;
+    --muted: 223 7% 15%;
     --muted-foreground: 215.4 16.3% 56.9%;
 
     --foreground-50: 240 4.8% 86%;
@@ -169,7 +169,8 @@
 
 @layer base {
   * {
-    @apply border-border focus-visible:outline-primary scrollbar-track-transparent scrollbar-thin scrollbar-thumb-border scrollbar-thumb-rounded-full;
+    @apply border-border focus-visible:outline-primary;
+    @apply scrollbar-track-transparent scrollbar-thin scrollbar-thumb-border scrollbar-thumb-rounded-full;
   }
 
   body {

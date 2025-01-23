@@ -8,7 +8,7 @@ export const MarkdownViewer = ({ children }: { children: string }) => {
   return (
     <Markdown
       className={cn(
-        'text-sm prose text-foreground [--tw-prose-headings:text-foreground] [--tw-prose-bullets:text-foreground]',
+        'text-sm prose text-foreground [--tw-prose-headings:text-foreground] [--tw-prose-bullets:text-foreground] [--tw-prose-bold:text-foreground] [--tw-prose-counters:text-foreground] [--tw-prose-lead:text-foreground] [--tw-prose-quotes:text-foreground] [--tw-prose-quote-borders:text-foreground] [--tw-prose-kbd:text-foreground]',
         /* <pre> */
         'prose-pre:p-0 prose-pre:ps-0 prose-pre:pe-0 prose-pre:bg-neutral-100',
       )}
@@ -34,7 +34,7 @@ export const MarkdownViewer = ({ children }: { children: string }) => {
             <div className="flex flex-col border border-neutral-200 rounded-md font-sans">
               <div className="flex flex-row justify-between items-center pl-3 pr-1 pt-1 text-foreground-500">
                 <div className="text-xs">{language}</div>
-                <CopyButton className="flex rounded-sm [&_svg]:size-3 hover:bg-neutral-50" text={text} />
+                <CopyButton size="xs" className="flex" text={text} />
               </div>
               <div className="overflow-x-scroll">
                 <CodeViewer {...rest} children={text} language={language} />

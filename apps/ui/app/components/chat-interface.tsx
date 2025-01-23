@@ -12,6 +12,8 @@ import { cn } from '@/utils/ui';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CodeViewer } from '@/components/code-viewer';
 import { mockCode } from '@/components/mock-code';
+import { CopyButton } from './copy-button';
+import { DownloadButton } from './download-button';
 
 export default function ChatInterface() {
   const [inputText, setInputText] = useState('');
@@ -34,6 +36,8 @@ export default function ChatInterface() {
     }
   }, [messages]);
 
+  console.log(messages);
+
   return (
     <ResizablePanelGroup direction="horizontal" className="flex h-[calc(100vh-48px)] bg-background">
       {/* Left Pane - Chat History */}
@@ -46,7 +50,13 @@ export default function ChatInterface() {
               ))}
             </div>
             <div className={cn('sticky flex justify-center bottom-2', isScrolledTo && 'opacity-0')}>
-              <Button size="icon" variant="outline" className={cn('rounded-full')} onClick={scrollTo}>
+              <Button
+                size="icon"
+                variant="outline"
+                className={cn('rounded-full', isScrolledTo && 'select-none pointer-events-none')}
+                tabIndex={isScrolledTo ? -1 : 0}
+                onClick={scrollTo}
+              >
                 <ArrowDown className="w-4 h-4" />
               </Button>
             </div>
@@ -89,33 +99,42 @@ export default function ChatInterface() {
       </ResizablePanel>
       <ResizableHandle className="hidden lg:flex" />
 
-      <ResizablePanel defaultSize={60} className="flex-1 flex-col hidden lg:flex">
-        <Tabs defaultValue="preview" className="flex-1 overflow-hidden">
-          <TabsList className="grid w-full grid-cols-3 m-2">
+      <ResizablePanel defaultSize={60} className="flex-1 h-full flex-col hidden lg:flex">
+        <Tabs defaultValue="code" className="flex flex-col">
+          <TabsList className="grid grid-cols-3 m-2">
             <TabsTrigger value="preview">
               <Eye className="w-4 h-4 mr-2" />
-              Preview
+              <span>Preview</span>
             </TabsTrigger>
             <TabsTrigger value="code">
               <Code className="w-4 h-4 mr-2" />
-              Code
+              <span>Code</span>
             </TabsTrigger>
             <TabsTrigger value="console">
               <Terminal className="w-4 h-4 mr-2" />
-              Console
+              <span>Console</span>
             </TabsTrigger>
           </TabsList>
           <TabsContent value="preview">
             <ChatViewer />
           </TabsContent>
           <TabsContent value="code">
-            <CodeViewer
-              className="text-sm"
-              showLineNumbers
-              showInlineLineNumbers
-              children={mockCode}
-              language="javascript"
-            />
+            <div className="flex flex-row justify-between items-center px-4 pb-2">
+              <span className="text-sm font-medium">main.kcl</span>
+              <div className="flex flex-row items-center">
+                <CopyButton size="icon" text={mockCode} />
+                <DownloadButton size="icon" text={mockCode} />
+              </div>
+            </div>
+            <div className="flex-1 bg-neutral-100 rounded-md m-2">
+              <CodeViewer
+                className="text-xs"
+                showLineNumbers
+                showInlineLineNumbers
+                children={mockCode}
+                language="typescript"
+              />
+            </div>
           </TabsContent>
         </Tabs>
       </ResizablePanel>

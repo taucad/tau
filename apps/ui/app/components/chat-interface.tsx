@@ -100,7 +100,7 @@ export default function ChatInterface() {
       <ResizableHandle className="hidden lg:flex" />
 
       <ResizablePanel defaultSize={60} className="flex-1 h-full flex-col hidden lg:flex">
-        <Tabs defaultValue="code" className="flex flex-col">
+        <Tabs defaultValue="code" className="flex flex-col h-full">
           <TabsList className="grid grid-cols-3 m-2">
             <TabsTrigger value="preview">
               <Eye className="w-4 h-4 mr-2" />
@@ -115,10 +115,10 @@ export default function ChatInterface() {
               <span>Console</span>
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="preview">
+          <TabsContent value="preview" className="h-full">
             <ChatViewer />
           </TabsContent>
-          <TabsContent value="code">
+          <TabsContent value="code" className="h-full">
             <div className="flex flex-row justify-between items-center px-4 pb-2">
               <span className="text-sm font-medium">main.kcl</span>
               <div className="flex flex-row items-center">

@@ -12,11 +12,14 @@ import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-export default function Page(
-  properties: React.ComponentProps<'div'> & { defaultOpen?: boolean; onSidebarOpenChange?: (open: boolean) => void },
-) {
+import { loader } from '@/root';
+import { useLoaderData } from '@remix-run/react';
+
+export function Page() {
+  const { sidebarOpen } = useLoaderData<typeof loader>();
+
   return (
-    <SidebarProvider defaultOpen={properties.defaultOpen} onOpenChange={properties.onSidebarOpenChange}>
+    <SidebarProvider defaultOpen={sidebarOpen}>
       <AppSidebar />
       <SidebarInset>
         <header className="flex h-12 shrink-0 items-center border-b-[1px] border-neutral-200 gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">

@@ -2,11 +2,13 @@ import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from '@remix-run
 import { Links, LiveReload, Meta, Scripts, ScrollRestoration, useLoaderData } from '@remix-run/react';
 
 import stylesUrl from './styles/global.css?url';
-import Page from './components/page';
-import { themeSessionResolver } from './sessions.server';
+import { Page } from '@/components/page';
+import { themeSessionResolver } from '@/sessions.server';
 import { PreventFlashOnWrongTheme, ThemeProvider, useTheme } from 'remix-themes';
 import { cn } from '@/utils/ui';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { SIDEBAR_COOKIE_NAME } from './components/ui/sidebar';
+import { extractCookie } from '@/utils/cookies';
 
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesUrl }];
 
@@ -19,8 +21,12 @@ export const meta: MetaFunction = () => [
 // Return the theme from the session storage using the loader
 export async function loader({ request }: LoaderFunctionArgs) {
   const { getTheme } = await themeSessionResolver(request);
+  const cookieHeader = request.headers.get('Cookie');
+  const sidebarOpen = extractCookie(cookieHeader, SIDEBAR_COOKIE_NAME);
+
   return {
     theme: getTheme(),
+    sidebarOpen: sidebarOpen === 'true',
   };
 }
 

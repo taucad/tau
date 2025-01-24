@@ -1,14 +1,21 @@
 import { Prism as SyntaxHighlighter, SyntaxHighlighterProps } from 'react-syntax-highlighter';
 import { cn } from '@/utils/ui';
 
-export function CodeViewer({ ref, className, ...rest }: SyntaxHighlighterProps & { className?: string }) {
+export function CodeViewer({
+  ref,
+  className,
+  showLineNumbers,
+  ...rest
+}: SyntaxHighlighterProps & { className?: string }) {
   return (
     <SyntaxHighlighter
       {...rest}
+      showLineNumbers={showLineNumbers}
       customStyle={{
         backgroundColor: 'transparent',
         color: 'hsl(var(--foreground))',
-        marginBottom: 0,
+        margin: 0,
+        ...(showLineNumbers ? { padding: '0.5em 0' } : {}),
       }}
       codeTagProps={{
         className: cn(

@@ -7,7 +7,7 @@ import { themeSessionResolver } from '@/sessions.server';
 import { PreventFlashOnWrongTheme, ThemeProvider, useTheme } from 'remix-themes';
 import { cn } from '@/utils/ui';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { SIDEBAR_COOKIE_NAME } from './components/ui/sidebar';
+import { SIDEBAR_COOKIE_NAME } from '@/components/ui/sidebar';
 import { extractCookie } from '@/utils/cookies';
 
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesUrl }];

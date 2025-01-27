@@ -3,7 +3,6 @@ import { Links, LiveReload, Meta, Scripts, ScrollRestoration, useLoaderData } fr
 
 import stylesUrl from './styles/global.css?url';
 
-import katexUrl from 'katex/dist/katex.min.css';
 import { Page } from '@/components/page';
 import { themeSessionResolver } from '@/sessions.server';
 import { PreventFlashOnWrongTheme, ThemeProvider, useTheme } from 'remix-themes';
@@ -11,11 +10,9 @@ import { cn } from '@/utils/ui';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { SIDEBAR_COOKIE_NAME } from '@/components/ui/sidebar';
 import { extractCookie } from '@/utils/cookies';
+import { markdownViewerLinks } from '@/components/markdown-viewer';
 
-export const links: LinksFunction = () => [
-  { rel: 'stylesheet', href: stylesUrl },
-  { rel: 'stylesheet', href: katexUrl },
-];
+export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesUrl }, ...markdownViewerLinks];
 
 export const meta: MetaFunction = () => [
   {

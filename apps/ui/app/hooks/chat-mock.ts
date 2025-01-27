@@ -7,3 +7,39 @@ export const MOCK_CHAT_MESSAGES = [
     status: 'success',
   },
 ];
+
+export const MOCK_KCL_MESSAGES = [
+  {
+    content: 'Generate a KittyCAD KCL file',
+    role: 'user',
+    status: 'success',
+  },
+  {
+    role: 'assistant',
+    content:
+      'To generate a KittyCAD KCL (KittyCAD Language) file, I need to know the specific design or parameters you want to include in the file. Please provide details such as:\n\n1. The type of object or design you want to create (e.g., a simple shape, a complex model).\n2. Dimensions or specifications for the object.\n3. Any specific features or components you want to include (e.g., colors, textures, materials).\n\nOnce I have this information, I can help you create a KCL file.',
+    status: 'success',
+  },
+  {
+    content: 'I want a gear',
+    role: 'user',
+    status: 'success',
+  },
+  {
+    role: 'assistant',
+    content:
+      "To create a KCL file for a gear, I need a few more details:\n\n1. **Number of Teeth**: How many teeth should the gear have?\n2. **Pitch Diameter**: What is the diameter of the pitch circle?\n3. **Module**: What is the module of the gear (this relates to the size of the teeth)?\n4. **Thickness**: How thick should the gear be?\n5. **Material**: What material should the gear be made of (if applicable)?\n6. **Color**: Do you want to specify a color for the gear?\n\nPlease provide these details, and I'll generate the KCL file for you.",
+    status: 'success',
+  },
+  {
+    content: 'Give an example, taking your best guess at each',
+    role: 'user',
+    status: 'success',
+  },
+  {
+    role: 'assistant',
+    content:
+      'Here\'s an example of a gear with the following specifications:\n\n1. **Number of Teeth**: 20\n2. **Pitch Diameter**: 40 mm\n3. **Module**: 2 mm\n4. **Thickness**: 10 mm\n5. **Material**: Steel\n6. **Color**: Gray\n\nBased on these specifications, here is a sample KCL file for the gear:\n\n```kcl\n// Gear KCL File Example\n// Gear Specifications\ngear {\n    number_of_teeth: 20;\n    pitch_diameter: 40; // in mm\n    module: 2; // in mm\n    thickness: 10; // in mm\n    material: "Steel";\n    color: "Gray";\n}\n\n// Gear Geometry\ngeometry {\n    type: "cylinder";\n    radius: 20; // Pitch radius = Pitch Diameter / 2\n    height: 10; // Thickness\n}\n\n// Teeth Profile\nteeth {\n    profile: "involute";\n    depth: 2; // Depth of teeth\n    angle: 20; // Pressure angle\n}\n\n// End of Gear Definition\n```\n\nThis KCL file defines a gear with the specified parameters. You can modify any of the values as needed. If you would like to save this as a file or need further modifications, please let me know!',
+    status: 'success',
+  },
+];

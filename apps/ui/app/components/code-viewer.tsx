@@ -1,10 +1,17 @@
 import { Prism as SyntaxHighlighter, SyntaxHighlighterProps } from 'react-syntax-highlighter';
 import { cn } from '@/utils/ui';
 
+const displayLanguageFromOriginalLanguage = {
+  kcl: 'typescript',
+};
+
+type MappedLanguage = keyof typeof displayLanguageFromOriginalLanguage;
+
 export function CodeViewer({
   ref,
   className,
   showLineNumbers,
+  language,
   ...rest
 }: SyntaxHighlighterProps & { className?: string }) {
   return (
@@ -17,6 +24,7 @@ export function CodeViewer({
         margin: 0,
         ...(showLineNumbers ? { padding: '0.5em 0' } : {}),
       }}
+      language={language ? displayLanguageFromOriginalLanguage[language as MappedLanguage] || language : undefined}
       codeTagProps={{
         className: cn(
           className,

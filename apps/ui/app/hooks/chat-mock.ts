@@ -43,3 +43,17 @@ export const MOCK_KCL_MESSAGES = [
     status: 'success',
   },
 ];
+
+export const MOCK_MATH_MESSAGES = [
+  {
+    content: 'Render Einsteins equations with math symbols, wrapping all symbols with a single dollar sign ($)',
+    role: 'user',
+    status: 'success',
+  },
+  {
+    role: 'assistant',
+    content:
+      "Einstein's equations, particularly the famous equation from his theory of relativity, can be represented as follows:\n\n$$E = mc^2$$\n\nIn this equation:\n- $E$ represents energy,\n- $m$ represents mass,\n- $c$ represents the speed of light in a vacuum.\n\nIf you are referring to the field equations of general relativity, they can be expressed as:\n\n$$R_{\\mu\\nu} - \\frac{1}{2}g_{\\mu\\nu}R + g_{\\mu\\nu}\\Lambda = \\frac{8\\pi G}{c^4}T_{\\mu\\nu}$$\n\nWhere:\n- $R_{\\mu\\nu}$ is the Ricci curvature tensor,\n- $g_{\\mu\\nu}$ is the metric tensor,\n- $R$ is the scalar curvature,\n- $\\Lambda$ is the cosmological constant,\n- $G$ is the gravitational constant,\n- $c$ is the speed of light,\n- $T_{\\mu\\nu}$ is the stress-energy tensor.",
+    status: 'success',
+  },
+];

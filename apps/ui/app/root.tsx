@@ -2,6 +2,8 @@ import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from '@remix-run
 import { Links, LiveReload, Meta, Scripts, ScrollRestoration, useLoaderData } from '@remix-run/react';
 
 import stylesUrl from './styles/global.css?url';
+
+import katexUrl from 'katex/dist/katex.min.css';
 import { Page } from '@/components/page';
 import { themeSessionResolver } from '@/sessions.server';
 import { PreventFlashOnWrongTheme, ThemeProvider, useTheme } from 'remix-themes';
@@ -10,7 +12,10 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { SIDEBAR_COOKIE_NAME } from '@/components/ui/sidebar';
 import { extractCookie } from '@/utils/cookies';
 
-export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesUrl }];
+export const links: LinksFunction = () => [
+  { rel: 'stylesheet', href: stylesUrl },
+  { rel: 'stylesheet', href: katexUrl },
+];
 
 export const meta: MetaFunction = () => [
   {

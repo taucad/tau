@@ -1,5 +1,7 @@
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { cn } from '@/utils/ui';
 import { CopyButton } from '@/components/copy-button';
 import { CodeViewer } from '@/components/code-viewer';
@@ -12,7 +14,8 @@ export const MarkdownViewer = ({ children }: { children: string }) => {
         /* <pre> */
         'prose-pre:p-0 prose-pre:ps-0 prose-pre:pe-0 prose-pre:bg-neutral-100',
       )}
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
       components={{
         a: (properties) => {
           const { children, ...rest } = properties;

@@ -17,7 +17,7 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
         {message.role === MessageRole.Assistant ? <Taucad /> : <img src="/avatar-sample.png" alt="User" />}
       </Avatar>
       <div className="flex flex-col space-y-2">
-        <div className={cn(isUser ? 'bg-neutral-200 p-2 rounded-xl text-right' : 'pt-[6px]')}>
+        <div className={cn(isUser ? 'bg-neutral-200 p-2 rounded-xl' : 'pt-[6px]')}>
           <MarkdownViewer>{`${message.content}${message.status === MessageStatus.Pending ? '●' : ''}`}</MarkdownViewer>
         </div>
         {!isUser && message.status === MessageStatus.Success && (

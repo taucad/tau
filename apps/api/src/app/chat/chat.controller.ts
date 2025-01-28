@@ -21,18 +21,23 @@ enum ChatEvent {
   OnChatModelStart = 'on_chat_model_start',
   OnChatModelEnd = 'on_chat_model_end',
   OnChatModelStream = 'on_chat_model_stream',
+  OnToolStart = 'on_tool_start',
+  OnToolEnd = 'on_tool_end',
 }
-
-const STREAMED_EVENTS = [ChatEvent.OnChatModelStream, ChatEvent.OnChatModelEnd, ChatEvent.OnChatModelStart];
 
 @Controller('chat')
 export class ChatController {
   @Post()
   @Sse('sse')
-  async getData(
-    @Body() body: any,
-  ): Promise<Observable<{ data: { status: string; timestamp: number; content?: string } }>> {
-    console.log(body);
+  async getData(@Body() body: any): Promise<
+    Observable<{
+      data: {
+        status: string;
+        timestamp: number;
+        content?: string | { input?: any; output?: any; description?: string };
+      };
+    }>
+  > {
     // Define the tools for the agent to use
     const tools = [
       // new TavilySearchResults({ maxResults: 3 }),
@@ -104,30 +109,57 @@ export class ChatController {
 
     return new Observable((observer) => {
       (async () => {
-        for await (const event of eventStream) {
-          switch (event.event) {
+        for await (const streamEvent of eventStream) {
+          switch (streamEvent.event) {
             case ChatEvent.OnChatModelStream: {
-              observer.next({
-                data: { status: event.event, timestamp: Date.now(), content: event.data.chunk.content },
-              });
+              if (streamEvent.data.chunk.content) {
+                observer.next({
+                  data: { status: streamEvent.event, timestamp: Date.now(), content: streamEvent.data.chunk.content },
+                });
+              }
 
               break;
             }
             case ChatEvent.OnChatModelStart: {
-              Logger.log('Starting chat model');
-              Logger.log(event);
-              observer.next({ data: { status: event.event, timestamp: Date.now() } });
+              observer.next({ data: { status: streamEvent.event, timestamp: Date.now() } });
 
               break;
             }
             case ChatEvent.OnChatModelEnd: {
-              observer.next({ data: { status: event.event, timestamp: Date.now() } });
+              observer.next({ data: { status: streamEvent.event, timestamp: Date.now() } });
 
               break;
             }
-            default: {
-              Logger.log(event.event);
+            case ChatEvent.OnToolStart: {
+              observer.next({
+                data: {
+                  status: streamEvent.event,
+                  timestamp: Date.now(),
+                  content: {
+                    description: 'Searching the web',
+                    input: streamEvent.data.input.input,
+                  },
+                },
+              });
+              break;
             }
+            case ChatEvent.OnToolEnd: {
+              // The tool doesn't return the results in a fully structured format, so we need to wrap it in an array and parse it
+              const results = JSON.parse(`[${streamEvent.data.output.content}]`);
+              observer.next({
+                data: {
+                  status: streamEvent.event,
+                  timestamp: Date.now(),
+                  content: {
+                    description: `Found ${results.length} results`,
+                    input: streamEvent.data.input.input,
+                    output: results,
+                  },
+                },
+              });
+              break;
+            }
+            default:
           }
         }
         observer.complete();

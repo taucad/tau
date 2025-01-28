@@ -57,3 +57,77 @@ export const MOCK_MATH_MESSAGES = [
     status: 'success',
   },
 ];
+
+export const MOCK_TOOL_MESSAGES = [
+  {
+    content: 'How does the sun produce energy? Search web',
+    role: 'user',
+    status: 'success',
+  },
+  {
+    content:
+      "The sun produces energy through a process called nuclear fusion, which occurs in its core. Here are some key points about how this process works:\n\n1. **Nuclear Fusion**: In the sun's core, hydrogen atoms are fused together to form helium nuclei. This fusion process releases a tremendous amount of energy, which is the source of the sun's light and heat.\n\n2. **Chain Reaction**: The energy released from nuclear fusion creates a chain reaction that allows the process to continue over and over again, sustaining the sun's energy output.\n\n3. **Energy Release**: The energy produced in the core eventually makes its way to the surface of the sun and is emitted as solar radiation, which is essential for life on Earth.\n\nFor more detailed information, you can check out the following resources:\n- [NASA Space Place: Where Does the Sun's Energy Come From?](https://spaceplace.nasa.gov/sun-heat/)\n- [Phys.org: How does the sun produce energy?](https://phys.org/news/2015-12-sun-energy.html)\n- [National Geographic Education: The Power of the Sun](https://education.nationalgeographic.org/resource/power-sun/)",
+    role: 'assistant',
+    status: 'success',
+    toolCall: {
+      description: 'Found 9 results',
+      input: 'how does the sun produce energy',
+      output: [
+        {
+          title: "Where Does the Sun's Energy Come From?",
+          link: 'https://spaceplace.nasa.gov/sun-heat/',
+          snippet:
+            'This process—called nuclear fusion—releases energy while creating a chain reaction that allows it to occur over and over and over again. That energy builds up.',
+        },
+        {
+          title: 'How does the sun produce energy?',
+          link: 'https://phys.org/news/2015-12-sun-energy.html',
+          snippet:
+            '14 Dec 2015 — It is here, in the core, where energy is produced by hydrogen atoms (H) being converted into nuclei of helium (He).',
+        },
+        {
+          title: 'The Power of the Sun - National Geographic Education',
+          link: 'https://education.nationalgeographic.org/resource/power-sun/',
+          snippet:
+            '19 Oct 2023 — Solar energy is created by nuclear fusion that takes place in the sun. It is necessary for life on Earth, and can be harvested for human uses ...',
+        },
+        {
+          title: 'How does solar power work? | Solar energy explained',
+          link: 'https://www.nationalgrid.com/stories/energy-explained/how-does-solar-power-work',
+          snippet:
+            '16 May 2023 — Solar power works by converting energy from the sun into power. There are two forms of energy generated from the sun for our use – electricity and heat.',
+        },
+        {
+          title: "The Sun's Energy: An Essential Part of the Earth System",
+          link: 'https://scied.ucar.edu/learning-zone/earth-system/energy-from-sun',
+          snippet:
+            "Solar radiation, or energy produced by the Sun, is the primary energy source for most processes in the Earth system and drives Earth's energy budget.",
+        },
+        {
+          title: 'How Does Solar Work?',
+          link: 'https://www.energy.gov/eere/solar/how-does-solar-work',
+          snippet:
+            '3 Dec 2019 — Solar technologies convert sunlight into electrical energy either through photovoltaic (PV) panels or through mirrors that concentrate solar radiation.',
+        },
+        {
+          title: 'Big Idea 3.2',
+          link: 'https://science.nasa.gov/learn/heat/big-ideas/big-idea-3-2/',
+          snippet:
+            'The core is the central region where nuclear reactions consume hydrogen to form helium. These reactions release the energy that ultimately leaves the surface as ...',
+        },
+        {
+          title: 'Why can the sun persistently produce energy for the stable ...',
+          link: 'https://www.hko.gov.hk/en/education/space-weather/general/00418-why-can-the-sun-persistently-produce-energy-for-the-stable-output-of-light-and-heat.html',
+          snippet:
+            'The sun contains massive hydrogen that serves as a lasting supply of fuel for the generation of large amount of energy through persistent nuclear fusion.',
+        },
+        {
+          title: 'How Does The Sun Produce Energy?',
+          link: 'https://www.universetoday.com/75803/how-does-the-sun-produce-energy/',
+          snippet:
+            '12 Dec 2015 — The simple answer is that the Sun, like all stars, is able to create energy because it is essentially a massive fusion reaction. Scientists ...',
+        },
+      ],
+    },
+  },
+];

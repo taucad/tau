@@ -15,7 +15,7 @@ export const MarkdownViewer = ({ children }: { children: string }) => {
   return (
     <Markdown
       className={cn(
-        'text-sm prose text-foreground [--tw-prose-headings:text-foreground] [--tw-prose-bullets:text-foreground] [--tw-prose-bold:text-foreground] [--tw-prose-counters:text-foreground] [--tw-prose-lead:text-foreground] [--tw-prose-quotes:text-foreground] [--tw-prose-quote-borders:text-foreground] [--tw-prose-kbd:text-foreground]',
+        'text-sm prose text-foreground [--tw-prose-headings:text-foreground] [--tw-prose-bullets:text-foreground] [--tw-prose-bold:text-foreground] [--tw-prose-counters:text-foreground] [--tw-prose-lead:text-foreground] [--tw-prose-quotes:text-foreground] [--tw-prose-quote-borders:text-foreground] [--tw-prose-kbd:text-foreground] [--tw-prose-links:text-foreground]',
         /* <pre> */
         'prose-pre:p-0 prose-pre:ps-0 prose-pre:pe-0 prose-pre:bg-neutral-100',
       )}

@@ -1,5 +1,16 @@
 import * as React from 'react';
-import { AudioWaveform, BookOpen, Bot, Command, Frame, Hammer, Map, PieChart, Settings2 } from 'lucide-react';
+import {
+  AudioWaveform,
+  BookOpen,
+  Bot,
+  Command,
+  Component,
+  Frame,
+  Hammer,
+  Map,
+  PieChart,
+  Settings2,
+} from 'lucide-react';
 
 import { NavMain } from '@/components/nav-main';
 import { NavProjects } from '@/components/nav-projects';
@@ -59,6 +70,25 @@ const data = {
       title: 'Models',
       url: '#',
       icon: Bot,
+      items: [
+        {
+          title: 'Genesis',
+          url: '#',
+        },
+        {
+          title: 'Explorer',
+          url: '#',
+        },
+        {
+          title: 'Quantum',
+          url: '#',
+        },
+      ],
+    },
+    {
+      title: 'Specifications',
+      url: '#',
+      icon: Component,
       items: [
         {
           title: 'Genesis',

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useEventSource } from './use-event-source';
-import { MOCK_CHAT_MESSAGES } from './chat-mock';
+import { MOCK_TOOL_MESSAGES } from './chat-mock';
+// import { MOCK_CHAT_MESSAGES } from './chat-mock';
 
 export type ChatInterfaceProperties = {
   chatId: string;
@@ -8,7 +9,17 @@ export type ChatInterfaceProperties = {
 
 type MessageEventSchema = {
   timestamp: number;
-  content: string;
+  content:
+    | string
+    | {
+        description: string;
+        input: string;
+        output: {
+          title: string;
+          link: string;
+          snippet: string;
+        }[];
+      };
   status: ChatEvent;
 };
 
@@ -27,16 +38,27 @@ export type MessageSchema = {
   role: MessageRole;
   content: string;
   status: MessageStatus;
+  toolCall?: {
+    input: string;
+    output: {
+      title: string;
+      link: string;
+      snippet: string;
+    }[];
+    description: string;
+  };
 };
 
 export enum ChatEvent {
   OnChatModelStart = 'on_chat_model_start',
   OnChatModelEnd = 'on_chat_model_end',
   OnChatModelStream = 'on_chat_model_stream',
+  OnToolStart = 'on_tool_start',
+  OnToolEnd = 'on_tool_end',
 }
 
 export const useChat = () => {
-  const [messages, setMessages] = useState<MessageSchema[]>([]);
+  const [messages, setMessages] = useState<MessageSchema[]>(MOCK_TOOL_MESSAGES);
   const [status, setStatus] = useState<ChatEvent | undefined>();
 
   const { stream } = useEventSource<MessageEventSchema, { messages: MessageSchema[] }>({
@@ -55,9 +77,8 @@ export const useChat = () => {
             return [
               ...previous.slice(0, -1),
               {
-                role: currentMessage.role,
+                ...currentMessage,
                 content: currentMessage.content + event.content,
-                status: MessageStatus.Pending,
               },
             ];
           });
@@ -65,14 +86,23 @@ export const useChat = () => {
           break;
         }
         case ChatEvent.OnChatModelStart: {
-          setMessages((previous) => [
-            ...previous,
-            {
-              role: MessageRole.Assistant,
-              content: '',
-              status: MessageStatus.Pending,
-            },
-          ]);
+          setMessages((previous) => {
+            const lastMessage = previous.at(-1);
+
+            if (lastMessage?.status === MessageStatus.Pending && lastMessage?.content.length === 0) {
+              return previous;
+            }
+
+            return [
+              ...previous,
+              {
+                ...lastMessage,
+                role: MessageRole.Assistant,
+                content: '',
+                status: MessageStatus.Pending,
+              },
+            ];
+          });
 
           break;
         }
@@ -84,7 +114,65 @@ export const useChat = () => {
               return previous;
             }
 
+            if (lastMessage.status === MessageStatus.Pending && lastMessage.content.length === 0) {
+              return previous;
+            }
+
             return [...previous.slice(0, -1), { ...lastMessage, status: MessageStatus.Success }];
+          });
+
+          break;
+        }
+        case ChatEvent.OnToolStart: {
+          setMessages((previous) => {
+            if (typeof event.content === 'string') {
+              throw new TypeError('Invalid event content');
+            }
+
+            const lastMessage = previous.at(-1);
+
+            if (!lastMessage) {
+              return previous;
+            }
+
+            return [
+              ...previous.slice(0, -1),
+              {
+                ...lastMessage,
+                toolCall: {
+                  description: event.content.description,
+                  input: event.content.input,
+                  output: [],
+                },
+              },
+            ];
+          });
+
+          break;
+        }
+        case ChatEvent.OnToolEnd: {
+          setMessages((previous) => {
+            const lastMessage = previous.at(-1);
+
+            if (typeof event.content === 'string') {
+              throw new TypeError('Invalid event content');
+            }
+
+            if (!lastMessage) {
+              return previous;
+            }
+
+            return [
+              ...previous.slice(0, -1),
+              {
+                ...lastMessage,
+                toolCall: {
+                  description: event.content.description,
+                  input: event.content.input,
+                  output: event.content.output,
+                },
+              },
+            ];
           });
 
           break;

@@ -1,5 +1,5 @@
 import { Avatar } from '@radix-ui/react-avatar';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@radix-ui/react-tooltip';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { ChevronRight, Edit } from 'lucide-react';
 import { CopyButton } from '@/components/copy-button';
 import { Taucad } from '@/components/icons/taucad';
@@ -40,7 +40,7 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
 
                 return (
                   <HoverCard openDelay={100} closeDelay={100} key={title}>
-                    <HoverCardTrigger>
+                    <HoverCardTrigger asChild>
                       <a href={source.link} target="_blank">
                         <div
                           key={source.title}
@@ -105,7 +105,7 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
                           );
                           sourceFaviconUrl.searchParams.set('url', source.link);
                           return (
-                            <a href={source.link} target="_blank">
+                            <a href={source.link} target="_blank" key={source.title}>
                               <div
                                 key={source.title}
                                 className="w-full bg-neutral-50 hover:bg-neutral-100 p-2 rounded-md flex flex-col space-y-2"
@@ -144,16 +144,18 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
       </div>
       {isUser && (
         <Tooltip>
-          <TooltipTrigger>
+          <TooltipTrigger asChild>
             <Button
               size="icon"
-              variant="ghost"
+              variant="outline"
               className="rounded-full transition-opacity group-hover:opacity-100 opacity-0"
             >
               <Edit className="w-4 h-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Edit</TooltipContent>
+          <TooltipContent>
+            <p>Edit</p>
+          </TooltipContent>
         </Tooltip>
       )}
     </article>

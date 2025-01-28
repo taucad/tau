@@ -147,7 +147,7 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
           <TooltipTrigger asChild>
             <Button
               size="icon"
-              variant="outline"
+              variant="ghost"
               className="rounded-full transition-opacity group-hover:opacity-100 opacity-0"
             >
               <Edit className="w-4 h-4" />

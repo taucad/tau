@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useEventSource } from './use-event-source';
-import { MOCK_TOOL_MESSAGES } from './chat-mock';
 // import { MOCK_CHAT_MESSAGES } from './chat-mock';
 
 export type ChatInterfaceProperties = {
@@ -34,11 +33,14 @@ export enum MessageStatus {
   Error = 'error',
 }
 
+export type SourceOrigin = 'web' | 'notion' | 'history' | 'projects';
+
 export type MessageSchema = {
   role: MessageRole;
   content: string;
   status: MessageStatus;
-  toolCall?: {
+  toolCalls?: {
+    origin: SourceOrigin;
     input: string;
     output: {
       title: string;
@@ -46,7 +48,7 @@ export type MessageSchema = {
       snippet: string;
     }[];
     description: string;
-  };
+  }[];
 };
 
 export enum ChatEvent {
@@ -58,10 +60,10 @@ export enum ChatEvent {
 }
 
 export const useChat = () => {
-  const [messages, setMessages] = useState<MessageSchema[]>(MOCK_TOOL_MESSAGES);
+  const [messages, setMessages] = useState<MessageSchema[]>([]);
   const [status, setStatus] = useState<ChatEvent | undefined>();
 
-  const { stream } = useEventSource<MessageEventSchema, { messages: MessageSchema[] }>({
+  const { stream } = useEventSource<MessageEventSchema, { model: string; messages: MessageSchema[] }>({
     url: 'http://localhost:4000/v1/chat',
     onStreamEvent: (event) => {
       setStatus(event.status);
@@ -100,6 +102,7 @@ export const useChat = () => {
                 role: MessageRole.Assistant,
                 content: '',
                 status: MessageStatus.Pending,
+                toolCalls: [],
               },
             ];
           });
@@ -139,11 +142,14 @@ export const useChat = () => {
               ...previous.slice(0, -1),
               {
                 ...lastMessage,
-                toolCall: {
-                  description: event.content.description,
-                  input: event.content.input,
-                  output: [],
-                },
+                toolCalls: [
+                  {
+                    origin: 'web',
+                    description: event.content.description,
+                    input: event.content.input,
+                    output: [],
+                  },
+                ],
               },
             ];
           });
@@ -166,11 +172,14 @@ export const useChat = () => {
               ...previous.slice(0, -1),
               {
                 ...lastMessage,
-                toolCall: {
-                  description: event.content.description,
-                  input: event.content.input,
-                  output: event.content.output,
-                },
+                toolCalls: [
+                  {
+                    origin: 'web',
+                    description: event.content.description,
+                    input: event.content.input,
+                    output: event.content.output,
+                  },
+                ],
               },
             ];
           });
@@ -182,15 +191,14 @@ export const useChat = () => {
     },
   });
 
-  const sendMessage = async (message: MessageSchema) => {
+  const sendMessage = async ({ message, model }: { message: MessageSchema; model: string }) => {
     setMessages((messages) => [...messages, message]);
-    await stream({ messages: [...messages, message] });
+    await stream({ model, messages: [...messages, message] });
   };
 
   return {
     status,
     messages,
-    // currentMessage,
     sendMessage,
   };
 };

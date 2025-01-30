@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Mic, Eye, Code, Terminal, ArrowRight, ArrowDown } from 'lucide-react';
+import { Mic, Eye, Code, Terminal, ArrowRight, ArrowDown, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MessageRole, MessageStatus, useChat } from '@/hooks/use-chat';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
@@ -14,19 +14,32 @@ import { CodeViewer } from '@/components/code-viewer';
 import { mockCode } from '@/components/mock-code';
 import { CopyButton } from './copy-button';
 import { DownloadButton } from './download-button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
+
+const MODELS = ['gpt-4o-mini', 'gpt-4o', 'llama3.2'] as const;
 
 export default function ChatInterface() {
   const [inputText, setInputText] = useState('');
   const { sendMessage, messages } = useChat();
+  const [model, setModel] = useState('gpt-4o-mini');
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
 
   const onSubmit = async () => {
     setInputText('');
     await sendMessage({
-      content: inputText,
-      role: MessageRole.User,
-      status: MessageStatus.Success,
+      message: {
+        content: inputText,
+        role: MessageRole.User,
+        status: MessageStatus.Success,
+      },
+      model,
     });
   };
 
@@ -80,6 +93,23 @@ export default function ChatInterface() {
                 autoFocus
                 placeholder="Type your message..."
               />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="ghost" className="absolute left-2 bottom-2">
+                    <p className="text-xs">{model}</p>
+                    <ChevronDown className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top">
+                  <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
+                    {MODELS.map((model) => (
+                      <DropdownMenuRadioItem key={model} value={model}>
+                        {model}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button
                 size="icon"
                 variant="ghost"
@@ -91,7 +121,7 @@ export default function ChatInterface() {
               >
                 <ArrowRight className="w-4 h-4" />
               </Button>
-              <Button size="icon" variant="ghost" className="absolute right-2 bottom-3">
+              <Button size="icon" variant="ghost" className="absolute right-2 bottom-2">
                 <Mic className="w-4 h-4" />
               </Button>
             </div>

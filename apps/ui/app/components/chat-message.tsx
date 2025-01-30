@@ -1,19 +1,34 @@
 import { Avatar } from '@radix-ui/react-avatar';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
-import { ChevronRight, Edit } from 'lucide-react';
+import { ChevronRight, Edit, Globe2, History, NotebookIcon, Projector } from 'lucide-react';
 import { CopyButton } from '@/components/copy-button';
 import { Taucad } from '@/components/icons/taucad';
 import { Button } from '@/components/ui/button';
-import { MessageSchema, MessageRole, MessageStatus } from '@/hooks/use-chat';
+import { MessageSchema, MessageRole, MessageStatus, SourceOrigin } from '@/hooks/use-chat';
 import { cn } from '@/utils/ui';
 import { MarkdownViewer } from './markdown-viewer';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
 import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from './ui/sheet';
+import { Badge } from './ui/badge';
+import { useState } from 'react';
+import { When } from './ui/utils/when';
 
 const MAX_TITLE_LENGTH = 50;
 
+const SOURCE_TOOLS = [
+  { icon: Globe2, key: 'web' },
+  { icon: NotebookIcon, key: 'notion' },
+  { icon: History, key: 'history' },
+  { icon: Projector, key: 'projects' },
+] as const satisfies { icon: React.ElementType; key: SourceOrigin }[];
+
 export function ChatMessage({ message }: { message: MessageSchema }) {
   const isUser = message.role === MessageRole.User;
+  const [activeSources, setActiveSources] = useState<SourceOrigin[]>(['web']);
+
+  const relevantSources = message.toolCalls
+    ?.filter((toolCall) => activeSources.includes(toolCall.origin))
+    .flatMap((toolCall) => toolCall.output.map((source) => ({ ...source, origin: toolCall.origin })));
 
   return (
     <article className={cn('group flex flex-row space-x-2 items-start', isUser && 'space-x-reverse flex-row-reverse')}>
@@ -21,11 +36,54 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
         {message.role === MessageRole.Assistant ? <Taucad /> : <img src="/avatar-sample.png" alt="User" />}
       </Avatar>
       <div className="flex flex-col space-y-2">
-        {message.toolCall && (
+        {message.toolCalls?.length > 0 && relevantSources && (
           <>
-            <p className="text-lg">Sources</p>
+            <div className="flex flex-row items-center space-x-2">
+              <p className="text-lg">Sources</p>
+              {SOURCE_TOOLS.filter((source) => message.toolCalls?.some((s) => s.origin === source.key)).map(
+                (source) => {
+                  const sourceCount = relevantSources.filter((s) => s.origin === source.key).length;
+                  return (
+                    <Badge
+                      variant={'outline'}
+                      data-active={activeSources.includes(source.key)}
+                      onClick={() => {
+                        setActiveSources((previous) => {
+                          if (previous.includes(source.key)) {
+                            return previous.filter((s) => s !== source.key);
+                          }
+                          return [...previous, source.key];
+                        });
+                      }}
+                      key={source.key}
+                      className="rounded-full hover:bg-neutral-100 data-[active=true]:bg-neutral-200 data-[active=true]:hover:bg-neutral-300 dark:data-[active=true]:hover:bg-neutral-400 flex flex-row items-center space-x-1 cursor-pointer select-none transition-all duration-200 ease-in-out"
+                    >
+                      <source.icon className="w-3 h-3" />
+                      <p className="text-xs">{sourceCount}</p>
+                      <p className="text-xs">{source.key}</p>
+                    </Badge>
+                  );
+                },
+              )}
+              <Tooltip>
+                <TooltipTrigger>
+                  <Badge
+                    variant={'outline'}
+                    className="rounded-full hover:bg-neutral-100 data-[active=true]:bg-neutral-200 data-[active=true]:hover:bg-neutral-300 dark:data-[active=true]:hover:bg-neutral-400 flex flex-row items-center space-x-1 cursor-pointer select-none transition-all duration-200 ease-in-out"
+                  >
+                    <p className="text-xs">+</p>
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Add sources</p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <When condition={relevantSources?.length === 0}>
+              <p className="italic text-foreground-500 text-sm">No sources, expand your search</p>
+            </When>
             <div className="grid grid-cols-4 gap-2">
-              {message.toolCall.output.slice(0, 3).map((source) => {
+              {relevantSources.slice(0, 3).map((source) => {
                 const title =
                   source.title.length > MAX_TITLE_LENGTH
                     ? source.title.slice(0, MAX_TITLE_LENGTH).trim() + '...'
@@ -65,11 +123,11 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
                   </HoverCard>
                 );
               })}
-              {message.toolCall.output.length > 3 && (
+              {relevantSources.length > 3 && (
                 <Sheet>
                   <SheetTrigger className="flex flex-col bg-neutral-50 hover:bg-neutral-100 p-2 justify-between rounded-md h-24">
                     <div className="flex flex-row items-center space-x-[1px] flex-wrap">
-                      {message.toolCall.output.slice(3).map((source) => {
+                      {relevantSources.slice(3, 9).map((source) => {
                         const sourceUrl = new URL(source.link);
                         const sourceDomain = sourceUrl.hostname.replace('www.', '').split('.').slice(0, -1).join('.');
                         const sourceFaviconUrl = new URL(
@@ -81,10 +139,15 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
                             key={source.title}
                             src={sourceFaviconUrl.href}
                             alt={sourceDomain}
-                            className="w-5 h-5 rounded-full"
+                            className="w-4 h-4 sm:w-5 sm:h-5 rounded-full"
                           />
                         );
                       })}
+                      {relevantSources.length > 9 && (
+                        <div className="flex items-center justify-center w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-neutral-200 text-[8px] sm:text-[8px] text-foreground-500 font-medium">
+                          +{relevantSources.length - 9}
+                        </div>
+                      )}
                     </div>
                     <div className="flex flex-row items-center text-foreground-500 font-medium">
                       <p className="text-xs">Show all</p>
@@ -93,11 +156,11 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
                   </SheetTrigger>
                   <SheetContent className="overflow-y-scroll">
                     <SheetHeader>
-                      <SheetTitle>{message.toolCall.output.length} Sources</SheetTitle>
+                      <SheetTitle>{relevantSources.length} Sources</SheetTitle>
                     </SheetHeader>
                     <SheetDescription asChild>
                       <div className="flex flex-col items-center space-y-2 flex-wrap mt-2 overflow-y-scroll">
-                        {message.toolCall.output.map((source) => {
+                        {relevantSources.map((source) => {
                           const sourceUrl = new URL(source.link);
                           const sourceDomain = sourceUrl.hostname.replace('www.', '').split('.').slice(0, -1).join('.');
                           const sourceFaviconUrl = new URL(
@@ -105,7 +168,7 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
                           );
                           sourceFaviconUrl.searchParams.set('url', source.link);
                           return (
-                            <a href={source.link} target="_blank" key={source.title}>
+                            <a href={source.link} target="_blank" key={source.link} className="w-full">
                               <div
                                 key={source.title}
                                 className="w-full bg-neutral-50 hover:bg-neutral-100 p-2 rounded-md flex flex-col space-y-2"

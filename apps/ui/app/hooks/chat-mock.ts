@@ -69,7 +69,10 @@ export const MOCK_TOOL_MESSAGES = [
       "The sun produces energy through a process called nuclear fusion, which occurs in its core. Here are some key points about how this process works:\n\n1. **Nuclear Fusion**: In the sun's core, hydrogen atoms are fused together to form helium nuclei. This fusion process releases a tremendous amount of energy, which is the source of the sun's light and heat.\n\n2. **Chain Reaction**: The energy released from nuclear fusion creates a chain reaction that allows the process to continue over and over again, sustaining the sun's energy output.\n\n3. **Energy Release**: The energy produced in the core eventually makes its way to the surface of the sun and is emitted as solar radiation, which is essential for life on Earth.\n\nFor more detailed information, you can check out the following resources:\n- [NASA Space Place: Where Does the Sun's Energy Come From?](https://spaceplace.nasa.gov/sun-heat/)\n- [Phys.org: How does the sun produce energy?](https://phys.org/news/2015-12-sun-energy.html)\n- [National Geographic Education: The Power of the Sun](https://education.nationalgeographic.org/resource/power-sun/)",
     role: 'assistant',
     status: 'success',
-    toolCall: {
+    toolCalls: [
+      {
+        description: 'Found 9 results',
+        origin: 'web',
       description: 'Found 9 results',
       input: 'how does the sun produce energy',
       output: [

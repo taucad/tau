@@ -1,14 +1,14 @@
-import { Body, Controller, Get, Post, Logger, Sse, Req } from '@nestjs/common';
+import { Body, Controller, Post, Logger, Sse } from '@nestjs/common';
 import { Observable } from 'rxjs';
 
-import { TavilySearchResults } from '@langchain/community/tools/tavily_search';
+// import { TavilySearchResults } from '@langchain/community/tools/tavily_search';
 import { SearxngSearch } from '@langchain/community/tools/searxng_search';
 import { ChatOpenAI } from '@langchain/openai';
 import { ChatOllama } from '@langchain/ollama';
-import { HumanMessage } from '@langchain/core/messages';
+import { AIMessage } from '@langchain/core/messages';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { StateGraph, MessagesAnnotation, END, START } from '@langchain/langgraph';
-import { CreateChatInput } from './usecases/create-chat.usecase';
+import { BaseChatModel, BaseChatModelParams } from '@langchain/core/language_models/chat_models';
 
 enum ChatNode {
   Start = START,
@@ -25,11 +25,86 @@ enum ChatEvent {
   OnToolEnd = 'on_tool_end',
 }
 
+type Provider = 'openai' | 'ollama' | 'samba';
+
+type ExtendedBaseChatModelParameters = BaseChatModelParams & {
+  model: string;
+  temperature: number;
+  streaming: boolean;
+};
+
+type ModelConfig = {
+  provider: Provider;
+  model: string;
+  temperature: number;
+  streaming: boolean;
+  createClass: (options: ExtendedBaseChatModelParameters) => BaseChatModel;
+  configuration?: {
+    apiKey?: string;
+    baseURL?: string;
+  };
+};
+
+const MODELS = {
+  'gpt-4o-mini': {
+    provider: 'openai',
+    model: 'gpt-4o-mini',
+    temperature: 0,
+    streaming: true,
+    createClass: (options) => new ChatOpenAI(options),
+  },
+  'llama3.2': {
+    provider: 'ollama',
+    model: 'llama3.2',
+    temperature: 0,
+    streaming: true,
+    createClass: (options) => new ChatOllama(options),
+  },
+  'gpt-4o': {
+    provider: 'openai',
+    model: 'gpt-4o',
+    temperature: 0,
+    streaming: true,
+    createClass: (options) => new ChatOpenAI(options),
+  },
+  'samba:llama3.2': {
+    provider: 'samba',
+    model: 'Meta-Llama-3.3-70B-Instruct',
+    temperature: 0,
+    streaming: true,
+    configuration: {
+      apiKey: '2682c8cf-6254-4850-bdde-f68813556c13',
+      baseURL: 'https://api.sambanova.ai/v1',
+    },
+    createClass: (options) => new ChatOllama(options),
+  },
+} as const satisfies Record<string, ModelConfig>;
+
+type Model = keyof typeof MODELS;
+
+const DEFAULT_MODEL = 'gpt-4o-mini' as const satisfies Model;
+
+const getModel = (model: Model) => {
+  const modelConfig = MODELS[model || DEFAULT_MODEL];
+
+  if (!modelConfig) {
+    throw new Error(`Model ${model} not found`);
+  }
+
+  const { createClass, ...configuration } = modelConfig;
+  return createClass(configuration);
+};
+
+type CreateChatBody = {
+  messages: any[];
+  model: Model;
+};
+
 @Controller('chat')
 export class ChatController {
   @Post()
   @Sse('sse')
-  async getData(@Body() body: any): Promise<
+  async getData(@Body() body: CreateChatBody): Promise<
     Observable<{
       data: {
         status: string;
@@ -44,7 +119,8 @@ export class ChatController {
       new SearxngSearch({
         params: {
           format: 'json', // Do not change this, format other than "json" is will throw error
-          engines: 'google',
+          engines: 'google,bing,duckduckgo,github,wikipedia,youtube',
+          numResults: 50,
         },
         apiBase: 'http://localhost:42114',
         // Custom Headers to support rapidAPI authentication Or any instance that requires custom headers
@@ -52,27 +128,15 @@ export class ChatController {
       }),
     ];
     const toolNode = new ToolNode(tools);
-
-    // Create a model and give it access to the tools
-    // const model = new ChatOllama({
-    //   model: "llama3.2:latest",
-    //   temperature: 0,
-    // }).bindTools(tools);
-    // const model = new ChatOllama({
-    //   model: "llama3.2:latest",
-    //   temperature: 0,
-    // }).bindTools(tools,{tools});
-    const model = new ChatOpenAI({
-      model: 'gpt-4o-mini',
-      temperature: 0,
-    }).bindTools(tools);
+    const model = getModel(body.model).bindTools(tools);
 
     // Define the function that determines whether to continue or not
     function shouldContinue({ messages }: typeof MessagesAnnotation.State) {
-      const lastMessage = messages.at(-1);
+      const lastMessage = messages.at(-1) as AIMessage;
+      console.log({ lastMessage });
 
       // If the LLM makes a tool call, then we route to the ChatNode.Tools node
-      if (lastMessage.additional_kwargs.tool_calls) {
+      if (lastMessage.tool_calls && lastMessage.tool_calls.length > 0) {
         return ChatNode.Tools;
       }
       // Otherwise, we stop (reply to the user) using the special "__end__" node
@@ -98,7 +162,7 @@ export class ChatController {
     // Finally, we compile it into a LangChain Runnable.
     const graph = workflow.compile();
 
-    const inputs = {
+    const inputs: typeof MessagesAnnotation.State = {
       messages: body.messages,
     };
 
@@ -146,6 +210,7 @@ export class ChatController {
             case ChatEvent.OnToolEnd: {
               // The tool doesn't return the results in a fully structured format, so we need to wrap it in an array and parse it
               const results = JSON.parse(`[${streamEvent.data.output.content}]`);
+              console.log({ results, data: streamEvent.data });
               observer.next({
                 data: {
                   status: streamEvent.event,
@@ -163,7 +228,10 @@ export class ChatController {
           }
         }
         observer.complete();
-      })().catch((error) => observer.error(error));
+      })().catch((error) => {
+        Logger.error(error);
+        observer.error(error);
+      });
     });
   }
 }

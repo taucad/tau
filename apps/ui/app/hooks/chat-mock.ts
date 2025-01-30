@@ -1,6 +1,7 @@
 export const MOCK_CHAT_MESSAGES = [
-  { content: 'Render gltf in React', role: 'user', status: 'success' },
+  { id: '1', content: 'Render gltf in React', role: 'user', status: 'success' },
   {
+    id: '2',
     role: 'assistant',
     content:
       "To render GLTF (GL Transmission Format) models in a React application, you can use the `@react-three/fiber` library along with `@react-three/drei`, which provides useful abstractions for working with 3D models. Below are the steps to set up a simple React component that renders a GLTF model.\n\n### Step 1: Install Required Packages\n\nFirst, you need to install the necessary packages. You can do this using npm or yarn:\n\n```bash\nnpm install three @react-three/fiber @react-three/drei\n```\n\nor\n\n```bash\nyarn add three @react-three/fiber @react-three/drei\n```\n\n### Step 2: Create a React Component\n\nNow, you can create a React component to load and render the GLTF model. Here's an example:\n\n```jsx\nimport React from 'react';\nimport { Canvas } from '@react-three/fiber';\nimport { OrbitControls, useGLTF } from '@react-three/drei';\n\nconst Model = ({ url }) => {\n  const { scene } = useGLTF(url);\n  return <primitive object={scene} />;\n};\n\nconst App = () => {\n  return (\n    <Canvas>\n      <ambientLight />\n      <pointLight position={[10, 10, 10]} />\n      <Model url=\"/path/to/your/model.gltf\" />\n      <OrbitControls />\n    </Canvas>\n  );\n};\n\nexport default App;\n```\n\n### Step 3: Add Your GLTF Model\n\nMake sure to replace `\"/path/to/your/model.gltf\"` with the actual path to your GLTF model file. You can place the model in the `public` directory of your React app for easy access.\n\n### Step 4: Run Your Application\n\nNow you can run your React application, and it should render the GLTF model in a 3D scene. You can use the mouse to rotate, zoom, and pan around the model thanks to the `OrbitControls`.\n\n### Additional Notes\n\n- Ensure that your GLTF model is properly formatted and accessible from the specified URL.\n- You can customize the lighting and camera settings in the `Canvas` component to better suit your model.\n- The `@react-three/drei` library provides many other useful components and hooks for working with 3D scenes, so feel free to explore its documentation for more features.\n\nThis setup should get you started with rendering GLTF models in a React application!",
@@ -73,64 +74,65 @@ export const MOCK_TOOL_MESSAGES = [
       {
         description: 'Found 9 results',
         origin: 'web',
-      description: 'Found 9 results',
-      input: 'how does the sun produce energy',
-      output: [
-        {
-          title: "Where Does the Sun's Energy Come From?",
-          link: 'https://spaceplace.nasa.gov/sun-heat/',
-          snippet:
-            'This process—called nuclear fusion—releases energy while creating a chain reaction that allows it to occur over and over and over again. That energy builds up.',
-        },
-        {
-          title: 'How does the sun produce energy?',
-          link: 'https://phys.org/news/2015-12-sun-energy.html',
-          snippet:
-            '14 Dec 2015 — It is here, in the core, where energy is produced by hydrogen atoms (H) being converted into nuclei of helium (He).',
-        },
-        {
-          title: 'The Power of the Sun - National Geographic Education',
-          link: 'https://education.nationalgeographic.org/resource/power-sun/',
-          snippet:
-            '19 Oct 2023 — Solar energy is created by nuclear fusion that takes place in the sun. It is necessary for life on Earth, and can be harvested for human uses ...',
-        },
-        {
-          title: 'How does solar power work? | Solar energy explained',
-          link: 'https://www.nationalgrid.com/stories/energy-explained/how-does-solar-power-work',
-          snippet:
-            '16 May 2023 — Solar power works by converting energy from the sun into power. There are two forms of energy generated from the sun for our use – electricity and heat.',
-        },
-        {
-          title: "The Sun's Energy: An Essential Part of the Earth System",
-          link: 'https://scied.ucar.edu/learning-zone/earth-system/energy-from-sun',
-          snippet:
-            "Solar radiation, or energy produced by the Sun, is the primary energy source for most processes in the Earth system and drives Earth's energy budget.",
-        },
-        {
-          title: 'How Does Solar Work?',
-          link: 'https://www.energy.gov/eere/solar/how-does-solar-work',
-          snippet:
-            '3 Dec 2019 — Solar technologies convert sunlight into electrical energy either through photovoltaic (PV) panels or through mirrors that concentrate solar radiation.',
-        },
-        {
-          title: 'Big Idea 3.2',
-          link: 'https://science.nasa.gov/learn/heat/big-ideas/big-idea-3-2/',
-          snippet:
-            'The core is the central region where nuclear reactions consume hydrogen to form helium. These reactions release the energy that ultimately leaves the surface as ...',
-        },
-        {
-          title: 'Why can the sun persistently produce energy for the stable ...',
-          link: 'https://www.hko.gov.hk/en/education/space-weather/general/00418-why-can-the-sun-persistently-produce-energy-for-the-stable-output-of-light-and-heat.html',
-          snippet:
-            'The sun contains massive hydrogen that serves as a lasting supply of fuel for the generation of large amount of energy through persistent nuclear fusion.',
-        },
-        {
-          title: 'How Does The Sun Produce Energy?',
-          link: 'https://www.universetoday.com/75803/how-does-the-sun-produce-energy/',
-          snippet:
-            '12 Dec 2015 — The simple answer is that the Sun, like all stars, is able to create energy because it is essentially a massive fusion reaction. Scientists ...',
-        },
-      ],
-    },
+        description: 'Found 9 results',
+        input: 'how does the sun produce energy',
+        output: [
+          {
+            title: "Where Does the Sun's Energy Come From?",
+            link: 'https://spaceplace.nasa.gov/sun-heat/',
+            snippet:
+              'This process—called nuclear fusion—releases energy while creating a chain reaction that allows it to occur over and over and over again. That energy builds up.',
+          },
+          {
+            title: 'How does the sun produce energy?',
+            link: 'https://phys.org/news/2015-12-sun-energy.html',
+            snippet:
+              '14 Dec 2015 — It is here, in the core, where energy is produced by hydrogen atoms (H) being converted into nuclei of helium (He).',
+          },
+          {
+            title: 'The Power of the Sun - National Geographic Education',
+            link: 'https://education.nationalgeographic.org/resource/power-sun/',
+            snippet:
+              '19 Oct 2023 — Solar energy is created by nuclear fusion that takes place in the sun. It is necessary for life on Earth, and can be harvested for human uses ...',
+          },
+          {
+            title: 'How does solar power work? | Solar energy explained',
+            link: 'https://www.nationalgrid.com/stories/energy-explained/how-does-solar-power-work',
+            snippet:
+              '16 May 2023 — Solar power works by converting energy from the sun into power. There are two forms of energy generated from the sun for our use – electricity and heat.',
+          },
+          {
+            title: "The Sun's Energy: An Essential Part of the Earth System",
+            link: 'https://scied.ucar.edu/learning-zone/earth-system/energy-from-sun',
+            snippet:
+              "Solar radiation, or energy produced by the Sun, is the primary energy source for most processes in the Earth system and drives Earth's energy budget.",
+          },
+          {
+            title: 'How Does Solar Work?',
+            link: 'https://www.energy.gov/eere/solar/how-does-solar-work',
+            snippet:
+              '3 Dec 2019 — Solar technologies convert sunlight into electrical energy either through photovoltaic (PV) panels or through mirrors that concentrate solar radiation.',
+          },
+          {
+            title: 'Big Idea 3.2',
+            link: 'https://science.nasa.gov/learn/heat/big-ideas/big-idea-3-2/',
+            snippet:
+              'The core is the central region where nuclear reactions consume hydrogen to form helium. These reactions release the energy that ultimately leaves the surface as ...',
+          },
+          {
+            title: 'Why can the sun persistently produce energy for the stable ...',
+            link: 'https://www.hko.gov.hk/en/education/space-weather/general/00418-why-can-the-sun-persistently-produce-energy-for-the-stable-output-of-light-and-heat.html',
+            snippet:
+              'The sun contains massive hydrogen that serves as a lasting supply of fuel for the generation of large amount of energy through persistent nuclear fusion.',
+          },
+          {
+            title: 'How Does The Sun Produce Energy?',
+            link: 'https://www.universetoday.com/75803/how-does-the-sun-produce-energy/',
+            snippet:
+              '12 Dec 2015 — The simple answer is that the Sun, like all stars, is able to create energy because it is essentially a massive fusion reaction. Scientists ...',
+          },
+        ],
+      },
+    ],
   },
 ];

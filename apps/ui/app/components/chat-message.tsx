@@ -10,8 +10,9 @@ import { MarkdownViewer } from './markdown-viewer';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
 import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from './ui/sheet';
 import { Badge } from './ui/badge';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { When } from './ui/utils/when';
+import { Textarea } from './ui/textarea';
 
 const MAX_TITLE_LENGTH = 50;
 
@@ -22,9 +23,24 @@ const SOURCE_TOOLS = [
   { icon: Projector, key: 'projects' },
 ] as const satisfies { icon: React.ElementType; key: SourceOrigin }[];
 
-export function ChatMessage({ message }: { message: MessageSchema }) {
+type ChatMessageProperties = {
+  message: MessageSchema;
+  onEdit: (content: string) => void;
+};
+
+export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
   const isUser = message.role === MessageRole.User;
+  const [content, setContent] = useState(message.content);
   const [activeSources, setActiveSources] = useState<SourceOrigin[]>(['web']);
+  const [isEditing, setIsEditing] = useState(false);
+  const textareaReference = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (isEditing && textareaReference.current) {
+      const length = textareaReference.current.value.length;
+      textareaReference.current.setSelectionRange(length, length);
+    }
+  }, [isEditing]);
 
   const relevantSources = message.toolCalls
     ?.filter((toolCall) => activeSources.includes(toolCall.origin))
@@ -32,9 +48,11 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
 
   return (
     <article className={cn('group flex flex-row space-x-2 items-start', isUser && 'space-x-reverse flex-row-reverse')}>
-      <Avatar className="w-8 h-8 bg-neutral-200 rounded-full flex items-center justify-center">
-        {message.role === MessageRole.Assistant ? <Taucad /> : <img src="/avatar-sample.png" alt="User" />}
-      </Avatar>
+      <When condition={message.role === MessageRole.User}>
+        <Avatar className="w-8 h-8 bg-neutral-200 rounded-full flex items-center justify-center">
+          <img src="/avatar-sample.png" alt="User" />
+        </Avatar>
+      </When>
       <div className="flex flex-col space-y-2">
         {message.toolCalls?.length > 0 && relevantSources && (
           <>
@@ -196,8 +214,33 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
             {message.content && <p className="text-lg">Answer</p>}
           </>
         )}
-        <div className={cn(isUser ? 'bg-neutral-200 p-2 rounded-xl' : 'pt-[6px]')}>
-          <MarkdownViewer>{`${message.content}${message.status === MessageStatus.Pending ? '●' : ''}`}</MarkdownViewer>
+        <div className={cn(isUser ? 'bg-neutral-200 rounded-xl' : 'pt-[6px]')}>
+          <When condition={isUser && isEditing}>
+            <Textarea
+              ref={textareaReference}
+              className="p-2 shadow-none border-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-none"
+              autoFocus
+              value={content}
+              onChange={(event) => {
+                setContent(event.target.value);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  onEdit(content);
+                  setIsEditing(false);
+                }
+                if (event.key === 'Escape') {
+                  setIsEditing(false);
+                }
+              }}
+            />
+          </When>
+          <When condition={!isEditing}>
+            <div className="p-2">
+              <MarkdownViewer>{`${message.content}${message.status === MessageStatus.Pending ? '●' : ''}`}</MarkdownViewer>
+            </div>
+          </When>
         </div>
         {!isUser && message.status === MessageStatus.Success && (
           <div className="flex flex-row justify-start items-center text-foreground-500">
@@ -212,6 +255,9 @@ export function ChatMessage({ message }: { message: MessageSchema }) {
               size="icon"
               variant="ghost"
               className="rounded-full transition-opacity group-hover:opacity-100 opacity-0"
+              onClick={() => {
+                setIsEditing((editing) => !editing);
+              }}
             >
               <Edit className="w-4 h-4" />
             </Button>

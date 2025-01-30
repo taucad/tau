@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useEventSource } from './use-event-source';
+import { MOCK_CHAT_MESSAGES } from './chat-mock';
 // import { MOCK_CHAT_MESSAGES } from './chat-mock';
 
 export type ChatInterfaceProperties = {
@@ -8,6 +9,7 @@ export type ChatInterfaceProperties = {
 
 type MessageEventSchema = {
   timestamp: number;
+  id: string;
   content:
     | string
     | {
@@ -36,6 +38,8 @@ export enum MessageStatus {
 export type SourceOrigin = 'web' | 'notion' | 'history' | 'projects';
 
 export type MessageSchema = {
+  id: string;
+  threadId?: string;
   role: MessageRole;
   content: string;
   status: MessageStatus;
@@ -99,6 +103,7 @@ export const useChat = () => {
               ...previous,
               {
                 ...lastMessage,
+                id: event.id,
                 role: MessageRole.Assistant,
                 content: '',
                 status: MessageStatus.Pending,
@@ -191,14 +196,31 @@ export const useChat = () => {
     },
   });
 
-  const sendMessage = async ({ message, model }: { message: MessageSchema; model: string }) => {
-    setMessages((messages) => [...messages, message]);
-    await stream({ model, messages: [...messages, message] });
+  const sendMessage = async ({ message, model }: { message: Omit<MessageSchema, 'id'>; model: string }) => {
+    const id = globalThis.crypto.randomUUID();
+    setMessages((messages) => [...messages, { ...message, id }]);
+    await stream({ model, messages: [...messages, { ...message, id }] });
+  };
+
+  const editMessage = async (messageId: string, content: string) => {
+    let newMessages: MessageSchema[] = [];
+    setMessages((messages) => {
+      const index = messages.findIndex((message) => message.id === messageId);
+      if (index === -1) {
+        throw new Error('Message not found');
+      }
+
+      newMessages = [...messages.slice(0, index), { ...messages[index], content }];
+      return newMessages;
+    });
+    console.log(newMessages);
+    await stream({ model: 'gpt-4o', messages: newMessages });
   };
 
   return {
     status,
     messages,
     sendMessage,
+    editMessage,
   };
 };

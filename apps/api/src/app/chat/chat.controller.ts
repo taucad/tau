@@ -9,6 +9,7 @@ import { AIMessage } from '@langchain/core/messages';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { StateGraph, MessagesAnnotation, END, START } from '@langchain/langgraph';
 import { BaseChatModel, BaseChatModelParams } from '@langchain/core/language_models/chat_models';
+import { randomUUID } from 'node:crypto';
 
 enum ChatNode {
   Start = START,
@@ -107,6 +108,7 @@ export class ChatController {
   async getData(@Body() body: CreateChatBody): Promise<
     Observable<{
       data: {
+        id: string;
         status: string;
         timestamp: number;
         content?: string | { input?: any; output?: any; description?: string };
@@ -119,7 +121,7 @@ export class ChatController {
       new SearxngSearch({
         params: {
           format: 'json', // Do not change this, format other than "json" is will throw error
-          engines: 'google,bing,duckduckgo,github,wikipedia,youtube',
+          engines: 'google,bing,duckduckgo,wikipedia,youtube',
           numResults: 50,
         },
         apiBase: 'http://localhost:42114',
@@ -133,7 +135,6 @@ export class ChatController {
     // Define the function that determines whether to continue or not
     function shouldContinue({ messages }: typeof MessagesAnnotation.State) {
       const lastMessage = messages.at(-1) as AIMessage;
-      console.log({ lastMessage });
 
       // If the LLM makes a tool call, then we route to the ChatNode.Tools node
       if (lastMessage.tool_calls && lastMessage.tool_calls.length > 0) {
@@ -172,31 +173,38 @@ export class ChatController {
     });
 
     return new Observable((observer) => {
+      const id = randomUUID();
       (async () => {
         for await (const streamEvent of eventStream) {
           switch (streamEvent.event) {
             case ChatEvent.OnChatModelStream: {
               if (streamEvent.data.chunk.content) {
                 observer.next({
-                  data: { status: streamEvent.event, timestamp: Date.now(), content: streamEvent.data.chunk.content },
+                  data: {
+                    id,
+                    status: streamEvent.event,
+                    timestamp: Date.now(),
+                    content: streamEvent.data.chunk.content,
+                  },
                 });
               }
 
               break;
             }
             case ChatEvent.OnChatModelStart: {
-              observer.next({ data: { status: streamEvent.event, timestamp: Date.now() } });
+              observer.next({ data: { id, status: streamEvent.event, timestamp: Date.now() } });
 
               break;
             }
             case ChatEvent.OnChatModelEnd: {
-              observer.next({ data: { status: streamEvent.event, timestamp: Date.now() } });
+              observer.next({ data: { id, status: streamEvent.event, timestamp: Date.now() } });
 
               break;
             }
             case ChatEvent.OnToolStart: {
               observer.next({
                 data: {
+                  id,
                   status: streamEvent.event,
                   timestamp: Date.now(),
                   content: {
@@ -213,6 +221,7 @@ export class ChatController {
               console.log({ results, data: streamEvent.data });
               observer.next({
                 data: {
+                  id,
                   status: streamEvent.event,
                   timestamp: Date.now(),
                   content: {

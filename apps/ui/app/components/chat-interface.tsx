@@ -26,7 +26,7 @@ const MODELS = ['gpt-4o-mini', 'gpt-4o', 'llama3.2'] as const;
 
 export default function ChatInterface() {
   const [inputText, setInputText] = useState('');
-  const { sendMessage, messages } = useChat();
+  const { sendMessage, messages, editMessage } = useChat();
   const [model, setModel] = useState('gpt-4o-mini');
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
@@ -59,7 +59,13 @@ export default function ChatInterface() {
           <ResizablePanel defaultSize={85} style={{ overflowY: 'auto' }} className="relative flex-1 p-4 pb-0">
             <div className="space-y-4">
               {messages.map((message, index) => (
-                <ChatMessage message={message} key={index} />
+                <ChatMessage
+                  message={message}
+                  key={index}
+                  onEdit={(content) => {
+                    editMessage(message.id, content);
+                  }}
+                />
               ))}
             </div>
             <div className={cn('sticky flex justify-center bottom-2', isScrolledTo && 'opacity-0')}>

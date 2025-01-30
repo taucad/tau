@@ -58,7 +58,7 @@ export function App() {
         <PreventFlashOnWrongTheme ssrTheme={Boolean(data.theme)} />
         <Links />
       </head>
-      <body>
+      <body className="overflow-hidden">
         <Page />
         <ScrollRestoration />
         <Scripts />

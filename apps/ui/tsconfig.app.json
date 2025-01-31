@@ -1,7 +1,6 @@
 {
   "extends": "./tsconfig.json",
   "include": [
-    "remix.environment.d.ts",
     "app/**/*.ts",
     "app/**/*.tsx",
     "app/**/*.js",
@@ -17,7 +16,6 @@
     "tests/**/*.spec.jsx",
     "tests/**/*.test.jsx",
     "vite.config.ts",
-    "vitest.config.ts",
     "src/**/*.test.ts",
     "src/**/*.spec.ts",
     "src/**/*.test.tsx",

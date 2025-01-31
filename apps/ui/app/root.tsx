@@ -1,5 +1,5 @@
 import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Links, LiveReload, Meta, Scripts, ScrollRestoration, useLoaderData } from '@remix-run/react';
+import { Links, Meta, Scripts, ScrollRestoration, useLoaderData } from '@remix-run/react';
 
 import stylesUrl from './styles/global.css?url';
 
@@ -62,7 +62,6 @@ export function App() {
         <Page />
         <ScrollRestoration />
         <Scripts />
-        <LiveReload />
       </body>
     </html>
   );

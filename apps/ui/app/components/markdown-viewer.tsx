@@ -6,10 +6,10 @@ import { cn } from '@/utils/ui';
 import { CopyButton } from '@/components/copy-button';
 import { CodeViewer } from '@/components/code-viewer';
 
-import katexUrl from 'katex/dist/katex.min.css';
-import type { LinksFunction } from '@remix-run/node';
+import katexUrl from 'katex/dist/katex.min.css?url';
+import type { LinkDescriptor } from '@remix-run/node';
 
-export const markdownViewerLinks: ReturnType<LinksFunction> = [{ rel: 'stylesheet', href: katexUrl }];
+export const markdownViewerLinks: LinkDescriptor[] = [{ rel: 'stylesheet', href: katexUrl }];
 
 export const MarkdownViewer = ({ children }: { children: string }) => {
   return (

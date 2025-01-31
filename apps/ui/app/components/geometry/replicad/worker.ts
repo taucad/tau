@@ -4,13 +4,14 @@ import { setOC } from "replicad";
 import { expose } from "comlink";
 
 // We import our model as a simple function
-import { drawBox } from "./cad";
+import { type Dimensions, drawBox } from "./cad";
 
 // This is the logic to load the web assembly code into replicad
 let loaded = false;
 const init = async () => {
   if (loaded) return Promise.resolve(true);
 
+  // @ts-expect-error - incorrect types
   const OC = await opencascade({
     locateFile: () => opencascadeWasm,
   });
@@ -22,16 +23,19 @@ const init = async () => {
 };
 const started = init();
 
-function createBlob(thickness) {
+function createBlob(dimensions: Dimensions): Promise<Blob> {
   // note that you might want to do some caching for more complex models
   return started.then(() => {
-    return drawBox(thickness).blobSTL();
+    return drawBox(dimensions).blobSTL();
   });
 }
 
-function createMesh(thickness) {
+function createMesh(dimensions: Dimensions): Promise<{
+  faces: any;
+  edges: any;
+}> {
   return started.then(() => {
-    const box = drawBox(thickness);
+    const box = drawBox(dimensions);
     // This is how you get the data structure that the replica-three-helper
     // can synchronise with three BufferGeometry
     return {

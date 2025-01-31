@@ -6,19 +6,23 @@ export interface DownloadButtonProperties extends ButtonProperties {
   /**
    * The text to copy.
    */
-  text: string;
+  text?: string;
   /**
    * The title of the file to download.
    */
   title?: string;
+  /**
+   * A function to get the blob to download.
+   */
+  getBlob?: () => Promise<Blob>;
 }
 
 export const DownloadButton = React.forwardRef<HTMLButtonElement, DownloadButtonProperties>(
-  ({ text, size, title = 'download.txt', ...properties }, reference) => {
-    const handleDownload = () => {
+  ({ text, getBlob, size, title = 'download.txt', ...properties }, reference) => {
+    const handleDownload = async () => {
       // New download handler logic without creating an element
-      const blob = new Blob([text], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
+      const newBlob = getBlob ? await getBlob() : new Blob([text as string], { type: 'text/plain' });
+      const url = URL.createObjectURL(newBlob);
 
       fetch(url)
         .then((response) => response.blob())

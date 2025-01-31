@@ -1,9 +1,18 @@
-import { drawRoundedRectangle } from 'replicad';
+import { drawRectangle, Shell } from 'replicad';
+
+
+export type Dimensions = {
+  thickness: number;
+  height: number;
+  width: number;
+  depth: number;
+};
 
 // The replicad code! Not much there!
-export function drawBox(thickness: number) {
-  return drawRoundedRectangle(30, 50)
+export function drawBox({ thickness, height, width, depth }: Dimensions): Shell {
+  return drawRectangle(width, depth)
     .sketchOnPlane()
-    .extrude(20)
-    .shell(thickness, (f) => f.inPlane('XY', 20));
+    .extrude(height)
+    // @ts-expect-error - incorrect types
+    .shell(thickness, (f) => f.inPlane('XY', height)) as Shell;
 }

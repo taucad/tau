@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Mic, Eye, Code, Terminal, ArrowRight, ArrowDown, ChevronDown } from 'lucide-react';
+import { Mic, Eye, Code, Terminal, ArrowRight, ArrowDown, ChevronDown, ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MessageRole, MessageStatus, useChat } from '@/hooks/use-chat';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
@@ -21,8 +21,9 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
+import { When } from './ui/utils/when';
 
-const MODELS = ['gpt-4o-mini', 'gpt-4o', 'llama3.2'] as const;
+const MODELS = ['gpt-o3-mini','gpt-4o-mini', 'gpt-4o', 'llama3.2'] as const;
 
 export default function ChatInterface() {
   const [inputText, setInputText] = useState('');
@@ -30,6 +31,7 @@ export default function ChatInterface() {
   const [model, setModel] = useState('gpt-4o-mini');
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
+  const [isChatOpen, setIsChatOpen] = useState(true);
 
   const onSubmit = async () => {
     setInputText('');
@@ -52,91 +54,100 @@ export default function ChatInterface() {
   console.log(messages);
 
   return (
-    <ResizablePanelGroup direction="horizontal" className="flex h-[calc(100vh-48px)] bg-background">
+    <ResizablePanelGroup direction="horizontal" className="relative flex h-[calc(100vh-48px)] bg-background">
+      <Button
+        size={'icon'}
+        variant='outline'
+        onClick={() => setIsChatOpen((prev) => !prev)}
+        className="absolute top-1.5 left-2 z-50"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </Button>
       {/* Left Pane - Chat History */}
-      <ResizablePanel minSize={30} maxSize={50} defaultSize={40} className="flex flex-col">
-        <ResizablePanelGroup direction="vertical">
-          <ResizablePanel defaultSize={85} style={{ overflowY: 'auto' }} className="relative flex-1 p-4 pb-0">
-            <div className="space-y-4">
-              {messages.map((message, index) => (
-                <ChatMessage
-                  message={message}
-                  key={index}
-                  onEdit={(content) => {
-                    editMessage(message.id, content);
+      <When condition={isChatOpen}>
+        <ResizablePanel minSize={30} maxSize={50} defaultSize={40} className="flex flex-col">
+          <ResizablePanelGroup direction="vertical">
+            <ResizablePanel defaultSize={85} style={{ overflowY: 'auto' }} className="relative flex-1 p-4 pb-0">
+              <div className="space-y-4">
+                {messages.map((message, index) => (
+                  <ChatMessage
+                    message={message}
+                    key={index}
+                    onEdit={(content) => {
+                      editMessage(message.id, content);
+                    }}
+                  />
+                ))}
+              </div>
+              <div className={cn('sticky flex justify-center bottom-2', isScrolledTo && 'opacity-0')}>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className={cn('rounded-full', isScrolledTo && 'select-none pointer-events-none')}
+                  tabIndex={isScrolledTo ? -1 : 0}
+                  onClick={scrollTo}
+                >
+                  <ArrowDown className="w-4 h-4" />
+                </Button>
+              </div>
+              <div ref={chatEndReference} className="mb-px" />
+            </ResizablePanel>
+            <ResizableHandle />
+            {/* Input Area */}
+            <ResizablePanel minSize={15} maxSize={50} defaultSize={15} className="p-4">
+              <div className="relative h-full">
+                <Textarea
+                  className="bg-background w-full p-3 pr-12 rounded-lg border h-full resize-none"
+                  rows={3}
+                  value={inputText}
+                  onChange={(event) => setInputText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault(); // Prevents adding a new line
+                      onSubmit();
+                    }
                   }}
+                  placeholder="Type your message..."
                 />
-              ))}
-            </div>
-            <div className={cn('sticky flex justify-center bottom-2', isScrolledTo && 'opacity-0')}>
-              <Button
-                size="icon"
-                variant="outline"
-                className={cn('rounded-full', isScrolledTo && 'select-none pointer-events-none')}
-                tabIndex={isScrolledTo ? -1 : 0}
-                onClick={scrollTo}
-              >
-                <ArrowDown className="w-4 h-4" />
-              </Button>
-            </div>
-            <div ref={chatEndReference} className="mb-px" />
-          </ResizablePanel>
-          <ResizableHandle />
-          {/* Input Area */}
-          <ResizablePanel minSize={15} maxSize={50} defaultSize={15} className="p-4">
-            <div className="relative h-full">
-              <Textarea
-                className="bg-background w-full p-3 pr-12 rounded-lg border h-full resize-none"
-                rows={3}
-                value={inputText}
-                onChange={(event) => setInputText(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault(); // Prevents adding a new line
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" variant="ghost" className="absolute left-2 bottom-2">
+                      <p className="text-xs">{model}</p>
+                      <ChevronDown className="w-4 h-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top">
+                    <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
+                      {MODELS.map((model) => (
+                        <DropdownMenuRadioItem key={model} value={model}>
+                          {model}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="absolute right-2 top-2"
+                  onClick={() => {
                     onSubmit();
-                  }
-                }}
-                autoFocus
-                placeholder="Type your message..."
-              />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant="ghost" className="absolute left-2 bottom-2">
-                    <p className="text-xs">{model}</p>
-                    <ChevronDown className="w-4 h-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="top">
-                  <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
-                    {MODELS.map((model) => (
-                      <DropdownMenuRadioItem key={model} value={model}>
-                        {model}
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="absolute right-2 top-2"
-                onClick={() => {
-                  onSubmit();
-                }}
-                disabled={inputText.length === 0}
-              >
-                <ArrowRight className="w-4 h-4" />
-              </Button>
-              <Button size="icon" variant="ghost" className="absolute right-2 bottom-2">
-                <Mic className="w-4 h-4" />
-              </Button>
-            </div>
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </ResizablePanel>
-      <ResizableHandle className="hidden lg:flex" />
+                  }}
+                  disabled={inputText.length === 0}
+                >
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
+                <Button size="icon" variant="ghost" className="absolute right-2 bottom-2">
+                  <Mic className="w-4 h-4" />
+                </Button>
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </ResizablePanel>
+        <ResizableHandle className="hidden lg:flex" />
+      </When>
 
-      <ResizablePanel defaultSize={60} className="flex-1 h-full flex-col hidden lg:flex">
+      <ResizablePanel data-state={isChatOpen ? 'open' : 'closed'} defaultSize={60} className="flex-1 h-full flex-col data-[state=open]:hidden data-[state=open]:lg:flex">
         <Tabs defaultValue="preview" className="flex flex-col h-full relative">
           <TabsList className="grid grid-cols-3 m-2 absolute top-1 left-0 bg-background">
             <TabsTrigger

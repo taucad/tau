@@ -1,5 +1,6 @@
 import { Canvas, MeshProps } from '@react-three/fiber';
 import { useGLTF, OrbitControls } from '@react-three/drei';
+import ReplicadApp from './geometry/replicad/sample-replicad';
 
 const MODELS = {
   Beech: 'https://vazxmixjsiawhamofees.supabase.co/storage/v1/object/public/models/tree-beech/model.gltf',
@@ -24,13 +25,19 @@ export function ChatViewer() {
   // const { scene } = useGLTF(deferred)
 
   return (
-    <Canvas camera={{ position: [0, 0, 20], fov: 2 }}>
-      <ambientLight intensity={Math.PI / 2} />
-      <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} decay={0} intensity={Math.PI} />
-      <pointLight position={[-10, -10, -10]} decay={0} intensity={2 * Math.PI} />
-      <Model url={MODELS.CarWheel} position={[0, 0, 0]} rotation={[0.3, -5.7, 0]} />
+    <ReplicadApp />
+    // <iframe
+    //   allow="fullscreen"
+    //   className="w-full h-full"
+    //   src="https://studio.replicad.xyz/share/https%3A%2F%2Fraw.githubusercontent.com%2Fsgenoud%2Freplicad%2Fmain%2Fpackages%2Freplicad-docs%2Fexamples%2FsimpleVase.js"
+    // ></iframe>
+    // <Canvas camera={{ position: [0, 0, 20], fov: 2 }}>
+    //   <ambientLight intensity={Math.PI / 2} />
+    //   <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} decay={0} intensity={Math.PI} />
+    //   <pointLight position={[-10, -10, -10]} decay={0} intensity={2 * Math.PI} />
+    //   <Model url={MODELS.CarWheel} position={[0, 0, 0]} rotation={[0.3, -5.7, 0]} />
 
-      <OrbitControls />
-    </Canvas>
+    //   <OrbitControls />
+    // </Canvas>
   );
 }

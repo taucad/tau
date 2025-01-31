@@ -197,7 +197,7 @@ export const useChat = () => {
   });
 
   const sendMessage = async ({ message, model }: { message: Omit<MessageSchema, 'id'>; model: string }) => {
-    const id = globalThis.crypto.randomUUID();
+    const id = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     setMessages((messages) => [...messages, { ...message, id }]);
     await stream({ model, messages: [...messages, { ...message, id }] });
   };

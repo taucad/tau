@@ -74,7 +74,6 @@ export const MOCK_TOOL_MESSAGES = [
       {
         description: 'Found 9 results',
         origin: 'web',
-        description: 'Found 9 results',
         input: 'how does the sun produce energy',
         output: [
           {

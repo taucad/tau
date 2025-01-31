@@ -9,7 +9,7 @@
         "buildTargetName": "build",
         "devTargetName": "dev",
         "typecheckTargetName": "typecheck",
-        "serveStaticTargetName": "serve-static"
+        "staticServeTargetName": "serve"
       }
     },
     {

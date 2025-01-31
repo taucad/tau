@@ -1,9 +1,8 @@
-/// <reference types='vitest' />
-
 import { vitePlugin as remix } from '@remix-run/dev';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { defineConfig } from 'vite';
+
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,8 +12,11 @@ export default defineConfig({
   root: __dirname,
   cacheDir: '../../node_modules/.vite/apps/ui-vite',
   plugins: [remix(), nxViteTsPaths(), tsconfigPaths()],
+
   server: {
     port: 3000,
+    // TODO: set to actual domain
+    allowedHosts: true,
   },
 
   test: {

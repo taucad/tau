@@ -93,8 +93,25 @@ export class ChatController {
     // Finally, we compile it into a LangChain Runnable.
     const graph = workflow.compile();
 
+    const textFromHint = {
+      search: 'Search the web for information.',
+    };
+
+    // Add hints to the messages
+    const messagesWithHints = body.messages.map((message) => {
+      if (message.metadata?.systemHints) {
+        return {
+          ...message,
+          content: `${message.metadata.systemHints
+            .map((hint: string) => textFromHint[hint as keyof typeof textFromHint])
+            .join(' ')} ${message.content}`,
+        };
+      }
+      return message;
+    });
+
     const inputs: typeof MessagesAnnotation.State = {
-      messages: body.messages,
+      messages: messagesWithHints,
     };
 
     const eventStream = graph.streamEvents(inputs, {

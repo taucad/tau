@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Mic, Eye, Code, Terminal, ArrowRight, ArrowDown, ChevronDown, ChevronLeft } from 'lucide-react';
+import { useState, useEffect, useRef, Fragment } from 'react';
+import { Mic, Eye, Code, Terminal, ArrowRight, ArrowDown, ChevronDown, ChevronLeft, Globe } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MessageRole, MessageStatus, useChat } from '@/hooks/use-chat';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
@@ -17,13 +17,15 @@ import { DownloadButton } from './download-button';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 import { When } from './ui/utils/when';
-
-const MODELS = ['gpt-o3-mini','gpt-4o-mini', 'gpt-4o', 'llama3.2'] as const;
+import { useModels } from '@/hooks/use-models';
+import { Badge } from './ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
 export default function ChatInterface() {
   const [inputText, setInputText] = useState('');
@@ -32,6 +34,10 @@ export default function ChatInterface() {
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
   const [isChatOpen, setIsChatOpen] = useState(true);
+  const { data: models } = useModels();
+  const [isSearching, setIsSearching] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const textareaReference = useRef<HTMLTextAreaElement | null>(null);
 
   const onSubmit = async () => {
     setInputText('');
@@ -40,6 +46,9 @@ export default function ChatInterface() {
         content: inputText,
         role: MessageRole.User,
         status: MessageStatus.Success,
+        metadata: {
+          systemHints: [...(isSearching ? ['search'] : [])],
+        },
       },
       model,
     });
@@ -51,14 +60,18 @@ export default function ChatInterface() {
     }
   }, [messages]);
 
-  console.log(messages);
+  const providerModels = models.reduce((accumulator, model) => {
+    accumulator[model.provider] = accumulator[model.provider] || [];
+    accumulator[model.provider].push(model);
+    return accumulator;
+  }, {});
 
   return (
     <ResizablePanelGroup direction="horizontal" className="relative flex h-[calc(100vh-48px)] bg-background">
       <Button
         size={'icon'}
-        variant='outline'
-        onClick={() => setIsChatOpen((prev) => !prev)}
+        variant="outline"
+        onClick={() => setIsChatOpen((previous) => !previous)}
         className="absolute top-1.5 left-2 z-50"
       >
         <ChevronLeft className="w-4 h-4" />
@@ -96,36 +109,89 @@ export default function ChatInterface() {
             {/* Input Area */}
             <ResizablePanel minSize={15} maxSize={50} defaultSize={15} className="p-4">
               <div className="relative h-full">
-                <Textarea
-                  className="bg-background w-full p-3 pr-12 rounded-lg border h-full resize-none"
-                  rows={3}
-                  value={inputText}
-                  onChange={(event) => setInputText(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault(); // Prevents adding a new line
-                      onSubmit();
-                    }
+                <div
+                  data-state={isFocused ? 'active' : 'inactive'}
+                  onClick={() => {
+                    textareaReference.current?.focus();
                   }}
-                  placeholder="Type your message..."
-                />
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm" variant="ghost" className="absolute left-2 bottom-2">
-                      <p className="text-xs">{model}</p>
-                      <ChevronDown className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent side="top">
-                    <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
-                      {MODELS.map((model) => (
-                        <DropdownMenuRadioItem key={model} value={model}>
-                          {model}
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  className="flex flex-col h-full border shadow-md rounded-lg shadow-none ring-0 data-[state=active]:border-primary w-full resize-none overflow-auto"
+                >
+                  <Textarea
+                    onFocus={() => {
+                      setIsFocused(true);
+                    }}
+                    onBlur={() => {
+                      setIsFocused(false);
+                    }}
+                    ref={textareaReference}
+                    className="border-none shadow-none ring-0 p-4 pr-10 pb-0 mb-8 focus-visible:ring-0 focus-visible:outline-none w-full resize-none h-full"
+                    rows={3}
+                    value={inputText}
+                    onChange={(event) => setInputText(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault(); // Prevents adding a new line
+                        onSubmit();
+                      }
+                    }}
+                    placeholder="Type your message..."
+                  />
+                </div>
+                <div className="absolute left-2 bottom-2 flex flex-row items-center gap-2">
+                  <DropdownMenu>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="sm" className="h-6 px-2" variant="ghost">
+                            <span className="text-xs">{model}</span>
+                            <ChevronDown className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Select a model</p>
+                      </TooltipContent>
+                    </Tooltip>
+                    <DropdownMenuContent side="top">
+                      <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
+                        {Object.entries(providerModels).map(([provider, models]) => (
+                          <Fragment key={provider}>
+                            <DropdownMenuLabel>{provider}</DropdownMenuLabel>
+                            {models.map((model) => (
+                              <DropdownMenuRadioItem
+                                className="group flex flex-row items-center gap-2 justify-between text-xs"
+                                key={model.model}
+                                value={model.model}
+                              >
+                                <span className="font-mono p-1 bg-neutral-100 rounded-sm">{model.model}</span>
+                                <Badge variant="outline" className="group-hover:bg-background">
+                                  {model.details.parameterSize}
+                                </Badge>
+                              </DropdownMenuRadioItem>
+                            ))}
+                          </Fragment>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        data-state={isSearching ? 'active' : 'inactive'}
+                        size="xs"
+                        variant="ghost"
+                        className="data-[state=active]:bg-neutral-100 data-[state=active]:text-primary data-[state=active]:shadow"
+                        onClick={() => setIsSearching((previous) => !previous)}
+                      >
+                        <span className="text-xs">Search</span>
+                        <Globe className="w-4 h-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Search the web</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
                 <Button
                   size="icon"
                   variant="ghost"
@@ -147,7 +213,11 @@ export default function ChatInterface() {
         <ResizableHandle className="hidden lg:flex" />
       </When>
 
-      <ResizablePanel data-state={isChatOpen ? 'open' : 'closed'} defaultSize={60} className="flex-1 h-full flex-col data-[state=open]:hidden data-[state=open]:lg:flex">
+      <ResizablePanel
+        data-state={isChatOpen ? 'open' : 'closed'}
+        defaultSize={60}
+        className="flex-1 h-full flex-col data-[state=open]:hidden data-[state=open]:lg:flex"
+      >
         <Tabs defaultValue="preview" className="flex flex-col h-full relative">
           <TabsList className="grid grid-cols-3 m-2 absolute top-1 left-0 bg-background">
             <TabsTrigger

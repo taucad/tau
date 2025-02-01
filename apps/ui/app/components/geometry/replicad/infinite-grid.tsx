@@ -1,17 +1,17 @@
-import { useRef } from "react";
-import * as THREE from "three";
-import { Plane } from "@react-three/drei";
+import { useRef } from 'react';
+import * as THREE from 'three';
+import { Plane } from '@react-three/drei';
 //
 //
 // Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
 const infiniteGridMaterial = function InfiniteGridMaterial({
   size1 = 10,
   size2 = 100,
-  color = new THREE.Color("var(--primary"),
+  color = new THREE.Color('grey'),
   distance = 8000,
-  axes = "xyz",
+  axes = 'xyz',
 } = {}) {
-  const planeAxes = axes.substr(0, 2);
+  const planeAxes = axes.slice(0, 2);
 
   const material = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
@@ -31,6 +31,7 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
       },
     },
     transparent: true,
+    // @SECURITY - is this safe from injection?
     vertexShader: `
            
            varying vec3 worldPosition;

@@ -11,6 +11,9 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { SIDEBAR_COOKIE_NAME } from '@/components/ui/sidebar';
 import { extractCookie } from '@/utils/cookies';
 import { markdownViewerLinks } from '@/components/markdown-viewer';
+import { QueryClient } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { useState } from 'react';
 
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesUrl }, ...markdownViewerLinks];
 
@@ -37,12 +40,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // `themeAction` is the action name that's used to change the theme in the session storage.
 export default function AppWithProviders() {
   const data = useLoaderData<typeof loader>();
+  const [queryClient] = useState(() => new QueryClient());
+
   return (
-    <ThemeProvider specifiedTheme={data.theme} themeAction="/action/set-theme">
-      <TooltipProvider delayDuration={0}>
-        <App />
-      </TooltipProvider>
-    </ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider specifiedTheme={data.theme} themeAction="/action/set-theme">
+        <TooltipProvider delayDuration={0}>
+          <App />
+        </TooltipProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
   );
 }
 

@@ -43,6 +43,9 @@ export type MessageSchema = {
   role: MessageRole;
   content: string;
   status: MessageStatus;
+  metadata?: {
+    systemHints?: string[];
+  };
   toolCalls?: {
     origin: SourceOrigin;
     input: string;
@@ -197,7 +200,7 @@ export const useChat = () => {
   });
 
   const sendMessage = async ({ message, model }: { message: Omit<MessageSchema, 'id'>; model: string }) => {
-    const id = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    const id = Math.random().toString(36).slice(2, 15) + Math.random().toString(36).slice(2, 15);
     setMessages((messages) => [...messages, { ...message, id }]);
     await stream({ model, messages: [...messages, { ...message, id }] });
   };

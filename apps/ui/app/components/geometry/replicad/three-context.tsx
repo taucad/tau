@@ -32,7 +32,7 @@ export default function ThreeContext({ children, ...properties }: ThreeContextPr
         {...properties}
       >
         <Controls hideGizmo={false} center={true} enableDamping={true}>
-        <InfiniteGrid/>
+          <InfiniteGrid />
           <OrbitControls />
           <ambientLight intensity={5} />
           <pointLight position={[100, 100, 100]} />

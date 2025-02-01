@@ -156,8 +156,8 @@ export default function ChatInterface() {
                           <Button size="sm" className="group h-6 px-2" variant="ghost">
                             <span className="text-xs">{model}</span>
                             <span className="relative flex w-4 h-4">
-                              <ChevronDown className="absolute group-hover:scale-0 w-4 h-4 transition-transform duration-200" />
-                              <CircuitBoard className="absolute scale-0 group-hover:scale-100 w-4 h-4 transition-transform duration-200" />
+                              <ChevronDown className="absolute group-hover:scale-0 transition-transform duration-200 ease-in-out" />
+                              <CircuitBoard className="absolute scale-0 group-hover:scale-100 transition-transform duration-200 ease-in-out" />
                             </span>
                           </Button>
                         </DropdownMenuTrigger>
@@ -200,7 +200,7 @@ export default function ChatInterface() {
                         }}
                       >
                         <span className="text-xs">Search</span>
-                        <Globe className="w-4 h-4" />
+                        <Globe className="w-4 h-4 group-hover:rotate-180 transition-transform duration-200 ease-in-out" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>

@@ -1,15 +1,12 @@
 import { Body, Controller, Post, Logger, Sse } from '@nestjs/common';
 import { Observable } from 'rxjs';
 
-// import { TavilySearchResults } from '@langchain/community/tools/tavily_search';
 import { SearxngSearch } from '@langchain/community/tools/searxng_search';
-import { ChatOpenAI } from '@langchain/openai';
-import { ChatOllama } from '@langchain/ollama';
 import { AIMessage } from '@langchain/core/messages';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { StateGraph, MessagesAnnotation, END, START } from '@langchain/langgraph';
-import { BaseChatModel, BaseChatModelParams } from '@langchain/core/language_models/chat_models';
 import { randomUUID } from 'node:crypto';
+import { ModelService } from './model.service';
 
 enum ChatNode {
   Start = START,
@@ -26,83 +23,15 @@ enum ChatEvent {
   OnToolEnd = 'on_tool_end',
 }
 
-type Provider = 'openai' | 'ollama' | 'samba';
-
-type ExtendedBaseChatModelParameters = BaseChatModelParams & {
-  model: string;
-  temperature: number;
-  streaming: boolean;
-};
-
-type ModelConfig = {
-  provider: Provider;
-  model: string;
-  temperature: number;
-  streaming: boolean;
-  createClass: (options: ExtendedBaseChatModelParameters) => BaseChatModel;
-  configuration?: {
-    apiKey?: string;
-    baseURL?: string;
-  };
-};
-
-const MODELS = {
-  'gpt-4o-mini': {
-    provider: 'openai',
-    model: 'gpt-4o-mini',
-    temperature: 0,
-    streaming: true,
-    createClass: (options) => new ChatOpenAI(options),
-  },
-  'llama3.2': {
-    provider: 'ollama',
-    model: 'llama3.2',
-    temperature: 0,
-    streaming: true,
-    createClass: (options) => new ChatOllama(options),
-  },
-  'gpt-4o': {
-    provider: 'openai',
-    model: 'gpt-4o',
-    temperature: 0,
-    streaming: true,
-    createClass: (options) => new ChatOpenAI(options),
-  },
-  'samba:llama3.2': {
-    provider: 'samba',
-    model: 'Meta-Llama-3.3-70B-Instruct',
-    temperature: 0,
-    streaming: true,
-    configuration: {
-      apiKey: '2682c8cf-6254-4850-bdde-f68813556c13',
-      baseURL: 'https://api.sambanova.ai/v1',
-    },
-    createClass: (options) => new ChatOllama(options),
-  },
-} as const satisfies Record<string, ModelConfig>;
-
-type Model = keyof typeof MODELS;
-
-const DEFAULT_MODEL = 'gpt-4o-mini' as const satisfies Model;
-
-const getModel = (model: Model) => {
-  const modelConfig = MODELS[model || DEFAULT_MODEL];
-
-  if (!modelConfig) {
-    throw new Error(`Model ${model} not found`);
-  }
-
-  const { createClass, ...configuration } = modelConfig;
-  return createClass(configuration);
-};
-
 type CreateChatBody = {
   messages: any[];
-  model: Model;
+  model: string;
 };
 
 @Controller('chat')
 export class ChatController {
+  constructor(private readonly modelService: ModelService) {}
+
   @Post()
   @Sse('sse')
   async getData(@Body() body: CreateChatBody): Promise<
@@ -122,7 +51,7 @@ export class ChatController {
         params: {
           format: 'json', // Do not change this, format other than "json" is will throw error
           engines: 'google,bing,duckduckgo,wikipedia,youtube',
-          numResults: 50,
+          numResults: 10,
         },
         apiBase: 'http://localhost:42114',
         // Custom Headers to support rapidAPI authentication Or any instance that requires custom headers
@@ -130,9 +59,10 @@ export class ChatController {
       }),
     ];
     const toolNode = new ToolNode(tools);
-    const model = getModel(body.model).bindTools(tools);
+    const unboundModel = this.modelService.buildModel(body.model);
+    const model = unboundModel.bindTools?.(tools) ?? unboundModel;
 
-    // Define the function that determines whether to continue or not
+    // Define the function that det ermines whether to continue or not
     function shouldContinue({ messages }: typeof MessagesAnnotation.State) {
       const lastMessage = messages.at(-1) as AIMessage;
 

@@ -1,5 +1,16 @@
 import { useState, useEffect, useRef, Fragment } from 'react';
-import { Mic, Eye, Code, Terminal, ArrowRight, ArrowDown, ChevronDown, ChevronLeft, Globe } from 'lucide-react';
+import {
+  Mic,
+  Eye,
+  Code,
+  Terminal,
+  ArrowRight,
+  ArrowDown,
+  ChevronDown,
+  ChevronLeft,
+  Globe,
+  CircuitBoard,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MessageRole, MessageStatus, useChat } from '@/hooks/use-chat';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
@@ -142,9 +153,12 @@ export default function ChatInterface() {
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <DropdownMenuTrigger asChild>
-                          <Button size="sm" className="h-6 px-2" variant="ghost">
+                          <Button size="sm" className="group h-6 px-2" variant="ghost">
                             <span className="text-xs">{model}</span>
-                            <ChevronDown className="w-4 h-4" />
+                            <span className="relative flex w-4 h-4">
+                              <ChevronDown className="absolute group-hover:scale-0 w-4 h-4 transition-transform duration-200" />
+                              <CircuitBoard className="absolute scale-0 group-hover:scale-100 w-4 h-4 transition-transform duration-200" />
+                            </span>
                           </Button>
                         </DropdownMenuTrigger>
                       </TooltipTrigger>
@@ -180,8 +194,10 @@ export default function ChatInterface() {
                         data-state={isSearching ? 'active' : 'inactive'}
                         size="xs"
                         variant="ghost"
-                        className="data-[state=active]:bg-neutral-100 data-[state=active]:text-primary data-[state=active]:shadow"
-                        onClick={() => setIsSearching((previous) => !previous)}
+                        className="group data-[state=active]:bg-neutral-100 data-[state=active]:text-primary data-[state=active]:shadow transition-all duration-200"
+                        onClick={() => {
+                          setIsSearching((previous) => !previous);
+                        }}
                       >
                         <span className="text-xs">Search</span>
                         <Globe className="w-4 h-4" />

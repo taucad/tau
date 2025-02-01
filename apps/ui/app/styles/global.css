@@ -106,24 +106,24 @@
     --foreground-900: 240 4.8% 41%;
     --foreground-950: 240 4.8% 36%;
 
-    --primary: 224.3 76.3% 48%;
+    --primary: 224.3 76.3% 58%;
     --primary-foreground: 240 4.8% 95%;
 
     --secondary: 222.2 47.4% 11.2%;
     --secondary-foreground: 210 40% 96.1%;
 
     --neutral-0: 240 5.9% 10%;
-    --neutral-50: 240 5.9% 15%;
-    --neutral-100: 240 5.9% 20%;
-    --neutral-200: 240 5.9% 25%;
-    --neutral-300: 240 5.9% 30%;
-    --neutral-400: 240 5.9% 35%;
-    --neutral-500: 240 5.9% 40%;
-    --neutral-600: 240 5.9% 45%;
-    --neutral-700: 240 5.9% 50%;
-    --neutral-800: 240 5.9% 55%;
-    --neutral-900: 240 5.9% 60%;
-    --neutral-950: 240 5.9% 65%;
+    --neutral-50: 240 5.9% 12%;
+    --neutral-100: 240 5.9% 16%;
+    --neutral-200: 240 5.9% 24%;
+    --neutral-300: 240 5.9% 32%;
+    --neutral-400: 240 5.9% 38%;
+    --neutral-500: 240 5.9% 44%;
+    --neutral-600: 240 5.9% 50%;
+    --neutral-700: 240 5.9% 56%;
+    --neutral-800: 240 5.9% 64%;
+    --neutral-900: 240 5.9% 72%;
+    --neutral-950: 240 5.9% 80%;
     --neutral: 0 0% 100%;
     --neutral-foreground: 0 0% 0%;
 

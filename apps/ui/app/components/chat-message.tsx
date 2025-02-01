@@ -74,7 +74,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                         });
                       }}
                       key={source.key}
-                      className="rounded-full hover:bg-neutral-100 data-[active=true]:bg-neutral-200 data-[active=true]:hover:bg-neutral-300 dark:data-[active=true]:hover:bg-neutral-400 flex flex-row items-center space-x-1 cursor-pointer select-none transition-all duration-200 ease-in-out"
+                      className="rounded-full hover:bg-neutral-100 data-[active=true]:bg-neutral-200 data-[active=true]:hover:bg-neutral-300 flex flex-row items-center space-x-1 cursor-pointer select-none transition-all duration-200 ease-in-out"
                     >
                       <source.icon className="w-3 h-3" />
                       <p className="text-xs">{sourceCount}</p>
@@ -87,7 +87,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                 <TooltipTrigger>
                   <Badge
                     variant={'outline'}
-                    className="rounded-full hover:bg-neutral-100 data-[active=true]:bg-neutral-200 data-[active=true]:hover:bg-neutral-300 dark:data-[active=true]:hover:bg-neutral-400 flex flex-row items-center space-x-1 cursor-pointer select-none transition-all duration-200 ease-in-out"
+                    className="rounded-full hover:bg-neutral-100 data-[active=true]:bg-neutral-200 data-[active=true]:hover:bg-neutral-300 flex flex-row items-center space-x-1 cursor-pointer select-none transition-all duration-200 ease-in-out"
                   >
                     <p className="text-xs">+</p>
                   </Badge>

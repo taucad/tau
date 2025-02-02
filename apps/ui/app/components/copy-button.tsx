@@ -2,6 +2,7 @@ import { Copy, Check } from 'lucide-react';
 import { Button, ButtonProperties } from '@/components/ui/button';
 import { useState, useEffect } from 'react';
 import React from 'react';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
 export interface CopyButtonProperties extends ButtonProperties {
   /**
@@ -33,10 +34,15 @@ export const CopyButton = React.forwardRef<HTMLButtonElement, CopyButtonProperti
     }, [copied]);
 
     return (
-      <Button size={size} variant="ghost" onClick={handleCopy} ref={reference} {...properties}>
-        <span>{copied ? <Check /> : <Copy />}</span>
-        {size !== 'icon' && (copied ? 'Copied' : 'Copy')}
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button size={size} variant="ghost" onClick={handleCopy} ref={reference} {...properties}>
+            <span>{copied ? <Check /> : <Copy />}</span>
+            {size !== 'icon' && (copied ? 'Copied' : 'Copy')}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Copy</TooltipContent>
+      </Tooltip>
     );
   },
 );

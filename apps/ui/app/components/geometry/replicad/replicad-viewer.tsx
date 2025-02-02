@@ -9,10 +9,9 @@ import { Slider } from '@/components/ui/slider';
 import { Dimensions } from './cad';
 import { DownloadButton } from '@/components/download-button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { PencilRuler } from 'lucide-react';
+import { LoaderPinwheel, PencilRuler } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const allDimensions = ['thickness', 'height', 'width', 'depth'];
 
@@ -54,22 +53,15 @@ export function ReplicadViewer() {
       {mesh ? (
         <>
           <div className="absolute top-0 right-11 z-10 flex flex-row justify-end gap-2 m-2">
-            <DownloadButton
-              className="shadow-none text-muted-foreground "
-              variant="outline"
-              size="icon"
-              getBlob={downloadModel}
-              title="thing.stl"
-            />
             <Collapsible>
               <CollapsibleTrigger asChild>
-                <Button variant="outline" className="shadow-none text-muted-foreground rounded-md flex flex-row">
+                <Button variant="outline" className="text-muted-foreground rounded-md flex flex-row">
                   <PencilRuler className="w-4 h-4 mr-2" />
                   <span>Edit</span>
                 </Button>
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <div className="absolute w-[90vw] md:w-[40dvw] top-12 right-0 z-10 bg-background/50 backdrop-blur-sm border p-2 rounded-md flex flex-col gap-4 justify-between">
+                <div className="absolute w-[90vw] md:w-[40dvw] top-12 -right-11 z-10 bg-background/50 backdrop-blur-sm border p-2 rounded-md flex flex-col gap-4 justify-between">
                   <div className="flex flex-col space-y-2 items-center">
                     {allDimensions.map((key) => (
                       <div key={key} className="grid grid-cols-5 gap-3 items-center">
@@ -100,13 +92,22 @@ export function ReplicadViewer() {
                 </div>
               </CollapsibleContent>
             </Collapsible>
+            <DownloadButton
+              className="text-muted-foreground "
+              variant="outline"
+              size="icon"
+              getBlob={downloadModel}
+              title="thing.stl"
+            />
           </div>
           <ThreeContext>
             <ReplicadMesh edges={mesh.edges} faces={mesh.faces} />
           </ThreeContext>
         </>
       ) : (
-        <div className="flex items-center font-bold text-2xl justify-center h-full">Loading...</div>
+        <div className="flex items-center font-bold text-2xl justify-center h-full">
+          <LoaderPinwheel className="size-20 stroke-1 animate-spin text-primary" />
+        </div>
       )}
     </main>
   );

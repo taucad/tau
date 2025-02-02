@@ -84,7 +84,7 @@ export default function ChatInterface() {
         size={'icon'}
         variant="outline"
         onClick={() => setIsChatOpen((previous) => !previous)}
-        className="group absolute top-2 right-2 z-50 shadow-none text-muted-foreground"
+        className="group absolute top-2 right-2 z-50 text-muted-foreground"
         data-state={isChatOpen ? 'open' : 'closed'}
       >
         <span className="relative w-4 h-4">
@@ -130,7 +130,7 @@ export default function ChatInterface() {
                   onClick={() => {
                     textareaReference.current?.focus();
                   }}
-                  className="flex flex-col h-full border shadow-md rounded-lg shadow-none ring-0 data-[state=active]:border-primary w-full resize-none overflow-auto"
+                  className="flex flex-col h-full border shadow-md rounded-lg data-[state=active]:border-primary w-full resize-none overflow-auto"
                 >
                   <Textarea
                     onFocus={() => {
@@ -270,11 +270,11 @@ export default function ChatInterface() {
             <ChatViewer />
           </TabsContent>
           <TabsContent value="code" className="h-full mt-0">
-            <div className="flex flex-row justify-between items-center px-4 pb-2">
+            <div className="flex flex-row justify-between items-center px-4 pb-2 mt-2 mr-9">
               <span className="text-sm font-medium">main.kcl</span>
-              <div className="flex flex-row items-center">
-                <CopyButton size="icon" text={mockCode} />
-                <DownloadButton size="icon" text={mockCode} />
+              <div className="flex flex-row items-center gap-2">
+                <CopyButton variant="outline" size="icon" text={mockCode} />
+                <DownloadButton variant="outline" size="icon" text={mockCode} />
               </div>
             </div>
             <div className="flex-1 bg-neutral-100 rounded-md m-2">

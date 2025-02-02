@@ -4,25 +4,20 @@ import {
   EnhancedCache,
   isDocumentRequest,
   isLoaderRequest,
-  Logger,
   NavigationHandler,
   type DefaultFetchHandler,
 } from '@remix-pwa/sw';
 
 declare let self: ServiceWorkerGlobalScope;
 
-const logger = new Logger({
-  prefix: '[TAU]',
-});
-
 self.addEventListener('install', (event) => {
-  logger.log('Service worker installed');
+  console.log('Service worker installed');
 
   event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', (event) => {
-  logger.log('Service worker activated');
+  console.log('Service worker activated');
 
   event.waitUntil(self.clients.claim());
 });

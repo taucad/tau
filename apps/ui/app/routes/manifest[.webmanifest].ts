@@ -1,11 +1,13 @@
 import { metaConfig } from '@/config';
 import type { WebAppManifest } from '@remix-pwa/dev';
+import { json } from '@remix-run/node';
 
 export const loader = () => {
-  return Response.json(
+  return json(
     {
       short_name: metaConfig.name,
       name: metaConfig.name,
+      description: metaConfig.description,
       start_url: '/',
       display: 'standalone',
       background_color: '#ffffff',

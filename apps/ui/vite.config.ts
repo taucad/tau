@@ -1,6 +1,7 @@
 import { vitePlugin as remix } from '@remix-run/dev';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import tsconfigPaths from 'vite-tsconfig-paths';
+import { remixPWA } from '@remix-pwa/dev';
 import { defineConfig } from 'vite';
 
 import path from 'node:path';
@@ -11,7 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   root: __dirname,
   cacheDir: '../../node_modules/.vite/apps/ui-vite',
-  plugins: [remix(), nxViteTsPaths(), tsconfigPaths()],
+  plugins: [remix(), nxViteTsPaths(), tsconfigPaths(), remixPWA()],
 
   server: {
     port: 3000,

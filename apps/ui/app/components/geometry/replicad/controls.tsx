@@ -1,19 +1,15 @@
-import React, { useRef } from "react";
-import { OrbitControls, GizmoHelper, GizmoViewport } from "@react-three/drei";
-import Stage from "./stage";
+import React, { useRef } from 'react';
+import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
+import Stage from './stage';
 
 const Controls = React.memo(
   React.forwardRef(function Controls(
-    { hideGizmo, enableDamping }: { hideGizmo: boolean, enableDamping: boolean },
-    controlsRef
+    { hideGizmo, enableDamping }: { hideGizmo: boolean; enableDamping: boolean },
+    controlsReference,
   ) {
     return (
       <>
-        <OrbitControls
-          makeDefault
-          ref={controlsRef}
-          enableDamping={enableDamping}
-        />
+        <OrbitControls makeDefault ref={controlsReference} enableDamping={enableDamping} />
         {!hideGizmo && (
           <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
             <GizmoViewport font="18px Inter var, HKGrotesk, sans-serif" />
@@ -21,7 +17,7 @@ const Controls = React.memo(
         )}
       </>
     );
-  })
+  }),
 );
 
 export type SceneProps = {
@@ -29,24 +25,15 @@ export type SceneProps = {
   center: boolean;
   enableDamping: boolean;
   children: React.ReactNode;
-}
+};
 
-export default React.memo(function Scene({
-  hideGizmo,
-  center,
-  enableDamping = true,
-  children,
-}: SceneProps) {
-  const controlsRef = useRef(null);
+export default React.memo(function Scene({ hideGizmo, center, enableDamping = true, children }: SceneProps) {
+  const controlsReference = useRef(null);
 
   return (
     <>
-      <Controls
-        hideGizmo={hideGizmo}
-        ref={controlsRef}
-        enableDamping={enableDamping}
-      />
-      <Stage controls={controlsRef} center={center}>
+      <Controls hideGizmo={hideGizmo} ref={controlsReference} enableDamping={enableDamping} />
+      <Stage controls={controlsReference} center={center}>
         {children}
       </Stage>
     </>

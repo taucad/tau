@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Fragment } from 'react';
+import { useState, useRef, Fragment, useEffect } from 'react';
 import {
   Mic,
   Eye,
@@ -83,9 +83,10 @@ export default function ChatInterface() {
         size={'icon'}
         variant="outline"
         onClick={() => setIsChatOpen((previous) => !previous)}
-        className="absolute top-1.5 left-2 z-50"
+        className="group absolute top-2 right-2 z-50 shadow-none"
+        data-state={isChatOpen ? 'open' : 'closed'}
       >
-        <ChevronLeft className="w-4 h-4" />
+        <ChevronLeft className="w-4 h-4 group-data-[state=open]:rotate-180 transition-transform duration-200 ease-in-out" />
       </Button>
       {/* Left Pane - Chat History */}
       <When condition={isChatOpen}>
@@ -197,6 +198,9 @@ export default function ChatInterface() {
                         className="group data-[state=active]:bg-neutral-100 data-[state=active]:text-primary data-[state=active]:shadow transition-all duration-200"
                         onClick={() => {
                           setIsSearching((previous) => !previous);
+                          if (!isSearching) {
+                            textareaReference.current?.focus();
+                          }
                         }}
                       >
                         <span className="text-xs">Search</span>
@@ -235,27 +239,27 @@ export default function ChatInterface() {
         className="flex-1 h-full flex-col data-[state=open]:hidden data-[state=open]:lg:flex"
       >
         <Tabs defaultValue="preview" className="flex flex-col h-full relative">
-          <TabsList className="grid grid-cols-3 m-2 absolute top-1 left-0 bg-background">
+          <TabsList className="grid grid-cols-3 absolute m-2 bg-background z-10 border md:h-[2.375rem]">
             <TabsTrigger
               value="preview"
-              className="data-[state=active]:bg-neutral-100 data-[state=active]:text-foreground data-[state=active]:shadow"
+              className="gap-2 data-[state=active]:bg-neutral-100 data-[state=active]:text-foreground data-[state=active]:shadow"
             >
-              <Eye className="w-4 h-4 mr-2" />
-              <span>Preview</span>
+              <Eye className="w-4 h-4" />
+              <span className="hidden md:block">Preview</span>
             </TabsTrigger>
             <TabsTrigger
               value="code"
-              className="data-[state=active]:bg-neutral-100 data-[state=active]:text-foreground data-[state=active]:shadow"
+              className="gap-2 data-[state=active]:bg-neutral-100 data-[state=active]:text-foreground data-[state=active]:shadow"
             >
-              <Code className="w-4 h-4 mr-2" />
-              <span>Code</span>
+              <Code className="w-4 h-4" />
+              <span className="hidden md:block">Code</span>
             </TabsTrigger>
             <TabsTrigger
               value="console"
-              className="data-[state=active]:bg-neutral-100 data-[state=active]:text-foreground data-[state=active]:shadow"
+              className="gap-2 data-[state=active]:bg-neutral-100 data-[state=active]:text-foreground data-[state=active]:shadow"
             >
-              <Terminal className="w-4 h-4 mr-2" />
-              <span>Console</span>
+              <Terminal className="w-4 h-4" />
+              <span className="hidden md:block">Console</span>
             </TabsTrigger>
           </TabsList>
           <TabsContent value="preview" className="h-full mt-0">

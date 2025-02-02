@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import { Canvas, CanvasProps } from '@react-three/fiber';
-import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import Controls from './controls';
 import InfiniteGrid from './infinite-grid';
@@ -25,7 +25,8 @@ export default function ThreeContext({ children, ...properties }: ThreeContextPr
   return (
     <Suspense fallback={<div>Rendering model...</div>}>
       <Canvas
-        className="w-full h-full bg-background"
+        className="bg-background"
+        style={{ height: 'calc(100vh - 48px)' }}
         dpr={dpr}
         frameloop="demand"
         camera={{ position: [20, 40, 50] }}

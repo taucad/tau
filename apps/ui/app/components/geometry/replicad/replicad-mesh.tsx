@@ -8,7 +8,7 @@ export type ReplicadMeshProps = {
   edges: any;
 };
 
-export default React.memo(function ShapeMeshes({ faces, edges }: ReplicadMeshProps) {
+export default React.memo(function ReplicadMesh({ faces, edges }: ReplicadMeshProps) {
   const { invalidate } = useThree();
 
   const body = useRef(new BufferGeometry());

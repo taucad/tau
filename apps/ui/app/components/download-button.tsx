@@ -1,6 +1,7 @@
 import { Download } from 'lucide-react';
 import { Button, ButtonProperties } from '@/components/ui/button';
 import React from 'react';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
 export interface DownloadButtonProperties extends ButtonProperties {
   /**
@@ -43,10 +44,15 @@ export const DownloadButton = React.forwardRef<HTMLButtonElement, DownloadButton
     };
 
     return (
-      <Button size={size} variant="ghost" onClick={handleDownload} ref={reference} {...properties}>
-        <span>{<Download />}</span>
-        {size !== 'icon' && 'Download'}
-      </Button>
+      <Tooltip>
+        <TooltipTrigger>
+          <Button size={size} variant="ghost" onClick={handleDownload} ref={reference} {...properties}>
+            <span>{<Download />}</span>
+            {size !== 'icon' && 'Download'}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Download</TooltipContent>
+      </Tooltip>
     );
   },
 );

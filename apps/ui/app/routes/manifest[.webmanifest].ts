@@ -1,6 +1,8 @@
 import { metaConfig } from '@/config';
 import type { WebAppManifest } from '@remix-pwa/dev';
-import { json } from '@remix-run/node';
+import { json, LinkDescriptor } from '@remix-run/node';
+
+export const webManifestLinks: LinkDescriptor[] = [{ rel: 'manifest', href: '/manifest.webmanifest' }];
 
 export const loader = () => {
   return json(
@@ -8,8 +10,12 @@ export const loader = () => {
       short_name: metaConfig.name,
       name: metaConfig.name,
       description: metaConfig.description,
+      orientation: 'portrait',
       start_url: '/',
       display: 'standalone',
+      // @see https://developer.mozilla.org/en-US/docs/Web/Manifest/Reference/display_override
+      // @ts-expect-error - fullscreen and minimal-ui are available in types, but are legitimate values
+      display_override: ['fullscreen', 'minimal-ui'],
       background_color: '#ffffff',
       theme_color: '#ffffff',
       icons: [

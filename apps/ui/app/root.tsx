@@ -18,8 +18,13 @@ import { ENV, metaConfig } from './config';
 import { useOffline } from './hooks/use-offline';
 import { ManifestLink } from '@remix-pwa/sw';
 import { Toaster } from './components/ui/sonner';
+import { webManifestLinks } from '@/routes/manifest[.webmanifest]';
 
-export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesUrl }, ...markdownViewerLinks];
+export const links: LinksFunction = () => [
+  { rel: 'stylesheet', href: stylesUrl },
+  ...webManifestLinks,
+  ...markdownViewerLinks,
+];
 
 export const meta: MetaFunction = () => [
   { title: metaConfig.name },
@@ -32,7 +37,6 @@ export const meta: MetaFunction = () => [
   { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
   { rel: 'icon', href: '/favicon.ico' },
   { rel: 'shortcut icon', href: '/favicon.ico' },
-  { rel: 'manifest', href: '/manifest.webmanifest' },
 ];
 
 // Return the theme from the session storage using the loader

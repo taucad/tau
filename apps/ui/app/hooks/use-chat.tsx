@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useEventSource } from './use-event-source';
 import { MOCK_CHAT_MESSAGES } from './chat-mock';
+import type { loader } from '@/root';
+import { useRouteLoaderData } from '@remix-run/react';
 // import { MOCK_CHAT_MESSAGES } from './chat-mock';
 
 export type ChatInterfaceProperties = {
@@ -69,9 +71,10 @@ export enum ChatEvent {
 export const useChat = () => {
   const [messages, setMessages] = useState<MessageSchema[]>([]);
   const [status, setStatus] = useState<ChatEvent | undefined>();
+  const loaderData = useRouteLoaderData<typeof loader>('root');
 
   const { stream } = useEventSource<MessageEventSchema, { model: string; messages: MessageSchema[] }>({
-    url: 'http://localhost:4000/v1/chat',
+    url: `${loaderData?.env.TAU_API_BASE_URL}/v1/chat`,
     onStreamEvent: (event) => {
       setStatus(event.status);
       switch (event.status) {

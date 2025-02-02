@@ -91,7 +91,7 @@ const PROVIDERS = {
   samba: {
     provider: 'samba',
     configuration: {
-      apiKey: '2682c8cf-6254-4850-bdde-f68813556c13',
+      apiKey: process.env.SAMBA_API_KEY,
       baseURL: 'https://api.sambanova.ai/v1',
     },
     createClass: (options: ChatOpenAIFields) => new ChatOpenAI(options),

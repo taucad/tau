@@ -94,7 +94,7 @@ export class ChatController {
     const graph = workflow.compile();
 
     const textFromHint = {
-      search: 'Search the web for information.',
+      search: "Search the web for information. Use the search results to answer the user's question.",
     };
 
     // Add hints to the messages

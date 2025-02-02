@@ -14,6 +14,7 @@ import { markdownViewerLinks } from '@/components/markdown-viewer';
 import { QueryClient } from '@tanstack/react-query';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
+import { ENV } from './config';
 
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesUrl }, ...markdownViewerLinks];
 
@@ -32,6 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     theme: getTheme(),
     sidebarOpen: sidebarOpen === 'true',
+    env: ENV,
   };
 }
 

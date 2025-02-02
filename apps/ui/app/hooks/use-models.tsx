@@ -1,15 +1,19 @@
-import { useLoaderData } from '@remix-run/react';
+import { ENV } from '@/config';
 import { useQuery } from '@tanstack/react-query';
 
 export const getModels = async () => {
-  const response = await fetch('http://localhost:4000/v1/models');
+  const response = await fetch(`${ENV.TAU_API_BASE_URL}/v1/models`, {
+    headers: {
+      'ngrok-skip-browser-warning': 'true',
+    },
+  });
+  console.log(response);
   const data = await response.json();
 
   return data;
 };
 
 export const useModels = () => {
-  //   const { models } = useLoaderData<any>();
   const { data, isLoading } = useQuery({
     queryKey: ['models'],
     queryFn: () => getModels(),

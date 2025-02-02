@@ -78,7 +78,7 @@ export default function ChatInterface() {
   }, {});
 
   return (
-    <ResizablePanelGroup direction="horizontal" className="relative flex h-[calc(100vh-48px)] bg-background">
+    <ResizablePanelGroup direction="horizontal" className="relative flex h-[calc(100dvh-48px)] bg-background">
       <Button
         size={'icon'}
         variant="outline"

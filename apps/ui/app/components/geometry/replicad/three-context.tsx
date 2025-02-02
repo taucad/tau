@@ -26,7 +26,7 @@ export default function ThreeContext({ children, ...properties }: ThreeContextPr
     <Suspense fallback={<div>Rendering model...</div>}>
       <Canvas
         className="bg-background"
-        style={{ height: 'calc(100vh - 48px)' }}
+        style={{ height: 'calc(100dvh - 48px)' }}
         dpr={dpr}
         frameloop="demand"
         camera={{ position: [20, 40, 50] }}

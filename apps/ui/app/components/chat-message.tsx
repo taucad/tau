@@ -237,7 +237,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
             />
           </When>
           <When condition={!isEditing}>
-            <div className="p-2">
+            <div className={cn(isUser && 'p-2')}>
               <MarkdownViewer>{`${message.content}${message.status === MessageStatus.Pending ? '●' : ''}`}</MarkdownViewer>
             </div>
           </When>

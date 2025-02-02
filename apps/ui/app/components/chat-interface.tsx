@@ -10,6 +10,8 @@ import {
   ChevronLeft,
   Globe,
   CircuitBoard,
+  Box,
+  MessageSquareReply,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MessageRole, MessageStatus, useChat } from '@/hooks/use-chat';
@@ -83,10 +85,13 @@ export default function ChatInterface() {
         size={'icon'}
         variant="outline"
         onClick={() => setIsChatOpen((previous) => !previous)}
-        className="group absolute top-2 right-2 z-50 shadow-none"
+        className="group absolute top-2 right-2 z-50 shadow-none text-muted-foreground"
         data-state={isChatOpen ? 'open' : 'closed'}
       >
-        <ChevronLeft className="w-4 h-4 group-data-[state=open]:rotate-180 transition-transform duration-200 ease-in-out" />
+        <span className="relative w-4 h-4">
+          <Box className="absolute scale-0 group-data-[state=open]:scale-100 transition-transform duration-200 ease-in-out" />
+          <MessageSquareReply className="scale-100 group-data-[state=open]:scale-0 transition-transform duration-200 ease-in-out" />
+        </span>
       </Button>
       {/* Left Pane - Chat History */}
       <When condition={isChatOpen}>

@@ -219,7 +219,7 @@ export const useChat = () => {
       newMessages = [...messages.slice(0, index), { ...messages[index], content }];
       return newMessages;
     });
-    console.log(newMessages);
+
     await stream({ model: 'gpt-4o', messages: newMessages });
   };
 

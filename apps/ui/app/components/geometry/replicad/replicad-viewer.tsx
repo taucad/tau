@@ -32,7 +32,6 @@ export function ReplicadViewer() {
     width: 10,
     depth: 10,
   });
-  const [isEditing, setIsEditing] = useState(false);
 
   const downloadModel = async () => {
     const blob = await cad.current.createBlob(dimensions);
@@ -82,7 +81,6 @@ export function ReplicadViewer() {
                           className="border rounded-md text-sm py-0 h-8 col-span-1 shadow-none"
                           value={dimensions[key as keyof Dimensions]}
                           onChange={(event) => {
-                            console.log(event.target.value);
                             setDimensions({ ...dimensions, [key]: Number(event.target.value) });
                           }}
                         />

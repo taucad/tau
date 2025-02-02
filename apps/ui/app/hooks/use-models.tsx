@@ -7,7 +7,6 @@ export const getModels = async () => {
       'ngrok-skip-browser-warning': 'true',
     },
   });
-  console.log(response);
   const data = await response.json();
 
   return data;

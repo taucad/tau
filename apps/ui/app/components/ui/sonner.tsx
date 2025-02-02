@@ -1,12 +1,12 @@
 'use client';
 
-import { useTheme } from 'next-themes';
+import { useTheme } from 'remix-themes';
 import { Toaster as Sonner } from 'sonner';
 
 type ToasterProperties = React.ComponentProps<typeof Sonner>;
 
 const Toaster = ({ ...properties }: ToasterProperties) => {
-  const { theme = 'system' } = useTheme();
+  const [theme] = useTheme();
 
   return (
     <Sonner

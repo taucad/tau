@@ -32,6 +32,7 @@ export const meta: MetaFunction = () => [
   { rel: 'icon', href: '/favicon.ico' },
   { rel: 'shortcut icon', href: '/favicon.ico' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
+];
 
 // Return the theme from the session storage using the loader
 export async function loader({ request }: LoaderFunctionArgs) {

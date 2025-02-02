@@ -12,7 +12,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   root: __dirname,
   cacheDir: '../../node_modules/.vite/apps/ui-vite',
-  plugins: [remix(), nxViteTsPaths(), tsconfigPaths(), remixPWA()],
+  plugins: [
+    remix({
+      future: {
+        v3_relativeSplatPath: true,
+      },
+    }),
+    nxViteTsPaths(),
+    tsconfigPaths(),
+    remixPWA(),
+  ],
 
   server: {
     port: 3000,

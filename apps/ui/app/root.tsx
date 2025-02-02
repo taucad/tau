@@ -14,7 +14,7 @@ import { markdownViewerLinks } from '@/components/markdown-viewer';
 import { QueryClient } from '@tanstack/react-query';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
-import { ENV } from './config';
+import { ENV, metaConfig } from './config';
 import { useOffline } from './hooks/use-offline';
 import { ManifestLink } from '@remix-pwa/sw';
 import { Toaster } from './components/ui/sonner';
@@ -22,9 +22,15 @@ import { Toaster } from './components/ui/sonner';
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesUrl }, ...markdownViewerLinks];
 
 export const meta: MetaFunction = () => [
-  {
-    title: 'TauCAD',
-  },
+  { title: metaConfig.name },
+  { name: 'theme-color', content: '#ffffff' },
+  { name: 'apple-mobile-web-app-title', content: metaConfig.name },
+  { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
+  { name: 'apple-mobile-web-app-capable', content: 'yes' },
+  { name: 'mobile-web-app-capable', content: 'yes' },
+  { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+  { rel: 'icon', href: '/favicon.ico' },
+  { rel: 'shortcut icon', href: '/favicon.ico' },
 ];
 
 // Return the theme from the session storage using the loader
@@ -71,7 +77,7 @@ export function App() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <PreventFlashOnWrongTheme ssrTheme={Boolean(data.theme)} />
-        <ManifestLink />
+        <ManifestLink manifestUrl="/manifest.json" />
         <Links />
       </head>
       <body className="overflow-hidden">

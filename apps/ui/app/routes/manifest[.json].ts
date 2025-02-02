@@ -1,11 +1,11 @@
+import { metaConfig } from '@/config';
 import type { WebAppManifest } from '@remix-pwa/dev';
-import { json } from '@remix-run/node';
 
 export const loader = () => {
-  return json(
+  return Response.json(
     {
-      short_name: 'TauCAD',
-      name: 'TauCAD',
+      short_name: metaConfig.name,
+      name: metaConfig.name,
       start_url: '/',
       display: 'standalone',
       background_color: '#ffffff',

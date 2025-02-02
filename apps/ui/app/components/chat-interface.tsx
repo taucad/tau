@@ -7,7 +7,6 @@ import {
   ArrowRight,
   ArrowDown,
   ChevronDown,
-  ChevronLeft,
   Globe,
   CircuitBoard,
   Box,

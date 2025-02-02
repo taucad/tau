@@ -15,6 +15,9 @@ import { QueryClient } from '@tanstack/react-query';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ENV } from './config';
+import { useOffline } from './hooks/use-offline';
+import { ManifestLink } from '@remix-pwa/sw';
+import { Toaster } from './components/ui/sonner';
 
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesUrl }, ...markdownViewerLinks];
 
@@ -44,6 +47,8 @@ export default function AppWithProviders() {
   const data = useLoaderData<typeof loader>();
   const [queryClient] = useState(() => new QueryClient());
 
+  useOffline();
+
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider specifiedTheme={data.theme} themeAction="/action/set-theme">
@@ -58,6 +63,7 @@ export default function AppWithProviders() {
 export function App() {
   const data = useLoaderData<typeof loader>();
   const [theme] = useTheme();
+
   return (
     <html lang="en" className={cn(theme)}>
       <head>
@@ -65,12 +71,14 @@ export function App() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <PreventFlashOnWrongTheme ssrTheme={Boolean(data.theme)} />
+        <ManifestLink />
         <Links />
       </head>
       <body className="overflow-hidden">
         <Page />
         <ScrollRestoration />
         <Scripts />
+        <Toaster />
       </body>
     </html>
   );

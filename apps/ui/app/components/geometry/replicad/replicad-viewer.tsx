@@ -1,4 +1,3 @@
-// import * as Comlink from 'https://unpkg.com/comlink/dist/esm/comlink.mjs';
 import { useState, useEffect, useRef } from 'react';
 
 import { wrap } from 'comlink';

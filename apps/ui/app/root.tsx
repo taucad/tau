@@ -31,7 +31,7 @@ export const meta: MetaFunction = () => [
   { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
   { rel: 'icon', href: '/favicon.ico' },
   { rel: 'shortcut icon', href: '/favicon.ico' },
-];
+  { rel: 'manifest', href: '/manifest.webmanifest' },
 
 // Return the theme from the session storage using the loader
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -77,7 +77,6 @@ export function App() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <PreventFlashOnWrongTheme ssrTheme={Boolean(data.theme)} />
-        <ManifestLink manifestUrl="/manifest.json" />
         <Links />
       </head>
       <body className="overflow-hidden">

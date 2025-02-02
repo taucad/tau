@@ -59,8 +59,8 @@ export class ChatController {
       }),
     ];
     const toolNode = new ToolNode(tools);
-    const unboundModel = this.modelService.buildModel(body.model);
-    const model = unboundModel.bindTools?.(tools) ?? unboundModel;
+    const { model: unboundModel, support } = this.modelService.buildModel(body.model);
+    const model = support?.tools === false ? unboundModel : (unboundModel.bindTools?.(tools) ?? unboundModel);
 
     // Define the function that det ermines whether to continue or not
     function shouldContinue({ messages }: typeof MessagesAnnotation.State) {
@@ -94,7 +94,7 @@ export class ChatController {
     const graph = workflow.compile();
 
     const textFromHint = {
-      search: "Search the web for information. Use the search results to answer the user's question.",
+      search: "Search the web for information. Use the search results to answer the user's question directly.",
     };
 
     // Add hints to the messages

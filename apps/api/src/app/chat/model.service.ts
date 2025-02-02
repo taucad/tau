@@ -1,10 +1,11 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 
-import { Model } from './model.schema';
+import { Model, ModelSupport } from './model.schema';
 import { ChatOllama, ChatOllamaInput } from '@langchain/ollama';
 import { ChatOpenAI, ChatOpenAIFields } from '@langchain/openai';
 import ollama from 'ollama';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+
 const MODELS = {
   samba: {
     'llama3.2': {
@@ -98,6 +99,8 @@ const PROVIDERS = {
   },
 } as const;
 
+const ollamaToolSupportFamilies = new Set(['llama']);
+
 type Provider = keyof typeof PROVIDERS;
 
 @Injectable()
@@ -117,7 +120,7 @@ export class ModelService implements OnModuleInit {
     return combinedModels;
   }
 
-  public buildModel(modelName: string): BaseChatModel {
+  public buildModel(modelName: string): { model: BaseChatModel; support?: ModelSupport } {
     const modelConfig = this.models.find((model) => model.model === modelName);
 
     if (!modelConfig) throw new Error(`Could not find model ${modelName}`);
@@ -130,12 +133,15 @@ export class ModelService implements OnModuleInit {
       configuration: provider.configuration,
     });
 
-    return modelClass;
+    return {
+      model: modelClass,
+      support: modelConfig.support,
+    };
   }
 
   private async getOllamaModels(): Promise<Model[]> {
     const ollamaModels = await ollama.list();
-    const ollamaModelList = ollamaModels.models.map((model) => ({
+    const ollamaModelList: Model[] = ollamaModels.models.map((model) => ({
       name: model.name,
       model: model.name,
       modifiedAt: String(model.modified_at),
@@ -154,6 +160,9 @@ export class ModelService implements OnModuleInit {
       configuration: {
         streaming: true,
         temperature: 0,
+      },
+      support: {
+        tools: ollamaToolSupportFamilies.has(model.details.family),
       },
       provider: 'ollama',
     }));

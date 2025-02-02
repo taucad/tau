@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+export const ModelSupportSchema = z.object({
+  tools: z.boolean().describe('Whether the model supports tools'),
+});
+
 export const ModelConfigurationSchema = z.object({
   streaming: z.boolean().describe('Whether the model is streaming'),
   temperature: z.number().describe('The temperature of the model').optional(),
@@ -25,6 +29,7 @@ export const ModelSchema = z.object({
   provider: z.string().describe('The provider of the model'),
   details: ModelDetailsSchema,
   configuration: ModelConfigurationSchema,
+  support: ModelSupportSchema.optional(),
 });
 
 export const ProviderSchema = z.object({
@@ -40,3 +45,4 @@ export const ProviderSchema = z.object({
 export type Model = z.infer<typeof ModelSchema>;
 export type ModelDetails = z.infer<typeof ModelDetailsSchema>;
 export type Provider = z.infer<typeof ProviderSchema>;
+export type ModelSupport = z.infer<typeof ModelSupportSchema>;

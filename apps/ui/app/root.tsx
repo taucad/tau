@@ -23,6 +23,7 @@ export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesUrl 
 
 export const meta: MetaFunction = () => [
   { title: metaConfig.name },
+  { name: 'description', content: metaConfig.description },
   { name: 'theme-color', content: '#ffffff' },
   { name: 'apple-mobile-web-app-title', content: metaConfig.name },
   { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },

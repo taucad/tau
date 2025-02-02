@@ -140,33 +140,38 @@ export class ModelService implements OnModuleInit {
   }
 
   private async getOllamaModels(): Promise<Model[]> {
-    const ollamaModels = await ollama.list();
-    const ollamaModelList: Model[] = ollamaModels.models.map((model) => ({
-      name: model.name,
-      model: model.name,
-      modifiedAt: String(model.modified_at),
-      size: model.size,
-      digest: model.digest,
-      details: {
-        parentModel: model.details.parent_model,
-        format: model.details.format,
-        family: model.details.family,
-        families: model.details.families,
-        parameterSize: model.details.parameter_size,
-        quantizationLevel: model.details.quantization_level,
-        contextWindow: 200_000,
-        maxTokens: 100_000,
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-      support: {
-        tools: ollamaToolSupportFamilies.has(model.details.family),
-      },
-      provider: 'ollama',
-    }));
+    try {
+      const ollamaModels = await ollama.list();
+      const ollamaModelList: Model[] = ollamaModels.models.map((model) => ({
+        name: model.name,
+        model: model.name,
+        modifiedAt: String(model.modified_at),
+        size: model.size,
+        digest: model.digest,
+        details: {
+          parentModel: model.details.parent_model,
+          format: model.details.format,
+          family: model.details.family,
+          families: model.details.families,
+          parameterSize: model.details.parameter_size,
+          quantizationLevel: model.details.quantization_level,
+          contextWindow: 200_000,
+          maxTokens: 100_000,
+        },
+        configuration: {
+          streaming: true,
+          temperature: 0,
+        },
+        support: {
+          tools: ollamaToolSupportFamilies.has(model.details.family),
+        },
+        provider: 'ollama',
+      }));
 
-    return ollamaModelList;
+      return ollamaModelList;
+    } catch (error) {
+      Logger.error('Error getting ollama models', error);
+      return [];
+    }
   }
 }

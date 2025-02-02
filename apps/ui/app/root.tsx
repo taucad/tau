@@ -77,7 +77,7 @@ export function App() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <PreventFlashOnWrongTheme ssrTheme={Boolean(data.theme)} />
-        <ManifestLink />
+        <ManifestLink manifestUrl="/manifest.json" />
         <Links />
       </head>
       <body className="overflow-hidden">

@@ -38,6 +38,13 @@ import { When } from './ui/utils/when';
 import { useModels } from '@/hooks/use-models';
 import { Badge } from './ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { useRouteLoaderData } from '@remix-run/react';
+import { loader } from '@/root';
+
+export const CHAT_COOKIE_NAME = 'tau-chat-open';
+export const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'tau-chat-history-resize';
+export const CHAT_RESIZE_COOKIE_NAME_MAIN = 'tau-chat-main-resize';
+export const CHAT_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 export default function ChatInterface() {
   const [inputText, setInputText] = useState('');
@@ -45,7 +52,8 @@ export default function ChatInterface() {
   const [model, setModel] = useState('gpt-4o-mini');
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
-  const [isChatOpen, setIsChatOpen] = useState(true);
+  const data = useRouteLoaderData<typeof loader>('root');
+  const [isChatOpen, setIsChatOpen] = useState(data?.chatOpen);
   const { data: models } = useModels();
   const [isSearching, setIsSearching] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
@@ -72,6 +80,20 @@ export default function ChatInterface() {
     }
   }, [messages]);
 
+  const toggleChatOpen = () => {
+    setIsChatOpen((previous) => {
+      const open = !previous;
+
+      document.cookie = `${CHAT_COOKIE_NAME}=${open}; path=/; max-age=${CHAT_COOKIE_MAX_AGE}`;
+      return open;
+    });
+  };
+
+  // eslint-disable-next-line unicorn/consistent-function-scoping
+  const onLayoutChange = (sizes: number[], name: string): void => {
+    document.cookie = `${name}=${JSON.stringify(sizes)}; path=/; max-age=${CHAT_COOKIE_MAX_AGE}`;
+  };
+
   const providerModels = models.reduce((accumulator, model) => {
     accumulator[model.provider] = accumulator[model.provider] || [];
     accumulator[model.provider].push(model);
@@ -79,11 +101,17 @@ export default function ChatInterface() {
   }, {});
 
   return (
-    <ResizablePanelGroup direction="horizontal" className="relative flex h-[calc(100dvh-48px)] bg-background">
+    <ResizablePanelGroup
+      direction="horizontal"
+      className="relative flex h-[calc(100dvh-48px)] bg-background"
+      onLayout={(sizes) => {
+        onLayoutChange(sizes, CHAT_RESIZE_COOKIE_NAME_MAIN);
+      }}
+    >
       <Button
         size={'icon'}
         variant="outline"
-        onClick={() => setIsChatOpen((previous) => !previous)}
+        onClick={toggleChatOpen}
         className="group absolute top-2 right-2 z-50 text-muted-foreground"
         data-state={isChatOpen ? 'open' : 'closed'}
       >
@@ -94,9 +122,27 @@ export default function ChatInterface() {
       </Button>
       {/* Left Pane - Chat History */}
       <When condition={isChatOpen}>
-        <ResizablePanel minSize={30} maxSize={50} defaultSize={40} className="flex flex-col">
-          <ResizablePanelGroup direction="vertical">
-            <ResizablePanel defaultSize={85} style={{ overflowY: 'auto' }} className="relative flex-1 p-4 pb-0">
+        <ResizablePanel
+          id="chat-history"
+          order={1}
+          minSize={30}
+          maxSize={50}
+          defaultSize={data?.resize.chatMain[0]}
+          className="flex flex-col"
+        >
+          <ResizablePanelGroup
+            direction="vertical"
+            onLayout={(sizes) => {
+              onLayoutChange(sizes, CHAT_RESIZE_COOKIE_NAME_HISTORY);
+            }}
+          >
+            <ResizablePanel
+              id="chat-history-content"
+              order={1}
+              defaultSize={data?.resize.chatHistory[0]}
+              style={{ overflowY: 'auto' }}
+              className="relative flex-1 p-4 pb-0"
+            >
               <div className="space-y-4">
                 {messages.map((message, index) => (
                   <ChatMessage
@@ -123,7 +169,14 @@ export default function ChatInterface() {
             </ResizablePanel>
             <ResizableHandle />
             {/* Input Area */}
-            <ResizablePanel minSize={15} maxSize={50} defaultSize={15} className="p-4">
+            <ResizablePanel
+              id="chat-input"
+              order={2}
+              minSize={15}
+              maxSize={50}
+              defaultSize={data?.resize.chatHistory[1]}
+              className="p-4"
+            >
               <div className="relative h-full">
                 <div
                   data-state={isFocused ? 'active' : 'inactive'}
@@ -202,9 +255,6 @@ export default function ChatInterface() {
                         className="group data-[state=active]:bg-neutral-100 data-[state=active]:text-primary data-[state=active]:shadow transition-all duration-200"
                         onClick={() => {
                           setIsSearching((previous) => !previous);
-                          if (!isSearching) {
-                            textareaReference.current?.focus();
-                          }
                         }}
                       >
                         <span className="text-xs">Search</span>
@@ -238,8 +288,10 @@ export default function ChatInterface() {
       </When>
 
       <ResizablePanel
+        id="chat-main"
+        order={2}
         data-state={isChatOpen ? 'open' : 'closed'}
-        defaultSize={60}
+        defaultSize={data?.resize.chatMain[1]}
         className="flex-1 h-full flex-col data-[state=open]:hidden data-[state=open]:lg:flex"
       >
         <Tabs defaultValue="preview" className="flex flex-col h-full relative">

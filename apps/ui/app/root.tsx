@@ -1,4 +1,5 @@
 import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { json } from '@remix-run/node';
 import { Links, Meta, Scripts, ScrollRestoration, useLoaderData } from '@remix-run/react';
 
 import stylesUrl from './styles/global.css?url';
@@ -16,8 +17,12 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ENV, metaConfig } from './config';
 import { useOffline } from './hooks/use-offline';
-import { ManifestLink } from '@remix-pwa/sw';
 import { Toaster } from './components/ui/sonner';
+import {
+  CHAT_COOKIE_NAME,
+  CHAT_RESIZE_COOKIE_NAME_HISTORY,
+  CHAT_RESIZE_COOKIE_NAME_MAIN,
+} from './components/chat-interface';
 import { webManifestLinks } from '@/routes/manifest[.webmanifest]';
 
 export const links: LinksFunction = () => [
@@ -39,15 +44,32 @@ export const meta: MetaFunction = () => [
   { rel: 'shortcut icon', href: '/favicon.ico' },
 ];
 
-// Return the theme from the session storage using the loader
+const safeParseResizeCookie = (cookie: string): [number, number] => {
+  try {
+    return JSON.parse(cookie);
+  } catch {
+    return [40, 60];
+  }
+};
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const { getTheme } = await themeSessionResolver(request);
   const cookieHeader = request.headers.get('Cookie');
-  const sidebarOpen = extractCookie(cookieHeader, SIDEBAR_COOKIE_NAME);
+  const isSidebarOpen = extractCookie(cookieHeader, SIDEBAR_COOKIE_NAME, 'true');
+  const isChatOpen = extractCookie(cookieHeader, CHAT_COOKIE_NAME, 'true');
+  const chatResizeMain = safeParseResizeCookie(extractCookie(cookieHeader, CHAT_RESIZE_COOKIE_NAME_MAIN, '[40,60]'));
+  const chatResizeHistory = safeParseResizeCookie(
+    extractCookie(cookieHeader, CHAT_RESIZE_COOKIE_NAME_HISTORY, '[15,85]'),
+  );
 
   return {
     theme: getTheme(),
-    sidebarOpen: sidebarOpen === 'true',
+    sidebarOpen: isSidebarOpen === 'true',
+    chatOpen: isChatOpen === 'true',
+    resize: {
+      chatMain: chatResizeMain,
+      chatHistory: chatResizeHistory,
+    },
     env: ENV,
   };
 }

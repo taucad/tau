@@ -1,12 +1,13 @@
-import { useNetworkConnectivity } from '@remix-pwa/client';
+import { useNetworkConnectivity, usePWAManager } from '@remix-pwa/client';
 import { useSWEffect } from '@remix-pwa/sw';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 export const useOffline = () => {
+  const [isOnline, setIsOnline] = useState(globalThis?.navigator?.onLine ?? true);
   // Configure the service worker for PWA
   useSWEffect();
 
-  // within our `App` component
   useNetworkConnectivity({
     onOnline: () => {
       const id = 'network-connectivity';
@@ -26,4 +27,17 @@ export const useOffline = () => {
       toast[type](title, { id, description });
     },
   });
+
+  const manager = usePWAManager();
+
+  useEffect(() => {
+    globalThis.addEventListener('online', () => {
+      setIsOnline(true);
+    });
+    globalThis.addEventListener('offline', () => {
+      setIsOnline(false);
+    });
+  }, []);
+
+  return { isOnline, manager };
 };

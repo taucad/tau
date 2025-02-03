@@ -30,7 +30,7 @@ const DATA_CACHE_NAME = `data-cache`;
 
 const documentCache = new EnhancedCache(DOCUMENT_CACHE_NAME, {
   version,
-  strategy: 'CacheFirst',
+  strategy: 'NetworkFirst',
   strategyOptions: {
     maxEntries: 64,
   },
@@ -38,7 +38,7 @@ const documentCache = new EnhancedCache(DOCUMENT_CACHE_NAME, {
 
 const assetCache = new EnhancedCache(ASSET_CACHE_NAME, {
   version,
-  strategy: 'CacheFirst',
+  strategy: 'NetworkFirst',
   strategyOptions: {
     maxAgeSeconds: 60 * 60 * 24 * 90, // 90 days
     maxEntries: 100,

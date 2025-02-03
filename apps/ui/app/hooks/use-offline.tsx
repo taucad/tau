@@ -31,12 +31,21 @@ export const useOffline = () => {
   const manager = usePWAManager();
 
   useEffect(() => {
-    globalThis.addEventListener('online', () => {
+    const handleOnline = () => {
       setIsOnline(true);
-    });
-    globalThis.addEventListener('offline', () => {
+    };
+
+    const handleOffline = () => {
       setIsOnline(false);
-    });
+    };
+
+    globalThis.addEventListener('online', handleOnline);
+    globalThis.addEventListener('offline', handleOffline);
+
+    return () => {
+      globalThis.removeEventListener('online', handleOnline);
+      globalThis.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   return { isOnline, manager };

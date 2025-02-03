@@ -107,6 +107,7 @@ export default function ChatInterface() {
       onLayout={(sizes) => {
         onLayoutChange(sizes, CHAT_RESIZE_COOKIE_NAME_MAIN);
       }}
+      autoSaveId={CHAT_RESIZE_COOKIE_NAME_MAIN}
     >
       <Button
         size={'icon'}
@@ -135,6 +136,7 @@ export default function ChatInterface() {
             onLayout={(sizes) => {
               onLayoutChange(sizes, CHAT_RESIZE_COOKIE_NAME_HISTORY);
             }}
+            autoSaveId={CHAT_RESIZE_COOKIE_NAME_HISTORY}
           >
             <ResizablePanel
               id="chat-history-content"

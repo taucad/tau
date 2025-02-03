@@ -32,7 +32,7 @@ export function Page() {
               <TooltipTrigger asChild>
                 <SidebarTrigger className="-ml-1" />
               </TooltipTrigger>
-              <TooltipContent>Toggle sidebar (⌘+B)</TooltipContent>
+              <TooltipContent>Toggle sidebar (⌘B)</TooltipContent>
             </Tooltip>
             <Separator orientation="vertical" className="mr-2 h-4" />
             <Breadcrumb>

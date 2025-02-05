@@ -1,5 +1,9 @@
 {
-    "#comment": "This exists to make ShadCN be happy with a default tsconfig.json",
-    "extends": "./tsconfig.base.json"
+    "#comment": "This exists to make ShadCN be happy with a default tsconfig.json, enabling seamless installs with the default component install command.",
+    "compilerOptions": {
+        "paths": {
+            "@/*": ["./apps/ui/app/*"]
+        }
+    }
 }
   

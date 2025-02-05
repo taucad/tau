@@ -14,13 +14,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 
 import { loader } from '@/root';
 import { useLoaderData } from '@remix-run/react';
-import { useOffline } from '@/hooks/use-offline';
 import { Badge } from './ui/badge';
+import { useNetworkConnectivity } from '@/hooks/use-network-connectivity';
 
 export function Page() {
   const { sidebarOpen } = useLoaderData<typeof loader>();
 
-  const { isOnline } = useOffline();
+  const isOnline = useNetworkConnectivity();
 
   return (
     <SidebarProvider defaultOpen={sidebarOpen}>
@@ -49,9 +49,16 @@ export function Page() {
           </div>
           <div className="flex items-center gap-2 px-4">
             {!isOnline && (
-              <Badge className="font-mono font-normal" variant={'outline'}>
-                {isOnline ? 'ONLINE' : 'OFFLINE'}
-              </Badge>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Badge className="font-mono font-normal" variant={'outline'}>
+                      OFFLINE
+                    </Badge>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>You are offline. Reconnect to access online features.</TooltipContent>
+              </Tooltip>
             )}
           </div>
         </header>

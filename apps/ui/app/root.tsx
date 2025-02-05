@@ -1,5 +1,4 @@
 import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { json } from '@remix-run/node';
 import { Links, Meta, Scripts, ScrollRestoration, useLoaderData } from '@remix-run/react';
 
 import stylesUrl from './styles/global.css?url';
@@ -16,7 +15,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ENV, metaConfig } from './config';
-import { useOffline } from './hooks/use-offline';
+import { useServiceWorker } from './hooks/use-service-worker';
 import { Toaster } from './components/ui/sonner';
 import {
   CHAT_COOKIE_NAME,
@@ -81,7 +80,8 @@ export default function AppWithProviders() {
   const data = useLoaderData<typeof loader>();
   const [queryClient] = useState(() => new QueryClient());
 
-  useOffline();
+  // Setup the service worker
+  useServiceWorker();
 
   return (
     <QueryClientProvider client={queryClient}>

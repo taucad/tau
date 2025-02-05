@@ -21,7 +21,6 @@ export const useServiceWorker = () => {
   const isOnline = useNetworkConnectivity({
     onOnline: () => {
       if (previousStatus.current !== true) {
-        console.log('online');
         const id = 'network-connectivity';
         const title = 'You are back online';
         const description = 'Seemed your network went for a nap, glad to have you back!';
@@ -35,7 +34,6 @@ export const useServiceWorker = () => {
 
     onOffline: () => {
       if (previousStatus.current !== false) {
-        console.log('offline');
         const id = 'network-connectivity';
         const title = 'You are offline';
         const description = 'Seems like you are offline, check your network connection';

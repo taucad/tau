@@ -49,7 +49,6 @@ const runCode = async (code: string, parameters: any): Promise<any> => {
 const extractDefaultParametersFromCode = async (code: string): Promise<any> => {
   if (/^\s*export\s+/m.test(code)) {
     const module = await buildModuleEvaluator(code);
-    console.log({ module });
     return module.defaultParams || null;
   }
 
@@ -153,6 +152,7 @@ const formatException = (oc: any, e: any): { error: boolean; message: string; st
 };
 
 const buildShapesFromCode = async (code: string, parameters: any): Promise<any> => {
+  console.log('building shapes from code');
   const oc = await OC;
   replicad.setOC(oc);
   // TODO: Add font loading
@@ -196,7 +196,7 @@ const buildBlob = (
 };
 
 const exportShape = async (
-  fileType = 'stl',
+  fileType = 'stl' as 'stl' | 'stl-binary' | 'step' | 'step-assembly',
   shapeId = 'defaultShape',
   meshConfig?: { tolerance: number; angularTolerance: number },
 ): Promise<{ blob: Blob; name: string }[]> => {

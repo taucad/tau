@@ -1,14 +1,14 @@
-import * as React from "react";
-import * as THREE from "three";
-import { useThree } from "@react-three/fiber";
+import * as React from 'react';
+import * as THREE from 'three';
+import { useThree } from '@react-three/fiber';
 
-type StageProps = {
+type StageProperties = {
   children: React.ReactNode;
   controls: React.RefObject<any>;
   center?: boolean;
 } & React.HTMLAttributes<HTMLDivElement>;
 
-export default function Stage({ children, center, ...props }: StageProps) {
+export default function Stage({ children, center, ...properties }: StageProperties) {
   const camera = useThree((state) => state.camera);
   const { invalidate } = useThree();
   const outer = React.useRef(null);
@@ -30,7 +30,7 @@ export default function Stage({ children, center, ...props }: StageProps) {
       outer.current.position.set(
         outer.current.position.x - centerPoint.x,
         outer.current.position.y - centerPoint.y,
-        outer.current.position.z - centerPoint.z
+        outer.current.position.z - centerPoint.z,
       );
     }
 
@@ -44,11 +44,7 @@ export default function Stage({ children, center, ...props }: StageProps) {
   React.useLayoutEffect(() => {
     if (previousRadius && previousRadius !== radius) {
       const ratio = radius / previousRadius;
-      camera.position.set(
-        camera.position.x * ratio,
-        camera.position.y * ratio,
-        camera.position.z * ratio
-      );
+      camera.position.set(camera.position.x * ratio, camera.position.y * ratio, camera.position.z * ratio);
 
       camera.far = Math.max(5000, radius * 4);
 
@@ -56,21 +52,13 @@ export default function Stage({ children, center, ...props }: StageProps) {
       return;
     }
 
-    camera.position.set(
-      radius * 0.25,
-      -radius * 1.5,
-      Math.max(top, radius) * 1.5
-    );
+    camera.position.set(radius * 0.25, -radius * 1.5, Math.max(top, radius) * 1.5);
     camera.near = 0.1;
     camera.far = Math.max(5000, radius * 4);
     camera.lookAt(0, 0, 0);
 
-    if (camera.type === "OrthographicCamera") {
-    camera.position.set(
-      radius,
-      -radius,
-      radius
-    );
+    if (camera.type === 'OrthographicCamera') {
+      camera.position.set(radius, -radius, radius);
 
       camera.zoom = 5;
       camera.near = -Math.max(5000, radius * 4);
@@ -82,7 +70,7 @@ export default function Stage({ children, center, ...props }: StageProps) {
   }, [radius, top, previousRadius]);
 
   return (
-    <group {...props}>
+    <group {...properties}>
       <group ref={outer}>
         <group ref={inner}>{children}</group>
       </group>

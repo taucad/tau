@@ -1,15 +1,15 @@
-import opencascade from "replicad-opencascadejs/src/replicad_single.js";
-import opencascadeWasm from "replicad-opencascadejs/src/replicad_single.wasm?url";
-import { setOC } from "replicad";
-import { expose } from "comlink";
+import opencascade from 'replicad-opencascadejs/src/replicad_single.js';
+import opencascadeWasm from 'replicad-opencascadejs/src/replicad_single.wasm?url';
+import { setOC } from 'replicad';
+import { expose } from 'comlink';
 
 // We import our model as a simple function
-import { type Dimensions, drawBox } from "./cad";
+import { type Dimensions, drawBox } from './cad';
 
 // This is the logic to load the web assembly code into replicad
 let loaded = false;
 const init = async () => {
-  if (loaded) return Promise.resolve(true);
+  if (loaded) return true;
 
   // @ts-expect-error - incorrect types
   const OC = await opencascade({

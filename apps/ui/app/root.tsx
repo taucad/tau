@@ -23,7 +23,7 @@ import {
   CHAT_RESIZE_COOKIE_NAME_MAIN,
 } from './components/chat-interface';
 import { webManifestLinks } from '@/routes/manifest[.webmanifest]';
-import { getModels } from './hooks/use-models';
+import { getModels, Model } from './hooks/use-models';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesUrl },
@@ -61,7 +61,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const chatResizeHistory = safeParseResizeCookie(
     extractCookie(cookieHeader, CHAT_RESIZE_COOKIE_NAME_HISTORY, '[15,85]'),
   );
-  const models = await getModels();
+
+  let models: Model[] = [];
+  try {
+    models = await getModels();
+  } catch (error) {
+    models = [];
+    console.error(error);
+  }
 
   return {
     theme: getTheme(),

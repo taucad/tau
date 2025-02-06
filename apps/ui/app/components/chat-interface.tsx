@@ -314,8 +314,8 @@ export default function ChatInterface() {
             <div className="flex flex-row justify-between items-center px-4 pb-2 mt-2 mr-9">
               <span className="text-sm font-medium">main.kcl</span>
               <div className="flex flex-row items-center gap-2">
-                <CopyButton variant="outline" size="icon" text={mockCode} />
-                <DownloadButton variant="outline" size="icon" text={mockCode} />
+                <CopyButton variant="outline" size="icon" text={mockCode} className="text-muted-foreground" />
+                <DownloadButton variant="outline" size="icon" text={mockCode} className="text-muted-foreground" />
               </div>
             </div>
             <div className="flex-1 bg-neutral-100 rounded-md m-2">

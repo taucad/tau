@@ -12,7 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-import { loader } from '@/root';
+import type { loader } from '@/root';
 import { useLoaderData } from '@remix-run/react';
 import { Badge } from './ui/badge';
 import { useNetworkConnectivity } from '@/hooks/use-network-connectivity';

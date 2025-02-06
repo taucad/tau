@@ -1,4 +1,6 @@
 import { ENV } from '@/config';
+import type { loader } from '@/root';
+import { useRouteLoaderData } from '@remix-run/react';
 import { useQuery } from '@tanstack/react-query';
 
 export type Model = {
@@ -21,10 +23,12 @@ export const getModels = async (): Promise<Model[]> => {
 };
 
 export const useModels = () => {
+  const loaderData = useRouteLoaderData<typeof loader>('root');
+
   const { data, isLoading } = useQuery({
     queryKey: ['models'],
     queryFn: () => getModels(),
-    initialData: [],
+    initialData: loaderData?.models,
   });
 
   return { data, isLoading };

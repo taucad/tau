@@ -31,7 +31,7 @@ import { Model, useModels } from '@/hooks/use-models';
 import { Badge } from './ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { useRouteLoaderData } from '@remix-run/react';
-import { loader } from '@/root';
+import type { loader } from '@/root';
 import { ComboBoxResponsive } from '@/components/ui/combobox-responsive';
 
 export const CHAT_COOKIE_NAME = 'tau-chat-open';

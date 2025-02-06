@@ -57,7 +57,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookieHeader = request.headers.get('Cookie');
   const isSidebarOpen = extractCookie(cookieHeader, SIDEBAR_COOKIE_NAME, 'true');
   const isChatOpen = extractCookie(cookieHeader, CHAT_COOKIE_NAME, 'true');
-  const chatResizeMain = safeParseResizeCookie(extractCookie(cookieHeader, CHAT_RESIZE_COOKIE_NAME_MAIN, '[40,60]'));
+  const chatResizeMain = safeParseResizeCookie(extractCookie(cookieHeader, CHAT_RESIZE_COOKIE_NAME_MAIN, '[30,70]'));
   const chatResizeHistory = safeParseResizeCookie(
     extractCookie(cookieHeader, CHAT_RESIZE_COOKIE_NAME_HISTORY, '[15,85]'),
   );

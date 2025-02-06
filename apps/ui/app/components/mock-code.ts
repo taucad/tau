@@ -5,7 +5,7 @@ const defaultParams = {
   height: 85.0,
   width: 120.0,
   thickness: 2.0,
-  holeDia: 50.0,
+  holeDiameter: 50.0,
   hookHeight: 10.0,
 };
 

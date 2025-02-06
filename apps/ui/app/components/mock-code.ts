@@ -7,31 +7,35 @@ const defaultParams = {
   thickness: 2.0,
   holeDiameter: 50.0,
   hookHeight: 10.0,
+  fillet: true,
 };
 
 const { drawCircle, draw, makePlane } = replicad;
 
 function main(
   r,
-  { width: inputWidth, height, thickness, holeDia, hookHeight }
+  { width: inputWidth, height, thickness, holeDiameter, hookHeight, fillet }
 ) {
   const length = inputWidth;
   const width = inputWidth * 0.9;
 
-  const tobleroneShape = draw([-width / 2, 0])
+  let tobleroneShape = draw([-width / 2, 0])
     .lineTo([0, height])
     .lineTo([width / 2, 0])
     .close()
     .sketchOnPlane("XZ", -length / 2)
     .extrude(length)
-    .shell(thickness, (f) => f.parallelTo("XZ"))
-    .fillet(thickness / 2, (e) =>
+    .shell(thickness, (f) => f.parallelTo("XZ"));
+
+  if (fillet) {
+    tobleroneShape = tobleroneShape.fillet(thickness / 2, (e) =>
       e
         .inDirection("Y")
         .either([(f) => f.inPlane("XY"), (f) => f.inPlane("XY", height)])
     );
+  }
 
-  const hole = drawCircle(holeDia / 2)
+  const hole = drawCircle(holeDiameter / 2)
     .sketchOnPlane(makePlane("YZ").translate([-length / 2, 0, height / 3]))
     .extrude(length);
 

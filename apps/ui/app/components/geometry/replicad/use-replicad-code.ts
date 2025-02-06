@@ -3,6 +3,9 @@ import { wrap, type Remote } from 'comlink';
 import { useReplicad } from './context';
 import BuilderWorker from './builder.worker?worker';
 import type { BuilderWorkerInterface } from './builder.worker';
+import { debounce } from '@/utils/functions';
+
+type EvaluateCodeFunction = (code: string, parameters: Record<string, any>) => Promise<void>;
 
 export function useReplicadCode() {
   const { state, dispatch } = useReplicad();
@@ -16,6 +19,7 @@ export function useReplicadCode() {
     }
     init();
     return () => {
+      console.log('terminating worker');
       if (workerReference.current) {
         const currentWorker = workerReference.current;
         if ('terminate' in currentWorker) {
@@ -26,49 +30,57 @@ export function useReplicadCode() {
     };
   }, []);
 
+  // Store the evaluation function in a ref with explicit parameters
+  const evaluateCodeReference = useRef<EvaluateCodeFunction>(async (code, parameters) => {
+    const randomId = Math.random().toString(36).slice(2, 15);
+    console.log('evaluating code', randomId);
+    const worker = workerReference.current;
+    if (!worker || !code) return;
+    try {
+      dispatch({ type: 'SET_COMPUTING', payload: true });
+      dispatch({ type: 'SET_ERROR', payload: undefined });
+
+      const result = await worker.buildShapesFromCode(code, parameters);
+      if ('error' in result) {
+        throw new Error(result.message);
+      }
+
+      const firstShape = result[0];
+      if (!firstShape || firstShape.error) {
+        throw new Error(firstShape?.error || 'Failed to generate shape');
+      }
+
+      dispatch({
+        type: 'SET_MESH',
+        payload: {
+          faces: firstShape.mesh,
+          edges: firstShape.edges,
+        },
+      });
+    } catch (error) {
+      dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : String(error) });
+    } finally {
+      dispatch({ type: 'SET_COMPUTING', payload: false });
+    }
+  });
+
+  // Create a single debounced function instance that persists
+  const debouncedEvaluateReference = useRef<ReturnType<typeof debounce>>(
+    debounce((code: string, parameters: Record<string, any>) => {
+      evaluateCodeReference.current(code, parameters);
+    }, 300),
+  );
+
+  // Effect to handle code and parameter changes
   useEffect(() => {
     const worker = workerReference.current;
     if (!worker || !state.code) return;
 
-    const evaluateCode = async () => {
-      try {
-        dispatch({ type: 'SET_COMPUTING', payload: true });
-        dispatch({ type: 'SET_ERROR', payload: undefined });
+    // Call the debounced evaluation with current code and parameters
+    debouncedEvaluateReference.current(state.code, state.parameters);
+  }, [state.code, state.parameters]);
 
-        // Extract default parameters when code changes
-        const defaultParameters = await worker.extractDefaultParametersFromCode(state.code);
-        if (Object.keys(state.parameters).length === 0) {
-          dispatch({ type: 'SET_PARAMETERS', payload: defaultParameters });
-        }
-
-        const result = await worker.buildShapesFromCode(state.code, state.parameters);
-        if ('error' in result) {
-          throw new Error(result.message);
-        }
-
-        // The result is an array of rendered shapes
-        const firstShape = result[0];
-        if (!firstShape || firstShape.error) {
-          throw new Error(firstShape?.error || 'Failed to generate shape');
-        }
-
-        dispatch({
-          type: 'SET_MESH',
-          payload: {
-            faces: firstShape.mesh,
-            edges: firstShape.edges,
-          },
-        });
-      } catch (error) {
-        dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : String(error) });
-      } finally {
-        dispatch({ type: 'SET_COMPUTING', payload: false });
-      }
-    };
-
-    evaluateCode();
-  }, [state.code, state.parameters, dispatch]);
-
+  // Separate effect just for loading default parameters on code change
   useEffect(() => {
     const worker = workerReference.current;
     if (!worker || !state.code) return;
@@ -76,7 +88,9 @@ export function useReplicadCode() {
     const loadDefaultParameters = async () => {
       try {
         const defaultParameters = await worker.extractDefaultParametersFromCode(state.code);
-        dispatch({ type: 'SET_PARAMETERS', payload: defaultParameters });
+        if (Object.keys(state.parameters).length === 0) {
+          dispatch({ type: 'SET_PARAMETERS', payload: defaultParameters });
+        }
       } catch (error) {
         console.error('Failed to load default parameters:', error);
       }

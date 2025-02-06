@@ -33,12 +33,14 @@ function replicadReducer(state: ReplicadState, action: ReplicadAction): Replicad
       };
     }
     case 'SET_PARAMETERS': {
+      console.log('setting parameters');
       return {
         ...state,
         parameters: action.payload,
       };
     }
     case 'UPDATE_PARAMETER': {
+      console.log('updating parameter');
       return {
         ...state,
         parameters: {

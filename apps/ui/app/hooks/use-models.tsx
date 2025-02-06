@@ -1,7 +1,15 @@
 import { ENV } from '@/config';
 import { useQuery } from '@tanstack/react-query';
 
-export const getModels = async () => {
+export type Model = {
+  model: string;
+  provider: string;
+  details: {
+    parameterSize: string;
+  };
+};
+
+export const getModels = async (): Promise<Model[]> => {
   const response = await fetch(`${ENV.TAU_API_BASE_URL}/v1/models`, {
     headers: {
       'ngrok-skip-browser-warning': 'true',

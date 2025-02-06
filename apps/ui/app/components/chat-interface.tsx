@@ -1,4 +1,4 @@
-import { useState, useRef, Fragment, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Mic,
   Eye,
@@ -6,11 +6,11 @@ import {
   Terminal,
   ArrowRight,
   ArrowDown,
-  ChevronDown,
   Globe,
-  CircuitBoard,
   Box,
   MessageSquareReply,
+  ChevronDown,
+  CircuitBoard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MessageRole, MessageStatus, useChat } from '@/hooks/use-chat';
@@ -26,20 +26,13 @@ import { CodeViewer } from '@/components/code-viewer';
 import { mockCode } from '@/components/mock-code';
 import { CopyButton } from './copy-button';
 import { DownloadButton } from './download-button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from './ui/dropdown-menu';
 import { When } from './ui/utils/when';
-import { useModels } from '@/hooks/use-models';
+import { Model, useModels } from '@/hooks/use-models';
 import { Badge } from './ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { useRouteLoaderData } from '@remix-run/react';
 import { loader } from '@/root';
+import { ComboBoxResponsive } from '@/components/ui/combobox-responsive';
 
 export const CHAT_COOKIE_NAME = 'tau-chat-open';
 export const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'tau-chat-history-resize';
@@ -94,11 +87,13 @@ export default function ChatInterface() {
     document.cookie = `${name}=${JSON.stringify(sizes)}; path=/; max-age=${CHAT_COOKIE_MAX_AGE}`;
   };
 
-  const providerModels = models.reduce((accumulator, model) => {
-    accumulator[model.provider] = accumulator[model.provider] || [];
-    accumulator[model.provider].push(model);
-    return accumulator;
-  }, {});
+  const providerModelsMap = models.reduce((map, model) => {
+    if (!map.has(model.provider)) {
+      map.set(model.provider, []);
+    }
+    map.get(model.provider)!.push(model);
+    return map;
+  }, new Map<string, Model[]>());
 
   return (
     <ResizablePanelGroup
@@ -209,45 +204,37 @@ export default function ChatInterface() {
                   />
                 </div>
                 <div className="absolute left-2 bottom-2 flex flex-row items-center gap-2">
-                  <DropdownMenu>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <DropdownMenuTrigger asChild>
-                          <Button size="sm" className="group h-6 px-2" variant="ghost">
-                            <span className="text-xs">{model}</span>
-                            <span className="relative flex w-4 h-4">
-                              <ChevronDown className="absolute group-hover:scale-0 transition-transform duration-200 ease-in-out" />
-                              <CircuitBoard className="absolute scale-0 group-hover:scale-100 transition-transform duration-200 ease-in-out" />
-                            </span>
-                          </Button>
-                        </DropdownMenuTrigger>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Select a model</p>
-                      </TooltipContent>
-                    </Tooltip>
-                    <DropdownMenuContent side="top">
-                      <DropdownMenuRadioGroup value={model} onValueChange={setModel}>
-                        {Object.entries(providerModels).map(([provider, models]) => (
-                          <Fragment key={provider}>
-                            <DropdownMenuLabel>{provider}</DropdownMenuLabel>
-                            {models.map((model) => (
-                              <DropdownMenuRadioItem
-                                className="group flex flex-row items-center gap-2 justify-between text-xs"
-                                key={model.model}
-                                value={model.model}
-                              >
-                                <span className="font-mono p-1 bg-neutral-100 rounded-sm">{model.model}</span>
-                                <Badge variant="outline" className="group-hover:bg-background">
-                                  {model.details.parameterSize}
-                                </Badge>
-                              </DropdownMenuRadioItem>
-                            ))}
-                          </Fragment>
-                        ))}
-                      </DropdownMenuRadioGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <ComboBoxResponsive
+                    className="group text-xs w-[initial] px-2 h-6 border-none flex items-center justify-between gap-2"
+                    popoverContentClassName="w-[300px]"
+                    groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({
+                      name: provider,
+                      items: models,
+                    }))}
+                    renderLabel={(item) => (
+                      <span className="text-xs flex items-center justify-between w-full">
+                        <span className="font-mono">{item.model}</span>
+                        <Badge variant="outline" className="bg-background">
+                          {item.details.parameterSize}
+                        </Badge>
+                      </span>
+                    )}
+                    renderButtonContents={(value) => (
+                      <>
+                        <span className="text-xs">{value}</span>
+                        <span className="relative flex w-4 h-4">
+                          <ChevronDown className="absolute group-hover:scale-0 transition-transform duration-200 ease-in-out" />
+                          <CircuitBoard className="absolute scale-0 group-hover:scale-100 transition-transform duration-200 ease-in-out" />
+                        </span>
+                      </>
+                    )}
+                    getValue={(item) => item.model}
+                    onSelect={(selectedModel) => {
+                      setModel(selectedModel);
+                    }}
+                    placeholder="Select a model"
+                    defaultValue={model}
+                  />
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button

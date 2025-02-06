@@ -7,14 +7,14 @@ const defaultParams = {
   thickness: 2.0,
   holeDiameter: 50.0,
   hookHeight: 10.0,
-  fillet: true,
+  filletEdges: true,
 };
 
 const { drawCircle, draw, makePlane } = replicad;
 
 function main(
   r,
-  { width: inputWidth, height, thickness, holeDiameter, hookHeight, fillet }
+  { width: inputWidth, height, thickness, holeDiameter, hookHeight, filletEdges }
 ) {
   const length = inputWidth;
   const width = inputWidth * 0.9;
@@ -27,7 +27,7 @@ function main(
     .extrude(length)
     .shell(thickness, (f) => f.parallelTo("XZ"));
 
-  if (fillet) {
+  if (filletEdges) {
     tobleroneShape = tobleroneShape.fillet(thickness / 2, (e) =>
       e
         .inDirection("Y")

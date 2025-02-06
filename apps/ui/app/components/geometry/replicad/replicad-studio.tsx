@@ -89,7 +89,7 @@ export function ReplicadStudio() {
                             type="number"
                             value={value}
                             onChange={(event) => handleParameterChange(key, Number.parseFloat(event.target.value))}
-                            className="w-12 h-8 p-1"
+                            className="w-12 h-8 p-1 bg-background"
                           />
                         </>
                       ) : null}

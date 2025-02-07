@@ -17,6 +17,8 @@ import { useLoaderData } from '@remix-run/react';
 import { Badge } from './ui/badge';
 import { useNetworkConnectivity } from '@/hooks/use-network-connectivity';
 
+const HEADER_HEIGHT = '3rem';
+
 export function Page() {
   const { sidebarOpen } = useLoaderData<typeof loader>();
 
@@ -25,8 +27,8 @@ export function Page() {
   return (
     <SidebarProvider defaultOpen={sidebarOpen}>
       <AppSidebar />
-      <SidebarInset>
-        <header className="flex h-12 justify-between shrink-0 items-center border-b-[1px] border-neutral-200 gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
+      <SidebarInset style={{ '--header-height': HEADER_HEIGHT } as React.CSSProperties}>
+        <header className="flex h-[var(--header-height)] justify-between shrink-0 items-center border-b-[1px] border-neutral-200 gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
           <div className="flex items-center gap-2 px-4">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -62,9 +64,9 @@ export function Page() {
             )}
           </div>
         </header>
-        <div className="flex flex-1 flex-col gap-4">
+        <section className="flex flex-1 h-[calc(100dvh-var(--header-height))]">
           <Outlet />
-        </div>
+        </section>
       </SidebarInset>
     </SidebarProvider>
   );

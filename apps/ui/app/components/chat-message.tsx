@@ -218,7 +218,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
           <When condition={isUser && isEditing}>
             <Textarea
               ref={textareaReference}
-              className="p-2 shadow-none border-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-none"
+              className="p-2 shadow-none border-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-none text-sm md:text-md"
               autoFocus
               value={content}
               onChange={(event) => {

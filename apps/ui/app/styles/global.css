@@ -177,7 +177,6 @@
     @apply font-sans bg-background text-foreground antialiased;
   }
 
-  body,
   html {
     @apply h-full scroll-smooth;
   }

@@ -47,7 +47,9 @@ export const DownloadButton = React.forwardRef<HTMLButtonElement, DownloadButton
       <Tooltip>
         <TooltipTrigger asChild>
           <Button size={size} variant="ghost" onClick={handleDownload} ref={reference} {...properties}>
-            <span>{<Download />}</span>
+            <span>
+              <Download />
+            </span>
             {size !== 'icon' && 'Download'}
           </Button>
         </TooltipTrigger>

@@ -1,4 +1,4 @@
-import { useReplicad } from './context';
+import { useReplicad } from './replicad-context';
 import { useReplicadCode } from './use-replicad-code';
 import { ReplicadViewer } from './replicad-viewer';
 import { Button } from '@/components/ui/button';

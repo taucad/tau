@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { wrap, type Remote } from 'comlink';
-import { useReplicad } from './context';
-import BuilderWorker from './builder.worker?worker';
-import type { BuilderWorkerInterface } from './builder.worker';
+import { useReplicad } from './replicad-context';
+import BuilderWorker from './replicad-builder.worker?worker';
+import type { BuilderWorkerInterface } from './replicad-builder.worker';
 import { debounce } from '@/utils/functions';
 
 type EvaluateCodeFunction = (code: string, parameters: Record<string, any>) => Promise<void>;
@@ -32,44 +32,47 @@ export function useReplicadCode() {
   }, []);
 
   // Store the evaluation function in a ref with explicit parameters
-  const evaluateCodeReference = useRef<EvaluateCodeFunction>(async (code, parameters) => {
-    const randomId = Math.random().toString(36).slice(2, 15);
-    console.log('evaluating code', randomId);
-    const worker = workerReference.current;
-    if (!worker || !code) return;
-    try {
-      dispatch({ type: 'SET_COMPUTING', payload: true });
-      dispatch({ type: 'SET_ERROR', payload: undefined });
+  const evaluateCodeReference = useCallback<EvaluateCodeFunction>(
+    async (code, parameters) => {
+      const randomId = Math.random().toString(36).slice(2, 15);
+      console.log('evaluating code', randomId);
+      const worker = workerReference.current;
+      if (!worker || !code) return;
+      try {
+        dispatch({ type: 'SET_COMPUTING', payload: true });
+        dispatch({ type: 'SET_ERROR', payload: undefined });
 
-      const result = await worker.buildShapesFromCode(code, parameters);
-      if ('error' in result) {
-        throw new Error(result.message);
+        const result = await worker.buildShapesFromCode(code, parameters);
+        if ('error' in result) {
+          throw new Error(result.message);
+        }
+
+        const firstShape = result[0];
+        if (!firstShape || firstShape.error) {
+          throw new Error(firstShape?.error || 'Failed to generate shape');
+        }
+
+        dispatch({
+          type: 'SET_MESH',
+          payload: {
+            faces: firstShape.mesh,
+            edges: firstShape.edges,
+          },
+        });
+      } catch (error) {
+        dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : String(error) });
+      } finally {
+        dispatch({ type: 'SET_COMPUTING', payload: false });
       }
-
-      const firstShape = result[0];
-      if (!firstShape || firstShape.error) {
-        throw new Error(firstShape?.error || 'Failed to generate shape');
-      }
-
-      dispatch({
-        type: 'SET_MESH',
-        payload: {
-          faces: firstShape.mesh,
-          edges: firstShape.edges,
-        },
-      });
-    } catch (error) {
-      dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : String(error) });
-    } finally {
-      dispatch({ type: 'SET_COMPUTING', payload: false });
-    }
-  });
+    },
+    [dispatch],
+  );
 
   // Create a single debounced function instance that persists
   const debouncedEvaluateReference = useRef<ReturnType<typeof debounce>>(
     debounce((code: string, parameters: Record<string, any>) => {
       setIsBuffering(false);
-      evaluateCodeReference.current(code, parameters);
+      evaluateCodeReference(code, parameters);
     }, 300),
   );
 

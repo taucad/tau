@@ -26,7 +26,6 @@ import { CodeViewer } from '@/components/code-viewer';
 import { mockCode } from '@/components/mock-code';
 import { CopyButton } from './copy-button';
 import { DownloadButton } from './download-button';
-import { When } from './ui/utils/when';
 import { Model, useModels } from '@/hooks/use-models';
 import { Badge } from './ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';

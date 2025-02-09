@@ -1,4 +1,3 @@
-import { Suspense } from 'react';
 import { Canvas, CanvasProps } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -19,7 +18,7 @@ THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 //
 // Depending on your needs I would advice not using a light and relying on
 // a matcap material instead of the meshStandardMaterial used here.
-export default function ThreeContext({ children, ...properties }: ThreeContextProperties) {
+export default function ThreeProvider({ children, ...properties }: ThreeContextProperties) {
   const dpr = Math.min(window.devicePixelRatio, 2);
 
   return (

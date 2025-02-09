@@ -1,10 +1,5 @@
-import { ReplicadProvider } from './geometry/replicad/context';
-import { ReplicadStudio } from './geometry/replicad/replicad-studio';
+import { ReplicadStudio } from './geometry/kernel/replicad/replicad-studio';
 
 export function ChatViewer() {
-  return (
-    <ReplicadProvider>
-      <ReplicadStudio />
-    </ReplicadProvider>
-  );
+  return <ReplicadStudio />;
 }

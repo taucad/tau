@@ -9,6 +9,12 @@ import { renderOutput, ShapeStandardizer } from './utils/render-output';
 
 globalThis.replicad = replicad;
 
+/**
+ * Run code in a VM with the OC context
+ * @param code
+ * @param context
+ * @returns the result of the code
+ */
 export function runInContextAsOC(code: string, context: Record<string, any> = {}): any {
   const editedText = `
 ${code}

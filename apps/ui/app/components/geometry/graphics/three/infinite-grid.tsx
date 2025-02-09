@@ -100,7 +100,7 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
   return material;
 };
 
-export default () => {
+export default function InfiniteGrid() {
   const material = useRef(infiniteGridMaterial());
   return <Plane material={material.current} />;
-};
+}

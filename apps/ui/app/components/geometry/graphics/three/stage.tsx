@@ -11,27 +11,31 @@ type StageProperties = {
 export default function Stage({ children, center, ...properties }: StageProperties) {
   const camera = useThree((state) => state.camera);
   const { invalidate } = useThree();
-  const outer = React.useRef(null);
-  const inner = React.useRef(null);
+  const outer = React.useRef<THREE.Group>(null);
+  const inner = React.useRef<THREE.Group>(null);
 
   const [{ radius, previousRadius, top }, set] = React.useState({
-    previousRadius: null,
+    previousRadius: undefined,
     radius: 0,
     top: 0,
   });
 
   React.useLayoutEffect(() => {
-    outer.current.updateWorldMatrix(true, true);
+    if (outer.current) {
+      outer.current.updateWorldMatrix(true, true);
+    }
     const box3 = new THREE.Box3().setFromObject(inner.current);
 
     if (center) {
       const centerPoint = new THREE.Vector3();
       box3.getCenter(centerPoint);
-      outer.current.position.set(
-        outer.current.position.x - centerPoint.x,
-        outer.current.position.y - centerPoint.y,
-        outer.current.position.z - centerPoint.z,
-      );
+      if (outer.current) {
+        outer.current.position.set(
+          outer.current.position.x - centerPoint.x,
+          outer.current.position.y - centerPoint.y,
+          outer.current.position.z - centerPoint.z,
+        );
+      }
     }
 
     const sphere = new THREE.Sphere();

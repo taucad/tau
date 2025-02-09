@@ -27,7 +27,10 @@ export function Page() {
   return (
     <SidebarProvider defaultOpen={sidebarOpen}>
       <AppSidebar />
-      <SidebarInset style={{ '--header-height': HEADER_HEIGHT } as React.CSSProperties}>
+      <SidebarInset
+        className="w-[calc(100dvw-var(--sidebar-width-current)-1px)]"
+        style={{ '--header-height': HEADER_HEIGHT } as React.CSSProperties}
+      >
         <header className="flex h-[var(--header-height)] justify-between shrink-0 items-center border-b-[1px] border-neutral-200 gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
           <div className="flex items-center gap-1.5 md:gap-2.5 px-4">
             <Tooltip>
@@ -64,7 +67,7 @@ export function Page() {
             )}
           </div>
         </header>
-        <section className="flex flex-1 h-[calc(100dvh-var(--header-height))]">
+        <section className="h-[calc(100dvh-var(--header-height)-1px)]">
           <Outlet />
         </section>
       </SidebarInset>

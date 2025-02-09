@@ -37,25 +37,29 @@ export function ReplicadStudio() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 relative">
-        <ReplicadViewer mesh={mesh} />
-        {isComputing && (
-          <div className="absolute flex items-center justify-center">
-            <LoaderPinwheel className="w-8 h-8 animate-spin" />
+      <ReplicadViewer mesh={mesh} />
+      {/* Loading state, only show when mesh is loaded and computing */}
+      {mesh && isComputing && (
+        <div className="absolute top-[50%] left-[50%] -translate-x-[50%] -translate-y-[50%]">
+          <div className="m-auto flex items-center gap-2 bg-background/50 backdrop-blur-sm p-2 rounded-md">
+            <span className="text-sm text-muted-foreground">Rendering...</span>
+            <LoaderPinwheel className="w-6 h-6 animate-spin text-primary ease-in-out" />
           </div>
-        )}
+        </div>
+      )}
+      <div className="absolute bottom-0 left-0">
+        {error && <div className="text-destructive p-0.5 rounded-tr-md bg-destructive/10 text-xs">{error}</div>}
       </div>
-      <div className="absolute bottom-0 left-0">{error && <div className="text-destructive">{error}</div>}</div>
-      <div className="absolute top-0 right-11 z-10 flex flex-row justify-end gap-2 m-2">
+      <div className="absolute top-0 right-0 flex flex-row justify-end gap-1.5 m-1.5 mr-12">
         <Collapsible>
           <CollapsibleTrigger asChild>
-            <Button variant="outline" className="text-muted-foreground rounded-md flex flex-row">
-              <PencilRuler className="w-4 h-4 mr-2" />
+            <Button variant="outline" className="text-muted-foreground rounded-md flex flex-row gap-2">
+              <PencilRuler className="w-4 h-4" />
               <span>Edit</span>
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="text-sm absolute w-[90vw] md:w-96 top-12 -right-11 z-10 backdrop-blur-sm border p-2 rounded-md flex flex-col gap-1 justify-between">
+            <div className="text-sm absolute w-[90dvw] md:w-96 top-12 -right-11 z-10 backdrop-blur-sm bg-background/50 border p-2 rounded-md flex flex-col gap-1 justify-between">
               <span className="font-bold text-lg">Parameters</span>
               {Object.entries(state.parameters).map(([key, value]) => {
                 const valueType = typeof value;

@@ -23,23 +23,14 @@ export default function ThreeContext({ children, ...properties }: ThreeContextPr
   const dpr = Math.min(window.devicePixelRatio, 2);
 
   return (
-    <Suspense fallback={<div>Rendering model...</div>}>
-      <Canvas
-        className="bg-background"
-        style={{ height: 'calc(100dvh - 48px)' }}
-        dpr={dpr}
-        frameloop="demand"
-        camera={{ position: [20, 40, 50] }}
-        {...properties}
-      >
-        <Controls hideGizmo={false} center={true} enableDamping={true}>
-          <InfiniteGrid />
-          <OrbitControls />
-          <ambientLight intensity={5} />
-          <pointLight position={[100, 100, 100]} />
-          {children}
-        </Controls>
-      </Canvas>
-    </Suspense>
+    <Canvas className="bg-background" dpr={dpr} frameloop="demand" {...properties}>
+      <Controls hideGizmo={false} center={true} enableDamping={true}>
+        <InfiniteGrid />
+        <OrbitControls />
+        <ambientLight intensity={5} />
+        <pointLight position={[100, 100, 100]} />
+        {children}
+      </Controls>
+    </Canvas>
   );
 }

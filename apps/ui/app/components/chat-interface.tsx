@@ -98,7 +98,7 @@ export default function ChatInterface() {
   return (
     <ResizablePanelGroup
       direction="horizontal"
-      className="relative flex h-[calc(100dvh-48px)] bg-background"
+      className="flex flex-1 bg-background"
       onLayout={(sizes) => {
         onLayoutChange(sizes, CHAT_RESIZE_COOKIE_NAME_MAIN);
       }}
@@ -108,182 +108,176 @@ export default function ChatInterface() {
         size={'icon'}
         variant="outline"
         onClick={toggleChatOpen}
-        className="group absolute top-2 right-2 z-50 text-muted-foreground"
+        className="group absolute top-0 right-0 text-muted-foreground m-1.5"
         data-state={isChatOpen ? 'open' : 'closed'}
       >
-        <span className="relative w-4 h-4">
+        <span className="w-4 h-4">
           <Box className="absolute scale-0 group-data-[state=open]:scale-100 transition-transform duration-200 ease-in-out" />
           <MessageSquareReply className="scale-100 group-data-[state=open]:scale-0 transition-transform duration-200 ease-in-out" />
         </span>
       </Button>
-      {/* Left Pane - Chat History */}
-      <When condition={isChatOpen}>
-        <ResizablePanel
-          id="chat-history"
-          order={1}
-          minSize={30}
-          maxSize={50}
-          defaultSize={data?.resize.chatMain[0]}
-          className="flex flex-col"
+      <ResizablePanel
+        order={1}
+        minSize={30}
+        maxSize={50}
+        defaultSize={data?.resize.chatMain[0]}
+        className={cn('hidden', isChatOpen && 'flex flex-col')}
+      >
+        <ResizablePanelGroup
+          direction="vertical"
+          onLayout={(sizes) => {
+            onLayoutChange(sizes, CHAT_RESIZE_COOKIE_NAME_HISTORY);
+          }}
+          autoSaveId={CHAT_RESIZE_COOKIE_NAME_HISTORY}
         >
-          <ResizablePanelGroup
-            direction="vertical"
-            onLayout={(sizes) => {
-              onLayoutChange(sizes, CHAT_RESIZE_COOKIE_NAME_HISTORY);
-            }}
-            autoSaveId={CHAT_RESIZE_COOKIE_NAME_HISTORY}
+          <ResizablePanel
+            id="chat-history-content"
+            order={1}
+            defaultSize={data?.resize.chatHistory[0]}
+            style={{ overflowY: 'auto' }}
+            className="relative flex-1 p-4 pb-0"
           >
-            <ResizablePanel
-              id="chat-history-content"
-              order={1}
-              defaultSize={data?.resize.chatHistory[0]}
-              style={{ overflowY: 'auto' }}
-              className="relative flex-1 p-4 pb-0"
-            >
-              <div className="space-y-4">
-                {messages.map((message, index) => (
-                  <ChatMessage
-                    message={message}
-                    key={index}
-                    onEdit={(content) => {
-                      editMessage(message.id, content);
-                    }}
-                  />
-                ))}
-              </div>
-              <div className={cn('sticky flex justify-center bottom-2', isScrolledTo && 'opacity-0')}>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  className={cn('rounded-full', isScrolledTo && 'select-none pointer-events-none')}
-                  tabIndex={isScrolledTo ? -1 : 0}
-                  onClick={scrollTo}
-                >
-                  <ArrowDown className="w-4 h-4" />
-                </Button>
-              </div>
-              <div ref={chatEndReference} className="mb-px" />
-            </ResizablePanel>
-            <ResizableHandle />
-            {/* Input Area */}
-            <ResizablePanel
-              id="chat-input"
-              order={2}
-              minSize={15}
-              maxSize={50}
-              defaultSize={data?.resize.chatHistory[1]}
-              className="p-4"
-            >
-              <div className="relative h-full">
-                <div
-                  data-state={isFocused ? 'active' : 'inactive'}
-                  onClick={() => {
-                    textareaReference.current?.focus();
+            <div className="space-y-4">
+              {messages.map((message, index) => (
+                <ChatMessage
+                  message={message}
+                  key={index}
+                  onEdit={(content) => {
+                    editMessage(message.id, content);
                   }}
-                  className="flex flex-col h-full border shadow-md rounded-lg data-[state=active]:border-primary w-full resize-none overflow-auto"
-                >
-                  <Textarea
-                    onFocus={() => {
-                      setIsFocused(true);
-                    }}
-                    onBlur={() => {
-                      setIsFocused(false);
-                    }}
-                    ref={textareaReference}
-                    className="border-none shadow-none ring-0 p-4 pr-10 pb-0 mb-8 focus-visible:ring-0 focus-visible:outline-none w-full resize-none h-full"
-                    rows={3}
-                    value={inputText}
-                    onChange={(event) => setInputText(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.shiftKey) {
-                        event.preventDefault(); // Prevents adding a new line
-                        onSubmit();
-                      }
-                    }}
-                    placeholder="Type your message..."
-                  />
-                </div>
-                <div className="absolute left-2 bottom-2 flex flex-row items-center gap-2">
-                  <ComboBoxResponsive
-                    className="group text-xs w-[initial] px-2 h-6 border-none flex items-center justify-between gap-2"
-                    popoverContentClassName="w-[300px]"
-                    groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({
-                      name: provider,
-                      items: models,
-                    }))}
-                    renderLabel={(item) => (
-                      <span className="text-xs flex items-center justify-between w-full">
-                        <span className="font-mono">{item.model}</span>
-                        <Badge variant="outline" className="bg-background">
-                          {item.details.parameterSize}
-                        </Badge>
+                />
+              ))}
+            </div>
+            <div className={cn('sticky flex justify-center bottom-2', isScrolledTo && 'opacity-0')}>
+              <Button
+                size="icon"
+                variant="outline"
+                className={cn('rounded-full', isScrolledTo && 'select-none pointer-events-none')}
+                tabIndex={isScrolledTo ? -1 : 0}
+                onClick={scrollTo}
+              >
+                <ArrowDown className="w-4 h-4" />
+              </Button>
+            </div>
+            <div ref={chatEndReference} className="mb-px" />
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel
+            id="chat-input"
+            order={2}
+            minSize={15}
+            maxSize={50}
+            defaultSize={data?.resize.chatHistory[1]}
+            className="p-2"
+          >
+            <div className="relative h-full">
+              <div
+                data-state={isFocused ? 'active' : 'inactive'}
+                onClick={() => {
+                  textareaReference.current?.focus();
+                }}
+                className="flex flex-col h-full border shadow-md rounded-lg data-[state=active]:border-primary w-full resize-none overflow-auto"
+              >
+                <Textarea
+                  onFocus={() => {
+                    setIsFocused(true);
+                  }}
+                  onBlur={() => {
+                    setIsFocused(false);
+                  }}
+                  ref={textareaReference}
+                  className="border-none shadow-none ring-0 p-4 pr-10 pb-0 mb-8 focus-visible:ring-0 focus-visible:outline-none w-full resize-none h-full"
+                  rows={3}
+                  value={inputText}
+                  onChange={(event) => setInputText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault(); // Prevents adding a new line
+                      onSubmit();
+                    }
+                  }}
+                  placeholder="Type your message..."
+                />
+              </div>
+              <div className="absolute left-2 bottom-2 flex flex-row items-center gap-2">
+                <ComboBoxResponsive
+                  className="group text-xs w-[initial] px-2 h-6 border-none flex items-center justify-between gap-2"
+                  popoverContentClassName="w-[300px]"
+                  groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({
+                    name: provider,
+                    items: models,
+                  }))}
+                  renderLabel={(item) => (
+                    <span className="text-xs flex items-center justify-between w-full">
+                      <span className="font-mono">{item.model}</span>
+                      <Badge variant="outline" className="bg-background">
+                        {item.details.parameterSize}
+                      </Badge>
+                    </span>
+                  )}
+                  renderButtonContents={(value) => (
+                    <>
+                      <span className="text-xs">{value}</span>
+                      <span className="relative flex w-4 h-4">
+                        <ChevronDown className="absolute group-hover:scale-0 transition-transform duration-200 ease-in-out" />
+                        <CircuitBoard className="absolute scale-0 group-hover:scale-100 transition-transform duration-200 ease-in-out" />
                       </span>
-                    )}
-                    renderButtonContents={(value) => (
-                      <>
-                        <span className="text-xs">{value}</span>
-                        <span className="relative flex w-4 h-4">
-                          <ChevronDown className="absolute group-hover:scale-0 transition-transform duration-200 ease-in-out" />
-                          <CircuitBoard className="absolute scale-0 group-hover:scale-100 transition-transform duration-200 ease-in-out" />
-                        </span>
-                      </>
-                    )}
-                    getValue={(item) => item.model}
-                    onSelect={(selectedModel) => {
-                      setModel(selectedModel);
-                    }}
-                    placeholder="Select a model"
-                    defaultValue={model}
-                  />
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        data-state={isSearching ? 'active' : 'inactive'}
-                        size="xs"
-                        variant="ghost"
-                        className="group data-[state=active]:bg-neutral-100 data-[state=active]:text-primary data-[state=active]:shadow transition-all duration-200"
-                        onClick={() => {
-                          setIsSearching((previous) => !previous);
-                        }}
-                      >
-                        <span className="text-xs">Search</span>
-                        <Globe className="w-4 h-4 group-hover:rotate-180 transition-transform duration-200 ease-in-out" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Search the web</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="absolute right-2 top-2"
-                  onClick={() => {
-                    onSubmit();
+                    </>
+                  )}
+                  getValue={(item) => item.model}
+                  onSelect={(selectedModel) => {
+                    setModel(selectedModel);
                   }}
-                  disabled={inputText.length === 0}
-                >
-                  <ArrowRight className="w-4 h-4" />
-                </Button>
-                <Button size="icon" variant="ghost" className="absolute right-2 bottom-2">
-                  <Mic className="w-4 h-4" />
-                </Button>
+                  placeholder="Select a model"
+                  defaultValue={model}
+                />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      data-state={isSearching ? 'active' : 'inactive'}
+                      size="xs"
+                      variant="ghost"
+                      className="group data-[state=active]:bg-neutral-100 data-[state=active]:text-primary data-[state=active]:shadow transition-all duration-200"
+                      onClick={() => {
+                        setIsSearching((previous) => !previous);
+                      }}
+                    >
+                      <span className="text-xs">Search</span>
+                      <Globe className="w-4 h-4 group-hover:rotate-180 transition-transform duration-200 ease-in-out" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Search the web</p>
+                  </TooltipContent>
+                </Tooltip>
               </div>
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </ResizablePanel>
-        <ResizableHandle className="hidden lg:flex" />
-      </When>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="absolute right-2 top-2"
+                onClick={() => {
+                  onSubmit();
+                }}
+                disabled={inputText.length === 0}
+              >
+                <ArrowRight className="w-4 h-4" />
+              </Button>
+              <Button size="icon" variant="ghost" className="absolute right-2 bottom-2">
+                <Mic className="w-4 h-4" />
+              </Button>
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </ResizablePanel>
+      <ResizableHandle className={cn('hidden', isChatOpen && 'flex')} />
 
       <ResizablePanel
-        id="chat-main"
         order={2}
         data-state={isChatOpen ? 'open' : 'closed'}
         defaultSize={data?.resize.chatMain[1]}
-        className="flex-1 h-full flex-col data-[state=open]:hidden data-[state=open]:lg:flex"
+        className="h-full flex-col data-[state=open]:hidden lg:data-[state=open]:flex"
       >
-        <Tabs defaultValue="preview" className="flex flex-col h-full relative">
+        <Tabs defaultValue="preview" className="flex flex-col h-full">
           <TabsList className="grid grid-cols-3 absolute m-2 bg-background z-10 border md:h-[2.375rem]">
             <TabsTrigger
               value="preview"
@@ -310,15 +304,12 @@ export default function ChatInterface() {
           <TabsContent value="preview" className="h-full mt-0">
             <ChatViewer />
           </TabsContent>
-          <TabsContent value="code" className="h-full mt-0">
-            <div className="flex flex-row justify-between items-center px-4 pb-2 mt-2 mr-9">
-              <span className="text-sm font-medium">main.kcl</span>
-              <div className="flex flex-row items-center gap-2">
-                <CopyButton variant="outline" size="icon" text={mockCode} className="text-muted-foreground" />
-                <DownloadButton variant="outline" size="icon" text={mockCode} className="text-muted-foreground" />
-              </div>
+          <TabsContent value="code" className="h-full mt-0 flex flex-1 w-full">
+            <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-1.5 mr-12 gap-1.5">
+              <CopyButton variant="outline" size="icon" text={mockCode} className="text-muted-foreground" />
+              <DownloadButton variant="outline" size="icon" text={mockCode} className="text-muted-foreground" />
             </div>
-            <div className="flex-1 bg-neutral-100 rounded-md m-2">
+            <div className="bg-neutral-100 rounded-md m-2 mt-14 overflow-y-scroll w-full">
               <CodeViewer
                 className="text-xs"
                 showLineNumbers

@@ -124,6 +124,7 @@ const SidebarProvider = React.forwardRef<
             {
               '--sidebar-width': SIDEBAR_WIDTH,
               '--sidebar-width-icon': SIDEBAR_WIDTH_ICON,
+              '--sidebar-width-current': isMobile ? SIDEBAR_WIDTH_MOBILE : open ? SIDEBAR_WIDTH : SIDEBAR_WIDTH_ICON,
               ...style,
             } as React.CSSProperties
           }

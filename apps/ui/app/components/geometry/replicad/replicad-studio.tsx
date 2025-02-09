@@ -15,7 +15,7 @@ import { mockCode } from '@/components/mock-code';
 
 export function ReplicadStudio() {
   const { state, dispatch } = useReplicad();
-  const { isComputing, error, downloadSTL, mesh } = useReplicadCode();
+  const { isComputing, error, downloadSTL, mesh, isBuffering } = useReplicadCode();
 
   const handleParameterChange = (key: string, value: any) => {
     console.log('updating parameter', key, value);
@@ -39,10 +39,12 @@ export function ReplicadStudio() {
     <div className="flex flex-col h-full">
       <ReplicadViewer mesh={mesh} />
       {/* Loading state, only show when mesh is loaded and computing */}
-      {mesh && isComputing && (
+      {mesh && (isComputing || isBuffering) && (
         <div className="absolute top-[50%] left-[50%] -translate-x-[50%] -translate-y-[50%]">
           <div className="m-auto flex items-center gap-2 bg-background/50 backdrop-blur-sm p-2 rounded-md">
-            <span className="text-sm text-muted-foreground">Rendering...</span>
+            <span className="text-sm font-mono text-muted-foreground">
+              {isBuffering ? 'Buffering...' : 'Rendering...'}
+            </span>
             <LoaderPinwheel className="w-6 h-6 animate-spin text-primary ease-in-out" />
           </div>
         </div>

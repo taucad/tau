@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { wrap, type Remote } from 'comlink';
 import { useReplicad } from './context';
 import BuilderWorker from './builder.worker?worker';
@@ -9,6 +9,7 @@ type EvaluateCodeFunction = (code: string, parameters: Record<string, any>) => P
 
 export function useReplicadCode() {
   const { state, dispatch } = useReplicad();
+  const [isBuffering, setIsBuffering] = useState(false);
   const workerReference = useRef<Remote<BuilderWorkerInterface> | undefined>(undefined);
 
   useEffect(() => {
@@ -67,6 +68,7 @@ export function useReplicadCode() {
   // Create a single debounced function instance that persists
   const debouncedEvaluateReference = useRef<ReturnType<typeof debounce>>(
     debounce((code: string, parameters: Record<string, any>) => {
+      setIsBuffering(false);
       evaluateCodeReference.current(code, parameters);
     }, 300),
   );
@@ -76,6 +78,8 @@ export function useReplicadCode() {
     const worker = workerReference.current;
     if (!worker || !state.code) return;
 
+    // Set buffering state to true when debounce starts
+    setIsBuffering(true);
     // Call the debounced evaluation with current code and parameters
     debouncedEvaluateReference.current(state.code, state.parameters);
   }, [state.code, state.parameters]);
@@ -108,6 +112,7 @@ export function useReplicadCode() {
 
   return {
     isComputing: state.isComputing,
+    isBuffering,
     error: state.error,
     mesh: state.mesh,
     downloadSTL,

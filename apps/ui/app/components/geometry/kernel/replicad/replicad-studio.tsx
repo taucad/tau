@@ -5,13 +5,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { DownloadButton } from '@/components/download-button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { LoaderPinwheel, PencilRuler } from 'lucide-react';
 import { useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { pascalCaseToWords } from '@/utils/string';
-import { cn } from '@/utils/ui';
 import { mockCode } from '@/components/mock-code';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 export function ReplicadStudio() {
   const { state, dispatch } = useReplicad();
@@ -55,59 +54,60 @@ export function ReplicadStudio() {
         </div>
       </div>
       <div className="absolute top-0 right-0 flex flex-row justify-end gap-1.5 m-1.5 mr-12">
-        <Collapsible>
-          <CollapsibleTrigger asChild>
+        <Popover>
+          <PopoverTrigger asChild>
             <Button variant="outline" className="text-muted-foreground rounded-md flex flex-row gap-2">
               <PencilRuler className="w-4 h-4" />
               <span>Edit</span>
             </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="text-sm absolute w-[90dvw] md:w-96 top-12 -right-11 z-10 backdrop-blur-sm bg-background/50 border p-2 rounded-md flex flex-col gap-1 justify-between">
-              <span className="font-bold text-lg">Parameters</span>
-              {Object.entries(state.parameters).map(([key, value]) => {
-                const valueType = typeof value;
+          </PopoverTrigger>
+          <PopoverContent
+            onInteractOutside={(e) => {
+              e.preventDefault();
+            }}
+            className="mr-1.5 mt-1.5 text-sm backdrop-blur-sm bg-background/50 rounded-md flex flex-col gap-2 justify-between"
+          >
+            <span className="font-bold text-lg">Parameters</span>
+            {Object.entries(state.parameters).map(([key, value]) => {
+              const valueType = typeof value;
 
-                return (
-                  <div
-                    key={key}
-                    className={cn(
-                      'flex flex-col justify-between',
-                      valueType === 'boolean' && 'flex-row items-center gap-2 my-2',
+              return (
+                <div key={key} className="flex flex-row justify-between gap-4 items-center">
+                  <div className="flex flex-col gap-1 w-full">
+                    <span>{pascalCaseToWords(key)}</span>
+                    {valueType === 'number' && (
+                      <Slider
+                        defaultValue={[value]}
+                        min={0}
+                        max={200}
+                        step={1}
+                        onValueChange={([newValue]) => handleParameterChange(key, Number(newValue))}
+                      />
                     )}
-                  >
-                    <div className="capitalize">{pascalCaseToWords(key)}</div>
-                    <div className="flex gap-4">
-                      {valueType === 'boolean' ? (
-                        <Switch
-                          size="lg"
-                          checked={value}
-                          onCheckedChange={(checked) => handleParameterChange(key, checked)}
-                        />
-                      ) : valueType === 'number' ? (
-                        <>
-                          <Slider
-                            defaultValue={[value]}
-                            min={0}
-                            max={200}
-                            step={1}
-                            onValueChange={([newValue]) => handleParameterChange(key, Number(newValue))}
-                          />
-                          <Input
-                            type="number"
-                            value={value}
-                            onChange={(event) => handleParameterChange(key, Number.parseFloat(event.target.value))}
-                            className="w-12 h-8 p-1 bg-background"
-                          />
-                        </>
-                      ) : null}
-                    </div>
                   </div>
-                );
-              })}
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
+                  <div className="flex gap-3">
+                    {valueType === 'boolean' ? (
+                      <Switch
+                        size="lg"
+                        checked={value}
+                        onCheckedChange={(checked) => handleParameterChange(key, checked)}
+                      />
+                    ) : valueType === 'number' ? (
+                      <>
+                        <Input
+                          type="number"
+                          value={value}
+                          onChange={(event) => handleParameterChange(key, Number.parseFloat(event.target.value))}
+                          className="w-12 h-8 p-1 bg-background"
+                        />
+                      </>
+                    ) : undefined}
+                  </div>
+                </div>
+              );
+            })}
+          </PopoverContent>
+        </Popover>
         <DownloadButton
           variant="outline"
           size="icon"

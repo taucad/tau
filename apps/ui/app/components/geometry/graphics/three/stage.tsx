@@ -8,7 +8,7 @@ type StageProperties = {
   center?: boolean;
 } & React.HTMLAttributes<HTMLDivElement>;
 
-export default function Stage({ children, center, ...properties }: StageProperties) {
+export function Stage({ children, center, ...properties }: StageProperties) {
   const camera = useThree((state) => state.camera);
   const { invalidate } = useThree();
   const outer = React.useRef<THREE.Group>(null);

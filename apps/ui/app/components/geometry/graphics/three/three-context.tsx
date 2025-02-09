@@ -1,7 +1,6 @@
 import { Canvas, CanvasProps } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
-import Controls from './controls';
+import { Scene } from './scene';
 import InfiniteGrid from './infinite-grid';
 
 export type ThreeContextProperties = CanvasProps;
@@ -23,13 +22,12 @@ export default function ThreeProvider({ children, ...properties }: ThreeContextP
 
   return (
     <Canvas className="bg-background" dpr={dpr} frameloop="demand" {...properties}>
-      <Controls hideGizmo={false} center={true} enableDamping={true}>
+      <Scene hideGizmo={false} center={true} enableDamping={true}>
         <InfiniteGrid />
-        <OrbitControls />
         <ambientLight intensity={5} />
         <pointLight position={[100, 100, 100]} />
         {children}
-      </Controls>
+      </Scene>
     </Canvas>
   );
 }

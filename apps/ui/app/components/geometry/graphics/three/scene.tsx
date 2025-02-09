@@ -1,12 +1,14 @@
 import React, { useRef } from 'react';
 import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
-import Stage from './stage';
+import { Stage } from './stage';
+
+type ControlsProperties = {
+  hideGizmo: boolean;
+  enableDamping: boolean;
+};
 
 const Controls = React.memo(
-  React.forwardRef(function Controls(
-    { hideGizmo, enableDamping }: { hideGizmo: boolean; enableDamping: boolean },
-    controlsReference,
-  ) {
+  React.forwardRef(function Controls({ hideGizmo, enableDamping }: ControlsProperties, controlsReference) {
     return (
       <>
         <OrbitControls makeDefault ref={controlsReference} enableDamping={enableDamping} />
@@ -20,14 +22,14 @@ const Controls = React.memo(
   }),
 );
 
-export type SceneProps = {
+export type SceneProperties = {
   hideGizmo: boolean;
   center: boolean;
   enableDamping: boolean;
   children: React.ReactNode;
 };
 
-export default React.memo(function Scene({ hideGizmo, center, enableDamping = true, children }: SceneProps) {
+export const Scene = React.memo(function Scene({ hideGizmo, center, enableDamping = true, children }: SceneProperties) {
   const controlsReference = useRef(null);
 
   return (

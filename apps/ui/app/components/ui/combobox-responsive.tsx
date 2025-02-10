@@ -12,7 +12,7 @@ type GroupedItems<T> = {
   items: T[];
 };
 
-export function ComboBoxResponsive<T extends { label: string; value: unknown }>({
+export function ComboBoxResponsive<T>({
   groupedItems,
   renderLabel,
   renderButtonContents,
@@ -22,6 +22,7 @@ export function ComboBoxResponsive<T extends { label: string; value: unknown }>(
   className,
   popoverContentClassName,
   placeholder = 'Set item',
+  searchPlaceHolder = 'Filter items...',
 }: {
   groupedItems: GroupedItems<T>[];
   renderLabel: (item: T) => React.ReactNode;
@@ -32,6 +33,7 @@ export function ComboBoxResponsive<T extends { label: string; value: unknown }>(
   className?: string;
   popoverContentClassName?: string;
   placeholder?: string;
+  searchPlaceHolder?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const isMobile = useIsMobile();
@@ -60,6 +62,7 @@ export function ComboBoxResponsive<T extends { label: string; value: unknown }>(
               setSelectedItem={handleSelect}
               renderLabel={renderLabel}
               getValue={getValue}
+              searchPlaceHolder={searchPlaceHolder}
             />
           </div>
         </DrawerContent>
@@ -80,6 +83,7 @@ export function ComboBoxResponsive<T extends { label: string; value: unknown }>(
           setSelectedItem={handleSelect}
           renderLabel={renderLabel}
           getValue={getValue}
+          searchPlaceHolder={searchPlaceHolder}
         />
       </PopoverContent>
     </Popover>
@@ -91,14 +95,17 @@ function ItemList<T>({
   setSelectedItem,
   renderLabel,
   getValue,
+  searchPlaceHolder,
 }: {
   groupedItems: GroupedItems<T>[];
   setSelectedItem: (item: T) => void;
   renderLabel: (item: T) => React.ReactNode;
   getValue: (item: T) => string;
+  searchPlaceHolder: string;
 }) {
   return (
     <Command>
+      <CommandInput placeholder={searchPlaceHolder} />
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
         {groupedItems.map((group) => (
@@ -121,7 +128,6 @@ function ItemList<T>({
           </CommandGroup>
         ))}
       </CommandList>
-      <CommandInput placeholder="Filter items..." />
     </Command>
   );
 }

@@ -47,8 +47,8 @@ const data = {
   ],
   navMain: [
     {
-      title: 'Build',
-      url: '#',
+      title: 'Builds',
+      url: '/builds',
       icon: Hammer,
       isActive: true,
       items: [

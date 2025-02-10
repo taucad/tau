@@ -29,8 +29,6 @@ import { useRouteLoaderData } from '@remix-run/react';
 import type { loader } from '@/root';
 import { ComboBoxResponsive } from '@/components/ui/combobox-responsive';
 import { ChatCode } from './chat-code';
-import { mockModels } from './mock-code';
-import { useReplicadCode } from './geometry/kernel/replicad/use-replicad-code';
 
 export const CHAT_COOKIE_NAME = 'tau-chat-open';
 export const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'tau-chat-history-resize';
@@ -40,7 +38,7 @@ export const CHAT_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 export default function ChatInterface() {
   const [inputText, setInputText] = useState('');
   const { sendMessage, messages, editMessage } = useChat();
-  const [model, setModel] = useState('gpt-4o-mini');
+  const [selectedModel, setSelectedModel] = useState('gpt-4o-mini');
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
   const data = useRouteLoaderData<typeof loader>('root');
@@ -49,7 +47,6 @@ export default function ChatInterface() {
   const [isSearching, setIsSearching] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const textareaReference = useRef<HTMLTextAreaElement | null>(null);
-  const { setCode } = useReplicadCode();
 
   const onSubmit = async () => {
     setInputText('');
@@ -62,7 +59,7 @@ export default function ChatInterface() {
           systemHints: [...(isSearching ? ['search'] : [])],
         },
       },
-      model,
+      model: selectedModel,
     });
   };
 
@@ -117,28 +114,6 @@ export default function ChatInterface() {
           <MessageSquareReply className="scale-100 group-data-[state=open]:scale-0 transition-transform duration-200 ease-in-out" />
         </span>
       </Button>
-      <div className="absolute top-0 right-0 mt-14 my-1.5 mr-1.5 z-50">
-        <Tooltip>
-          <ComboBoxResponsive
-            groupedItems={[
-              {
-                name: 'Models',
-                items: mockModels.map((model) => ({ label: model.name, value: model.name })),
-              },
-            ]}
-            renderLabel={(item) => item.label}
-            renderButtonContents={(value) => value}
-            getValue={(item) => item.value}
-            defaultValue={mockModels[0].name}
-            onSelect={(value) => {
-              const model = mockModels.find((model) => model.name === value);
-              if (model) {
-                setCode(model.code);
-              }
-            }}
-          />
-        </Tooltip>
-      </div>
       <ResizablePanel
         order={1}
         minSize={30}
@@ -222,7 +197,7 @@ export default function ChatInterface() {
                   placeholder="Type your message..."
                 />
               </div>
-              <div className="absolute left-2 bottom-2 flex flex-row items-center gap-2">
+              <div className="absolute left-2 bottom-2 flex flex-row items-center">
                 <ComboBoxResponsive
                   className="group text-xs w-[initial] px-2 h-6 border-none flex items-center justify-between gap-2"
                   popoverContentClassName="w-[300px]"
@@ -238,9 +213,9 @@ export default function ChatInterface() {
                       </Badge>
                     </span>
                   )}
-                  renderButtonContents={(value) => (
+                  renderButtonContents={(item) => (
                     <>
-                      <span className="text-xs">{value}</span>
+                      <span className="text-xs">{item.model}</span>
                       <span className="relative flex w-4 h-4">
                         <ChevronDown className="absolute group-hover:scale-0 transition-transform duration-200 ease-in-out" />
                         <CircuitBoard className="absolute scale-0 group-hover:scale-100 transition-transform duration-200 ease-in-out" />
@@ -249,10 +224,10 @@ export default function ChatInterface() {
                   )}
                   getValue={(item) => item.model}
                   onSelect={(selectedModel) => {
-                    setModel(selectedModel);
+                    setSelectedModel(selectedModel);
                   }}
                   placeholder="Select a model"
-                  defaultValue={model}
+                  defaultValue={models.find((model) => model.model === selectedModel)}
                 />
                 <Tooltip>
                   <TooltipTrigger asChild>

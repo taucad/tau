@@ -3,7 +3,7 @@ import * as React from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { Drawer, DrawerContent, DrawerTrigger } from '@/components/ui/drawer';
+import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from '@/components/ui/drawer';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/utils/ui';
 
@@ -23,39 +23,44 @@ export function ComboBoxResponsive<T>({
   popoverContentClassName,
   placeholder = 'Set item',
   searchPlaceHolder = 'Filter items...',
+  labelAsChild = false,
+  labelClassName,
 }: {
   groupedItems: GroupedItems<T>[];
   renderLabel: (item: T) => React.ReactNode;
-  renderButtonContents: (value: string) => React.ReactNode;
+  renderButtonContents: (item: T) => React.ReactNode;
   getValue: (item: T) => string;
-  defaultValue?: string;
+  defaultValue?: T;
   onSelect?: (value: string) => void;
   className?: string;
   popoverContentClassName?: string;
   placeholder?: string;
   searchPlaceHolder?: string;
+  labelAsChild?: boolean;
+  labelClassName?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const isMobile = useIsMobile();
-  const [selectedItem, setSelectedItem] = React.useState<string | undefined>(defaultValue);
+  const [selectedItem, setSelectedItem] = React.useState<T | undefined>(defaultValue);
 
   const handleSelect = (item: T) => {
-    setSelectedItem(getValue(item));
+    setSelectedItem(item);
     setOpen(false);
     onSelect?.(getValue(item));
   };
-
-  const value = selectedItem ?? placeholder;
 
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={setOpen}>
         <DrawerTrigger asChild>
           <Button variant="outline" className={cn('w-[150px] justify-start', className)}>
-            {renderButtonContents(value)}
+            {selectedItem ? renderButtonContents(selectedItem) : placeholder}
           </Button>
         </DrawerTrigger>
-        <DrawerContent>
+        <DrawerContent aria-describedby="drawer-title">
+          <DrawerTitle className="sr-only" id="drawer-title">
+            {placeholder}
+          </DrawerTitle>
           <div className="mt-4 border-t">
             <ItemList
               groupedItems={groupedItems}
@@ -63,6 +68,8 @@ export function ComboBoxResponsive<T>({
               renderLabel={renderLabel}
               getValue={getValue}
               searchPlaceHolder={searchPlaceHolder}
+              labelAsChild={labelAsChild}
+              labelClassName={labelClassName}
             />
           </div>
         </DrawerContent>
@@ -74,7 +81,7 @@ export function ComboBoxResponsive<T>({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button variant="outline" className={cn('w-[150px] justify-start', className)}>
-          {renderButtonContents(value)}
+          {selectedItem ? renderButtonContents(selectedItem) : placeholder}
         </Button>
       </PopoverTrigger>
       <PopoverContent className={cn('w-[200px] p-0', popoverContentClassName)} align="start">
@@ -84,6 +91,8 @@ export function ComboBoxResponsive<T>({
           renderLabel={renderLabel}
           getValue={getValue}
           searchPlaceHolder={searchPlaceHolder}
+          labelAsChild={labelAsChild}
+          labelClassName={labelClassName}
         />
       </PopoverContent>
     </Popover>
@@ -96,12 +105,16 @@ function ItemList<T>({
   renderLabel,
   getValue,
   searchPlaceHolder,
+  labelAsChild,
+  labelClassName,
 }: {
   groupedItems: GroupedItems<T>[];
   setSelectedItem: (item: T) => void;
   renderLabel: (item: T) => React.ReactNode;
   getValue: (item: T) => string;
   searchPlaceHolder: string;
+  labelAsChild?: boolean;
+  labelClassName?: string;
 }) {
   return (
     <Command>
@@ -114,12 +127,14 @@ function ItemList<T>({
               const value = getValue(item);
               return (
                 <CommandItem
+                  asChild={labelAsChild}
                   key={value}
                   value={value}
                   keywords={[group.name]}
                   onSelect={() => {
                     setSelectedItem(item);
                   }}
+                  className={cn('cursor-pointer', labelClassName)}
                 >
                   {renderLabel(item)}
                 </CommandItem>

@@ -1,4 +1,5 @@
 type Model = {
+  id: string;
   name: string;
   code: string;
 };
@@ -666,34 +667,42 @@ export const main = (r, { height, depth, width, filletRadius, shellThickness, de
 
 export const mockModels = [
   {
+    id: 'bld_birdhouse',
     name: 'Birdhouse',
     code: birdhouseCode,
   },
   {
+    id: 'bld_tray',
     name: 'Tray',
     code: trayCode,
   },
   {
+    id: 'bld_vase',
     name: 'Vase',
     code: vaseCode,
   },
   {
+    id: 'bld_wavy-vase',
     name: 'Wavy Vase',
     code: wavyVase,
   },
   {
+    id: 'bld_cylindrical-gear',
     name: 'Cylindrical Gear',
     code: cyloidalGear,
   },
   {
+    id: 'bld_bottle',
     name: 'Bottle',
     code: bottle,
   },
   {
+    id: 'bld_gridfinity-box',
     name: 'Gridfinity Box',
     code: gridfinityBox,
   },
   {
+    id: 'bld_decorated-box',
     name: 'Decorated Box',
     code: decoratedBox,
   },

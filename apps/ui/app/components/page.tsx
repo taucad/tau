@@ -1,11 +1,10 @@
-import { Outlet } from '@remix-run/react';
+import { Link, Outlet, useMatches } from '@remix-run/react';
 import { AppSidebar } from './app-sidebar';
 import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
-  BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
@@ -16,13 +15,18 @@ import type { loader } from '@/root';
 import { useLoaderData } from '@remix-run/react';
 import { Badge } from './ui/badge';
 import { useNetworkConnectivity } from '@/hooks/use-network-connectivity';
+import { Button } from './ui/button';
+import { Fragment } from 'react/jsx-runtime';
 
 const HEADER_HEIGHT = '3rem';
 
 export function Page() {
   const { sidebarOpen } = useLoaderData<typeof loader>();
+  const matches = useMatches();
 
   const isOnline = useNetworkConnectivity();
+
+  const breadcrumbItems = matches.filter((match) => match.handle && match.handle.breadcrumb);
 
   return (
     <SidebarProvider defaultOpen={sidebarOpen}>
@@ -39,16 +43,23 @@ export function Page() {
               </TooltipTrigger>
               <TooltipContent>Toggle sidebar (⌘B)</TooltipContent>
             </Tooltip>
-            <Separator orientation="vertical" className="mr-2 h-4" />
+            <Separator orientation="vertical" className="h-4" />
             <Breadcrumb>
-              <BreadcrumbList>
+              <BreadcrumbList className="sm:gap-0">
                 <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="#">Build anything</BreadcrumbLink>
+                  <Button variant="ghost" className="p-2" asChild>
+                    <Link to="/builds">Builds</Link>
+                  </Button>
                 </BreadcrumbItem>
-                <BreadcrumbSeparator className="hidden md:block" />
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Data Fetching</BreadcrumbPage>
-                </BreadcrumbItem>
+
+                {breadcrumbItems.map((match) => (
+                  <Fragment key={match.id}>
+                    <BreadcrumbSeparator className="hidden md:block" />
+                    <BreadcrumbItem>
+                      <BreadcrumbLink>{match.handle.breadcrumb(match)}</BreadcrumbLink>
+                    </BreadcrumbItem>
+                  </Fragment>
+                ))}
               </BreadcrumbList>
             </Breadcrumb>
           </div>

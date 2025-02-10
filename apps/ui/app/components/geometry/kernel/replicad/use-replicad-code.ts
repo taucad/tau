@@ -5,8 +5,6 @@ import BuilderWorker from './replicad-builder.worker?worker';
 import type { BuilderWorkerInterface } from './replicad-builder.worker';
 import { debounce } from '@/utils/functions';
 
-type EvaluateCodeFunction = (code: string, parameters: Record<string, any>) => Promise<void>;
-
 export function useReplicadCode() {
   const { state, dispatch } = useReplicad();
   const [isBuffering, setIsBuffering] = useState(false);
@@ -32,10 +30,8 @@ export function useReplicadCode() {
   }, []);
 
   // Store the evaluation function in a ref with explicit parameters
-  const evaluateCodeReference = useCallback<EvaluateCodeFunction>(
-    async (code, parameters) => {
-      const randomId = Math.random().toString(36).slice(2, 15);
-      console.log('evaluating code', randomId);
+  const evaluateCodeReference = useCallback(
+    async (code: string, parameters: Record<string, string | number | boolean>) => {
       const worker = workerReference.current;
       if (!worker || !code) return;
       try {
@@ -70,7 +66,7 @@ export function useReplicadCode() {
 
   // Create a single debounced function instance that persists
   const debouncedEvaluateReference = useRef<ReturnType<typeof debounce>>(
-    debounce((code: string, parameters: Record<string, any>) => {
+    debounce((code: string, parameters: Record<string, string | number | boolean>) => {
       setIsBuffering(false);
       evaluateCodeReference(code, parameters);
     }, 300),
@@ -95,9 +91,8 @@ export function useReplicadCode() {
     const loadDefaultParameters = async () => {
       try {
         const defaultParameters = await worker.extractDefaultParametersFromCode(state.code);
-        if (Object.keys(state.parameters).length === 0) {
-          dispatch({ type: 'SET_PARAMETERS', payload: defaultParameters });
-        }
+        console.log('default parameters', defaultParameters);
+        dispatch({ type: 'SET_PARAMETERS', payload: defaultParameters });
       } catch (error) {
         console.error('Failed to load default parameters:', error);
       }
@@ -113,11 +108,23 @@ export function useReplicadCode() {
     return result[0].blob;
   };
 
+  const setCode = (code: string) => {
+    dispatch({ type: 'SET_CODE', payload: code });
+  };
+
+  const setParameters = (key: string, value: string | number | boolean) => {
+    dispatch({ type: 'UPDATE_PARAMETER', payload: { key, value } });
+  };
+
   return {
     isComputing: state.isComputing,
     isBuffering,
     error: state.error,
     mesh: state.mesh,
+    code: state.code,
+    parameters: state.parameters,
     downloadSTL,
+    setCode,
+    setParameters,
   };
 }

@@ -1,4 +1,3 @@
-import { useReplicad } from './replicad-context';
 import { useReplicadCode } from './use-replicad-code';
 import { ReplicadViewer } from './replicad-viewer';
 import { Button } from '@/components/ui/button';
@@ -6,23 +5,12 @@ import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { DownloadButton } from '@/components/download-button';
 import { LoaderPinwheel, PencilRuler } from 'lucide-react';
-import { useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { pascalCaseToWords } from '@/utils/string';
-import { mockCode } from '@/components/mock-code';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 export function ReplicadStudio() {
-  const { state, dispatch } = useReplicad();
-  const { isComputing, error, downloadSTL, mesh, isBuffering } = useReplicadCode();
-
-  const handleParameterChange = (key: string, value: any) => {
-    console.log('updating parameter', key, value);
-    dispatch({
-      type: 'UPDATE_PARAMETER',
-      payload: { key, value },
-    });
-  };
+  const { isComputing, error, downloadSTL, mesh, isBuffering, setParameters, parameters } = useReplicadCode();
 
   const handleDownload = async () => {
     const blob = await downloadSTL();
@@ -30,17 +18,13 @@ export function ReplicadStudio() {
     return blob;
   };
 
-  useEffect(() => {
-    dispatch({ type: 'SET_CODE', payload: mockCode });
-  }, [dispatch]);
-
   return (
     <>
       <div className="relative flex flex-col h-full">
         <ReplicadViewer mesh={mesh} />
         {/* Loading state, only show when mesh is loaded and computing */}
         {mesh && (isComputing || isBuffering) && (
-          <div className="absolute top-[80%] left-[50%] -translate-x-[50%] -translate-y-[80%]">
+          <div className="absolute top-[90%] left-[50%] -translate-x-[50%] -translate-y-[90%]">
             <div className="m-auto flex items-center gap-2 bg-background/70 border border-neutral-200 backdrop-blur-sm p-2 rounded-md">
               <span className="text-sm font-mono text-muted-foreground">
                 {isBuffering ? 'Buffering...' : 'Rendering...'}
@@ -62,50 +46,47 @@ export function ReplicadStudio() {
             </Button>
           </PopoverTrigger>
           <PopoverContent
-            onInteractOutside={(e) => {
-              e.preventDefault();
+            onInteractOutside={(event) => {
+              event.preventDefault();
             }}
             className="mr-1.5 mt-1.5 text-sm backdrop-blur-sm bg-background/50 rounded-md flex flex-col gap-2 justify-between"
           >
             <span className="font-bold text-lg">Parameters</span>
-            {Object.entries(state.parameters).map(([key, value]) => {
-              const valueType = typeof value;
+            {parameters &&
+              Object.entries(parameters).map(([key, value]) => {
+                const valueType = typeof value;
 
-              return (
-                <div key={key} className="flex flex-row justify-between gap-4 items-center">
-                  <div className="flex flex-col gap-1 w-full">
-                    <span>{pascalCaseToWords(key)}</span>
-                    {valueType === 'number' && (
-                      <Slider
-                        defaultValue={[value]}
-                        min={0}
-                        max={200}
-                        step={1}
-                        onValueChange={([newValue]) => handleParameterChange(key, Number(newValue))}
-                      />
-                    )}
-                  </div>
-                  <div className="flex gap-3">
-                    {valueType === 'boolean' ? (
-                      <Switch
-                        size="lg"
-                        checked={value}
-                        onCheckedChange={(checked) => handleParameterChange(key, checked)}
-                      />
-                    ) : valueType === 'number' ? (
-                      <>
-                        <Input
-                          type="number"
-                          value={value}
-                          onChange={(event) => handleParameterChange(key, Number.parseFloat(event.target.value))}
-                          className="w-12 h-8 p-1 bg-background"
+                return (
+                  <div key={key} className="flex flex-row justify-between gap-4 items-center">
+                    <div className="flex flex-col gap-1 w-full">
+                      <span>{pascalCaseToWords(key)}</span>
+                      {valueType === 'number' && (
+                        <Slider
+                          value={[value]}
+                          min={0}
+                          max={200}
+                          step={1}
+                          onValueChange={([newValue]) => setParameters(key, Number(newValue))}
                         />
-                      </>
-                    ) : undefined}
+                      )}
+                    </div>
+                    <div className="flex gap-3">
+                      {valueType === 'boolean' ? (
+                        <Switch size="lg" checked={value} onCheckedChange={(checked) => setParameters(key, checked)} />
+                      ) : valueType === 'number' ? (
+                        <>
+                          <Input
+                            type="number"
+                            value={value}
+                            onChange={(event) => setParameters(key, Number.parseFloat(event.target.value))}
+                            className="w-12 h-8 p-1 bg-background"
+                          />
+                        </>
+                      ) : undefined}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </PopoverContent>
         </Popover>
         <DownloadButton

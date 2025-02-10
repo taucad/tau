@@ -12,7 +12,7 @@ type GroupedItems<T> = {
   items: T[];
 };
 
-export function ComboBoxResponsive<T>({
+export function ComboBoxResponsive<T extends { label: string; value: unknown }>({
   groupedItems,
   renderLabel,
   renderButtonContents,

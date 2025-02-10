@@ -1,3 +1,4 @@
+import { birdhouseCode } from '@/components/mock-code';
 import { createContext, useContext, useReducer, ReactNode } from 'react';
 
 interface ReplicadState {
@@ -17,7 +18,7 @@ type ReplicadAction =
   | { type: 'SET_MESH'; payload: { edges: any; faces: any } | undefined };
 
 const initialState: ReplicadState = {
-  code: '',
+  code: birdhouseCode,
   parameters: {},
   error: undefined,
   isComputing: false,

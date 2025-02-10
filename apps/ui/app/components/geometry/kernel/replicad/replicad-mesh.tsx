@@ -1,33 +1,75 @@
-import React, { useRef, useLayoutEffect, useEffect } from 'react';
+import React, { useRef, useLayoutEffect, useCallback } from 'react';
 import { useThree } from '@react-three/fiber';
 import { BufferGeometry } from 'three';
-import * as replicadThreejsHelper from 'replicad-threejs-helper';
+import * as r3js from 'replicad-threejs-helper';
+import { MatcapMaterial } from '@/components/geometry/graphics/three/matcap-material';
 
-export type ReplicadMeshProps = {
-  faces: any;
-  edges: any;
+export const useApplyHighlights = (geometry, highlight) => {
+  const { invalidate } = useThree();
+
+  useLayoutEffect(() => {
+    let toHighlight = highlight;
+
+    if (!highlight && highlight !== 0) toHighlight = [];
+    else if (!Array.isArray(highlight)) toHighlight = [highlight];
+
+    r3js.highlightInGeometry(toHighlight, geometry);
+    invalidate();
+  }, [geometry, highlight, invalidate]);
 };
 
-export default React.memo(function ReplicadMesh({ faces, edges }: ReplicadMeshProps) {
+export const useFaceEvent = (onEvent) => {
+  const function_ = useRef(onEvent);
+  useLayoutEffect(() => {
+    function_.current = onEvent;
+  }, [onEvent]);
+
+  return useCallback((event) => {
+    if (!function_.current) return null;
+    const faceIndex = r3js.getFaceIndex(event.faceIndex, event.object.geometry);
+    function_.current(event, faceIndex);
+  }, []);
+};
+
+export const ReplicadMesh = React.memo(function ShapeMeshes({ faces, edges, onFaceClick, selected, faceHover }) {
   const { invalidate } = useThree();
 
   const body = useRef(new BufferGeometry());
   const lines = useRef(new BufferGeometry());
 
+  const onClick = useFaceEvent(onFaceClick);
+  const onHover = (e) => {
+    if (!faceHover) return;
+    let toHighlight;
+    if (e === null) toHighlight = [];
+    else {
+      const faceIndex = r3js.getFaceIndex(e.faceIndex, e.object.geometry);
+      toHighlight = [faceIndex];
+    }
+
+    r3js.highlightInGeometry(toHighlight, body.current);
+    invalidate();
+  };
+
   useLayoutEffect(() => {
-    // We use the three helpers to synchronise the buffer geometry with the
-    // new data from the parameters
-    if (faces) replicadThreejsHelper.syncFaces(body.current, faces);
+    if (!faceHover && body.current) r3js.highlightInGeometry([], body.current);
+  }, [faceHover]);
 
-    if (edges) replicadThreejsHelper.syncLines(lines.current, edges);
-    else if (faces) replicadThreejsHelper.syncLinesFromFaces(lines.current, body.current);
+  useLayoutEffect(() => {
+    r3js.highlightInGeometry(selected || selected === 0 ? [selected] : [], body.current);
+    invalidate();
+  }, [selected, invalidate]);
 
-    // We have configured the canvas to only refresh when there is a change,
-    // the invalidate function is here to tell it to recompute
+  useLayoutEffect(() => {
+    if (faces) r3js.syncFaces(body.current, faces);
+
+    if (edges) r3js.syncLines(lines.current, edges);
+    else if (faces) r3js.syncLinesFromFaces(lines.current, body.current);
+
     invalidate();
   }, [faces, edges, invalidate]);
 
-  useEffect(
+  useLayoutEffect(
     () => () => {
       body.current.dispose();
       lines.current.dispose();
@@ -38,12 +80,31 @@ export default React.memo(function ReplicadMesh({ faces, edges }: ReplicadMeshPr
 
   return (
     <group>
-      <mesh geometry={body.current}>
+      <mesh
+        geometry={body.current}
+        onClick={onClick}
+        onPointerOver={onHover}
+        onPointerMove={onHover}
+        onPointerLeave={() => onHover(null)}
+      >
         {/* the offsets are here to avoid z fighting between the mesh and the lines */}
-        <meshStandardMaterial color="#5a8296" polygonOffset polygonOffsetFactor={2} polygonOffsetUnits={1} />
+        <MatcapMaterial
+          color="#d8e9d8"
+          attachArray="material"
+          polygonOffset
+          polygonOffsetFactor={2}
+          polygonOffsetUnits={1}
+        />
+        <MatcapMaterial
+          color="#5a8296"
+          attachArray="material"
+          polygonOffset
+          polygonOffsetFactor={2}
+          polygonOffsetUnits={1}
+        />
       </mesh>
       <lineSegments geometry={lines.current}>
-        <lineBasicMaterial color="#3c5a6e" />
+        <lineBasicMaterial color="#244224" />
       </lineSegments>
     </group>
   );

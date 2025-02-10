@@ -17,17 +17,15 @@ THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 //
 // Depending on your needs I would advice not using a light and relying on
 // a matcap material instead of the meshStandardMaterial used here.
-export default function ThreeProvider({ children, ...properties }: ThreeContextProperties) {
+export const ThreeProvider = ({ children, ...properties }: ThreeContextProperties) => {
   const dpr = Math.min(window.devicePixelRatio, 2);
 
   return (
     <Canvas className="bg-background" dpr={dpr} frameloop="demand" {...properties}>
       <Scene hideGizmo={false} center={true} enableDamping={true}>
         <InfiniteGrid />
-        <ambientLight intensity={5} />
-        <pointLight position={[100, 100, 100]} />
         {children}
       </Scene>
     </Canvas>
   );
-}
+};

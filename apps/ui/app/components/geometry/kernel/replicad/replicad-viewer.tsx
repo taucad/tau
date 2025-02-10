@@ -1,5 +1,5 @@
-import ThreeProvider from '../../graphics/three/three-context';
-import ReplicadMesh from './replicad-mesh';
+import { ThreeProvider } from '../../graphics/three/three-context';
+import { ReplicadMesh } from './replicad-mesh';
 import { LoaderPinwheel } from 'lucide-react';
 
 export function ReplicadViewer({ mesh }: { mesh: any }) {

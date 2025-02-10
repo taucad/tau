@@ -22,16 +22,15 @@ import { ChatViewer } from '@/components/chat-viewer';
 import { cn } from '@/utils/ui';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CodeViewer } from '@/components/code-viewer';
-import { mockCode } from '@/components/mock-code';
-import { CopyButton } from './copy-button';
-import { DownloadButton } from './download-button';
 import { Model, useModels } from '@/hooks/use-models';
 import { Badge } from './ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { useRouteLoaderData } from '@remix-run/react';
 import type { loader } from '@/root';
 import { ComboBoxResponsive } from '@/components/ui/combobox-responsive';
+import { ChatCode } from './chat-code';
+import { mockModels } from './mock-code';
+import { useReplicadCode } from './geometry/kernel/replicad/use-replicad-code';
 
 export const CHAT_COOKIE_NAME = 'tau-chat-open';
 export const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'tau-chat-history-resize';
@@ -50,6 +49,7 @@ export default function ChatInterface() {
   const [isSearching, setIsSearching] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const textareaReference = useRef<HTMLTextAreaElement | null>(null);
+  const { setCode } = useReplicadCode();
 
   const onSubmit = async () => {
     setInputText('');
@@ -76,6 +76,7 @@ export default function ChatInterface() {
     setIsChatOpen((previous) => {
       const open = !previous;
 
+      // eslint-disable-next-line unicorn/no-document-cookie
       document.cookie = `${CHAT_COOKIE_NAME}=${open}; path=/; max-age=${CHAT_COOKIE_MAX_AGE}`;
       return open;
     });
@@ -83,6 +84,7 @@ export default function ChatInterface() {
 
   // eslint-disable-next-line unicorn/consistent-function-scoping
   const onLayoutChange = (sizes: number[], name: string): void => {
+    // eslint-disable-next-line unicorn/no-document-cookie
     document.cookie = `${name}=${JSON.stringify(sizes)}; path=/; max-age=${CHAT_COOKIE_MAX_AGE}`;
   };
 
@@ -115,6 +117,28 @@ export default function ChatInterface() {
           <MessageSquareReply className="scale-100 group-data-[state=open]:scale-0 transition-transform duration-200 ease-in-out" />
         </span>
       </Button>
+      <div className="absolute top-0 right-0 mt-14 my-1.5 mr-1.5 z-50">
+        <Tooltip>
+          <ComboBoxResponsive
+            groupedItems={[
+              {
+                name: 'Models',
+                items: mockModels.map((model) => ({ label: model.name, value: model.name })),
+              },
+            ]}
+            renderLabel={(item) => item.label}
+            renderButtonContents={(value) => value}
+            getValue={(item) => item.value}
+            defaultValue={mockModels[0].name}
+            onSelect={(value) => {
+              const model = mockModels.find((model) => model.name === value);
+              if (model) {
+                setCode(model.code);
+              }
+            }}
+          />
+        </Tooltip>
+      </div>
       <ResizablePanel
         order={1}
         minSize={30}
@@ -304,19 +328,7 @@ export default function ChatInterface() {
             <ChatViewer />
           </TabsContent>
           <TabsContent value="code" className="h-full mt-0 flex flex-1 w-full">
-            <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-1.5 mr-12 gap-1.5">
-              <CopyButton variant="outline" size="icon" text={mockCode} className="text-muted-foreground" />
-              <DownloadButton variant="outline" size="icon" text={mockCode} className="text-muted-foreground" />
-            </div>
-            <div className="bg-neutral-100 rounded-md m-2 mt-14 overflow-y-scroll w-full">
-              <CodeViewer
-                className="text-xs"
-                showLineNumbers
-                showInlineLineNumbers
-                children={mockCode}
-                language="typescript"
-              />
-            </div>
+            <ChatCode />
           </TabsContent>
         </Tabs>
       </ResizablePanel>

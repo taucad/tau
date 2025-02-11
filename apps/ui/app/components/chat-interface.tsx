@@ -299,7 +299,7 @@ export default function ChatInterface() {
               <span className="hidden md:block">Console</span>
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="preview" className="h-full mt-0">
+          <TabsContent value="preview" className="h-full w-full mt-0">
             <ChatViewer />
           </TabsContent>
           <TabsContent value="code" className="h-full mt-0 flex flex-1 w-full">

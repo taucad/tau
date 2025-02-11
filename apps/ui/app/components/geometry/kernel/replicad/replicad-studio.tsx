@@ -1,4 +1,3 @@
-import { useReplicadCode } from './use-replicad-code';
 import { ReplicadViewer } from './replicad-viewer';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,9 +7,10 @@ import { LoaderPinwheel, PencilRuler } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { pascalCaseToWords } from '@/utils/string';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useReplicad } from './replicad-context';
 
 export function ReplicadStudio() {
-  const { isComputing, error, downloadSTL, mesh, isBuffering, setParameters, parameters } = useReplicadCode();
+  const { isComputing, error, downloadSTL, mesh, isBuffering, setParameters, parameters } = useReplicad();
 
   const handleDownload = async () => {
     const blob = await downloadSTL();

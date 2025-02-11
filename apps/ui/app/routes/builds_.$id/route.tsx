@@ -1,6 +1,5 @@
 import ChatInterface from '@/components/chat-interface';
-import { ReplicadProvider } from '@/components/geometry/kernel/replicad/replicad-context';
-import { useReplicadCode } from '@/components/geometry/kernel/replicad/use-replicad-code';
+import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
 import { mockModels } from '@/components/mock-code';
 import { ComboBoxResponsive } from '@/components/ui/combobox-responsive';
 import { LoaderFunctionArgs } from '@remix-run/node';
@@ -49,7 +48,7 @@ export const loader = async ({ params }: LoaderFunctionArgs) => {
 
 export const Chat = () => {
   const { model } = useLoaderData<typeof loader>();
-  const { setCode } = useReplicadCode();
+  const { setCode } = useReplicad();
 
   useEffect(() => {
     setCode(model.code);

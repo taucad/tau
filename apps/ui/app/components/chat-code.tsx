@@ -1,10 +1,10 @@
 import { CopyButton } from './copy-button';
 import { DownloadButton } from './download-button';
 import { EditableCodeViewer } from './editable-code-viewer';
-import { useReplicadCode } from './geometry/kernel/replicad/use-replicad-code';
+import { useReplicad } from './geometry/kernel/replicad/replicad-context';
 
 export const ChatCode = () => {
-  const { code, setCode } = useReplicadCode();
+  const { code, setCode } = useReplicad();
 
   return (
     <>

@@ -128,7 +128,6 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_COMPUTING', payload: true });
         dispatch({ type: 'SET_ERROR', payload: undefined });
 
-        await worker.ready();
         const result = await worker.buildShapesFromCode(code, parameters);
         if ('error' in result) {
           throw new Error(result.message);
@@ -181,7 +180,6 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
 
     const loadDefaultParameters = async () => {
       try {
-        await worker.ready();
         const defaultParameters = await worker.extractDefaultParametersFromCode(state.code);
         dispatch({ type: 'SET_PARAMETERS', payload: defaultParameters });
       } catch (error) {
@@ -195,7 +193,6 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
   const downloadSTL = async () => {
     const worker = workerReference.current;
     if (!worker) return;
-    await worker.ready();
     const result = await worker.exportShape('stl');
     return result[0].blob;
   };

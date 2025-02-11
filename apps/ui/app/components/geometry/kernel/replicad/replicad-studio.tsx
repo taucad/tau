@@ -12,12 +12,6 @@ import { useReplicad } from './replicad-context';
 export function ReplicadStudio() {
   const { isComputing, error, downloadSTL, mesh, isBuffering, setParameters, parameters } = useReplicad();
 
-  const handleDownload = async () => {
-    const blob = await downloadSTL();
-    if (!blob) throw new Error('Failed to generate STL file');
-    return blob;
-  };
-
   return (
     <>
       <div className="relative flex flex-col h-full">
@@ -92,7 +86,7 @@ export function ReplicadStudio() {
         <DownloadButton
           variant="outline"
           size="icon"
-          getBlob={handleDownload}
+          getBlob={downloadSTL}
           title="model.stl"
           className="text-muted-foreground"
         />

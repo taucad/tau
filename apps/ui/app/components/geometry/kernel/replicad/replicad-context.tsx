@@ -87,7 +87,7 @@ const ReplicadContext = createContext<
       mesh: { edges: any; faces: any } | undefined;
       code: string;
       parameters: Record<string, any>;
-      downloadSTL: () => Promise<Blob | undefined>;
+      downloadSTL: () => Promise<Blob>;
       setCode: (code: string) => void;
       setParameters: (key: string, value: any) => void;
     }
@@ -192,7 +192,7 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
 
   const downloadSTL = async () => {
     const worker = workerReference.current;
-    if (!worker) return;
+    if (!worker) throw new Error('Worker not found');
     const result = await worker.exportShape('stl');
     return result[0].blob;
   };

@@ -109,8 +109,10 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
       console.log('terminating worker');
       if (workerReference.current) {
         const currentWorker = workerReference.current;
+        // TODO: Check if this is needed
         if ('terminate' in currentWorker) {
           (currentWorker as unknown as Worker).terminate();
+          console.log('terminated worker');
         }
         workerReference.current = undefined;
       }

@@ -400,7 +400,7 @@ export const gridfinityBox = `const {
 const defaultParams = {
   xSize: 2,
   ySize: 1,
-  heigth: 0.5,
+  height: 0.5,
   withMagnet: false,
   withScrew: false,
   magnetRadius: 3.25,
@@ -567,7 +567,7 @@ function main(
   {
     xSize = 2,
     ySize = 1,
-    heigth = 0.5,
+    height = 0.5,
     keepFull = false,
     wallThickness = 1.2,
     withMagnet = false,
@@ -577,7 +577,7 @@ function main(
     screwRadius = 1.5,
   } = {}
 ) {
-  const stdHeight = heigth * SIZE;
+  const stdHeight = height * SIZE;
 
   let box = drawRoundedRectangle(
     xSize * SIZE - CLEARANCE,

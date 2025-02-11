@@ -1,8 +1,6 @@
-import { Avatar } from '@radix-ui/react-avatar';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { ChevronRight, Edit, Globe2, History, NotebookIcon, Projector } from 'lucide-react';
 import { CopyButton } from '@/components/copy-button';
-import { Taucad } from '@/components/icons/taucad';
 import { Button } from '@/components/ui/button';
 import { MessageSchema, MessageRole, MessageStatus, SourceOrigin } from '@/hooks/use-chat';
 import { cn } from '@/utils/ui';
@@ -13,6 +11,7 @@ import { Badge } from './ui/badge';
 import { useState, useEffect, useRef } from 'react';
 import { When } from './ui/utils/when';
 import { Textarea } from './ui/textarea';
+import { Avatar, AvatarImage } from './ui/avatar';
 
 const MAX_TITLE_LENGTH = 50;
 
@@ -38,7 +37,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
   useEffect(() => {
     if (isEditing && textareaReference.current) {
       const length = textareaReference.current.value.length;
-      textareaReference.current.setSelectionRange(length, length);
+      textareaReference.current.setSelectionRange(0, length);
     }
   }, [isEditing]);
 
@@ -50,7 +49,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
     <article className={cn('group flex flex-row space-x-2 items-start', isUser && 'space-x-reverse flex-row-reverse')}>
       <When condition={message.role === MessageRole.User}>
         <Avatar className="w-8 h-8 bg-neutral-200 rounded-full flex items-center justify-center">
-          <img src="/avatar-sample.png" alt="User" />
+          <AvatarImage src="/avatar-sample.png" alt="User" />
         </Avatar>
       </When>
       <div className="flex flex-col space-y-2">

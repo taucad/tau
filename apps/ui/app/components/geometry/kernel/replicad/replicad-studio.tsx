@@ -38,7 +38,7 @@ export function ReplicadStudio() {
         <Drawer>
           <DrawerTrigger asChild>
             <Button variant="outline" className="flex md:hidden text-muted-foreground rounded-md flex-row gap-2">
-              <PencilRuler className="w-4 h-4" />
+              <PencilRuler className="size-4" />
               <span>Edit</span>
             </Button>
           </DrawerTrigger>

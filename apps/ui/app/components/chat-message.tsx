@@ -75,7 +75,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                       key={source.key}
                       className="rounded-full hover:bg-neutral-100 data-[active=true]:bg-neutral-200 data-[active=true]:hover:bg-neutral-300 flex flex-row items-center space-x-1 cursor-pointer select-none transition-all duration-200 ease-in-out"
                     >
-                      <source.icon className="w-3 h-3" />
+                      <source.icon className="size-5" />
                       <p className="text-xs">{sourceCount}</p>
                       <p className="text-xs">{source.key}</p>
                     </Badge>
@@ -123,7 +123,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                         >
                           <p className="text-xs font-medium line-clamp-3">{source.title}</p>
                           <div className="flex flex-row items-center space-x-2">
-                            <img src={sourceFaviconUrl.href} alt={sourceDomain} className="w-4 h-4 rounded-full" />
+                            <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
                             <p className="text-xs text-foreground-500 font-medium truncate">{sourceDomain}</p>
                           </div>
                         </div>
@@ -131,7 +131,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                     </HoverCardTrigger>
                     <HoverCardContent className="flex flex-col space-y-2">
                       <div className="flex flex-row items-center space-x-2">
-                        <img src={sourceFaviconUrl.href} alt={sourceDomain} className="w-4 h-4 rounded-full" />
+                        <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
                         <p className="text-sm text-foreground-500">{sourceDomain}</p>
                       </div>
                       <p className="text-sm font-medium">{source.title}</p>
@@ -156,19 +156,19 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                             key={source.title}
                             src={sourceFaviconUrl.href}
                             alt={sourceDomain}
-                            className="w-4 h-4 sm:w-5 sm:h-5 rounded-full"
+                            className="size-4 sm:w-5 sm:h-5 rounded-full"
                           />
                         );
                       })}
                       {relevantSources.length > 9 && (
-                        <div className="flex items-center justify-center w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-neutral-200 text-[8px] sm:text-[8px] text-foreground-500 font-medium">
+                        <div className="flex items-center justify-center size-4 sm:w-5 sm:h-5 rounded-full bg-neutral-200 text-[8px] sm:text-[8px] text-foreground-500 font-medium">
                           +{relevantSources.length - 9}
                         </div>
                       )}
                     </div>
                     <div className="flex flex-row items-center text-foreground-500 font-medium">
                       <p className="text-xs">Show all</p>
-                      <ChevronRight className="w-4 h-4" />
+                      <ChevronRight className="size-4" />
                     </div>
                   </SheetTrigger>
                   <SheetContent className="overflow-y-scroll">
@@ -192,11 +192,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                               >
                                 <p className="text-sm font-medium text-foreground">{source.title}</p>
                                 <div className="flex flex-row items-center space-x-2">
-                                  <img
-                                    src={sourceFaviconUrl.href}
-                                    alt={sourceDomain}
-                                    className="w-4 h-4 rounded-full"
-                                  />
+                                  <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
                                   <p className="text-xs text-foreground-500 font-medium">{sourceDomain}</p>
                                 </div>
                                 <p className="text-xs text-foreground">{source.snippet}</p>
@@ -258,7 +254,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                 setIsEditing((editing) => !editing);
               }}
             >
-              <Edit className="w-4 h-4" />
+              <Edit className="size-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>

@@ -109,7 +109,7 @@ export default function ChatInterface() {
         className="group absolute top-0 right-0 text-muted-foreground m-1.5"
         data-state={isChatOpen ? 'open' : 'closed'}
       >
-        <span className="w-4 h-4">
+        <span className="size-4">
           <Box className="absolute scale-0 group-data-[state=open]:scale-100 transition-transform duration-200 ease-in-out" />
           <MessageSquareReply className="scale-100 group-data-[state=open]:scale-0 transition-transform duration-200 ease-in-out" />
         </span>
@@ -154,7 +154,7 @@ export default function ChatInterface() {
                 tabIndex={isScrolledTo ? -1 : 0}
                 onClick={scrollTo}
               >
-                <ArrowDown className="w-4 h-4" />
+                <ArrowDown className="size-4" />
               </Button>
             </div>
             <div ref={chatEndReference} className="mb-px" />
@@ -216,7 +216,7 @@ export default function ChatInterface() {
                   renderButtonContents={(item) => (
                     <>
                       <span className="text-xs">{item.model}</span>
-                      <span className="relative flex w-4 h-4">
+                      <span className="relative flex size-4">
                         <ChevronDown className="absolute group-hover:scale-0 transition-transform duration-200 ease-in-out" />
                         <CircuitBoard className="absolute scale-0 group-hover:scale-100 transition-transform duration-200 ease-in-out" />
                       </span>
@@ -241,7 +241,7 @@ export default function ChatInterface() {
                       }}
                     >
                       <span className="text-xs">Search</span>
-                      <Globe className="w-4 h-4 group-hover:rotate-180 transition-transform duration-200 ease-in-out" />
+                      <Globe className="size-4 group-hover:rotate-180 transition-transform duration-200 ease-in-out" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -258,10 +258,10 @@ export default function ChatInterface() {
                 }}
                 disabled={inputText.length === 0}
               >
-                <ArrowRight className="w-4 h-4" />
+                <ArrowRight className="size-4" />
               </Button>
               <Button size="icon" variant="ghost" className="absolute right-2 bottom-2">
-                <Mic className="w-4 h-4" />
+                <Mic className="size-4" />
               </Button>
             </div>
           </ResizablePanel>
@@ -281,21 +281,21 @@ export default function ChatInterface() {
               value="preview"
               className="gap-2 data-[state=active]:bg-neutral-100 data-[state=active]:text-foreground data-[state=active]:shadow"
             >
-              <Eye className="w-4 h-4" />
+              <Eye className="size-4" />
               <span className="hidden md:block">Preview</span>
             </TabsTrigger>
             <TabsTrigger
               value="code"
               className="gap-2 data-[state=active]:bg-neutral-100 data-[state=active]:text-foreground data-[state=active]:shadow"
             >
-              <Code className="w-4 h-4" />
+              <Code className="size-4" />
               <span className="hidden md:block">Code</span>
             </TabsTrigger>
             <TabsTrigger
               value="console"
               className="gap-2 data-[state=active]:bg-neutral-100 data-[state=active]:text-foreground data-[state=active]:shadow"
             >
-              <Terminal className="w-4 h-4" />
+              <Terminal className="size-4" />
               <span className="hidden md:block">Console</span>
             </TabsTrigger>
           </TabsList>

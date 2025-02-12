@@ -58,7 +58,7 @@ export default function ChatStart() {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button size="icon" variant="ghost" className="absolute right-2 top-2 transform transition-colors">
-                <Mic className="h-4 w-4 sm:h-5 sm:w-5" />
+                <Mic className="size-4 sm:h-5 sm:w-5" />
               </Button>
             </TooltipTrigger>
             <TooltipContent>
@@ -88,21 +88,21 @@ export default function ChatStart() {
             variant="outline"
             className="flex items-center justify-start gap-2 py-2 sm:py-3 px-4 h-auto hover:shadow-sm transition-all"
           >
-            <FileText className="h-4 w-4 shrink-0" />
+            <FileText className="size-4 shrink-0" />
             Analyze document
           </Button>
           <Button
             variant="outline"
             className="flex items-center justify-start gap-2 py-2 sm:py-3 px-4 h-auto hover:shadow-sm transition-all"
           >
-            <Code className="h-4 w-4 shrink-0" />
+            <Code className="size-4 shrink-0" />
             Write code
           </Button>
           <Button
             variant="outline"
             className="flex items-center justify-start gap-2 py-2 sm:py-3 px-4 h-auto hover:shadow-sm transition-all"
           >
-            <Lightbulb className="h-4 w-4 shrink-0" />
+            <Lightbulb className="size-4 shrink-0" />
             Explain concept
           </Button>
         </div>
@@ -112,7 +112,7 @@ export default function ChatStart() {
           className="w-full text-muted-foreground flex items-center justify-center gap-2 transition-colors py-3 sm:py-4 text-sm sm:text-base"
         >
           Show All
-          <ChevronDown className="h-4 w-4 ml-1" />
+          <ChevronDown className="size-4 ml-1" />
         </Button>
       </div>
     </div>

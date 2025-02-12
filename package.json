@@ -124,7 +124,6 @@
     "jest-environment-node": "^29.7.0",
     "jsdom": "~26.0.0",
     "nx": "20.4.0",
-    "postcss": "8.5.1",
     "prettier": "3.4.2",
     "tailwind-merge": "^3.0.1",
     "tailwind-scrollbar": "^4.0.0",

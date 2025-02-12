@@ -20,7 +20,7 @@ export function CodeViewer({
       showLineNumbers={showLineNumbers}
       customStyle={{
         backgroundColor: 'transparent',
-        color: 'hsl(var(--foreground))',
+        color: 'var(--foreground)',
         margin: 0,
         ...(showLineNumbers ? { padding: '0.5em 0' } : {}),
       }}

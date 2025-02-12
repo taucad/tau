@@ -29,7 +29,7 @@ export function ReplicadStudio() {
             {error && <div className="text-destructive p-0.5 rounded-tr-md bg-destructive/10 text-xs">{error}</div>}
           </div>
         </div>
-        <div className="hidden md:flex w-64 xl:w-96 flex-shrink-0 p-4 border-l-[1px] gap-2 text-sm flex-col">
+        <div className="hidden md:flex w-64 xl:w-96 shrink-0 p-4 border-l-[1px] gap-2 text-sm flex-col">
           <span className="font-bold text-lg">Parameters</span>
           <Parameters />
         </div>

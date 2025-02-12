@@ -2,6 +2,7 @@ import { vitePlugin as remix } from '@remix-run/dev';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { remixPWA } from '@remix-pwa/dev';
+import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
 import path from 'node:path';
@@ -21,6 +22,7 @@ export default defineConfig({
     nxViteTsPaths(),
     tsconfigPaths(),
     remixPWA(),
+    tailwindcss(),
   ],
 
   server: {

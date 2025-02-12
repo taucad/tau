@@ -1,183 +1,362 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
 
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 47.4% 11.2%;
+@plugin 'tailwindcss-animate';
+@plugin '@tailwindcss/typography';
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+@custom-variant dark (&:is(.dark *));
 
-    --foreground-0: 210 10% 100%;
-    --foreground-50: 210 10% 96%;
-    --foreground-100: 210 30% 96%;
-    --foreground-200: 220 18% 90%;
-    --foreground-300: 219 15% 82%;
-    --foreground-400: 220 11% 64%;
-    --foreground-500: 221 8% 48%;
-    --foreground-600: 222 11% 36%;
-    --foreground-700: 221 16% 20%;
-    --foreground-800: 227 17% 16%;
-    --foreground-900: 226 21% 12%;
-    --foreground-950: 222 32% 8%;
+@theme inline {
+  --shadow-*: initial;
+  --shadow-xs: 0px 1px 2px 0px rgba(10, 13, 20, 0.03);
+  --shadow-sm: 0px 1px 2px 0px #1018280f, 0px 1px 3px 0px #1018281a;
+  --shadow-md: 0px 16px 32px -12px rgba(14, 18, 27, 0.1);
+  --shadow: 0px 16px 32px -12px #0e121b1a;
 
-    --primary: 224.3 76.3% 58%;
-    --primary-foreground: 210 40% 96.1%;
+  --color-*: initial;
+  --color-black: black;
+  --color-white: white;
+  --color-transparent: transparent;
+  --color-background: var(--background);
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+  --color-foreground-0: var(--foreground-0);
+  --color-foreground-50: var(--foreground-50);
+  --color-foreground-100: var(--foreground-100);
+  --color-foreground-200: var(--foreground-200);
+  --color-foreground-300: var(--foreground-300);
+  --color-foreground-400: var(--foreground-400);
+  --color-foreground-500: var(--foreground-500);
+  --color-foreground-600: var(--foreground-600);
+  --color-foreground-700: var(--foreground-700);
+  --color-foreground-800: var(--foreground-800);
+  --color-foreground-900: var(--foreground-900);
+  --color-foreground-950: var(--foreground-950);
+  --color-foreground: var(--foreground);
 
-    --neutral-0: 210 10% 100%;
-    --neutral-50: 0 0% 98%;
-    --neutral-100: 210 30% 96%;
-    --neutral-200: 220 18% 90%;
-    --neutral-300: 219 15% 82%;
-    --neutral-400: 220 11% 64%;
-    --neutral-500: 221 8% 48%;
-    --neutral-600: 222 11% 36%;
-    --neutral-700: 221 16% 20%;
-    --neutral-800: 227 17% 16%;
-    --neutral-900: 226 21% 12%;
-    --neutral-950: 222 32% 8%;
-    --neutral: 0 0% 0%;
-    --neutral-foreground: 0 0% 100%;
+  --color-neutral-0: var(--neutral-0);
+  --color-neutral-50: var(--neutral-50);
+  --color-neutral-100: var(--neutral-100);
+  --color-neutral-200: var(--neutral-200);
+  --color-neutral-300: var(--neutral-300);
+  --color-neutral-400: var(--neutral-400);
+  --color-neutral-500: var(--neutral-500);
+  --color-neutral-600: var(--neutral-600);
+  --color-neutral-700: var(--neutral-700);
+  --color-neutral-800: var(--neutral-800);
+  --color-neutral-900: var(--neutral-900);
+  --color-neutral-950: var(--neutral-950);
+  --color-neutral: var(--neutral);
+  --color-neutral-foreground: var(--neutral-foreground);
 
-    --accent: 220 23.7% 90.9%;
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
 
-    --border: 220 18% 90%;
+  --color-accent: var(--accent);
 
-    --destructive: 355 96% 60%;
-    --destructive-foreground: 0 0% 100%;
+  --color-border: var(--border);
 
-    --success: 148 72% 44%;
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
 
-    --warning: 20 100% 64%;
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
 
-    --feature: 256 88% 64%;
+  --color-success: var(--success);
 
-    --information: 228 100% 60%;
+  --color-warning: var(--warning);
 
-    --highlighted: 330 96% 64%;
+  --color-feature: var(--feature);
 
-    --stable: 172 72% 48%;
+  --color-information: var(--information);
 
-    --alert: 42 92% 54%;
+  --color-highlighted: var(--highlighted);
 
-    --verified: 200 100% 64%;
+  --color-stable: var(--stable);
 
-    --input: 220 18% 90%;
-    --ring: 217.2 91.2% 59.8%;
+  --color-verified: var(--verified);
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 47.4% 11.2%;
+  --color-alert: var(--alert);
 
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 90.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 
-    /* RADIUS */
-    --radius: 0.5rem;
+  --color-sidebar: var(--sidebar-background);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --animate-pulse-subtle: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-gradient: gradient 5s ease infinite;
+
+  @keyframes gradient {
+
+    0%,
+    100% {
+      background-position: 0% 50%;
+    }
+
+    50% {
+      background-position: 100% 50%;
+    }
   }
 
-  .dark,
-  :root[class~="dark"] {
-    --background: 240 5.9% 10%;
-    --foreground: 210 40% 96.1%;
+  @keyframes pulse-subtle {
 
-    --muted: 223 7% 15%;
-    --muted-foreground: 215.4 16.3% 56.9%;
+    0%,
+    100% {
+      opacity: 1;
+    }
 
-    --foreground-50: 240 4.8% 86%;
-    --foreground-100: 240 4.8% 81%;
-    --foreground-200: 240 4.8% 76%;
-    --foreground-300: 240 4.8% 71%;
-    --foreground-400: 240 4.8% 66%;
-    --foreground-500: 240 4.8% 61%;
-    --foreground-600: 240 4.8% 56%;
-    --foreground-700: 240 4.8% 51%;
-    --foreground-800: 240 4.8% 46%;
-    --foreground-900: 240 4.8% 41%;
-    --foreground-950: 240 4.8% 36%;
+    50% {
+      opacity: 0.85;
+    }
+  }
+}
 
-    --primary: 224.3 76.3% 58%;
-    --primary-foreground: 240 4.8% 95%;
+:root {
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(222.2 47.4% 11.2%);
 
-    --secondary: 222.2 47.4% 11.2%;
-    --secondary-foreground: 210 40% 96.1%;
+  --muted: hsl(210 40% 96.1%);
+  --muted-foreground: hsl(215.4 16.3% 46.9%);
 
-    --neutral-0: 240 5.9% 10%;
-    --neutral-50: 240 5.9% 12%;
-    --neutral-100: 240 5.9% 16%;
-    --neutral-200: 240 5.9% 24%;
-    --neutral-300: 240 5.9% 32%;
-    --neutral-400: 240 5.9% 38%;
-    --neutral-500: 240 5.9% 44%;
-    --neutral-600: 240 5.9% 50%;
-    --neutral-700: 240 5.9% 56%;
-    --neutral-800: 240 5.9% 64%;
-    --neutral-900: 240 5.9% 72%;
-    --neutral-950: 240 5.9% 80%;
-    --neutral: 0 0% 100%;
-    --neutral-foreground: 0 0% 0%;
+  --foreground-0: hsl(210 10% 100%);
+  --foreground-50: hsl(210 10% 96%);
+  --foreground-100: hsl(210 30% 96%);
+  --foreground-200: hsl(220 18% 90%);
+  --foreground-300: hsl(219 15% 82%);
+  --foreground-400: hsl(220 11% 64%);
+  --foreground-500: hsl(221 8% 48%);
+  --foreground-600: hsl(222 11% 36%);
+  --foreground-700: hsl(221 16% 20%);
+  --foreground-800: hsl(227 17% 16%);
+  --foreground-900: hsl(226 21% 12%);
+  --foreground-950: hsl(222 32% 8%);
 
-    --accent: 240 3.7% 15.9%;
+  --primary: hsl(224.3 76.3% 58%);
+  --primary-foreground: hsl(210 40% 96.1%);
 
-    --border: 240 5.9% 25%;
+  --secondary: hsl(210 40% 96.1%);
+  --secondary-foreground: hsl(222.2 47.4% 11.2%);
 
-    --destructive: 355 96% 40%;
-    --destructive-foreground: 0 0% 100%;
+  --neutral-0: hsl(210 10% 100%);
+  --neutral-50: hsl(0 0% 98%);
+  --neutral-100: hsl(210 30% 96%);
+  --neutral-200: hsl(220 18% 90%);
+  --neutral-300: hsl(219 15% 82%);
+  --neutral-400: hsl(220 11% 64%);
+  --neutral-500: hsl(221 8% 48%);
+  --neutral-600: hsl(222 11% 36%);
+  --neutral-700: hsl(221 16% 20%);
+  --neutral-800: hsl(227 17% 16%);
+  --neutral-900: hsl(226 21% 12%);
+  --neutral-950: hsl(222 32% 8%);
+  --neutral: hsl(0 0% 0%);
+  --neutral-foreground: hsl(0 0% 100%);
 
-    --success: 148 72% 34%;
+  --accent: hsl(220 23.7% 90.9%);
 
-    --warning: 20 100% 44%;
+  --border: hsl(220 18% 90%);
 
-    --feature: 256 88% 44%;
+  --destructive: hsl(355 96% 60%);
+  --destructive-foreground: hsl(0 0% 100%);
 
-    --information: 228 100% 40%;
+  --success: hsl(148 72% 44%);
 
-    --highlighted: 330 96% 44%;
+  --warning: hsl(20 100% 64%);
 
-    --stable: 172 72% 38%;
+  --feature: hsl(256 88% 64%);
 
-    --alert: 42 92% 34%;
+  --information: hsl(228 100% 60%);
 
-    --verified: 200 100% 44%;
+  --highlighted: hsl(330 96% 64%);
 
-    --input: 240 5.9% 15%;
-    --ring: 224.3 76.3% 48%;
+  --stable: hsl(172 72% 48%);
 
-    --popover: 240 5.9% 10%;
-    --popover-foreground: 240 4.8% 90.9%;
+  --alert: hsl(42 92% 54%);
 
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 90.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 90.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+  --verified: hsl(200 100% 64%);
+
+  --input: hsl(220 18% 90%);
+  --ring: hsl(217.2 91.2% 59.8%);
+
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(222.2 47.4% 11.2%);
+
+  --sidebar-background: hsl(0 0% 98%);
+  --sidebar-foreground: hsl(240 5.3% 26.1%);
+  --sidebar-primary: hsl(240 5.9% 10%);
+  --sidebar-primary-foreground: hsl(0 0% 98%);
+  --sidebar-accent: hsl(240 4.8% 90.9%);
+  --sidebar-accent-foreground: hsl(240 5.9% 10%);
+  --sidebar-border: hsl(220 13% 91%);
+  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(222.2 47.4% 11.2%);
+
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(222.2 47.4% 11.2%);
+}
+
+.dark,
+:root[class~="dark"] {
+  --background: hsl(240 5.9% 10%);
+  --foreground: hsl(210 40% 96.1%);
+
+  --muted: hsl(223 7% 15%);
+  --muted-foreground: hsl(215.4 16.3% 56.9%);
+
+  --foreground-50: hsl(240 4.8% 86%);
+  --foreground-100: hsl(240 4.8% 81%);
+  --foreground-200: hsl(240 4.8% 76%);
+  --foreground-300: hsl(240 4.8% 71%);
+  --foreground-400: hsl(240 4.8% 66%);
+  --foreground-500: hsl(240 4.8% 61%);
+  --foreground-600: hsl(240 4.8% 56%);
+  --foreground-700: hsl(240 4.8% 51%);
+  --foreground-800: hsl(240 4.8% 46%);
+  --foreground-900: hsl(240 4.8% 41%);
+  --foreground-950: hsl(240 4.8% 36%);
+
+  --primary: hsl(224.3 76.3% 58%);
+  --primary-foreground: hsl(240 4.8% 95%);
+
+  --secondary: hsl(222.2 47.4% 11.2%);
+  --secondary-foreground: hsl(210 40% 96.1%);
+
+  --neutral-0: hsl(240 5.9% 10%);
+  --neutral-50: hsl(240 5.9% 12%);
+  --neutral-100: hsl(240 5.9% 16%);
+  --neutral-200: hsl(240 5.9% 24%);
+  --neutral-300: hsl(240 5.9% 32%);
+  --neutral-400: hsl(240 5.9% 38%);
+  --neutral-500: hsl(240 5.9% 44%);
+  --neutral-600: hsl(240 5.9% 50%);
+  --neutral-700: hsl(240 5.9% 56%);
+  --neutral-800: hsl(240 5.9% 64%);
+  --neutral-900: hsl(240 5.9% 72%);
+  --neutral-950: hsl(240 5.9% 80%);
+  --neutral: hsl(0 0% 100%);
+  --neutral-foreground: hsl(0 0% 0%);
+
+  --accent: hsl(240 3.7% 15.9%);
+
+  --border: hsl(240 5.9% 25%);
+
+  --destructive: hsl(355 96% 40%);
+  --destructive-foreground: hsl(0 0% 100%);
+
+  --success: hsl(148 72% 34%);
+
+  --warning: hsl(20 100% 44%);
+
+  --feature: hsl(256 88% 44%);
+
+  --information: hsl(228 100% 40%);
+
+  --highlighted: hsl(330 96% 44%);
+
+  --stable: hsl(172 72% 38%);
+
+  --alert: hsl(42 92% 34%);
+
+  --verified: hsl(200 100% 44%);
+
+  --input: hsl(240 5.9% 15%);
+  --ring: hsl(224.3 76.3% 48%);
+
+  --popover: hsl(240 5.9% 10%);
+  --popover-foreground: hsl(240 4.8% 90.9%);
+
+  --sidebar-background: hsl(240 5.9% 10%);
+  --sidebar-foreground: hsl(240 4.8% 90.9%);
+  --sidebar-primary: hsl(224.3 76.3% 48%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(240 3.7% 15.9%);
+  --sidebar-accent-foreground: hsl(240 4.8% 90.9%);
+  --sidebar-border: hsl(240 3.7% 15.9%);
+  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+}
+
+/*
+  The default border color has changed to `currentColor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--border, currentColor);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
   }
 }
 
 @layer base {
   * {
     @apply border-border focus-visible:outline-primary;
-    @apply scrollbar-track-transparent scrollbar-thin scrollbar-thumb-border scrollbar-thumb-rounded-full;
   }
 
   body {
-    @apply font-sans bg-background text-foreground antialiased;
-  }
-
-  html {
-    @apply h-full scroll-smooth;
+    @apply font-sans bg-background text-foreground antialiased scroll-smooth;
+    overflow: hidden;
   }
 }
+
+
+/* START SCROLLBAR STYLES */
+@plugin 'tailwind-scrollbar' {
+  nocompatible: true;
+  preferredStrategy: 'pseudoelements';
+}
+
+:root {
+  --scrollbar-thumb: var(--border);
+  --scrollbar-track: transparent;
+  --scrollbar-thickness: 9px;
+  --scrollbar-padding: 1.5px;
+
+  --scrollbar-corner: var(--scrollbar-track);
+  --scrollbar-width: var(--scrollbar-thickness);
+  --scrollbar-height: var(--scrollbar-thickness);
+  --scrollbar-radius: calc(var(--scrollbar-thickness) / 2);
+  --scrollbar-thumb-radius: var(--scrollbar-radius);
+  --scrollbar-track-radius: var(--scrollbar-radius);
+  --scrollbar-corner-radius: var(--scrollbar-radius);
+}
+
+@layer base {
+  * {
+    @apply scrollbar;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+
+    /* Ensures the scrollbar thumb is correctly padded in Webkit browsers */
+    ::-webkit-scrollbar-thumb {
+      border: var(--scrollbar-padding) var(--scrollbar-track) solid;
+      background-clip: padding-box;
+    }
+  }
+}
+
+/* END SCROLLBAR STYLES */

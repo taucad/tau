@@ -88,21 +88,21 @@ export default function ChatStart() {
             variant="outline"
             className="flex items-center justify-start gap-2 py-2 sm:py-3 px-4 h-auto hover:shadow-sm transition-all"
           >
-            <FileText className="h-4 w-4 flex-shrink-0" />
+            <FileText className="h-4 w-4 shrink-0" />
             Analyze document
           </Button>
           <Button
             variant="outline"
             className="flex items-center justify-start gap-2 py-2 sm:py-3 px-4 h-auto hover:shadow-sm transition-all"
           >
-            <Code className="h-4 w-4 flex-shrink-0" />
+            <Code className="h-4 w-4 shrink-0" />
             Write code
           </Button>
           <Button
             variant="outline"
             className="flex items-center justify-start gap-2 py-2 sm:py-3 px-4 h-auto hover:shadow-sm transition-all"
           >
-            <Lightbulb className="h-4 w-4 flex-shrink-0" />
+            <Lightbulb className="h-4 w-4 shrink-0" />
             Explain concept
           </Button>
         </div>

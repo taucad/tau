@@ -277,6 +277,9 @@
   --popover: hsl(240 5.9% 10%);
   --popover-foreground: hsl(240 4.8% 90.9%);
 
+  --card: hsl(240 5.9% 10%);
+  --card-foreground: hsl(240 4.8% 90.9%);
+
   --sidebar-background: hsl(240 5.9% 10%);
   --sidebar-foreground: hsl(240 4.8% 90.9%);
   --sidebar-primary: hsl(224.3 76.3% 48%);

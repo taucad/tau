@@ -3,6 +3,7 @@ import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { remixPWA } from '@remix-pwa/dev';
 import tailwindcss from '@tailwindcss/vite';
+import ViteSvgSpriteWrapper from 'vite-svg-sprite-wrapper';
 import { defineConfig } from 'vite';
 
 import path from 'node:path';
@@ -23,12 +24,24 @@ export default defineConfig({
     tsconfigPaths(),
     remixPWA(),
     tailwindcss(),
+    ViteSvgSpriteWrapper({
+      icons: path.resolve(__dirname, './app/components/icons/raw/**/*.svg'),
+      outputDir: path.resolve(__dirname, './app/components/icons/generated'),
+      generateType: true,
+      typeOutputDir: path.resolve(__dirname, './app/components/icons/generated'),
+      sprite: { shape: {} },
+    }),
   ],
 
   server: {
     port: 3000,
     // TODO: set to actual domain
     allowedHosts: true,
+  },
+  build: {
+    assetsInlineLimit: (file) => {
+      return !file.endsWith('.svg');
+    },
   },
 
   test: {

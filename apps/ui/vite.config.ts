@@ -29,6 +29,7 @@ export default defineConfig({
       outputDir: path.resolve(__dirname, './app/components/icons/generated'),
       generateType: true,
       typeOutputDir: path.resolve(__dirname, './app/components/icons/generated'),
+      // Ensure the sprite retains the original svg attributes
       sprite: { shape: {} },
     }),
   ],

@@ -32,6 +32,8 @@ DO NOT EDIT THESE FILES DIRECTLY.
 
 These files should be checked into source control.
 
+## Notes
 
-
-
+- The size of the `sprite.svg` file should be checked periodically to ensure it is not too large,
+  ideally below 125kb. If it becomes larger than this, we should split the icons into multiple
+  sprites.

@@ -1,33 +1,18 @@
-import { useState, useRef, useEffect } from 'react';
-import {
-  Mic,
-  Eye,
-  Code,
-  Terminal,
-  ArrowRight,
-  ArrowDown,
-  Globe,
-  Box,
-  MessageSquareReply,
-  ChevronDown,
-  CircuitBoard,
-} from 'lucide-react';
+import { useRef, useEffect, useState } from 'react';
+import { Eye, Code, Terminal, ArrowDown, Box, MessageSquareReply } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MessageRole, MessageStatus, useChat } from '@/hooks/use-chat';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
-import { Textarea } from '@/components/ui/textarea';
 import { useScroll } from '@/hooks/use-scroll';
 import { ChatMessage } from '@/components/chat-message';
 import { ChatViewer } from '@/components/chat-viewer';
 import { cn } from '@/utils/ui';
+import { ChatTextarea } from '@/components/chat-textarea';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Model, useModels } from '@/hooks/use-models';
-import { Badge } from './ui/badge';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { useModels } from '@/hooks/use-models';
 import { useRouteLoaderData } from '@remix-run/react';
 import type { loader } from '@/root';
-import { ComboBoxResponsive } from '@/components/ui/combobox-responsive';
 import { ChatCode } from './chat-code';
 
 export const CHAT_COOKIE_NAME = 'tau-chat-open';
@@ -36,30 +21,22 @@ export const CHAT_RESIZE_COOKIE_NAME_MAIN = 'tau-chat-main-resize';
 export const CHAT_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 export default function ChatInterface() {
-  const [inputText, setInputText] = useState('');
   const { sendMessage, messages, editMessage } = useChat();
-  const [selectedModel, setSelectedModel] = useState('gpt-4o-mini');
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
   const data = useRouteLoaderData<typeof loader>('root');
   const [isChatOpen, setIsChatOpen] = useState(data?.chatOpen);
   const { data: models } = useModels();
-  const [isSearching, setIsSearching] = useState(false);
-  const [isFocused, setIsFocused] = useState(false);
-  const textareaReference = useRef<HTMLTextAreaElement | null>(null);
 
-  const onSubmit = async () => {
-    setInputText('');
+  const onSubmit = async (text: string, model: string) => {
     await sendMessage({
       message: {
-        content: inputText,
+        content: text,
         role: MessageRole.User,
         status: MessageStatus.Success,
-        metadata: {
-          systemHints: [...(isSearching ? ['search'] : [])],
-        },
+        metadata: {},
       },
-      model: selectedModel,
+      model,
     });
   };
 
@@ -72,7 +49,6 @@ export default function ChatInterface() {
   const toggleChatOpen = () => {
     setIsChatOpen((previous) => {
       const open = !previous;
-
       // eslint-disable-next-line unicorn/no-document-cookie
       document.cookie = `${CHAT_COOKIE_NAME}=${open}; path=/; max-age=${CHAT_COOKIE_MAX_AGE}`;
       return open;
@@ -84,14 +60,6 @@ export default function ChatInterface() {
     // eslint-disable-next-line unicorn/no-document-cookie
     document.cookie = `${name}=${JSON.stringify(sizes)}; path=/; max-age=${CHAT_COOKIE_MAX_AGE}`;
   };
-
-  const providerModelsMap = models.reduce((map, model) => {
-    if (!map.has(model.provider)) {
-      map.set(model.provider, []);
-    }
-    map.get(model.provider)!.push(model);
-    return map;
-  }, new Map<string, Model[]>());
 
   return (
     <ResizablePanelGroup
@@ -169,102 +137,7 @@ export default function ChatInterface() {
             defaultSize={data?.resize.chatHistory[1]}
             className="p-2"
           >
-            <div className="relative h-full">
-              <div
-                data-state={isFocused ? 'active' : 'inactive'}
-                onClick={() => {
-                  textareaReference.current?.focus();
-                }}
-                className="flex flex-col h-full border shadow-md rounded-lg data-[state=active]:border-primary w-full resize-none overflow-auto"
-              >
-                <Textarea
-                  onFocus={() => {
-                    setIsFocused(true);
-                  }}
-                  onBlur={() => {
-                    setIsFocused(false);
-                  }}
-                  ref={textareaReference}
-                  className="border-none shadow-none ring-0 p-4 pr-10 pb-0 mb-8 focus-visible:ring-0 focus-visible:outline-none w-full resize-none h-full"
-                  rows={3}
-                  value={inputText}
-                  onChange={(event) => setInputText(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault(); // Prevents adding a new line
-                      onSubmit();
-                    }
-                  }}
-                  placeholder="Type your message..."
-                />
-              </div>
-              <div className="absolute left-2 bottom-2 flex flex-row items-center">
-                <ComboBoxResponsive
-                  className="group text-xs w-[initial] px-2 h-6 border-none flex items-center justify-between gap-2"
-                  popoverContentClassName="w-[300px]"
-                  groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({
-                    name: provider,
-                    items: models,
-                  }))}
-                  renderLabel={(item) => (
-                    <span className="text-xs flex items-center justify-between w-full">
-                      <span className="font-mono">{item.model}</span>
-                      <Badge variant="outline" className="bg-background">
-                        {item.details.parameterSize}
-                      </Badge>
-                    </span>
-                  )}
-                  renderButtonContents={(item) => (
-                    <>
-                      <span className="text-xs">{item.model}</span>
-                      <span className="relative flex size-4">
-                        <ChevronDown className="absolute group-hover:scale-0 transition-transform duration-200 ease-in-out" />
-                        <CircuitBoard className="absolute scale-0 group-hover:scale-100 transition-transform duration-200 ease-in-out" />
-                      </span>
-                    </>
-                  )}
-                  getValue={(item) => item.model}
-                  onSelect={(selectedModel) => {
-                    setSelectedModel(selectedModel);
-                  }}
-                  placeholder="Select a model"
-                  defaultValue={models.find((model) => model.model === selectedModel)}
-                />
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      data-state={isSearching ? 'active' : 'inactive'}
-                      size="xs"
-                      variant="ghost"
-                      className="group data-[state=active]:bg-neutral/20 data-[state=active]:text-primary data-[state=active]:shadow transition-all duration-200"
-                      onClick={() => {
-                        setIsSearching((previous) => !previous);
-                      }}
-                    >
-                      <span className="text-xs">Search</span>
-                      <Globe className="size-4 group-hover:rotate-180 transition-transform duration-200 ease-in-out" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Search the web</p>
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="absolute right-2 top-2"
-                onClick={() => {
-                  onSubmit();
-                }}
-                disabled={inputText.length === 0}
-              >
-                <ArrowRight className="size-4" />
-              </Button>
-              <Button size="icon" variant="ghost" className="absolute right-2 bottom-2">
-                <Mic className="size-4" />
-              </Button>
-            </div>
+            <ChatTextarea onSubmit={onSubmit} models={models ?? []} />
           </ResizablePanel>
         </ResizablePanelGroup>
       </ResizablePanel>

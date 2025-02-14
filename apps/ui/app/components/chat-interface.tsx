@@ -146,17 +146,18 @@ export default function ChatInterface() {
                 />
               ))}
             </div>
-            <div className={cn('sticky flex justify-center bottom-2', isScrolledTo && 'opacity-0')}>
-              <Button
-                size="icon"
-                variant="outline"
-                className={cn('rounded-full', isScrolledTo && 'select-none pointer-events-none')}
-                tabIndex={isScrolledTo ? -1 : 0}
-                onClick={scrollTo}
-              >
-                <ArrowDown className="size-4" />
-              </Button>
-            </div>
+            <Button
+              size="icon"
+              variant="outline"
+              className={cn(
+                'sticky flex justify-center bottom-2 left-1/2 -translate-x-1/2 rounded-full',
+                isScrolledTo && 'opacity-0 select-none pointer-events-none',
+              )}
+              tabIndex={isScrolledTo ? -1 : 0}
+              onClick={scrollTo}
+            >
+              <ArrowDown className="size-4" />
+            </Button>
             <div ref={chatEndReference} className="mb-px" />
           </ResizablePanel>
           <ResizableHandle />
@@ -235,7 +236,7 @@ export default function ChatInterface() {
                       data-state={isSearching ? 'active' : 'inactive'}
                       size="xs"
                       variant="ghost"
-                      className="group data-[state=active]:bg-neutral-100 data-[state=active]:text-primary data-[state=active]:shadow transition-all duration-200"
+                      className="group data-[state=active]:bg-neutral/20 data-[state=active]:text-primary data-[state=active]:shadow transition-all duration-200"
                       onClick={() => {
                         setIsSearching((previous) => !previous);
                       }}
@@ -276,25 +277,16 @@ export default function ChatInterface() {
         className="h-full flex-col data-[state=open]:hidden lg:data-[state=open]:flex"
       >
         <Tabs defaultValue="preview" className="flex flex-col h-full">
-          <TabsList className="grid grid-cols-3 absolute m-2 bg-background z-10 border md:h-[2.375rem]">
-            <TabsTrigger
-              value="preview"
-              className="gap-2 data-[state=active]:bg-neutral-100 data-[state=active]:text-foreground data-[state=active]:shadow"
-            >
+          <TabsList className="grid grid-cols-3 absolute m-2 bg-background border md:h-[2.375rem] z-10 [&>*]:data-[state=active]:bg-accent/50">
+            <TabsTrigger value="preview" className="gap-2">
               <Eye className="size-4" />
               <span className="hidden md:block">Preview</span>
             </TabsTrigger>
-            <TabsTrigger
-              value="code"
-              className="gap-2 data-[state=active]:bg-neutral-100 data-[state=active]:text-foreground data-[state=active]:shadow"
-            >
+            <TabsTrigger value="code" className="gap-2">
               <Code className="size-4" />
               <span className="hidden md:block">Code</span>
             </TabsTrigger>
-            <TabsTrigger
-              value="console"
-              className="gap-2 data-[state=active]:bg-neutral-100 data-[state=active]:text-foreground data-[state=active]:shadow"
-            >
+            <TabsTrigger value="console" className="gap-2">
               <Terminal className="size-4" />
               <span className="hidden md:block">Console</span>
             </TabsTrigger>

@@ -1,4 +1,4 @@
-import { Link, Outlet, useMatches } from '@remix-run/react';
+import { Outlet, useMatches } from '@remix-run/react';
 import { AppSidebar } from './app-sidebar';
 import {
   Breadcrumb,
@@ -15,7 +15,6 @@ import type { loader } from '@/root';
 import { useLoaderData } from '@remix-run/react';
 import { Badge } from './ui/badge';
 import { useNetworkConnectivity } from '@/hooks/use-network-connectivity';
-import { Button } from './ui/button';
 import { Fragment } from 'react/jsx-runtime';
 
 const HEADER_HEIGHT = '3rem';
@@ -35,7 +34,7 @@ export function Page() {
         className="w-[calc(100dvw-var(--sidebar-width-current)-1px)]"
         style={{ '--header-height': HEADER_HEIGHT } as React.CSSProperties}
       >
-        <header className="flex h-[var(--header-height)] justify-between shrink-0 items-center border-b-[1px] border-neutral-200 gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
+        <header className="flex h-[var(--header-height)] justify-between shrink-0 items-center border-b-[1px] border-border gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
           <div className="flex items-center gap-1.5 md:gap-2.5 px-4">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -46,17 +45,11 @@ export function Page() {
             <Separator orientation="vertical" className="h-4" />
             <Breadcrumb>
               <BreadcrumbList className="sm:gap-0">
-                <BreadcrumbItem className="hidden md:block">
-                  <Button variant="ghost" className="p-2" asChild>
-                    <Link to="/builds">Builds</Link>
-                  </Button>
-                </BreadcrumbItem>
-
                 {breadcrumbItems.map((match) => (
                   <Fragment key={match.id}>
-                    <BreadcrumbSeparator className="hidden md:block" />
+                    <BreadcrumbSeparator className="hidden md:block first:hidden" />
                     <BreadcrumbItem>
-                      <BreadcrumbLink>{match.handle.breadcrumb(match)}</BreadcrumbLink>
+                      <BreadcrumbLink asChild>{match.handle.breadcrumb(match)}</BreadcrumbLink>
                     </BreadcrumbItem>
                   </Fragment>
                 ))}
@@ -78,7 +71,7 @@ export function Page() {
             )}
           </div>
         </header>
-        <section className="h-[calc(100dvh-var(--header-height)-1px)]">
+        <section className="h-[calc(100dvh-var(--header-height)-1px)] overflow-y-auto">
           <Outlet />
         </section>
       </SidebarInset>

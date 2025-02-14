@@ -12,7 +12,7 @@ export const ChatCode = () => {
         <CopyButton variant="outline" size="icon" text={code} className="text-muted-foreground" />
         <DownloadButton variant="outline" size="icon" text={code} className="text-muted-foreground" />
       </div>
-      <div className="bg-neutral-100 rounded-md m-2 mt-14 overflow-y-scroll w-full">
+      <div className="bg-neutral/10 rounded-md m-2 mt-14 overflow-y-scroll w-full">
         <EditableCodeViewer className="text-xs" language="typescript" code={code} onChange={setCode} />
       </div>
     </>

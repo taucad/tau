@@ -28,9 +28,11 @@ export default function ChatStart() {
 
   return (
     <div className="text-neutral max-w-3xl mx-auto py-6 px-4 sm:py-12 sm:px-6 space-y-6 sm:space-y-8">
-      <h1 className="text-2xl sm:text-3xl font-bold text-center mb-6 sm:mb-12">What should we build?</h1>
+      <div className="mb-12 text-center">
+        <h1 className="mb-4 text-4xl font-bold tracking-tight">What can I help you build?</h1>
+      </div>
 
-      <div className="bg-neutral-100 backdrop-blur-sm rounded-xl shadow-lg border p-4 sm:p-6 space-y-4 sm:space-y-6">
+      <div className="bg-neutral/10 backdrop-blur-sm rounded-xl shadow-lg border p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="flex flex-wrap gap-2 sm:gap-3 justify-center">
           {roles.map((role) => (
             <Button

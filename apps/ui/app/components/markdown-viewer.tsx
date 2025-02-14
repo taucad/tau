@@ -17,7 +17,7 @@ export const MarkdownViewer = ({ children }: { children: string }) => {
       className={cn(
         'text-sm prose text-foreground [--tw-prose-headings:text-foreground] [--tw-prose-bullets:text-foreground] [--tw-prose-bold:text-foreground] [--tw-prose-counters:text-foreground] [--tw-prose-lead:text-foreground] [--tw-prose-quotes:text-foreground] [--tw-prose-quote-borders:text-foreground] [--tw-prose-kbd:text-foreground] [--tw-prose-links:text-foreground]',
         /* <pre> */
-        'prose-pre:p-0 prose-pre:ps-0 prose-pre:pe-0 prose-pre:bg-neutral-100',
+        'prose-pre:p-0 prose-pre:ps-0 prose-pre:pe-0 prose-pre:bg-neutral/10',
       )}
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex]}
@@ -40,7 +40,7 @@ export const MarkdownViewer = ({ children }: { children: string }) => {
 
           return match ? (
             <div className="flex flex-col border border-neutral-200 rounded-md font-sans">
-              <div className="flex flex-row justify-between items-center pl-3 pr-1 pt-1 text-foreground-500">
+              <div className="flex flex-row justify-between items-center pl-3 pr-1 pt-1 text-foreground/50">
                 <div className="text-xs">{language}</div>
                 <CopyButton size="xs" className="flex" text={text} />
               </div>
@@ -53,7 +53,7 @@ export const MarkdownViewer = ({ children }: { children: string }) => {
               {...rest}
               className={cn(
                 className,
-                'bg-neutral-200 text-neutral p-1 font-normal rounded-sm after:content-none before:content-none',
+                'bg-neutral/20 text-neutral p-1 font-normal rounded-sm after:content-none before:content-none',
               )}
             >
               {children}

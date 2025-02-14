@@ -48,7 +48,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
   return (
     <article className={cn('group flex flex-row space-x-2 items-start', isUser && 'space-x-reverse flex-row-reverse')}>
       <When condition={message.role === MessageRole.User}>
-        <Avatar className="w-8 h-8 bg-neutral-200 rounded-full flex items-center justify-center">
+        <Avatar className="w-8 h-8 bg-neutral/20 rounded-full flex items-center justify-center">
           <AvatarImage src="/avatar-sample.png" alt="User" />
         </Avatar>
       </When>
@@ -73,9 +73,9 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                         });
                       }}
                       key={source.key}
-                      className="rounded-full hover:bg-neutral-100 data-[active=true]:bg-neutral-200 data-[active=true]:hover:bg-neutral-300 flex flex-row items-center space-x-1 cursor-pointer select-none transition-all duration-200 ease-in-out"
+                      className="rounded-full hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30 flex flex-row items-center space-x-1 cursor-pointer select-none transition-all duration-200 ease-in-out"
                     >
-                      <source.icon className="size-5" />
+                      <source.icon className="size-3" />
                       <p className="text-xs">{sourceCount}</p>
                       <p className="text-xs">{source.key}</p>
                     </Badge>
@@ -86,7 +86,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                 <TooltipTrigger>
                   <Badge
                     variant={'outline'}
-                    className="rounded-full hover:bg-neutral-100 data-[active=true]:bg-neutral-200 data-[active=true]:hover:bg-neutral-300 flex flex-row items-center space-x-1 cursor-pointer select-none transition-all duration-200 ease-in-out"
+                    className="rounded-full hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30 flex flex-row items-center space-x-1 cursor-pointer select-none transition-all duration-200 ease-in-out"
                   >
                     <p className="text-xs">+</p>
                   </Badge>
@@ -97,7 +97,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
               </Tooltip>
             </div>
             <When condition={relevantSources?.length === 0}>
-              <p className="italic text-foreground-500 text-sm">No sources, expand your search</p>
+              <p className="italic text-foreground/50 text-sm">No sources, expand your search</p>
             </When>
             <div className="grid grid-cols-4 gap-2">
               {relevantSources.slice(0, 3).map((source) => {
@@ -119,12 +119,12 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                       <a href={source.link} target="_blank">
                         <div
                           key={source.title}
-                          className="flex flex-col bg-neutral-50 hover:bg-neutral-100 p-2 justify-between rounded-md h-24"
+                          className="flex flex-col bg-neutral/5 hover:bg-neutral/10 p-2 justify-between rounded-md h-24"
                         >
                           <p className="text-xs font-medium line-clamp-3">{source.title}</p>
                           <div className="flex flex-row items-center space-x-2">
                             <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
-                            <p className="text-xs text-foreground-500 font-medium truncate">{sourceDomain}</p>
+                            <p className="text-xs text-foreground/50 font-medium truncate">{sourceDomain}</p>
                           </div>
                         </div>
                       </a>
@@ -132,7 +132,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                     <HoverCardContent className="flex flex-col space-y-2">
                       <div className="flex flex-row items-center space-x-2">
                         <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
-                        <p className="text-sm text-foreground-500">{sourceDomain}</p>
+                        <p className="text-sm text-foreground/50">{sourceDomain}</p>
                       </div>
                       <p className="text-sm font-medium">{source.title}</p>
                       <p className="text-sm">{source.snippet}</p>
@@ -142,7 +142,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
               })}
               {relevantSources.length > 3 && (
                 <Sheet>
-                  <SheetTrigger className="flex flex-col bg-neutral-50 hover:bg-neutral-100 p-2 justify-between rounded-md h-24">
+                  <SheetTrigger className="flex flex-col bg-neutral/5 hover:bg-neutral/10 p-2 justify-between rounded-md h-24">
                     <div className="flex flex-row items-center space-x-[1px] flex-wrap">
                       {relevantSources.slice(3, 9).map((source) => {
                         const sourceUrl = new URL(source.link);
@@ -161,12 +161,12 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                         );
                       })}
                       {relevantSources.length > 9 && (
-                        <div className="flex items-center justify-center size-4 sm:w-5 sm:h-5 rounded-full bg-neutral-200 text-[8px] sm:text-[8px] text-foreground-500 font-medium">
+                        <div className="flex items-center justify-center size-4 sm:w-5 sm:h-5 rounded-full bg-neutral/20 text-[8px] sm:text-[8px] text-foreground/50 font-medium">
                           +{relevantSources.length - 9}
                         </div>
                       )}
                     </div>
-                    <div className="flex flex-row items-center text-foreground-500 font-medium">
+                    <div className="flex flex-row items-center text-foreground/50 font-medium">
                       <p className="text-xs">Show all</p>
                       <ChevronRight className="size-4" />
                     </div>
@@ -188,12 +188,12 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                             <a href={source.link} target="_blank" key={source.link} className="w-full">
                               <div
                                 key={source.title}
-                                className="w-full bg-neutral-50 hover:bg-neutral-100 p-2 rounded-md flex flex-col space-y-2"
+                                className="w-full bg-neutral/5 hover:bg-neutral/10 p-2 rounded-md flex flex-col space-y-2"
                               >
                                 <p className="text-sm font-medium text-foreground">{source.title}</p>
                                 <div className="flex flex-row items-center space-x-2">
                                   <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
-                                  <p className="text-xs text-foreground-500 font-medium">{sourceDomain}</p>
+                                  <p className="text-xs text-foreground/50 font-medium">{sourceDomain}</p>
                                 </div>
                                 <p className="text-xs text-foreground">{source.snippet}</p>
                               </div>
@@ -209,7 +209,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
             {message.content && <p className="text-lg">Answer</p>}
           </>
         )}
-        <div className={cn(isUser ? 'bg-neutral-200 rounded-xl' : 'pt-[6px]')}>
+        <div className={cn(isUser ? 'bg-neutral/20 rounded-xl' : 'pt-[6px]')}>
           <When condition={isUser && isEditing}>
             <Textarea
               ref={textareaReference}
@@ -238,7 +238,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
           </When>
         </div>
         {!isUser && message.status === MessageStatus.Success && (
-          <div className="flex flex-row justify-start items-center text-foreground-500">
+          <div className="flex flex-row justify-start items-center text-foreground/50">
             <CopyButton size="sm" text={message.content} />
           </div>
         )}

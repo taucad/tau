@@ -6,7 +6,7 @@ import { Link } from '@remix-run/react';
 export const NavChat = () => {
   return (
     <SidebarGroup>
-      <Link to="/chat">
+      <Link to="/builds/new">
         <SidebarMenuButton tooltip="New Build" variant="outline">
           <Plus />
           <span>New Build</span>

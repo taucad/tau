@@ -5,7 +5,8 @@ import { Link } from '@remix-run/react';
 
 export const NavChat = () => {
   return (
-    <SidebarGroup>
+    // Elevate the sidebar group above the other items to ensure the new build button is always clickable
+    <SidebarGroup className="z-10">
       <Link to="/builds/new">
         <SidebarMenuButton tooltip="New Build" variant="outline">
           <Plus />

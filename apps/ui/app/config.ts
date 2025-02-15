@@ -3,7 +3,7 @@ export const ENV = {
 };
 
 export const metaConfig = {
-  name: 'TauCAD',
+  name: 'Tau',
   githubUrl: 'https://github.com/opensrchq/taucad',
   description: 'The first open source, offline CAD viewer powered by AI',
 };

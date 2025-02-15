@@ -4,14 +4,14 @@ import { CopyButton } from '@/components/copy-button';
 import { Button } from '@/components/ui/button';
 import { MessageSchema, MessageRole, MessageStatus, SourceOrigin } from '@/hooks/use-chat';
 import { cn } from '@/utils/ui';
-import { MarkdownViewer } from './markdown-viewer';
+import { MarkdownViewer } from '@/components/markdown-viewer';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
-import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from './ui/sheet';
-import { Badge } from './ui/badge';
+import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { Badge } from '@/components/ui/badge';
 import { useState, useEffect, useRef } from 'react';
-import { When } from './ui/utils/when';
-import { Textarea } from './ui/textarea';
-import { Avatar, AvatarImage } from './ui/avatar';
+import { When } from '@/components/ui/utils/when';
+import { Textarea } from '@/components/ui/textarea';
+import { Avatar, AvatarImage } from '@/components/ui/avatar';
 
 const MAX_TITLE_LENGTH = 50;
 

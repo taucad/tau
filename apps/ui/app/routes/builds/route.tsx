@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Search, Filter, Grid, List, Star, ChevronDown, ArrowRight, Zap, Cpu, Layout, Cog } from 'lucide-react';
 import { Link } from '@remix-run/react';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/utils/ui';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CATEGORIES, Category } from '../builds_.community/route';
+import { mockModels } from '@/components/mock-code';
+import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer';
+import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
+import { Category } from '@/components/project-grid';
+import { CATEGORIES } from '@/components/project-grid';
 
 export const handle = {
   breadcrumb: () => {

@@ -3,7 +3,6 @@ import { useEventSource } from './use-event-source';
 import { MOCK_CHAT_MESSAGES } from './chat-mock';
 import type { loader } from '@/root';
 import { useRouteLoaderData } from '@remix-run/react';
-// import { MOCK_CHAT_MESSAGES } from './chat-mock';
 
 export type ChatInterfaceProperties = {
   chatId: string;

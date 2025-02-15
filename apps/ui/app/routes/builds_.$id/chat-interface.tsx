@@ -4,10 +4,10 @@ import { Button } from '@/components/ui/button';
 import { MessageRole, MessageStatus, useChat } from '@/hooks/use-chat';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useScroll } from '@/hooks/use-scroll';
-import { ChatMessage } from '@/components/chat-message';
-import { ChatViewer } from '@/components/chat-viewer';
+import { ChatMessage } from '@/routes/builds_.$id/chat-message';
+import { ChatViewer } from '@/routes/builds_.$id/chat-viewer';
 import { cn } from '@/utils/ui';
-import { ChatTextarea } from '@/components/chat-textarea';
+import { ChatTextarea } from '@/components/chat/chat-textarea';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useModels } from '@/hooks/use-models';
@@ -20,7 +20,7 @@ export const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'tau-chat-history-resize';
 export const CHAT_RESIZE_COOKIE_NAME_MAIN = 'tau-chat-main-resize';
 export const CHAT_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
-export default function ChatInterface() {
+export const ChatInterface = () => {
   const { sendMessage, messages, editMessage } = useChat();
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
@@ -174,4 +174,4 @@ export default function ChatInterface() {
       </ResizablePanel>
     </ResizablePanelGroup>
   );
-}
+};

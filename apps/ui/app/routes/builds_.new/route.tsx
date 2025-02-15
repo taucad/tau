@@ -1,6 +1,6 @@
 import { useModels } from '@/hooks/use-models';
 import { useChat, MessageRole, MessageStatus } from '@/hooks/use-chat';
-import { ChatTextarea } from '@/components/chat-textarea';
+import { ChatTextarea } from '@/components/chat/chat-textarea';
 import { ProjectGrid } from '@/components/project-grid';
 import { mockProjects } from '@/components/mock-projects';
 import { Button } from '@/components/ui/button';

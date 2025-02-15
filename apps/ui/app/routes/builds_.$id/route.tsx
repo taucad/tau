@@ -1,4 +1,4 @@
-import ChatInterface from '@/components/chat-interface';
+import { ChatInterface } from '@/routes/builds_.$id/chat-interface';
 import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
 import { mockModels } from '@/components/mock-code';
 import { ComboBoxResponsive } from '@/components/ui/combobox-responsive';
@@ -46,7 +46,7 @@ export const loader = async ({ params }: LoaderFunctionArgs) => {
   };
 };
 
-export const Chat = () => {
+const Chat = () => {
   const { model } = useLoaderData<typeof loader>();
   const { setCode } = useReplicad();
 

@@ -13,13 +13,13 @@ import {
   Workflow,
 } from 'lucide-react';
 
-import { NavMain } from '@/components/nav-main';
-import { NavProjects } from '@/components/nav-projects';
-import { NavUser } from '@/components/nav-user';
-import { TeamSwitcher } from '@/components/team-switcher';
+import { NavMain } from '@/components/nav/nav-main';
+import { NavProjects } from '@/components/nav/nav-projects';
+import { NavUser } from '@/components/nav/nav-user';
+import { TeamSwitcher } from '@/components/nav/team-switcher';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarRail } from '@/components/ui/sidebar';
 import { Taucad } from '@/components/icons/taucad';
-import { NavChat } from '@/components/nav-chat';
+import { NavChat } from '@/components/nav/nav-chat';
 import { ModeToggle } from '@/components/mode-toggle';
 
 // This is sample data.

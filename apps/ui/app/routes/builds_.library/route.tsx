@@ -23,9 +23,9 @@ import { CATEGORIES } from '@/components/project-grid';
 export const handle = {
   breadcrumb: () => {
     return (
-      <Link to="/builds">
+      <Link to="/builds/library">
         <Button variant="ghost" className="p-2">
-          Builds
+          Library
         </Button>
       </Link>
     );
@@ -58,12 +58,12 @@ interface Build {
   lastOpened?: Date;
   isFavorite: boolean;
   thumbnail?: string;
-  estimatedCompletionDate?: Date;
   revisions?: {
     version: string;
     date: Date;
     changes: string;
   }[];
+  viewer?: 'replicad' | 'other';
 }
 
 interface FileMetadata {
@@ -222,6 +222,16 @@ export default function PersonalCadProjects() {
   );
 }
 
+function ReplicadPreview({ code }: { code: string }) {
+  const { setCode } = useReplicad();
+
+  useEffect(() => {
+    setCode(code);
+  }, [code, setCode]);
+
+  return <ReplicadViewer mesh={undefined} />;
+}
+
 function ProjectGrid({
   projects,
   visibleProjects,
@@ -294,79 +304,107 @@ function StatusDropdown({ status, projectId }: { status: string; projectId: stri
 function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' | 'list' }) {
   if (viewMode === 'list') {
     return (
-      <div className="flex items-center space-x-4 p-4 border rounded-lg hover:bg-accent transition-colors">
-        <div className="flex-shrink-0">
-          <Avatar className="h-12 w-12">
-            <AvatarImage src={project.thumbnail || project.author.avatar} alt={project.name} />
-            <AvatarFallback>{project.name.charAt(0)}</AvatarFallback>
-          </Avatar>
-        </div>
-        <div className="flex-grow">
-          <h3 className="font-semibold">{project.name}</h3>
-          <p className="text-sm text-muted-foreground">{project.description}</p>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="flex gap-2">
-            {project.category.map((cat) => (
-              <CategoryBadge key={cat} category={cat} />
-            ))}
+      <Link to={`/builds/${project.id}`} className="block">
+        <div className="flex items-center space-x-4 p-4 border rounded-lg hover:bg-accent transition-colors">
+          <div className="flex-shrink-0">
+            <Avatar className="h-12 w-12">
+              <AvatarImage src={project.thumbnail || project.author.avatar} alt={project.name} />
+              <AvatarFallback>{project.name.charAt(0)}</AvatarFallback>
+            </Avatar>
           </div>
-          <StatusDropdown status={project.status} projectId={project.id} />
+          <div className="flex-grow">
+            <h3 className="font-semibold">{project.name}</h3>
+            <p className="text-sm text-muted-foreground">{project.description}</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex gap-2">
+              {project.category.map((cat) => (
+                <CategoryBadge key={cat} category={cat} />
+              ))}
+            </div>
+            <StatusDropdown status={project.status} projectId={project.id} />
+          </div>
+          <div className="text-sm text-muted-foreground">
+            {project.lastOpened
+              ? `Last opened ${formatHumanDate(project.lastOpened)}`
+              : `Created ${formatHumanDate(project.createdAt)}`}
+          </div>
         </div>
-        <div className="text-sm text-muted-foreground">
-          {project.lastOpened
-            ? `Last opened ${formatHumanDate(project.lastOpened)}`
-            : `Created ${formatHumanDate(project.createdAt)}`}
-        </div>
-      </div>
+      </Link>
     );
   }
 
   return (
-    <Card className="group relative overflow-hidden flex flex-col">
-      <div className="aspect-video overflow-hidden bg-muted">
-        <img
-          src={project.thumbnail || '/placeholder.svg'}
-          alt={project.name}
-          className="h-full w-full object-cover transition-transform group-hover:scale-105"
-          loading="lazy"
-        />
-      </div>
-      <CardHeader>
-        <div className="flex justify-between items-start">
-          <CardTitle>{project.name}</CardTitle>
+    <Link to={`/builds/${project.id}`}>
+      <Card className="group relative overflow-hidden flex flex-col">
+        <div className="aspect-video overflow-hidden bg-muted">
+          <img
+            src={project.thumbnail || '/placeholder.svg'}
+            alt={project.name}
+            className="h-full w-full object-cover transition-transform group-hover:scale-105"
+            loading="lazy"
+          />
         </div>
-        <CardDescription>{project.description}</CardDescription>
-      </CardHeader>
-      <CardContent className="flex-grow">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap gap-2">
-            {project.category.map((cat) => (
-              <CategoryBadge key={cat} category={cat} />
-            ))}
+        <CardHeader>
+          <div className="flex justify-between items-start">
+            <CardTitle>{project.name}</CardTitle>
           </div>
-          <StatusDropdown status={project.status} projectId={project.id} />
-        </div>
-      </CardContent>
-      <CardFooter className="flex justify-between items-center">
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn(project.isFavorite ? 'text-yellow-400' : 'text-gray-400 hover:text-yellow-400')}
-          onClick={() => handleFavorite(project.id)}
-        >
-          <Star className="size-4" />
-        </Button>
-        <Button variant="ghost" size="icon">
-          <ArrowRight className="size-4" />
-        </Button>
-      </CardFooter>
-    </Card>
+          <CardDescription>{project.description}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex-grow">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap gap-2">
+              {project.category.map((cat) => (
+                <CategoryBadge key={cat} category={cat} />
+              ))}
+            </div>
+            <StatusDropdown status={project.status} projectId={project.id} />
+          </div>
+        </CardContent>
+        <CardFooter className="flex justify-between items-center">
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(project.isFavorite ? 'text-yellow-400' : 'text-gray-400 hover:text-yellow-400')}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleFavorite(project.id);
+            }}
+          >
+            <Star className="size-4" />
+          </Button>
+          <Button variant="ghost" size="icon">
+            <ArrowRight className="size-4" />
+          </Button>
+        </CardFooter>
+      </Card>
+    </Link>
   );
 }
-
 // Sample data
 const projects: Build[] = [
+  ...mockModels.map((model) => ({
+    id: model.id,
+    category: ['mechanical'],
+    files: {
+      mech: { 'model.ts': { content: model.code } },
+      elec: {},
+      firmware: {},
+    },
+    name: model.name,
+    description: `A 3D ${model.name} model built with Replicad`,
+    author: {
+      name: 'Replicad Team',
+      avatar: '/avatar-sample.png',
+    },
+    version: '1.0.0',
+    createdAt: new Date(),
+    status: 'published' as const,
+    tags: ['3d-printing', 'parametric', 'replicad'],
+    lastOpened: new Date(),
+    isFavorite: false,
+    viewer: 'replicad' as const,
+  })),
   {
     id: '1',
     category: ['mechanical', 'electrical'],

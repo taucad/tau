@@ -11,7 +11,7 @@ export const handle = {
     return (
       <Link to="/builds">
         <Button variant="ghost" className="p-2">
-          Builds
+          New
         </Button>
       </Link>
     );

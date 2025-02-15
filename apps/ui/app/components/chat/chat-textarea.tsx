@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ComboBoxResponsive } from '@/components/ui/combobox-responsive';
 import { Model } from '@/hooks/use-models';
+import { SvgIcon } from '../icons/svg-icon';
 
 interface ChatTextareaProperties {
   onSubmit: (text: string, model: string) => Promise<void>;
@@ -74,7 +75,10 @@ export function ChatTextarea({ onSubmit, models, defaultModel = 'gpt-4o-mini' }:
           }))}
           renderLabel={(item) => (
             <span className="text-xs flex items-center justify-between w-full">
-              <span className="font-mono">{item.model}</span>
+              <div className="flex items-center gap-2">
+                <SvgIcon id={item.provider} className="size-4" />
+                <span className="font-mono">{item.model}</span>
+              </div>
               <Badge variant="outline" className="bg-background">
                 {item.details.parameterSize}
               </Badge>

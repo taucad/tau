@@ -7,10 +7,10 @@ import ollama from 'ollama';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
 const MODELS = {
-  samba: {
+  sambanova: {
     'llama3.2': {
       name: 'Llama 3.3',
-      provider: 'samba',
+      provider: 'sambanova',
       model: 'Meta-Llama-3.3-70B-Instruct',
       details: {
         family: 'Llama 3.3',
@@ -89,8 +89,8 @@ const PROVIDERS = {
     },
     createClass: (options: ChatOllamaInput) => new ChatOllama(options),
   },
-  samba: {
-    provider: 'samba',
+  sambanova: {
+    provider: 'sambanova',
     configuration: {
       apiKey: process.env.SAMBA_API_KEY,
       baseURL: 'https://api.sambanova.ai/v1',

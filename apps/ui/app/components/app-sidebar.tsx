@@ -49,7 +49,7 @@ const data = {
   navMain: [
     {
       title: 'Builds',
-      url: '/builds',
+      url: '/builds/library',
       icon: Hammer,
       isActive: true,
       // items: [

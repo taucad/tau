@@ -16,7 +16,6 @@ import { useLoaderData } from '@remix-run/react';
 import { Badge } from './ui/badge';
 import { useNetworkConnectivity } from '@/hooks/use-network-connectivity';
 import { Fragment } from 'react/jsx-runtime';
-import { useIsMobile } from '@/hooks/use-mobile';
 
 const HEADER_HEIGHT = '3rem';
 

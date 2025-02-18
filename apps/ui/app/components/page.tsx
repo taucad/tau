@@ -16,11 +16,12 @@ import { useLoaderData } from '@remix-run/react';
 import { Badge } from './ui/badge';
 import { useNetworkConnectivity } from '@/hooks/use-network-connectivity';
 import { Fragment } from 'react/jsx-runtime';
+import { ReactNode } from 'react';
 
 const HEADER_HEIGHT = '3rem';
 
-export function Page() {
-  const { sidebarOpen } = useLoaderData<typeof loader>();
+export function Page({ error }: { error?: ReactNode }) {
+  const data = useLoaderData<typeof loader>();
   const matches = useMatches();
 
   const isOnline = useNetworkConnectivity();
@@ -28,7 +29,7 @@ export function Page() {
   const breadcrumbItems = matches.filter((match) => match.handle && match.handle.breadcrumb);
 
   return (
-    <SidebarProvider defaultOpen={sidebarOpen}>
+    <SidebarProvider defaultOpen={data?.sidebarOpen}>
       <AppSidebar />
       <SidebarInset
         className="w-[calc(100dvw-var(--sidebar-width-current)-1px)]"
@@ -72,7 +73,7 @@ export function Page() {
           </div>
         </header>
         <section className="h-[calc(100dvh-var(--header-height)-1px)] overflow-y-auto">
-          <Outlet />
+          {error === undefined ? <Outlet /> : error}
         </section>
       </SidebarInset>
     </SidebarProvider>

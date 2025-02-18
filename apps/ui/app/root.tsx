@@ -7,6 +7,7 @@ import {
   ScrollRestoration,
   useRouteError,
   useNavigate,
+  useLoaderData,
 } from '@remix-run/react';
 
 import stylesUrl from './styles/global.css?url';
@@ -32,7 +33,7 @@ import {
 } from '@/routes/builds_.$id/chat-interface';
 import { webManifestLinks } from '@/routes/manifest[.webmanifest]';
 import { getModels, Model } from '@/hooks/use-models';
-import { Button, buttonVariants } from './components/ui/button';
+import { buttonVariants } from './components/ui/button';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesUrl },
@@ -96,7 +97,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // `specifiedTheme` is the stored theme in the session storage.
 // `themeAction` is the action name that's used to change the theme in the session storage.
 export default function AppWithProviders({ error }: { error?: ReactNode }) {
-  // const data = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>();
   const [queryClient] = useState(() => new QueryClient());
 
   // Setup the service worker
@@ -104,9 +105,9 @@ export default function AppWithProviders({ error }: { error?: ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider specifiedTheme={Theme.DARK} themeAction="/action/set-theme">
+      <ThemeProvider specifiedTheme={data?.theme} themeAction="/action/set-theme">
         <TooltipProvider delayDuration={0}>
-          <App error={error} ssrTheme={Theme.DARK} />
+          <App error={error} ssrTheme={data?.theme} />
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>

@@ -55,15 +55,15 @@ const data = {
       // items: [
       //   {
       //     title: 'History',
-      //     url: '#',
+      //     url: '/builds/history',
       //   },
       //   {
       //     title: 'Starred',
-      //     url: '#',
+      //     url: '/builds/starred',
       //   },
       //   {
       //     title: 'Settings',
-      //     url: '#',
+      //     url: '/builds/settings',
       //   },
       // ],
     },
@@ -79,34 +79,34 @@ const data = {
     },
     {
       title: 'Specifications',
-      url: '#',
+      url: '/specifications',
       icon: Component,
     },
     {
       title: 'Documentation',
-      url: '#',
+      url: '/docs',
       icon: BookOpen,
     },
     {
       title: 'Settings',
-      url: '#',
+      url: '/settings',
       icon: Settings2,
     },
   ],
   projects: [
     {
       name: 'Design Engineering',
-      url: '#',
+      url: '/projects/design-engineering',
       icon: Frame,
     },
     {
       name: 'Sales & Marketing',
-      url: '#',
+      url: '/projects/sales-marketing',
       icon: PieChart,
     },
     {
       name: 'Travel',
-      url: '#',
+      url: '/projects/travel',
       icon: Map,
     },
   ],

@@ -25,10 +25,8 @@ export function Page() {
   const matches = useMatches();
 
   const isOnline = useNetworkConnectivity();
-  const isMobile = useIsMobile();
 
   const breadcrumbItems = matches.filter((match) => match.handle && match.handle.breadcrumb);
-  const filteredBreadcrumbItems = isMobile ? breadcrumbItems.slice(-1) : breadcrumbItems;
 
   return (
     <SidebarProvider defaultOpen={sidebarOpen}>
@@ -48,10 +46,10 @@ export function Page() {
             <Separator orientation="vertical" className="h-4" />
             <Breadcrumb>
               <BreadcrumbList className="sm:gap-0">
-                {filteredBreadcrumbItems.map((match) => (
+                {breadcrumbItems.map((match) => (
                   <Fragment key={match.id}>
                     <BreadcrumbSeparator className="hidden md:block first:hidden" />
-                    <BreadcrumbItem>
+                    <BreadcrumbItem className="hidden md:block last:block">
                       <BreadcrumbLink asChild>{match.handle.breadcrumb(match)}</BreadcrumbLink>
                     </BreadcrumbItem>
                   </Fragment>

@@ -60,18 +60,7 @@ const ColorPicker = forwardRef<
           <TooltipContent side="right">Choose theme color</TooltipContent>
         </Tooltip>
         <PopoverContent side="right" className="w-full flex flex-col gap-2">
-          <HslColorPicker
-            className={cn(
-              // Disable the saturation picker
-              disableSaturation && '',
-              // Change the background color of the picker
-              'bg-yellow',
-              // '[&_.react-colorful__saturation]:rounded-none!',
-              // '[&_.react-colorful__last-control]:rounded-md!',
-            )}
-            color={value}
-            onChange={handleChange}
-          />
+          <HslColorPicker className="first:hidden" color={value} onChange={handleChange} />
           <div className="flex items-center gap-2">
             <Input
               min={0}

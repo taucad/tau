@@ -11,8 +11,6 @@ import { ChatTextarea } from '@/components/chat/chat-textarea';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useModels } from '@/hooks/use-models';
-import { useRouteLoaderData } from '@remix-run/react';
-import type { loader } from '@/root';
 import { ChatCode } from './chat-code';
 import { useCookie } from '@/utils/cookies';
 
@@ -42,8 +40,9 @@ export const ChatInterface = () => {
   const { sendMessage, messages, editMessage } = useChat();
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
-  const data = useRouteLoaderData<typeof loader>('root');
-  const [isChatOpen, setIsChatOpen] = useCookie(CHAT_COOKIE_NAME, data?.cookies[CHAT_COOKIE_NAME] === 'true');
+  const [isChatOpen, setIsChatOpen] = useCookie(CHAT_COOKIE_NAME, true, {
+    parse: (value) => value === 'true',
+  });
   const [chatResizeMain, setChatResizeMain] = useCookie(CHAT_RESIZE_COOKIE_NAME_MAIN, [40, 60], resizeCookieOptions);
   const [chatResizeHistory, setChatResizeHistory] = useCookie(
     CHAT_RESIZE_COOKIE_NAME_HISTORY,

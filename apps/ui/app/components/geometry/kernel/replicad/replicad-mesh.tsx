@@ -1,10 +1,11 @@
 import React, { useRef, useLayoutEffect, useCallback } from 'react';
-import { useThree } from '@react-three/fiber';
+import { useThree, type ThreeEvent } from '@react-three/fiber';
 import { BufferGeometry } from 'three';
 import * as r3js from 'replicad-threejs-helper';
 import { MatcapMaterial } from '@/components/geometry/graphics/three/matcap-material';
+import { useColor } from '@/hooks/use-color';
 
-export const useApplyHighlights = (geometry, highlight) => {
+export const useApplyHighlights = (geometry: BufferGeometry, highlight: number | number[]) => {
   const { invalidate } = useThree();
 
   useLayoutEffect(() => {
@@ -18,32 +19,47 @@ export const useApplyHighlights = (geometry, highlight) => {
   }, [geometry, highlight, invalidate]);
 };
 
-export const useFaceEvent = (onEvent) => {
+export const useFaceEvent = (onEvent: (event: ThreeEvent<MouseEvent>, faceIndex: number) => void) => {
   const function_ = useRef(onEvent);
   useLayoutEffect(() => {
     function_.current = onEvent;
   }, [onEvent]);
 
-  return useCallback((event) => {
+  return useCallback((event: ThreeEvent<MouseEvent>) => {
     if (!function_.current) return null;
     const faceIndex = r3js.getFaceIndex(event.faceIndex, event.object.geometry);
     function_.current(event, faceIndex);
   }, []);
 };
 
-export const ReplicadMesh = React.memo(function ShapeMeshes({ faces, edges, onFaceClick, selected, faceHover }) {
+interface ReplicadMeshProperties {
+  faces?: any; // Using any for now since we don't have the replicad types
+  edges?: any; // Using any for now since we don't have the replicad types
+  onFaceClick?: (event: ThreeEvent<MouseEvent>, faceIndex: number) => void;
+  selected?: number;
+  faceHover?: boolean;
+}
+
+export const ReplicadMesh = React.memo(function ShapeMeshes({
+  faces,
+  edges,
+  onFaceClick,
+  selected,
+  faceHover,
+}: ReplicadMeshProperties) {
   const { invalidate } = useThree();
+  const { hex } = useColor();
 
   const body = useRef(new BufferGeometry());
   const lines = useRef(new BufferGeometry());
 
   const onClick = useFaceEvent(onFaceClick);
-  const onHover = (e) => {
+  const onHover = (event: ThreeEvent<MouseEvent> | undefined) => {
     if (!faceHover) return;
     let toHighlight;
-    if (e === null) toHighlight = [];
+    if (event === undefined) toHighlight = [];
     else {
-      const faceIndex = r3js.getFaceIndex(e.faceIndex, e.object.geometry);
+      const faceIndex = r3js.getFaceIndex(event.faceIndex, event.object.geometry);
       toHighlight = [faceIndex];
     }
 
@@ -89,14 +105,14 @@ export const ReplicadMesh = React.memo(function ShapeMeshes({ faces, edges, onFa
       >
         {/* the offsets are here to avoid z fighting between the mesh and the lines */}
         <MatcapMaterial
-          color="#d8e9d8"
+          color={hex}
           attachArray="material"
           polygonOffset
           polygonOffsetFactor={2}
           polygonOffsetUnits={1}
         />
         <MatcapMaterial
-          color="#5a8296"
+          color={hex}
           attachArray="material"
           polygonOffset
           polygonOffsetFactor={2}

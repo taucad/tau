@@ -105,6 +105,8 @@
   --l-high: 0.78;
   --l-intense: 0.88;
   --l-deepest: 0.95;
+
+  --primary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
 }
 
 @custom-variant dark (&:is(.dark *));

@@ -17,7 +17,7 @@ import { themeSessionResolver } from '@/sessions.server';
 import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from 'remix-themes';
 import { cn } from '@/utils/ui';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { parseCookies, useCookie } from '@/utils/cookies';
+import { parseCookies } from '@/utils/cookies';
 import { markdownViewerLinks } from '@/components/markdown-viewer';
 import { QueryClient } from '@tanstack/react-query';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -28,7 +28,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { webManifestLinks } from '@/routes/manifest[.webmanifest]';
 import { getModels, Model } from '@/hooks/use-models';
 import { buttonVariants } from './components/ui/button';
-import { COLOR_COOKIE_NAME, DEFAULT_COLOR, getRootColorStyle } from './components/nav/color-toggle';
+import { ColorProvider, useColor } from '@/hooks/use-color';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesUrl },
@@ -83,9 +83,11 @@ export default function AppWithProviders({ error }: { error?: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider specifiedTheme={data?.theme} themeAction="/action/set-theme">
-        <TooltipProvider delayDuration={0}>
-          <App error={error} ssrTheme={data?.theme} />
-        </TooltipProvider>
+        <ColorProvider>
+          <TooltipProvider delayDuration={0}>
+            <App error={error} ssrTheme={data?.theme} />
+          </TooltipProvider>
+        </ColorProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );
@@ -93,10 +95,10 @@ export default function AppWithProviders({ error }: { error?: ReactNode }) {
 
 export function App({ error, ssrTheme }: { error?: ReactNode; ssrTheme: Theme | null }) {
   const [theme] = useTheme();
-  const [colorCookie] = useCookie(COLOR_COOKIE_NAME, DEFAULT_COLOR);
+  const { rootStyles } = useColor();
 
   return (
-    <html lang="en" className={cn(theme)} style={getRootColorStyle(Number(colorCookie))}>
+    <html lang="en" className={cn(theme)} style={rootStyles}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

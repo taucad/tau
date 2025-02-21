@@ -7,7 +7,7 @@ export const NavChat = () => {
   return (
     // Elevate the sidebar group above the other items to ensure the new build button is always clickable
     <SidebarGroup className="z-10">
-      <NavLink to="/builds/new">
+      <NavLink to="/builds/new" tabIndex={-1}>
         {({ isActive }) => (
           <SidebarMenuButton isActive={isActive} tooltip="New Build" variant="outline">
             <Plus />

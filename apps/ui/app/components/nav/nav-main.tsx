@@ -36,7 +36,7 @@ export function NavMain({
           return (
             <Collapsible key={item.title} asChild defaultOpen={item.isActive} className="group/collapsible">
               <SidebarMenuItem>
-                <NavLink to={item.url}>
+                <NavLink to={item.url} tabIndex={-1}>
                   {({ isActive }) => (
                     <CollapsibleTrigger asChild>
                       <SidebarMenuButton isActive={isActive} tooltip={item.title}>
@@ -54,7 +54,7 @@ export function NavMain({
                     <SidebarMenuSub>
                       {item.items?.map((subItem) => (
                         <SidebarMenuSubItem key={subItem.title}>
-                          <NavLink to={subItem.url}>
+                          <NavLink to={subItem.url} tabIndex={-1}>
                             {({ isActive }) => (
                               <SidebarMenuSubButton isActive={isActive} asChild>
                                 <span>{subItem.title}</span>

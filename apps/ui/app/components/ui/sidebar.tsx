@@ -55,8 +55,6 @@ const SidebarProvider = React.forwardRef<
     stringify: String,
   });
 
-  console.log('open', _open);
-
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
   const open = openProperty ?? _open;

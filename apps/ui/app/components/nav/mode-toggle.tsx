@@ -32,8 +32,6 @@ export function ModeToggle() {
     stringify: stringifyThemeCookie,
   });
 
-  console.log({ theme });
-
   const cycleTheme = () => {
     let newTheme;
     if (theme === Theme.LIGHT) {

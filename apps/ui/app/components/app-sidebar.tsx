@@ -20,7 +20,8 @@ import { TeamSwitcher } from '@/components/nav/team-switcher';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarRail } from '@/components/ui/sidebar';
 import { Taucad } from '@/components/icons/taucad';
 import { NavChat } from '@/components/nav/nav-chat';
-import { ModeToggle } from '@/components/mode-toggle';
+import { ModeToggle } from '@/components/nav/mode-toggle';
+import { ColorToggle } from './nav/color-toggle';
 
 // This is sample data.
 const data = {
@@ -124,6 +125,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
         <NavProjects projects={data.projects} />
       </SidebarContent>
       <SidebarFooter className="flex flex-col transition-all duration-200 ease-linear items-end group-data-[collapsible=icon]:items-center">
+        <ColorToggle />
         <ModeToggle />
         <NavUser user={data.user} />
       </SidebarFooter>

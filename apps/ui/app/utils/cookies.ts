@@ -56,7 +56,6 @@ export const useCookie = <T>(
         const updatedValue = typeof value === 'function' ? (value as (value: T) => T)(oldValue) : value;
         const stringifiedValue = stringifier(updatedValue);
         setCookie(name, stringifiedValue, options.maxAge ?? DEFAULT_COOKIE_MAX_AGE);
-        console.log('newValue', updatedValue);
 
         return updatedValue;
       });

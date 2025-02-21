@@ -40,8 +40,8 @@ const ColorPicker = forwardRef<
     return (
       <Popover onOpenChange={setOpen} open={open}>
         <Tooltip>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild disabled={disabled} onBlur={onBlur}>
+          <PopoverTrigger asChild disabled={disabled} onBlur={onBlur}>
+            <TooltipTrigger asChild>
               <Comp
                 {...properties}
                 className={cn('block', className)}
@@ -55,8 +55,8 @@ const ColorPicker = forwardRef<
                 data-color-l={value.l}
                 variant="outline"
               />
-            </PopoverTrigger>
-          </TooltipTrigger>
+            </TooltipTrigger>
+          </PopoverTrigger>
           <TooltipContent side="right">Choose theme color</TooltipContent>
         </Tooltip>
         <PopoverContent side="right" className="w-full flex flex-col gap-2">

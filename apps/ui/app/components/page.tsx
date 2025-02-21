@@ -11,8 +11,6 @@ import { Separator } from '@/components/ui/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-import type { loader } from '@/root';
-import { useLoaderData } from '@remix-run/react';
 import { Badge } from './ui/badge';
 import { useNetworkConnectivity } from '@/hooks/use-network-connectivity';
 import { Fragment } from 'react/jsx-runtime';
@@ -21,7 +19,6 @@ import { ReactNode } from 'react';
 const HEADER_HEIGHT = '3rem';
 
 export function Page({ error }: { error?: ReactNode }) {
-  const data = useLoaderData<typeof loader>();
   const matches = useMatches();
 
   const isOnline = useNetworkConnectivity();
@@ -29,7 +26,7 @@ export function Page({ error }: { error?: ReactNode }) {
   const breadcrumbItems = matches.filter((match) => match.handle && match.handle.breadcrumb);
 
   return (
-    <SidebarProvider defaultOpen={data?.sidebarOpen}>
+    <SidebarProvider>
       <AppSidebar />
       <SidebarInset
         className="w-[calc(100dvw-var(--sidebar-width-current)-1px)]"

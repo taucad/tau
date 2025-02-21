@@ -17,8 +17,7 @@ import { themeSessionResolver } from '@/sessions.server';
 import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from 'remix-themes';
 import { cn } from '@/utils/ui';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { SIDEBAR_COOKIE_NAME } from '@/components/ui/sidebar';
-import { extractCookie } from '@/utils/cookies';
+import { parseCookies } from '@/utils/cookies';
 import { markdownViewerLinks } from '@/components/markdown-viewer';
 import { QueryClient } from '@tanstack/react-query';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -26,11 +25,6 @@ import { ReactNode, useState } from 'react';
 import { ENV, metaConfig } from './config';
 import { useServiceWorker } from '@/hooks/use-service-worker';
 import { Toaster } from '@/components/ui/sonner';
-import {
-  CHAT_COOKIE_NAME,
-  CHAT_RESIZE_COOKIE_NAME_HISTORY,
-  CHAT_RESIZE_COOKIE_NAME_MAIN,
-} from '@/routes/builds_.$id/chat-interface';
 import { webManifestLinks } from '@/routes/manifest[.webmanifest]';
 import { getModels, Model } from '@/hooks/use-models';
 import { buttonVariants } from './components/ui/button';
@@ -54,23 +48,10 @@ export const meta: MetaFunction = () => [
   { rel: 'shortcut icon', href: '/favicon.ico' },
 ];
 
-const safeParseResizeCookie = (cookie: string): [number, number] => {
-  try {
-    return JSON.parse(cookie);
-  } catch {
-    return [40, 60];
-  }
-};
-
 export async function loader({ request }: LoaderFunctionArgs) {
   const { getTheme } = await themeSessionResolver(request);
   const cookieHeader = request.headers.get('Cookie');
-  const isSidebarOpen = extractCookie(cookieHeader, SIDEBAR_COOKIE_NAME, 'true');
-  const isChatOpen = extractCookie(cookieHeader, CHAT_COOKIE_NAME, 'true');
-  const chatResizeMain = safeParseResizeCookie(extractCookie(cookieHeader, CHAT_RESIZE_COOKIE_NAME_MAIN, '[30,70]'));
-  const chatResizeHistory = safeParseResizeCookie(
-    extractCookie(cookieHeader, CHAT_RESIZE_COOKIE_NAME_HISTORY, '[15,85]'),
-  );
+  const cookies = parseCookies(cookieHeader ?? '');
 
   let models: Model[] = [];
   try {
@@ -82,12 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     theme: getTheme(),
-    sidebarOpen: isSidebarOpen === 'true',
-    chatOpen: isChatOpen === 'true',
-    resize: {
-      chatMain: chatResizeMain,
-      chatHistory: chatResizeHistory,
-    },
+    cookies,
     env: ENV,
     models,
   };

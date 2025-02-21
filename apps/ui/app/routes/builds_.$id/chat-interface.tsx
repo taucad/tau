@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect } from 'react';
 import { Eye, Code, Terminal, ArrowDown, Box, MessageSquareReply } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MessageRole, MessageStatus, useChat } from '@/hooks/use-chat';
@@ -14,18 +14,42 @@ import { useModels } from '@/hooks/use-models';
 import { useRouteLoaderData } from '@remix-run/react';
 import type { loader } from '@/root';
 import { ChatCode } from './chat-code';
+import { useCookie } from '@/utils/cookies';
 
 export const CHAT_COOKIE_NAME = 'tau-chat-open';
 export const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'tau-chat-history-resize';
 export const CHAT_RESIZE_COOKIE_NAME_MAIN = 'tau-chat-main-resize';
 export const CHAT_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
+const parseResizeCookie = (cookie: string): [number, number] => {
+  try {
+    return JSON.parse(cookie);
+  } catch {
+    return [40, 60];
+  }
+};
+
+const stringifyResizeCookie = (sizes: [number, number]): string => {
+  return JSON.stringify(sizes);
+};
+
+const resizeCookieOptions = {
+  parse: parseResizeCookie,
+  stringify: stringifyResizeCookie,
+};
+
 export const ChatInterface = () => {
   const { sendMessage, messages, editMessage } = useChat();
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
   const data = useRouteLoaderData<typeof loader>('root');
-  const [isChatOpen, setIsChatOpen] = useState(data?.chatOpen);
+  const [isChatOpen, setIsChatOpen] = useCookie(CHAT_COOKIE_NAME, data?.cookies[CHAT_COOKIE_NAME] === 'true');
+  const [chatResizeMain, setChatResizeMain] = useCookie(CHAT_RESIZE_COOKIE_NAME_MAIN, [40, 60], resizeCookieOptions);
+  const [chatResizeHistory, setChatResizeHistory] = useCookie(
+    CHAT_RESIZE_COOKIE_NAME_HISTORY,
+    [85, 15],
+    resizeCookieOptions,
+  );
   const { data: models } = useModels();
 
   const onSubmit = async (text: string, model: string) => {
@@ -49,16 +73,9 @@ export const ChatInterface = () => {
   const toggleChatOpen = () => {
     setIsChatOpen((previous) => {
       const open = !previous;
-      // eslint-disable-next-line unicorn/no-document-cookie
-      document.cookie = `${CHAT_COOKIE_NAME}=${open}; path=/; max-age=${CHAT_COOKIE_MAX_AGE}`;
+      setIsChatOpen(open);
       return open;
     });
-  };
-
-  // eslint-disable-next-line unicorn/consistent-function-scoping
-  const onLayoutChange = (sizes: number[], name: string): void => {
-    // eslint-disable-next-line unicorn/no-document-cookie
-    document.cookie = `${name}=${JSON.stringify(sizes)}; path=/; max-age=${CHAT_COOKIE_MAX_AGE}`;
   };
 
   return (
@@ -66,7 +83,7 @@ export const ChatInterface = () => {
       direction="horizontal"
       className="flex flex-1 bg-background"
       onLayout={(sizes) => {
-        onLayoutChange(sizes, CHAT_RESIZE_COOKIE_NAME_MAIN);
+        setChatResizeMain(sizes as [number, number]);
       }}
       autoSaveId={CHAT_RESIZE_COOKIE_NAME_MAIN}
     >
@@ -86,20 +103,20 @@ export const ChatInterface = () => {
         order={1}
         minSize={30}
         maxSize={50}
-        defaultSize={data?.resize.chatMain[0]}
+        defaultSize={chatResizeMain[0]}
         className={cn('hidden', isChatOpen && 'flex flex-col')}
       >
         <ResizablePanelGroup
           direction="vertical"
           onLayout={(sizes) => {
-            onLayoutChange(sizes, CHAT_RESIZE_COOKIE_NAME_HISTORY);
+            setChatResizeHistory(sizes as [number, number]);
           }}
           autoSaveId={CHAT_RESIZE_COOKIE_NAME_HISTORY}
         >
           <ResizablePanel
             id="chat-history-content"
             order={1}
-            defaultSize={data?.resize.chatHistory[0]}
+            defaultSize={chatResizeHistory[0]}
             style={{ overflowY: 'auto' }}
             className="relative flex-1 p-4 pb-0"
           >
@@ -134,7 +151,7 @@ export const ChatInterface = () => {
             order={2}
             minSize={15}
             maxSize={50}
-            defaultSize={data?.resize.chatHistory[1]}
+            defaultSize={chatResizeHistory[1]}
             className="p-2"
           >
             <ChatTextarea onSubmit={onSubmit} models={models ?? []} />
@@ -146,7 +163,7 @@ export const ChatInterface = () => {
       <ResizablePanel
         order={2}
         data-state={isChatOpen ? 'open' : 'closed'}
-        defaultSize={data?.resize.chatMain[1]}
+        defaultSize={chatResizeMain[1]}
         className="h-full flex-col data-[state=open]:hidden lg:data-[state=open]:flex"
       >
         <Tabs defaultValue="preview" className="flex flex-col h-full">

@@ -6,7 +6,7 @@ export const Taucad = (properties: SVGProps<SVGSVGElement>) => {
       <path
         fill="currentColor"
         d="M166.001-14.001c60-60 120-60 180 0L526.002 166c59.996 60 59.996 120 0 180.001l-180.001 180c-60 60-120 60-180 0l-180-180c-60-60.001-60-120.001 0-180.001l180-180.001Z"
-        paint-order="fill"
+        paintOrder="fill"
         style={{ transformBox: 'fill-box' }}
         transform="rotate(45 0 0)"
         transform-origin="50% 50%"

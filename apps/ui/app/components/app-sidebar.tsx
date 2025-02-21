@@ -33,7 +33,7 @@ const data = {
   teams: [
     {
       name: 'TauCAD',
-      logo: Taucad,
+      logo: () => <Taucad className="size-8 text-primary bg-primary rounded-md overflow-clip" />,
       plan: 'Enterprise',
     },
     {

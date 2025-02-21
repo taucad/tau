@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { Slot } from '@radix-ui/react-slot';
+import { RotateCcw } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from './tooltip';
 
 export type ColorPickerValue = HslColor;
 
@@ -16,6 +18,7 @@ interface ColorPickerProperties {
   children?: React.ReactNode;
   asChild?: boolean;
   disableSaturation?: boolean;
+  onReset?: () => void;
 }
 
 const ColorPicker = forwardRef<
@@ -23,7 +26,7 @@ const ColorPicker = forwardRef<
   Omit<ButtonProperties, 'value' | 'onChange' | 'onBlur'> & ColorPickerProperties
 >(
   (
-    { disabled, value, onChange, onBlur, name, className, asChild, disableSaturation, ...properties },
+    { disabled, value, onChange, onBlur, name, className, asChild, disableSaturation, onReset, ...properties },
     forwardedReference,
   ) => {
     const [open, setOpen] = useState(false);
@@ -36,31 +39,35 @@ const ColorPicker = forwardRef<
 
     return (
       <Popover onOpenChange={setOpen} open={open}>
-        <PopoverTrigger asChild disabled={disabled} onBlur={onBlur}>
-          <Comp
-            {...properties}
-            className={cn('block', className)}
-            name={name}
-            onClick={() => {
-              setOpen(true);
-            }}
-            size="icon"
-            data-color-h={value.h}
-            data-color-s={value.s}
-            data-color-l={value.l}
-            variant="outline"
-          />
-        </PopoverTrigger>
-        <PopoverContent side="right" className="w-full">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild disabled={disabled} onBlur={onBlur}>
+              <Comp
+                {...properties}
+                className={cn('block', className)}
+                name={name}
+                onClick={() => {
+                  setOpen(true);
+                }}
+                size="icon"
+                data-color-h={value.h}
+                data-color-s={value.s}
+                data-color-l={value.l}
+                variant="outline"
+              />
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="right">Choose theme color</TooltipContent>
+        </Tooltip>
+        <PopoverContent side="right" className="w-full flex flex-col gap-2">
           <HslColorPicker
             className={cn(
-              'mb-2',
               // Disable the saturation picker
-              ':hidden',
-              '[*]:bg-yellow',
-              disableSaturation && 'h',
+              disableSaturation && '',
               // Change the background color of the picker
-              'first:hidden',
+              'bg-yellow',
+              // '[&_.react-colorful__saturation]:rounded-none!',
+              // '[&_.react-colorful__last-control]:rounded-md!',
             )}
             color={value}
             onChange={handleChange}
@@ -76,6 +83,14 @@ const ColorPicker = forwardRef<
               ref={forwardedReference}
               value={value.h}
             />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="icon" onClick={onReset}>
+                  <RotateCcw className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Reset</TooltipContent>
+            </Tooltip>
           </div>
         </PopoverContent>
       </Popover>

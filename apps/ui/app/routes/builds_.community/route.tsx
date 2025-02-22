@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Link } from '@remix-run/react';
 import { ProjectGrid, type Category, type CadLanguage } from '@/components/project-grid';
-import { mockProjects } from '@/components/mock-projects';
+import { mockBuilds } from '@/components/mock-builds';
 import { Search, Code2, Layout, SlidersHorizontal } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -18,7 +18,7 @@ import { CATEGORIES, CAD_LANGUAGES } from '@/components/project-grid';
 export const handle = {
   breadcrumb: () => {
     return (
-      <Link to="/builds/community">
+      <Link to="/builds/community" tabIndex={-1}>
         <Button variant="ghost" className="p-2">
           Community
         </Button>
@@ -37,7 +37,7 @@ export default function CadCommunity() {
   const [visibleProjects, setVisibleProjects] = useState(ITEMS_PER_PAGE);
   const [sortBy, setSortBy] = useState<SortOption>('trending');
 
-  const filteredProjects = mockProjects.filter(
+  const filteredProjects = mockBuilds.filter(
     (project) =>
       (activeFilter === 'all' || project.categories.includes(activeFilter as Category)) &&
       (activeLanguage === 'all' || project.language === activeLanguage) &&

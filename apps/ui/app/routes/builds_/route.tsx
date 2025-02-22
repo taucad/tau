@@ -7,7 +7,7 @@ import { LoaderFunctionArgs } from '@remix-run/node';
 export const handle = {
   breadcrumb: () => {
     return (
-      <Link to="/builds">
+      <Link to="/builds" tabIndex={-1}>
         <Button variant="ghost" className="p-2">
           Builds
         </Button>

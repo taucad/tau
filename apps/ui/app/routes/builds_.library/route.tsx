@@ -16,14 +16,14 @@ import { cn } from '@/utils/ui';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { mockModels } from '@/components/mock-code';
 import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer';
-import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
+import { useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
 import { Category } from '@/components/project-grid';
 import { CATEGORIES } from '@/components/project-grid';
 
 export const handle = {
   breadcrumb: () => {
     return (
-      <Link to="/builds/library">
+      <Link to="/builds/library" tabIndex={-1}>
         <Button variant="ghost" className="p-2">
           Library
         </Button>
@@ -131,7 +131,7 @@ export default function PersonalCadProjects() {
     <div className="container mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-4xl font-bold">Builds</h1>
-        <Link to="/builds/new">
+        <Link to="/builds/new" tabIndex={-1}>
           <Button>New Build</Button>
         </Link>
       </div>
@@ -220,16 +220,6 @@ export default function PersonalCadProjects() {
       </Tabs>
     </div>
   );
-}
-
-function ReplicadPreview({ code }: { code: string }) {
-  const { setCode } = useReplicad();
-
-  useEffect(() => {
-    setCode(code);
-  }, [code, setCode]);
-
-  return <ReplicadViewer mesh={undefined} />;
 }
 
 function ProjectGrid({

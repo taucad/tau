@@ -40,7 +40,7 @@ interface ChatState {
 type ChatAction =
   | { type: 'SET_MESSAGES'; payload: Message[] }
   | { type: 'ADD_MESSAGE'; payload: Message }
-  | { type: 'UPDATE_MESSAGE'; payload: { messageId: string; content: string } }
+  | { type: 'UPDATE_MESSAGE'; payload: { messageId: string; content?: string; status?: MessageStatus } }
   | {
       type: 'EDIT_MESSAGE';
       payload: { messageId: string; content: string; toolCalls?: Message['toolCalls']; status?: MessageStatus };
@@ -71,11 +71,13 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
     }
     case 'UPDATE_MESSAGE': {
-      const { messageId, content } = action.payload;
+      const { messageId, content, status } = action.payload;
       return {
         ...state,
         messages: state.messages.map((message) =>
-          message.id === messageId ? { ...message, content: message.content + content } : message,
+          message.id === messageId
+            ? { ...message, content: message.content + (content ?? ''), status: status ?? message.status }
+            : message,
         ),
       };
     }
@@ -339,11 +341,13 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
     message,
     model,
   }: {
-    message: Omit<Message, 'id' | 'createdAt' | 'updatedAt'>;
+    message: Omit<Message, 'id' | 'createdAt' | 'updatedAt'> & { id?: string };
     model: string;
   }) => {
     // Don't send messages while initializing or if already streaming
     if (state.initializing || state.activeStreamId) return;
+
+    let messageToSend: Message;
 
     // Find any existing pending message with the same content
     const existingMessage = messagesReference.current.find(
@@ -351,22 +355,26 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
     );
 
     if (existingMessage) {
+      messageToSend = existingMessage;
       // If we found an existing message, use its ID as the active stream
       dispatch({ type: 'SET_ACTIVE_STREAM', payload: existingMessage.id });
     } else {
-      const userMessage = createMessage({
+      messageToSend = createMessage({
         content: message.content,
         role: message.role,
         model,
         status: message.status,
         metadata: message.metadata,
       });
-      dispatch({ type: 'ADD_MESSAGE', payload: userMessage });
-      dispatch({ type: 'SET_ACTIVE_STREAM', payload: userMessage.id });
+      if (message.id) {
+        dispatch({ type: 'UPDATE_MESSAGE', payload: { messageId: message.id, status: MessageStatus.Success } });
+      } else {
+        dispatch({ type: 'ADD_MESSAGE', payload: messageToSend });
+      }
+      dispatch({ type: 'SET_ACTIVE_STREAM', payload: messageToSend.id });
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const currentMessages = [...messagesReference.current];
+    const currentMessages = [...messagesReference.current, messageToSend];
     await stream({ model, messages: currentMessages });
   };
 
@@ -376,7 +384,6 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
 
     dispatch({ type: 'EDIT_MESSAGE', payload: { messageId, content } });
     dispatch({ type: 'SET_ACTIVE_STREAM', payload: messageId });
-    await new Promise((resolve) => setTimeout(resolve, 0));
     const currentMessages = [...messagesReference.current];
     await stream({ model: 'gpt-4', messages: currentMessages });
   };

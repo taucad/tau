@@ -85,7 +85,6 @@ const Chat = () => {
         model: lastMessage.model,
       });
     }
-    console.log('messages', build?.messages);
   }, [build?.id]); // Only run when build ID changes
 
   return <ChatInterface />;

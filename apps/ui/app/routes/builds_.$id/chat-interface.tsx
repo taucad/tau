@@ -156,7 +156,7 @@ export const ChatInterface = () => {
         minSize={15}
         maxSize={30}
         defaultSize={chatResizeMain[0]}
-        className={cn('hidden', isChatOpen && 'md:flex flex-col')}
+        className={cn(!isChatOpen && 'hidden')}
       >
         <ResizablePanelGroup
           direction="vertical"
@@ -213,12 +213,16 @@ export const ChatInterface = () => {
 
       <ResizableHandle className={cn('hidden', isChatOpen && 'md:flex')} />
 
-      <ResizablePanel order={2} defaultSize={chatResizeMain[1]} className="h-full flex-col">
+      <ResizablePanel
+        order={2}
+        defaultSize={chatResizeMain[1]}
+        className={cn('h-full flex-col', isMobile && isChatOpen && 'hidden')}
+      >
         <Tabs defaultValue="preview" className="flex flex-col h-full">
           <TabsList
             className={cn(
-              'grid grid-cols-3 absolute m-2 ml-13 bg-background border md:h-[2.375rem] z-10 [&>*]:data-[state=active]:bg-accent/50',
-              isChatOpen && 'ml-2',
+              'grid grid-cols-3 absolute m-2 bg-background border md:h-[2.375rem] z-10 [&>*]:data-[state=active]:bg-accent/50',
+              (!isChatOpen || isMobile) && 'ml-13',
             )}
           >
             <TabsTrigger value="preview" className="gap-2">
@@ -251,7 +255,10 @@ export const ChatInterface = () => {
             size={'icon'}
             variant="outline"
             onClick={toggleParametersOpen}
-            className="group absolute top-0 right-0 text-muted-foreground m-[0.5625rem] z-10"
+            className={cn(
+              'group absolute top-0 right-0 text-muted-foreground m-[0.5625rem] z-10',
+              isMobile && isChatOpen && 'hidden',
+            )}
             data-state={isParametersOpen ? 'open' : 'closed'}
           >
             <span className="size-4">
@@ -269,47 +276,25 @@ export const ChatInterface = () => {
         minSize={15}
         maxSize={30}
         defaultSize={chatResizeMain[2]}
-        className={cn('hidden', isParametersOpen && 'md:flex w-64 xl:w-96 shrink-0 p-4 gap-2 text-sm flex-col')}
+        className={cn(
+          'hidden',
+          isParametersOpen && 'md:flex w-64 xl:w-96 shrink-0 p-4 gap-2 text-sm flex-col',
+          isMobile && isChatOpen && 'hidden',
+        )}
       >
         <span className="font-bold text-lg">Parameters</span>
         <Parameters />
       </ResizablePanel>
 
-      {isMobile && (
-        <>
-          <Drawer open={isParametersOpen} onOpenChange={setIsParametersOpen}>
-            <DrawerContent className="p-4 pt-0 text-sm flex flex-col gap-2 justify-between">
-              <span className="font-bold text-lg">Parameters</span>
-              <div className="grid grid-cols-2 gap-2">
-                <Parameters />
-              </div>
-            </DrawerContent>
-          </Drawer>
-
-          <Drawer open={isChatOpen} onOpenChange={setIsChatOpen}>
-            <DrawerContent className="flex flex-col h-[85vh]">
-              <div className="p-4 pb-2">
-                <span className="font-bold text-lg">Chat</span>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4">
-                <div className="space-y-4 pb-4">
-                  {messages.map((message, index) => (
-                    <ChatMessage
-                      message={message}
-                      key={index}
-                      onEdit={(content) => {
-                        editMessage(message.id, content);
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-              <div className="p-4 pt-2 border-t bg-background">
-                <ChatTextarea onSubmit={onSubmit} models={models ?? []} />
-              </div>
-            </DrawerContent>
-          </Drawer>
-        </>
+      {isMobile && !isChatOpen && (
+        <Drawer open={isParametersOpen} onOpenChange={setIsParametersOpen}>
+          <DrawerContent className="p-4 pt-0 text-sm flex flex-col gap-2 justify-between">
+            <span className="font-bold text-lg">Parameters</span>
+            <div className="grid grid-cols-2 gap-2">
+              <Parameters />
+            </div>
+          </DrawerContent>
+        </Drawer>
       )}
     </ResizablePanelGroup>
   );

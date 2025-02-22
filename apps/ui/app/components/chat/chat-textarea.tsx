@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Mic, Globe, ArrowRight, ChevronDown, CircuitBoard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -6,15 +6,30 @@ import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ComboBoxResponsive } from '@/components/ui/combobox-responsive';
 import { Model } from '@/hooks/use-models';
-import { SvgIcon } from '../icons/svg-icon';
+import { SvgIcon } from '@/components/icons/svg-icon';
+import { CadLanguage } from '@/types/cad';
 
-interface ChatTextareaProperties {
-  onSubmit: (text: string, model: string) => Promise<void>;
+export interface ChatTextareaProperties {
+  onSubmit: ({
+    content,
+    model,
+    metadata,
+  }: {
+    content: string;
+    model: string;
+    metadata?: { systemHints?: string[] };
+  }) => Promise<void>;
   models: Model[];
   defaultModel?: string;
+  autoFocus?: boolean;
 }
 
-export function ChatTextarea({ onSubmit, models, defaultModel = 'gpt-4o-mini' }: ChatTextareaProperties) {
+export function ChatTextarea({
+  onSubmit,
+  models,
+  defaultModel = 'gpt-4o-mini',
+  autoFocus = true,
+}: ChatTextareaProperties) {
   const [inputText, setInputText] = useState('');
   const [selectedModel, setSelectedModel] = useState(defaultModel);
   const [isSearching, setIsSearching] = useState(false);
@@ -24,7 +39,11 @@ export function ChatTextarea({ onSubmit, models, defaultModel = 'gpt-4o-mini' }:
   const handleSubmit = async () => {
     if (inputText.length === 0) return;
     setInputText('');
-    await onSubmit(inputText, selectedModel);
+    await onSubmit({
+      content: inputText,
+      model: selectedModel,
+      metadata: { systemHints: [...(isSearching ? ['search'] : [])] },
+    });
   };
 
   const providerModelsMap = new Map<string, Model[]>();
@@ -34,6 +53,12 @@ export function ChatTextarea({ onSubmit, models, defaultModel = 'gpt-4o-mini' }:
     }
     providerModelsMap.get(model.provider)?.push(model);
   }
+
+  useEffect(() => {
+    if (autoFocus) {
+      textareaReference.current?.focus();
+    }
+  }, [autoFocus]);
 
   return (
     <div className="relative h-full">
@@ -76,7 +101,7 @@ export function ChatTextarea({ onSubmit, models, defaultModel = 'gpt-4o-mini' }:
           renderLabel={(item) => (
             <span className="text-xs flex items-center justify-between w-full">
               <div className="flex items-center gap-2">
-                <SvgIcon id={item.provider} className="size-4" />
+                <SvgIcon id={item.provider as CadLanguage} className="size-4" />
                 <span className="font-mono">{item.model}</span>
               </div>
               <Badge variant="outline" className="bg-background">
@@ -106,7 +131,7 @@ export function ChatTextarea({ onSubmit, models, defaultModel = 'gpt-4o-mini' }:
               data-state={isSearching ? 'active' : 'inactive'}
               size="xs"
               variant="ghost"
-              className="group data-[state=active]:bg-neutral/20 data-[state=active]:text-primary data-[state=active]:shadow transition-all duration-200"
+              className="group data-[state=active]:bg-neutral/20 data-[state=active]:text-primary data-[state=active]:shadow transition-transform duration-200 ease-in-out"
               onClick={() => {
                 setIsSearching((previous) => !previous);
               }}

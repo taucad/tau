@@ -9,8 +9,26 @@ export function useScroll({ behavior, reference }: ScrollToProperties) {
   const [isScrolledTo, setIsScrolledTo] = useState(false);
 
   const scrollTo = () => {
-    if (!isScrolledTo) {
-      reference.current?.scrollIntoView({ behavior: behavior || 'smooth', block: 'end' });
+    if (reference.current) {
+      // Find the scrollable parent container by traversing up and checking both
+      // inline styles and computed styles for overflow
+      let element: HTMLElement | null = reference.current;
+      let scrollContainer: HTMLElement | undefined;
+
+      while (element && !scrollContainer) {
+        const style = globalThis.getComputedStyle(element);
+        if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+          scrollContainer = element;
+        }
+        element = element.parentElement;
+      }
+
+      if (scrollContainer) {
+        scrollContainer.scrollTo({
+          top: scrollContainer.scrollHeight,
+          behavior: behavior || 'smooth',
+        });
+      }
     }
   };
 

@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Eye, Code, Terminal, ArrowDown, MessageCircle, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useChat } from '@/contexts/use-chat';
@@ -48,6 +48,8 @@ export const ChatInterface = () => {
   const { sendMessage, messages, editMessage } = useChat();
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
+  const lastMessageReference = useRef<string | undefined>(undefined);
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
   const [isChatOpen, setIsChatOpen] = useCookie(CHAT_COOKIE_NAME, true, {
     parse: (value) => value === 'true',
   });
@@ -73,8 +75,34 @@ export const ChatInterface = () => {
   );
   const { data: models } = useModels();
 
+  useEffect(() => {
+    // Get the last message if there are any messages
+    const lastMessage = messages.at(-1);
+
+    // Determine if this is a new message
+    const isNewMessage = lastMessage?.id !== lastMessageReference.current;
+    const isStreaming = lastMessage?.status === MessageStatus.Pending;
+
+    // Auto-scroll if:
+    // 1. Message is currently streaming
+    // 2. It's a new message AND we're already near bottom (isScrolledTo)
+    // 3. It's a new message AND it's from the user (shouldAutoScroll is true)
+    // 4. Chat was just opened (isChatOpen changed to true)
+    if (lastMessage && (isStreaming || (isNewMessage && (isScrolledTo || shouldAutoScroll))) && isChatOpen) {
+      scrollTo();
+      // Only reset shouldAutoScroll if the message is complete
+      if (!isStreaming) {
+        setShouldAutoScroll(false);
+      }
+    }
+
+    // Update the last message reference
+    lastMessageReference.current = lastMessage?.id;
+  }, [messages, isChatOpen, isScrolledTo, scrollTo]);
+
   const onSubmit: ChatTextareaProperties['onSubmit'] = async ({ content, model, metadata }) => {
-    sendMessage({
+    setShouldAutoScroll(true);
+    await sendMessage({
       message: {
         content,
         role: MessageRole.User,
@@ -85,12 +113,6 @@ export const ChatInterface = () => {
       model,
     });
   };
-
-  useEffect(() => {
-    if (!isScrolledTo) {
-      scrollTo();
-    }
-  }, [messages]);
 
   const toggleChatOpen = () => {
     setIsChatOpen((previous) => {

@@ -13,10 +13,10 @@ See:
 `<SvgIcon>` is a component that renders the icon using
 the SVG sprite, all svg props are passed through to the `<svg>` element.
 
-For example, to render the `zoo` icon, use:
+For example, to render the `kcl` icon, use:
 
 ```tsx
-<SvgIcon id="zoo" />
+<SvgIcon id="kcl" />
 ```
 
 ## Raw Icons

@@ -95,7 +95,7 @@ export default function PersonalCadProjects() {
           <TabsList className="">
             <TabsTrigger value="all" className="flex items-center gap-2">
               <Layout className="size-4" />
-              <span className="hidden sm:inline">All</span>
+              <span className="hidden sm:inline">all</span>
             </TabsTrigger>
             {Object.entries(CATEGORIES).map(([key, { icon: Icon, color }]) => (
               <TabsTrigger key={key} value={key} className="flex items-center gap-2">

@@ -22,6 +22,7 @@ import { Taucad } from '@/components/icons/taucad';
 import { NavChat } from '@/components/nav/nav-chat';
 import { ModeToggle } from '@/components/nav/mode-toggle';
 import { ColorToggle } from './nav/color-toggle';
+import { NavHistory } from './nav/nav-history';
 
 // This is sample data.
 const data = {
@@ -121,6 +122,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
       </SidebarHeader>
       <SidebarContent>
         <NavChat />
+        <NavHistory />
         <NavMain items={data.navMain} />
         <NavProjects projects={data.projects} />
       </SidebarContent>

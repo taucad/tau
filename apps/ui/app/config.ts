@@ -1,5 +1,5 @@
 export const ENV = {
-  TAU_API_BASE_URL: 'https://liked-fancy-raccoon.ngrok-free.app',
+  TAU_API_BASE_URL: 'https://taucad-api.fly.dev',
 };
 
 export const metaConfig = {

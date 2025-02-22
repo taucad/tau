@@ -65,7 +65,7 @@ export function ChatTextarea({ onSubmit, models, defaultModel = 'gpt-4o-mini' }:
           placeholder="Ask Tau a question..."
         />
       </div>
-      <div className="absolute left-2 bottom-2 flex flex-row items-center">
+      <div className="absolute left-2 bottom-2 flex flex-row items-center gap-1">
         <ComboBoxResponsive
           className="group text-xs w-[initial] px-2 h-6 border-none flex items-center justify-between gap-2"
           popoverContentClassName="w-[300px]"
@@ -85,13 +85,13 @@ export function ChatTextarea({ onSubmit, models, defaultModel = 'gpt-4o-mini' }:
             </span>
           )}
           renderButtonContents={(item) => (
-            <>
+            <span className="flex flex-row items-center gap-2 group-data-[state=open]:text-primary">
               <span className="text-xs">{item.model}</span>
               <span className="relative flex size-4">
                 <ChevronDown className="absolute group-hover:scale-0 transition-transform duration-200 ease-in-out" />
                 <CircuitBoard className="absolute scale-0 group-hover:scale-100 transition-transform duration-200 ease-in-out" />
               </span>
-            </>
+            </span>
           )}
           getValue={(item) => item.model}
           onSelect={(selectedModel) => {

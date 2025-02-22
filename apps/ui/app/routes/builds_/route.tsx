@@ -19,7 +19,7 @@ export const handle = {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   if (url.pathname === '/builds') {
-    return redirect('/builds/new');
+    return redirect('/');
   }
   return null;
 };
@@ -31,7 +31,7 @@ export default function Builds() {
 
   useEffect(() => {
     if (location.pathname === '/builds') {
-      navigate('/builds/new');
+      navigate('/');
     }
   }, [navigate, location.pathname]);
 

@@ -2,7 +2,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { ChevronRight, Edit, Globe2, History, NotebookIcon, Projector } from 'lucide-react';
 import { CopyButton } from '@/components/copy-button';
 import { Button } from '@/components/ui/button';
-import { MessageSchema, MessageRole, MessageStatus, SourceOrigin } from '@/hooks/use-chat';
+import { Message, MessageRole, MessageStatus, SourceOrigin } from '@/types/chat';
 import { cn } from '@/utils/ui';
 import { MarkdownViewer } from '@/components/markdown-viewer';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
@@ -23,7 +23,7 @@ const SOURCE_TOOLS = [
 ] as const satisfies { icon: React.ElementType; key: SourceOrigin }[];
 
 type ChatMessageProperties = {
-  message: MessageSchema;
+  message: Message;
   onEdit: (content: string) => void;
 };
 

@@ -52,9 +52,17 @@ const ColorPicker = forwardRef<
             />
           </TooltipTrigger>
         </PopoverTrigger>
-        <TooltipContent side="right">Choose theme color</TooltipContent>
+        <TooltipContent side="right">Choose theme</TooltipContent>
       </Tooltip>
       <PopoverContent side="right" className="w-48 flex flex-row gap-2 p-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="outline" size="icon" onClick={onReset} className="w-12">
+              <RotateCcw className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Reset</TooltipContent>
+        </Tooltip>
         <Slider
           min={0}
           max={360}
@@ -74,14 +82,6 @@ const ColorPicker = forwardRef<
           )}
           ref={forwardedReference}
         />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="outline" size="icon" onClick={onReset} className="w-12">
-              <RotateCcw className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Reset</TooltipContent>
-        </Tooltip>
       </PopoverContent>
     </Popover>
   );

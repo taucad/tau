@@ -1,18 +1,20 @@
 import { useRef, useEffect } from 'react';
-import { Eye, Code, Terminal, ArrowDown, Box, MessageSquareReply } from 'lucide-react';
+import { Eye, Code, Terminal, ArrowDown, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { MessageRole, MessageStatus, useChat } from '@/hooks/use-chat';
+import { useChat } from '@/contexts/use-chat';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useScroll } from '@/hooks/use-scroll';
 import { ChatMessage } from '@/routes/builds_.$id/chat-message';
 import { ChatViewer } from '@/routes/builds_.$id/chat-viewer';
 import { cn } from '@/utils/ui';
-import { ChatTextarea } from '@/components/chat/chat-textarea';
+import { ChatTextarea, ChatTextareaProperties } from '@/components/chat/chat-textarea';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useModels } from '@/hooks/use-models';
 import { ChatCode } from './chat-code';
 import { useCookie } from '@/utils/cookies';
+import { MessageRole, MessageStatus } from '@/types/chat';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export const CHAT_COOKIE_NAME = 'tau-chat-open';
 export const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'tau-chat-history-resize';
@@ -43,7 +45,7 @@ export const ChatInterface = () => {
   const [isChatOpen, setIsChatOpen] = useCookie(CHAT_COOKIE_NAME, true, {
     parse: (value) => value === 'true',
   });
-  const [chatResizeMain, setChatResizeMain] = useCookie(CHAT_RESIZE_COOKIE_NAME_MAIN, [40, 60], resizeCookieOptions);
+  const [chatResizeMain, setChatResizeMain] = useCookie(CHAT_RESIZE_COOKIE_NAME_MAIN, [15, 85], resizeCookieOptions);
   const [chatResizeHistory, setChatResizeHistory] = useCookie(
     CHAT_RESIZE_COOKIE_NAME_HISTORY,
     [85, 15],
@@ -51,13 +53,14 @@ export const ChatInterface = () => {
   );
   const { data: models } = useModels();
 
-  const onSubmit = async (text: string, model: string) => {
-    await sendMessage({
+  const onSubmit: ChatTextareaProperties['onSubmit'] = async ({ content, model, metadata }) => {
+    sendMessage({
       message: {
-        content: text,
+        content,
         role: MessageRole.User,
         status: MessageStatus.Success,
-        metadata: {},
+        metadata: metadata ?? { systemHints: [] },
+        model,
       },
       model,
     });
@@ -80,27 +83,33 @@ export const ChatInterface = () => {
   return (
     <ResizablePanelGroup
       direction="horizontal"
-      className="flex flex-1 bg-background"
+      className="relative flex flex-1 bg-background"
       onLayout={(sizes) => {
         setChatResizeMain(sizes as [number, number]);
       }}
       autoSaveId={CHAT_RESIZE_COOKIE_NAME_MAIN}
     >
-      <Button
-        size={'icon'}
-        variant="outline"
-        onClick={toggleChatOpen}
-        className="group absolute top-0 right-0 text-muted-foreground m-1.5"
-        data-state={isChatOpen ? 'open' : 'closed'}
-      >
-        <span className="size-4">
-          <Box className="absolute scale-0 group-data-[state=open]:scale-100 transition-transform duration-200 ease-in-out" />
-          <MessageSquareReply className="scale-100 group-data-[state=open]:scale-0 transition-transform duration-200 ease-in-out" />
-        </span>
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size={'icon'}
+            variant="outline"
+            onClick={toggleChatOpen}
+            className="group absolute top-0 left-0 text-muted-foreground m-[0.5625rem] z-10"
+            data-state={isChatOpen ? 'open' : 'closed'}
+          >
+            <span className="size-4">
+              <MessageCircle className="scale-100 group-data-[state=open]:-rotate-90 group-data-[state=open]:text-foreground transition-transform duration-200 ease-in-out" />
+            </span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>{isChatOpen ? 'Close' : 'Open'} Chat</p>
+        </TooltipContent>
+      </Tooltip>
       <ResizablePanel
         order={1}
-        minSize={30}
+        minSize={20}
         maxSize={50}
         defaultSize={chatResizeMain[0]}
         className={cn('hidden', isChatOpen && 'flex flex-col')}
@@ -166,7 +175,12 @@ export const ChatInterface = () => {
         className="h-full flex-col data-[state=open]:hidden lg:data-[state=open]:flex"
       >
         <Tabs defaultValue="preview" className="flex flex-col h-full">
-          <TabsList className="grid grid-cols-3 absolute m-2 bg-background border md:h-[2.375rem] z-10 [&>*]:data-[state=active]:bg-accent/50">
+          <TabsList
+            className={cn(
+              'grid grid-cols-3 absolute m-2 bg-background border  md:h-[2.375rem]  z-10 [&>*]:data-[state=active]:bg-accent/50',
+              !isChatOpen && 'ml-13',
+            )}
+          >
             <TabsTrigger value="preview" className="gap-2">
               <Eye className="size-4" />
               <span className="hidden md:block">Preview</span>

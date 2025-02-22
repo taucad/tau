@@ -53,7 +53,8 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
         </Avatar>
       </When>
       <div className="flex flex-col space-y-2">
-        {message.toolCalls?.length > 0 && relevantSources && (
+        {/* @ts-expect-error - FIXME: message.toolCalls is always defined */}
+        {message.toolCalls.length > 0 && relevantSources && (
           <>
             <div className="flex flex-row items-center space-x-2">
               <p className="text-lg">Sources</p>
@@ -73,7 +74,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                         });
                       }}
                       key={source.key}
-                      className="rounded-full hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30 flex flex-row items-center space-x-1 cursor-pointer select-none transition-all duration-200 ease-in-out"
+                      className="rounded-full hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30 flex flex-row items-center space-x-1 cursor-pointer select-none transition-transform duration-200 ease-in-out"
                     >
                       <source.icon className="size-3" />
                       <p className="text-xs">{sourceCount}</p>
@@ -86,7 +87,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                 <TooltipTrigger>
                   <Badge
                     variant={'outline'}
-                    className="rounded-full hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30 flex flex-row items-center space-x-1 cursor-pointer select-none transition-all duration-200 ease-in-out"
+                    className="rounded-full hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30 flex flex-row items-center space-x-1 cursor-pointer select-none transition-transform duration-200 ease-in-out"
                   >
                     <p className="text-xs">+</p>
                   </Badge>
@@ -258,7 +259,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            <p>Edit</p>
+            <p>Edit message</p>
           </TooltipContent>
         </Tooltip>
       )}

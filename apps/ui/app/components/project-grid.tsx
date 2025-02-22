@@ -5,48 +5,26 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { SvgIcon } from '@/components/icons/svg-icon';
-import { Cog, Zap, Cpu } from 'lucide-react';
-
-export const CAD_LANGUAGES = ['Replicad', 'OpenSCAD', 'KCL'] as const;
-export type CadLanguage = (typeof CAD_LANGUAGES)[number];
-
-export const CATEGORIES = {
-  Mechanical: { icon: Cog, color: 'text-blue' },
-  Electrical: { icon: Zap, color: 'text-yellow' },
-  Firmware: { icon: Cpu, color: 'text-purple' },
-} as const;
-export type Category = keyof typeof CATEGORIES;
+import { Build } from '@/types/build';
+import { CadLanguage, CATEGORIES, Category } from '@/types/cad';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
 // Placeholder for language icons
 const LANGUAGE_ICONS: Record<CadLanguage, ComponentType<{ className?: string }>> = {
-  Replicad: ({ className }) => <SvgIcon id="replicad" className={className} />,
-  OpenSCAD: ({ className }) => <SvgIcon id="openscad" className={className} />,
-  KCL: ({ className }) => <SvgIcon id="zoo" className={className} />,
+  replicad: ({ className }) => <SvgIcon id="replicad" className={className} />,
+  openscad: ({ className }) => <SvgIcon id="openscad" className={className} />,
+  kicad: ({ className }) => <SvgIcon id="kicad" className={className} />,
+  kcl: ({ className }) => <SvgIcon id="kcl" className={className} />,
+  cpp: ({ className }) => <SvgIcon id="cpp" className={className} />,
 };
 
-export interface Project {
-  id: string;
-  title: string;
-  description: string;
-  image: string;
-  stars: number;
-  forks: number;
-  author: {
-    name: string;
-    avatar: string;
-  };
-  language: CadLanguage;
-  categories: Category[];
-  tags: string[];
-}
-
-interface ProjectCardProperties extends Project {
+interface ProjectCardProperties extends Build {
   onStar?: (id: string) => void;
   onFork?: (id: string) => void;
 }
 
 export interface ProjectGridProperties {
-  projects: Project[];
+  projects: Build[];
   onStar?: (id: string) => void;
   onFork?: (id: string) => void;
   hasMore?: boolean;
@@ -75,48 +53,58 @@ export function ProjectGrid({ projects, onStar, onFork, hasMore, onLoadMore }: P
 
 function ProjectCard({
   id,
-  title,
+  name,
   description,
-  image,
+  thumbnail,
   stars,
   forks,
   author,
-  language,
-  categories,
   tags,
+  assets,
   onStar,
   onFork,
 }: ProjectCardProperties) {
-  const LanguageIcon = LANGUAGE_ICONS[language];
+  const LanguageIcon = Object.values(assets)
+    .map((asset) => asset.language)
+    .map((language) => ({
+      Icon: LANGUAGE_ICONS[language],
+      language,
+    }));
 
   return (
     <Card className="group relative overflow-hidden flex flex-col">
       <div className="aspect-video overflow-hidden bg-muted">
         <img
-          src={image || '/placeholder.svg'}
-          alt={title}
+          src={thumbnail || '/placeholder.svg'}
+          alt={name}
           className="h-full w-full object-cover transition-transform group-hover:scale-105"
           loading="lazy"
         />
       </div>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle>{title}</CardTitle>
-          <Badge variant="outline" className="flex items-center gap-2 rounded-full pr-0.5">
-            {language}
-            <Avatar className="h-5 w-5">
-              <AvatarFallback>
-                <LanguageIcon className="size-3" />
-              </AvatarFallback>
-            </Avatar>
-          </Badge>
+          <CardTitle>{name}</CardTitle>
+          <div className="flex flex-wrap gap-1">
+            {LanguageIcon.map(({ language, Icon }) => (
+              <Tooltip key={language}>
+                <TooltipTrigger>
+                  <Avatar className="h-5 w-5">
+                    <AvatarFallback>
+                      <Icon className="size-3" />
+                    </AvatarFallback>
+                  </Avatar>
+                </TooltipTrigger>
+                <TooltipContent>{language}</TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
         </div>
         <CardDescription className="line-clamp-2">{description}</CardDescription>
       </CardHeader>
       <CardContent className="flex-grow">
         <div className="flex flex-wrap gap-2 mb-2">
-          {categories.map((category) => {
-            const { icon: Icon, color } = CATEGORIES[category];
+          {Object.keys(assets).map((category) => {
+            const { icon: Icon, color } = CATEGORIES[category as Category];
             return (
               <span key={category} className={`flex items-center gap-1 text-sm ${color}`}>
                 <Icon className="size-4" />

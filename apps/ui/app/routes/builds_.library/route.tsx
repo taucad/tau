@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { Search, Filter, Grid, List, Star, ChevronDown, ArrowRight, Zap, Cpu, Layout, Cog } from 'lucide-react';
 import { Link } from '@remix-run/react';
 import { Button } from '@/components/ui/button';
@@ -15,10 +15,9 @@ import {
 import { cn } from '@/utils/ui';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { mockModels } from '@/components/mock-code';
-import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer';
-import { useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
-import { Category } from '@/components/project-grid';
-import { CATEGORIES } from '@/components/project-grid';
+import { Category, CATEGORIES } from '@/types/cad';
+import { Build } from '@/types/build';
+import { mockBuilds } from '@/components/mock-builds';
 
 export const handle = {
   breadcrumb: () => {
@@ -32,59 +31,7 @@ export const handle = {
   },
 };
 
-interface Build {
-  id: string;
-  category: string[];
-  files: {
-    mech: Record<string, { content: string; metadata?: FileMetadata }>;
-    elec: Record<string, { content: string; metadata?: FileMetadata }>;
-    firmware: Record<string, { content: string; metadata?: FileMetadata }>;
-  };
-  name: string;
-  description: string;
-  author: {
-    name: string;
-    avatar: string;
-    contact?: string;
-  };
-  version: string;
-  createdAt: Date;
-  updatedAt?: Date;
-  status: 'draft' | 'review' | 'published' | 'completed' | 'archived';
-  tags?: string[];
-  dependencies?: string[];
-  notes?: string;
-  collaborators?: { name: string; role?: string }[];
-  lastOpened?: Date;
-  isFavorite: boolean;
-  thumbnail?: string;
-  revisions?: {
-    version: string;
-    date: Date;
-    changes: string;
-  }[];
-  viewer?: 'replicad' | 'other';
-}
-
-interface FileMetadata {
-  size: number;
-  type: string;
-  lastModified: Date;
-}
-
 const ITEMS_PER_PAGE = 12;
-
-function formatHumanDate(date: Date) {
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const minutes = Math.floor(diff / 60_000);
-  const hours = Math.floor(minutes / 60);
-
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
-  if (hours < 6) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
-  if (hours < 24) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return date.toLocaleDateString();
-}
 
 const handleStatusChange = (projectId: string, newStatus: string) => {
   console.log(`Changing status of project ${projectId} to ${newStatus}`);
@@ -106,19 +53,13 @@ export default function PersonalCadProjects() {
   const filteredProjects = projects
     .filter(
       (project) =>
-        (activeFilter === 'all' || project.category.includes(activeFilter)) &&
+        (activeFilter === 'all' || Object.keys(project.assets).includes(activeFilter)) &&
         (project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
           project.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
           project.tags?.some((tag) => tag.toLowerCase().includes(searchTerm.toLowerCase()))),
     )
     .sort((a, b) => {
-      if (sortBy === 'lastOpened') {
-        return (b.lastOpened?.getTime() || 0) - (a.lastOpened?.getTime() || 0);
-      } else if (sortBy === 'createdAt') {
-        return b.createdAt.getTime() - a.createdAt.getTime();
-      } else {
-        return a.name.localeCompare(b.name);
-      }
+      return sortBy === 'createdAt' ? b.createdAt - a.createdAt : a.name.localeCompare(b.name);
     });
 
   // TODO: add load more
@@ -131,7 +72,7 @@ export default function PersonalCadProjects() {
     <div className="container mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-4xl font-bold">Builds</h1>
-        <Link to="/builds/new" tabIndex={-1}>
+        <Link to="/" tabIndex={-1}>
           <Button>New Build</Button>
         </Link>
       </div>
@@ -198,21 +139,21 @@ export default function PersonalCadProjects() {
         </TabsContent>
         <TabsContent value="mechanical">
           <ProjectGrid
-            projects={filteredProjects.filter((p) => p.category.includes('mechanical'))}
+            projects={filteredProjects.filter((p) => Object.keys(p.assets).includes('mechanical'))}
             visibleProjects={visibleProjects}
             viewMode={viewMode}
           />
         </TabsContent>
         <TabsContent value="electrical">
           <ProjectGrid
-            projects={filteredProjects.filter((p) => p.category.includes('electrical'))}
+            projects={filteredProjects.filter((p) => Object.keys(p.assets).includes('electrical'))}
             visibleProjects={visibleProjects}
             viewMode={viewMode}
           />
         </TabsContent>
         <TabsContent value="firmware">
           <ProjectGrid
-            projects={filteredProjects.filter((p) => p.category.includes('firmware'))}
+            projects={filteredProjects.filter((p) => Object.keys(p.assets).includes('firmware'))}
             visibleProjects={visibleProjects}
             viewMode={viewMode}
           />
@@ -261,6 +202,7 @@ function CategoryBadge({ category }: { category: string }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function StatusDropdown({ status, projectId }: { status: string; projectId: string }) {
   const statusColors = {
     draft: 'bg-gray-100 hover:bg-neutral',
@@ -308,16 +250,11 @@ function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' |
           </div>
           <div className="flex items-center gap-4">
             <div className="flex gap-2">
-              {project.category.map((cat) => (
+              {Object.keys(project.assets).map((cat) => (
                 <CategoryBadge key={cat} category={cat} />
               ))}
             </div>
-            <StatusDropdown status={project.status} projectId={project.id} />
-          </div>
-          <div className="text-sm text-muted-foreground">
-            {project.lastOpened
-              ? `Last opened ${formatHumanDate(project.lastOpened)}`
-              : `Created ${formatHumanDate(project.createdAt)}`}
+            {/* <StatusDropdown status={project.status} projectId={project.id} /> */}
           </div>
         </div>
       </Link>
@@ -344,18 +281,18 @@ function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' |
         <CardContent className="flex-grow">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap gap-2">
-              {project.category.map((cat) => (
+              {Object.keys(project.assets).map((cat) => (
                 <CategoryBadge key={cat} category={cat} />
               ))}
             </div>
-            <StatusDropdown status={project.status} projectId={project.id} />
+            {/* <StatusDropdown status={project.status} projectId={project.id} /> */}
           </div>
         </CardContent>
         <CardFooter className="flex justify-between items-center">
           <Button
             variant="ghost"
             size="icon"
-            className={cn(project.isFavorite ? 'text-yellow-400' : 'text-gray-400 hover:text-yellow-400')}
+            // className={cn(project.isFavorite ? 'text-yellow-400' : 'text-gray-400 hover:text-yellow-400')}
             onClick={(event) => {
               event.stopPropagation();
               handleFavorite(project.id);
@@ -375,11 +312,12 @@ function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' |
 const projects: Build[] = [
   ...mockModels.map((model) => ({
     id: model.id,
-    category: ['mechanical'],
-    files: {
-      mech: { 'model.ts': { content: model.code } },
-      elec: {},
-      firmware: {},
+    assets: {
+      mechanical: {
+        files: { 'model.ts': { content: model.code } },
+        main: 'model.ts',
+        language: 'replicad' as const,
+      },
     },
     name: model.name,
     description: `A 3D ${model.name} model built with Replicad`,
@@ -388,124 +326,14 @@ const projects: Build[] = [
       avatar: '/avatar-sample.png',
     },
     version: '1.0.0',
-    createdAt: new Date(),
-    status: 'published' as const,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
     tags: ['3d-printing', 'parametric', 'replicad'],
-    lastOpened: new Date(),
     isFavorite: false,
-    viewer: 'replicad' as const,
+    stars: 0,
+    forks: 0,
+    thumbnail: '/placeholder.svg',
+    messages: [],
   })),
-  {
-    id: '1',
-    category: ['mechanical', 'electrical'],
-    files: {
-      mech: { 'main.scad': { content: '// OpenSCAD code here' } },
-      elec: { 'schematic.kicad': { content: '// KiCad schematic here' } },
-      firmware: {},
-    },
-    name: 'Robotic Arm',
-    description: '6-axis robotic arm with custom PCB control',
-    author: {
-      name: 'Jane Doe',
-      avatar: '/avatar-sample.png',
-    },
-    version: '1.2.0',
-    createdAt: new Date('2023-01-15'),
-    updatedAt: new Date('2023-06-20'),
-    status: 'completed',
-    tags: ['robotics', 'automation'],
-    lastOpened: new Date('2023-06-25'),
-    isFavorite: true,
-    thumbnail: 'https://images.unsplash.com/photo-1485827404703-89b55fcc595e?q=80&w=640',
-  },
-  {
-    id: '2',
-    category: ['mechanical'],
-    files: {
-      mech: { 'gears.scad': { content: '// OpenSCAD gear system' } },
-      elec: {},
-      firmware: {},
-    },
-    name: 'Parametric Gearbox',
-    description: 'Customizable gearbox for various applications',
-    author: {
-      name: 'John Smith',
-      avatar: '/avatar-sample.png',
-    },
-    version: '0.9.5',
-    createdAt: new Date('2023-03-10'),
-    status: 'draft',
-    lastOpened: new Date('2023-07-01'),
-    isFavorite: false,
-    thumbnail: 'https://images.unsplash.com/photo-1631083215251-26ef18bd1fdb?q=80&w=640',
-  },
-  {
-    id: '3',
-    category: ['electrical', 'firmware'],
-    files: {
-      mech: {},
-      elec: { 'main_board.kicad': { content: '// KiCad PCB layout' } },
-      firmware: { 'main.ino': { content: '// Arduino code' } },
-    },
-    name: 'Smart Home Hub',
-    description: 'Central control unit for home automation',
-    author: {
-      name: 'Alice Johnson',
-      avatar: '/avatar-sample.png',
-    },
-    version: '2.1.3',
-    createdAt: new Date('2022-11-05'),
-    updatedAt: new Date('2023-05-15'),
-    status: 'completed',
-    tags: ['IoT', 'home-automation'],
-    lastOpened: new Date('2023-07-10'),
-    isFavorite: true,
-    thumbnail: 'https://images.unsplash.com/photo-1638383417648-0c5a3b9baa9b?q=80&w=640',
-  },
-  {
-    id: '4',
-    category: ['mechanical', 'electrical'],
-    files: {
-      mech: { 'frame.scad': { content: '// OpenSCAD frame design' } },
-      elec: { 'motor_control.kicad': { content: '// KiCad motor controller schematic' } },
-      firmware: {},
-    },
-    name: 'Electric Skateboard',
-    description: 'Custom electric skateboard with regenerative braking',
-    author: {
-      name: 'Bob Wilson',
-      avatar: '/avatar-sample.png',
-    },
-    version: '1.0.0',
-    createdAt: new Date('2023-02-20'),
-    updatedAt: new Date('2023-06-30'),
-    status: 'completed',
-    tags: ['e-mobility', 'transportation'],
-    lastOpened: new Date('2023-07-05'),
-    isFavorite: false,
-    thumbnail: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=640',
-  },
-  {
-    id: '5',
-    category: ['firmware'],
-    files: {
-      mech: {},
-      elec: {},
-      firmware: { 'control_system.cpp': { content: '// C++ firmware for drone' } },
-    },
-    name: 'Drone Flight Controller',
-    description: 'Advanced flight control system for quadcopters',
-    author: {
-      name: 'Charlie Brown',
-      avatar: '/avatar-sample.png',
-    },
-    version: '3.2.1',
-    createdAt: new Date('2022-09-15'),
-    updatedAt: new Date('2023-07-01'),
-    status: 'draft',
-    tags: ['drones', 'flight-control'],
-    lastOpened: new Date('2023-07-15'),
-    isFavorite: true,
-    thumbnail: 'https://images.unsplash.com/photo-1473968512647-3e447244af8f?q=80&w=640',
-  },
+  ...mockBuilds,
 ];

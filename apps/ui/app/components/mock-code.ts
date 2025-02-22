@@ -291,7 +291,7 @@ const main = (
 };
 `;
 
-export const cyloidalGear = `const { drawCircle, drawParametricFunction } = replicad;
+export const cylindricalGear = `const { drawCircle, drawParametricFunction } = replicad;
 
 const hypocycloid = (t, r1, r2) => {
   return [
@@ -689,7 +689,7 @@ export const mockModels = [
   {
     id: 'bld_cylindrical-gear',
     name: 'Cylindrical Gear',
-    code: cyloidalGear,
+    code: cylindricalGear,
   },
   {
     id: 'bld_bottle',

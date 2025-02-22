@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Link } from '@remix-run/react';
-import { ProjectGrid, type Category, type CadLanguage } from '@/components/project-grid';
+import { ProjectGrid } from '@/components/project-grid';
 import { mockBuilds } from '@/components/mock-builds';
 import { Search, Code2, Layout, SlidersHorizontal } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { CATEGORIES, CAD_LANGUAGES } from '@/components/project-grid';
+import { CATEGORIES, CAD_LANGUAGES, Category, CadLanguage } from '@/types/cad';
 
 export const handle = {
   breadcrumb: () => {
@@ -39,9 +39,9 @@ export default function CadCommunity() {
 
   const filteredProjects = mockBuilds.filter(
     (project) =>
-      (activeFilter === 'all' || project.categories.includes(activeFilter as Category)) &&
-      (activeLanguage === 'all' || project.language === activeLanguage) &&
-      (project.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (activeFilter === 'all' || Object.keys(project.assets).includes(activeFilter)) &&
+      (activeLanguage === 'all' || Object.keys(project.assets).includes(activeLanguage)) &&
+      (project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         project.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
         project.tags.some((tag) => tag.toLowerCase().includes(searchTerm.toLowerCase()))),
   );
@@ -108,7 +108,7 @@ export default function CadCommunity() {
           <TabsList>
             <TabsTrigger value="all" className="flex items-center gap-2">
               <Layout className="size-4" />
-              <span className="hidden sm:inline">All</span>
+              <span className="hidden sm:inline">all</span>
             </TabsTrigger>
             {Object.entries(CATEGORIES).map(([key, { icon: Icon, color }]) => (
               <TabsTrigger key={key} value={key} className="flex items-center gap-2">
@@ -129,7 +129,7 @@ export default function CadCommunity() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>
-                <DropdownMenuItem onSelect={() => setActiveLanguage('all')}>All</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setActiveLanguage('all')}>all</DropdownMenuItem>
                 {CAD_LANGUAGES.map((lang) => (
                   <DropdownMenuItem key={lang} onSelect={() => setActiveLanguage(lang)}>
                     {lang}

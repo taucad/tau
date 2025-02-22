@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react';
-import { Eye, Code, Terminal, ArrowDown, MessageCircle } from 'lucide-react';
+import { Eye, Code, Terminal, ArrowDown, MessageCircle, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useChat } from '@/contexts/use-chat';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
@@ -8,6 +8,7 @@ import { ChatMessage } from '@/routes/builds_.$id/chat-message';
 import { ChatViewer } from '@/routes/builds_.$id/chat-viewer';
 import { cn } from '@/utils/ui';
 import { ChatTextarea, ChatTextareaProperties } from '@/components/chat/chat-textarea';
+import { Parameters } from '@/components/geometry/kernel/replicad/parameters';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useModels } from '@/hooks/use-models';
@@ -15,10 +16,15 @@ import { ChatCode } from './chat-code';
 import { useCookie } from '@/utils/cookies';
 import { MessageRole, MessageStatus } from '@/types/chat';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useKeydown } from '@/hooks/use-keydown';
+import { Drawer, DrawerContent } from '@/components/ui/drawer';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 export const CHAT_COOKIE_NAME = 'tau-chat-open';
+export const PARAMETERS_COOKIE_NAME = 'tau-parameters-open';
 export const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'tau-chat-history-resize';
 export const CHAT_RESIZE_COOKIE_NAME_MAIN = 'tau-chat-main-resize';
+export const PARAMETERS_RESIZE_COOKIE_NAME = 'tau-parameters-resize';
 export const CHAT_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 const parseResizeCookie = (cookie: string): [number, number] => {
@@ -45,7 +51,21 @@ export const ChatInterface = () => {
   const [isChatOpen, setIsChatOpen] = useCookie(CHAT_COOKIE_NAME, true, {
     parse: (value) => value === 'true',
   });
-  const [chatResizeMain, setChatResizeMain] = useCookie(CHAT_RESIZE_COOKIE_NAME_MAIN, [15, 85], resizeCookieOptions);
+  const [isParametersOpen, setIsParametersOpen] = useCookie(PARAMETERS_COOKIE_NAME, true, {
+    parse: (value) => value === 'true',
+  });
+  const [chatResizeMain, setChatResizeMain] = useCookie(CHAT_RESIZE_COOKIE_NAME_MAIN, [15, 65, 20], {
+    parse: (cookie: string): [number, number, number] => {
+      try {
+        return JSON.parse(cookie);
+      } catch {
+        return [15, 65, 20];
+      }
+    },
+    stringify: (sizes: [number, number, number]): string => {
+      return JSON.stringify(sizes);
+    },
+  });
   const [chatResizeHistory, setChatResizeHistory] = useCookie(
     CHAT_RESIZE_COOKIE_NAME_HISTORY,
     [85, 15],
@@ -80,12 +100,35 @@ export const ChatInterface = () => {
     });
   };
 
+  const toggleParametersOpen = () => {
+    setIsParametersOpen((previous) => {
+      const open = !previous;
+      setIsParametersOpen(open);
+      return open;
+    });
+  };
+
+  useKeydown({
+    key: 'p',
+    callback: toggleParametersOpen,
+    ctrlKey: true,
+    requireAllModifiers: true,
+  });
+  useKeydown({
+    key: 'c',
+    callback: toggleChatOpen,
+    ctrlKey: true,
+    requireAllModifiers: true,
+  });
+
+  const isMobile = useIsMobile();
+
   return (
     <ResizablePanelGroup
       direction="horizontal"
       className="relative flex flex-1 bg-background"
       onLayout={(sizes) => {
-        setChatResizeMain(sizes as [number, number]);
+        setChatResizeMain(sizes as [number, number, number]);
       }}
       autoSaveId={CHAT_RESIZE_COOKIE_NAME_MAIN}
     >
@@ -99,20 +142,21 @@ export const ChatInterface = () => {
             data-state={isChatOpen ? 'open' : 'closed'}
           >
             <span className="size-4">
-              <MessageCircle className="scale-100 group-data-[state=open]:-rotate-90 group-data-[state=open]:text-foreground transition-transform duration-200 ease-in-out" />
+              <MessageCircle className="scale-100 transition-transform duration-200 ease-in-out group-data-[state=open]:-rotate-90 group-data-[state=open]:text-foreground" />
             </span>
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          <p>{isChatOpen ? 'Close' : 'Open'} Chat</p>
+          <p>{isChatOpen ? 'Close' : 'Open'} Chat (Ctrl + C)</p>
         </TooltipContent>
       </Tooltip>
+
       <ResizablePanel
         order={1}
-        minSize={20}
-        maxSize={50}
+        minSize={15}
+        maxSize={30}
         defaultSize={chatResizeMain[0]}
-        className={cn('hidden', isChatOpen && 'flex flex-col')}
+        className={cn('hidden', isChatOpen && 'md:flex flex-col')}
       >
         <ResizablePanelGroup
           direction="vertical"
@@ -166,19 +210,14 @@ export const ChatInterface = () => {
           </ResizablePanel>
         </ResizablePanelGroup>
       </ResizablePanel>
-      <ResizableHandle className={cn('hidden', isChatOpen && 'flex')} />
 
-      <ResizablePanel
-        order={2}
-        data-state={isChatOpen ? 'open' : 'closed'}
-        defaultSize={chatResizeMain[1]}
-        className="h-full flex-col data-[state=open]:hidden lg:data-[state=open]:flex"
-      >
+      <ResizableHandle className={cn('hidden', isChatOpen && 'md:flex')} />
+
+      <ResizablePanel order={2} defaultSize={chatResizeMain[1]} className="h-full flex-col">
         <Tabs defaultValue="preview" className="flex flex-col h-full">
           <TabsList
             className={cn(
-              'grid grid-cols-3 absolute m-2 bg-background border  md:h-[2.375rem]  z-10 [&>*]:data-[state=active]:bg-accent/50',
-              !isChatOpen && 'ml-13',
+              'grid grid-cols-3 absolute m-2 ml-13 bg-background border md:h-[2.375rem] z-10 [&>*]:data-[state=active]:bg-accent/50',
             )}
           >
             <TabsTrigger value="preview" className="gap-2">
@@ -202,6 +241,75 @@ export const ChatInterface = () => {
           </TabsContent>
         </Tabs>
       </ResizablePanel>
+
+      <ResizableHandle className={cn('hidden', isParametersOpen && 'md:flex')} />
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size={'icon'}
+            variant="outline"
+            onClick={toggleParametersOpen}
+            className="group absolute top-0 right-0 text-muted-foreground m-[0.5625rem] z-10"
+            data-state={isParametersOpen ? 'open' : 'closed'}
+          >
+            <span className="size-4">
+              <Settings2 className="scale-100 group-data-[state=open]:-rotate-90 group-data-[state=open]:text-foreground transition-transform duration-200 ease-in-out" />
+            </span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>{isParametersOpen ? 'Close' : 'Open'} Parameters (Ctrl + P)</p>
+        </TooltipContent>
+      </Tooltip>
+
+      <ResizablePanel
+        order={3}
+        minSize={15}
+        maxSize={30}
+        defaultSize={chatResizeMain[2]}
+        className={cn('hidden', isParametersOpen && 'md:flex w-64 xl:w-96 shrink-0 p-4 gap-2 text-sm flex-col')}
+      >
+        <span className="font-bold text-lg">Parameters</span>
+        <Parameters />
+      </ResizablePanel>
+
+      {isMobile && (
+        <>
+          <Drawer open={isParametersOpen} onOpenChange={setIsParametersOpen}>
+            <DrawerContent className="p-4 pt-0 text-sm flex flex-col gap-2 justify-between">
+              <span className="font-bold text-lg">Parameters</span>
+              <div className="grid grid-cols-2 gap-2">
+                <Parameters />
+              </div>
+            </DrawerContent>
+          </Drawer>
+
+          <Drawer open={isChatOpen} onOpenChange={setIsChatOpen}>
+            <DrawerContent className="flex flex-col h-[85vh]">
+              <div className="p-4 pb-2">
+                <span className="font-bold text-lg">Chat</span>
+              </div>
+              <div className="flex-1 overflow-y-auto px-4">
+                <div className="space-y-4 pb-4">
+                  {messages.map((message, index) => (
+                    <ChatMessage
+                      message={message}
+                      key={index}
+                      onEdit={(content) => {
+                        editMessage(message.id, content);
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="p-4 pt-2 border-t bg-background">
+                <ChatTextarea onSubmit={onSubmit} models={models ?? []} />
+              </div>
+            </DrawerContent>
+          </Drawer>
+        </>
+      )}
     </ResizablePanelGroup>
   );
 };

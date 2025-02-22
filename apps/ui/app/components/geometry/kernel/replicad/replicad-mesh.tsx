@@ -48,7 +48,7 @@ export const ReplicadMesh = React.memo(function ShapeMeshes({
   faceHover,
 }: ReplicadMeshProperties) {
   const { invalidate } = useThree();
-  const { hex } = useColor();
+  const color = useColor();
 
   const body = useRef(new BufferGeometry());
   const lines = useRef(new BufferGeometry());
@@ -105,14 +105,14 @@ export const ReplicadMesh = React.memo(function ShapeMeshes({
       >
         {/* the offsets are here to avoid z fighting between the mesh and the lines */}
         <MatcapMaterial
-          color={hex}
+          color={color.serialized.hex}
           attachArray="material"
           polygonOffset
           polygonOffsetFactor={2}
           polygonOffsetUnits={1}
         />
         <MatcapMaterial
-          color={hex}
+          color={color.serialized.hex}
           attachArray="material"
           polygonOffset
           polygonOffsetFactor={2}

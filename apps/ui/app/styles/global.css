@@ -37,6 +37,10 @@
   --l-deepest: 0.08;
   /* Deepest lightness, typically used for the darkest elements */
 
+  --l-primary: 0.5719;
+  --c-primary: 0.1898;
+  --hue-primary: 242deg;
+
   /* Base colors */
   --background: oklch(var(--l-base) 0.005 var(--hue-neutral));
   --foreground: oklch(var(--l-deepest) 0.02 var(--hue-neutral));
@@ -45,7 +49,7 @@
   --muted-foreground: oklch(var(--l-emphasized) 0.02 var(--hue-neutral));
 
   /* Primary colors with consistent chroma */
-  --primary: oklch(0.5719 0.1898 var(--hue-primary));
+  --primary: oklch(var(--l-primary) var(--c-primary) var(--hue-primary));
   --primary-foreground: oklch(var(--l-base) 0.01 var(--hue-neutral));
 
   /* Neutral scale using consistent chroma */

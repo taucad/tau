@@ -10,13 +10,7 @@ export const ColorToggle = () => {
 
   return (
     <SidebarMenuButton asChild>
-      <ColorPicker
-        asChild
-        value={{ h: hue, s: 100, l: 75 }}
-        onChange={(value) => setHue(value.h)}
-        disableSaturation
-        onReset={resetHue}
-      >
+      <ColorPicker asChild value={{ h: hue, s: 100, l: 75 }} onChange={(value) => setHue(value.h)} onReset={resetHue}>
         <Button
           variant="ghost"
           size="icon"

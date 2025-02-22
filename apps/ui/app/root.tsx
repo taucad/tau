@@ -29,6 +29,7 @@ import { webManifestLinks } from '@/routes/manifest[.webmanifest]';
 import { getModels, Model } from '@/hooks/use-models';
 import { buttonVariants } from './components/ui/button';
 import { ColorProvider, useColor } from '@/hooks/use-color';
+import { useFavicon } from '@/hooks/use-favicon';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesUrl },
@@ -45,8 +46,8 @@ export const meta: MetaFunction = () => [
   { name: 'apple-mobile-web-app-capable', content: 'yes' },
   { name: 'mobile-web-app-capable', content: 'yes' },
   { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
-  { rel: 'icon', href: '/favicon.ico' },
-  { rel: 'shortcut icon', href: '/favicon.ico' },
+  { rel: 'icon', href: '/favicon.ico', sizes: 'any' },
+  { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
 ];
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -95,10 +96,15 @@ export default function AppWithProviders({ error }: { error?: ReactNode }) {
 
 export function App({ error, ssrTheme }: { error?: ReactNode; ssrTheme: Theme | null }) {
   const [theme] = useTheme();
-  const { rootStyles } = useColor();
+  const color = useColor();
+  const { setFaviconColor } = useFavicon();
+
+  useEffect(() => {
+    setFaviconColor(color.serialized.hex);
+  }, [setFaviconColor, color]);
 
   return (
-    <html lang="en" className={cn(theme)} style={rootStyles}>
+    <html lang="en" className={cn(theme)} style={color.rootStyles}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

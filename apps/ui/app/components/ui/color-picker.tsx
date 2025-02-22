@@ -4,7 +4,6 @@ import { cn } from '@/utils/ui';
 import type { ButtonProperties } from '@/components/ui/button';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Input } from '@/components/ui/input';
 import { Slot } from '@radix-ui/react-slot';
 import { RotateCcw } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from './tooltip';
@@ -72,6 +71,7 @@ const ColorPicker = forwardRef<
             '[&_[data-slot="thumb"]]:border-border',
             '[&_[data-slot="thumb"]]:border-2',
           )}
+          ref={forwardedReference}
         />
         <Tooltip>
           <TooltipTrigger asChild>

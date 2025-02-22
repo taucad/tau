@@ -21,7 +21,7 @@ import { parseCookies } from '@/utils/cookies';
 import { markdownViewerLinks } from '@/components/markdown-viewer';
 import { QueryClient } from '@tanstack/react-query';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { ENV, metaConfig } from './config';
 import { useServiceWorker } from '@/hooks/use-service-worker';
 import { Toaster } from '@/components/ui/sonner';

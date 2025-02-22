@@ -120,7 +120,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
       <SidebarHeader>
         <TeamSwitcher teams={data.teams} />
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="mt-[0.1875rem]">
         <NavChat />
         <NavHistory />
         <NavMain items={data.navMain} />

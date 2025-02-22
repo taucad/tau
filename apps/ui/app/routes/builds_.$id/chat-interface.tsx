@@ -218,6 +218,7 @@ export const ChatInterface = () => {
           <TabsList
             className={cn(
               'grid grid-cols-3 absolute m-2 ml-13 bg-background border md:h-[2.375rem] z-10 [&>*]:data-[state=active]:bg-accent/50',
+              isChatOpen && 'ml-2',
             )}
           >
             <TabsTrigger value="preview" className="gap-2">

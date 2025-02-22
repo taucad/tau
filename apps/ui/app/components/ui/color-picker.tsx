@@ -54,7 +54,7 @@ const ColorPicker = forwardRef<
         </PopoverTrigger>
         <TooltipContent side="right">Choose theme color</TooltipContent>
       </Tooltip>
-      <PopoverContent side="right" className="w-48 flex flex-row gap-4 px-0 py-3">
+      <PopoverContent side="right" className="w-48 flex flex-row gap-2 p-2">
         <Slider
           min={0}
           max={360}
@@ -63,8 +63,9 @@ const ColorPicker = forwardRef<
           className={cn(
             '[&_[data-slot="range"]]:bg-transparent',
             '[&_[data-slot="track"]]:bg-[linear-gradient(_to_right,_oklch(var(--l-primary)_var(--c-primary)_0),_oklch(var(--l-primary)_var(--c-primary)_120),_oklch(var(--l-primary)_var(--c-primary)_240),_oklch(var(--l-primary)_var(--c-primary)_360)_)]',
+            '[&_[data-slot="track"]]:border-x-[oklch(var(--l-primary)_var(--c-primary)_0)]',
+            '[&_[data-slot="track"]]:border-x-9',
             '[&_[data-slot="track"]]:h-6',
-            '[&_[data-slot="track"]]:mx-3',
             '[&_[data-slot="track"]]:rounded-md',
             '[&_[data-slot="thumb"]]:bg-primary',
             '[&_[data-slot="thumb"]]:size-9',
@@ -75,7 +76,7 @@ const ColorPicker = forwardRef<
         />
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="outline" size="icon" onClick={onReset} className="-ml-3 mr-3 w-12">
+            <Button variant="outline" size="icon" onClick={onReset} className="w-12">
               <RotateCcw className="size-4" />
             </Button>
           </TooltipTrigger>

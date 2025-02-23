@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { CATEGORIES, CAD_LANGUAGES, Category, CadLanguage } from '@/types/cad';
+import { CATEGORIES, CAD_PROVIDERS, Category, CadProvider } from '@/types/cad';
 
 export const handle = {
   breadcrumb: () => {
@@ -32,7 +32,7 @@ type SortOption = 'trending' | 'most-starred' | 'recently-updated' | 'most-forke
 
 export default function CadCommunity() {
   const [activeFilter, setActiveFilter] = useState<'all' | Category>('all');
-  const [activeLanguage, setActiveLanguage] = useState<CadLanguage | 'all'>('all');
+  const [activeLanguage, setActiveLanguage] = useState<CadProvider | 'all'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [visibleProjects, setVisibleProjects] = useState(ITEMS_PER_PAGE);
   const [sortBy, setSortBy] = useState<SortOption>('trending');
@@ -130,7 +130,7 @@ export default function CadCommunity() {
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>
                 <DropdownMenuItem onSelect={() => setActiveLanguage('all')}>all</DropdownMenuItem>
-                {CAD_LANGUAGES.map((lang) => (
+                {CAD_PROVIDERS.map((lang) => (
                   <DropdownMenuItem key={lang} onSelect={() => setActiveLanguage(lang)}>
                     {lang}
                   </DropdownMenuItem>

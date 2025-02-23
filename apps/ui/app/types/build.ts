@@ -1,4 +1,4 @@
-import type { CadLanguage, Category } from './cad';
+import type { CadProvider, Category } from './cad';
 import type { Message } from './chat';
 
 type File = {
@@ -25,7 +25,7 @@ export interface Build {
     [key in Category]?: {
       files: Record<string, File>;
       main: string;
-      language: CadLanguage;
+      language: CadProvider;
     };
   };
 }

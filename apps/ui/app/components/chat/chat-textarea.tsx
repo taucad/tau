@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ComboBoxResponsive } from '@/components/ui/combobox-responsive';
 import { Model } from '@/hooks/use-models';
 import { SvgIcon } from '@/components/icons/svg-icon';
-import { CadLanguage } from '@/types/cad';
+import { ModelProvider } from '@/types/cad';
 
 export interface ChatTextareaProperties {
   onSubmit: ({
@@ -101,7 +101,7 @@ export function ChatTextarea({
           renderLabel={(item) => (
             <span className="text-xs flex items-center justify-between w-full">
               <div className="flex items-center gap-2">
-                <SvgIcon id={item.provider as CadLanguage} className="size-4" />
+                <SvgIcon id={item.provider as ModelProvider} className="size-4" />
                 <span className="font-mono">{item.model}</span>
               </div>
               <Badge variant="outline" className="bg-background">

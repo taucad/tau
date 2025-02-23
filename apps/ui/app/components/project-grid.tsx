@@ -6,11 +6,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { SvgIcon } from '@/components/icons/svg-icon';
 import { Build } from '@/types/build';
-import { CadLanguage, CATEGORIES, Category } from '@/types/cad';
+import { CadProvider, CATEGORIES, Category } from '@/types/cad';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
 // Placeholder for language icons
-const LANGUAGE_ICONS: Record<CadLanguage, ComponentType<{ className?: string }>> = {
+const LANGUAGE_ICONS: Record<CadProvider, ComponentType<{ className?: string }>> = {
   replicad: ({ className }) => <SvgIcon id="replicad" className={className} />,
   openscad: ({ className }) => <SvgIcon id="openscad" className={className} />,
   kicad: ({ className }) => <SvgIcon id="kicad" className={className} />,

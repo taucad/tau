@@ -1,5 +1,5 @@
 import { fetchEventSource } from '@/utils/fetch-event-source/fetch';
-import { useEffect, createContext, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 // EventSource implementation borrowed from `remix-util` package
 // Updated to support async data decoding
@@ -8,12 +8,6 @@ export interface EventSourceOptions {
   init?: EventSourceInit;
   event?: string;
 }
-
-export type EventSourceMap = Map<string, { count: number; source: EventSource }>;
-
-const context = createContext<EventSourceMap>(new Map<string, { count: number; source: EventSource }>());
-
-export const EventSourceProvider = context.Provider;
 
 type UseEventSourceProperties<T> = {
   url: string;

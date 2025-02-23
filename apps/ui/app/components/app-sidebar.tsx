@@ -18,7 +18,7 @@ import { NavProjects } from '@/components/nav/nav-projects';
 import { NavUser } from '@/components/nav/nav-user';
 import { TeamSwitcher } from '@/components/nav/team-switcher';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarRail } from '@/components/ui/sidebar';
-import { Taucad } from '@/components/icons/taucad';
+import { Tau } from '@/components/icons/tau';
 import { NavChat } from '@/components/nav/nav-chat';
 import { ModeToggle } from '@/components/nav/mode-toggle';
 import { ColorToggle } from './nav/color-toggle';
@@ -33,8 +33,8 @@ const data = {
   },
   teams: [
     {
-      name: 'TauCAD',
-      logo: () => <Taucad className="size-8 text-primary bg-primary rounded-md overflow-clip" />,
+      name: 'Tau',
+      logo: () => <Tau className="size-8 text-primary bg-primary rounded-md overflow-clip" />,
       plan: 'Enterprise',
     },
     {

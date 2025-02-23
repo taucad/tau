@@ -1,6 +1,6 @@
 import { SVGProps } from 'react';
 
-export const Taucad = (properties: SVGProps<SVGSVGElement>) => {
+export const Tau = (properties: SVGProps<SVGSVGElement>) => {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" {...properties}>
       <path

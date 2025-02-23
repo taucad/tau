@@ -7,6 +7,7 @@
     "test": "nx run-many -t test"
   },
   "dependencies": {
+    "@langchain/anthropic": "^0.3.13",
     "@langchain/community": "^0.3.28",
     "@langchain/core": "^0.3.37",
     "@langchain/langgraph": "^0.2.44",

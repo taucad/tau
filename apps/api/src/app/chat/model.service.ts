@@ -3,6 +3,8 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Model, ModelSupport } from './model.schema';
 import { ChatOllama, ChatOllamaInput } from '@langchain/ollama';
 import { ChatOpenAI, ChatOpenAIFields } from '@langchain/openai';
+import { ChatAnthropic } from '@langchain/anthropic';
+import type { ChatAnthropicCallOptions } from '@langchain/anthropic';
 import ollama from 'ollama';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
@@ -74,6 +76,88 @@ const MODELS = {
       },
     },
   },
+  anthropic: {
+    'claude-3-5-sonnet': {
+      name: 'Claude 3.5 Sonnet',
+      provider: 'anthropic',
+      model: 'claude-3-5-sonnet-20241022',
+      details: {
+        family: 'Claude',
+        families: ['Claude'],
+        parameterSize: '150B',
+        contextWindow: 200_000,
+        maxTokens: 100_000,
+      },
+      configuration: {
+        streaming: true,
+        temperature: 0,
+      },
+    },
+    'claude-3-5-haiku': {
+      name: 'Claude 3.5 Haiku',
+      provider: 'anthropic',
+      model: 'claude-3-5-haiku-20241022',
+      details: {
+        family: 'Claude',
+        families: ['Claude'],
+        parameterSize: '8B',
+        contextWindow: 200_000,
+        maxTokens: 100_000,
+      },
+      configuration: {
+        streaming: true,
+        temperature: 0,
+      },
+    },
+    'claude-3-opus': {
+      name: 'Claude 3 Opus',
+      provider: 'anthropic',
+      model: 'claude-3-opus-20240229',
+      details: {
+        family: 'Claude',
+        families: ['Claude'],
+        parameterSize: '200B',
+        contextWindow: 200_000,
+        maxTokens: 100_000,
+      },
+      configuration: {
+        streaming: true,
+        temperature: 0,
+      },
+    },
+    'claude-3-sonnet': {
+      name: 'Claude 3 Sonnet',
+      provider: 'anthropic',
+      model: 'claude-3-sonnet-20240229',
+      details: {
+        family: 'Claude',
+        families: ['Claude'],
+        parameterSize: '150B',
+        contextWindow: 200_000,
+        maxTokens: 100_000,
+      },
+      configuration: {
+        streaming: true,
+        temperature: 0,
+      },
+    },
+    'claude-3-haiku': {
+      name: 'Claude 3 Haiku',
+      provider: 'anthropic',
+      model: 'claude-3-haiku-20240307',
+      details: {
+        family: 'Claude',
+        families: ['Claude'],
+        parameterSize: '8B',
+        contextWindow: 200_000,
+        maxTokens: 100_000,
+      },
+      configuration: {
+        streaming: true,
+        temperature: 0,
+      },
+    },
+  },
 } as const satisfies Record<string, Record<string, Model>>;
 
 const PROVIDERS = {
@@ -96,6 +180,18 @@ const PROVIDERS = {
       baseURL: 'https://api.sambanova.ai/v1',
     },
     createClass: (options: ChatOpenAIFields) => new ChatOpenAI(options),
+  },
+  anthropic: {
+    provider: 'anthropic',
+    configuration: {
+      apiKey: process.env.ANTHROPIC_API_KEY,
+    },
+    createClass: (options: ChatAnthropicCallOptions) =>
+      new ChatAnthropic({
+        ...options,
+        anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+        maxRetries: 2,
+      }),
   },
 } as const;
 

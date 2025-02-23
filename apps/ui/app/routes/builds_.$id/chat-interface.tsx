@@ -56,12 +56,12 @@ export const ChatInterface = () => {
   const [isParametersOpen, setIsParametersOpen] = useCookie(PARAMETERS_COOKIE_NAME, true, {
     parse: (value) => value === 'true',
   });
-  const [chatResizeMain, setChatResizeMain] = useCookie(CHAT_RESIZE_COOKIE_NAME_MAIN, [15, 65, 20], {
+  const [chatResizeMain, setChatResizeMain] = useCookie(CHAT_RESIZE_COOKIE_NAME_MAIN, [15, 70, 15], {
     parse: (cookie: string): [number, number, number] => {
       try {
         return JSON.parse(cookie);
       } catch {
-        return [15, 65, 20];
+        return [15, 70, 15];
       }
     },
     stringify: (sizes: [number, number, number]): string => {

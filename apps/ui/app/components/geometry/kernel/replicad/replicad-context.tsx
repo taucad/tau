@@ -1,52 +1,70 @@
 import { type Remote, wrap } from 'comlink';
-import { createContext, useContext, useReducer, ReactNode, useEffect, useRef, useState, useCallback } from 'react';
+import { createContext, useContext, useReducer, ReactNode, useEffect, useRef, useMemo, useCallback } from 'react';
 import { BuilderWorkerInterface } from './replicad-builder.worker';
 import BuilderWorker from './replicad-builder.worker?worker';
 import { debounce } from '@/utils/functions';
 
+// Combine related state
 interface ReplicadState {
   code: string;
   parameters: Record<string, any>;
-  error: string | undefined;
+  error?: string;
   isComputing: boolean;
-  mesh: { edges: any; faces: any } | undefined;
+  isBuffering: boolean;
+  mesh?: {
+    edges: any;
+    faces: any;
+  };
 }
 
 type ReplicadAction =
   | { type: 'SET_CODE'; payload: string }
   | { type: 'SET_PARAMETERS'; payload: Record<string, any> }
   | { type: 'UPDATE_PARAMETER'; payload: { key: string; value: any } }
-  | { type: 'SET_ERROR'; payload: string | undefined }
-  | { type: 'SET_COMPUTING'; payload: boolean }
-  | { type: 'SET_MESH'; payload: { edges: any; faces: any } | undefined };
+  | { type: 'SET_STATUS'; payload: { error?: string; isComputing?: boolean; isBuffering?: boolean } }
+  | { type: 'SET_MESH'; payload: ReplicadState['mesh'] };
 
 const initialState: ReplicadState = {
   code: '',
   parameters: {},
-  error: undefined,
   isComputing: false,
+  isBuffering: false,
   mesh: undefined,
 };
 
 const DEBOUNCE_TIME = 300;
 
+function useReplicadWorker() {
+  const workerReference = useRef<Remote<BuilderWorkerInterface> | undefined>(undefined);
+
+  const initWorker = useCallback(async () => {
+    if (!workerReference.current) {
+      const worker = new BuilderWorker();
+      workerReference.current = wrap<BuilderWorkerInterface>(worker);
+      await workerReference.current.ready();
+    }
+    return workerReference.current;
+  }, []);
+
+  const terminateWorker = useCallback(() => {
+    if (workerReference.current && 'terminate' in workerReference.current) {
+      (workerReference.current as unknown as Worker).terminate();
+      workerReference.current = undefined;
+    }
+  }, []);
+
+  return { initWorker, terminateWorker };
+}
+
 function replicadReducer(state: ReplicadState, action: ReplicadAction): ReplicadState {
   switch (action.type) {
     case 'SET_CODE': {
-      return {
-        ...state,
-        code: action.payload,
-      };
+      return { ...state, code: action.payload };
     }
     case 'SET_PARAMETERS': {
-      console.log('setting parameters');
-      return {
-        ...state,
-        parameters: action.payload,
-      };
+      return { ...state, parameters: action.payload };
     }
     case 'UPDATE_PARAMETER': {
-      console.log('updating parameter');
       return {
         ...state,
         parameters: {
@@ -55,23 +73,11 @@ function replicadReducer(state: ReplicadState, action: ReplicadAction): Replicad
         },
       };
     }
-    case 'SET_ERROR': {
-      return {
-        ...state,
-        error: action.payload,
-      };
-    }
-    case 'SET_COMPUTING': {
-      return {
-        ...state,
-        isComputing: action.payload,
-      };
+    case 'SET_STATUS': {
+      return { ...state, ...action.payload };
     }
     case 'SET_MESH': {
-      return {
-        ...state,
-        mesh: action.payload,
-      };
+      return { ...state, mesh: action.payload };
     }
     default: {
       return state;
@@ -96,39 +102,16 @@ const ReplicadContext = createContext<
 
 export function ReplicadProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(replicadReducer, initialState);
-  const workerReference = useRef<Remote<BuilderWorkerInterface> | undefined>(undefined);
+  const { initWorker, terminateWorker } = useReplicadWorker();
 
-  useEffect(() => {
-    async function init() {
-      const worker = new BuilderWorker();
-      workerReference.current = wrap<BuilderWorkerInterface>(worker);
-      await workerReference.current.ready();
-    }
-    init();
-    return () => {
-      console.log('terminating worker');
-      if (workerReference.current) {
-        const currentWorker = workerReference.current;
-        // TODO: Check if this is needed
-        if ('terminate' in currentWorker) {
-          (currentWorker as unknown as Worker).terminate();
-          console.log('terminated worker');
-        }
-        workerReference.current = undefined;
-      }
-    };
-  }, []);
-
-  const [isBuffering, setIsBuffering] = useState(false);
-
-  // Store the evaluation function in a ref with explicit parameters
-  const evaluateCodeReference = useCallback(
-    async (code: string, parameters: Record<string, string | number | boolean>) => {
-      const worker = workerReference.current;
+  // Memoize the evaluation function
+  const evaluateCode = useCallback(
+    async (code: string, parameters: Record<string, any>) => {
+      const worker = await initWorker();
       if (!worker || !code) return;
+
       try {
-        dispatch({ type: 'SET_COMPUTING', payload: true });
-        dispatch({ type: 'SET_ERROR', payload: undefined });
+        dispatch({ type: 'SET_STATUS', payload: { isComputing: true, error: undefined } });
 
         const result = await worker.buildShapesFromCode(code, parameters);
         if ('error' in result) {
@@ -142,45 +125,61 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
 
         dispatch({
           type: 'SET_MESH',
-          payload: {
-            faces: firstShape.mesh,
-            edges: firstShape.edges,
-          },
+          payload: { faces: firstShape.mesh, edges: firstShape.edges },
         });
       } catch (error) {
-        dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : String(error) });
+        dispatch({
+          type: 'SET_STATUS',
+          payload: { error: error instanceof Error ? error.message : String(error) },
+        });
       } finally {
-        dispatch({ type: 'SET_COMPUTING', payload: false });
+        dispatch({ type: 'SET_STATUS', payload: { isComputing: false, isBuffering: false } });
       }
     },
-    [dispatch],
+    [initWorker],
   );
 
-  // Create a single debounced function instance that persists
-  const debouncedEvaluateReference = useRef<ReturnType<typeof debounce>>(
-    debounce((code: string, parameters: Record<string, string | number | boolean>) => {
-      setIsBuffering(false);
-      evaluateCodeReference(code, parameters);
-    }, DEBOUNCE_TIME),
+  // Create stable debounced evaluation function
+  const debouncedEvaluate = useMemo(
+    () =>
+      debounce((code: string, parameters: Record<string, any>) => {
+        dispatch({ type: 'SET_STATUS', payload: { isBuffering: false } });
+        evaluateCode(code, parameters);
+      }, DEBOUNCE_TIME),
+    [evaluateCode],
   );
 
-  // Effect to handle code and parameter changes
-  useEffect(() => {
-    const worker = workerReference.current;
-    if (!worker || !state.code) return;
+  // Memoize handler functions
+  const handlers = useMemo(
+    () => ({
+      setCode: (code: string) => {
+        dispatch({ type: 'SET_STATUS', payload: { isBuffering: true } });
+        dispatch({ type: 'SET_CODE', payload: code });
+        debouncedEvaluate(code, state.parameters);
+      },
+      setParameters: (key: string, value: any) => {
+        dispatch({ type: 'SET_STATUS', payload: { isBuffering: true } });
+        dispatch({ type: 'UPDATE_PARAMETER', payload: { key, value } });
+        debouncedEvaluate(state.code, { ...state.parameters, [key]: value });
+      },
+      downloadSTL: async () => {
+        const worker = await initWorker();
+        if (!worker) throw new Error('Worker not found');
+        const result = await worker.exportShape('stl');
+        return result[0].blob;
+      },
+    }),
+    [state.code, state.parameters, debouncedEvaluate, initWorker],
+  );
 
-    // Set buffering state to true when debounce starts
-    setIsBuffering(true);
-    // Call the debounced evaluation with current code and parameters
-    debouncedEvaluateReference.current(state.code, state.parameters);
-  }, [state.code, state.parameters]);
-
-  // Separate effect just for loading default parameters on code change
+  // Load default parameters when code changes
   useEffect(() => {
-    const worker = workerReference.current;
-    if (!worker || !state.code) return;
+    if (!state.code) return;
 
     const loadDefaultParameters = async () => {
+      const worker = await initWorker();
+      if (!worker) return;
+
       try {
         const defaultParameters = await worker.extractDefaultParametersFromCode(state.code);
         dispatch({ type: 'SET_PARAMETERS', payload: defaultParameters });
@@ -190,40 +189,25 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
     };
 
     loadDefaultParameters();
-  }, [state.code, dispatch]);
+  }, [state.code, initWorker]);
 
-  const downloadSTL = async () => {
-    const worker = workerReference.current;
-    if (!worker) throw new Error('Worker not found');
-    const result = await worker.exportShape('stl');
-    return result[0].blob;
-  };
+  // Cleanup worker on unmount
+  useEffect(() => terminateWorker, [terminateWorker]);
 
-  const setCode = (code: string) => {
-    dispatch({ type: 'SET_CODE', payload: code });
-  };
-
-  const setParameters = (key: string, value: string | number | boolean) => {
-    dispatch({ type: 'UPDATE_PARAMETER', payload: { key, value } });
-  };
-
-  return (
-    <ReplicadContext.Provider
-      value={{
-        isComputing: state.isComputing,
-        isBuffering,
-        error: state.error,
-        mesh: state.mesh,
-        code: state.code,
-        parameters: state.parameters,
-        downloadSTL,
-        setCode,
-        setParameters,
-      }}
-    >
-      {children}
-    </ReplicadContext.Provider>
+  const contextValue = useMemo(
+    () => ({
+      isComputing: state.isComputing,
+      isBuffering: state.isBuffering,
+      error: state.error,
+      mesh: state.mesh,
+      code: state.code,
+      parameters: state.parameters,
+      ...handlers,
+    }),
+    [state, handlers],
   );
+
+  return <ReplicadContext.Provider value={contextValue}>{children}</ReplicadContext.Provider>;
 }
 
 export function useReplicad() {

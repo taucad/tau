@@ -64,7 +64,10 @@ export const useCookie = <T>(
   );
 
   useEffect(() => {
-    setValue(parsedCookie);
+    // Only update the value if it's different from the parsed cookie
+    if (JSON.stringify(parsedCookie) !== JSON.stringify(value)) {
+      setValue(parsedCookie);
+    }
   }, [parsedCookie]);
 
   return [value, handleSetValue] as const;

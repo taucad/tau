@@ -209,7 +209,7 @@ export const ChatInterface = () => {
                   message={message}
                   key={index}
                   onEdit={(content) => {
-                    editMessage(message.id, content);
+                    editMessage({ messageId: message.id, content, model: message.model });
                   }}
                 />
               ))}

@@ -123,7 +123,7 @@ interface ChatContextValue {
     message: Omit<Message, 'id' | 'createdAt' | 'updatedAt'>;
     model: string;
   }) => Promise<void>;
-  editMessage: (messageId: string, content: string) => Promise<void>;
+  editMessage: (parameters: { messageId: string; content: string; model: string }) => Promise<void>;
   setMessages: (messages: Message[]) => void;
 }
 
@@ -378,14 +378,14 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
     await stream({ model, messages: currentMessages });
   };
 
-  const editMessage = async (messageId: string, content: string) => {
+  const editMessage = async ({ messageId, content, model }: { messageId: string; content: string; model: string }) => {
     // Don't edit messages while initializing or if already streaming
     if (state.initializing || state.activeStreamId) return;
 
     dispatch({ type: 'EDIT_MESSAGE', payload: { messageId, content } });
     dispatch({ type: 'SET_ACTIVE_STREAM', payload: messageId });
     const currentMessages = [...messagesReference.current];
-    await stream({ model: 'gpt-4', messages: currentMessages });
+    await stream({ model, messages: currentMessages });
   };
 
   const setMessages = (messages: Message[]) => {

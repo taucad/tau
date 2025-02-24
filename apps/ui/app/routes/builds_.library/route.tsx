@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { Search, Filter, Grid, List, Star, ChevronDown, ArrowRight, Zap, Cpu, Layout, Cog } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { Search, Filter, Grid, List, Star, ChevronDown, ArrowRight, Zap, Cpu, Layout, Cog, Eye } from 'lucide-react';
 import { Link } from '@remix-run/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,7 +17,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { mockModels } from '@/components/mock-code';
 import { Category, CATEGORIES } from '@/types/cad';
 import { Build } from '@/types/build';
-import { mockBuilds } from '@/components/mock-builds';
+import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
+import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer';
 
 export const handle = {
   breadcrumb: () => {
@@ -175,7 +176,9 @@ function ProjectGrid({
   return (
     <div className={viewMode === 'grid' ? 'grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'space-y-4'}>
       {projects.slice(0, visibleProjects).map((project) => (
-        <ProjectCard key={project.id} project={project} viewMode={viewMode} />
+        <ReplicadProvider key={project.id}>
+          <ProjectCard project={project} viewMode={viewMode} />
+        </ReplicadProvider>
       ))}
     </div>
   );
@@ -234,6 +237,19 @@ function StatusDropdown({ status, projectId }: { status: string; projectId: stri
 }
 
 function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' | 'list' }) {
+  const { setCode, mesh } = useReplicad();
+  const main = project.assets.mechanical?.main;
+  const code = project.assets.mechanical?.files[main as string]?.content;
+
+  // Start with preview false, then enable it once we have both code and mesh
+  const [showPreview, setShowPreview] = useState(!!code);
+
+  useEffect(() => {
+    if (code) {
+      setCode(code);
+    }
+  }, [code, setCode]);
+
   if (viewMode === 'list') {
     return (
       <Link to={`/builds/${project.id}`} className="block">
@@ -262,15 +278,38 @@ function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' |
   }
 
   return (
-    <Link to={`/builds/${project.id}`}>
+    <Link to={`/builds/${project.id}`} draggable={!showPreview}>
       <Card className="group relative overflow-hidden flex flex-col">
-        <div className="aspect-video overflow-hidden bg-muted">
-          <img
-            src={project.thumbnail || '/placeholder.svg'}
-            alt={project.name}
-            className="h-full w-full object-cover transition-transform group-hover:scale-105"
-            loading="lazy"
-          />
+        <div className="relative aspect-video overflow-hidden bg-muted">
+          {!showPreview && (
+            <img
+              src={project.thumbnail || '/placeholder.svg'}
+              alt={project.name}
+              className="h-full w-full object-cover transition-transform group-hover:scale-105"
+              loading="lazy"
+            />
+          )}
+          <div
+            className="absolute inset-0"
+            onClick={(event) => {
+              event.stopPropagation();
+              event.preventDefault();
+            }}
+          >
+            {showPreview && <ReplicadViewer mesh={mesh} disableGrid={true} disableGizmo={true} className="bg-muted" />}
+          </div>
+          <Button
+            variant="outline"
+            size="icon"
+            className="absolute top-2 right-2"
+            onClick={(event) => {
+              event.stopPropagation();
+              event.preventDefault();
+              setShowPreview(!showPreview);
+            }}
+          >
+            <Eye className="size-4" />
+          </Button>
         </div>
         <CardHeader>
           <div className="flex justify-between items-start">
@@ -309,31 +348,28 @@ function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' |
   );
 }
 // Sample data
-const projects: Build[] = [
-  ...mockModels.map((model) => ({
-    id: model.id,
-    assets: {
-      mechanical: {
-        files: { 'model.ts': { content: model.code } },
-        main: 'model.ts',
-        language: 'replicad' as const,
-      },
+const projects: Build[] = mockModels.map((model) => ({
+  id: model.id,
+  assets: {
+    mechanical: {
+      files: { 'model.ts': { content: model.code } },
+      main: 'model.ts',
+      language: 'replicad' as const,
     },
-    name: model.name,
-    description: `A 3D ${model.name} model built with Replicad`,
-    author: {
-      name: 'Replicad Team',
-      avatar: '/avatar-sample.png',
-    },
-    version: '1.0.0',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    tags: ['3d-printing', 'parametric', 'replicad'],
-    isFavorite: false,
-    stars: 0,
-    forks: 0,
-    thumbnail: '/placeholder.svg',
-    messages: [],
-  })),
-  ...mockBuilds,
-];
+  },
+  name: model.name,
+  description: `A 3D ${model.name} model built with Replicad`,
+  author: {
+    name: 'Replicad Team',
+    avatar: '/avatar-sample.png',
+  },
+  version: '1.0.0',
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+  tags: ['3d-printing', 'parametric', 'replicad'],
+  isFavorite: false,
+  stars: 0,
+  forks: 0,
+  thumbnail: '/placeholder.svg',
+  messages: [],
+}));

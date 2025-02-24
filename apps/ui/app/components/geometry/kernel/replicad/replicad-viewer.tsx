@@ -1,12 +1,16 @@
-import { ThreeProvider } from '../../graphics/three/three-context';
+import { CadViewerProperties, ThreeProvider } from '../../graphics/three/three-context';
 import { ReplicadMesh } from './replicad-mesh';
 import { LoaderPinwheel } from 'lucide-react';
 
-export function ReplicadViewer({ mesh }: { mesh: any }) {
+type ReplicadViewerProperties = CadViewerProperties & {
+  mesh: any;
+};
+
+export function ReplicadViewer({ mesh, disableGizmo, disableGrid, className }: ReplicadViewerProperties) {
   return (
     <div className="w-full h-full">
       {mesh ? (
-        <ThreeProvider>
+        <ThreeProvider disableGizmo={disableGizmo} disableGrid={disableGrid} className={className}>
           <ReplicadMesh {...mesh} />
         </ThreeProvider>
       ) : (

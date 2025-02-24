@@ -253,7 +253,7 @@ function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' |
   if (viewMode === 'list') {
     return (
       <Link to={`/builds/${project.id}`} className="block">
-        <div className="flex items-center space-x-4 p-4 border rounded-lg hover:bg-accent transition-colors">
+        <div className="flex items-center space-x-4 p-4 border rounded-lg hover:bg-accent">
           <div className="flex-shrink-0">
             <Avatar className="h-12 w-12">
               <AvatarImage src={project.thumbnail || project.author.avatar} alt={project.name} />

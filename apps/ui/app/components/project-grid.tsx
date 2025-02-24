@@ -131,14 +131,14 @@ function ProjectCard({
         </div>
         <div className="flex items-center gap-4">
           <button
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-yellow transition-colors"
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-yellow"
             onClick={() => onStar?.(id)}
           >
             <Star className="size-4" />
             {stars}
           </button>
           <button
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-blue transition-colors"
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-blue"
             onClick={() => onFork?.(id)}
           >
             <GitFork className="size-4" />

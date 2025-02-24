@@ -126,7 +126,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
         <NavMain items={data.navMain} />
         <NavProjects projects={data.projects} />
       </SidebarContent>
-      <SidebarFooter className="flex flex-col transition-all duration-200 ease-linear items-end group-data-[collapsible=icon]:items-center">
+      <SidebarFooter className="flex flex-col transition-transform duration-200 ease-linear items-end group-data-[collapsible=icon]:items-center">
         <ColorToggle />
         <ModeToggle />
         <NavUser user={data.user} />

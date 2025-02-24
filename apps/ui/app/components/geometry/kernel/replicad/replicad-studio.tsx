@@ -34,6 +34,7 @@ export function ReplicadStudio() {
           getBlob={downloadSTL}
           title="model.stl"
           className="text-muted-foreground"
+          tooltip="Download STL"
         />
       </div>
     </>

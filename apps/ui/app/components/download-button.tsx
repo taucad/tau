@@ -16,10 +16,14 @@ export interface DownloadButtonProperties extends ButtonProperties {
    * A function to get the blob to download.
    */
   getBlob?: () => Promise<Blob>;
+  /**
+   * Tooltip text.
+   */
+  tooltip?: string;
 }
 
 export const DownloadButton = React.forwardRef<HTMLButtonElement, DownloadButtonProperties>(
-  ({ text, getBlob, size, title = 'download.txt', ...properties }, reference) => {
+  ({ text, getBlob, size, title = 'download.txt', tooltip = 'Download', ...properties }, reference) => {
     const handleDownload = async () => {
       // New download handler logic without creating an element
       const newBlob = getBlob ? await getBlob() : new Blob([text as string], { type: 'text/plain' });
@@ -53,7 +57,7 @@ export const DownloadButton = React.forwardRef<HTMLButtonElement, DownloadButton
             {size !== 'icon' && 'Download'}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Download</TooltipContent>
+        <TooltipContent>{tooltip}</TooltipContent>
       </Tooltip>
     );
   },

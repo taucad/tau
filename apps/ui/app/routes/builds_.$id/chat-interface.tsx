@@ -240,7 +240,7 @@ export const ChatInterface = () => {
         defaultSize={chatResizeMain[1]}
         className={cn('h-full flex-col', isMobile && isChatOpen && 'hidden')}
       >
-        <Tabs defaultValue="preview" className="flex flex-col h-full">
+        <Tabs defaultValue="preview" className="relative flex flex-col h-full">
           <TabsList
             className={cn(
               'grid grid-cols-3 absolute m-2 bg-background border md:h-[2.375rem] z-10 [&>*]:data-[state=active]:bg-accent/50',

@@ -177,6 +177,10 @@
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
 
+  /* Highlighter specific */
+  --color-highlighter: var(--primary);
+  --color-highlighter-foreground: var(--primary-foreground);
+
   --animate-pulse-subtle: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-gradient: gradient 5s ease infinite;
 
@@ -268,6 +272,10 @@
       border: var(--scrollbar-padding) var(--scrollbar-track) solid;
       background-clip: padding-box;
     }
+  }
+
+  ::selection {
+    @apply bg-highlighter text-highlighter-foreground;
   }
 }
 

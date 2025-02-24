@@ -9,6 +9,7 @@ import { generatePrefixedId } from '@/utils/id';
 import { PREFIX_TYPES } from '@/utils/constants';
 import { MessageRole, MessageStatus } from '@/types/chat';
 import { createMessage } from '@/contexts/use-chat';
+import { cubeCode } from '@/components/mock-code';
 
 export default function ChatStart() {
   const { data: models } = useModels();
@@ -50,7 +51,13 @@ export default function ChatStart() {
         messages: [userMessage],
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        assets: {},
+        assets: {
+          mechanical: {
+            files: { 'model.ts': { content: cubeCode } },
+            main: 'model.ts',
+            language: 'replicad',
+          },
+        },
       });
 
       // Navigate immediately - the build page will handle the streaming

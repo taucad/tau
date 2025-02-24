@@ -1,44 +1,41 @@
-import { useLoaderData } from '@remix-run/react';
 import { storage } from '@/db/storage';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import type { Build } from '@/types/build';
 import { useChat } from '@/contexts/use-chat';
-import { loader } from '@/routes/builds_.$id/route';
+import { sampleBuilds } from './use-builds';
+import { useQuery } from '@tanstack/react-query';
+
+// Function to fetch builds
+const fetchBuild = async (buildId: string): Promise<Build> => {
+  const clientBuild = storage.getBuild(buildId);
+
+  if (clientBuild) {
+    return clientBuild;
+  } else {
+    const sampleBuild = sampleBuilds.find((build) => build.id === buildId);
+    if (sampleBuild) {
+      return sampleBuild;
+    } else {
+      throw new Error('Build not found');
+    }
+  }
+};
 
 export function useBuild(buildId: string) {
-  const { model } = useLoaderData<typeof loader>();
   const chat = useChat();
-  const [build, setBuild] = useState<Build | undefined>();
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | undefined>();
 
-  // Load initial build data and messages
-  useEffect(() => {
-    async function loadBuildData() {
-      try {
-        setIsLoading(true);
-        setError(undefined);
-
-        // Get client-side build data
-        const clientBuild = storage.getBuild(buildId);
-        if (!clientBuild) {
-          throw new Error('Build not found');
-        }
-
-        setBuild(clientBuild);
-        // Load messages into chat context
-        chat.setMessages(clientBuild.messages);
-      } catch (error) {
-        console.error('Failed to load build:', error);
-        setError(error instanceof Error ? error.message : 'Failed to load build');
-        setBuild(undefined);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    loadBuildData();
-  }, [buildId, chat]);
+  const {
+    data: build,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ['build', buildId],
+    queryFn: () =>
+      fetchBuild(buildId).then((build) => {
+        chat.setMessages(build.messages);
+        return build;
+      }),
+  });
 
   // Save messages to storage when they change
   useEffect(() => {
@@ -54,9 +51,15 @@ export function useBuild(buildId: string) {
     });
   }, [build, buildId, chat.messages]);
 
+  // Reset messages when the build is unmounted
+  useEffect(() => {
+    return () => {
+      chat.setMessages([]);
+    };
+  }, [buildId]);
+
   return {
     build,
-    model,
     isLoading,
     error,
     chat,

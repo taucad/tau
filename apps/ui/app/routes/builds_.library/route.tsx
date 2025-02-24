@@ -14,11 +14,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/utils/ui';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { mockModels } from '@/components/mock-code';
 import { Category, CATEGORIES } from '@/types/cad';
 import { Build } from '@/types/build';
 import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
 import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer';
+import { useBuilds } from '@/hooks/use-builds';
 
 export const handle = {
   breadcrumb: () => {
@@ -50,8 +50,9 @@ export default function PersonalCadProjects() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [sortBy, setSortBy] = useState<'lastOpened' | 'createdAt' | 'name'>('lastOpened');
   const [visibleProjects, setVisibleProjects] = useState(ITEMS_PER_PAGE);
+  const { builds } = useBuilds();
 
-  const filteredProjects = projects
+  const filteredProjects = builds
     .filter(
       (project) =>
         (activeFilter === 'all' || Object.keys(project.assets).includes(activeFilter)) &&
@@ -347,29 +348,3 @@ function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' |
     </Link>
   );
 }
-// Sample data
-const projects: Build[] = mockModels.map((model) => ({
-  id: model.id,
-  assets: {
-    mechanical: {
-      files: { 'model.ts': { content: model.code } },
-      main: 'model.ts',
-      language: 'replicad' as const,
-    },
-  },
-  name: model.name,
-  description: `A 3D ${model.name} model built with Replicad`,
-  author: {
-    name: 'Replicad Team',
-    avatar: '/avatar-sample.png',
-  },
-  version: '1.0.0',
-  createdAt: Date.now(),
-  updatedAt: Date.now(),
-  tags: ['3d-printing', 'parametric', 'replicad'],
-  isFavorite: false,
-  stars: 0,
-  forks: 0,
-  thumbnail: '/placeholder.svg',
-  messages: [],
-}));

@@ -7,7 +7,7 @@ import { LoaderFunctionArgs } from '@remix-run/node';
 export const handle = {
   breadcrumb: () => {
     return (
-      <Link to="/builds" tabIndex={-1}>
+      <Link to="/" tabIndex={-1}>
         <Button variant="ghost" className="p-2">
           Builds
         </Button>
@@ -21,6 +21,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (url.pathname === '/builds') {
     return redirect('/');
   }
+  // `undefined` is not allowed in the loader
+  // eslint-disable-next-line unicorn/no-null
   return null;
 };
 

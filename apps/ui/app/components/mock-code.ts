@@ -4,6 +4,26 @@ type Model = {
   code: string;
 };
 
+export const cubeCode = `// Cube
+const { sketchRectangle, EdgeFinder } = replicad;
+
+export const defaultParams = {
+  length: 100,
+  filletRadius: 5,
+};
+
+export const main = (r, { length, filletRadius }) => {
+  let shape = sketchRectangle(length, length)
+    .extrude(length)
+    .fillet({
+      radius: filletRadius,
+      filter: new EdgeFinder(),
+    })
+
+  return shape;
+};
+`;
+
 export const birdhouseCode = `// Birdhouse
 // source: https://github.com/Irev-Dev/curated-code-cad
 

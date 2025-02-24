@@ -109,15 +109,6 @@ const data = {
         ctrlKey: true,
       },
     },
-    {
-      title: 'Settings',
-      url: '/settings',
-      icon: Settings2,
-      keyCombination: {
-        key: 's',
-        ctrlKey: true,
-      },
-    },
   ],
   projects: [
     {

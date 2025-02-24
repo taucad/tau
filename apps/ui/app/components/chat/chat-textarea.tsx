@@ -8,6 +8,7 @@ import { ComboBoxResponsive } from '@/components/ui/combobox-responsive';
 import { Model } from '@/hooks/use-models';
 import { SvgIcon } from '@/components/icons/svg-icon';
 import { ModelProvider } from '@/types/cad';
+import { ComingSoon } from '../ui/coming-soon';
 
 export interface ChatTextareaProperties {
   onSubmit: ({
@@ -154,9 +155,16 @@ export function ChatTextarea({
       >
         <ArrowRight className="size-4" />
       </Button>
-      <Button size="icon" variant="ghost" className="absolute right-2 bottom-2">
-        <Mic className="size-4" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button size="icon" variant="ghost" className="absolute right-2 bottom-2">
+            <Mic className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          Speak to Tau <ComingSoon variant="tooltip" className="ml-1" />
+        </TooltipContent>
+      </Tooltip>
     </div>
   );
 }

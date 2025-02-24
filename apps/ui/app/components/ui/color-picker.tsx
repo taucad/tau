@@ -8,6 +8,8 @@ import { Slot } from '@radix-ui/react-slot';
 import { RotateCcw } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from './tooltip';
 import { Slider } from './slider';
+import { useKeydown } from '@/hooks/use-keydown';
+import { KeyShortcut } from './key-shortcut';
 
 export type ColorPickerValue = HslColor;
 
@@ -32,6 +34,13 @@ const ColorPicker = forwardRef<
     onChange(value);
   };
 
+  const { formattedKeyCombination } = useKeydown(
+    {
+      key: 'i',
+      metaKey: true,
+    },
+    () => setOpen((previous) => !previous),
+  );
   return (
     <Popover onOpenChange={setOpen} open={open}>
       <Tooltip>
@@ -52,17 +61,14 @@ const ColorPicker = forwardRef<
             />
           </TooltipTrigger>
         </PopoverTrigger>
-        <TooltipContent side="right">Choose theme</TooltipContent>
+        <TooltipContent side="right">
+          Choose color{' '}
+          <KeyShortcut variant="tooltip" className="ml-1">
+            {formattedKeyCombination}
+          </KeyShortcut>
+        </TooltipContent>
       </Tooltip>
       <PopoverContent side="right" className="w-48 flex flex-row gap-2 p-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="outline" size="icon" onClick={onReset} className="w-12">
-              <RotateCcw className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Reset</TooltipContent>
-        </Tooltip>
         <Slider
           min={0}
           max={360}
@@ -82,6 +88,14 @@ const ColorPicker = forwardRef<
           )}
           ref={forwardedReference}
         />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="outline" size="icon" onClick={onReset} className="w-12">
+              <RotateCcw className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Reset</TooltipContent>
+        </Tooltip>
       </PopoverContent>
     </Popover>
   );

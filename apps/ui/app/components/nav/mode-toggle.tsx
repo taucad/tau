@@ -7,8 +7,9 @@ import { SidebarMenuButton } from '../ui/sidebar';
 import { useCookie } from '@/utils/cookies';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { useKeydown } from '@/hooks/use-keydown';
+import { KeyShortcut } from '../ui/key-shortcut';
 
-const THEME_COOKIE_NAME = 'theme-mode';
+const THEME_COOKIE_NAME = 'tau-theme-mode';
 
 type ThemeCookie = Theme | 'system';
 
@@ -46,12 +47,14 @@ export function ModeToggle() {
     setThemeCookie(newTheme);
   };
 
-  useKeydown({
-    key: 'u',
-    callback: cycleTheme,
-    ctrlKey: true,
-    metaKey: true,
-  });
+  const { formattedKeyCombination } = useKeydown(
+    {
+      key: 'u',
+      metaKey: true,
+    },
+    cycleTheme,
+  );
+  console.log({ theme });
 
   return (
     <Tooltip>
@@ -80,7 +83,12 @@ export function ModeToggle() {
           </Button>
         </SidebarMenuButton>
       </TooltipTrigger>
-      <TooltipContent side="right">Toggle theme (⌘U)</TooltipContent>
+      <TooltipContent side="right" className="flex items-center align-baseline gap-2">
+        Toggle theme{' '}
+        <KeyShortcut variant="tooltip" className="ml-1">
+          {formattedKeyCombination}
+        </KeyShortcut>
+      </TooltipContent>
     </Tooltip>
   );
 }

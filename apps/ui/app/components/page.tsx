@@ -1,5 +1,5 @@
 import { Outlet, useMatches } from '@remix-run/react';
-import { AppSidebar } from './app-sidebar';
+import { AppSidebar } from '@/components/app-sidebar';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -8,13 +8,15 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
-import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
+import { SIDEBAR_TOGGLE_KEY_COMBO, SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-import { Badge } from './ui/badge';
+import { Badge } from '@/components/ui/badge';
 import { useNetworkConnectivity } from '@/hooks/use-network-connectivity';
 import { Fragment } from 'react/jsx-runtime';
 import { ReactNode } from 'react';
+import { KeyShortcut } from '@/components/ui/key-shortcut';
+import { formatKeyCombination } from '@/utils/keys';
 
 const HEADER_HEIGHT = '3rem';
 
@@ -23,6 +25,7 @@ export function Page({ error }: { error?: ReactNode }) {
 
   const isOnline = useNetworkConnectivity();
 
+  // @ts-expect-error - FIXME: breadcrumb is not typed
   const breadcrumbItems = matches.filter((match) => match.handle && match.handle.breadcrumb);
 
   return (
@@ -38,7 +41,10 @@ export function Page({ error }: { error?: ReactNode }) {
               <TooltipTrigger asChild>
                 <SidebarTrigger className="-ml-1" />
               </TooltipTrigger>
-              <TooltipContent>Toggle sidebar (⌘B)</TooltipContent>
+              <TooltipContent>
+                Toggle sidebar{' '}
+                <KeyShortcut variant="tooltip">{formatKeyCombination(SIDEBAR_TOGGLE_KEY_COMBO)}</KeyShortcut>
+              </TooltipContent>
             </Tooltip>
             <Separator orientation="vertical" className="h-4" />
             <Breadcrumb>
@@ -47,6 +53,7 @@ export function Page({ error }: { error?: ReactNode }) {
                   <Fragment key={match.id}>
                     <BreadcrumbSeparator className="hidden md:block first:hidden" />
                     <BreadcrumbItem className="hidden md:block last:block">
+                      {/* @ts-expect-error - FIXME: match.handle.breadcrumb is not typed */}
                       <BreadcrumbLink asChild>{match.handle.breadcrumb(match)}</BreadcrumbLink>
                     </BreadcrumbItem>
                   </Fragment>

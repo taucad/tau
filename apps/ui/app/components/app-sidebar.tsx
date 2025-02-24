@@ -2,8 +2,8 @@ import * as React from 'react';
 import {
   AudioWaveform,
   BookOpen,
+  Bot,
   Command,
-  Component,
   Frame,
   Hammer,
   Map,
@@ -54,6 +54,10 @@ const data = {
       url: '/builds/library',
       icon: Hammer,
       isActive: true,
+      keyCombination: {
+        key: 'b',
+        ctrlKey: true,
+      },
       // items: [
       //   {
       //     title: 'History',
@@ -73,26 +77,46 @@ const data = {
       title: 'Community',
       url: '/builds/community',
       icon: UsersRound,
+      keyCombination: {
+        key: 'g',
+        ctrlKey: true,
+      },
     },
     {
       title: 'Workflows',
       url: '/workflows',
       icon: Workflow,
+      keyCombination: {
+        key: 'w',
+        ctrlKey: true,
+      },
     },
     {
-      title: 'Specifications',
-      url: '/specifications',
-      icon: Component,
+      title: 'Models',
+      url: '/models',
+      icon: Bot,
+      keyCombination: {
+        key: 'm',
+        ctrlKey: true,
+      },
     },
     {
       title: 'Documentation',
       url: '/docs',
       icon: BookOpen,
+      keyCombination: {
+        key: 'd',
+        ctrlKey: true,
+      },
     },
     {
       title: 'Settings',
       url: '/settings',
       icon: Settings2,
+      keyCombination: {
+        key: 's',
+        ctrlKey: true,
+      },
     },
   ],
   projects: [

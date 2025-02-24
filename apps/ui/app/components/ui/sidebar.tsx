@@ -13,13 +13,18 @@ import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useCookie } from '@/utils/cookies';
+import { type KeyCombination } from '@/utils/keys';
 
 export const SIDEBAR_COOKIE_NAME = 'tau-sidebar-open';
 const SIDEBAR_DEFAULT_OPEN = 'false';
 const SIDEBAR_WIDTH = '16rem';
 const SIDEBAR_WIDTH_MOBILE = '18rem';
 const SIDEBAR_WIDTH_ICON = '3rem';
-const SIDEBAR_KEYBOARD_SHORTCUT = 'b';
+
+export const SIDEBAR_TOGGLE_KEY_COMBO = {
+  key: 'b',
+  metaKey: true,
+} as const satisfies KeyCombination;
 
 type SidebarContext = {
   state: 'expanded' | 'collapsed';
@@ -76,12 +81,9 @@ const SidebarProvider = React.forwardRef<
     return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open);
   }, [isMobile, setOpen, setOpenMobile]);
 
-  // Add keyboard shortcut to toggle the sidebar
-  useKeydown({
-    key: SIDEBAR_KEYBOARD_SHORTCUT,
-    callback: toggleSidebar,
-    metaKey: true,
-    ctrlKey: true,
+  useKeydown(SIDEBAR_TOGGLE_KEY_COMBO, toggleSidebar, {
+    preventDefault: true,
+    stopPropagation: true,
   });
 
   // We add a state so that we can do data-state="expanded" or "collapsed".

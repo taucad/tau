@@ -19,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useKeydown } from '@/hooks/use-keydown';
 import { Drawer, DrawerContent } from '@/components/ui/drawer';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { KeyShortcut } from '@/components/ui/key-shortcut';
 
 export const CHAT_COOKIE_NAME = 'tau-chat-open';
 export const PARAMETERS_COOKIE_NAME = 'tau-parameters-open';
@@ -130,18 +131,21 @@ export const ChatInterface = () => {
     });
   };
 
-  useKeydown({
-    key: 'p',
-    callback: toggleParametersOpen,
-    ctrlKey: true,
-    requireAllModifiers: true,
-  });
-  useKeydown({
-    key: 'c',
-    callback: toggleChatOpen,
-    ctrlKey: true,
-    requireAllModifiers: true,
-  });
+  const { formattedKeyCombination: formattedParametersKeyCombination } = useKeydown(
+    {
+      key: 'p',
+      ctrlKey: true,
+    },
+    toggleParametersOpen,
+  );
+
+  const { formattedKeyCombination: formattedChatKeyCombination } = useKeydown(
+    {
+      key: 'c',
+      ctrlKey: true,
+    },
+    toggleChatOpen,
+  );
 
   const isMobile = useIsMobile();
 
@@ -164,12 +168,17 @@ export const ChatInterface = () => {
             data-state={isChatOpen ? 'open' : 'closed'}
           >
             <span className="size-4">
-              <MessageCircle className="scale-100 transition-transform duration-200 ease-in-out group-data-[state=open]:-rotate-90 group-data-[state=open]:text-foreground" />
+              <MessageCircle className="scale-100 transition-transform duration-200 ease-in-out group-data-[state=open]:-rotate-90 group-data-[state=open]:text-primary" />
             </span>
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          <p>{isChatOpen ? 'Close' : 'Open'} Chat (Ctrl + C)</p>
+          <p>
+            {isChatOpen ? 'Close' : 'Open'} Chat{' '}
+            <KeyShortcut variant="tooltip" className="ml-1">
+              {formattedChatKeyCombination}
+            </KeyShortcut>
+          </p>
         </TooltipContent>
       </Tooltip>
 
@@ -284,12 +293,17 @@ export const ChatInterface = () => {
             data-state={isParametersOpen ? 'open' : 'closed'}
           >
             <span className="size-4">
-              <Settings2 className="scale-100 group-data-[state=open]:-rotate-90 group-data-[state=open]:text-foreground transition-transform duration-200 ease-in-out" />
+              <Settings2 className="scale-100 group-data-[state=open]:-rotate-90 group-data-[state=open]:text-primary transition-transform duration-200 ease-in-out" />
             </span>
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          <p>{isParametersOpen ? 'Close' : 'Open'} Parameters (Ctrl + P)</p>
+          <p>
+            {isParametersOpen ? 'Close' : 'Open'} Parameters{' '}
+            <KeyShortcut variant="tooltip" className="ml-1">
+              {formattedParametersKeyCombination}
+            </KeyShortcut>
+          </p>
         </TooltipContent>
       </Tooltip>
 

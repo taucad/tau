@@ -4,6 +4,10 @@ import { generatePrefixedId } from '@/utils/id';
 import { PREFIX_TYPES } from '@/utils/constants';
 import { useEventSource } from '@/hooks/use-event-source';
 import { ENV } from '@/config';
+import { useCookie } from '@/utils/cookies';
+
+const CHAT_MODEL_COOKIE_NAME = 'tau-chat-model';
+const DEFAULT_CHAT_MODEL = 'gpt-4o-mini';
 
 export enum ChatEvent {
   OnChatModelStart = 'on_chat_model_start',
@@ -119,6 +123,8 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 interface ChatContextValue {
   messages: Message[];
   status?: string;
+  selectedModel: string;
+  setSelectedModel: (model: string) => void;
   sendMessage: (parameters: {
     message: Omit<Message, 'id' | 'createdAt' | 'updatedAt'>;
     model: string;
@@ -141,6 +147,8 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
   });
   const messagesReference = useRef(state.messages);
   const contentBuffer = useRef('');
+
+  const [selectedModel, setSelectedModel] = useCookie(CHAT_MODEL_COOKIE_NAME, DEFAULT_CHAT_MODEL);
 
   useEffect(() => {
     messagesReference.current = state.messages;
@@ -396,6 +404,8 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
       value={{
         messages: state.messages,
         status: state.status,
+        selectedModel,
+        setSelectedModel,
         sendMessage,
         editMessage,
         setMessages,

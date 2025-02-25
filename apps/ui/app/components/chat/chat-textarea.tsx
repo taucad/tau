@@ -9,6 +9,7 @@ import { Model } from '@/hooks/use-models';
 import { SvgIcon } from '@/components/icons/svg-icon';
 import { ModelProvider } from '@/types/cad';
 import { ComingSoon } from '../ui/coming-soon';
+import { useChat } from '@/contexts/use-chat';
 
 export interface ChatTextareaProperties {
   onSubmit: ({
@@ -25,17 +26,13 @@ export interface ChatTextareaProperties {
   autoFocus?: boolean;
 }
 
-export function ChatTextarea({
-  onSubmit,
-  models,
-  defaultModel = 'gpt-4o-mini',
-  autoFocus = true,
-}: ChatTextareaProperties) {
+export function ChatTextarea({ onSubmit, models, autoFocus = true }: ChatTextareaProperties) {
   const [inputText, setInputText] = useState('');
-  const [selectedModel, setSelectedModel] = useState(defaultModel);
   const [isSearching, setIsSearching] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const textareaReference = useRef<HTMLTextAreaElement | null>(null);
+
+  const { selectedModel, setSelectedModel } = useChat();
 
   const handleSubmit = async () => {
     if (inputText.length === 0) return;
@@ -120,8 +117,8 @@ export function ChatTextarea({
             </span>
           )}
           getValue={(item) => item.model}
-          onSelect={(selectedModel) => {
-            setSelectedModel(selectedModel);
+          onSelect={(model) => {
+            setSelectedModel(model);
           }}
           placeholder="Select a model"
           defaultValue={models.find((model) => model.model === selectedModel)}

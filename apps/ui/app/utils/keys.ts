@@ -29,15 +29,15 @@ const formatKey = (key: KeyCombination['key']): string => {
  * Formats a key combination into platform-specific notation
  */
 export const formatKeyCombination = (combo: KeyCombination): string => {
-  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC');
+  // const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC');
   const parts: string[] = [];
 
   // Add modifiers in the correct order
-  if (combo.altKey) parts.push(isMac ? '⌥' : 'Alt+');
-  if (combo.shiftKey) parts.push(isMac ? '⇧' : 'Shift+');
-  if (combo.metaKey && combo.ctrlKey) parts.push(isMac ? '⌘' : 'Ctrl+');
-  if (combo.metaKey) parts.push(isMac ? '⌘' : 'Ctrl+');
-  if (combo.ctrlKey) parts.push(isMac ? '⌃' : 'Ctrl+');
+  if (combo.altKey) parts.push('⌥');
+  if (combo.shiftKey) parts.push('⇧');
+  if (combo.metaKey && combo.ctrlKey) parts.push('⌘');
+  if (combo.metaKey) parts.push('⌘');
+  if (combo.ctrlKey) parts.push('⌃');
 
   // Format the main key
   const formattedKey = formatKey(combo.key);

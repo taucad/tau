@@ -5,7 +5,7 @@
     "app/**/*.tsx",
     "app/**/*.js",
     "app/**/*.jsx"
-  ],
+, "vite-environment.d.ts"  ],
   "exclude": [
     "tests/**/*.spec.ts",
     "tests/**/*.test.ts",

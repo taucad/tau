@@ -25,5 +25,5 @@
     "tests/**/*.test.js",
     "tests/**/*.spec.jsx",
     "tests/**/*.test.jsx"
-  ]
+, "vite-environment.d.ts"  ]
 }

@@ -103,14 +103,6 @@ export const ReplicadMesh = React.memo(function ShapeMeshes({
         onPointerMove={onHover}
         onPointerLeave={() => onHover(null)}
       >
-        {/* the offsets are here to avoid z fighting between the mesh and the lines */}
-        <MatcapMaterial
-          color={color.serialized.hex}
-          attachArray="material"
-          polygonOffset
-          polygonOffsetFactor={2}
-          polygonOffsetUnits={1}
-        />
         <MatcapMaterial
           color={color.serialized.hex}
           attachArray="material"

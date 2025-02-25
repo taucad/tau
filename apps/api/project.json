@@ -47,6 +47,18 @@
           "buildTarget": "api:build:production"
         }
       }
+    },
+    "deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "fly deploy --config ./apps/api/fly.toml --dockerfile ./apps/api/Dockerfile"
+      }
+    },
+    "launch": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "fly launch --config ./apps/api/fly.toml"
+      }
     }
   }
 }

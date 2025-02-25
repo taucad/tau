@@ -1,17 +1,17 @@
-# fly.toml app configuration file generated for tau-ui on 2025-02-02T16:27:08+13:00
+# fly.toml app configuration file generated for taucad on 2025-02-25T12:51:56+13:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'tau-ui'
+app = 'taucad'
 primary_region = 'syd'
-
-[env]
-  NODE_ENV = 'production'
-  TAU_API_URL = 'https://taucad-api.fly.dev'
 
 [build]
   dockerfile = 'Dockerfile'
+
+[env]
+  NODE_ENV = 'production'
+  TAU_API_URL = 'https://tau-api.fly.dev'
 
 [http_service]
   internal_port = 3000

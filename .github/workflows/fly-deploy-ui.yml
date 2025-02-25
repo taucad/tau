@@ -11,12 +11,15 @@ on:
 
 jobs:
   deploy:
-    name: Deploy app
+    name: Deploy UI
     runs-on: ubuntu-latest
-    concurrency: deploy-group    # optional: ensure only one action runs at a time
+    concurrency: deploy-ui-group
     steps:
       - uses: actions/checkout@v4
+      
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --remote-only --config apps/ui/fly.toml --dockerfile apps/ui/Dockerfile
+      
+      - name: Deploy to Fly.io
+        run: flyctl deploy --remote-only --config apps/ui/fly.toml --dockerfile apps/ui/Dockerfile
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

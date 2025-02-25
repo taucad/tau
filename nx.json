@@ -48,6 +48,18 @@
     },
     "e2e-ci--**/*": {
       "dependsOn": ["^build"]
+    },
+    "deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "."
+      }
+    },
+    "launch": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "."
+      }
     }
   },
   "generators": {

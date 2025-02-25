@@ -5,5 +5,18 @@
   "projectType": "application",
   "tags": [],
   "// targets": "to see all targets run: nx show project ui --web",
-  "targets": {}
+  "targets": {
+    "deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "fly deploy --config ./apps/ui/fly.toml --dockerfile ./apps/ui/Dockerfile"
+      }
+    },
+    "launch": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "fly launch --config ./apps/ui/fly.toml"
+      }
+    }
+  }
 }

@@ -54,7 +54,6 @@ export function ModeToggle() {
     },
     cycleTheme,
   );
-  console.log({ theme });
 
   return (
     <Tooltip>

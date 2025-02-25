@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { Mic, Globe, ArrowRight, ChevronDown, CircuitBoard } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { Globe, ArrowRight, ChevronDown, CircuitBoard, AudioLines } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -31,7 +31,7 @@ export function ChatTextarea({ onSubmit, models, autoFocus = true }: ChatTextare
   const [isSearching, setIsSearching] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const textareaReference = useRef<HTMLTextAreaElement | null>(null);
-
+  const containerReference = useRef<HTMLDivElement | null>(null);
   const { selectedModel, setSelectedModel } = useChat();
 
   const handleSubmit = async () => {
@@ -52,14 +52,18 @@ export function ChatTextarea({ onSubmit, models, autoFocus = true }: ChatTextare
     providerModelsMap.get(model.provider)?.push(model);
   }
 
+  const focusInput = useCallback(() => {
+    textareaReference.current?.focus();
+  }, [textareaReference]);
+
   useEffect(() => {
     if (autoFocus) {
-      textareaReference.current?.focus();
+      focusInput();
     }
-  }, [autoFocus]);
+  }, [autoFocus, focusInput]);
 
   return (
-    <div className="relative h-full">
+    <div className="relative h-full @container" ref={containerReference}>
       <div
         data-state={isFocused ? 'active' : 'inactive'}
         onClick={() => {
@@ -108,13 +112,23 @@ export function ChatTextarea({ onSubmit, models, autoFocus = true }: ChatTextare
             </span>
           )}
           renderButtonContents={(item) => (
-            <span className="flex flex-row items-center gap-2 group-data-[state=open]:text-primary">
-              <span className="text-xs">{item.model}</span>
-              <span className="relative flex size-4">
-                <ChevronDown className="absolute group-hover:scale-0 transition-transform duration-200 ease-in-out" />
-                <CircuitBoard className="absolute scale-0 group-hover:scale-100 transition-transform duration-200 ease-in-out" />
-              </span>
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="flex flex-row items-center gap-2 group-data-[state=open]:text-primary max-w-24 @md:max-w-fit shrink-0">
+                  <span className="text-xs truncate hidden @xs:block">{item.model}</span>
+                  <span className="relative flex size-4 items-center justify-center">
+                    <ChevronDown className="scale-0 @xs:scale-100 absolute group-hover:scale-0 transition-transform duration-200 ease-in-out" />
+                    <CircuitBoard className="absolute scale-100 @xs:scale-0 group-hover:scale-100 transition-transform duration-200 ease-in-out" />
+                  </span>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>
+                  <span>Select model{` `}</span>
+                  <span>({item.model})</span>
+                </p>
+              </TooltipContent>
+            </Tooltip>
           )}
           getValue={(item) => item.model}
           onSelect={(model) => {
@@ -134,7 +148,7 @@ export function ChatTextarea({ onSubmit, models, autoFocus = true }: ChatTextare
                 setIsSearching((previous) => !previous);
               }}
             >
-              <span className="text-xs">Search</span>
+              <span className="text-xs hidden @xs:block">Search</span>
               <Globe className="size-4 group-hover:rotate-180 transition-transform duration-200 ease-in-out" />
             </Button>
           </TooltipTrigger>
@@ -154,8 +168,8 @@ export function ChatTextarea({ onSubmit, models, autoFocus = true }: ChatTextare
       </Button>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button size="icon" variant="ghost" className="absolute right-2 bottom-2">
-            <Mic className="size-4" />
+          <Button size="icon" variant="ghost" className="absolute right-2 bottom-2 size-6 mr-1.5">
+            <AudioLines className="size-4" />
           </Button>
         </TooltipTrigger>
         <TooltipContent>

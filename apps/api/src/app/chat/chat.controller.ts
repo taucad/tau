@@ -126,14 +126,29 @@ export class ChatController {
           switch (streamEvent.event) {
             case ChatEvent.OnChatModelStream: {
               if (streamEvent.data.chunk.content) {
-                observer.next({
-                  data: {
-                    id,
-                    status: streamEvent.event,
-                    timestamp: Date.now(),
-                    content: streamEvent.data.chunk.content,
-                  },
-                });
+                const streamedContent = streamEvent.data.chunk.content;
+                let content: string | undefined;
+
+                if (typeof streamedContent === 'string') {
+                  content = streamedContent;
+                } else {
+                  // Handle anthropic streaming
+                  if (streamedContent.length > 0) {
+                    // TODO: handle joining multiple chunks?
+                    content = streamedContent[0].text;
+                  }
+                }
+
+                if (content) {
+                  observer.next({
+                    data: {
+                      id,
+                      status: streamEvent.event,
+                      timestamp: Date.now(),
+                      content,
+                    },
+                  });
+                }
               }
 
               break;
@@ -165,7 +180,6 @@ export class ChatController {
             case ChatEvent.OnToolEnd: {
               // The tool doesn't return the results in a fully structured format, so we need to wrap it in an array and parse it
               const results = JSON.parse(`[${streamEvent.data.output.content}]`);
-              console.log({ results, data: streamEvent.data });
               observer.next({
                 data: {
                   id,

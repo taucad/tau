@@ -2,6 +2,7 @@ import { Canvas, CanvasProps } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Scene } from './scene';
 import InfiniteGrid from './infinite-grid';
+import rotate3dBase64 from './rotate-3d.svg?base64';
 import { cn } from '@/utils/ui';
 
 export type CadViewerProperties = {
@@ -34,7 +35,15 @@ export const ThreeProvider = ({
   const dpr = Math.min(window.devicePixelRatio, 2);
 
   return (
-    <Canvas className={cn('bg-background', className)} dpr={dpr} frameloop="demand" {...properties}>
+    <Canvas
+      style={{
+        cursor: `url(data:image/svg+xml;base64,${rotate3dBase64}) 12 12, auto`,
+      }}
+      dpr={dpr}
+      frameloop="demand"
+      className={cn('bg-background', className)}
+      {...properties}
+    >
       <Scene hideGizmo={disableGizmo} center={true} enableDamping={true}>
         {!disableGrid && <InfiniteGrid />}
         {children}

@@ -26,7 +26,7 @@ import {
 
 const COLOR_COOKIE_NAME = 'tau-color-hue';
 const HUE_CSS_VAR = '--hue-primary';
-const DEFAULT_HSL_HUE = 266;
+const DEFAULT_HUE = 266;
 const DEFAULT_LIGHTNESS = 0.5719;
 const DEFAULT_CHROMA = 0.1898;
 
@@ -54,7 +54,7 @@ interface ColorContextType {
 const ColorContext = createContext<ColorContextType | undefined>(undefined);
 
 export function ColorProvider({ children }: { children: React.ReactNode }) {
-  const [hue, setHue] = useCookie(COLOR_COOKIE_NAME, DEFAULT_HSL_HUE, {
+  const [hue, setHue] = useCookie(COLOR_COOKIE_NAME, DEFAULT_HUE, {
     parse: Number,
     stringify: String,
   });
@@ -66,7 +66,7 @@ export function ColorProvider({ children }: { children: React.ReactNode }) {
   }, [hue]);
 
   const resetHue = useCallback(() => {
-    setHue(DEFAULT_HSL_HUE);
+    setHue(DEFAULT_HUE);
   }, [setHue]);
 
   const colors = useMemo(() => {

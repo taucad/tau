@@ -133,6 +133,7 @@ export function ChatTextarea({ onSubmit, models, autoFocus = true }: ChatTextare
           getValue={(item) => item.model}
           onSelect={(model) => {
             setSelectedModel(model);
+            focusInput();
           }}
           placeholder="Select a model"
           defaultValue={models.find((model) => model.model === selectedModel)}
@@ -146,6 +147,7 @@ export function ChatTextarea({ onSubmit, models, autoFocus = true }: ChatTextare
               className="group data-[state=active]:bg-neutral/20 data-[state=active]:text-primary data-[state=active]:shadow transition-transform duration-200 ease-in-out"
               onClick={() => {
                 setIsSearching((previous) => !previous);
+                focusInput();
               }}
             >
               <span className="text-xs hidden @xs:block">Search</span>

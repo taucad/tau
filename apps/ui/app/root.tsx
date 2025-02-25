@@ -22,7 +22,7 @@ import { markdownViewerLinks } from '@/components/markdown-viewer';
 import { QueryClient } from '@tanstack/react-query';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ReactNode, useEffect, useState } from 'react';
-import { ENV, metaConfig } from './config';
+import { getEnvironment, metaConfig } from './config';
 import { useServiceWorker } from '@/hooks/use-service-worker';
 import { Toaster } from '@/components/ui/sonner';
 import { webManifestLinks } from '@/routes/manifest[.webmanifest]';
@@ -67,7 +67,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     theme: getTheme(),
     cookies,
-    env: ENV,
+    env: getEnvironment(),
     models,
   };
 }
@@ -101,6 +101,7 @@ export function App({ error, ssrTheme }: { error?: ReactNode; ssrTheme: Theme | 
   const [theme] = useTheme();
   const color = useColor();
   const { setFaviconColor } = useFavicon();
+  const data = useLoaderData<typeof loader>();
 
   useEffect(() => {
     setFaviconColor(color.serialized.hex);
@@ -116,6 +117,11 @@ export function App({ error, ssrTheme }: { error?: ReactNode; ssrTheme: Theme | 
         <Links />
       </head>
       <body>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.ENV = ${JSON.stringify(data.env)}`,
+          }}
+        />
         <Page error={error} />
         <ScrollRestoration />
         <Scripts />

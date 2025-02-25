@@ -139,7 +139,7 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
     ...initialState,
     messages: initialMessages ?? [],
   });
-  const { TAU_API_BASE_URL } = useEnvironment();
+  const { TAU_API_URL } = useEnvironment();
   const messagesReference = useRef(state.messages);
   const contentBuffer = useRef('');
 
@@ -170,7 +170,7 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
   }, [initialMessages]);
 
   const { stream } = useEventSource<MessageEventSchema, { model: string; messages: Message[] }>({
-    url: `${TAU_API_BASE_URL}/v1/chat`,
+    url: `${TAU_API_URL}/v1/chat`,
     onStreamEvent: (event) => {
       dispatch({ type: 'SET_STATUS', payload: event.status });
 

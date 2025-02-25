@@ -1,13 +1,26 @@
 /**
- * Environment variables
+ * Environment variable loader for the server.
  *
  * TODO: add validation
  */
-export const ENV = {
-  TAU_API_BASE_URL: process.env.TAU_API_URL,
-  NODE_ENV: process.env.NODE_ENV,
-  // Add any other environment variables you need
-} as const;
+export const getEnvironment = () => {
+  return {
+    TAU_API_URL: process.env.TAU_API_URL,
+    NODE_ENV: process.env.NODE_ENV,
+    // Add any other environment variables you need
+  } as const;
+};
+
+type Environment = ReturnType<typeof getEnvironment>;
+
+// Extend the global Window interface
+declare global {
+  interface Window {
+    ENV: Environment;
+  }
+}
+
+export const ENV = (globalThis.window ? globalThis.window.ENV : process.env) as Environment;
 
 /**
  * Meta config. Contains infrequently changing information about the app.

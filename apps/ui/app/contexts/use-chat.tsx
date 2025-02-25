@@ -3,7 +3,7 @@ import { Message, MessageRole, MessageStatus } from '@/types/chat';
 import { generatePrefixedId } from '@/utils/id';
 import { PREFIX_TYPES } from '@/utils/constants';
 import { useEventSource } from '@/hooks/use-event-source';
-import { useEnvironment } from '@/hooks/use-environment';
+import { ENV } from '@/config';
 
 export enum ChatEvent {
   OnChatModelStart = 'on_chat_model_start',
@@ -139,7 +139,6 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
     ...initialState,
     messages: initialMessages ?? [],
   });
-  const { TAU_API_URL } = useEnvironment();
   const messagesReference = useRef(state.messages);
   const contentBuffer = useRef('');
 
@@ -170,7 +169,7 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
   }, [initialMessages]);
 
   const { stream } = useEventSource<MessageEventSchema, { model: string; messages: Message[] }>({
-    url: `${TAU_API_URL}/v1/chat`,
+    url: `${ENV.TAU_API_URL}/v1/chat`,
     onStreamEvent: (event) => {
       dispatch({ type: 'SET_STATUS', payload: event.status });
 

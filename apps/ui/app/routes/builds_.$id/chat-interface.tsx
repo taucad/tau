@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
-import { Eye, Code, Terminal, ArrowDown, MessageCircle, Settings2 } from 'lucide-react';
+import { Eye, Code, Terminal, ArrowDown, MessageCircle, Settings2, LayoutGrid, Rows } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useChat } from '@/contexts/use-chat';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
@@ -20,6 +20,8 @@ import { useKeydown } from '@/hooks/use-keydown';
 import { Drawer, DrawerContent } from '@/components/ui/drawer';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { KeyShortcut } from '@/components/ui/key-shortcut';
+import { ChatConsole } from './chat-console';
+import { KeyCombination } from '@/utils/keys';
 
 export const CHAT_COOKIE_NAME = 'tau-chat-open';
 export const PARAMETERS_COOKIE_NAME = 'tau-parameters-open';
@@ -27,6 +29,11 @@ export const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'tau-chat-history-resize';
 export const CHAT_RESIZE_COOKIE_NAME_MAIN = 'tau-chat-main-resize';
 export const PARAMETERS_RESIZE_COOKIE_NAME = 'tau-parameters-resize';
 export const CHAT_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
+export const VIEW_MODE_COOKIE_NAME = 'tau-view-mode';
+export const VIEW_MODE_CODE_COOKIE_NAME = 'tau-view-mode-code';
+export const VIEW_MODE_CONSOLE_COOKIE_NAME = 'tau-view-mode-console';
+export const CHAT_TAB_COOKIE_NAME = 'tau-chat-tab';
+type ViewMode = 'tabs' | 'split';
 
 const parseResizeCookie = (cookie: string): [number, number] => {
   try {
@@ -44,6 +51,60 @@ const resizeCookieOptions = {
   parse: parseResizeCookie,
   stringify: stringifyResizeCookie,
 };
+
+const toggleChatKeyCombination = {
+  key: 'c',
+  ctrlKey: true,
+} satisfies KeyCombination;
+
+const toggleParametersKeyCombination = {
+  key: 'p',
+  ctrlKey: true,
+} satisfies KeyCombination;
+
+const openPreviewKeyCombination = {
+  key: 'p',
+  ctrlKey: true,
+  shiftKey: true,
+  requireAllModifiers: true,
+} satisfies KeyCombination;
+
+const openCodeKeyCombination = {
+  key: 'c',
+  ctrlKey: true,
+  shiftKey: true,
+  requireAllModifiers: true,
+} satisfies KeyCombination;
+
+const openConsoleKeyCombination = {
+  key: 't',
+  ctrlKey: true,
+  shiftKey: true,
+  requireAllModifiers: true,
+} satisfies KeyCombination;
+
+const tabs = [
+  {
+    value: 'preview',
+    icon: Eye,
+    label: 'Preview',
+    keyCombination: openPreviewKeyCombination,
+  },
+  {
+    value: 'code',
+    icon: Code,
+    label: 'Code',
+    keyCombination: openCodeKeyCombination,
+  },
+  {
+    value: 'console',
+    icon: Terminal,
+    label: 'Console',
+    keyCombination: openConsoleKeyCombination,
+  },
+] as const;
+
+type ChatTabs = (typeof tabs)[number]['value'];
 
 export const ChatInterface = () => {
   const { sendMessage, messages, editMessage } = useChat();
@@ -75,6 +136,11 @@ export const ChatInterface = () => {
     resizeCookieOptions,
   );
   const { data: models } = useModels();
+  const [consoleSize, setConsoleSize] = useCookie(VIEW_MODE_CONSOLE_COOKIE_NAME, [85, 15], resizeCookieOptions);
+  const [codeSize, setCodeSize] = useCookie(VIEW_MODE_CODE_COOKIE_NAME, [85, 15], resizeCookieOptions);
+
+  const [viewMode, setViewMode] = useCookie<ViewMode>(VIEW_MODE_COOKIE_NAME, 'tabs');
+  const [chatTab, setChatTab] = useCookie<ChatTabs>(CHAT_TAB_COOKIE_NAME, 'preview');
 
   useEffect(() => {
     // Get the last message if there are any messages
@@ -132,19 +198,19 @@ export const ChatInterface = () => {
   };
 
   const { formattedKeyCombination: formattedParametersKeyCombination } = useKeydown(
-    {
-      key: 'p',
-      ctrlKey: true,
-    },
+    toggleParametersKeyCombination,
     toggleParametersOpen,
   );
 
-  const { formattedKeyCombination: formattedChatKeyCombination } = useKeydown(
+  const { formattedKeyCombination: formattedChatKeyCombination } = useKeydown(toggleChatKeyCombination, toggleChatOpen);
+
+  const { formattedKeyCombination: formattedToggleViewModeKeyCombination } = useKeydown(
     {
-      key: 'c',
+      key: 't',
       ctrlKey: true,
+      requireAllModifiers: true,
     },
-    toggleChatOpen,
+    () => setViewMode((previous) => (previous === 'tabs' ? 'split' : 'tabs')),
   );
 
   const isMobile = useIsMobile();
@@ -164,7 +230,7 @@ export const ChatInterface = () => {
             size={'icon'}
             variant="outline"
             onClick={toggleChatOpen}
-            className="group absolute top-0 left-0 text-muted-foreground m-[0.5625rem] z-10"
+            className="group absolute top-0 left-0 text-muted-foreground m-2 z-30"
             data-state={isChatOpen ? 'open' : 'closed'}
           >
             <span className="size-4">
@@ -249,33 +315,105 @@ export const ChatInterface = () => {
         defaultSize={chatResizeMain[1]}
         className={cn('h-full flex-col', isMobile && isChatOpen && 'hidden')}
       >
-        <Tabs defaultValue="preview" className="relative flex flex-col h-full">
-          <TabsList
-            className={cn(
-              'grid grid-cols-3 absolute m-2 bg-background border md:h-[2.375rem] z-10 [&>*]:data-[state=active]:bg-accent/50',
-              (!isChatOpen || isMobile) && 'ml-13',
-            )}
-          >
-            <TabsTrigger value="preview" className="gap-2">
-              <Eye className="size-4" />
-              <span className="hidden md:block">Preview</span>
-            </TabsTrigger>
-            <TabsTrigger value="code" className="gap-2">
-              <Code className="size-4" />
-              <span className="hidden md:block">Code</span>
-            </TabsTrigger>
-            <TabsTrigger value="console" className="gap-2">
-              <Terminal className="size-4" />
-              <span className="hidden md:block">Console</span>
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="preview" className="h-full w-full mt-0">
-            <ChatViewer />
-          </TabsContent>
-          <TabsContent value="code" className="h-full mt-0 flex flex-1 w-full">
-            <ChatCode />
-          </TabsContent>
-        </Tabs>
+        <div className="relative flex flex-col h-full">
+          {viewMode === 'tabs' ? (
+            <Tabs
+              defaultValue={chatTab}
+              className="h-full w-full flex-1"
+              onValueChange={(value) => {
+                setChatTab(value as ChatTabs);
+              }}
+            >
+              <TabsList
+                defaultValue="code"
+                className={cn(
+                  '[&>*]:data-[state=active]:bg-accent/50 [&>*]:hover:bg-accent/30 bg-transparent m-2 gap-2 z-30',
+                  !isChatOpen && 'ml-13',
+                  chatTab === 'preview' && 'absolute top-0 left-0 ',
+                )}
+              >
+                {tabs.map((tab) => (
+                  <TabsTrigger
+                    key={tab.value}
+                    value={tab.value}
+                    className={'gap-2 border-[1px] md:border-none size-9 md:h-9 md:w-auto px-1 md:px-3'}
+                  >
+                    <tab.icon className="size-4" />
+                    <span className="hidden md:block">{tab.label}</span>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              <TabsContent value="preview" className="h-full mt-0 flex flex-1 w-full">
+                <ChatViewer />
+              </TabsContent>
+              <TabsContent value="code" className="h-full mt-0 flex flex-1 w-full">
+                <ChatCode />
+              </TabsContent>
+              <TabsContent value="console" className="h-full mt-0 flex flex-1 w-full p-2">
+                <ChatConsole />
+              </TabsContent>
+            </Tabs>
+          ) : (
+            <ResizablePanelGroup
+              autoSaveId={VIEW_MODE_CODE_COOKIE_NAME}
+              direction="horizontal"
+              className="h-full"
+              onLayout={(sizes) => setCodeSize(sizes as [number, number])}
+            >
+              <ResizablePanel order={1} defaultSize={codeSize[0]}>
+                <ChatViewer />
+              </ResizablePanel>
+              <ResizableHandle />
+              <ResizablePanel order={2} defaultSize={codeSize[1]}>
+                <ResizablePanelGroup
+                  direction="vertical"
+                  autoSaveId={VIEW_MODE_CONSOLE_COOKIE_NAME}
+                  onLayout={(sizes) => setConsoleSize(sizes as [number, number])}
+                >
+                  <ResizablePanel order={1} defaultSize={consoleSize[0]}>
+                    <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-13 gap-1.5"></div>
+                    <div className="pt-14 overflow-y-scroll dark:bg-[rgb(30,_30,_30)] w-full">
+                      <ChatCode />
+                    </div>
+                  </ResizablePanel>
+                  <ResizableHandle />
+                  <ResizablePanel order={2} defaultSize={consoleSize[1]} minSize={5} className="p-2">
+                    <ChatConsole />
+                  </ResizablePanel>
+                </ResizablePanelGroup>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          )}
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className={cn(
+                  'group absolute top-0 right-0 text-muted-foreground m-2 z-30 hidden md:flex',
+                  isMobile && isChatOpen && 'hidden',
+                  !isParametersOpen && 'mr-13',
+                )}
+                onClick={() => setViewMode(viewMode === 'tabs' ? 'split' : 'tabs')}
+                data-state={viewMode === 'split' ? 'open' : 'closed'}
+              >
+                <span className="size-4 relative group" data-state={viewMode}>
+                  <Rows className="rotate-90 absolute scale-0 group-data-[state=tabs]:scale-100 transition-transform duration-200 ease-in-out" />
+                  <LayoutGrid className="absolute scale-0 group-data-[state=split]:scale-100 transition-transform duration-200 ease-in-out" />
+                </span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>
+                Open {viewMode === 'tabs' ? 'Split' : 'Tabs'} View{' '}
+                <KeyShortcut variant="tooltip" className="ml-1">
+                  {formattedToggleViewModeKeyCombination}
+                </KeyShortcut>
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </ResizablePanel>
 
       <ResizableHandle className={cn('hidden', isParametersOpen && 'md:flex')} />
@@ -287,7 +425,7 @@ export const ChatInterface = () => {
             variant="outline"
             onClick={toggleParametersOpen}
             className={cn(
-              'group absolute top-0 right-0 text-muted-foreground m-[0.5625rem] z-10',
+              'group absolute top-0 right-0 text-muted-foreground m-2 z-30',
               isMobile && isChatOpen && 'hidden',
             )}
             data-state={isParametersOpen ? 'open' : 'closed'}

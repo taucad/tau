@@ -27,7 +27,7 @@ export function ReplicadStudio() {
           </div>
         </div>
       </div>
-      <div className="absolute top-0 right-0 flex flex-row justify-end gap-1.5 m-[0.5625rem] mr-13">
+      <div className="absolute top-0 right-0 flex flex-row justify-end gap-1.5 m-2 mr-13">
         <DownloadButton
           variant="outline"
           size="icon"

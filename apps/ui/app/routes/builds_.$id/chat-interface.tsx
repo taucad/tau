@@ -137,7 +137,7 @@ export const ChatInterface = () => {
   );
   const { data: models } = useModels();
   const [consoleSize, setConsoleSize] = useCookie(VIEW_MODE_CONSOLE_COOKIE_NAME, [85, 15], resizeCookieOptions);
-  const [codeSize, setCodeSize] = useCookie(VIEW_MODE_CODE_COOKIE_NAME, [85, 15], resizeCookieOptions);
+  const [codeSize, setCodeSize] = useCookie(VIEW_MODE_CODE_COOKIE_NAME, [60, 40], resizeCookieOptions);
 
   const [viewMode, setViewMode] = useCookie<ViewMode>(VIEW_MODE_COOKIE_NAME, 'tabs');
   const [chatTab, setChatTab] = useCookie<ChatTabs>(CHAT_TAB_COOKIE_NAME, 'preview');
@@ -248,13 +248,7 @@ export const ChatInterface = () => {
         </TooltipContent>
       </Tooltip>
 
-      <ResizablePanel
-        order={1}
-        minSize={15}
-        maxSize={30}
-        defaultSize={chatResizeMain[0]}
-        className={cn(!isChatOpen && 'hidden')}
-      >
+      <ResizablePanel minSize={15} maxSize={30} defaultSize={chatResizeMain[0]} className={cn(!isChatOpen && 'hidden')}>
         <ResizablePanelGroup
           direction="vertical"
           onLayout={(sizes) => {
@@ -264,7 +258,6 @@ export const ChatInterface = () => {
         >
           <ResizablePanel
             id="chat-history-content"
-            order={1}
             defaultSize={chatResizeHistory[0]}
             style={{ overflowY: 'auto' }}
             className="relative flex-1 p-4 pb-0"
@@ -295,14 +288,7 @@ export const ChatInterface = () => {
             <div ref={chatEndReference} className="mb-px" />
           </ResizablePanel>
           <ResizableHandle />
-          <ResizablePanel
-            id="chat-input"
-            order={2}
-            minSize={15}
-            maxSize={50}
-            defaultSize={chatResizeHistory[1]}
-            className="p-2"
-          >
+          <ResizablePanel id="chat-input" minSize={15} maxSize={50} defaultSize={chatResizeHistory[1]} className="p-2">
             <ChatTextarea onSubmit={onSubmit} models={models ?? []} />
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -311,7 +297,6 @@ export const ChatInterface = () => {
       <ResizableHandle className={cn('hidden', isChatOpen && 'md:flex')} />
 
       <ResizablePanel
-        order={2}
         defaultSize={chatResizeMain[1]}
         className={cn('h-full flex-col', isMobile && isChatOpen && 'hidden')}
       >
@@ -360,24 +345,24 @@ export const ChatInterface = () => {
               className="h-full"
               onLayout={(sizes) => setCodeSize(sizes as [number, number])}
             >
-              <ResizablePanel order={1} defaultSize={codeSize[0]}>
+              <ResizablePanel defaultSize={codeSize[0]}>
                 <ChatViewer />
               </ResizablePanel>
               <ResizableHandle />
-              <ResizablePanel order={2} defaultSize={codeSize[1]}>
+              <ResizablePanel defaultSize={codeSize[1]}>
                 <ResizablePanelGroup
                   direction="vertical"
                   autoSaveId={VIEW_MODE_CONSOLE_COOKIE_NAME}
                   onLayout={(sizes) => setConsoleSize(sizes as [number, number])}
                 >
-                  <ResizablePanel order={1} defaultSize={consoleSize[0]}>
+                  <ResizablePanel defaultSize={consoleSize[0]}>
                     <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-13 gap-1.5"></div>
                     <div className="pt-14 overflow-y-scroll dark:bg-[rgb(30,_30,_30)] w-full">
                       <ChatCode />
                     </div>
                   </ResizablePanel>
                   <ResizableHandle />
-                  <ResizablePanel order={2} defaultSize={consoleSize[1]} minSize={5} className="p-2">
+                  <ResizablePanel defaultSize={consoleSize[1]} minSize={5} className="p-2">
                     <ChatConsole />
                   </ResizablePanel>
                 </ResizablePanelGroup>
@@ -446,7 +431,6 @@ export const ChatInterface = () => {
       </Tooltip>
 
       <ResizablePanel
-        order={3}
         minSize={15}
         maxSize={30}
         defaultSize={chatResizeMain[2]}

@@ -297,7 +297,15 @@ function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' |
               event.preventDefault();
             }}
           >
-            {showPreview && <ReplicadViewer mesh={mesh} disableGrid={true} disableGizmo={true} className="bg-muted" />}
+            {showPreview && (
+              <ReplicadViewer
+                mesh={mesh}
+                disableGrid={true}
+                disableGizmo={true}
+                className="bg-muted"
+                zoomLevel={1.25}
+              />
+            )}
           </div>
           <Button
             variant="outline"

@@ -4,13 +4,25 @@ import { LoaderPinwheel } from 'lucide-react';
 
 type ReplicadViewerProperties = CadViewerProperties & {
   mesh: any;
+  zoomLevel?: number;
 };
 
-export function ReplicadViewer({ mesh, disableGizmo, disableGrid, className }: ReplicadViewerProperties) {
+export function ReplicadViewer({
+  mesh,
+  disableGizmo,
+  disableGrid,
+  className,
+  zoomLevel = 0.75,
+}: ReplicadViewerProperties) {
   return (
     <div className="w-full h-full">
       {mesh ? (
-        <ThreeProvider disableGizmo={disableGizmo} disableGrid={disableGrid} className={className}>
+        <ThreeProvider
+          disableGizmo={disableGizmo}
+          disableGrid={disableGrid}
+          className={className}
+          stageOptions={{ perspective: { zoomLevel } }}
+        >
           <ReplicadMesh {...mesh} />
         </ThreeProvider>
       ) : (

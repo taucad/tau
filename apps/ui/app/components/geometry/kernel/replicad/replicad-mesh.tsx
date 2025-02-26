@@ -103,13 +103,7 @@ export const ReplicadMesh = React.memo(function ShapeMeshes({
         onPointerMove={onHover}
         onPointerLeave={() => onHover(null)}
       >
-        <MatcapMaterial
-          color={color.serialized.hex}
-          attachArray="material"
-          polygonOffset
-          polygonOffsetFactor={2}
-          polygonOffsetUnits={1}
-        />
+        <MatcapMaterial color={color.serialized.hex} polygonOffset polygonOffsetFactor={2} polygonOffsetUnits={1} />
       </mesh>
       <lineSegments geometry={lines.current}>
         <lineBasicMaterial color="#244224" />

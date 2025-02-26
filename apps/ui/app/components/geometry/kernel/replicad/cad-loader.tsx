@@ -1,0 +1,92 @@
+import { useEffect, useRef } from 'react';
+import { useGLTF, useAnimations, useTexture } from '@react-three/drei';
+import { Group, MeshMatcapMaterial } from 'three';
+import { useFrame } from '@react-three/fiber';
+import { LoopRepeat } from 'three';
+import { useColor } from '@/hooks/use-color';
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const allActions = [
+  'Dance',
+  'Death',
+  'Idle',
+  'Jump',
+  'No',
+  'Punch',
+  'Running',
+  'Sitting',
+  'Standing',
+  'ThumbsUp',
+  'Walking',
+  'WalkJump',
+  'Wave',
+  'Yes',
+] as const;
+
+type Action = (typeof allActions)[number];
+
+type CadLoaderProperties = {
+  action?: Action;
+};
+
+export function CadLoader({ action = 'Idle' }: CadLoaderProperties) {
+  const group = useRef<Group>(null);
+  const { scene, animations } = useGLTF('/robot.glb');
+  const { actions, mixer } = useAnimations(animations, group);
+  const [matcapTexture] = useTexture(['/textures/matcap-1.png']);
+  const color = useColor();
+
+  // Setup animation only once
+  useEffect(() => {
+    const selectedAction = actions[action];
+    if (selectedAction) {
+      selectedAction.reset().fadeIn(0.5).play();
+      selectedAction.setLoop(LoopRepeat, Infinity);
+      selectedAction.timeScale = 0.5;
+    }
+
+    return () => {
+      mixer.stopAllAction();
+    };
+  }, [actions, mixer, action]);
+
+  // Update materials when color changes
+  useEffect(() => {
+    scene.traverse((child: any) => {
+      if (child.isMesh) {
+        const originalMaterial = child.material;
+
+        // Create new matcap material while preserving original material properties
+        child.material = new MeshMatcapMaterial({
+          matcap: matcapTexture,
+          color: originalMaterial.color.clone(), // Clone the color to prevent reference issues
+          name: originalMaterial.name,
+          // Map specific colors for different parts
+          ...(originalMaterial.name.includes('Main') && { color: color.serialized.hex }), // main parts
+          // ...(originalMaterial.name.includes('Black') && { color: color.serialized.hex }), // black parts
+          // ...(originalMaterial.name.includes('Grey') && { color: color.serialized.hex }), // grey parts
+        });
+      }
+    });
+  }, [scene, matcapTexture, color.serialized.hex]);
+
+  useFrame((state, delta) => {
+    // Ensure the mixer updates on each frame
+    mixer.update(delta);
+  });
+
+  return (
+    <>
+      {/* With matcap material, we don't need additional lights */}
+      <group
+        ref={group}
+        position={[0, 0, 0]}
+        rotation={[Math.PI / 2, 0, 0]} // Changed rotation to fix orientation
+      >
+        <primitive object={scene} />
+      </group>
+    </>
+  );
+}
+
+useGLTF.preload('/robot.glb');

@@ -1,21 +1,21 @@
 import { Canvas, CanvasProps } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Scene } from './scene';
+import { StageOptions } from './stage';
 import InfiniteGrid from './infinite-grid';
 import rotate3dBase64 from './rotate-3d.svg?base64';
 import { cn } from '@/utils/ui';
+import { useEffect } from 'react';
 
 export type CadViewerProperties = {
   disableGizmo?: boolean;
   disableGrid?: boolean;
   className?: string;
+  center?: boolean;
+  stageOptions?: StageOptions;
 };
 
 export type ThreeContextProperties = CanvasProps & CadViewerProperties;
-
-// We change the default orientation - threejs tends to use Y are the height,
-// while replicad uses Z. This is mostly a representation default.
-THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
 // This is the basics to render a nice looking model user react-three-fiber
 //
@@ -30,9 +30,15 @@ export const ThreeProvider = ({
   disableGizmo = false,
   disableGrid = false,
   className,
+  stageOptions = {},
+  center = true,
   ...properties
 }: ThreeContextProperties) => {
   const dpr = Math.min(window.devicePixelRatio, 2);
+
+  useEffect(() => {
+    THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+  }, []);
 
   return (
     <Canvas
@@ -44,7 +50,7 @@ export const ThreeProvider = ({
       className={cn('bg-background', className)}
       {...properties}
     >
-      <Scene hideGizmo={disableGizmo} center={true} enableDamping={true}>
+      <Scene hideGizmo={disableGizmo} center={center} enableDamping={true} stageOptions={stageOptions}>
         {!disableGrid && <InfiniteGrid />}
         {children}
       </Scene>

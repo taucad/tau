@@ -12,7 +12,6 @@ import { useKeydown } from '@/hooks/use-keydown';
 import { KeyShortcut } from './key-shortcut';
 import { ThreeProvider } from '../geometry/graphics/three/three-context';
 import { CadLoader } from '../geometry/kernel/replicad/cad-loader';
-import { PerspectiveCamera } from '@react-three/drei';
 
 export type ColorPickerValue = HslColor;
 

@@ -24,7 +24,15 @@ const ResizableHandle = ({
 }) => (
   <ResizablePrimitive.PanelResizeHandle
     className={cn(
-      'relative flex w-px data-[resize-handle-state=hover]:after:bg-border items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] after:-translate-x-1/2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 data-[panel-group-direction=vertical]:h-px data-[panel-group-direction=vertical]:w-full data-[panel-group-direction=vertical]:after:left-0 data-[panel-group-direction=vertical]:after:h-[2px] data-[panel-group-direction=vertical]:after:w-full data-[panel-group-direction=vertical]:after:-translate-y-1/2 data-[panel-group-direction=vertical]:after:translate-x-0 [&[data-panel-group-direction=vertical]>div]:rotate-90',
+      'relative flex w-0 items-center justify-center bg-border',
+      'after:absolute after:inset-y-0 after:left-1/2 after:w-[1px] after:-translate-x-1/2 after:bg-border after:z-10 after:transition-all after:ease-in-out after:duration-200',
+      'data-[resize-handle-state=hover]:after:w-[3px] data-[resize-handle-state=drag]:after:w-[3px]',
+      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+      // Vertical specific styles
+      'data-[panel-group-direction=vertical]:h-0 data-[panel-group-direction=vertical]:w-full',
+      'data-[panel-group-direction=vertical]:after:left-0 data-[panel-group-direction=vertical]:after:h-[1px] data-[panel-group-direction=vertical]:after:w-full data-[panel-group-direction=vertical]:after:-translate-y-1/2 data-[panel-group-direction=vertical]:after:translate-x-0',
+      'data-[panel-group-direction=vertical]:data-[resize-handle-state=hover]:after:h-[3px] data-[panel-group-direction=vertical]:data-[resize-handle-state=drag]:after:h-[3px] data-[panel-group-direction=vertical]:data-[resize-handle-state=hover]:after:w-full data-[panel-group-direction=vertical]:data-[resize-handle-state=drag]:after:w-full',
+      '[&[data-panel-group-direction=vertical]>div]:rotate-90',
       className,
     )}
     {...properties}

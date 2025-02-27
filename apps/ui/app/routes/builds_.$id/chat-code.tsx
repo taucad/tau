@@ -1,5 +1,6 @@
 import { CodeEditor } from '@/components/code-editor';
 import { useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
+import { LoaderPinwheel } from 'lucide-react';
 
 export const ChatCode = () => {
   const { code, setCode } = useReplicad();
@@ -24,6 +25,7 @@ export const ChatCode = () => {
     //   </div>
     <CodeEditor
       //
+      loading={<LoaderPinwheel className="size-20 stroke-1 animate-spin text-primary ease-in-out" />}
       className="text-xs bg-background"
       defaultLanguage="typescript"
       defaultValue={code}

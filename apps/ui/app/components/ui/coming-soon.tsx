@@ -8,7 +8,7 @@ const comingSoonVariants = cva(
   {
     variants: {
       variant: {
-        tooltip: 'bg-primary/80 dark:bg-primary/20 text-primary-foreground dark:text-primary-foreground border-none',
+        tooltip: 'bg-primary text-primary-foreground border-none',
         default: 'bg-primary text-primary-foreground',
       },
       size: {

@@ -296,10 +296,7 @@ export const ChatInterface = () => {
 
       <ResizableHandle className={cn('hidden', isChatOpen && 'md:flex')} />
 
-      <ResizablePanel
-        defaultSize={chatResizeMain[1]}
-        className={cn('h-full flex-col', isMobile && isChatOpen && 'hidden')}
-      >
+      <ResizablePanel defaultSize={chatResizeMain[1]} className={cn('h-full flex-col', isChatOpen && 'hidden md:flex')}>
         <div className="relative flex flex-col h-full">
           {viewMode === 'tabs' ? (
             <Tabs
@@ -312,8 +309,8 @@ export const ChatInterface = () => {
               <TabsList
                 defaultValue="code"
                 className={cn(
-                  '[&>*]:data-[state=active]:bg-accent/50 [&>*]:hover:bg-accent/30 bg-transparent m-2 gap-2 z-30',
-                  !isChatOpen && 'ml-13',
+                  '[&>*]:data-[state=active]:bg-accent [&>*]:border-[1px] [&>*]:border-border [&>*]:hover:bg-accent/70 bg-transparent mx-2 my-1.5 gap-2 z-30 p-0',
+                  !isChatOpen && 'ml-13 md:ml-12',
                   chatTab === 'preview' && 'absolute top-0 left-0 ',
                 )}
               >
@@ -321,7 +318,7 @@ export const ChatInterface = () => {
                   <TabsTrigger
                     key={tab.value}
                     value={tab.value}
-                    className={'gap-2 border-[1px] md:border-none size-9 md:h-9 md:w-auto px-1 md:px-3'}
+                    className={'gap-2 border-[1px] md:border-none size-8 md:h-8 md:w-auto px-1 md:px-3'}
                   >
                     <tab.icon className="size-4" />
                     <span className="hidden md:block">{tab.label}</span>
@@ -356,7 +353,7 @@ export const ChatInterface = () => {
                   onLayout={(sizes) => setConsoleSize(sizes as [number, number])}
                 >
                   <ResizablePanel defaultSize={consoleSize[0]}>
-                    <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-13 gap-1.5"></div>
+                    <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-12 gap-1.5"></div>
                     <div className="pt-14 overflow-y-scroll dark:bg-[rgb(30,_30,_30)] w-full">
                       <ChatCode />
                     </div>
@@ -376,9 +373,10 @@ export const ChatInterface = () => {
                 variant="outline"
                 size="icon"
                 className={cn(
-                  'group absolute top-0 right-0 text-muted-foreground m-2 z-30 hidden md:flex',
-                  isMobile && isChatOpen && 'hidden',
-                  !isParametersOpen && 'mr-13',
+                  'group absolute top-0 right-0 text-muted-foreground m-2 z-30',
+                  'hidden md:flex',
+                  isChatOpen && 'hidden',
+                  !isParametersOpen && 'mr-12',
                 )}
                 onClick={() => setViewMode(viewMode === 'tabs' ? 'split' : 'tabs')}
                 data-state={viewMode === 'split' ? 'open' : 'closed'}
@@ -411,7 +409,8 @@ export const ChatInterface = () => {
             onClick={toggleParametersOpen}
             className={cn(
               'group absolute top-0 right-0 text-muted-foreground m-2 z-30',
-              isMobile && isChatOpen && 'hidden',
+              'flex', // Show by default
+              isChatOpen && 'hidden md:flex', // Hide on mobile when chat is open, show on desktop always
             )}
             data-state={isParametersOpen ? 'open' : 'closed'}
           >
@@ -446,7 +445,7 @@ export const ChatInterface = () => {
 
       {isMobile && !isChatOpen && (
         <Drawer open={isParametersOpen} onOpenChange={setIsParametersOpen}>
-          <DrawerContent className="p-4 pt-0 text-sm flex flex-col gap-2 justify-between">
+          <DrawerContent className={cn('p-4 pt-0 text-sm flex flex-col gap-2 justify-between', 'md:hidden')}>
             <span className="font-bold text-lg">Parameters</span>
             <div className="grid grid-cols-2 gap-2">
               <Parameters />

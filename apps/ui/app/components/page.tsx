@@ -18,7 +18,7 @@ import { ReactNode } from 'react';
 import { KeyShortcut } from '@/components/ui/key-shortcut';
 import { formatKeyCombination } from '@/utils/keys';
 
-const HEADER_HEIGHT = '3rem';
+export const HEADER_HEIGHT = '3rem';
 
 export function Page({ error }: { error?: ReactNode }) {
   const matches = useMatches();
@@ -36,10 +36,10 @@ export function Page({ error }: { error?: ReactNode }) {
         style={{ '--header-height': HEADER_HEIGHT } as React.CSSProperties}
       >
         <header className="flex h-[var(--header-height)] justify-between shrink-0 items-center border-b-[1px] border-border gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
-          <div className="flex items-center gap-1.5 md:gap-2.5 px-4">
+          <div className="flex items-center gap-1 px-4">
             <Tooltip>
               <TooltipTrigger asChild>
-                <SidebarTrigger className="-ml-1" />
+                <SidebarTrigger className="-ml-2" />
               </TooltipTrigger>
               <TooltipContent>
                 Toggle sidebar{' '}

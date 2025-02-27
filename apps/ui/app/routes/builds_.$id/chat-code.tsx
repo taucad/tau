@@ -12,7 +12,7 @@ export const ChatCode = () => {
   };
 
   return (
-    // <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-[0.5625rem] mr-13 gap-1.5">
+    // <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-[0.5625rem] mr-12 gap-1.5">
     //     <CopyButton variant="outline" size="icon" text={code} className="text-muted-foreground" />
     //     <DownloadButton
     //       variant="outline"

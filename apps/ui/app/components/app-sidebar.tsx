@@ -1,28 +1,24 @@
 import * as React from 'react';
-import {
-  AudioWaveform,
-  BookOpen,
-  Bot,
-  Command,
-  Frame,
-  Hammer,
-  Map,
-  PieChart,
-  Settings2,
-  UsersRound,
-  Workflow,
-} from 'lucide-react';
+import { BookOpen, Bot, Frame, Hammer, Map, PieChart, UsersRound, Workflow } from 'lucide-react';
 
 import { NavMain } from '@/components/nav/nav-main';
 import { NavProjects } from '@/components/nav/nav-projects';
 import { NavUser } from '@/components/nav/nav-user';
-import { TeamSwitcher } from '@/components/nav/team-switcher';
-import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarRail } from '@/components/ui/sidebar';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarMenuButton,
+  SidebarRail,
+} from '@/components/ui/sidebar';
 import { Tau } from '@/components/icons/tau';
 import { NavChat } from '@/components/nav/nav-chat';
 import { ModeToggle } from '@/components/nav/mode-toggle';
 import { ColorToggle } from './nav/color-toggle';
 import { NavHistory } from './nav/nav-history';
+import { Link } from '@remix-run/react';
+import { HEADER_HEIGHT } from './page';
 
 // This is sample data.
 const data = {
@@ -31,23 +27,6 @@ const data = {
     email: 'richard@fontein.co',
     avatar: '/avatar-sample.png',
   },
-  teams: [
-    {
-      name: 'Tau',
-      logo: () => <Tau className="size-8 text-primary bg-primary rounded-md overflow-clip" />,
-      plan: 'Enterprise',
-    },
-    {
-      name: 'Acme Corp.',
-      logo: AudioWaveform,
-      plan: 'Startup',
-    },
-    {
-      name: 'Evil Corp.',
-      logo: Command,
-      plan: 'Free',
-    },
-  ],
   navMain: [
     {
       title: 'Builds',
@@ -132,10 +111,16 @@ const data = {
 export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar collapsible="icon" {...properties}>
-      <SidebarHeader>
-        <TeamSwitcher teams={data.teams} />
+      <SidebarHeader style={{ height: HEADER_HEIGHT }} className="border-b-[1px] border-border">
+        <Link to="/" tabIndex={-1}>
+          <SidebarMenuButton tooltip="Home" className="[&>svg]:size-8 !p-0">
+            <Tau className="text-primary bg-primary rounded-md overflow-clip" />
+            <h1 className="text-2xl font-semibold font-mono tracking-wider">Tau</h1>
+            <span className="sr-only">Home</span>
+          </SidebarMenuButton>
+        </Link>
       </SidebarHeader>
-      <SidebarContent className="mt-[0.1875rem]">
+      <SidebarContent>
         <NavChat />
         <NavHistory />
         <NavMain items={data.navMain} />

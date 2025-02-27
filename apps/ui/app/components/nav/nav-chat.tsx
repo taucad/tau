@@ -36,7 +36,7 @@ export const NavChat = () => {
               ),
             }}
             variant="outline"
-            className="whitespace-nowrap"
+            className="whitespace-nowrap !pl-[7px]"
           >
             <Plus className="size-4 shrink-0" />
             <span className="flex-1">New Build</span>

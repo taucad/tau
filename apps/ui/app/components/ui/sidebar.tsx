@@ -472,11 +472,31 @@ const SidebarMenuButton = React.forwardRef<
   } & VariantProps<typeof sidebarMenuButtonVariants>
 >(
   (
-    { asChild = false, isActive = false, variant = 'default', size = 'default', tooltip, className, ...properties },
+    {
+      asChild = false,
+      isActive = false,
+      variant = 'default',
+      size = 'default',
+      tooltip,
+      className,
+      onClick,
+      ...properties
+    },
     reference,
   ) => {
     const Comp = asChild ? Slot : 'button';
-    const { isMobile, state } = useSidebar();
+    const { isMobile, state, toggleSidebar } = useSidebar();
+
+    // Auto-close the sidebar when clicking on a button in mobile mode.
+    const handleClick = React.useCallback(
+      (event: React.MouseEvent<HTMLButtonElement>) => {
+        if (isMobile && state === 'collapsed') {
+          toggleSidebar();
+        }
+        onClick?.(event);
+      },
+      [isMobile, state, toggleSidebar],
+    );
 
     const button = (
       <Comp
@@ -485,6 +505,7 @@ const SidebarMenuButton = React.forwardRef<
         data-size={size}
         data-active={isActive}
         className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
+        onClick={handleClick}
         {...properties}
       />
     );

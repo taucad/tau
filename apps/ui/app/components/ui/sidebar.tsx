@@ -17,7 +17,7 @@ import { type KeyCombination } from '@/utils/keys';
 
 export const SIDEBAR_COOKIE_NAME = 'tau-sidebar-open';
 const SIDEBAR_DEFAULT_OPEN = 'false';
-const SIDEBAR_WIDTH = '16rem';
+const SIDEBAR_WIDTH = '14rem';
 const SIDEBAR_WIDTH_MOBILE = '18rem';
 const SIDEBAR_WIDTH_ICON = '3rem';
 

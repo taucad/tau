@@ -301,7 +301,7 @@ export const ChatInterface = () => {
           {viewMode === 'tabs' ? (
             <Tabs
               defaultValue={chatTab}
-              className="h-full w-full flex-1"
+              className={cn('h-full w-full flex-1', chatTab === 'code' && 'dark:bg-[rgb(30,_30,_30)]')}
               onValueChange={(value) => {
                 setChatTab(value as ChatTabs);
               }}
@@ -309,7 +309,7 @@ export const ChatInterface = () => {
               <TabsList
                 defaultValue="code"
                 className={cn(
-                  '[&>*]:data-[state=active]:bg-accent [&>*]:border-[1px] [&>*]:border-border [&>*]:hover:bg-accent/70 bg-transparent mx-2 my-1.5 gap-2 z-30 p-0',
+                  '[&>*]:data-[state=active]:bg-accent [&>*]:border-[1px] [&>*]:border-border [&>*]:hover:bg-accent/70 bg-transparent ml-2 mr-auto w-full flex justify-start my-1.5 gap-2 z-30 p-0',
                   !isChatOpen && 'ml-13 md:ml-12',
                   chatTab === 'preview' && 'absolute top-0 left-0 ',
                 )}
@@ -346,7 +346,7 @@ export const ChatInterface = () => {
                 <ChatViewer />
               </ResizablePanel>
               <ResizableHandle />
-              <ResizablePanel defaultSize={codeSize[1]}>
+              <ResizablePanel defaultSize={codeSize[1]} minSize={30}>
                 <ResizablePanelGroup
                   direction="vertical"
                   autoSaveId={VIEW_MODE_CONSOLE_COOKIE_NAME}

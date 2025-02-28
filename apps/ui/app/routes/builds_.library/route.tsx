@@ -48,7 +48,7 @@ export default function PersonalCadProjects() {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [sortBy, setSortBy] = useState<'lastOpened' | 'createdAt' | 'name'>('lastOpened');
+  const [sortBy, setSortBy] = useState<'lastOpened' | 'createdAt' | 'name' | 'updatedAt'>('updatedAt');
   const [visibleProjects, setVisibleProjects] = useState(ITEMS_PER_PAGE);
   const { builds } = useBuilds();
 
@@ -61,7 +61,11 @@ export default function PersonalCadProjects() {
           project.tags?.some((tag) => tag.toLowerCase().includes(searchTerm.toLowerCase()))),
     )
     .sort((a, b) => {
-      return sortBy === 'createdAt' ? b.createdAt - a.createdAt : a.name.localeCompare(b.name);
+      return sortBy === 'createdAt'
+        ? b.createdAt - a.createdAt
+        : sortBy === 'updatedAt'
+          ? b.updatedAt - a.updatedAt
+          : a.name.localeCompare(b.name);
     });
 
   // TODO: add load more
@@ -107,11 +111,15 @@ export default function PersonalCadProjects() {
             ))}
           </TabsList>
           <div className="flex items-center gap-2">
-            <Select value={sortBy} onValueChange={(value: 'lastOpened' | 'createdAt' | 'name') => setSortBy(value)}>
+            <Select
+              value={sortBy}
+              onValueChange={(value: 'lastOpened' | 'createdAt' | 'updatedAt' | 'name') => setSortBy(value)}
+            >
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Sort by" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="updatedAt">Last Updated</SelectItem>
                 <SelectItem value="lastOpened">Last Opened</SelectItem>
                 <SelectItem value="createdAt">Created Date</SelectItem>
                 <SelectItem value="name">Name</SelectItem>
@@ -238,9 +246,10 @@ function StatusDropdown({ status, projectId }: { status: string; projectId: stri
 }
 
 function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' | 'list' }) {
-  const { setCode, mesh } = useReplicad();
+  const { setCode, setParameters, mesh } = useReplicad();
   const main = project.assets.mechanical?.main;
   const code = project.assets.mechanical?.files[main as string]?.content;
+  const parameters = project.assets.mechanical?.parameters;
 
   // Start with preview false, then enable it once we have both code and mesh
   const [showPreview, setShowPreview] = useState(!!code);
@@ -249,7 +258,10 @@ function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' |
     if (code) {
       setCode(code);
     }
-  }, [code, setCode]);
+    if (parameters) {
+      setParameters(parameters);
+    }
+  }, [code, setCode, parameters, setParameters]);
 
   if (viewMode === 'list') {
     return (

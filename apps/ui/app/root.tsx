@@ -30,7 +30,6 @@ import { getModels, Model } from '@/hooks/use-models';
 import { buttonVariants } from './components/ui/button';
 import { ColorProvider, useColor } from '@/hooks/use-color';
 import { useFavicon } from '@/hooks/use-favicon';
-import { ChatProvider } from '@/contexts/use-chat';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesUrl },
@@ -86,11 +85,9 @@ export default function AppWithProviders({ error }: { error?: ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider specifiedTheme={data?.theme} themeAction="/action/set-theme">
         <ColorProvider>
-          <ChatProvider>
-            <TooltipProvider delayDuration={0}>
-              <App error={error} ssrTheme={data?.theme} />
-            </TooltipProvider>
-          </ChatProvider>
+          <TooltipProvider delayDuration={0}>
+            <App error={error} ssrTheme={data?.theme} />
+          </TooltipProvider>
         </ColorProvider>
       </ThemeProvider>
     </QueryClientProvider>

@@ -11,6 +11,7 @@ export const sampleBuilds: Build[] = mockModels.map((model) => ({
       files: { 'model.ts': { content: model.code } },
       main: 'model.ts',
       language: 'replicad' as const,
+      parameters: {},
     },
   },
   name: model.name,
@@ -20,8 +21,8 @@ export const sampleBuilds: Build[] = mockModels.map((model) => ({
     avatar: '/avatar-sample.png',
   },
   version: '1.0.0',
-  createdAt: Date.now(),
-  updatedAt: Date.now(),
+  createdAt: 1_740_702_000_000,
+  updatedAt: 1_740_702_000_000,
   tags: ['3d-printing', 'parametric', 'replicad'],
   isFavorite: false,
   stars: 0,
@@ -40,7 +41,6 @@ export const fetchBuilds = async (): Promise<Build[]> => {
 };
 
 export function useBuilds() {
-  console.log('fetching builds in useBuilds');
   const {
     data: builds = [],
     isLoading,
@@ -49,8 +49,6 @@ export function useBuilds() {
     queryKey: ['builds'],
     queryFn: fetchBuilds,
   });
-
-  console.log('fetched builds in useBuilds');
 
   return {
     builds,

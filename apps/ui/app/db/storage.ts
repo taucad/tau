@@ -1,9 +1,15 @@
 import type { Build } from '@/types/build';
+import type { PartialDeep } from 'type-fest';
+import deepmerge from 'deepmerge';
 
 export interface StorageProvider {
   // Build operations
   createBuild(build: Build): Promise<Build>;
-  updateBuild(buildId: string, update: Partial<Build>): Promise<Build | undefined>;
+  updateBuild(
+    buildId: string,
+    update: PartialDeep<Build>,
+    options: { ignoreKeys?: string[] },
+  ): Promise<Build | undefined>;
   getBuilds(): Build[];
   getBuild(buildId: string): Build | undefined;
 }
@@ -27,7 +33,16 @@ export class LocalStorageProvider implements StorageProvider {
     return build;
   }
 
-  async updateBuild(buildId: string, update: Partial<Build>): Promise<Build | undefined> {
+  async updateBuild(
+    buildId: string,
+    update: PartialDeep<Build>,
+    options?: {
+      /**
+       * Keys to ignore when merging the build
+       */
+      ignoreKeys?: string[];
+    },
+  ): Promise<Build | undefined> {
     const builds = this.getBuildsInternal();
     const index = builds.findIndex((b) => b.id === buildId);
 
@@ -35,7 +50,19 @@ export class LocalStorageProvider implements StorageProvider {
       return undefined;
     }
 
-    const updatedBuild = { ...builds[index], ...update };
+    // Custom merge function that doesn't merge leaf nodes for 'files' and 'parameters'
+    const mergeIgnoreKeys = new Set(options?.ignoreKeys || []);
+    const updatedBuild = deepmerge(
+      builds[index],
+      { ...update, updatedAt: Date.now() },
+      {
+        customMerge: (key) => {
+          if (mergeIgnoreKeys.has(key)) {
+            return (source, target) => target;
+          }
+        },
+      },
+    ) as Build;
     builds[index] = updatedBuild;
     this.saveBuilds(builds);
     return updatedBuild;

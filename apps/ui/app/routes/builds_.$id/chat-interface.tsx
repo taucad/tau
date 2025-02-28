@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import { Eye, Code, Terminal, ArrowDown, MessageCircle, Settings2, LayoutGrid, Rows } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useChat } from '@/contexts/use-chat';
@@ -8,7 +8,7 @@ import { ChatMessage } from '@/routes/builds_.$id/chat-message';
 import { ChatViewer } from '@/routes/builds_.$id/chat-viewer';
 import { cn } from '@/utils/ui';
 import { ChatTextarea, ChatTextareaProperties } from '@/components/chat/chat-textarea';
-import { Parameters } from '@/components/geometry/kernel/replicad/parameters';
+import { ChatParameters } from '@/routes/builds_.$id/chat-parameters';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useModels } from '@/hooks/use-models';
@@ -22,17 +22,18 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { KeyShortcut } from '@/components/ui/key-shortcut';
 import { ChatConsole } from './chat-console';
 import { KeyCombination } from '@/utils/keys';
+import { ImperativePanelHandle } from 'react-resizable-panels';
 
-export const CHAT_COOKIE_NAME = 'tau-chat-open';
-export const PARAMETERS_COOKIE_NAME = 'tau-parameters-open';
+export const CHAT_HISTORY_OPEN_COOKIE_NAME = 'tau-chat-history-open';
+export const CHAT_PARAMETERS_OPEN_COOKIE_NAME = 'tau-chat-parameters-open';
 export const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'tau-chat-history-resize';
 export const CHAT_RESIZE_COOKIE_NAME_MAIN = 'tau-chat-main-resize';
-export const PARAMETERS_RESIZE_COOKIE_NAME = 'tau-parameters-resize';
 export const CHAT_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
-export const VIEW_MODE_COOKIE_NAME = 'tau-view-mode';
-export const VIEW_MODE_CODE_COOKIE_NAME = 'tau-view-mode-code';
-export const VIEW_MODE_CONSOLE_COOKIE_NAME = 'tau-view-mode-console';
+export const CHAT_VIEW_MODE_COOKIE_NAME = 'tau-chat-view-mode';
+export const CHAT_RESIZE_VIEWER_COOKIE_NAME = 'tau-chat-resize-viewer';
+export const CHAT_RESIZE_CODE_COOKIE_NAME = 'tau-chat-resize-code';
 export const CHAT_TAB_COOKIE_NAME = 'tau-chat-tab';
+export const CONSOLE_OPEN_COOKIE_NAME = 'tau-console-open';
 type ViewMode = 'tabs' | 'split';
 
 const parseResizeCookie = (cookie: string): [number, number] => {
@@ -83,6 +84,12 @@ const openConsoleKeyCombination = {
   requireAllModifiers: true,
 } satisfies KeyCombination;
 
+const toggleConsoleKeyCombination = {
+  key: 'l',
+  ctrlKey: true,
+  requireAllModifiers: true,
+} satisfies KeyCombination;
+
 const tabs = [
   {
     value: 'preview',
@@ -112,10 +119,13 @@ export const ChatInterface = () => {
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
   const lastMessageReference = useRef<string | undefined>(undefined);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
-  const [isChatOpen, setIsChatOpen] = useCookie(CHAT_COOKIE_NAME, true, {
+  const [isChatOpen, setIsChatOpen] = useCookie(CHAT_HISTORY_OPEN_COOKIE_NAME, true, {
     parse: (value) => value === 'true',
   });
-  const [isParametersOpen, setIsParametersOpen] = useCookie(PARAMETERS_COOKIE_NAME, true, {
+  const [isParametersOpen, setIsParametersOpen] = useCookie(CHAT_PARAMETERS_OPEN_COOKIE_NAME, true, {
+    parse: (value) => value === 'true',
+  });
+  const [isConsoleOpen, setIsConsoleOpen] = useCookie(CONSOLE_OPEN_COOKIE_NAME, true, {
     parse: (value) => value === 'true',
   });
   const [chatResizeMain, setChatResizeMain] = useCookie(CHAT_RESIZE_COOKIE_NAME_MAIN, [25, 60, 15], {
@@ -136,10 +146,10 @@ export const ChatInterface = () => {
     resizeCookieOptions,
   );
   const { data: models } = useModels();
-  const [consoleSize, setConsoleSize] = useCookie(VIEW_MODE_CONSOLE_COOKIE_NAME, [85, 15], resizeCookieOptions);
-  const [codeSize, setCodeSize] = useCookie(VIEW_MODE_CODE_COOKIE_NAME, [60, 40], resizeCookieOptions);
+  const [consoleSize, setConsoleSize] = useCookie(CHAT_RESIZE_CODE_COOKIE_NAME, [85, 15], resizeCookieOptions);
+  const [codeSize, setCodeSize] = useCookie(CHAT_RESIZE_VIEWER_COOKIE_NAME, [60, 40], resizeCookieOptions);
 
-  const [viewMode, setViewMode] = useCookie<ViewMode>(VIEW_MODE_COOKIE_NAME, 'tabs');
+  const [viewMode, setViewMode] = useCookie<ViewMode>(CHAT_VIEW_MODE_COOKIE_NAME, 'tabs');
   const [chatTab, setChatTab] = useCookie<ChatTabs>(CHAT_TAB_COOKIE_NAME, 'preview');
 
   useEffect(() => {
@@ -213,6 +223,27 @@ export const ChatInterface = () => {
     () => setViewMode((previous) => (previous === 'tabs' ? 'split' : 'tabs')),
   );
 
+  const consolePanelReference = useRef<ImperativePanelHandle>(null);
+
+  const toggleConsolePanel = useCallback(() => {
+    const panel = consolePanelReference.current;
+    if (panel) {
+      if (panel.isCollapsed()) {
+        setIsConsoleOpen(true);
+
+        panel.expand();
+      } else {
+        setIsConsoleOpen(false);
+        panel.collapse();
+      }
+    }
+  }, [consolePanelReference, setIsConsoleOpen]);
+
+  const { formattedKeyCombination: formattedToggleConsoleKeyCombination } = useKeydown(
+    toggleConsoleKeyCombination,
+    toggleConsolePanel,
+  );
+
   const isMobile = useIsMobile();
 
   return (
@@ -254,6 +285,7 @@ export const ChatInterface = () => {
         maxSize={30}
         defaultSize={chatResizeMain[0]}
         className={cn(!isChatOpen && 'hidden')}
+        id="chat-history"
       >
         <ResizablePanelGroup
           direction="vertical"
@@ -314,6 +346,7 @@ export const ChatInterface = () => {
         order={2}
         defaultSize={chatResizeMain[1]}
         className={cn('h-full flex-col', isChatOpen && 'hidden md:flex')}
+        id="chat-main"
       >
         <div className="relative flex flex-col h-full">
           {viewMode === 'tabs' ? (
@@ -349,36 +382,58 @@ export const ChatInterface = () => {
               <TabsContent value="code" className="h-full mt-0 flex flex-1 w-full">
                 <ChatCode />
               </TabsContent>
-              <TabsContent value="console" className="h-full mt-0 flex flex-1 w-full p-2">
-                <ChatConsole />
+              <TabsContent value="console" className="h-full mt-0 flex flex-1 w-full">
+                <ChatConsole data-view="tabs" className="p-2 pt-0" />
               </TabsContent>
             </Tabs>
           ) : (
             <ResizablePanelGroup
-              autoSaveId={VIEW_MODE_CODE_COOKIE_NAME}
+              autoSaveId={CHAT_RESIZE_VIEWER_COOKIE_NAME}
               direction="horizontal"
               className="h-full"
               onLayout={(sizes) => setCodeSize(sizes as [number, number])}
             >
-              <ResizablePanel order={1} defaultSize={codeSize[0]}>
+              <ResizablePanel order={1} defaultSize={codeSize[0]} id="chat-viewer">
                 <ChatViewer />
               </ResizablePanel>
               <ResizableHandle />
-              <ResizablePanel order={2} defaultSize={codeSize[1]} minSize={30}>
+              <ResizablePanel order={2} defaultSize={codeSize[1]} minSize={30} id="chat-code-container">
                 <ResizablePanelGroup
                   direction="vertical"
-                  autoSaveId={VIEW_MODE_CONSOLE_COOKIE_NAME}
+                  autoSaveId={CHAT_RESIZE_CODE_COOKIE_NAME}
                   onLayout={(sizes) => setConsoleSize(sizes as [number, number])}
                 >
-                  <ResizablePanel order={1} defaultSize={consoleSize[0]}>
+                  <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-code">
                     <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-12 gap-1.5"></div>
                     <div className="pt-14 overflow-y-scroll dark:bg-[rgb(30,_30,_30)] w-full">
                       <ChatCode />
                     </div>
                   </ResizablePanel>
                   <ResizableHandle />
-                  <ResizablePanel order={2} defaultSize={consoleSize[1]} minSize={5} className="p-2">
-                    <ChatConsole />
+                  <ResizablePanel
+                    order={2}
+                    defaultSize={consoleSize[1]}
+                    minSize={2.5}
+                    collapsible
+                    collapsedSize={2.5}
+                    className="p-2"
+                    ref={consolePanelReference}
+                    id="chat-console"
+                  >
+                    <ChatConsole
+                      onButtonClick={toggleConsolePanel}
+                      keyCombination={formattedToggleConsoleKeyCombination}
+                      onFilterChange={(event) => {
+                        const panel = consolePanelReference.current;
+                        if (event.target.value.length > 0) {
+                          panel?.expand();
+                        } else {
+                          panel?.collapse();
+                        }
+                      }}
+                      data-state={isConsoleOpen ? 'open' : 'closed'}
+                      data-view="split"
+                    />
                   </ResizablePanel>
                 </ResizablePanelGroup>
               </ResizablePanel>
@@ -454,12 +509,13 @@ export const ChatInterface = () => {
         defaultSize={chatResizeMain[2]}
         className={cn(
           'hidden',
-          isParametersOpen && 'md:flex w-64 xl:w-96 shrink-0 p-4 gap-2 text-sm flex-col',
+          isParametersOpen && 'md:flex w-64 xl:w-96 shrink-0 p-2 pt-3 pl-3 gap-3 text-sm flex-col',
           isMobile && isChatOpen && 'hidden',
         )}
+        id="chat-parameters"
       >
-        <span className="font-bold text-lg">Parameters</span>
-        <Parameters />
+        <span className="font-bold font-mono text-lg">Parameters</span>
+        <ChatParameters />
       </ResizablePanel>
 
       {isMobile && !isChatOpen && (
@@ -467,7 +523,7 @@ export const ChatInterface = () => {
           <DrawerContent className={cn('p-4 pt-0 text-sm flex flex-col gap-2 justify-between', 'md:hidden')}>
             <span className="font-bold text-lg">Parameters</span>
             <div className="grid grid-cols-2 gap-2">
-              <Parameters />
+              <ChatParameters />
             </div>
           </DrawerContent>
         </Drawer>

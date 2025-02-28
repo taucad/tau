@@ -9,10 +9,14 @@ export interface CopyButtonProperties extends ButtonProperties {
    * The text to copy.
    */
   text: string;
+  /**
+   * The tooltip to display when the button is hovered.
+   */
+  tooltip?: string;
 }
 
 export const CopyButton = React.forwardRef<HTMLButtonElement, CopyButtonProperties>(
-  ({ text, size, ...properties }, reference) => {
+  ({ text, size, tooltip = 'Copy', ...properties }, reference) => {
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
@@ -41,7 +45,7 @@ export const CopyButton = React.forwardRef<HTMLButtonElement, CopyButtonProperti
             {size !== 'icon' && (copied ? 'Copied' : 'Copy')}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Copy</TooltipContent>
+        <TooltipContent>{tooltip}</TooltipContent>
       </Tooltip>
     );
   },

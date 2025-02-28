@@ -240,7 +240,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
         </div>
         {!isUser && message.status === MessageStatus.Success && (
           <div className="flex flex-row justify-start items-center text-foreground/50">
-            <CopyButton size="sm" text={message.content} />
+            <CopyButton size="sm" text={message.content} tooltip="Copy message" />
           </div>
         )}
       </div>

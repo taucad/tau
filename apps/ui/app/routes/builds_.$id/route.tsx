@@ -2,10 +2,10 @@ import { ChatInterface } from '@/routes/builds_.$id/chat-interface';
 import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
 import { Link, UIMatch, useParams } from '@remix-run/react';
 import { useEffect } from 'react';
-import { useChat } from '@/contexts/use-chat';
 import { MessageStatus } from '@/types/chat';
-import { useBuild } from '@/hooks/use-build';
+import { BuildProvider, useBuild } from '@/hooks/use-build2';
 import { Button } from '@/components/ui/button';
+import { ChatProvider, useChat } from '@/contexts/use-chat';
 
 export const handle = {
   breadcrumb: (match: UIMatch) => {
@@ -21,19 +21,34 @@ export const handle = {
 
 const Chat = () => {
   const { id } = useParams();
-  const { build, isLoading } = useBuild(id!);
-  const { setCode } = useReplicad();
-  const { sendMessage } = useChat();
-  const main = build?.assets.mechanical?.main;
-  const code = build?.assets.mechanical?.files[main as string]?.content;
+  const { build, isLoading, setMessages: setBuildMessages } = useBuild();
+  const { setCode, setParameters } = useReplicad();
+  const { sendMessage, setMessages, messages } = useChat();
+
+  // Load and respond to build changes
+  useEffect(() => {
+    if (!build || isLoading) return;
+    // Set code
+    setCode(build.assets.mechanical?.files[build.assets.mechanical?.main as string]?.content || '');
+
+    // Set parameters
+    const parameters = build.assets.mechanical?.parameters;
+    setParameters(parameters || {});
+  }, [id, build, isLoading]);
 
   useEffect(() => {
-    if (code) {
-      setCode(code);
-    }
-  }, [id, build, setCode]);
+    // Set initial messages
+    if (!build || isLoading) return;
+    setMessages(build.messages);
+  }, [id, isLoading]);
 
-  // Handle initial pending message
+  // Handle message changes
+  useEffect(() => {
+    if (!build || isLoading) return;
+    setBuildMessages(messages);
+  }, [messages]);
+
+  // Handle any pending messages
   useEffect(() => {
     if (!build || isLoading) return;
 
@@ -41,21 +56,32 @@ const Chat = () => {
     if (!lastMessage) return;
 
     if (lastMessage.status === MessageStatus.Pending) {
-      console.log('sending message');
       sendMessage({
         message: lastMessage,
         model: lastMessage.model,
       });
     }
-  }, [id, build]); // Only run when build ID changes
+  }, [id, isLoading]);
 
   return <ChatInterface />;
 };
 
 export default function ChatRoute() {
+  const { id } = useParams();
+
+  if (!id) {
+    throw new Error('No build id provided');
+  }
+
   return (
-    <ReplicadProvider>
-      <Chat />
-    </ReplicadProvider>
+    <BuildProvider buildId={id}>
+      <ReplicadProvider>
+        <ChatProvider>
+          <div className="flex h-full">
+            <Chat />
+          </div>
+        </ChatProvider>
+      </ReplicadProvider>
+    </BuildProvider>
   );
 }

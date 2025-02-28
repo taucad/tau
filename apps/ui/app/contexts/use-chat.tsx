@@ -37,8 +37,6 @@ type MessageEventSchema = {
 interface ChatState {
   messages: Message[];
   status?: string;
-  activeStreamId?: string;
-  initializing: boolean;
 }
 
 type ChatAction =
@@ -56,8 +54,6 @@ type ChatAction =
 const initialState: ChatState = {
   messages: [],
   status: undefined,
-  activeStreamId: undefined,
-  initializing: true,
 };
 
 function chatReducer(state: ChatState, action: ChatAction): ChatState {
@@ -102,18 +98,6 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         status: action.payload,
       };
     }
-    case 'SET_ACTIVE_STREAM': {
-      return {
-        ...state,
-        activeStreamId: action.payload,
-      };
-    }
-    case 'SET_INITIALIZING': {
-      return {
-        ...state,
-        initializing: action.payload,
-      };
-    }
     default: {
       return state;
     }
@@ -156,24 +140,8 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
 
   // Handle initial messages loading
   useEffect(() => {
-    if (!initialMessages?.length) {
-      dispatch({ type: 'SET_INITIALIZING', payload: false });
-      return;
-    }
-
-    // Find any pending messages that need to be continued
-    const pendingMessage = initialMessages.find((message) => message.status === MessageStatus.Pending);
-
     // Set messages first
-    dispatch({ type: 'SET_MESSAGES', payload: initialMessages });
-
-    // Then set active stream if needed
-    if (pendingMessage) {
-      dispatch({ type: 'SET_ACTIVE_STREAM', payload: pendingMessage.id });
-    }
-
-    // Mark initialization as complete
-    dispatch({ type: 'SET_INITIALIZING', payload: false });
+    dispatch({ type: 'SET_MESSAGES', payload: initialMessages ?? [] });
   }, [initialMessages]);
 
   const { stream } = useEventSource<MessageEventSchema, { model: string; messages: Message[] }>({
@@ -351,9 +319,6 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
     message: Omit<Message, 'id' | 'createdAt' | 'updatedAt'> & { id?: string };
     model: string;
   }) => {
-    // Don't send messages while initializing or if already streaming
-    if (state.initializing || state.activeStreamId) return;
-
     let messageToSend: Message;
 
     // Find any existing pending message with the same content
@@ -378,7 +343,6 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
       } else {
         dispatch({ type: 'ADD_MESSAGE', payload: messageToSend });
       }
-      dispatch({ type: 'SET_ACTIVE_STREAM', payload: messageToSend.id });
     }
 
     const currentMessages = [...messagesReference.current, messageToSend];
@@ -386,11 +350,7 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
   };
 
   const editMessage = async ({ messageId, content, model }: { messageId: string; content: string; model: string }) => {
-    // Don't edit messages while initializing or if already streaming
-    if (state.initializing || state.activeStreamId) return;
-
     dispatch({ type: 'EDIT_MESSAGE', payload: { messageId, content } });
-    dispatch({ type: 'SET_ACTIVE_STREAM', payload: messageId });
     const currentMessages = [...messagesReference.current];
     await stream({ model, messages: currentMessages });
   };

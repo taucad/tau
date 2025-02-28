@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// TODO: fix typings
 import { type Remote, wrap } from 'comlink';
 import { createContext, useContext, useReducer, ReactNode, useEffect, useRef, useMemo, useCallback } from 'react';
 import { BuilderWorkerInterface } from './replicad-builder.worker';
@@ -8,11 +10,14 @@ import { debounce } from '@/utils/functions';
 interface ReplicadState {
   code: string;
   parameters: Record<string, any>;
+
+  defaultParameters: Record<string, any>;
   error?: string;
   isComputing: boolean;
   isBuffering: boolean;
   mesh?: {
     edges: any;
+
     faces: any;
   };
 }
@@ -20,13 +25,14 @@ interface ReplicadState {
 type ReplicadAction =
   | { type: 'SET_CODE'; payload: string }
   | { type: 'SET_PARAMETERS'; payload: Record<string, any> }
-  | { type: 'UPDATE_PARAMETER'; payload: { key: string; value: any } }
+  | { type: 'SET_DEFAULT_PARAMETERS'; payload: Record<string, any> }
   | { type: 'SET_STATUS'; payload: { error?: string; isComputing?: boolean; isBuffering?: boolean } }
   | { type: 'SET_MESH'; payload: ReplicadState['mesh'] };
 
 const initialState: ReplicadState = {
   code: '',
   parameters: {},
+  defaultParameters: {},
   isComputing: false,
   isBuffering: false,
   mesh: undefined,
@@ -64,14 +70,8 @@ function replicadReducer(state: ReplicadState, action: ReplicadAction): Replicad
     case 'SET_PARAMETERS': {
       return { ...state, parameters: action.payload };
     }
-    case 'UPDATE_PARAMETER': {
-      return {
-        ...state,
-        parameters: {
-          ...state.parameters,
-          [action.payload.key]: action.payload.value,
-        },
-      };
+    case 'SET_DEFAULT_PARAMETERS': {
+      return { ...state, defaultParameters: action.payload };
     }
     case 'SET_STATUS': {
       return { ...state, ...action.payload };
@@ -87,15 +87,16 @@ function replicadReducer(state: ReplicadState, action: ReplicadAction): Replicad
 
 const ReplicadContext = createContext<
   | {
-      isComputing: boolean;
-      isBuffering: boolean;
-      error: string | undefined;
       mesh: { edges: any; faces: any } | undefined;
-      code: string;
-      parameters: Record<string, any>;
+      status: {
+        isComputing: boolean;
+        isBuffering: boolean;
+        error?: string;
+      };
       downloadSTL: () => Promise<Blob>;
       setCode: (code: string) => void;
-      setParameters: (key: string, value: any) => void;
+      setParameters: (parameters: Record<string, any>) => void;
+      defaultParameters: Record<string, any>;
     }
   | undefined
 >(undefined);
@@ -142,35 +143,19 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
   // Create stable debounced evaluation function
   const debouncedEvaluate = useMemo(
     () =>
-      debounce((code: string, parameters: Record<string, any>) => {
+      debounce((code: string, parameters: Record<string, any>, defaultParameters: Record<string, any>) => {
         dispatch({ type: 'SET_STATUS', payload: { isBuffering: false } });
-        evaluateCode(code, parameters);
+        const mergedParameters = { ...defaultParameters, ...parameters };
+        evaluateCode(code, mergedParameters);
       }, DEBOUNCE_TIME),
     [evaluateCode],
   );
 
-  // Memoize handler functions
-  const handlers = useMemo(
-    () => ({
-      setCode: (code: string) => {
-        dispatch({ type: 'SET_STATUS', payload: { isBuffering: true } });
-        dispatch({ type: 'SET_CODE', payload: code });
-        debouncedEvaluate(code, state.parameters);
-      },
-      setParameters: (key: string, value: any) => {
-        dispatch({ type: 'SET_STATUS', payload: { isBuffering: true } });
-        dispatch({ type: 'UPDATE_PARAMETER', payload: { key, value } });
-        debouncedEvaluate(state.code, { ...state.parameters, [key]: value });
-      },
-      downloadSTL: async () => {
-        const worker = await initWorker();
-        if (!worker) throw new Error('Worker not found');
-        const result = await worker.exportShape('stl');
-        return result[0].blob;
-      },
-    }),
-    [state.code, state.parameters, debouncedEvaluate, initWorker],
-  );
+  // Effect to handle code/parameter changes
+  useEffect(() => {
+    dispatch({ type: 'SET_STATUS', payload: { isBuffering: true } });
+    debouncedEvaluate(state.code, state.parameters, state.defaultParameters);
+  }, [state.code, state.parameters, state.defaultParameters]);
 
   // Load default parameters when code changes
   useEffect(() => {
@@ -182,7 +167,7 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
 
       try {
         const defaultParameters = await worker.extractDefaultParametersFromCode(state.code);
-        dispatch({ type: 'SET_PARAMETERS', payload: defaultParameters });
+        dispatch({ type: 'SET_DEFAULT_PARAMETERS', payload: defaultParameters });
       } catch (error) {
         console.error('Failed to load default parameters:', error);
       }
@@ -194,20 +179,28 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
   // Cleanup worker on unmount
   useEffect(() => terminateWorker, [terminateWorker]);
 
-  const contextValue = useMemo(
+  const value = useMemo(
     () => ({
-      isComputing: state.isComputing,
-      isBuffering: state.isBuffering,
-      error: state.error,
       mesh: state.mesh,
-      code: state.code,
-      parameters: state.parameters,
-      ...handlers,
+      status: {
+        isComputing: state.isComputing,
+        isBuffering: state.isBuffering,
+        error: state.error,
+      },
+      downloadSTL: async () => {
+        const worker = await initWorker();
+        if (!worker) throw new Error('Worker not found');
+        const result = await worker.exportShape('stl');
+        return result[0].blob;
+      },
+      setCode: (code: string) => dispatch({ type: 'SET_CODE', payload: code }),
+      setParameters: (parameters: Record<string, any>) => dispatch({ type: 'SET_PARAMETERS', payload: parameters }),
+      defaultParameters: state.defaultParameters,
     }),
-    [state, handlers],
+    [state.mesh, state.isComputing, state.isBuffering, state.error, state.defaultParameters, initWorker],
   );
 
-  return <ReplicadContext.Provider value={contextValue}>{children}</ReplicadContext.Provider>;
+  return <ReplicadContext.Provider value={value}>{children}</ReplicadContext.Provider>;
 }
 
 export function useReplicad() {

@@ -1,0 +1,125 @@
+import { storage } from '@/db/storage';
+import type { Build } from '@/types/build';
+import { sampleBuilds } from './use-builds';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { createContext, useContext, ReactNode } from 'react';
+import { Message } from '@/types/chat';
+
+// Function to fetch builds
+const fetchBuild = async (buildId: string): Promise<Build> => {
+  const clientBuild = storage.getBuild(buildId);
+
+  if (clientBuild) {
+    return clientBuild;
+  } else {
+    const sampleBuild = sampleBuilds.find((build) => build.id === buildId);
+    if (sampleBuild) {
+      return sampleBuild;
+    } else {
+      throw new Error('Build not found');
+    }
+  }
+};
+
+interface BuildContextType {
+  build: Build | undefined;
+  isLoading: boolean;
+  error: Error | null;
+  code: string;
+  parameters: Record<string, unknown>;
+  setCode: (code: string) => void;
+  setParameters: (parameters: Record<string, unknown>) => void;
+  setMessages: (messages: Message[]) => void;
+}
+
+const BuildContext = createContext<BuildContextType | undefined>(undefined);
+
+export function BuildProvider({ children, buildId }: { children: ReactNode; buildId: string }) {
+  const queryClient = useQueryClient();
+
+  // Query for fetching build data
+  const buildQuery = useQuery({
+    queryKey: ['build', buildId],
+    queryFn: () => fetchBuild(buildId),
+  });
+
+  // Mutation for updating code
+  const codeUpdate = useMutation({
+    mutationFn: (code: string) =>
+      storage.updateBuild(buildId, {
+        assets: {
+          mechanical: {
+            files: {
+              'model.ts': {
+                content: code,
+              },
+            },
+          },
+        },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['build', buildId] });
+    },
+  });
+
+  // Mutation for updating parameters
+  const parameterUpdate = useMutation({
+    mutationFn: (parameters: Record<string, unknown>) => {
+      return storage.updateBuild(
+        buildId,
+        {
+          assets: {
+            mechanical: {
+              parameters,
+            },
+          },
+        },
+        { ignoreKeys: ['parameters'] },
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['build', buildId] });
+    },
+  });
+
+  // Mutation for updating messages
+  const messageUpdate = useMutation({
+    mutationFn: (messages: Message[]) => {
+      return storage.updateBuild(
+        buildId,
+        {
+          messages,
+        },
+        { ignoreKeys: ['messages'] },
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['build', buildId] });
+    },
+  });
+
+  const build = buildQuery.data;
+  const code = build?.assets.mechanical?.files[build.assets.mechanical.main]?.content || '';
+  const parameters = build?.assets.mechanical?.parameters || {};
+
+  const value = {
+    build,
+    isLoading: buildQuery.isLoading,
+    error: buildQuery.error as Error | null,
+    code,
+    parameters,
+    setCode: codeUpdate.mutate,
+    setParameters: parameterUpdate.mutate,
+    setMessages: messageUpdate.mutate,
+  };
+
+  return <BuildContext.Provider value={value}>{children}</BuildContext.Provider>;
+}
+
+export function useBuild() {
+  const context = useContext(BuildContext);
+  if (context === undefined) {
+    throw new Error('useBuild must be used within a BuildProvider');
+  }
+  return context;
+}

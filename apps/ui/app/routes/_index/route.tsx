@@ -8,7 +8,7 @@ import { storage } from '@/db/storage';
 import { generatePrefixedId } from '@/utils/id';
 import { PREFIX_TYPES } from '@/utils/constants';
 import { MessageRole, MessageStatus } from '@/types/chat';
-import { createMessage } from '@/contexts/use-chat';
+import { ChatProvider, createMessage } from '@/contexts/use-chat';
 import { cubeCode } from '@/components/mock-code';
 
 export default function ChatStart() {
@@ -56,6 +56,7 @@ export default function ChatStart() {
             files: { 'model.ts': { content: cubeCode } },
             main: 'model.ts',
             language: 'replicad',
+            parameters: {},
           },
         },
       });
@@ -75,7 +76,9 @@ export default function ChatStart() {
           <h1 className="text-3xl md:text-5xl font-semibold tracking-tight">What can I help you build?</h1>
         </div>
 
-        <ChatTextarea onSubmit={onSubmit} models={models ?? []} />
+        <ChatProvider>
+          <ChatTextarea onSubmit={onSubmit} models={models ?? []} />
+        </ChatProvider>
       </div>
       <div className="container mx-auto px-4 py-8">
         <div className="flex flex-row justify-between items-center mb-2">

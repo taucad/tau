@@ -1,15 +1,13 @@
 import { useModels } from '@/hooks/use-models';
 import { ChatTextarea } from '@/components/chat/chat-textarea';
-import { ProjectGrid } from '@/components/project-grid';
-import { mockBuilds } from '@/components/mock-builds';
 import { Button } from '@/components/ui/button';
 import { Link, useNavigate } from '@remix-run/react';
 import { storage } from '@/db/storage';
-import { generatePrefixedId } from '@/utils/id';
-import { PREFIX_TYPES } from '@/utils/constants';
 import { MessageRole, MessageStatus } from '@/types/chat';
 import { ChatProvider, createMessage } from '@/contexts/use-chat';
 import { cubeCode } from '@/components/mock-code';
+import { CommunityBuildGrid } from '@/components/project-grid';
+import { sampleBuilds } from '@/components/mock-builds';
 
 export default function ChatStart() {
   const { data: models } = useModels();
@@ -34,10 +32,7 @@ export default function ChatStart() {
         metadata: { systemHints: metadata?.systemHints ?? [] },
       });
 
-      // Create a new build with the pending message
-      const buildId = generatePrefixedId(PREFIX_TYPES.BUILD);
-      await storage.createBuild({
-        id: buildId,
+      const build = await storage.createBuild({
         name: 'New Build',
         description: '',
         stars: 0,
@@ -62,7 +57,7 @@ export default function ChatStart() {
       });
 
       // Navigate immediately - the build page will handle the streaming
-      navigate(`/builds/${buildId}`, { replace: true });
+      navigate(`/builds/${build.id}`, { replace: true });
     } catch (error) {
       console.error('Failed to create build:', error);
       // TODO: Show error toast
@@ -89,7 +84,7 @@ export default function ChatStart() {
             </Button>
           </Link>
         </div>
-        <ProjectGrid projects={mockBuilds} />
+        <CommunityBuildGrid builds={sampleBuilds} />
       </div>
     </>
   );

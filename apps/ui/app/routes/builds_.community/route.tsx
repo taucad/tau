@@ -1,11 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Link } from '@remix-run/react';
-import { ProjectGrid } from '@/components/project-grid';
-import { mockBuilds } from '@/components/mock-builds';
-import { Search, Code2, Layout, SlidersHorizontal } from 'lucide-react';
+import { Search, Code2, SlidersHorizontal } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,7 +10,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { CATEGORIES, CAD_PROVIDERS, Category, CadProvider } from '@/types/cad';
+import { CAD_PROVIDERS, CadProvider } from '@/types/cad';
+import { sampleBuilds } from '@/components/mock-builds';
+import { CommunityBuildGrid } from '@/components/project-grid';
 
 export const handle = {
   breadcrumb: () => {
@@ -28,147 +27,122 @@ export const handle = {
 };
 
 const ITEMS_PER_PAGE = 9;
-type SortOption = 'trending' | 'most-starred' | 'recently-updated' | 'most-forked';
+type SortOption = 'newest' | 'oldest' | 'stars' | 'forks';
 
 export default function CadCommunity() {
-  const [activeFilter, setActiveFilter] = useState<'all' | Category>('all');
-  const [activeLanguage, setActiveLanguage] = useState<CadProvider | 'all'>('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedLanguage, setSelectedLanguage] = useState<CadProvider | 'all'>('all');
+  const [sortOption, setSortOption] = useState<SortOption>('newest');
   const [visibleProjects, setVisibleProjects] = useState(ITEMS_PER_PAGE);
-  const [sortBy, setSortBy] = useState<SortOption>('trending');
 
-  const filteredProjects = mockBuilds.filter(
-    (project) =>
-      (activeFilter === 'all' || Object.keys(project.assets).includes(activeFilter)) &&
-      (activeLanguage === 'all' || Object.keys(project.assets).includes(activeLanguage)) &&
-      (project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        project.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        project.tags.some((tag) => tag.toLowerCase().includes(searchTerm.toLowerCase()))),
-  );
+  // Filter projects based on search term and selected language
+  const filteredProjects = sampleBuilds.filter((project) => {
+    const matchesSearch =
+      searchTerm === '' ||
+      project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      project.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      project.tags.some((tag) => tag.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  // Sort projects based on selected sort option
+    const matchesLanguage =
+      selectedLanguage === 'all' || Object.values(project.assets).some((asset) => asset.language === selectedLanguage);
+
+    return matchesSearch && matchesLanguage;
+  });
+
+  // Sort projects based on selected option
   const sortedProjects = [...filteredProjects].sort((a, b) => {
-    switch (sortBy) {
-      case 'most-starred': {
+    switch (sortOption) {
+      case 'newest': {
+        return b.createdAt - a.createdAt;
+      }
+      case 'oldest': {
+        return a.createdAt - b.createdAt;
+      }
+      case 'stars': {
         return b.stars - a.stars;
       }
-      case 'most-forked': {
+      case 'forks': {
         return b.forks - a.forks;
       }
-      case 'recently-updated': {
-        // For demo purposes, we'll use a random sort since we don't have update dates
-        return Math.random() - 0.5;
-      }
       default: {
-        // For trending, we'll use a combination of stars and forks
-        return b.stars * 2 + b.forks - (a.stars * 2 + a.forks);
+        return 0;
       }
     }
   });
 
-  const handleStarProject = useCallback((projectId: string) => {
-    console.log(`Starred project: ${projectId}`);
-    // Implement star functionality here
-  }, []);
-
-  const handleForkProject = useCallback((projectId: string) => {
-    console.log(`Forked project: ${projectId}`);
-    // Implement fork functionality here
-  }, []);
-
-  const loadMore = useCallback(() => {
+  const handleLoadMore = () => {
     setVisibleProjects((previous) => Math.min(previous + ITEMS_PER_PAGE, sortedProjects.length));
-  }, [sortedProjects.length]);
-
-  const displayedProjects = sortedProjects.slice(0, visibleProjects);
+  };
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="mb-12 text-center">
-        <h1 className="mb-4 text-4xl font-bold tracking-tight">Discover Community CAD Projects</h1>
-        <p className="text-lg text-muted-foreground">Explore, fork, and collaborate on open-source CAD designs</p>
-      </div>
-
-      {/* Search */}
-      <div className="relative mb-8 max-w-2xl mx-auto">
-        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          className="w-full pl-10"
-          placeholder="Search CAD projects..."
-          type="search"
-          value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
-        />
-      </div>
-
-      {/* Filters */}
-      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
-        <Tabs value={activeFilter} onValueChange={(value) => setActiveFilter(value as 'all' | Category)}>
-          <TabsList>
-            <TabsTrigger value="all" className="flex items-center gap-2">
-              <Layout className="size-4" />
-              <span className="hidden sm:inline">all</span>
-            </TabsTrigger>
-            {Object.entries(CATEGORIES).map(([key, { icon: Icon, color }]) => (
-              <TabsTrigger key={key} value={key} className="flex items-center gap-2">
-                <Icon className={`size-4 ${color}`} />
-                <span className="hidden sm:inline">{key}</span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-
+    <div className="container mx-auto py-8 space-y-8">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="flex items-center gap-2">
-                <Code2 className="size-4" />
-                Language: {activeLanguage}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuGroup>
-                <DropdownMenuItem onSelect={() => setActiveLanguage('all')}>all</DropdownMenuItem>
-                {CAD_PROVIDERS.map((lang) => (
-                  <DropdownMenuItem key={lang} onSelect={() => setActiveLanguage(lang)}>
-                    {lang}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <h1 className="text-3xl font-bold">Community</h1>
+          <span className="text-muted-foreground">({sortedProjects.length})</span>
+        </div>
+        <Button asChild>
+          <Link to="/builds/new">Create New</Link>
+        </Button>
+      </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="flex items-center gap-2">
-                <SlidersHorizontal className="size-4" />
-                Sort by:{' '}
-                {sortBy
-                  .split('-')
-                  .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-                  .join(' ')}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuGroup>
-                <DropdownMenuItem onSelect={() => setSortBy('trending')}>Trending</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setSortBy('most-starred')}>Most Starred</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setSortBy('recently-updated')}>Recently Updated</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setSortBy('most-forked')}>Most Forked</DropdownMenuItem>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center">
+          <div className="relative flex-grow">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search projects..."
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="w-[180px] justify-start">
+                  <Code2 className="mr-2 size-4" />
+                  {selectedLanguage === 'all' ? 'All Languages' : selectedLanguage}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[180px]">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => setSelectedLanguage('all')}>All Languages</DropdownMenuItem>
+                  {Object.entries(CAD_PROVIDERS).map(([key]) => (
+                    <DropdownMenuItem key={key} onClick={() => setSelectedLanguage(key as CadProvider)}>
+                      {key}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="w-[180px] justify-start">
+                  <SlidersHorizontal className="mr-2 size-4" />
+                  Sort by: {sortOption}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[180px]">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => setSortOption('newest')}>Newest</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSortOption('oldest')}>Oldest</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSortOption('stars')}>Most Stars</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSortOption('forks')}>Most Forks</DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </div>
 
-      <ProjectGrid
-        projects={displayedProjects}
-        onStar={handleStarProject}
-        onFork={handleForkProject}
-        hasMore={visibleProjects < sortedProjects.length}
-        onLoadMore={loadMore}
-      />
+      <CommunityBuildGrid builds={sortedProjects} />
+
+      {visibleProjects < sortedProjects.length && (
+        <div className="flex justify-center">
+          <Button onClick={handleLoadMore}>Load More Projects</Button>
+        </div>
+      )}
     </div>
   );
 }

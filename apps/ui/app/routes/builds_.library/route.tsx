@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Search, Filter, Grid, List, Star, ChevronDown, ArrowRight, Zap, Cpu, Layout, Cog, Eye } from 'lucide-react';
+import { Search, Filter, Grid, List, ChevronDown, Zap, Cpu, Layout, Cog, Eye, Star, ArrowRight } from 'lucide-react';
 import { Link } from '@remix-run/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,11 +37,6 @@ const ITEMS_PER_PAGE = 12;
 const handleStatusChange = (projectId: string, newStatus: string) => {
   console.log(`Changing status of project ${projectId} to ${newStatus}`);
   // Implement status change logic here
-};
-
-const handleFavorite = (id: string) => {
-  console.log(`Toggling favorite for project ${id}`);
-  // Implement the actual favorite toggle logic here
 };
 
 export default function PersonalCadProjects() {
@@ -145,24 +140,24 @@ export default function PersonalCadProjects() {
           </div>
         </div>
         <TabsContent value="all">
-          <ProjectGrid projects={filteredProjects} visibleProjects={visibleProjects} viewMode={viewMode} />
+          <LibraryBuildGrid projects={filteredProjects} visibleProjects={visibleProjects} viewMode={viewMode} />
         </TabsContent>
         <TabsContent value="mechanical">
-          <ProjectGrid
+          <LibraryBuildGrid
             projects={filteredProjects.filter((p) => Object.keys(p.assets).includes('mechanical'))}
             visibleProjects={visibleProjects}
             viewMode={viewMode}
           />
         </TabsContent>
         <TabsContent value="electrical">
-          <ProjectGrid
+          <LibraryBuildGrid
             projects={filteredProjects.filter((p) => Object.keys(p.assets).includes('electrical'))}
             visibleProjects={visibleProjects}
             viewMode={viewMode}
           />
         </TabsContent>
         <TabsContent value="firmware">
-          <ProjectGrid
+          <LibraryBuildGrid
             projects={filteredProjects.filter((p) => Object.keys(p.assets).includes('firmware'))}
             visibleProjects={visibleProjects}
             viewMode={viewMode}
@@ -173,20 +168,22 @@ export default function PersonalCadProjects() {
   );
 }
 
-function ProjectGrid({
+function LibraryBuildGrid({
   projects,
   visibleProjects,
   viewMode,
+  renderActions,
 }: {
   projects: Build[];
   visibleProjects: number;
   viewMode: 'grid' | 'list';
+  renderActions?: (project: Build) => React.ReactNode;
 }) {
   return (
     <div className={viewMode === 'grid' ? 'grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'space-y-4'}>
       {projects.slice(0, visibleProjects).map((project) => (
         <ReplicadProvider key={project.id}>
-          <ProjectCard project={project} viewMode={viewMode} />
+          <BuildLibraryCard project={project} viewMode={viewMode} renderActions={renderActions} />
         </ReplicadProvider>
       ))}
     </div>
@@ -245,7 +242,7 @@ function StatusDropdown({ status, projectId }: { status: string; projectId: stri
   );
 }
 
-function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' | 'list' }) {
+function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'grid' | 'list' }) {
   const { setCode, setParameters, mesh } = useReplicad();
   const main = project.assets.mechanical?.main;
   const code = project.assets.mechanical?.files[main as string]?.content;
@@ -355,7 +352,7 @@ function ProjectCard({ project, viewMode }: { project: Build; viewMode: 'grid' |
             // className={cn(project.isFavorite ? 'text-yellow-400' : 'text-gray-400 hover:text-yellow-400')}
             onClick={(event) => {
               event.stopPropagation();
-              handleFavorite(project.id);
+              // handleFavorite(project.id);
             }}
           >
             <Star className="size-4" />

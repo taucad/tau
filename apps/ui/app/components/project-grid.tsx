@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { Star, GitFork } from 'lucide-react';
+import { Star, GitFork, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -8,6 +8,11 @@ import { SvgIcon } from '@/components/icons/svg-icon';
 import { Build } from '@/types/build';
 import { CadProvider, CATEGORIES, Category } from '@/types/cad';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
+import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer';
+import { useState, useEffect, useRef } from 'react';
+import { storage } from '@/db/storage';
+import { useNavigate } from '@remix-run/react';
 
 // Placeholder for language icons
 const LANGUAGE_ICONS: Record<CadProvider, ComponentType<{ className?: string }>> = {
@@ -18,25 +23,22 @@ const LANGUAGE_ICONS: Record<CadProvider, ComponentType<{ className?: string }>>
   cpp: ({ className }) => <SvgIcon id="cpp" className={className} />,
 };
 
-interface ProjectCardProperties extends Build {
-  onStar?: (id: string) => void;
-  onFork?: (id: string) => void;
-}
+type CommunityBuildCardProperties = Build;
 
-export interface ProjectGridProperties {
-  projects: Build[];
-  onStar?: (id: string) => void;
-  onFork?: (id: string) => void;
+export interface CommunityBuildGridProperties {
+  builds: Build[];
   hasMore?: boolean;
   onLoadMore?: () => void;
 }
 
-export function ProjectGrid({ projects, onStar, onFork, hasMore, onLoadMore }: ProjectGridProperties) {
+export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBuildGridProperties) {
   return (
     <>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {projects.map((project) => (
-          <ProjectCard key={project.id} {...project} onStar={onStar} onFork={onFork} />
+        {builds.map((build) => (
+          <ReplicadProvider key={build.id}>
+            <ProjectCard {...build} />
+          </ReplicadProvider>
         ))}
       </div>
 
@@ -61,9 +63,12 @@ function ProjectCard({
   author,
   tags,
   assets,
-  onStar,
-  onFork,
-}: ProjectCardProperties) {
+}: CommunityBuildCardProperties) {
+  const [showPreview, setShowPreview] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
+  const cardReference = useRef<HTMLDivElement>(null);
+  const { setCode, mesh } = useReplicad();
+  const navigate = useNavigate();
   const LanguageIcon = Object.values(assets)
     .map((asset) => asset.language)
     .map((language) => ({
@@ -71,15 +76,97 @@ function ProjectCard({
       language,
     }));
 
+  // Get the replicad code if available
+  const replicadAsset = Object.values(assets).find((asset) => asset.language === 'replicad');
+  const replicadCode = replicadAsset?.files[replicadAsset.main]?.content;
+
+  // Set up intersection observer to detect when card is visible
+  useEffect(() => {
+    if (!cardReference.current) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          setIsVisible(entry.isIntersecting);
+        }
+      },
+      {
+        root: undefined,
+        rootMargin: '50px', // Start loading a bit before the card comes into view
+        threshold: 0.1,
+      },
+    );
+
+    observer.observe(cardReference.current);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  // When card becomes visible or preview is manually toggled, compile the code
+  useEffect(() => {
+    if ((isVisible || showPreview) && replicadCode) {
+      setCode(replicadCode);
+    }
+  }, [isVisible, showPreview, replicadCode, setCode]);
+
+  // eslint-disable-next-line unicorn/consistent-function-scoping
+  const handleStar = () => {
+    // TODO: Implement star functionality
+  };
+
+  const handleFork = async () => {
+    // Create a new build with forked data
+    const newBuild: Omit<Build, 'id'> = {
+      name: `${name} (Fork)`,
+      description,
+      thumbnail,
+      stars: 0,
+      forks: 0,
+      author, // This should be the current user in a real implementation
+      tags,
+      assets,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      forkedFrom: id,
+      messages: [], // Initialize with empty messages array
+    };
+
+    const createdBuild = await storage.createBuild(newBuild);
+    // Navigate to the new build
+    navigate(`/builds/${createdBuild.id}`);
+  };
+
   return (
-    <Card className="group relative overflow-hidden flex flex-col">
-      <div className="aspect-video overflow-hidden bg-muted">
-        <img
-          src={thumbnail || '/placeholder.svg'}
-          alt={name}
-          className="h-full w-full object-cover transition-transform group-hover:scale-105"
-          loading="lazy"
-        />
+    <Card ref={cardReference} className="group relative overflow-hidden flex flex-col">
+      <div className="relative aspect-video overflow-hidden bg-muted">
+        {!showPreview && !isVisible && (
+          <img
+            src={thumbnail || '/placeholder.svg'}
+            alt={name}
+            className="h-full w-full object-cover transition-transform group-hover:scale-105"
+            loading="lazy"
+          />
+        )}
+        {replicadCode && (isVisible || showPreview) && (
+          <div className="absolute inset-0">
+            <ReplicadViewer mesh={mesh} disableGrid={true} disableGizmo={true} className="bg-muted" zoomLevel={1.25} />
+          </div>
+        )}
+        {replicadCode && (
+          <Button
+            variant="outline"
+            size="icon"
+            className="absolute top-2 right-2 z-10"
+            onClick={(event) => {
+              event.stopPropagation();
+              setShowPreview(!showPreview);
+            }}
+          >
+            <Eye className={showPreview ? 'size-4 text-primary' : 'size-4'} />
+          </Button>
+        )}
       </div>
       <CardHeader>
         <div className="flex items-center justify-between">
@@ -132,14 +219,14 @@ function ProjectCard({
         <div className="flex items-center gap-4">
           <button
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-yellow"
-            onClick={() => onStar?.(id)}
+            onClick={handleStar}
           >
             <Star className="size-4" />
             {stars}
           </button>
           <button
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-blue"
-            onClick={() => onFork?.(id)}
+            onClick={handleFork}
           >
             <GitFork className="size-4" />
             {forks}

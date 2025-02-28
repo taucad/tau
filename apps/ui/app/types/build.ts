@@ -20,6 +20,7 @@ export interface Build {
   messages: Message[];
   createdAt: number;
   updatedAt: number;
+  forkedFrom?: string;
   // status: 'draft' | 'review' | 'published' | 'completed' | 'archived';
   assets: {
     [key in Category]?: {

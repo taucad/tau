@@ -1,6 +1,8 @@
 import type { Build } from '@/types/build';
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
+import { generatePrefixedId } from '@/utils/id';
+import { PREFIX_TYPES } from '@/utils/constants';
 
 export interface StorageProvider {
   // Build operations
@@ -26,11 +28,13 @@ export class LocalStorageProvider implements StorageProvider {
     localStorage.setItem(this.BUILDS_KEY, JSON.stringify(builds));
   }
 
-  async createBuild(build: Build): Promise<Build> {
+  async createBuild(build: Omit<Build, 'id'>): Promise<Build> {
+    const id = generatePrefixedId(PREFIX_TYPES.BUILD);
+    const buildWithId = { ...build, id };
     const builds = this.getBuildsInternal();
-    builds.push(build);
+    builds.push(buildWithId);
     this.saveBuilds(builds);
-    return build;
+    return buildWithId;
   }
 
   async updateBuild(

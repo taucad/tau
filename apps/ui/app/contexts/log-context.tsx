@@ -110,7 +110,20 @@ export const useLogContext = (): LogContextType => {
   const context = useContext(LogContext);
 
   if (!context) {
-    throw new Error('useLogContext must be used within a LogProvider');
+    // Provide a mock context when used outside of provider
+    return {
+      logs: [],
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      setLogs: () => {},
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      addLog: () => {},
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      addLogs: () => {},
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      clearLogs: () => {},
+      filterLogs: () => [],
+      maxLogs: DEFAULT_MAX_LOGS,
+    };
   }
 
   return context;

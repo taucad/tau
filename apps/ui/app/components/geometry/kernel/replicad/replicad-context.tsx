@@ -5,13 +5,13 @@ import { createContext, useContext, useReducer, ReactNode, useEffect, useRef, us
 import { BuilderWorkerInterface } from './replicad-builder.worker';
 import BuilderWorker from './replicad-builder.worker?worker';
 import { debounce } from '@/utils/functions';
+import { useConsole } from '@/hooks/use-console';
 
 // Combine related state
 interface ReplicadState {
   code: string;
   parameters: Record<string, any>;
-
-  defaultParameters: Record<string, any>;
+  defaultParameters: Record<string, any> | undefined;
   error?: string;
   isComputing: boolean;
   isBuffering: boolean;
@@ -32,7 +32,7 @@ type ReplicadAction =
 const initialState: ReplicadState = {
   code: '',
   parameters: {},
-  defaultParameters: {},
+  defaultParameters: undefined,
   isComputing: false,
   isBuffering: false,
   mesh: undefined,
@@ -104,6 +104,7 @@ const ReplicadContext = createContext<
 export function ReplicadProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(replicadReducer, initialState);
   const { initWorker, terminateWorker } = useReplicadWorker();
+  const { log } = useConsole({ defaultOrigin: { component: 'CAD' } });
 
   // Memoize the evaluation function
   const evaluateCode = useCallback(
@@ -112,6 +113,7 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
       if (!worker || !code) return;
 
       try {
+        log.debug('Building shape');
         dispatch({ type: 'SET_STATUS', payload: { isComputing: true, error: undefined } });
 
         const result = await worker.buildShapesFromCode(code, parameters);
@@ -121,14 +123,17 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
 
         const firstShape = result[0];
         if (!firstShape || firstShape.error) {
+          log.error('Failed to build shape', { data: firstShape?.error });
           throw new Error(firstShape?.error || 'Failed to generate shape');
         }
 
+        log.debug('Built shape');
         dispatch({
           type: 'SET_MESH',
           payload: { faces: firstShape.mesh, edges: firstShape.edges },
         });
       } catch (error) {
+        log.error('Failed to build shape', { data: error instanceof Error ? error.message : String(error) });
         dispatch({
           type: 'SET_STATUS',
           payload: { error: error instanceof Error ? error.message : String(error) },
@@ -145,16 +150,20 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
     () =>
       debounce((code: string, parameters: Record<string, any>, defaultParameters: Record<string, any>) => {
         dispatch({ type: 'SET_STATUS', payload: { isBuffering: false } });
+        log.debug('Evaluating code');
         const mergedParameters = { ...defaultParameters, ...parameters };
         evaluateCode(code, mergedParameters);
+        log.debug('Evaluated code');
       }, DEBOUNCE_TIME),
     [evaluateCode],
   );
 
   // Effect to handle code/parameter changes
   useEffect(() => {
-    dispatch({ type: 'SET_STATUS', payload: { isBuffering: true } });
-    debouncedEvaluate(state.code, state.parameters, state.defaultParameters);
+    if (state.defaultParameters) {
+      dispatch({ type: 'SET_STATUS', payload: { isBuffering: true } });
+      debouncedEvaluate(state.code, state.parameters, state.defaultParameters);
+    }
   }, [state.code, state.parameters, state.defaultParameters]);
 
   // Load default parameters when code changes
@@ -168,8 +177,11 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
       try {
         const defaultParameters = await worker.extractDefaultParametersFromCode(state.code);
         dispatch({ type: 'SET_DEFAULT_PARAMETERS', payload: defaultParameters });
+        log.debug('Loaded default parameters', { data: defaultParameters });
       } catch (error) {
-        console.error('Failed to load default parameters:', error);
+        log.error('Failed to load default parameters', {
+          data: error instanceof Error ? error.message : String(error),
+        });
       }
     };
 
@@ -195,7 +207,7 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
       },
       setCode: (code: string) => dispatch({ type: 'SET_CODE', payload: code }),
       setParameters: (parameters: Record<string, any>) => dispatch({ type: 'SET_PARAMETERS', payload: parameters }),
-      defaultParameters: state.defaultParameters,
+      defaultParameters: state.defaultParameters ?? {},
     }),
     [state.mesh, state.isComputing, state.isBuffering, state.error, state.defaultParameters, initWorker],
   );

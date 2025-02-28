@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { ChatProvider, useChat } from '@/contexts/use-chat';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
+import { LogProvider } from '@/contexts/log-context';
 
 const BuildNameEditor = () => {
   const { build, updateName } = useBuild();
@@ -117,14 +118,16 @@ export default function ChatRoute() {
   }
 
   return (
-    <BuildProvider buildId={id}>
-      <ReplicadProvider>
-        <ChatProvider>
-          <div className="flex h-full">
-            <Chat />
-          </div>
-        </ChatProvider>
-      </ReplicadProvider>
-    </BuildProvider>
+    <LogProvider>
+      <BuildProvider buildId={id}>
+        <ReplicadProvider>
+          <ChatProvider>
+            <div className="flex h-full">
+              <Chat />
+            </div>
+          </ChatProvider>
+        </ReplicadProvider>
+      </BuildProvider>
+    </LogProvider>
   );
 }

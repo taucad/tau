@@ -1,10 +1,21 @@
-import { useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { ChevronUp, Trash } from 'lucide-react';
+import { ChevronUp, Filter, Settings, Trash } from 'lucide-react';
 import { KeyShortcut } from '@/components/ui/key-shortcut';
 import { cn } from '@/utils/ui';
+import { useConsole } from '@/hooks/use-console';
+import { useState, useCallback } from 'react';
+import { LogLevel, LOG_LEVELS, LogOrigin } from '@/types/console';
+import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -14,6 +25,108 @@ type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   'data-state'?: 'open' | 'closed';
 };
 
+// Cookie names for persisting console settings
+// const CONSOLE_LOG_LEVELS_COOKIE = 'tau-console-log-levels';
+// const CONSOLE_DISPLAY_CONFIG_COOKIE = 'tau-console-display-config';
+
+// Default values for enabled log levels
+const DEFAULT_ENABLED_LEVELS: Record<LogLevel, boolean> = {
+  ERROR: true,
+  WARN: true,
+  INFO: true,
+  DEBUG: true,
+  TRACE: true,
+};
+
+// Default values for display configuration
+const DEFAULT_DISPLAY_CONFIG = {
+  showTimestamp: true,
+  showComponent: true,
+  showVerbosity: true,
+  showData: true,
+};
+
+// Generate a deterministic color based on the component name
+const getComponentColor = (component: string | undefined): string => {
+  if (!component) return '#6b7280'; // Default gray
+
+  // Simple hash function
+  let hash = 0;
+  for (let index = 0; index < component.length; index++) {
+    const charPoint = component.codePointAt(index) || 0;
+    hash = charPoint + ((hash << 5) - hash);
+  }
+
+  // Convert to hex color with good saturation and lightness
+  const h = Math.abs(hash) % 360; // Hue between 0-359
+  return `hsl(${h}, 70%, 65%)`; // Higher saturation for vibrant colors, light enough for text
+};
+
+// Component badge renderer
+const ComponentBadge = ({ origin }: { origin?: LogOrigin }) => {
+  if (!origin?.component) return;
+
+  const bgColor = getComponentColor(origin.component);
+
+  return (
+    <Badge
+      className="text-xs font-normal"
+      style={{
+        backgroundColor: bgColor,
+        color: '#000', // Dark text for contrast
+      }}
+    >
+      <span className="inline-block whitespace-nowrap">{origin.component}</span>
+    </Badge>
+  );
+};
+
+// Verbosity level badge renderer
+const VerbosityBadge = ({ level }: { level: LogLevel }) => {
+  const getBadgeColor = () => {
+    switch (level) {
+      case LOG_LEVELS.ERROR: {
+        return 'bg-[red]';
+      }
+      case LOG_LEVELS.WARN: {
+        return 'bg-[yellow]';
+      }
+      case LOG_LEVELS.INFO: {
+        return 'bg-[blue]';
+      }
+      case LOG_LEVELS.DEBUG:
+      case LOG_LEVELS.TRACE: {
+        return 'bg-[gray]';
+      }
+      default: {
+        return 'bg-[gray]';
+      }
+    }
+  };
+
+  return (
+    <Badge
+      className={cn(
+        'text-xs font-normal flex items-center justify-center',
+        'w-10', // Fixed width
+        getBadgeColor(),
+        `hover:bg-initial`,
+      )}
+    >
+      {level}
+    </Badge>
+  );
+};
+
+// Format timestamp with seconds
+const formatTimestamp = (timestamp: number): string => {
+  return new Date(timestamp).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+};
+
 export const ChatConsole = ({
   onButtonClick,
   keyCombination,
@@ -21,11 +134,81 @@ export const ChatConsole = ({
   className,
   ...properties
 }: ChatConsoleProperties) => {
-  const { status } = useReplicad();
+  const log = useConsole({ defaultOrigin: { component: 'ChatConsole' } });
+  const [filter, setFilter] = useState('');
+
+  // Cookie-persisted state for log levels with proper parse and stringify
+  const [enabledLevels, setEnabledLevels] = useState<Record<LogLevel, boolean>>(DEFAULT_ENABLED_LEVELS);
+  const [displayConfig, setDisplayConfig] = useState(DEFAULT_DISPLAY_CONFIG);
+
+  // Handle filter changes
+  const handleFilterChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setFilter(event.target.value);
+      if (onFilterChange) {
+        onFilterChange(event);
+      }
+    },
+    [onFilterChange],
+  );
+
+  // Handle clear logs
+  const handleClearLogs = useCallback(() => {
+    log.clear();
+  }, [log]);
+
+  // Toggle log level filter
+  const toggleLevel = useCallback(
+    (level: LogLevel, value: boolean) => {
+      setEnabledLevels((previous: Record<LogLevel, boolean>) => ({
+        ...previous,
+        [level]: value,
+      }));
+    },
+    [setEnabledLevels],
+  );
+
+  // Toggle display configuration
+  const toggleDisplayConfig = useCallback(
+    (key: keyof typeof DEFAULT_DISPLAY_CONFIG, value: boolean) => {
+      console.log('toggleDisplayConfig', key);
+      setDisplayConfig((previous: typeof DEFAULT_DISPLAY_CONFIG) => ({
+        ...previous,
+        [key]: value,
+      }));
+    },
+    [setDisplayConfig],
+  );
+
+  // Filter logs based on search text and verbosity levels
+  const filteredLogs = log.logs.filter((log) => {
+    // Check if log level is enabled
+    if (!enabledLevels[log.level]) {
+      return false;
+    }
+
+    // If there's a text filter, check if the message contains it
+    if (filter && !log.message.toLowerCase().includes(filter.toLowerCase())) {
+      return false;
+    }
+
+    return true;
+  });
 
   return (
-    <div className={cn('flex flex-col gap-2 w-full group/console', className)} {...properties}>
-      <div className="flex flex-row gap-2">
+    <div
+      className={cn(
+        'flex flex-col w-full group/console',
+        // Full height for both modes with different adjustments
+        'group-data-[view=tabs]/console:h-full group-data-[view=tabs]/console:flex-1',
+        'group-data-[view=split]/console:h-full group-data-[view=split]/console:min-h-0',
+        // Fix scrolling issues
+        'min-h-0 max-h-full overflow-hidden',
+        className,
+      )}
+      {...properties}
+    >
+      <div className="flex flex-row gap-2 sticky top-0 bg-background z-10">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -57,27 +240,144 @@ export const ChatConsole = ({
           </TooltipContent>
         </Tooltip>
         <Input
-          className="h-6 group-data-[view=tabs]/console:h-8 shadow-none"
+          className="h-6 group-data-[view=tabs]/console:h-8 w-full shadow-none"
           placeholder="Filter..."
-          onChange={onFilterChange}
+          onChange={handleFilterChange}
+          value={filter}
         />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon"
-              className="gap-2 h-6 [&>svg]:size-3 group-data-[view=tabs]/console:size-8"
-            >
-              <Trash />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Clear logs</TooltipContent>
-        </Tooltip>
+
+        <div className="flex flex-row gap-2">
+          {/* Verbosity filter dropdown */}
+          <DropdownMenu modal={false}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className={cn('gap-2 size-6 [&>svg]:size-3', 'group-data-[view=tabs]/console:size-8')}
+                  >
+                    <Filter />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                <span>Filter by log level</span>
+              </TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>Log Levels</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {Object.values(LOG_LEVELS).map((level) => (
+                <DropdownMenuCheckboxItem
+                  key={level}
+                  checked={enabledLevels[level]}
+                  onSelect={(event) => event.preventDefault()}
+                  onCheckedChange={(checked) => toggleLevel(level, checked)}
+                >
+                  <Badge
+                    className={cn('mr-2', {
+                      'bg-red-500': level === LOG_LEVELS.ERROR,
+                      'bg-yellow-500': level === LOG_LEVELS.WARN,
+                      'bg-blue-500': level === LOG_LEVELS.INFO,
+                      'bg-gray-500': level === LOG_LEVELS.DEBUG || level === LOG_LEVELS.TRACE,
+                    })}
+                  >
+                    {level}
+                  </Badge>
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Display configuration dropdown */}
+          <DropdownMenu modal={false}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className={cn('gap-2 size-6 [&>svg]:size-3', 'group-data-[view=tabs]/console:size-8')}
+                  >
+                    <Settings />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                <span>Display settings</span>
+              </TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>Display Options</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {Object.keys(DEFAULT_DISPLAY_CONFIG).map((key) => (
+                <DropdownMenuCheckboxItem
+                  key={key}
+                  checked={displayConfig[key as keyof typeof DEFAULT_DISPLAY_CONFIG]}
+                  onSelect={(event) => event.preventDefault()}
+                  onCheckedChange={(checked) =>
+                    toggleDisplayConfig(key as keyof typeof DEFAULT_DISPLAY_CONFIG, checked)
+                  }
+                >
+                  {key.replaceAll(/([A-Z])/g, ' $1').replace(/^./, (string_) => string_.toUpperCase())}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className={cn('gap-2 size-6 [&>svg]:size-3', 'group-data-[view=tabs]/console:size-8')}
+                onClick={handleClearLogs}
+              >
+                <Trash />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Clear logs</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
-      <div className="flex flex-col gap-2 ">
-        {status.isComputing && <pre className="text-xs bg-background font-mono">{`Computing...`}</pre>}
-        {status.isBuffering && <pre className="text-xs bg-background font-mono">{`Buffering...`}</pre>}
-        {status.error && <pre className="text-xs bg-background font-mono">{`${status.error}`}</pre>}
+      <div className="flex flex-col-reverse gap-0.5 overflow-y-auto mt-2 min-h-0 flex-grow">
+        {/* Display console logs */}
+        {filteredLogs.length > 0 ? (
+          filteredLogs.map((log) => (
+            <pre
+              key={log.id}
+              className={cn(
+                'text-xs bg-background font-mono py-1 px-2 rounded border-l-2',
+                'hover:bg-muted/20 transition-colors cursor-default group/log border-primary',
+                {
+                  'border-[red]': log.level === LOG_LEVELS.ERROR,
+                  'border-[yellow]': log.level === LOG_LEVELS.WARN,
+                  'border-[blue]': log.level === LOG_LEVELS.INFO,
+                  'border-[gray]': log.level === LOG_LEVELS.DEBUG || log.level === LOG_LEVELS.TRACE,
+                },
+              )}
+            >
+              <div className="flex items-center flex-wrap gap-2">
+                {displayConfig.showTimestamp && (
+                  <span className="opacity-60 shrink-0">[{formatTimestamp(log.timestamp)}]</span>
+                )}
+                {displayConfig.showComponent && <ComponentBadge origin={log.origin} />}
+                {displayConfig.showVerbosity && <VerbosityBadge level={log.level} />}
+                <span className="mr-auto">{log.message}</span>
+              </div>
+              {log.data && displayConfig.showData && (
+                <div className="block opacity-80 overflow-x-auto">
+                  {typeof log.data === 'object' ? JSON.stringify(log.data, undefined, 2) : log.data}
+                </div>
+              )}
+            </pre>
+          ))
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-muted-foreground">
+            <p className="text-sm">No logs to display</p>
+          </div>
+        )}
       </div>
     </div>
   );

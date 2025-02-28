@@ -311,7 +311,15 @@ const main = (
 };
 `;
 
-export const cylindricalGear = `const { drawCircle, drawParametricFunction } = replicad;
+export const cycloidalGear = `const { drawCircle, drawParametricFunction } = replicad;
+
+const defaultParams = {
+  height: 40,
+  r1: 12,
+  r2: 1,
+  circleDiameter: 2,
+  twistAngle: 90,
+};
 
 const hypocycloid = (t, r1, r2) => {
   return [
@@ -327,22 +335,18 @@ const epicycloid = (t, r1, r2) => {
   ];
 };
 
-const gear = (t, r1 = 4, r2 = 1) => {
+const gear = (t, r1 = defaultParams.r1, r2 = defaultParams.r2) => {
   if ((-1) ** (1 + Math.floor((t / 2 / Math.PI) * (r1 / r2))) < 0)
     return epicycloid(t, r1, r2);
   else return hypocycloid(t, r1, r2);
 };
 
-const defaultParams = {
-  height: 15,
-};
-
-const main = (r, { height }) => {
-  const base = drawParametricFunction((t) => gear(2 * Math.PI * t, 6, 1))
+const main = (r, { height, r1, r2, twistAngle, circleDiameter }) => {
+  const base = drawParametricFunction((t) => gear(2 * Math.PI * t, r1, r2))
     .sketchOnPlane()
-    .extrude(height, { twistAngle: 90 });
+    .extrude(height, { twistAngle: twistAngle });
 
-  const hole = drawCircle(2).sketchOnPlane().extrude(height);
+  const hole = drawCircle(circleDiameter).sketchOnPlane().extrude(height);
 
   return base.cut(hole);
 };
@@ -776,8 +780,8 @@ export const mockModels = [
   },
   {
     id: 'bld_cylindrical-gear',
-    name: 'Cylindrical Gear',
-    code: cylindricalGear,
+    name: 'Cycloidal Gear',
+    code: cycloidalGear,
   },
   {
     id: 'bld_bottle',

@@ -44,7 +44,7 @@ export function NavHistory() {
         ))}
         {allBuilds.length > visibleCount && (
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={handleLoadMore} className="text-sidebar-foreground/70">
+            <SidebarMenuButton onClick={handleLoadMore} disableAutoClose className="text-sidebar-foreground/70">
               <MoreHorizontal className="size-4" />
               <span>Load More</span>
             </SidebarMenuButton>
@@ -74,7 +74,7 @@ const NavHistoryItem = ({ build, index }: { build: Build; index: number }) => {
         {({ isActive }) => (
           <SidebarMenuButton isActive={isActive}>
             <History className="size-4 shrink-0" />
-            <span className="truncate flex-1">bld_{build.id.slice(0, 16)}...</span>
+            <span className="truncate flex-1">{build.name}</span>
             {index < 10 && <KeyShortcut className="ml-2 shrink-0">{formattedKeyCombination}</KeyShortcut>}
           </SidebarMenuButton>
         )}

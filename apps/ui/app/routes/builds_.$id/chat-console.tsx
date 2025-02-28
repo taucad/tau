@@ -59,7 +59,7 @@ const getComponentColor = (component: string | undefined): string => {
 
   // Convert to hex color with good saturation and lightness
   const h = Math.abs(hash) % 360; // Hue between 0-359
-  return `hsl(${h}, 70%, 65%)`; // Higher saturation for vibrant colors, light enough for text
+  return `oklch(var(--l-primary) var(--c-primary) ${h})`; // Higher saturation for vibrant colors, light enough for text
 };
 
 // Component badge renderer
@@ -73,7 +73,6 @@ const ComponentBadge = ({ origin }: { origin?: LogOrigin }) => {
       className="text-xs font-normal"
       style={{
         backgroundColor: bgColor,
-        color: '#000', // Dark text for contrast
       }}
     >
       <span className="inline-block whitespace-nowrap">{origin.component}</span>

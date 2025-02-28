@@ -1,6 +1,5 @@
 import { storage } from '@/db/storage';
 import type { Build } from '@/types/build';
-import { sampleBuilds } from './use-builds';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createContext, useContext, ReactNode } from 'react';
 import { Message } from '@/types/chat';
@@ -12,12 +11,7 @@ const fetchBuild = async (buildId: string): Promise<Build> => {
   if (clientBuild) {
     return clientBuild;
   } else {
-    const sampleBuild = sampleBuilds.find((build) => build.id === buildId);
-    if (sampleBuild) {
-      return sampleBuild;
-    } else {
-      throw new Error('Build not found');
-    }
+    throw new Error('Build not found');
   }
 };
 

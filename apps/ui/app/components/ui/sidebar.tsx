@@ -469,6 +469,7 @@ const SidebarMenuButton = React.forwardRef<
     asChild?: boolean;
     isActive?: boolean;
     tooltip?: string | React.ComponentProps<typeof TooltipContent>;
+    disableAutoClose?: boolean;
   } & VariantProps<typeof sidebarMenuButtonVariants>
 >(
   (
@@ -480,6 +481,7 @@ const SidebarMenuButton = React.forwardRef<
       tooltip,
       className,
       onClick,
+      disableAutoClose = false,
       ...properties
     },
     reference,
@@ -490,7 +492,7 @@ const SidebarMenuButton = React.forwardRef<
     // Auto-close the sidebar when clicking on a button in mobile mode.
     const handleClick = React.useCallback(
       (event: React.MouseEvent<HTMLButtonElement>) => {
-        if (isMobile && state === 'collapsed') {
+        if (isMobile && state === 'expanded' && !disableAutoClose) {
           toggleSidebar();
         }
         onClick?.(event);

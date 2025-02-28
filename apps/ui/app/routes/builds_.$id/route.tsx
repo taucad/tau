@@ -1,20 +1,63 @@
 import { ChatInterface } from '@/routes/builds_.$id/chat-interface';
 import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
-import { Link, UIMatch, useParams } from '@remix-run/react';
-import { useEffect } from 'react';
+import { useParams } from '@remix-run/react';
+import { useEffect, useState } from 'react';
 import { MessageStatus } from '@/types/chat';
 import { BuildProvider, useBuild } from '@/hooks/use-build2';
 import { Button } from '@/components/ui/button';
 import { ChatProvider, useChat } from '@/contexts/use-chat';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Input } from '@/components/ui/input';
+
+const BuildNameEditor = () => {
+  const { build, updateName } = useBuild();
+  const [isEditing, setIsEditing] = useState(false);
+  const [name, setName] = useState<string>();
+
+  useEffect(() => {
+    setName(build?.name || 'Untitled Build');
+  }, [build?.name]);
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (name) {
+      updateName(name);
+      setIsEditing(false);
+    }
+  };
+
+  return (
+    <Popover open={isEditing} onOpenChange={setIsEditing}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" className="p-2">
+          {build?.name}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="-translate-x-2 w-64 p-1">
+        <form onSubmit={handleSubmit} className="flex gap-2  align-middle items-center">
+          <Input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            autoFocus
+            onFocus={(event) => event.target.select()}
+            className="h-8"
+          />
+          <Button type="submit" size="sm">
+            Save
+          </Button>
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
+};
 
 export const handle = {
-  breadcrumb: (match: UIMatch) => {
+  breadcrumb: () => {
+    const { id } = useParams();
     return (
-      <Link to={`/builds/${match.params.id}`} tabIndex={-1}>
-        <Button variant="ghost" className="p-2">
-          {match.params.id}
-        </Button>
-      </Link>
+      <BuildProvider buildId={id!}>
+        <BuildNameEditor />
+      </BuildProvider>
     );
   },
 };

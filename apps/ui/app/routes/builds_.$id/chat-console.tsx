@@ -93,12 +93,14 @@ const VerbosityBadge = ({ level }: { level: LogLevel }) => {
       case LOG_LEVELS.INFO: {
         return 'bg-information';
       }
-      case LOG_LEVELS.DEBUG:
-      case LOG_LEVELS.TRACE: {
+      case LOG_LEVELS.DEBUG: {
         return 'bg-stable';
       }
+      case LOG_LEVELS.TRACE: {
+        return 'bg-feature';
+      }
       default: {
-        return 'bg-stable';
+        return 'bg-[grey]';
       }
     }
   };
@@ -279,8 +281,8 @@ export const ChatConsole = ({
                       'bg-destructive': level === LOG_LEVELS.ERROR,
                       'bg-warning': level === LOG_LEVELS.WARN,
                       'bg-information': level === LOG_LEVELS.INFO,
-                      'bg-feature': level === LOG_LEVELS.DEBUG,
-                      'bg-stable': level === LOG_LEVELS.TRACE,
+                      'bg-stable': level === LOG_LEVELS.DEBUG,
+                      'bg-feature': level === LOG_LEVELS.TRACE,
                     })}
                   >
                     {level}
@@ -354,8 +356,8 @@ export const ChatConsole = ({
                   'border-destructive': log.level === LOG_LEVELS.ERROR,
                   'border-warning': log.level === LOG_LEVELS.WARN,
                   'border-information': log.level === LOG_LEVELS.INFO,
-                  'border-feature': log.level === LOG_LEVELS.DEBUG,
-                  'border-stable': log.level === LOG_LEVELS.TRACE,
+                  'border-stable': log.level === LOG_LEVELS.DEBUG,
+                  'border-feature': log.level === LOG_LEVELS.TRACE,
                 },
               )}
             >

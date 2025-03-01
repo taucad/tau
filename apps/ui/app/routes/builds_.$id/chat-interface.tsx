@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 import { Eye, Code, Terminal, ArrowDown, MessageCircle, Settings2, LayoutGrid, Rows } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useChat } from '@/contexts/use-chat';
@@ -117,6 +117,15 @@ export const ChatInterface = () => {
   const { sendMessage, messages, editMessage } = useChat();
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
+  const hasScrolledToBottom = useRef(false);
+
+  useEffect(() => {
+    if (messages.length > 0 && !hasScrolledToBottom.current) {
+      scrollTo();
+      hasScrolledToBottom.current = true;
+    }
+  }, [scrollTo, messages]);
+
   const [isChatOpen, setIsChatOpen] = useCookie(CHAT_HISTORY_OPEN_COOKIE_NAME, true, {
     parse: (value) => value === 'true',
   });

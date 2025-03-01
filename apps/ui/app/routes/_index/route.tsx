@@ -55,7 +55,7 @@ export default function ChatStart() {
       });
 
       // Navigate immediately - the build page will handle the streaming
-      navigate(`/builds/${build.id}`, { replace: true });
+      navigate(`/builds/${build.id}`);
     } catch (error) {
       console.error('Failed to create build:', error);
       // TODO: Show error toast

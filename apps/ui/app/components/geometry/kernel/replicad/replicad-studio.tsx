@@ -10,7 +10,7 @@ export function ReplicadStudio() {
     <>
       <div className="flex flex-row w-full h-full">
         <div className="relative flex-1 min-w-0">
-          <ReplicadViewer mesh={mesh} />
+          <ReplicadViewer mesh={mesh} enableGizmo enableGrid enableZoom />
           {/* Loading state, only show when mesh is loaded and computing */}
           {mesh && (status.isComputing || status.isBuffering) && (
             <div className="absolute top-[90%] left-[50%] -translate-x-[50%] -translate-y-[90%]">

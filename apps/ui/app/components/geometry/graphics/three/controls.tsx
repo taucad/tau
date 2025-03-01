@@ -3,17 +3,21 @@ import { OrbitControls, GizmoHelper, GizmoViewcube } from '@react-three/drei';
 import React from 'react';
 
 type ControlsProperties = {
-  hideGizmo: boolean;
+  enableGizmo: boolean;
   enableDamping: boolean;
+  enableZoom: boolean;
 };
 
 export const Controls = React.memo(
-  React.forwardRef(function Controls({ hideGizmo, enableDamping }: ControlsProperties, controlsReference) {
+  React.forwardRef(function Controls(
+    { enableGizmo, enableDamping, enableZoom }: ControlsProperties,
+    controlsReference,
+  ) {
     const color = useColor();
     return (
       <>
-        <OrbitControls makeDefault ref={controlsReference} enableDamping={enableDamping} />
-        {!hideGizmo && (
+        <OrbitControls makeDefault ref={controlsReference} enableDamping={enableDamping} enableZoom={enableZoom} />
+        {enableGizmo && (
           <GizmoHelper
             up={[Math.PI / 2, 0, 0]}
             rotation={[Math.PI / 2, 0, 0]}

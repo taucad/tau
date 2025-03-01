@@ -9,8 +9,9 @@ type ReplicadViewerProperties = CadViewerProperties & {
 
 export function ReplicadViewer({
   mesh,
-  disableGizmo,
-  disableGrid,
+  enableGizmo,
+  enableGrid,
+  enableZoom,
   className,
   zoomLevel = 0.75,
 }: ReplicadViewerProperties) {
@@ -18,8 +19,9 @@ export function ReplicadViewer({
     <div className="w-full h-full">
       {mesh ? (
         <ThreeProvider
-          disableGizmo={disableGizmo}
-          disableGrid={disableGrid}
+          enableGizmo={enableGizmo}
+          enableGrid={enableGrid}
+          enableZoom={enableZoom}
           className={className}
           stageOptions={{ perspective: { zoomLevel } }}
         >

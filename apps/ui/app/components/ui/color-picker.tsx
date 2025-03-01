@@ -72,8 +72,6 @@ const ColorPicker = forwardRef<
       </Tooltip>
       <PopoverContent side="right" className="w-48 flex flex-col gap-2 p-2">
         <ThreeProvider
-          disableGizmo={true}
-          disableGrid={true}
           className={cn(className, 'p-0')}
           stageOptions={{
             perspective: {

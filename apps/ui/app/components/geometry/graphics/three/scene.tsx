@@ -4,16 +4,18 @@ import { Controls } from './controls';
 
 type SceneProperties = {
   children: React.ReactNode;
-  hideGizmo?: boolean;
+  enableGizmo?: boolean;
   enableDamping?: boolean;
+  enableZoom?: boolean;
   stageOptions: StageOptions;
   center?: boolean;
 };
 
 export function Scene({
   children,
-  hideGizmo = false,
+  enableGizmo = false,
   enableDamping = false,
+  enableZoom = false,
   stageOptions,
   center = true,
 }: SceneProperties) {
@@ -21,7 +23,12 @@ export function Scene({
 
   return (
     <>
-      <Controls hideGizmo={hideGizmo} ref={controlsReference} enableDamping={enableDamping} />
+      <Controls
+        enableGizmo={enableGizmo}
+        ref={controlsReference}
+        enableDamping={enableDamping}
+        enableZoom={enableZoom}
+      />
       <Stage controls={controlsReference} stageOptions={stageOptions} center={center}>
         {children}
       </Stage>

@@ -8,8 +8,9 @@ import { cn } from '@/utils/ui';
 import { useEffect } from 'react';
 
 export type CadViewerProperties = {
-  disableGizmo?: boolean;
-  disableGrid?: boolean;
+  enableGizmo?: boolean;
+  enableGrid?: boolean;
+  enableZoom?: boolean;
   className?: string;
   center?: boolean;
   stageOptions?: StageOptions;
@@ -27,8 +28,9 @@ export type ThreeContextProperties = CanvasProps & CadViewerProperties;
 // a matcap material instead of the meshStandardMaterial used here.
 export const ThreeProvider = ({
   children,
-  disableGizmo = false,
-  disableGrid = false,
+  enableGizmo = false,
+  enableGrid = false,
+  enableZoom = false,
   className,
   stageOptions = {},
   center = true,
@@ -50,8 +52,14 @@ export const ThreeProvider = ({
       className={cn('bg-background', className)}
       {...properties}
     >
-      <Scene hideGizmo={disableGizmo} center={center} enableDamping={true} stageOptions={stageOptions}>
-        {!disableGrid && <InfiniteGrid />}
+      <Scene
+        enableGizmo={enableGizmo}
+        center={center}
+        enableDamping={true}
+        enableZoom={enableZoom}
+        stageOptions={stageOptions}
+      >
+        {enableGrid && <InfiniteGrid />}
         {children}
       </Scene>
     </Canvas>

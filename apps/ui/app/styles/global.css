@@ -184,6 +184,7 @@
 
   --animate-pulse-subtle: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-gradient: gradient 5s ease infinite;
+  --animate-bounce-subtle: gentle-bounce 2s infinite;
 
   @keyframes gradient {
 
@@ -206,6 +207,17 @@
 
     50% {
       opacity: 0.85;
+    }
+  }
+  
+  @keyframes gentle-bounce {
+    0%, 100% {
+      transform: translateY(0);
+      animation-timing-function: cubic-bezier(0.8, 0, 1, 1); /* slow down at the bottom */
+    }
+    50% {
+      transform: translateY(6px);
+      animation-timing-function: cubic-bezier(0, 0, 0.2, 1); /* speed up on the way up */
     }
   }
 }

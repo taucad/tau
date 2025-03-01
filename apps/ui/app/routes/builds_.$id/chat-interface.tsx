@@ -312,18 +312,21 @@ export const ChatInterface = () => {
                 />
               ))}
             </div>
-            <Button
-              size="icon"
-              variant="outline"
-              className={cn(
-                'sticky flex justify-center bottom-2 left-1/2 -translate-x-1/2 rounded-full',
-                isScrolledTo && 'opacity-0 select-none pointer-events-none',
-              )}
-              tabIndex={isScrolledTo ? -1 : 0}
-              onClick={scrollTo}
-            >
-              <ArrowDown className="size-4" />
-            </Button>
+            <div className="sticky bottom-4 w-full flex justify-center">
+              <Button
+                size="icon"
+                variant="outline"
+                className={cn(
+                  'flex justify-center rounded-full',
+                  isScrolledTo && 'opacity-0 select-none pointer-events-none',
+                  !isScrolledTo && 'animate-bounce-subtle',
+                )}
+                tabIndex={isScrolledTo ? -1 : 0}
+                onClick={scrollTo}
+              >
+                <ArrowDown className="size-4" />
+              </Button>
+            </div>
             <div ref={chatEndReference} className="mb-px" />
           </ResizablePanel>
           <ResizableHandle />

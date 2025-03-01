@@ -28,9 +28,15 @@ export class LocalStorageProvider implements StorageProvider {
     localStorage.setItem(this.BUILDS_KEY, JSON.stringify(builds));
   }
 
-  async createBuild(build: Omit<Build, 'id'>): Promise<Build> {
+  async createBuild(build: Omit<Build, 'id' | 'createdAt' | 'updatedAt'>): Promise<Build> {
     const id = generatePrefixedId(PREFIX_TYPES.BUILD);
-    const buildWithId = { ...build, id };
+    const timestamp = Date.now();
+    const buildWithId = {
+      ...build,
+      id,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
     const builds = this.getBuildsInternal();
     builds.push(buildWithId);
     this.saveBuilds(builds);
@@ -79,6 +85,15 @@ export class LocalStorageProvider implements StorageProvider {
   getBuild(buildId: string): Build | undefined {
     const builds = this.getBuilds();
     return builds.find((b) => b.id === buildId);
+  }
+
+  async deleteBuild(buildId: string): Promise<void> {
+    const builds = this.getBuilds();
+    const index = builds.findIndex((b) => b.id === buildId);
+    if (index !== -1) {
+      builds.splice(index, 1);
+      this.saveBuilds(builds);
+    }
   }
 }
 

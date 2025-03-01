@@ -1,6 +1,22 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Search, Filter, Grid, List, ChevronDown, Zap, Cpu, Layout, Cog, Eye, Star, ArrowRight } from 'lucide-react';
-import { Link } from '@remix-run/react';
+import {
+  Search,
+  Filter,
+  Grid,
+  List,
+  ChevronDown,
+  Zap,
+  Cpu,
+  Layout,
+  Cog,
+  Eye,
+  Star,
+  ArrowRight,
+  Trash,
+  Ellipsis,
+  Copy,
+} from 'lucide-react';
+import { Link, useNavigate } from '@remix-run/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -19,6 +35,7 @@ import { Build } from '@/types/build';
 import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
 import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer';
 import { useBuilds } from '@/hooks/use-builds';
+import { toast } from 'sonner';
 
 export const handle = {
   breadcrumb: () => {
@@ -172,18 +189,16 @@ function LibraryBuildGrid({
   projects,
   visibleProjects,
   viewMode,
-  renderActions,
 }: {
   projects: Build[];
   visibleProjects: number;
   viewMode: 'grid' | 'list';
-  renderActions?: (project: Build) => React.ReactNode;
 }) {
   return (
     <div className={viewMode === 'grid' ? 'grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'space-y-4'}>
       {projects.slice(0, visibleProjects).map((project) => (
         <ReplicadProvider key={project.id}>
-          <BuildLibraryCard project={project} viewMode={viewMode} renderActions={renderActions} />
+          <BuildLibraryCard project={project} viewMode={viewMode} />
         </ReplicadProvider>
       ))}
     </div>
@@ -244,9 +259,11 @@ function StatusDropdown({ status, projectId }: { status: string; projectId: stri
 
 function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'grid' | 'list' }) {
   const { setCode, setParameters, mesh } = useReplicad();
+  const { deleteBuild, duplicateBuild } = useBuilds();
   const main = project.assets.mechanical?.main;
   const code = project.assets.mechanical?.files[main as string]?.content;
   const parameters = project.assets.mechanical?.parameters;
+  const navigate = useNavigate();
 
   // Start with preview false, then enable it once we have both code and mesh
   const [showPreview, setShowPreview] = useState(!!code);
@@ -259,6 +276,28 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
       setParameters(parameters);
     }
   }, [code, setCode, parameters, setParameters]);
+
+  const handleDelete = () => {
+    deleteBuild(project.id);
+    toast.success(`Deleted ${project.name}`);
+  };
+
+  const handleDuplicate = async () => {
+    try {
+      await duplicateBuild(project.id);
+      toast.success(`Duplicated ${project.name}`, {
+        action: {
+          label: 'Open',
+          onClick: () => {
+            navigate(`/builds/${project.id}`);
+          },
+        },
+      });
+    } catch (error) {
+      toast.error('Failed to duplicate build');
+      console.error('Error in component:', error);
+    }
+  };
 
   if (viewMode === 'list') {
     return (
@@ -288,80 +327,93 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
   }
 
   return (
-    <Link to={`/builds/${project.id}`} draggable={!showPreview}>
-      <Card className="group relative overflow-hidden flex flex-col">
-        <div className="relative aspect-video overflow-hidden bg-muted">
-          {!showPreview && (
-            <img
-              src={project.thumbnail || '/placeholder.svg'}
-              alt={project.name}
-              className="h-full w-full object-cover transition-transform group-hover:scale-105"
-              loading="lazy"
-            />
-          )}
-          <div
-            className="absolute inset-0"
-            onClick={(event) => {
-              event.stopPropagation();
-              event.preventDefault();
-            }}
-          >
-            {showPreview && (
-              <ReplicadViewer
-                mesh={mesh}
-                disableGrid={true}
-                disableGizmo={true}
-                className="bg-muted"
-                zoomLevel={1.25}
+    <>
+      <Link to={`/builds/${project.id}`} draggable={!showPreview}>
+        <Card className="group relative overflow-hidden flex flex-col">
+          <div className="relative aspect-video overflow-hidden bg-muted">
+            {!showPreview && (
+              <img
+                src={project.thumbnail || '/placeholder.svg'}
+                alt={project.name}
+                className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                loading="lazy"
               />
             )}
-          </div>
-          <Button
-            variant="outline"
-            size="icon"
-            className="absolute top-2 right-2"
-            onClick={(event) => {
-              event.stopPropagation();
-              event.preventDefault();
-              setShowPreview(!showPreview);
-            }}
-          >
-            <Eye className="size-4" />
-          </Button>
-        </div>
-        <CardHeader>
-          <div className="flex justify-between items-start">
-            <CardTitle>{project.name}</CardTitle>
-          </div>
-          <CardDescription>{project.description}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex-grow">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex flex-wrap gap-2">
-              {Object.keys(project.assets).map((cat) => (
-                <CategoryBadge key={cat} category={cat} />
-              ))}
+            <div
+              className="absolute inset-0"
+              onClick={(event) => {
+                event.stopPropagation();
+                event.preventDefault();
+              }}
+            >
+              {showPreview && <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={1.25} />}
             </div>
-            {/* <StatusDropdown status={project.status} projectId={project.id} /> */}
+            <Button
+              variant="outline"
+              size="icon"
+              className="absolute top-2 right-2"
+              onClick={(event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                setShowPreview(!showPreview);
+              }}
+            >
+              <Eye className="size-4" />
+            </Button>
           </div>
-        </CardContent>
-        <CardFooter className="flex justify-between items-center">
-          <Button
-            variant="ghost"
-            size="icon"
-            // className={cn(project.isFavorite ? 'text-yellow-400' : 'text-gray-400 hover:text-yellow-400')}
-            onClick={(event) => {
-              event.stopPropagation();
-              // handleFavorite(project.id);
-            }}
-          >
-            <Star className="size-4" />
-          </Button>
-          <Button variant="ghost" size="icon">
-            <ArrowRight className="size-4" />
-          </Button>
-        </CardFooter>
-      </Card>
-    </Link>
+          <CardHeader>
+            <div className="flex justify-between items-start">
+              <CardTitle>{project.name}</CardTitle>
+            </div>
+            <CardDescription>{project.description}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex-grow">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap gap-2">
+                {Object.keys(project.assets).map((cat) => (
+                  <CategoryBadge key={cat} category={cat} />
+                ))}
+              </div>
+              {/* <StatusDropdown status={project.status} projectId={project.id} /> */}
+            </div>
+          </CardContent>
+          <CardFooter className="flex justify-between items-center">
+            <Link to={`/builds/${project.id}`} draggable={!showPreview}>
+              <Button variant="outline">
+                <span>Open</span>
+                <ArrowRight className="size-4" />
+              </Button>
+            </Link>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <Ellipsis className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                onClick={(event) => {
+                  event.stopPropagation();
+                  event.preventDefault();
+                }}
+                align="end"
+              >
+                <DropdownMenuItem onClick={handleDuplicate}>
+                  <Copy className="mr-2 size-4" />
+                  <span>Duplicate</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem>
+                  <Star className="mr-2 size-4" />
+                  <span>Favorite</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
+                  <Trash className="mr-2 size-4" />
+                  <span>Delete</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </CardFooter>
+        </Card>
+      </Link>
+    </>
   );
 }

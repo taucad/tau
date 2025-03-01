@@ -61,6 +61,7 @@
   --border: oklch(var(--l-subtle) 0.01 var(--hue-neutral));
 
   --destructive: oklch(var(--l-medium) 0.25 var(--hue-destructive));
+  --destructive-foreground: oklch(var(--l-base) 0 var(--hue-destructive));
   --success: oklch(var(--l-medium) 0.18 var(--hue-success));
   --warning: oklch(var(--l-medium) 0.18 var(--hue-warning));
   --feature: oklch(var(--l-medium) 0.22 var(--hue-feature));

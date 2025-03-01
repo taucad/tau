@@ -44,8 +44,6 @@ export default function ChatStart() {
         tags: [],
         thumbnail: '',
         messages: [userMessage],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
         assets: {
           mechanical: {
             files: { 'model.ts': { content: cubeCode } },

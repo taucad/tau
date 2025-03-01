@@ -85,20 +85,20 @@ const VerbosityBadge = ({ level }: { level: LogLevel }) => {
   const getBadgeColor = () => {
     switch (level) {
       case LOG_LEVELS.ERROR: {
-        return 'bg-[red]';
+        return 'bg-destructive';
       }
       case LOG_LEVELS.WARN: {
-        return 'bg-[yellow]';
+        return 'bg-warning';
       }
       case LOG_LEVELS.INFO: {
-        return 'bg-[blue]';
+        return 'bg-information';
       }
       case LOG_LEVELS.DEBUG:
       case LOG_LEVELS.TRACE: {
-        return 'bg-[gray]';
+        return 'bg-stable';
       }
       default: {
-        return 'bg-[gray]';
+        return 'bg-stable';
       }
     }
   };
@@ -107,7 +107,7 @@ const VerbosityBadge = ({ level }: { level: LogLevel }) => {
     <Badge
       className={cn(
         'text-xs font-normal flex items-center justify-center',
-        'w-10', // Fixed width
+        'w-12', // Fixed width
         getBadgeColor(),
         `hover:bg-initial`,
       )}
@@ -264,7 +264,7 @@ export const ChatConsole = ({
                 <span>Filter by log level</span>
               </TooltipContent>
             </Tooltip>
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent align="end">
               <DropdownMenuLabel>Log Levels</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {Object.values(LOG_LEVELS).map((level) => (
@@ -275,11 +275,12 @@ export const ChatConsole = ({
                   onCheckedChange={(checked) => toggleLevel(level, checked)}
                 >
                   <Badge
-                    className={cn('mr-2', {
-                      'bg-red-500': level === LOG_LEVELS.ERROR,
-                      'bg-yellow-500': level === LOG_LEVELS.WARN,
-                      'bg-blue-500': level === LOG_LEVELS.INFO,
-                      'bg-gray-500': level === LOG_LEVELS.DEBUG || level === LOG_LEVELS.TRACE,
+                    className={cn('w-full text-center justify-center hover:bg-initial', {
+                      'bg-destructive': level === LOG_LEVELS.ERROR,
+                      'bg-warning': level === LOG_LEVELS.WARN,
+                      'bg-information': level === LOG_LEVELS.INFO,
+                      'bg-feature': level === LOG_LEVELS.DEBUG,
+                      'bg-stable': level === LOG_LEVELS.TRACE,
                     })}
                   >
                     {level}
@@ -350,10 +351,11 @@ export const ChatConsole = ({
                 'text-xs bg-background font-mono py-1 px-2 rounded border-l-2',
                 'hover:bg-muted/20 transition-colors cursor-default group/log border-primary',
                 {
-                  'border-[red]': log.level === LOG_LEVELS.ERROR,
-                  'border-[yellow]': log.level === LOG_LEVELS.WARN,
-                  'border-[blue]': log.level === LOG_LEVELS.INFO,
-                  'border-[gray]': log.level === LOG_LEVELS.DEBUG || log.level === LOG_LEVELS.TRACE,
+                  'border-destructive': log.level === LOG_LEVELS.ERROR,
+                  'border-warning': log.level === LOG_LEVELS.WARN,
+                  'border-information': log.level === LOG_LEVELS.INFO,
+                  'border-feature': log.level === LOG_LEVELS.DEBUG,
+                  'border-stable': log.level === LOG_LEVELS.TRACE,
                 },
               )}
             >

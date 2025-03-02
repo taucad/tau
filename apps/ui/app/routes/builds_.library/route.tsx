@@ -378,12 +378,10 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
             </div>
           </CardContent>
           <CardFooter className="flex justify-between items-center">
-            <Link to={`/builds/${project.id}`} draggable={!showPreview}>
-              <Button variant="outline">
-                <span>Open</span>
-                <ArrowRight className="size-4" />
-              </Button>
-            </Link>
+            <Button variant="outline">
+              <span>Open</span>
+              <ArrowRight className="size-4" />
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon">

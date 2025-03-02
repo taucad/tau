@@ -7,7 +7,15 @@ import { runInContext, buildModuleEvaluator } from './vm';
 
 import { renderOutput, ShapeStandardizer } from './utils/render-output';
 
-globalThis.replicad = replicad;
+// Track whether we've already set OC in replicad to avoid repeated calls
+let replicadHasOC = false;
+
+// Define types for OC to avoid typescript errors
+interface OpenCascadeInstance {
+  [key: string]: any;
+}
+
+(globalThis as any).replicad = replicad;
 
 /**
  * Run code in a VM with the OC context
@@ -29,8 +37,7 @@ return main(replicad, __inputParams || dp)
 }
 
 async function runAsFunction(code: string, parameters: any): Promise<any> {
-  const oc = await OC;
-
+  const oc = await initializeOpenCascade();
   return runInContextAsOC(code, {
     oc,
     replicad,
@@ -39,23 +46,44 @@ async function runAsFunction(code: string, parameters: any): Promise<any> {
 }
 
 export async function runAsModule(code: string, parameters: any): Promise<any> {
+  const startTime = performance.now();
+  console.log('Module not in cache, building evaluator');
   const module = await buildModuleEvaluator(code);
+  const buildTime = performance.now();
+  console.log(`Module building took ${buildTime - startTime}ms`);
 
-  if (module.default) return module.default(parameters || module.defaultParams);
-  return module.main(replicad, parameters || module.defaultParams || {});
+  const execStartTime = performance.now();
+  const result = await (module.default
+    ? module.default(parameters || module.defaultParams)
+    : module.main(replicad, parameters || module.defaultParams || {}));
+  const execEndTime = performance.now();
+  console.log(`Module execution took ${execEndTime - execStartTime}ms`);
+
+  return result;
 }
 
 const runCode = async (code: string, parameters: any): Promise<any> => {
+  console.log('Starting runCode evaluation');
+  const startTime = performance.now();
+
+  let result;
   if (/^\s*export\s+/m.test(code)) {
-    return runAsModule(code, parameters);
+    console.log('Starting runAsModule');
+    result = await runAsModule(code, parameters);
+  } else {
+    console.log('Starting runAsFunction');
+    result = await runAsFunction(code, parameters);
   }
-  return runAsFunction(code, parameters);
+
+  const endTime = performance.now();
+  console.log(`Total runCode execution took ${endTime - startTime}ms`);
+  return result;
 };
 
 const extractDefaultParametersFromCode = async (code: string): Promise<any> => {
   if (/^\s*export\s+/m.test(code)) {
     const module = await buildModuleEvaluator(code);
-    return module.defaultParams || null;
+    return module.defaultParams || undefined;
   }
 
   const editedText = `
@@ -63,7 +91,7 @@ ${code}
 try {
   return defaultParams;
 } catch (e) {
-  return null;
+  return undefined;
 }
   `;
 
@@ -96,98 +124,194 @@ try {
   }
 };
 
-const SHAPES_MEMORY = {};
+const SHAPES_MEMORY: Record<string, any> = {};
 
-const ocVersions: Record<string, any | null> = {
-  withExceptions: null,
-  single: null,
-  current: null,
+const ocVersions: Record<string, any> = {
+  withExceptions: undefined,
+  single: undefined,
+  current: 'single', // Default to single for better initial performance
 };
 
-let OC: Promise<any> = Promise.reject('OpenCascade not initialized');
+// Simplify the OC initialization promise - this approach is more direct like the original replicad
+let OC = (async () => {
+  try {
+    console.log('Initial OpenCascade initialization starting');
+    const oc = await initOpenCascade();
+    console.log('Initial OpenCascade initialization complete');
+    return oc;
+  } catch (error) {
+    console.error('Initial OpenCascade initialization failed:', error);
+    throw error;
+  }
+})();
+
+let isInitializing = false;
+
+async function initializeOpenCascade() {
+  if (isInitializing) {
+    console.log('Already initializing OpenCascade, returning existing promise');
+    return OC;
+  }
+
+  isInitializing = true;
+
+  // Track performance
+  const startTime = performance.now();
+
+  try {
+    // If OC is already resolved, return it immediately
+    const resolved = await Promise.race([
+      OC.then(() => true).catch(() => false),
+      new Promise((resolve) => setTimeout(() => resolve(false), 5)),
+    ]);
+
+    if (resolved) {
+      console.log('Using already initialized OpenCascade');
+      isInitializing = false;
+      return OC;
+    }
+
+    console.log('Initializing OpenCascade');
+
+    // Reset the promise based on the current version
+    if (ocVersions.current === 'single') {
+      if (!ocVersions.single) {
+        ocVersions.single = initOpenCascade();
+      }
+      OC = ocVersions.single;
+    } else {
+      if (!ocVersions.withExceptions) {
+        ocVersions.withExceptions = initOpenCascadeWithExceptions();
+      }
+      OC = ocVersions.withExceptions;
+    }
+
+    const result = await OC;
+    const endTime = performance.now();
+    console.log(`OpenCascade initialized successfully in ${endTime - startTime}ms`);
+    return result;
+  } catch (error) {
+    console.error('Failed to initialize OpenCascade:', error);
+    throw error;
+  } finally {
+    isInitializing = false;
+  }
+}
 
 function enableExceptions() {
-  if (!ocVersions.withExceptions) {
-    ocVersions.withExceptions = initOpenCascadeWithExceptions();
-  }
   ocVersions.current = 'withExceptions';
-  OC = ocVersions.withExceptions;
+  return initializeOpenCascade();
 }
 
 function disableExceptions() {
-  if (!ocVersions.single) {
-    ocVersions.single = initOpenCascade();
-  }
   ocVersions.current = 'single';
-  OC = ocVersions.single;
+  return initializeOpenCascade();
 }
 
 async function toggleExceptions() {
-  if (ocVersions.current === 'single') {
-    enableExceptions();
-  } else {
-    disableExceptions();
-  }
-
-  await OC;
+  await (ocVersions.current === 'single' ? enableExceptions() : disableExceptions());
   return ocVersions.current;
 }
 
-disableExceptions();
-
-const formatException = (oc: any, e: any): { error: boolean; message: string; stack?: string } => {
+const formatException = (oc: any, error: any): { error: boolean; message: string; stack?: string } => {
   let message = 'error';
 
-  if (typeof e === 'number') {
+  if (typeof error === 'number') {
     if (oc.OCJS) {
-      const error = oc.OCJS.getStandard_FailureData(e);
-      message = error.GetMessageString();
+      const errorData = oc.OCJS.getStandard_FailureData(error);
+      message = errorData.GetMessageString();
     } else {
-      message = `Kernel error ${e}`;
+      message = `Kernel error ${error}`;
     }
   } else {
-    message = e.message;
-    console.error(e);
+    message = error.message;
+    console.error(error);
   }
 
   return {
     error: true,
     message,
-    stack: e.stack,
+    stack: error.stack,
   };
 };
 
 const buildShapesFromCode = async (code: string, parameters: any): Promise<any> => {
+  const startTime = performance.now();
   console.log('building shapes from code');
-  const oc = await OC;
-  replicad.setOC(oc);
-  // TODO: Add font loading
-  // if (!replicad.getFont()) await replicad.loadFont('/fonts/HKGrotesk-Regular.ttf');
-
-  let shapes;
-  let defaultName;
-  const helper = new StudioHelper();
-  const standardizer = new ShapeStandardizer();
 
   try {
-    globalThis.$ = helper;
-    globalThis.registerShapeStandardizer = standardizer.registerAdapter.bind(standardizer);
-    shapes = await runCode(code, parameters);
-    defaultName = code && (await extractDefaultNameFromCode(code));
-  } catch (error) {
-    return formatException(oc, error);
-  }
+    // Use optimized OC initialization with caching benefits
+    let oc: OpenCascadeInstance;
+    try {
+      // Try getting OC from cache first without full initialization call
+      oc = await OC;
+    } catch {
+      console.log('Cached OC not available, initializing from scratch');
+      oc = await initializeOpenCascade();
+    }
 
-  return renderOutput(
-    shapes,
-    standardizer,
-    (shapes) => {
-      const editedShapes = helper.apply(shapes);
-      SHAPES_MEMORY.defaultShape = shapes;
-      return editedShapes;
-    },
-    defaultName,
-  );
+    const ocEndTime = performance.now();
+    console.log(`OpenCascade initialization took ${ocEndTime - startTime}ms`);
+
+    // Set replicad OC once we have it
+    if (!replicadHasOC) {
+      console.log('Setting OC in replicad');
+      replicad.setOC(oc as any); // Cast to any to avoid TypeScript errors
+      replicadHasOC = true;
+    }
+
+    // Ensure font is loaded
+    // if (!replicad.getFont()) {
+    //   await replicad.loadFont('/fonts/HKGrotesk-Regular.ttf');
+    // }
+
+    // Prepare context and helpers
+    let shapes;
+    let defaultName;
+    const helper = new StudioHelper();
+    const standardizer = new ShapeStandardizer();
+
+    try {
+      // Set up global helpers
+      (globalThis as any).$ = helper;
+      (globalThis as any).registerShapeStandardizer = standardizer.registerAdapter.bind(standardizer);
+
+      // Run the code with measurements
+      const runCodeStartTime = performance.now();
+      shapes = await runCode(code, parameters);
+      const runCodeEndTime = performance.now();
+      console.log(`Code execution took ${runCodeEndTime - runCodeStartTime}ms`);
+
+      defaultName = code && (await extractDefaultNameFromCode(code));
+    } catch (error) {
+      const endTime = performance.now();
+      console.log(`Error occurred after ${endTime - startTime}ms`);
+      return formatException(oc, error);
+    }
+
+    // Process shapes efficiently
+    const renderStartTime = performance.now();
+    const result = renderOutput(
+      shapes,
+      standardizer,
+      (shapesArray) => {
+        const editedShapes = helper.apply(shapesArray);
+        SHAPES_MEMORY['defaultShape'] = shapesArray;
+        return editedShapes;
+      },
+      defaultName,
+    );
+    const renderEndTime = performance.now();
+    console.log(`Render output took ${renderEndTime - renderStartTime}ms`);
+
+    const totalTime = performance.now() - startTime;
+    console.log(`Total buildShapesFromCode time: ${totalTime}ms`);
+
+    return result;
+  } catch (error) {
+    console.error('Error in buildShapesFromCode:', error);
+    return { error: true, message: error instanceof Error ? error.message : String(error) };
+  }
 };
 
 const buildBlob = (
@@ -243,7 +367,26 @@ const edgeInfo = (subshapeIndex: number, edgeIndex: number, shapeId = 'defaultSh
 };
 
 const service = {
-  ready: (): Promise<boolean> => OC.then(() => true),
+  // Add a faster ready option that doesn't wait for full initialization
+  ready: async (fastMode = true): Promise<boolean> => {
+    if (fastMode) {
+      // Fast mode: start initialization but don't wait for it
+      // This lets the UI proceed quickly while initialization happens in background
+      OC.catch((error) => {
+        console.error('OpenCascade initialization error in background:', error);
+      });
+      return true;
+    } else {
+      // Complete mode: wait for full initialization
+      try {
+        await OC;
+        return true;
+      } catch (error) {
+        console.error('OpenCascade initialization error:', error);
+        return false;
+      }
+    }
+  },
   buildShapesFromCode,
   extractDefaultParametersFromCode,
   extractDefaultNameFromCode,
@@ -254,7 +397,7 @@ const service = {
   exceptionsEnabled: (): boolean => ocVersions.current === 'withExceptions',
 };
 
-export type BuilderWorkerInterface = typeof service;
-
 expose(service, globalThis);
+
+export type BuilderWorkerInterface = typeof service;
 export default service;

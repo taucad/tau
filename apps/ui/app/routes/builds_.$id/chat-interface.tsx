@@ -377,7 +377,7 @@ export const ChatInterface = () => {
               className="h-full"
               onLayout={(sizes) => setCodeSize(sizes as [number, number])}
             >
-              <ResizablePanel order={1} defaultSize={codeSize[0]} id="chat-viewer">
+              <ResizablePanel order={1} defaultSize={codeSize[0]} minSize={30} id="chat-viewer">
                 <ChatViewer />
               </ResizablePanel>
               <ResizableHandle />

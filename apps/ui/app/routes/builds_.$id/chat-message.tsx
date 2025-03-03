@@ -14,6 +14,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarImage } from '@/components/ui/avatar';
 
 const MAX_TITLE_LENGTH = 50;
+const MIN_TEXTAREA_HEIGHT_EM = 3;
+const MAX_TEXTAREA_HEIGHT_EM = 30;
 
 const SOURCE_TOOLS = [
   { icon: Globe2, key: 'web' },
@@ -36,10 +38,31 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
 
   useEffect(() => {
     if (isEditing && textareaReference.current) {
+      // Select all text when entering edit mode
       const length = textareaReference.current.value.length;
       textareaReference.current.setSelectionRange(0, length);
+      resizeTextarea(textareaReference.current);
     }
   }, [isEditing]);
+
+  // Handle resizing on content changes
+  useEffect(() => {
+    if (isEditing && textareaReference.current) {
+      resizeTextarea(textareaReference.current);
+    }
+  }, [content, isEditing]);
+
+  // Dynamically resize textarea based on content and font size
+  const resizeTextarea = (textarea: HTMLTextAreaElement) => {
+    const computedStyle = globalThis.getComputedStyle(textarea);
+    const fontSize = Number.parseFloat(computedStyle.fontSize);
+
+    textarea.style.height = 'auto';
+    const heightInEm = textarea.scrollHeight / fontSize;
+    const constrainedHeightInEm = Math.min(Math.max(heightInEm, MIN_TEXTAREA_HEIGHT_EM), MAX_TEXTAREA_HEIGHT_EM);
+
+    textarea.style.height = `${constrainedHeightInEm}em`;
+  };
 
   const relevantSources = message.toolCalls
     ?.filter((toolCall) => activeSources.includes(toolCall.origin))
@@ -52,7 +75,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
           <AvatarImage src="/avatar-sample.png" alt="User" />
         </Avatar>
       </When>
-      <div className="flex flex-col space-y-2 w-full max-w-full overflow-hidden">
+      <div className="flex flex-col space-y-2">
         {/* @ts-expect-error - FIXME: message.toolCalls is always defined */}
         {message.toolCalls.length > 0 && relevantSources && (
           <>
@@ -214,7 +237,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
           <When condition={isUser && isEditing}>
             <Textarea
               ref={textareaReference}
-              className="p-2 shadow-none border-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-none text-sm md:text-md"
+              className={`p-2 shadow-none border-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-none text-sm md:text-md min-h-[${MIN_TEXTAREA_HEIGHT_EM}em] max-h-[${MAX_TEXTAREA_HEIGHT_EM}em] w-full overflow-y-auto`}
               autoFocus
               value={content}
               onChange={(event) => {

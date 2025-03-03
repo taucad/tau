@@ -256,7 +256,7 @@ const SidebarRail = React.forwardRef<HTMLButtonElement, React.ComponentProps<'bu
         onClick={toggleSidebar}
         title="Toggle Sidebar"
         className={cn(
-          'absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-transform ease-linear after:z-10 after:absolute after:inset-y-0 after:left-1/2 after:w-[1px] after:-translate-x-1/2 after:transition-all after:ease-in-out after:duration-200 hover:after:w-[3px] active:after:w-[3px] after:bg-transparent hover:after:bg-sidebar-border active:after:bg-sidebar-border group-data-[side=left]:-right-[1.03125rem] group-data-[side=right]:left-0 sm:flex',
+          'absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-transform ease-linear after:z-10 after:absolute after:inset-y-0 after:left-1/2 after:w-[1px] after:-translate-x-1/2 after:transition-all after:ease-in-out after:duration-200 hover:after:w-[3px] active:after:w-[3px] after:bg-transparent hover:after:bg-border active:after:bg-neutral/50 group-data-[side=left]:-right-[1.03125rem] group-data-[side=right]:left-0 sm:flex',
           '[[data-side=left]_&]:cursor-w-resize [[data-side=right]_&]:cursor-e-resize',
           '[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize',
           'group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full group-data-[collapsible=offcanvas]:hover:bg-sidebar',

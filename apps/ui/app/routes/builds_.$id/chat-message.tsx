@@ -75,7 +75,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
           <AvatarImage src="/avatar-sample.png" alt="User" />
         </Avatar>
       </When>
-      <div className="flex flex-col space-y-2 w-full overflow-y-auto">
+      <div className={cn('flex flex-col space-y-2 overflow-y-auto', isEditing && 'w-full')}>
         {/* @ts-expect-error - FIXME: message.toolCalls is always defined */}
         {message.toolCalls.length > 0 && relevantSources && (
           <>
@@ -267,25 +267,27 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
           </div>
         )}
       </div>
-      {isUser && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="rounded-full transition-opacity group-hover:opacity-100 opacity-0"
-              onClick={() => {
-                setIsEditing((editing) => !editing);
-              }}
-            >
-              <Edit className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Edit message</p>
-          </TooltipContent>
-        </Tooltip>
-      )}
+      <div className="mt-auto">
+        {isUser && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="rounded-full transition-opacity group-hover:opacity-100 opacity-0"
+                onClick={() => {
+                  setIsEditing((editing) => !editing);
+                }}
+              >
+                <Edit className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Edit message</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
     </article>
   );
 }

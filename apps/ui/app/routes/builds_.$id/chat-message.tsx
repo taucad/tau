@@ -69,7 +69,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
     .flatMap((toolCall) => toolCall.output.map((source) => ({ ...source, origin: toolCall.origin })));
 
   return (
-    <article className={cn('group flex flex-row items-start', isUser && 'space-x-reverse space-x-2  flex-row-reverse')}>
+    <article className={cn('group flex flex-row items-start', isUser && 'space-x-reverse space-x-2 flex-row-reverse')}>
       <When condition={message.role === MessageRole.User}>
         <Avatar className="w-8 h-8 bg-neutral/20 rounded-full flex items-center justify-center">
           <AvatarImage src="/avatar-sample.png" alt="User" />

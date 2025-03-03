@@ -274,7 +274,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
               <Button
                 size="icon"
                 variant="ghost"
-                className="rounded-full transition-opacity group-hover:opacity-100 opacity-0"
+                className="rounded-full transition-opacity group-hover:opacity-100 opacity-0 focus:opacity-100"
                 onClick={() => {
                   setIsEditing((editing) => !editing);
                 }}

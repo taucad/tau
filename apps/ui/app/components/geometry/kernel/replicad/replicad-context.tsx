@@ -435,12 +435,6 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
     updateActivityTimestamp();
     const parametersString = JSON.stringify(state.parameters);
 
-    // Skip if nothing changed
-    if (state.code === lastCodeReference.current && parametersString === lastParametersReference.current) {
-      log.debug('Skipping evaluation - no changes detected');
-      return;
-    }
-
     // Update refs
     lastCodeReference.current = state.code;
     lastParametersReference.current = parametersString;

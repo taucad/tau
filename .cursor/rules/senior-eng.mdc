@@ -1,6 +1,7 @@
 ---
 description: Senior Full-Stack Developer Guidelines
-globs: 
+globs: *.ts,*.tsx,*.js,*.jsx
+alwaysApply: false
 ---
 # Senior Full-Stack Developer Guidelines
 
@@ -58,6 +59,7 @@ globs:
 - Use Map, Filter, Reduce
 - Currying and Partial Application
 - Immutability
+- Never use `null`, only `undefined` unless absolutely necessary
 
 ## Performance:
 - Avoid Premature Optimization
@@ -69,7 +71,7 @@ globs:
 - Comment function purpose
 - Use JSDoc for JS
 - Document "why" not "what"
-- Always use full variable naming (i.e `properties` not `props`, `event` not `e`, `errror` not `e`,)
+- Always use full variable naming (i.e `properties` not `props`, `event` not `e`, `error` not `e`,)
 
 ## Function Ordering:
 - Higher-order functionality first

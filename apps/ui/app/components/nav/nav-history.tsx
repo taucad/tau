@@ -19,20 +19,20 @@ const MAX_SHORTCUT_LENGTH = 9;
 
 export function NavHistory() {
   const [visibleCount, setVisibleCount] = useState(BUILDS_PER_PAGE);
-  const [allBuilds, setAllBuilds] = useState<Build[]>([]);
+  const [visibleBuilds, setVisibleBuilds] = useState<Build[]>([]);
   const { builds } = useBuilds();
 
   useEffect(() => {
     // Get all builds from storage and sort by most recently updated
     const builds = storage.getBuilds().sort((a, b) => b.updatedAt - a.updatedAt);
-    setAllBuilds(builds.slice(0, visibleCount));
+    setVisibleBuilds(builds.slice(0, visibleCount));
   }, [visibleCount]);
 
   const handleLoadMore = () => {
     setVisibleCount((previous) => previous + BUILDS_PER_PAGE);
   };
 
-  if (allBuilds.length === 0) {
+  if (visibleBuilds.length === 0) {
     return;
   }
 
@@ -40,7 +40,7 @@ export function NavHistory() {
     <SidebarGroup className="group-data-[collapsible=icon]:hidden">
       <SidebarGroupLabel>Recent Builds</SidebarGroupLabel>
       <SidebarMenu>
-        {allBuilds.map((build, index) => (
+        {visibleBuilds.map((build, index) => (
           <NavHistoryItem key={build.id} build={build} index={index} />
         ))}
         {builds.length > visibleCount && (

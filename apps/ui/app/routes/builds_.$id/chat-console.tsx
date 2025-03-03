@@ -201,7 +201,6 @@ export const ChatConsole = ({
       className={cn(
         'flex flex-col w-full group/console',
         // Full height for both modes with different adjustments
-        'group-data-[view=tabs]/console:h-full group-data-[view=tabs]/console:flex-1',
         'group-data-[view=split]/console:h-full group-data-[view=split]/console:min-h-0',
         // Fix scrolling issues
         'min-h-0 max-h-full overflow-hidden',
@@ -209,7 +208,7 @@ export const ChatConsole = ({
       )}
       {...properties}
     >
-      <div className="flex flex-row gap-2 sticky top-0 bg-background z-10">
+      <div className="flex flex-row gap-2 sticky top-0 bg-background p-2">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -256,7 +255,9 @@ export const ChatConsole = ({
                   <Button
                     variant="outline"
                     size="icon"
-                    className={cn('gap-2 size-6 [&>svg]:size-3', 'group-data-[view=tabs]/console:size-8')}
+                    className={cn(
+                      'gap-2 group-data-[view=split]/console:size-6 group-data-[view=split]/console:[&>svg]:size-3',
+                    )}
                   >
                     <Filter />
                   </Button>
@@ -276,17 +277,7 @@ export const ChatConsole = ({
                   onSelect={(event) => event.preventDefault()}
                   onCheckedChange={(checked) => toggleLevel(level, checked)}
                 >
-                  <Badge
-                    className={cn('w-full text-center justify-center hover:bg-initial', {
-                      'bg-destructive': level === LOG_LEVELS.ERROR,
-                      'bg-warning': level === LOG_LEVELS.WARN,
-                      'bg-information': level === LOG_LEVELS.INFO,
-                      'bg-stable': level === LOG_LEVELS.DEBUG,
-                      'bg-feature': level === LOG_LEVELS.TRACE,
-                    })}
-                  >
-                    {level}
-                  </Badge>
+                  <VerbosityBadge level={level} />
                 </DropdownMenuCheckboxItem>
               ))}
             </DropdownMenuContent>
@@ -300,7 +291,9 @@ export const ChatConsole = ({
                   <Button
                     variant="outline"
                     size="icon"
-                    className={cn('gap-2 size-6 [&>svg]:size-3', 'group-data-[view=tabs]/console:size-8')}
+                    className={cn(
+                      'gap-2 group-data-[view=split]/console:size-6 group-data-[view=split]/console:[&>svg]:size-3',
+                    )}
                   >
                     <Settings />
                   </Button>
@@ -333,7 +326,9 @@ export const ChatConsole = ({
               <Button
                 variant="outline"
                 size="icon"
-                className={cn('gap-2 size-6 [&>svg]:size-3', 'group-data-[view=tabs]/console:size-8')}
+                className={cn(
+                  'gap-2 group-data-[view=split]/console:size-6 group-data-[view=split]/console:[&>svg]:size-3',
+                )}
                 onClick={handleClearLogs}
               >
                 <Trash />
@@ -343,7 +338,7 @@ export const ChatConsole = ({
           </Tooltip>
         </div>
       </div>
-      <div className="flex flex-col-reverse gap-0.5 overflow-y-auto mt-2 min-h-0 flex-grow">
+      <div className="flex flex-col group-data-[view=split]/console:flex-col-reverse gap-0.5 overflow-y-auto p-2 pt-0 min-h-0 flex-grow">
         {/* Display console logs */}
         {filteredLogs.length > 0 ? (
           filteredLogs.map((log) => (

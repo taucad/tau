@@ -397,10 +397,9 @@ export const ChatInterface = () => {
                   <ResizablePanel
                     order={2}
                     defaultSize={consoleSize[1]}
-                    minSize={2.5}
+                    minSize={4}
                     collapsible
-                    collapsedSize={2.5}
-                    className="p-2"
+                    collapsedSize={4}
                     ref={consolePanelReference}
                     id="chat-console"
                   >

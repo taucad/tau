@@ -11,20 +11,21 @@ import {
   SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { useKeydown } from '@/hooks/use-keydown';
-import { KeyShortcut } from '../ui/key-shortcut';
+import { KeyShortcut } from '@/components/ui/key-shortcut';
+import { useBuilds } from '@/hooks/use-builds';
 
 const BUILDS_PER_PAGE = 5;
+const MAX_SHORTCUT_LENGTH = 9;
 
 export function NavHistory() {
-  const [builds, setBuilds] = useState<Build[]>([]);
   const [visibleCount, setVisibleCount] = useState(BUILDS_PER_PAGE);
   const [allBuilds, setAllBuilds] = useState<Build[]>([]);
+  const { builds } = useBuilds();
 
   useEffect(() => {
     // Get all builds from storage and sort by most recently updated
     const builds = storage.getBuilds().sort((a, b) => b.updatedAt - a.updatedAt);
-    setAllBuilds(builds);
-    setBuilds(builds.slice(0, visibleCount));
+    setAllBuilds(builds.slice(0, visibleCount));
   }, [visibleCount]);
 
   const handleLoadMore = () => {
@@ -39,10 +40,10 @@ export function NavHistory() {
     <SidebarGroup className="group-data-[collapsible=icon]:hidden">
       <SidebarGroupLabel>Recent Builds</SidebarGroupLabel>
       <SidebarMenu>
-        {builds.map((build, index) => (
+        {allBuilds.map((build, index) => (
           <NavHistoryItem key={build.id} build={build} index={index} />
         ))}
-        {allBuilds.length > visibleCount && (
+        {builds.length > visibleCount && (
           <SidebarMenuItem>
             <SidebarMenuButton onClick={handleLoadMore} disableAutoClose className="text-sidebar-foreground/70">
               <MoreHorizontal className="size-4" />
@@ -75,7 +76,9 @@ const NavHistoryItem = ({ build, index }: { build: Build; index: number }) => {
           <SidebarMenuButton isActive={isActive}>
             <History className="size-4 shrink-0" />
             <span className="truncate flex-1">{build.name}</span>
-            {index < 10 && <KeyShortcut className="ml-2 shrink-0">{formattedKeyCombination}</KeyShortcut>}
+            {index < MAX_SHORTCUT_LENGTH && (
+              <KeyShortcut className="ml-2 shrink-0">{formattedKeyCombination}</KeyShortcut>
+            )}
           </SidebarMenuButton>
         )}
       </NavLink>

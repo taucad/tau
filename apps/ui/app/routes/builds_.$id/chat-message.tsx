@@ -75,7 +75,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
           <AvatarImage src="/avatar-sample.png" alt="User" />
         </Avatar>
       </When>
-      <div className="flex flex-col space-y-2">
+      <div className="flex flex-col space-y-2 w-full overflow-y-auto">
         {/* @ts-expect-error - FIXME: message.toolCalls is always defined */}
         {message.toolCalls.length > 0 && relevantSources && (
           <>

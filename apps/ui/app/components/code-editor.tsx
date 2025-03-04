@@ -17,7 +17,6 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties) {
   return (
     <Editor
       className={cn(className)}
-      height="100vh"
       theme={theme === 'dark' ? 'vs-dark' : 'vs'}
       defaultLanguage="typescript"
       options={{ minimap: { enabled: false }, extraEditorClassName: 'bg-background' }}

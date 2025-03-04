@@ -363,11 +363,12 @@ export const ChatInterface = () => {
               <TabsContent value="preview" className="h-full mt-0 flex flex-1 w-full">
                 <ChatViewer />
               </TabsContent>
-              <TabsContent value="code" className="h-full mt-0 flex flex-1 w-full">
+              {/* subtract 6rem for the chat history and chat input as they don't take the full height */}
+              <TabsContent value="code" className="h-[calc(100vh-6rem)] mt-0 flex flex-1 w-full">
                 <ChatCode />
               </TabsContent>
-              <TabsContent value="console" className="h-full mt-0 flex flex-1 w-full">
-                <ChatConsole data-view="tabs" className="p-2 pt-0" />
+              <TabsContent value="console" className="h-[calc(100vh-6rem)] mt-0 flex flex-1 w-full">
+                <ChatConsole data-view="tabs" className="pt-0" />
               </TabsContent>
             </Tabs>
           ) : (
@@ -389,7 +390,7 @@ export const ChatInterface = () => {
                 >
                   <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-code">
                     <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-12 gap-1.5"></div>
-                    <div className="pt-14 overflow-y-scroll dark:bg-[rgb(30,_30,_30)] w-full">
+                    <div className="pt-14 overflow-y-scroll dark:bg-[rgb(30,_30,_30)] w-full h-full">
                       <ChatCode />
                     </div>
                   </ResizablePanel>

@@ -7,43 +7,6 @@ import BuilderWorker from './replicad-builder.worker?worker';
 import { debounce } from '@/utils/functions';
 import { useConsole } from '@/hooks/use-console';
 
-// Preload the worker module as early as possible
-let preloadedWorker: Worker | undefined;
-let preloadingStarted = false;
-
-// Function to preload the worker in the background
-function preloadWorker() {
-  if (preloadingStarted) return;
-  preloadingStarted = true;
-
-  console.log('Preloading Replicad worker in background');
-  try {
-    // Create worker but don't wrap it yet (avoid overhead)
-    preloadedWorker = new BuilderWorker();
-
-    // Call the ready method but don't await it - just let it initialize in background
-    const readyPromise = wrap<BuilderWorkerInterface>(preloadedWorker).ready();
-    readyPromise.catch((error) => {
-      console.error('Background worker preload failed', error);
-      // If preloading fails, clean up so we can try again
-      if (preloadedWorker) {
-        preloadedWorker.terminate();
-        preloadedWorker = undefined;
-      }
-      preloadingStarted = false;
-    });
-  } catch (error) {
-    console.error('Failed to preload worker', error);
-    preloadingStarted = false;
-  }
-}
-
-// Start preloading right away
-if (typeof globalThis !== 'undefined') {
-  // No more timeouts - preload immediately
-  preloadWorker();
-}
-
 // Combine related state
 interface ReplicadState {
   code: string;
@@ -113,39 +76,8 @@ function useReplicadWorker() {
       }
     }
 
-    // Use the preloaded worker if available
-    if (preloadedWorker) {
-      log.debug('Using preloaded worker');
-      const worker = preloadedWorker;
-      preloadedWorker = undefined;
-      preloadingStarted = false;
-
-      workerReference.current = wrap<BuilderWorkerInterface>(worker);
-
-      try {
-        const readyStartTime = performance.now();
-        await workerReference.current.ready();
-        const endTime = performance.now();
-        log.debug(
-          `Preloaded worker ready (id: ${initId}). Init took ${endTime - startTime}ms, ready took ${endTime - readyStartTime}ms`,
-        );
-        console.log(
-          `Preloaded worker ready (id: ${initId}). Init took ${endTime - startTime}ms, ready took ${endTime - readyStartTime}ms`,
-        );
-
-        return workerReference.current;
-      } catch (error) {
-        log.error(`Preloaded worker initialization failed (id: ${initId})`, {
-          data: error instanceof Error ? error.message : String(error),
-        });
-        console.error(`Preloaded worker initialization failed (id: ${initId})`, error);
-        workerReference.current = undefined;
-        // Fall through to create a new worker
-      }
-    }
-
-    // Create a new worker if preloaded one isn't available or failed
-    log.debug('Creating new worker (no preload available)');
+    // Create a new worker
+    log.debug('Creating new worker');
     const worker = new BuilderWorker();
     workerReference.current = wrap<BuilderWorkerInterface>(worker);
 
@@ -159,9 +91,6 @@ function useReplicadWorker() {
       console.log(
         `New worker ready (id: ${initId}). Initialization took ${endTime - startTime}ms, ready took ${endTime - readyStartTime}ms`,
       );
-
-      // Start preloading the next worker
-      preloadWorker();
     } catch (error) {
       log.error(`Worker initialization failed (id: ${initId})`, {
         data: error instanceof Error ? error.message : String(error),
@@ -233,19 +162,6 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
   const workerInitializationPromise = useRef<Promise<Remote<BuilderWorkerInterface> | undefined> | undefined>(
     undefined,
   );
-
-  // Start preloading the worker immediately when the context is first created
-  useEffect(() => {
-    // Preload immediately without timeout
-    log.debug('Preloading worker in background');
-    getOrInitWorker().catch((error) => {
-      log.error('Background worker preload failed', {
-        data: error instanceof Error ? error.message : String(error),
-      });
-    });
-
-    // No cleanup needed since we removed timeout
-  }, []);
 
   // Centralized worker initialization function to avoid multiple initializations
   const getOrInitWorker = useCallback(async () => {

@@ -21,11 +21,11 @@ export interface LogEntry {
   level: LogLevel;
   message: string;
   origin?: LogOrigin;
-  data?: string | Record<string, unknown>;
+  data?: unknown;
 }
 
 export interface LogOptions {
   level?: LogLevel;
   origin?: LogOrigin;
-  data?: string | Record<string, unknown>;
+  data?: unknown;
 }

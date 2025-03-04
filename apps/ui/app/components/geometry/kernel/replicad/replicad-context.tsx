@@ -40,12 +40,8 @@ function preloadWorker() {
 
 // Start preloading right away
 if (typeof globalThis !== 'undefined') {
-  // Use requestIdleCallback if available, or setTimeout as fallback
-  if ('requestIdleCallback' in globalThis) {
-    (globalThis as any).requestIdleCallback(() => preloadWorker(), { timeout: 1000 });
-  } else {
-    setTimeout(preloadWorker, 100);
-  }
+  // No more timeouts - preload immediately
+  preloadWorker();
 }
 
 // Combine related state
@@ -58,7 +54,6 @@ interface ReplicadState {
   isBuffering: boolean;
   mesh?: {
     edges: any;
-
     faces: any;
   };
 }
@@ -86,32 +81,9 @@ function useReplicadWorker() {
   const workerReference = useRef<Remote<BuilderWorkerInterface> | undefined>(undefined);
   const workerInitializationId = useRef<number>(0);
   const lastActivityTime = useRef<number>(Date.now());
-  const cleanupTimer = useRef<NodeJS.Timeout | undefined>(undefined);
-
-  // Auto-cleanup idle workers
-  const WORKER_IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
   const updateActivityTimestamp = useCallback(() => {
     lastActivityTime.current = Date.now();
-  }, []);
-
-  // Setup idle timer to clean up resources
-  const setupIdleCleanup = useCallback(() => {
-    if (cleanupTimer.current) {
-      clearTimeout(cleanupTimer.current);
-    }
-
-    cleanupTimer.current = setTimeout(() => {
-      const idleTime = Date.now() - lastActivityTime.current;
-
-      if (idleTime >= WORKER_IDLE_TIMEOUT && workerReference.current) {
-        log.debug('Worker idle timeout reached, terminating inactive worker');
-        terminateWorker();
-      } else if (workerReference.current) {
-        // Reset timer if worker is still needed
-        setupIdleCleanup();
-      }
-    }, WORKER_IDLE_TIMEOUT);
   }, []);
 
   const initWorker = useCallback(async () => {
@@ -128,17 +100,14 @@ function useReplicadWorker() {
       console.log(`Using existing worker (id: ${initId}). Check took ${endTime - startTime}ms`);
 
       try {
-        // Ensure the worker is still responsive with a quick ready check
-        const readyResult = await Promise.race([
-          workerReference.current.ready(),
-          new Promise<boolean>((_, reject) => setTimeout(() => reject(new Error('Worker ready check timeout')), 100)),
-        ]);
+        // Ensure the worker is still responsive with a ready check - no timeout
+        const readyResult = await workerReference.current.ready();
 
         if (readyResult) {
           // Worker is responsive and ready
           return workerReference.current;
         } else {
-          // Worker ready check failed but didn't timeout - terminate and recreate
+          // Worker ready check failed - terminate and recreate
           log.debug('Worker responded but not ready, recreating worker');
           terminateWorker();
         }
@@ -171,8 +140,6 @@ function useReplicadWorker() {
           `Preloaded worker ready (id: ${initId}). Init took ${endTime - startTime}ms, ready took ${endTime - readyStartTime}ms`,
         );
 
-        // Set up idle cleanup
-        setupIdleCleanup();
         return workerReference.current;
       } catch (error) {
         log.error(`Preloaded worker initialization failed (id: ${initId})`, {
@@ -200,9 +167,6 @@ function useReplicadWorker() {
         `New worker ready (id: ${initId}). Initialization took ${endTime - startTime}ms, ready took ${endTime - readyStartTime}ms`,
       );
 
-      // Set up idle cleanup when worker is successfully initialized
-      setupIdleCleanup();
-
       // Start preloading the next worker
       preloadWorker();
     } catch (error) {
@@ -215,29 +179,16 @@ function useReplicadWorker() {
     }
 
     return workerReference.current;
-  }, [setupIdleCleanup, updateActivityTimestamp]);
+  }, [updateActivityTimestamp]);
 
   const terminateWorker = useCallback(() => {
     log.debug(`Terminating worker (id: ${workerInitializationId.current})`);
     console.log(`Terminating worker (id: ${workerInitializationId.current})`);
 
-    if (cleanupTimer.current) {
-      clearTimeout(cleanupTimer.current);
-    }
-
     if (workerReference.current && 'terminate' in workerReference.current) {
       (workerReference.current as unknown as Worker).terminate();
       workerReference.current = undefined;
     }
-  }, []);
-
-  // Cleanup on component unmount
-  useEffect(() => {
-    return () => {
-      if (cleanupTimer.current) {
-        clearTimeout(cleanupTimer.current);
-      }
-    };
   }, []);
 
   return { initWorker, terminateWorker, updateActivityTimestamp };
@@ -292,17 +243,15 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
 
   // Start preloading the worker immediately when the context is first created
   useEffect(() => {
-    // Use a short timeout to let the app initialize first
-    const preloadTimer = setTimeout(() => {
-      log.debug('Preloading worker in background');
-      getOrInitWorker().catch((error) => {
-        log.error('Background worker preload failed', {
-          data: error instanceof Error ? error.message : String(error),
-        });
+    // Preload immediately without timeout
+    log.debug('Preloading worker in background');
+    getOrInitWorker().catch((error) => {
+      log.error('Background worker preload failed', {
+        data: error instanceof Error ? error.message : String(error),
       });
-    }, 100);
+    });
 
-    return () => clearTimeout(preloadTimer);
+    // No cleanup needed since we removed timeout
   }, []);
 
   // Centralized worker initialization function to avoid multiple initializations
@@ -389,10 +338,11 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
     [getOrInitWorker],
   );
 
-  // Create stable debounced evaluation function with better tracking
+  // Track evaluation state
   const evaluationInProgress = useRef(false);
   const pendingEvaluation = useRef(false);
 
+  // Create stable debounced evaluation function
   const debouncedEvaluate = useMemo(
     () =>
       debounce((code: string, parameters: Record<string, any>, defaultParameters: Record<string, any>) => {
@@ -443,7 +393,7 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
     log.debug(`Starting debounce at ${debounceStartTime}ms`);
     dispatch({ type: 'SET_STATUS', payload: { isBuffering: true } });
     debouncedEvaluate(state.code, state.parameters, state.defaultParameters);
-  }, [state.code, state.parameters, state.defaultParameters, updateActivityTimestamp]);
+  }, [state.code, state.parameters, state.defaultParameters, updateActivityTimestamp, debouncedEvaluate]);
 
   // Load default parameters when code changes
   useEffect(() => {

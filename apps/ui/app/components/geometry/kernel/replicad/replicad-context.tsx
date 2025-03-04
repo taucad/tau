@@ -80,19 +80,12 @@ function useReplicadWorker() {
   const { log } = useConsole({ defaultOrigin: { component: 'Replicad' } });
   const workerReference = useRef<Remote<BuilderWorkerInterface> | undefined>(undefined);
   const workerInitializationId = useRef<number>(0);
-  const lastActivityTime = useRef<number>(Date.now());
-
-  const updateActivityTimestamp = useCallback(() => {
-    lastActivityTime.current = Date.now();
-  }, []);
 
   const initWorker = useCallback(async () => {
     const initId = ++workerInitializationId.current;
     const startTime = performance.now();
     log.debug(`Initializing worker (id: ${initId})`);
     console.log(`Initializing worker (id: ${initId})`);
-
-    updateActivityTimestamp();
 
     if (workerReference.current) {
       const endTime = performance.now();
@@ -179,7 +172,7 @@ function useReplicadWorker() {
     }
 
     return workerReference.current;
-  }, [updateActivityTimestamp]);
+  }, []);
 
   const terminateWorker = useCallback(() => {
     log.debug(`Terminating worker (id: ${workerInitializationId.current})`);
@@ -191,7 +184,7 @@ function useReplicadWorker() {
     }
   }, []);
 
-  return { initWorker, terminateWorker, updateActivityTimestamp };
+  return { initWorker, terminateWorker };
 }
 
 function replicadReducer(state: ReplicadState, action: ReplicadAction): ReplicadState {
@@ -235,7 +228,7 @@ const ReplicadContext = createContext<
 
 export function ReplicadProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(replicadReducer, initialState);
-  const { initWorker, terminateWorker, updateActivityTimestamp } = useReplicadWorker();
+  const { initWorker, terminateWorker } = useReplicadWorker();
   const { log } = useConsole({ defaultOrigin: { component: 'CAD' } });
   const workerInitializationPromise = useRef<Promise<Remote<BuilderWorkerInterface> | undefined> | undefined>(
     undefined,
@@ -256,8 +249,6 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
 
   // Centralized worker initialization function to avoid multiple initializations
   const getOrInitWorker = useCallback(async () => {
-    updateActivityTimestamp();
-
     if (workerInitializationPromise.current) {
       log.debug('Reusing existing worker initialization promise');
 
@@ -285,7 +276,7 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
       }
       throw error;
     }
-  }, [initWorker, updateActivityTimestamp]);
+  }, [initWorker]);
 
   // Memoize the evaluation function
   const evaluateCode = useCallback(
@@ -382,7 +373,6 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!state.defaultParameters) return;
 
-    updateActivityTimestamp();
     const parametersString = JSON.stringify(state.parameters);
 
     // Update refs
@@ -393,7 +383,7 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
     log.debug(`Starting debounce at ${debounceStartTime}ms`);
     dispatch({ type: 'SET_STATUS', payload: { isBuffering: true } });
     debouncedEvaluate(state.code, state.parameters, state.defaultParameters);
-  }, [state.code, state.parameters, state.defaultParameters, updateActivityTimestamp, debouncedEvaluate]);
+  }, [state.code, state.parameters, state.defaultParameters, debouncedEvaluate]);
 
   // Load default parameters when code changes
   useEffect(() => {

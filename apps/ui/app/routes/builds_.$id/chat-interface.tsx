@@ -498,7 +498,9 @@ export const ChatInterface = () => {
         id="chat-parameters"
       >
         <span className="font-bold font-mono text-lg">Parameters</span>
-        <ChatParameters />
+        <div className="flex flex-col gap-2 overflow-y-auto">
+          <ChatParameters />
+        </div>
       </ResizablePanel>
 
       {isMobile && !isChatOpen && (

@@ -129,6 +129,13 @@ export const ChatParameters = () => {
                     onChange={(event) => handleParameterChange(key, Number.parseFloat(event.target.value))}
                     className="w-14 h-8 p-1 bg-background shadow-none"
                   />
+                ) : valueType === 'string' ? (
+                  <Input
+                    type="text"
+                    value={value as string}
+                    onChange={(event) => handleParameterChange(key, event.target.value)}
+                    className="h-8 p-1 bg-background shadow-none"
+                  />
                 ) : // eslint-disable-next-line unicorn/no-null
                 null}
               </div>

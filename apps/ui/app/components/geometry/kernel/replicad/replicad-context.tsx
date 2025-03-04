@@ -41,27 +41,26 @@ const DEBOUNCE_TIME = 300;
 
 function useReplicadWorker() {
   const { log } = useConsole({ defaultOrigin: { component: 'Replicad' } });
-  const workerReference = useRef<Remote<BuilderWorkerInterface> | undefined>(undefined);
+  const wrappedWorkerReference = useRef<Remote<BuilderWorkerInterface> | undefined>(undefined);
+  const workerReference = useRef<Worker | undefined>(undefined);
   const workerInitializationId = useRef<number>(0);
 
   const initWorker = useCallback(async () => {
     const initId = ++workerInitializationId.current;
     const startTime = performance.now();
     log.debug(`Initializing worker (id: ${initId})`);
-    console.log(`Initializing worker (id: ${initId})`);
 
-    if (workerReference.current) {
+    if (wrappedWorkerReference.current) {
       const endTime = performance.now();
       log.debug(`Using existing worker (id: ${initId}). Check took ${endTime - startTime}ms`);
-      console.log(`Using existing worker (id: ${initId}). Check took ${endTime - startTime}ms`);
 
       try {
         // Ensure the worker is still responsive with a ready check - no timeout
-        const readyResult = await workerReference.current.ready();
+        const readyResult = await wrappedWorkerReference.current.ready();
 
         if (readyResult) {
           // Worker is responsive and ready
-          return workerReference.current;
+          return wrappedWorkerReference.current;
         } else {
           // Worker ready check failed - terminate and recreate
           log.debug('Worker responded but not ready, recreating worker');
@@ -78,38 +77,42 @@ function useReplicadWorker() {
 
     // Create a new worker
     log.debug('Creating new worker');
-    const worker = new BuilderWorker();
-    workerReference.current = wrap<BuilderWorkerInterface>(worker);
+    workerReference.current = new BuilderWorker();
+    wrappedWorkerReference.current = wrap<BuilderWorkerInterface>(workerReference.current);
 
     try {
       const readyStartTime = performance.now();
-      await workerReference.current.ready();
+      await wrappedWorkerReference.current.ready();
       const endTime = performance.now();
       log.debug(
-        `New worker ready (id: ${initId}). Initialization took ${endTime - startTime}ms, ready took ${endTime - readyStartTime}ms`,
-      );
-      console.log(
         `New worker ready (id: ${initId}). Initialization took ${endTime - startTime}ms, ready took ${endTime - readyStartTime}ms`,
       );
     } catch (error) {
       log.error(`Worker initialization failed (id: ${initId})`, {
         data: error instanceof Error ? error.message : String(error),
       });
-      console.error(`Worker initialization failed (id: ${initId})`, error);
-      workerReference.current = undefined;
+      wrappedWorkerReference.current = undefined;
       throw error;
     }
 
-    return workerReference.current;
+    return wrappedWorkerReference.current;
   }, []);
 
   const terminateWorker = useCallback(() => {
     log.debug(`Terminating worker (id: ${workerInitializationId.current})`);
-    console.log(`Terminating worker (id: ${workerInitializationId.current})`);
 
-    if (workerReference.current && 'terminate' in workerReference.current) {
-      (workerReference.current as unknown as Worker).terminate();
-      workerReference.current = undefined;
+    if (workerReference.current) {
+      try {
+        workerReference.current.terminate();
+        log.debug('Terminated worker');
+      } catch (error) {
+        log.error('Error terminating worker', {
+          data: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        wrappedWorkerReference.current = undefined;
+        workerReference.current = undefined;
+      }
     }
   }, []);
 

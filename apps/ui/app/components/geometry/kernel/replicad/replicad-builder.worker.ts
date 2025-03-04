@@ -136,7 +136,7 @@ const ocVersions: Record<string, any> = {
 let OC = (async () => {
   try {
     console.log('Initial OpenCascade initialization starting');
-    const oc = await initOpenCascade();
+    const oc = await initOpenCascadeWithExceptions();
     console.log('Initial OpenCascade initialization complete');
     return oc;
   } catch (error) {

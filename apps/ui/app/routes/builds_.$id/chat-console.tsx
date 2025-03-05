@@ -179,7 +179,6 @@ export const ChatConsole = ({
   // Toggle display configuration
   const toggleDisplayConfig = useCallback(
     (key: keyof typeof DEFAULT_DISPLAY_CONFIG, value: boolean) => {
-      console.log('toggleDisplayConfig', key);
       setDisplayConfig((previous: typeof DEFAULT_DISPLAY_CONFIG) => ({
         ...previous,
         [key]: value,

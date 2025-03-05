@@ -356,7 +356,7 @@ export const ChatConsole = ({
                 },
               )}
             >
-              <div className="flex items-center flex-wrap gap-2">
+              <div className="flex items-baseline flex-wrap gap-2">
                 {displayConfig.showTimestamp && (
                   <span className="opacity-60 shrink-0">[{formatTimestamp(log.timestamp)}]</span>
                 )}

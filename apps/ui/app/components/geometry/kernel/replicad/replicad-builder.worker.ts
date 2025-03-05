@@ -367,24 +367,13 @@ const edgeInfo = (subshapeIndex: number, edgeIndex: number, shapeId = 'defaultSh
 };
 
 const service = {
-  // Add a faster ready option that doesn't wait for full initialization
-  ready: async (fastMode = true): Promise<boolean> => {
-    if (fastMode) {
-      // Fast mode: start initialization but don't wait for it
-      // This lets the UI proceed quickly while initialization happens in background
-      OC.catch((error) => {
-        console.error('OpenCascade initialization error in background:', error);
-      });
-      return true;
-    } else {
-      // Complete mode: wait for full initialization
+  ready: async (): Promise<boolean> => {
       try {
         await OC;
         return true;
       } catch (error) {
         console.error('OpenCascade initialization error:', error);
         return false;
-      }
     }
   },
   buildShapesFromCode,

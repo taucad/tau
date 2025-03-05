@@ -1,7 +1,7 @@
 import { loader } from '@/root';
 import { useRouteLoaderData } from '@remix-run/react';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 
 const DEFAULT_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
@@ -45,30 +45,34 @@ export const useCookie = <T>(
   const parser = options.parse ?? ((value: string) => value as T);
   const stringifier = options.stringify ?? String;
 
+  // Get the latest cookie value from route data on each render
   const data = useRouteLoaderData<typeof loader>('root');
   const extractedCookie = data?.cookies[name];
-  const parsedCookie = extractedCookie ? parser(extractedCookie) : defaultValue;
-  const [value, setValue] = useState(parsedCookie);
+  const cookieValue = extractedCookie ? parser(extractedCookie) : defaultValue;
+
+  // Use the cookie value directly from route data instead of maintaining separate state
+  // This eliminates the need for useEffect or other sync mechanisms
+  const [localOverride, setLocalOverride] = useState<T | undefined>();
+
+  // Use localOverride if it exists, otherwise use the cookie value from route data
+  const value = localOverride === undefined ? cookieValue : localOverride;
 
   const handleSetValue = useCallback(
-    (value: T | ((value: T) => T)) => {
-      setValue((oldValue) => {
-        const updatedValue = typeof value === 'function' ? (value as (value: T) => T)(oldValue) : value;
+    (valueOrUpdater: T | ((previousValue: T) => T)) => {
+      setLocalOverride((oldValue) => {
+        // If oldValue is undefined, use the current value from cookie
+        const currentValue = oldValue === undefined ? cookieValue : oldValue;
+        const updatedValue =
+          typeof valueOrUpdater === 'function' ? (valueOrUpdater as (value: T) => T)(currentValue) : valueOrUpdater;
+
         const stringifiedValue = stringifier(updatedValue);
         setCookie(name, stringifiedValue, options.maxAge ?? DEFAULT_COOKIE_MAX_AGE);
 
         return updatedValue;
       });
     },
-    [name, stringifier, options.maxAge],
+    [name, stringifier, options.maxAge, cookieValue],
   );
-
-  useEffect(() => {
-    // Only update the value if it's different from the parsed cookie
-    if (JSON.stringify(parsedCookie) !== JSON.stringify(value)) {
-      setValue(parsedCookie);
-    }
-  }, [parsedCookie]);
 
   return [value, handleSetValue] as const;
 };

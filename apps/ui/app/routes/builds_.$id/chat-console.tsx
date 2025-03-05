@@ -16,6 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useCookie } from '@/utils/cookies';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -26,11 +27,11 @@ type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
 };
 
 // Cookie names for persisting console settings
-// const CONSOLE_LOG_LEVELS_COOKIE = 'tau-console-log-levels';
-// const CONSOLE_DISPLAY_CONFIG_COOKIE = 'tau-console-display-config';
+const CONSOLE_LOG_LEVELS_COOKIE = 'tau-console-log-levels';
+const CONSOLE_DISPLAY_CONFIG_COOKIE = 'tau-console-display-config';
 
 // Default values for enabled log levels
-const DEFAULT_ENABLED_LEVELS: Record<LogLevel, boolean> = {
+const DEFAULT_LOG_LEVELS: Record<LogLevel, boolean> = {
   ERROR: true,
   WARN: true,
   INFO: true,
@@ -139,8 +140,14 @@ export const ChatConsole = ({
   const [filter, setFilter] = useState('');
 
   // Cookie-persisted state for log levels with proper parse and stringify
-  const [enabledLevels, setEnabledLevels] = useState<Record<LogLevel, boolean>>(DEFAULT_ENABLED_LEVELS);
-  const [displayConfig, setDisplayConfig] = useState(DEFAULT_DISPLAY_CONFIG);
+  const [enabledLevels, setEnabledLevels] = useCookie(CONSOLE_LOG_LEVELS_COOKIE, DEFAULT_LOG_LEVELS, {
+    parse: JSON.parse,
+    stringify: JSON.stringify,
+  });
+  const [displayConfig, setDisplayConfig] = useCookie(CONSOLE_DISPLAY_CONFIG_COOKIE, DEFAULT_DISPLAY_CONFIG, {
+    parse: JSON.parse,
+    stringify: JSON.stringify,
+  });
 
   // Handle filter changes
   const handleFilterChange = useCallback(

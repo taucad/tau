@@ -12,7 +12,7 @@ import { ChatParameters } from '@/routes/builds_.$id/chat-parameters';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useModels } from '@/hooks/use-models';
-import { ChatCode } from './chat-code';
+import { ChatEditor } from './chat-editor';
 import { useCookie } from '@/utils/cookies';
 import { MessageRole, MessageStatus } from '@/types/chat';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -31,7 +31,7 @@ export const CHAT_RESIZE_COOKIE_NAME_MAIN = 'tau-chat-main-resize';
 export const CHAT_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 export const CHAT_VIEW_MODE_COOKIE_NAME = 'tau-chat-view-mode';
 export const CHAT_RESIZE_VIEWER_COOKIE_NAME = 'tau-chat-resize-viewer';
-export const CHAT_RESIZE_CODE_COOKIE_NAME = 'tau-chat-resize-code';
+export const CHAT_RESIZE_CODE_COOKIE_NAME = 'tau-chat-resize-editor';
 export const CHAT_TAB_COOKIE_NAME = 'tau-chat-tab';
 export const CONSOLE_OPEN_COOKIE_NAME = 'tau-console-open';
 type ViewMode = 'tabs' | 'split';
@@ -98,9 +98,9 @@ const tabs = [
     keyCombination: openPreviewKeyCombination,
   },
   {
-    value: 'code',
+    value: 'editor',
     icon: Code,
-    label: 'Code',
+    label: 'Editor',
     keyCombination: openCodeKeyCombination,
   },
   {
@@ -336,13 +336,13 @@ export const ChatInterface = () => {
           {viewMode === 'tabs' ? (
             <Tabs
               defaultValue={chatTab}
-              className={cn('h-full w-full flex-1', chatTab === 'code' && 'dark:bg-[rgb(30,_30,_30)]')}
+              className={cn('h-full w-full flex-1', chatTab === 'editor' && 'dark:bg-[rgb(30,_30,_30)]')}
               onValueChange={(value) => {
                 setChatTab(value as ChatTabs);
               }}
             >
               <TabsList
-                defaultValue="code"
+                defaultValue="editor"
                 className={cn(
                   '[&>*]:data-[state=active]:bg-accent [&>*]:border-[1px] [&>*]:border-border [&>*]:hover:bg-accent/70 bg-transparent ml-2 mr-auto w-full flex justify-start my-1.5 gap-2 z-30 p-0',
                   !isChatOpen && 'ml-13 md:ml-12',
@@ -364,8 +364,8 @@ export const ChatInterface = () => {
                 <ChatViewer />
               </TabsContent>
               {/* subtract 6rem for the chat history and chat input as they don't take the full height */}
-              <TabsContent value="code" className="h-[calc(100vh-6rem)] mt-0 flex flex-1 w-full">
-                <ChatCode />
+              <TabsContent value="editor" className="h-[calc(100vh-6rem)] mt-0 flex flex-1 w-full">
+                <ChatEditor />
               </TabsContent>
               <TabsContent value="console" className="h-[calc(100vh-6rem)] mt-0 flex flex-1 w-full">
                 <ChatConsole data-view="tabs" className="pt-0" />
@@ -382,16 +382,16 @@ export const ChatInterface = () => {
                 <ChatViewer />
               </ResizablePanel>
               <ResizableHandle />
-              <ResizablePanel order={2} defaultSize={codeSize[1]} minSize={30} id="chat-code-container">
+              <ResizablePanel order={2} defaultSize={codeSize[1]} minSize={30} id="chat-editor-container">
                 <ResizablePanelGroup
                   direction="vertical"
                   autoSaveId={CHAT_RESIZE_CODE_COOKIE_NAME}
                   onLayout={(sizes) => setConsoleSize(sizes as [number, number])}
                 >
-                  <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-code">
+                  <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-editor">
                     <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-12 gap-1.5"></div>
                     <div className="pt-14 overflow-y-scroll dark:bg-[rgb(30,_30,_30)] w-full h-full">
-                      <ChatCode />
+                      <ChatEditor />
                     </div>
                   </ResizablePanel>
                   <ResizableHandle />

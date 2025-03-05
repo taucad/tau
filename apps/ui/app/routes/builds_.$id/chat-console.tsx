@@ -360,14 +360,12 @@ export const ChatConsole = ({
                 {displayConfig.showTimestamp && (
                   <span className="opacity-60 shrink-0">[{formatTimestamp(log.timestamp)}]</span>
                 )}
-                {displayConfig.showComponent && <ComponentBadge origin={log.origin} />}
                 {displayConfig.showVerbosity && <VerbosityBadge level={log.level} />}
+                {displayConfig.showComponent && <ComponentBadge origin={log.origin} />}
                 <span className="mr-auto">{log.message}</span>
               </div>
-              {log.data && displayConfig.showData && (
-                <div className="block opacity-80 overflow-x-auto">
-                  {typeof log.data === 'object' ? JSON.stringify(log.data, undefined, 2) : log.data}
-                </div>
+              {log.data !== undefined && displayConfig.showData && (
+                <div className="block opacity-80 overflow-x-auto">{JSON.stringify(log.data, undefined, 2)}</div>
               )}
             </pre>
           ))

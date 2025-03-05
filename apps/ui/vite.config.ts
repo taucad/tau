@@ -61,6 +61,7 @@ export default defineConfig({
   },
   build: {
     assetsInlineLimit: (file) => {
+      // Don't inline SVGs
       return !file.endsWith('.svg');
     },
   },

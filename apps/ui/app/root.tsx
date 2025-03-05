@@ -76,7 +76,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // `themeAction` is the action name that's used to change the theme in the session storage.
 export default function AppWithProviders({ error }: { error?: ReactNode }) {
   const data = useLoaderData<typeof loader>();
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: { networkMode: 'offlineFirst' },
+          mutations: { networkMode: 'offlineFirst' },
+        },
+      }),
+  );
 
   // Setup the service worker
   useServiceWorker();

@@ -48,13 +48,12 @@ export const ChatEditor = () => {
     const errors = monaco?.editor.getModelMarkers({});
     if (errors?.length) {
       for (const error of errors) {
-        const lineInfo = `Line ${error.startLineNumber.toString().padEnd(4)}Col ${error.startColumn.toString().padEnd(3)}`;
-        const codeInfo = `ts(${error.code})`;
+        const lineInfo = `${error.startLineNumber.toString().padStart(2)}:${error.startColumn.toString().padEnd(2)}`;
 
         if (error.severity === 1) {
-          log.warn(`${codeInfo}: ${lineInfo}`, { data: error.message });
+          log.warn(`${lineInfo}: ${error.message}`);
         } else {
-          log.error(`${codeInfo}: ${lineInfo}`, { data: error.message });
+          log.error(`${lineInfo}: ${error.message}`);
         }
       }
     }

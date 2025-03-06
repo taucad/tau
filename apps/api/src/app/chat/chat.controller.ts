@@ -122,6 +122,11 @@ export class ChatController {
 
     return new Observable((observer) => {
       const id = randomUUID();
+
+      // Keep thinking state in Observable scope (per-request)
+      let thinkingBuffer = '';
+      let isThinking = false;
+
       (async () => {
         for await (const streamEvent of eventStream) {
           switch (streamEvent.event) {
@@ -132,7 +137,13 @@ export class ChatController {
                 let type: 'text' | 'thinking' = 'text';
 
                 if (typeof streamedContent === 'string') {
-                  content = streamedContent;
+                  // Process string content to detect thinking tags
+                  const processedContent = this.processThinkingTags(streamedContent, thinkingBuffer, isThinking);
+                  content = processedContent.content;
+                  type = processedContent.type;
+                  // Update state after processing
+                  thinkingBuffer = processedContent.buffer;
+                  isThinking = processedContent.isThinking;
                 } else {
                   // Handle anthropic streaming
                   if (streamedContent.length > 0) {
@@ -211,5 +222,118 @@ export class ChatController {
         observer.error(error);
       });
     });
+  }
+
+  /**
+   * Process streaming content to detect <think> and </think> tags.
+   * @param chunk Current text chunk from the stream
+   * @param buffer Current buffer state
+   * @param isThinking Current thinking mode state
+   * @returns Processed content, type, and updated state
+   */
+  private processThinkingTags(
+    chunk: string,
+    buffer: string,
+    isThinking: boolean,
+  ): {
+    content: string;
+    type: 'text' | 'thinking';
+    buffer: string;
+    isThinking: boolean;
+  } {
+    // Add the current chunk to the buffer
+    let updatedBuffer = buffer + chunk;
+
+    // Check for opening and closing tags
+    const openTagIndex = updatedBuffer.indexOf('<think>');
+    const closeTagIndex = updatedBuffer.indexOf('</think>');
+
+    let resultContent = '';
+    let contentType: 'text' | 'thinking' = isThinking ? 'thinking' : 'text';
+
+    // Process the buffer based on tag positions
+    if (openTagIndex !== -1 && closeTagIndex !== -1) {
+      // Both tags are present in the buffer
+      if (openTagIndex < closeTagIndex) {
+        // Normal case: <think>...</think>
+        if (openTagIndex > 0) {
+          // Text before the opening tag
+          resultContent = updatedBuffer.slice(0, openTagIndex);
+          contentType = 'text';
+        } else {
+          // Extract content between tags
+          resultContent = updatedBuffer.slice(openTagIndex + 7, closeTagIndex);
+          contentType = 'thinking';
+        }
+
+        // Update buffer to content after the closing tag
+        updatedBuffer = updatedBuffer.slice(closeTagIndex + 8);
+        isThinking = false;
+
+        // If there's remaining content, recursively process it
+        if (updatedBuffer.length > 0) {
+          const nextProcess = this.processThinkingTags('', updatedBuffer, isThinking);
+          if (nextProcess.content) {
+            // If the next chunk has content with a different type, we'll send separate chunks
+            return {
+              content: resultContent,
+              type: contentType,
+              buffer: nextProcess.buffer,
+              isThinking: nextProcess.isThinking,
+            };
+          }
+          // Update with the recursive call results
+          updatedBuffer = nextProcess.buffer;
+          isThinking = nextProcess.isThinking;
+        }
+      }
+    } else if (openTagIndex !== -1) {
+      // Only opening tag found
+      if (openTagIndex > 0) {
+        // Return content before the tag
+        resultContent = updatedBuffer.slice(0, openTagIndex);
+        updatedBuffer = updatedBuffer.slice(openTagIndex);
+        contentType = 'text';
+      } else {
+        // We're entering thinking mode
+        isThinking = true;
+        resultContent = updatedBuffer.slice(7); // Skip "<think>"
+        updatedBuffer = '';
+        contentType = 'thinking';
+      }
+    } else if (closeTagIndex === -1) {
+      // No tags found, return current chunk with current mode
+      resultContent = updatedBuffer;
+      updatedBuffer = '';
+    } else {
+      // Only closing tag found
+      resultContent = updatedBuffer.slice(0, closeTagIndex);
+      updatedBuffer = updatedBuffer.slice(closeTagIndex + 8);
+      isThinking = false;
+      contentType = 'thinking';
+
+      // If there's remaining content, process it
+      if (updatedBuffer.length > 0) {
+        const nextProcess = this.processThinkingTags('', updatedBuffer, isThinking);
+        if (nextProcess.content) {
+          return {
+            content: resultContent,
+            type: contentType,
+            buffer: nextProcess.buffer,
+            isThinking: nextProcess.isThinking,
+          };
+        }
+        // Update with the recursive call results
+        updatedBuffer = nextProcess.buffer;
+        isThinking = nextProcess.isThinking;
+      }
+    }
+
+    return {
+      content: resultContent,
+      type: contentType,
+      buffer: updatedBuffer,
+      isThinking: isThinking,
+    };
   }
 }

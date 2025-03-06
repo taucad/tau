@@ -124,8 +124,6 @@ export class ChatController {
       const id = randomUUID();
       (async () => {
         for await (const streamEvent of eventStream) {
-          console.log(streamEvent.event);
-          console.log(streamEvent.data);
           switch (streamEvent.event) {
             case ChatEvent.OnChatModelStream: {
               if (streamEvent.data.chunk.content) {

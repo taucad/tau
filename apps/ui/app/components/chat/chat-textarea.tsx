@@ -104,18 +104,20 @@ export function ChatTextarea({ onSubmit, models, autoFocus = true }: ChatTextare
             <span className="text-xs flex items-center justify-between w-full">
               <div className="flex items-center gap-2">
                 <SvgIcon id={item.provider as ModelProvider} className="size-4" />
-                <span className="font-mono">{item.model}</span>
+                <span className="font-mono">{item.name}</span>
               </div>
-              <Badge variant="outline" className="bg-background">
-                {item.details.parameterSize}
-              </Badge>
+              {item.details.parameterSize && (
+                <Badge variant="outline" className="bg-background">
+                  {item.details.parameterSize}
+                </Badge>
+              )}
             </span>
           )}
           renderButtonContents={(item) => (
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="flex flex-row items-center gap-2 group-data-[state=open]:text-primary max-w-24 @md:max-w-fit shrink-0">
-                  <span className="text-xs truncate hidden @xs:block">{item.model}</span>
+                  <span className="text-xs truncate hidden @xs:block">{item.name}</span>
                   <span className="relative flex size-4 items-center justify-center">
                     <ChevronDown className="scale-0 @xs:scale-100 absolute group-hover:scale-0 transition-transform duration-200 ease-in-out" />
                     <CircuitBoard className="absolute scale-100 @xs:scale-0 group-hover:scale-100 transition-transform duration-200 ease-in-out" />
@@ -125,18 +127,18 @@ export function ChatTextarea({ onSubmit, models, autoFocus = true }: ChatTextare
               <TooltipContent>
                 <p>
                   <span>Select model{` `}</span>
-                  <span>({item.model})</span>
+                  <span>({item.name})</span>
                 </p>
               </TooltipContent>
             </Tooltip>
           )}
-          getValue={(item) => item.model}
+          getValue={(item) => item.id}
           onSelect={(model) => {
             setSelectedModel(model);
             focusInput();
           }}
           placeholder="Select a model"
-          defaultValue={models.find((model) => model.model === selectedModel)}
+          defaultValue={models.find((model) => model.id === selectedModel)}
         />
         <Tooltip>
           <TooltipTrigger asChild>

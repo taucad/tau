@@ -6,14 +6,6 @@ import { useState, useCallback } from 'react';
 const DEFAULT_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 /* eslint-disable unicorn/no-document-cookie */
-export const extractCookie = (cookie: string | null, key: string, defaultValue = ''): string => {
-  const cookieString = cookie?.split('; ').find((item) => item.startsWith(key));
-  if (!cookieString) {
-    return defaultValue;
-  }
-  return cookieString.split('=')[1];
-};
-
 export const setCookie = (name: string, value: string, maxAge: number) => {
   document.cookie = `${name}=${value}; path=/; max-age=${maxAge}`;
 };
@@ -47,7 +39,7 @@ export const useCookie = <T>(
 
   // Get the latest cookie value from route data on each render
   const data = useRouteLoaderData<typeof loader>('root');
-  const extractedCookie = data?.cookies[name];
+  const extractedCookie = globalThis.document === undefined ? data?.cookies[name] : getCookie(document.cookie, name);
   const cookieValue = extractedCookie ? parser(extractedCookie) : defaultValue;
 
   // Use the cookie value directly from route data instead of maintaining separate state

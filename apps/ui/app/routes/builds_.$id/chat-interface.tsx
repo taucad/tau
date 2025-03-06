@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback } from 'react';
 import { Eye, Code, Terminal, ArrowDown, MessageCircle, Settings2, LayoutGrid, Rows } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useChat } from '@/contexts/use-chat';
@@ -117,14 +117,6 @@ export const ChatInterface = () => {
   const { sendMessage, messages, editMessage } = useChat();
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
-  const hasScrolledToBottom = useRef(false);
-
-  useEffect(() => {
-    if (messages.length > 0 && !hasScrolledToBottom.current) {
-      scrollTo();
-      hasScrolledToBottom.current = true;
-    }
-  }, [scrollTo, messages]);
 
   const [isChatOpen, setIsChatOpen] = useCookie(CHAT_HISTORY_OPEN_COOKIE_NAME, true, {
     parse: (value) => value === 'true',
@@ -293,21 +285,19 @@ export const ChatInterface = () => {
                 />
               ))}
             </div>
-            <div className="sticky bottom-4 w-full flex justify-center">
-              <Button
-                size="icon"
-                variant="outline"
-                className={cn(
-                  'flex justify-center rounded-full',
-                  isScrolledTo && 'opacity-0 select-none pointer-events-none',
-                  !isScrolledTo && 'animate-bounce-subtle',
-                )}
-                tabIndex={isScrolledTo ? -1 : 0}
-                onClick={scrollTo}
-              >
-                <ArrowDown className="size-4" />
-              </Button>
-            </div>
+            <Button
+              size="icon"
+              variant="outline"
+              className={cn(
+                'sticky flex justify-center bottom-4 left-1/2 -translate-x-1/2 rounded-full',
+                isScrolledTo && 'opacity-0 select-none pointer-events-none',
+                !isScrolledTo && 'animate-bounce-subtle',
+              )}
+              tabIndex={isScrolledTo ? -1 : 0}
+              onClick={scrollTo}
+            >
+              <ArrowDown className="size-4" />
+            </Button>
             <div ref={chatEndReference} className="mb-px" />
           </ResizablePanel>
           <ResizableHandle />

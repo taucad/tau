@@ -34,7 +34,24 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
   const [content, setContent] = useState(message.content);
   const [activeSources, setActiveSources] = useState<SourceOrigin[]>(['web']);
   const [isEditing, setIsEditing] = useState(false);
+  const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
+  const [previousContentLength, setPreviousContentLength] = useState(message.content.length);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const textareaReference = useRef<HTMLTextAreaElement | null>(null);
+  const thinkingContentReference = useRef<HTMLDivElement>(null);
+
+  // Track content length changes to trigger animation
+  useEffect(() => {
+    // If content was empty and now has content, trigger transition animation
+    if (previousContentLength === 0 && message.content.length > 0) {
+      setIsTransitioning(true);
+      const timer = setTimeout(() => {
+        setIsTransitioning(false);
+      }, 300); // Match this to the transition duration
+      return () => clearTimeout(timer);
+    }
+    setPreviousContentLength(message.content.length);
+  }, [message.content.length, previousContentLength]);
 
   useEffect(() => {
     if (isEditing && textareaReference.current) {
@@ -67,6 +84,11 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
   const relevantSources = message.toolCalls
     ?.filter((toolCall) => activeSources.includes(toolCall.origin))
     .flatMap((toolCall) => toolCall.output.map((source) => ({ ...source, origin: toolCall.origin })));
+
+  // Toggle thinking section with animation
+  const toggleThinking = () => {
+    setIsThinkingExpanded(!isThinkingExpanded);
+  };
 
   return (
     <article className={cn('group flex flex-row items-start', isUser && 'space-x-reverse space-x-2 flex-row-reverse')}>
@@ -234,6 +256,60 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
           </>
         )}
         <div className={cn(isUser ? 'bg-neutral/20 rounded-xl' : 'pt-[6px]')}>
+          {/* Thinking content section with animation */}
+          {!isUser && message.thinking && (
+            <div className="mb-2 overflow-hidden">
+              {/* Show the collapsible button when message has content */}
+              {message.content.length > 0 && (
+                <div
+                  className={cn(
+                    'transition-all duration-300 ease-out',
+                    isTransitioning && 'translate-y-0 opacity-100 animate-in fade-in slide-in-from-bottom-2',
+                  )}
+                >
+                  <button
+                    onClick={toggleThinking}
+                    className="flex items-center text-foreground/60 hover:text-foreground/80 transition-colors text-sm font-medium"
+                  >
+                    <ChevronRight
+                      className={cn(
+                        'size-4 mr-1 transition-transform duration-300 ease-in-out',
+                        isThinkingExpanded && 'rotate-90',
+                      )}
+                    />
+                    Thought Process
+                  </button>
+                </div>
+              )}
+
+              {/* Show "Thinking..." label when no content */}
+              {message.content.length === 0 && (
+                <div
+                  className={cn(
+                    'text-foreground/60 font-medium text-sm mb-2 transition-all duration-300 ease-out',
+                    isTransitioning && 'opacity-0 translate-y-2',
+                  )}
+                >
+                  Thinking...
+                </div>
+              )}
+
+              {/* Always render thinking content, but conditionally show it */}
+              <div
+                ref={thinkingContentReference}
+                className={cn(
+                  'pl-5 border-l border-foreground/20 text-foreground/60 text-sm italic whitespace-pre-wrap',
+                  'transition-all duration-300 ease-in-out origin-top',
+                  message.content.length > 0 && !isThinkingExpanded
+                    ? 'max-h-0 opacity-0 scale-y-95 transform'
+                    : 'max-h-[2000px] opacity-100 scale-y-100 transform mt-2',
+                )}
+              >
+                {message.thinking}
+              </div>
+            </div>
+          )}
+
           <When condition={isUser && isEditing}>
             <Textarea
               ref={textareaReference}

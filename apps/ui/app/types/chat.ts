@@ -21,6 +21,7 @@ export interface Message {
   role: MessageRole;
   model: string;
   content: string;
+  thinking?: string;
   status: MessageStatus;
   metadata?: {
     systemHints?: string[];

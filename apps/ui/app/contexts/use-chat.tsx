@@ -20,6 +20,7 @@ export enum ChatEvent {
 type MessageEventSchema = {
   timestamp: number;
   id: string;
+  type?: 'text' | 'thinking';
   content:
     | string
     | {
@@ -42,10 +43,19 @@ interface ChatState {
 type ChatAction =
   | { type: 'SET_MESSAGES'; payload: Message[] }
   | { type: 'ADD_MESSAGE'; payload: Message }
-  | { type: 'UPDATE_MESSAGE'; payload: { messageId: string; content?: string; status?: MessageStatus } }
+  | {
+      type: 'UPDATE_MESSAGE';
+      payload: { messageId: string; content?: string; thinking?: string; status?: MessageStatus };
+    }
   | {
       type: 'EDIT_MESSAGE';
-      payload: { messageId: string; content: string; toolCalls?: Message['toolCalls']; status?: MessageStatus };
+      payload: {
+        messageId: string;
+        content: string;
+        thinking?: string;
+        toolCalls?: Message['toolCalls'];
+        status?: MessageStatus;
+      };
     }
   | { type: 'SET_STATUS'; payload: string }
   | { type: 'SET_ACTIVE_STREAM'; payload: string | undefined }
@@ -71,23 +81,35 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
     }
     case 'UPDATE_MESSAGE': {
-      const { messageId, content, status } = action.payload;
+      const { messageId, content, thinking, status } = action.payload;
       return {
         ...state,
         messages: state.messages.map((message) =>
           message.id === messageId
-            ? { ...message, content: message.content + (content ?? ''), status: status ?? message.status }
+            ? {
+                ...message,
+                content: content === undefined ? message.content : message.content + content,
+                thinking:
+                  thinking === undefined ? message.thinking : message.thinking ? message.thinking + thinking : thinking,
+                status: status ?? message.status,
+              }
             : message,
         ),
       };
     }
     case 'EDIT_MESSAGE': {
-      const { messageId, content, toolCalls, status } = action.payload;
+      const { messageId, content, thinking, toolCalls, status } = action.payload;
       return {
         ...state,
         messages: state.messages.map((message) =>
           message.id === messageId
-            ? { ...message, content, toolCalls: toolCalls ?? message.toolCalls, status: status ?? message.status }
+            ? {
+                ...message,
+                content,
+                thinking: thinking ?? message.thinking,
+                toolCalls: toolCalls ?? message.toolCalls,
+                status: status ?? message.status,
+              }
             : message,
         ),
       };
@@ -185,16 +207,31 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
           const lastMessage = messagesReference.current.at(-1);
           if (!lastMessage || lastMessage.role !== MessageRole.Assistant) break;
 
-          // Add new content to the buffer
-          contentBuffer.current += event.content;
+          // Handle content based on type (text or thinking)
+          const type = event.type;
 
-          // Only update the message if we have a complete word or punctuation
-          if (/[\s!,.:;?]/.test(event.content)) {
+          if (type === 'text') {
+            // Add new content to the buffer
+            contentBuffer.current += event.content;
+
+            // Only update the message if we have a complete word or punctuation
+            if (/[\s!,.:;?]/.test(event.content)) {
+              dispatch({
+                type: 'EDIT_MESSAGE',
+                payload: {
+                  messageId: lastMessage.id,
+                  content: contentBuffer.current,
+                  status: MessageStatus.Pending,
+                },
+              });
+            }
+          } else if (type === 'thinking') {
+            // For thinking type, we update the thinking attribute
             dispatch({
-              type: 'EDIT_MESSAGE',
+              type: 'UPDATE_MESSAGE',
               payload: {
                 messageId: lastMessage.id,
-                content: contentBuffer.current,
+                thinking: event.content,
                 status: MessageStatus.Pending,
               },
             });
@@ -389,21 +426,24 @@ export function createMessage({
   content,
   role,
   model,
+  thinking,
   status = MessageStatus.Success,
   metadata = {},
 }: {
   content: string;
   role: MessageRole;
   model: string;
+  thinking?: string;
   status?: MessageStatus;
   metadata?: Record<string, unknown>;
 }): Message {
   return {
     id: generatePrefixedId(PREFIX_TYPES.MESSAGE),
-    content,
     role,
-    model,
+    content,
+    thinking,
     status,
+    model,
     metadata,
     toolCalls: [],
     createdAt: Date.now(),

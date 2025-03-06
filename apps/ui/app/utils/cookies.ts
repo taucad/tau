@@ -39,6 +39,9 @@ export const useCookie = <T>(
 
   // Get the latest cookie value from route data on each render
   const data = useRouteLoaderData<typeof loader>('root');
+
+  // If we're on the server, use the cookie from the route data
+  // If we're on the client, use the cookie from the document
   const extractedCookie = globalThis.document === undefined ? data?.cookies[name] : getCookie(document.cookie, name);
   const cookieValue = extractedCookie ? parser(extractedCookie) : defaultValue;
 

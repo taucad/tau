@@ -214,17 +214,14 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
             // Add new content to the buffer
             contentBuffer.current += event.content;
 
-            // Only update the message if we have a complete word or punctuation
-            if (/[\s!,.:;?]/.test(event.content)) {
-              dispatch({
-                type: 'EDIT_MESSAGE',
-                payload: {
-                  messageId: lastMessage.id,
-                  content: contentBuffer.current,
-                  status: MessageStatus.Pending,
-                },
-              });
-            }
+            dispatch({
+              type: 'EDIT_MESSAGE',
+              payload: {
+                messageId: lastMessage.id,
+                content: contentBuffer.current,
+                status: MessageStatus.Pending,
+              },
+            });
           } else if (type === 'thinking') {
             // For thinking type, we update the thinking attribute
             dispatch({

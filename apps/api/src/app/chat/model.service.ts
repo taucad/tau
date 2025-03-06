@@ -3,14 +3,84 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Model, ModelSupport } from './model.schema';
 import { ChatOllama, ChatOllamaInput } from '@langchain/ollama';
 import { ChatOpenAI, ChatOpenAIFields } from '@langchain/openai';
-import { ChatAnthropic } from '@langchain/anthropic';
-import type { ChatAnthropicCallOptions } from '@langchain/anthropic';
+import { ChatAnthropic, type ChatAnthropicCallOptions } from '@langchain/anthropic';
 import ollama from 'ollama';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
 const MODELS = {
+  anthropic: {
+    'claude-3.7-sonnet-thinking': {
+      id: 'anthropic-claude-3.7-sonnet-thinking',
+      name: 'Claude 3.7 Sonnet (Thinking)',
+      provider: 'anthropic',
+      model: 'claude-3-7-sonnet-20250219',
+      details: {
+        family: 'Claude',
+        families: ['Claude'],
+        contextWindow: 200_000,
+        // Extended thinking mode supports up to 64000 tokens
+        maxTokens: 64_000,
+      },
+      configuration: {
+        streaming: true,
+        thinking: {
+          type: 'enabled',
+          budget_tokens: 2000,
+        },
+      },
+    },
+    'claude-3.7-sonnet': {
+      id: 'anthropic-claude-3.7-sonnet',
+      name: 'Claude 3.7 Sonnet',
+      provider: 'anthropic',
+      model: 'claude-3-7-sonnet-20250219',
+      details: {
+        family: 'Claude',
+        families: ['Claude'],
+        contextWindow: 200_000,
+        maxTokens: 8192,
+      },
+      configuration: {
+        streaming: true,
+        temperature: 0,
+      },
+    },
+    'claude-3.5-sonnet': {
+      id: 'anthropic-claude-3.5-sonnet',
+      name: 'Claude 3.5 Sonnet',
+      provider: 'anthropic',
+      model: 'claude-3-5-sonnet-20241022',
+      details: {
+        family: 'Claude',
+        families: ['Claude'],
+        contextWindow: 200_000,
+        maxTokens: 8192,
+      },
+      configuration: {
+        streaming: true,
+        temperature: 0,
+      },
+    },
+    'claude-3-5-haiku': {
+      id: 'anthropic-claude-3-5-haiku',
+      name: 'Claude 3.5 Haiku',
+      provider: 'anthropic',
+      model: 'claude-3-5-haiku-20241022',
+      details: {
+        family: 'Claude',
+        families: ['Claude'],
+        contextWindow: 200_000,
+        maxTokens: 8192,
+      },
+      configuration: {
+        streaming: true,
+        temperature: 0,
+      },
+    },
+  },
   sambanova: {
-    'llama3.2': {
+    'llama3.3': {
+      id: 'sambanova-llama3.3',
       name: 'Llama 3.3',
       provider: 'sambanova',
       model: 'Meta-Llama-3.3-70B-Instruct',
@@ -29,28 +99,29 @@ const MODELS = {
   },
   openai: {
     'gpt-o3-mini': {
-      name: 'GPT-O3 Mini',
+      id: 'openai-gpt-o3-mini',
+      name: 'GPT-o3 Mini',
       provider: 'openai',
       model: 'o3-mini',
       details: {
         family: 'GPT-O3',
         families: ['GPT-O3'],
-        parameterSize: '1.5B',
         contextWindow: 200_000,
         maxTokens: 100_000,
       },
       configuration: {
         streaming: true,
+        temperature: 0,
       },
     },
     'gpt-4o-mini': {
+      id: 'openai-gpt-4o-mini',
       name: 'GPT-4o Mini',
       provider: 'openai',
       model: 'gpt-4o-mini',
       details: {
         family: 'GPT-4o',
         families: ['GPT-4o'],
-        parameterSize: '1.5B',
         contextWindow: 128_000,
         maxTokens: 16_384,
       },
@@ -60,97 +131,15 @@ const MODELS = {
       },
     },
     'gpt-4o': {
+      id: 'openai-gpt-4o',
       name: 'GPT-4o',
       provider: 'openai',
       model: 'gpt-4o',
       details: {
         family: 'GPT-4o',
         families: ['GPT-4o'],
-        parameterSize: '1.5B',
         contextWindow: 128_000,
-        maxTokens: 16_384,
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-    },
-  },
-  anthropic: {
-    'claude-3-5-sonnet': {
-      name: 'Claude 3.5 Sonnet',
-      provider: 'anthropic',
-      model: 'claude-3-5-sonnet-20241022',
-      details: {
-        family: 'Claude',
-        families: ['Claude'],
-        parameterSize: '150B',
-        contextWindow: 200_000,
-        maxTokens: 100_000,
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-    },
-    'claude-3-5-haiku': {
-      name: 'Claude 3.5 Haiku',
-      provider: 'anthropic',
-      model: 'claude-3-5-haiku-20241022',
-      details: {
-        family: 'Claude',
-        families: ['Claude'],
-        parameterSize: '8B',
-        contextWindow: 200_000,
-        maxTokens: 100_000,
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-    },
-    'claude-3-opus': {
-      name: 'Claude 3 Opus',
-      provider: 'anthropic',
-      model: 'claude-3-opus-20240229',
-      details: {
-        family: 'Claude',
-        families: ['Claude'],
-        parameterSize: '200B',
-        contextWindow: 200_000,
-        maxTokens: 100_000,
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-    },
-    'claude-3-sonnet': {
-      name: 'Claude 3 Sonnet',
-      provider: 'anthropic',
-      model: 'claude-3-sonnet-20240229',
-      details: {
-        family: 'Claude',
-        families: ['Claude'],
-        parameterSize: '150B',
-        contextWindow: 200_000,
-        maxTokens: 100_000,
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-    },
-    'claude-3-haiku': {
-      name: 'Claude 3 Haiku',
-      provider: 'anthropic',
-      model: 'claude-3-haiku-20240307',
-      details: {
-        family: 'Claude',
-        families: ['Claude'],
-        parameterSize: '8B',
-        contextWindow: 200_000,
-        maxTokens: 100_000,
+        maxTokens: 4096,
       },
       configuration: {
         streaming: true,
@@ -216,10 +205,10 @@ export class ModelService implements OnModuleInit {
     return combinedModels;
   }
 
-  public buildModel(modelName: string): { model: BaseChatModel; support?: ModelSupport } {
-    const modelConfig = this.models.find((model) => model.model === modelName);
+  public buildModel(modelId: string): { model: BaseChatModel; support?: ModelSupport } {
+    const modelConfig = this.models.find((model) => model.id === modelId);
 
-    if (!modelConfig) throw new Error(`Could not find model ${modelName}`);
+    if (!modelConfig) throw new Error(`Could not find model ${modelId}`);
 
     const provider = PROVIDERS[modelConfig.provider as Provider];
 
@@ -239,6 +228,7 @@ export class ModelService implements OnModuleInit {
     try {
       const ollamaModels = await ollama.list();
       const ollamaModelList: Model[] = ollamaModels.models.map((model) => ({
+        id: model.name,
         name: model.name,
         model: model.name,
         modifiedAt: String(model.modified_at),

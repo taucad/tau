@@ -39,6 +39,7 @@ export class ChatController {
       data: {
         id: string;
         status: string;
+        type?: 'text' | 'thinking';
         timestamp: number;
         content?: string | { input?: any; output?: any; description?: string };
       };
@@ -123,11 +124,14 @@ export class ChatController {
       const id = randomUUID();
       (async () => {
         for await (const streamEvent of eventStream) {
+          console.log(streamEvent.event);
+          console.log(streamEvent.data);
           switch (streamEvent.event) {
             case ChatEvent.OnChatModelStream: {
               if (streamEvent.data.chunk.content) {
                 const streamedContent = streamEvent.data.chunk.content;
                 let content: string | undefined;
+                let type: 'text' | 'thinking' = 'text';
 
                 if (typeof streamedContent === 'string') {
                   content = streamedContent;
@@ -135,7 +139,12 @@ export class ChatController {
                   // Handle anthropic streaming
                   if (streamedContent.length > 0) {
                     // TODO: handle joining multiple chunks?
-                    content = streamedContent[0].text;
+                    type = streamedContent[0].type;
+                    if (type === 'text') {
+                      content = streamedContent[0].text;
+                    } else if (type === 'thinking') {
+                      content = streamedContent[0].thinking;
+                    }
                   }
                 }
 
@@ -144,6 +153,7 @@ export class ChatController {
                     data: {
                       id,
                       status: streamEvent.event,
+                      type,
                       timestamp: Date.now(),
                       content,
                     },

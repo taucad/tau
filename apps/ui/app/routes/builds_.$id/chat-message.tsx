@@ -257,7 +257,8 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
         )}
         <div className={cn(isUser ? 'bg-neutral/20 rounded-xl' : 'pt-[6px]')}>
           {/* Thinking content section with animation */}
-          {!isUser && message.thinking && (
+          {/* TODO: remove trim when backend is fixed to trim thinking tags */}
+          {!isUser && message.thinking?.trim() && (
             <div className="mb-2 overflow-hidden">
               {/* Show the collapsible button when message has content */}
               {message.content.length > 0 && (
@@ -305,7 +306,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                     : 'max-h-[2000px] opacity-100 scale-y-100 transform mt-2',
                 )}
               >
-                {message.thinking}
+                {message.thinking.trim()}
               </div>
             </div>
           )}

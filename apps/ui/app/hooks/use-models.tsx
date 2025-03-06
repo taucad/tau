@@ -4,7 +4,9 @@ import { useRouteLoaderData } from '@remix-run/react';
 import { useQuery } from '@tanstack/react-query';
 
 export type Model = {
+  id: string;
   model: string;
+  name: string;
   provider: string;
   details: {
     parameterSize: string;

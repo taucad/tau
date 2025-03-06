@@ -45,7 +45,7 @@ function useReplicadWorker() {
   const workerReference = useRef<Worker | undefined>(undefined);
   const workerInitializationId = useRef<number>(0);
 
-  const initWorker = useCallback(async () => {
+  const initWorker = useCallback(async (withExceptions = false) => {
     const initId = ++workerInitializationId.current;
     const startTime = performance.now();
     log.debug(`Initializing worker (id: ${initId})`);
@@ -55,7 +55,7 @@ function useReplicadWorker() {
       log.debug(`Using existing worker (id: ${initId}). Check took ${endTime - startTime}ms`);
 
       try {
-        // Ensure the worker is still responsive with a ready check - no timeout
+        // Ensure the worker is still responsive with a ready check
         const readyResult = await wrappedWorkerReference.current.ready();
 
         if (readyResult) {
@@ -82,7 +82,11 @@ function useReplicadWorker() {
 
     try {
       const readyStartTime = performance.now();
-      await wrappedWorkerReference.current.ready();
+
+      // Initialize with the specified exceptions mode
+      log.debug(`Initializing OpenCascade with ${withExceptions ? 'exceptions' : 'normal'} mode`);
+      await wrappedWorkerReference.current.initialize(withExceptions);
+
       const endTime = performance.now();
       log.debug(
         `New worker ready (id: ${initId}). Initialization took ${endTime - startTime}ms, ready took ${endTime - readyStartTime}ms`,
@@ -158,7 +162,18 @@ const ReplicadContext = createContext<
   | undefined
 >(undefined);
 
-export function ReplicadProvider({ children }: { children: ReactNode }) {
+/**
+ * Provider component for Replicad functionality
+ * @param children - React children
+ * @param withExceptions - Whether to initialize OpenCascade with exceptions mode (default: false)
+ */
+export function ReplicadProvider({
+  children,
+  withExceptions = false,
+}: {
+  children: ReactNode;
+  withExceptions?: boolean;
+}) {
   const [state, dispatch] = useReducer(replicadReducer, initialState);
   const { initWorker, terminateWorker } = useReplicadWorker();
   const { log } = useConsole({ defaultOrigin: { component: 'CAD' } });
@@ -183,7 +198,7 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
     }
 
     log.debug('Creating new worker initialization promise');
-    const initPromise = initWorker();
+    const initPromise = initWorker(withExceptions);
     workerInitializationPromise.current = initPromise;
 
     try {
@@ -195,7 +210,7 @@ export function ReplicadProvider({ children }: { children: ReactNode }) {
       }
       throw error;
     }
-  }, [initWorker]);
+  }, [initWorker, withExceptions]);
 
   // Memoize the evaluation function
   const evaluateCode = useCallback(

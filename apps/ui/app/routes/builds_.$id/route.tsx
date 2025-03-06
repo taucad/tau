@@ -120,7 +120,7 @@ export default function ChatRoute() {
   return (
     <LogProvider>
       <BuildProvider buildId={id}>
-        <ReplicadProvider>
+        <ReplicadProvider withExceptions>
           <ChatProvider>
             <div className="flex h-full">
               <Chat />

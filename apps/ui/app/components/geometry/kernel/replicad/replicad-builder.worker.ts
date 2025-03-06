@@ -15,6 +15,7 @@ interface OpenCascadeInstance {
   [key: string]: any;
 }
 
+// Make replicad available in the global scope
 (globalThis as any).replicad = replicad;
 
 /**
@@ -37,7 +38,7 @@ return main(replicad, __inputParams || dp)
 }
 
 async function runAsFunction(code: string, parameters: any): Promise<any> {
-  const oc = await initializeOpenCascade();
+  const oc = await OC;
   return runInContextAsOC(code, {
     oc,
     replicad,
@@ -47,7 +48,6 @@ async function runAsFunction(code: string, parameters: any): Promise<any> {
 
 export async function runAsModule(code: string, parameters: any): Promise<any> {
   const startTime = performance.now();
-  console.log('Module not in cache, building evaluator');
   const module = await buildModuleEvaluator(code);
   const buildTime = performance.now();
   console.log(`Module building took ${buildTime - startTime}ms`);
@@ -124,66 +124,57 @@ try {
   }
 };
 
-const SHAPES_MEMORY: Record<string, any> = {};
+const SHAPES_MEMORY: Record<string, { shape: any; name: string }[]> = {};
 
-const ocVersions: Record<string, any> = {
+const ocVersions: {
+  withExceptions: Promise<OpenCascadeInstance> | undefined;
+  single: Promise<OpenCascadeInstance> | undefined;
+  current: 'single' | 'withExceptions';
+} = {
   withExceptions: undefined,
   single: undefined,
   current: 'single', // Default to single for better initial performance
 };
 
-// Simplify the OC initialization promise - this approach is more direct like the original replicad
-let OC = (async () => {
-  try {
-    console.log('Initial OpenCascade initialization starting');
-    const oc = await initOpenCascadeWithExceptions();
-    console.log('Initial OpenCascade initialization complete');
-    return oc;
-  } catch (error) {
-    console.error('Initial OpenCascade initialization failed:', error);
-    throw error;
-  }
-})();
+// Initialize OC as a placeholder that will be set during initialization
+let OC: Promise<OpenCascadeInstance>;
 
 let isInitializing = false;
 
-async function initializeOpenCascade() {
+/**
+ * Initializes the OpenCascade instance with the specified mode
+ * @param withExceptions Whether to use exceptions mode
+ * @returns The initialized OpenCascade instance
+ */
+async function initializeOpenCascadeInstance(withExceptions: boolean): Promise<OpenCascadeInstance> {
   if (isInitializing) {
     console.log('Already initializing OpenCascade, returning existing promise');
+    if (!OC) {
+      throw new Error('OpenCascade initialization in progress but OC is undefined');
+    }
     return OC;
   }
 
   isInitializing = true;
-
-  // Track performance
   const startTime = performance.now();
 
   try {
-    // If OC is already resolved, return it immediately
-    const resolved = await Promise.race([
-      OC.then(() => true).catch(() => false),
-      new Promise((resolve) => setTimeout(() => resolve(false), 5)),
-    ]);
+    // Set the current version based on the parameter
+    ocVersions.current = withExceptions ? 'withExceptions' : 'single';
 
-    if (resolved) {
-      console.log('Using already initialized OpenCascade');
-      isInitializing = false;
-      return OC;
-    }
-
-    console.log('Initializing OpenCascade');
-
-    // Reset the promise based on the current version
-    if (ocVersions.current === 'single') {
-      if (!ocVersions.single) {
-        ocVersions.single = initOpenCascade();
-      }
-      OC = ocVersions.single;
-    } else {
+    // Use cached version if available
+    if (withExceptions) {
       if (!ocVersions.withExceptions) {
+        console.log('Initializing OpenCascade with exceptions');
         ocVersions.withExceptions = initOpenCascadeWithExceptions();
       }
       OC = ocVersions.withExceptions;
+    } else {
+      if (!ocVersions.single) {
+        console.log('Initializing OpenCascade without exceptions');
+        ocVersions.single = initOpenCascade();
+      }
+      OC = ocVersions.single;
     }
 
     const result = await OC;
@@ -200,12 +191,12 @@ async function initializeOpenCascade() {
 
 function enableExceptions() {
   ocVersions.current = 'withExceptions';
-  return initializeOpenCascade();
+  return initializeOpenCascadeInstance(true);
 }
 
 function disableExceptions() {
   ocVersions.current = 'single';
-  return initializeOpenCascade();
+  return initializeOpenCascadeInstance(false);
 }
 
 async function toggleExceptions() {
@@ -240,26 +231,6 @@ const buildShapesFromCode = async (code: string, parameters: any): Promise<any> 
   console.log('building shapes from code');
 
   try {
-    // Use optimized OC initialization with caching benefits
-    let oc: OpenCascadeInstance;
-    try {
-      // Try getting OC from cache first without full initialization call
-      oc = await OC;
-    } catch {
-      console.log('Cached OC not available, initializing from scratch');
-      oc = await initializeOpenCascade();
-    }
-
-    const ocEndTime = performance.now();
-    console.log(`OpenCascade initialization took ${ocEndTime - startTime}ms`);
-
-    // Set replicad OC once we have it
-    if (!replicadHasOC) {
-      console.log('Setting OC in replicad');
-      replicad.setOC(oc as any); // Cast to any to avoid TypeScript errors
-      replicadHasOC = true;
-    }
-
     // Ensure font is loaded
     // if (!replicad.getFont()) {
     //   await replicad.loadFont('/fonts/HKGrotesk-Regular.ttf');
@@ -286,7 +257,7 @@ const buildShapesFromCode = async (code: string, parameters: any): Promise<any> 
     } catch (error) {
       const endTime = performance.now();
       console.log(`Error occurred after ${endTime - startTime}ms`);
-      return formatException(oc, error);
+      return formatException(OC, error);
     }
 
     // Process shapes efficiently
@@ -314,11 +285,9 @@ const buildShapesFromCode = async (code: string, parameters: any): Promise<any> 
   }
 };
 
-const buildBlob = (
-  shape: any,
-  fileType: string,
-  meshConfig: { tolerance: number; angularTolerance: number } = { tolerance: 0.01, angularTolerance: 30 },
-): Blob => {
+const DEFAULT_MESH_CONFIG = { tolerance: 0.01, angularTolerance: 30 };
+
+const buildBlob = (shape: any, fileType: string, meshConfig: { tolerance: number; angularTolerance: number }): Blob => {
   if (fileType === 'stl') return shape.blobSTL(meshConfig);
   if (fileType === 'stl-binary') return shape.blobSTL({ ...meshConfig, binary: true });
   if (fileType === 'step') return shape.blobSTEP();
@@ -328,7 +297,7 @@ const buildBlob = (
 const exportShape = async (
   fileType = 'stl' as 'stl' | 'stl-binary' | 'step' | 'step-assembly',
   shapeId = 'defaultShape',
-  meshConfig?: { tolerance: number; angularTolerance: number },
+  meshConfig = DEFAULT_MESH_CONFIG,
 ): Promise<{ blob: Blob; name: string }[]> => {
   if (!SHAPES_MEMORY[shapeId]) throw new Error(`Shape ${shapeId} not computed yet`);
   if (fileType === 'step-assembly') {
@@ -345,9 +314,9 @@ const exportShape = async (
   }));
 };
 
-const faceInfo = (subshapeIndex: number, faceIndex: number, shapeId = 'defaultShape'): any | null => {
+const faceInfo = (subshapeIndex: number, faceIndex: number, shapeId = 'defaultShape'): any | undefined => {
   const face = SHAPES_MEMORY[shapeId]?.[subshapeIndex]?.shape.faces[faceIndex];
-  if (!face) return null;
+  if (!face) return undefined;
   return {
     type: face.geomType,
     center: face.center.toTuple(),
@@ -355,9 +324,9 @@ const faceInfo = (subshapeIndex: number, faceIndex: number, shapeId = 'defaultSh
   };
 };
 
-const edgeInfo = (subshapeIndex: number, edgeIndex: number, shapeId = 'defaultShape'): any | null => {
+const edgeInfo = (subshapeIndex: number, edgeIndex: number, shapeId = 'defaultShape'): any | undefined => {
   const edge = SHAPES_MEMORY[shapeId]?.[subshapeIndex]?.shape.edges[edgeIndex];
-  if (!edge) return null;
+  if (!edge) return undefined;
   return {
     type: edge.geomType,
     start: edge.startPoint.toTuple(),
@@ -366,14 +335,30 @@ const edgeInfo = (subshapeIndex: number, edgeIndex: number, shapeId = 'defaultSh
   };
 };
 
+const initialize = async (withExceptions: boolean): Promise<void> => {
+  const startTime = performance.now();
+  const oc = await initializeOpenCascadeInstance(withExceptions);
+
+  const ocEndTime = performance.now();
+  console.log(`OpenCascade initialization took ${ocEndTime - startTime}ms`);
+
+  // Set replicad OC once we have it
+  if (!replicadHasOC) {
+    console.log('Setting OC in replicad');
+    replicad.setOC(oc as any); // Cast to any to avoid TypeScript errors
+    replicadHasOC = true;
+  }
+};
+
 const service = {
   ready: async (): Promise<boolean> => {
-      try {
-        await OC;
-        return true;
-      } catch (error) {
-        console.error('OpenCascade initialization error:', error);
-        return false;
+    try {
+      // Check that OC is initialized
+      await OC;
+      return true;
+    } catch (error) {
+      console.error('OpenCascade initialization error:', error);
+      return false;
     }
   },
   buildShapesFromCode,
@@ -382,8 +367,9 @@ const service = {
   exportShape,
   edgeInfo,
   faceInfo,
+  initialize,
   toggleExceptions,
-  exceptionsEnabled: (): boolean => ocVersions.current === 'withExceptions',
+  isExceptionsEnabled: (): boolean => ocVersions.current === 'withExceptions',
 };
 
 expose(service, globalThis);

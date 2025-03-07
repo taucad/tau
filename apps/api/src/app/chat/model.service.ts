@@ -111,7 +111,6 @@ const MODELS = {
       },
       configuration: {
         streaming: true,
-        temperature: 0,
       },
     },
     'gpt-4o-mini': {

@@ -255,7 +255,7 @@ export const ChatInterface = () => {
       <ResizablePanel
         order={1}
         minSize={15}
-        maxSize={30}
+        maxSize={50}
         defaultSize={chatResizeMain[0]}
         className={cn(!isChatOpen && 'hidden')}
         id="chat-history"

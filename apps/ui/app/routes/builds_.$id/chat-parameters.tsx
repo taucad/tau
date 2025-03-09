@@ -87,7 +87,7 @@ export const ChatParameters = () => {
                       <Button
                         variant="ghost"
                         size="xs"
-                        className="[&_svg]:text-muted-foreground"
+                        className="text-muted-foreground"
                         onClick={() => resetSingleParameter(key)}
                       >
                         <RefreshCcwDot />

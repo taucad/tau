@@ -1,4 +1,3 @@
-import { useColor } from '@/hooks/use-color';
 import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import React from 'react';
 
@@ -13,7 +12,6 @@ export const Controls = React.memo(
     { enableGizmo, enableDamping, enableZoom }: ControlsProperties,
     controlsReference,
   ) {
-    const color = useColor();
     return (
       <>
         <OrbitControls makeDefault ref={controlsReference} enableDamping={enableDamping} enableZoom={enableZoom} />

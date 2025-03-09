@@ -58,8 +58,8 @@ export const DEFAULT_SCENE_OPTIONS = {
     verticalOffsetRatio: -2.5,
     heightMultiplier: 1.5,
     nearPlane: 0.2,
-    minFarPlane: 5000,
-    farPlaneRadiusMultiplier: 2,
+    minFarPlane: 10_000,
+    farPlaneRadiusMultiplier: 5,
     zoomLevel: 0.75,
   },
   orthographic: {

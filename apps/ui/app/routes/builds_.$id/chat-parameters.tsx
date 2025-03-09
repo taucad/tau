@@ -62,7 +62,12 @@ export const ChatParameters = () => {
         {Object.keys(validParameters).length > 0 && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="outline" size="icon" onClick={resetAllParameters} className="mr-12 mt-2">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={resetAllParameters}
+                className="mr-12 mt-2 text-muted-foreground"
+              >
                 <RefreshCcw />
               </Button>
             </TooltipTrigger>

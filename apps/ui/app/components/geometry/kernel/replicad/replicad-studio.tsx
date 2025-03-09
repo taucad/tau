@@ -11,7 +11,7 @@ import { toast } from '@/components/ui/sonner';
 
 export function ReplicadStudio() {
   const { status, downloadSTL, mesh } = useReplicad();
-  const { updateThumbnail } = useBuild();
+  const { updateThumbnail, name } = useBuild();
   const canvasReference = useRef<ReplicadViewerReference>(null);
   const [isScreenshotReady, setIsScreenshotReady] = useState(false);
 
@@ -98,7 +98,7 @@ export function ReplicadStudio() {
           variant="outline"
           size="icon"
           getBlob={downloadPNG}
-          title="screenshot.png"
+          title={`${name}.png`}
           className="text-muted-foreground"
           tooltip={isScreenshotReady ? 'Download PNG' : 'Preparing renderer...'}
           disabled={!isScreenshotReady}

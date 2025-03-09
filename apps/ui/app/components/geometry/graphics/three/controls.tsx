@@ -1,5 +1,5 @@
 import { useColor } from '@/hooks/use-color';
-import { OrbitControls, GizmoHelper, GizmoViewcube } from '@react-three/drei';
+import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import React from 'react';
 
 type ControlsProperties = {
@@ -18,18 +18,28 @@ export const Controls = React.memo(
       <>
         <OrbitControls makeDefault ref={controlsReference} enableDamping={enableDamping} enableZoom={enableZoom} />
         {enableGizmo && (
-          <GizmoHelper
-            up={[Math.PI / 2, 0, 0]}
-            rotation={[Math.PI / 2, 0, 0]}
-            alignment="bottom-right"
-            margin={[60, 60]}
-          >
-            <GizmoViewcube
-              color={color.serialized.rgb}
-              textColor="#fff"
-              // faces={['front', 'back', 'left', 'right', 'top', 'bottom']}
-            />
-          </GizmoHelper>
+          <>
+            {/* <GizmoHelper
+              up={[Math.PI / 2, 0, 0]}
+              rotation={[Math.PI / 2, 0, 0]}
+              alignment="bottom-right"
+              margin={[60, 60]}
+            >
+              <GizmoViewcube
+                color={color.serialized.rgb}
+                textColor="#fff"
+                // faces={['front', 'back', 'left', 'right', 'top', 'bottom']}
+              />
+            </GizmoHelper> */}
+            <GizmoHelper
+              up={[Math.PI / 2, 0, 0]}
+              rotation={[Math.PI / 2, 0, 0]}
+              alignment="bottom-right"
+              margin={[60, 60]}
+            >
+              <GizmoViewport />
+            </GizmoHelper>
+          </>
         )}
       </>
     );

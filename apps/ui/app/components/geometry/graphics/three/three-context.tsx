@@ -18,14 +18,6 @@ export type CadViewerProperties = {
 
 export type ThreeContextProperties = CanvasProps & CadViewerProperties;
 
-// This is the basics to render a nice looking model user react-three-fiber
-//
-// The camera is positioned for the model we present (that cannot change size.
-// You might need to adjust this with something like the autoadjust from the
-// `Stage` component of `drei`
-//
-// Depending on your needs I would advice not using a light and relying on
-// a matcap material instead of the meshStandardMaterial used here.
 export const ThreeProvider = ({
   children,
   enableGizmo = false,

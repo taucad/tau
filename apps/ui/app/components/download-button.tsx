@@ -26,7 +26,7 @@ export interface DownloadButtonProperties extends ButtonProperties {
 }
 
 export const DownloadButton = React.forwardRef<HTMLButtonElement, DownloadButtonProperties>(
-  ({ getBlob, size, title = 'download.txt', tooltip = 'Download', ...properties }, reference) => {
+  ({ getBlob, size, title = 'download.txt', tooltip = 'Download', children, ...properties }, reference) => {
     const handleDownload = async () => {
       try {
         const newBlob = await getBlob();
@@ -63,9 +63,7 @@ export const DownloadButton = React.forwardRef<HTMLButtonElement, DownloadButton
       <Tooltip>
         <TooltipTrigger asChild>
           <Button size={size} variant="ghost" onClick={handleDownload} ref={reference} {...properties}>
-            <span>
-              <Download />
-            </span>
+            <span>{children || <Download />}</span>
             {size !== 'icon' && 'Download'}
           </Button>
         </TooltipTrigger>

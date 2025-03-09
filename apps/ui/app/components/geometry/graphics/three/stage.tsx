@@ -69,6 +69,9 @@ export const DEFAULT_SCENE_OPTIONS = {
   },
 } as const satisfies StageOptions;
 
+// The ratio of the radius change that is considered significant enough to warrant a camera update
+const SIGNIFICANT_RADIUS_CHANGE_RATIO = 0.5;
+
 type StageProperties = {
   children: React.ReactNode;
   controls: React.RefObject<any>;
@@ -82,13 +85,16 @@ export function Stage({ children, center = true, stageOptions, ...properties }: 
   const outer = React.useRef<THREE.Group>(null);
   const inner = React.useRef<THREE.Group>(null);
 
-  const [{ radius, previousRadius, top }, set] = React.useState<{
-    previousRadius: number | undefined;
-    radius: number;
+  const [{ shapeRadius, sceneRadius, top }, set] = React.useState<{
+    // The radius of the scene. Used to determine if the camera needs to be updated
+    sceneRadius: number | undefined;
+    // The radius of the shape.
+    shapeRadius: number;
+    // The top of the scene
     top: number;
   }>({
-    previousRadius: undefined,
-    radius: 0,
+    sceneRadius: undefined,
+    shapeRadius: 0,
     top: 0,
   });
 
@@ -106,6 +112,11 @@ export function Stage({ children, center = true, stageOptions, ...properties }: 
     if (outer.current) {
       outer.current.updateWorldMatrix(true, true);
     }
+
+    if (!inner.current) {
+      return;
+    }
+
     const box3 = new THREE.Box3().setFromObject(inner.current);
 
     if (center) {
@@ -123,7 +134,9 @@ export function Stage({ children, center = true, stageOptions, ...properties }: 
     const sphere = new THREE.Sphere();
     box3.getBoundingSphere(sphere);
 
-    set({ radius: sphere.radius, previousRadius: radius, top: box3.max.z });
+    set((previous) => {
+      return { shapeRadius: sphere.radius, sceneRadius: previous.sceneRadius, top: box3.max.z };
+    });
     //eslint-disable-next-line react-hooks/exhaustive-deps
   }, [children]);
 
@@ -131,37 +144,46 @@ export function Stage({ children, center = true, stageOptions, ...properties }: 
    * Rotate the camera based on the scene's bounding box.
    */
   React.useLayoutEffect(() => {
-    if (previousRadius && previousRadius !== radius) {
-      const ratio = radius / previousRadius;
-      camera.position.set(camera.position.x * ratio, camera.position.y * ratio, camera.position.z * ratio);
+    // If the scene radius is undefined, we need to initialize the camera
+    const isSignificantChange =
+      sceneRadius === undefined
+        ? true
+        : Math.abs(shapeRadius - sceneRadius) / sceneRadius > SIGNIFICANT_RADIUS_CHANGE_RATIO;
 
-      camera.far = Math.max(perspective.minFarPlane, radius * perspective.farPlaneRadiusMultiplier);
-
-      invalidate();
-      return;
-    }
-
-    if (camera.type === 'OrthographicCamera') {
-      camera.position.set(radius * orthographic.positionRatio, radius * orthographic.verticalOffsetRatio, radius);
-      camera.zoom = orthographic.zoomLevel;
-      camera.near = -Math.max(perspective.minFarPlane, radius * perspective.farPlaneRadiusMultiplier);
+    if (isSignificantChange) {
+      if (camera.type === 'OrthographicCamera') {
+        camera.position.set(
+          shapeRadius * orthographic.positionRatio,
+          shapeRadius * orthographic.verticalOffsetRatio,
+          shapeRadius,
+        );
+        camera.zoom = orthographic.zoomLevel;
+        camera.near = -Math.max(perspective.minFarPlane, shapeRadius * perspective.farPlaneRadiusMultiplier);
+      } else {
+        // Perspective camera settings
+        camera.position.set(
+          shapeRadius * perspective.sideOffsetRatio,
+          shapeRadius * perspective.verticalOffsetRatio,
+          Math.max(shapeRadius) * perspective.heightMultiplier,
+        );
+        camera.zoom = perspective.zoomLevel;
+        camera.near = perspective.nearPlane;
+        camera.far = Math.max(perspective.minFarPlane, shapeRadius * perspective.farPlaneRadiusMultiplier);
+        camera.lookAt(0, 0, 0);
+      }
+      // Update the radius
+      set((previous) => {
+        return {
+          ...previous,
+          sceneRadius: shapeRadius,
+        };
+      });
       camera.updateProjectionMatrix();
-    } else {
-      // Perspective camera settings
-      camera.position.set(
-        radius * perspective.sideOffsetRatio,
-        radius * perspective.verticalOffsetRatio,
-        Math.max(radius) * perspective.heightMultiplier,
-      );
-      camera.zoom = perspective.zoomLevel;
-      camera.near = perspective.nearPlane;
-      camera.far = Math.max(perspective.minFarPlane, radius * perspective.farPlaneRadiusMultiplier);
-      camera.lookAt(0, 0, 0);
+      invalidate();
     }
 
-    invalidate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [radius, top, previousRadius, stageOptions]);
+  }, [shapeRadius, top, sceneRadius, stageOptions]);
 
   return (
     <group {...properties}>

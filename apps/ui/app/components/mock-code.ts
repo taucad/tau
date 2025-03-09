@@ -757,6 +757,262 @@ const main = ({ Sketcher, sketchRectangle, sketchCircle, Plane, makeSphere,FaceF
 }
 `;
 
+export const staircase = `// Parametric Staircase Model
+const { draw, drawRoundedRectangle, drawCircle } = replicad;
+
+const defaultParams = {
+  // Main staircase dimensions
+  totalHeight: 2700, // mm - typical floor-to-floor height
+  totalRun: 3600,    // mm - horizontal length of staircase
+  width: 1200,        // mm - width of stairs
+  numSteps: 15,      // number of steps
+  
+  // Step customization
+  stepThickness: 50, // mm - thickness of each step
+  nosing: 25,        // mm - step overhang
+  roundedSteps: true,
+  cornerRadius: 10,  // mm - radius for rounded corners on steps
+  
+  // Stringer options
+  includeStringers: true,
+  stringerWidth: 50, // mm
+  stringerThickness: 25, // mm
+  
+  // Handrail options
+  includeHandrails: true,
+  handrailHeight: 900, // mm - height from step to top of handrail
+  handrailDiameter: 60, // mm
+  balusters: true,
+  balusterSpacing: 200, // mm
+  balusterDiameter: 20, // mm
+};
+
+/**
+ * Creates a parametric staircase model
+ * @param r Replicad environment
+ * @param params Staircase parameters
+ * @returns The complete staircase model
+ */
+function main(r, params = {}) {
+  // Merge default parameters with provided ones
+  const p = { ...defaultParams, ...params };
+  
+  // Calculate derived dimensions
+  const stepRise = p.totalHeight / p.numSteps; // Height of each step
+  const stepRun = p.totalRun / p.numSteps;     // Depth of each step
+  
+  // Validation of dimensions against typical building codes
+  // Most codes require:
+  // - Rise: 150-220mm (5.9-8.7")
+  // - Run: minimum 240mm (9.5")
+  // - 2R + T = 550-700mm (where R=rise, T=tread)
+  if (stepRise < 150 || stepRise > 220) {
+    console.warn(\`Warning: Step rise (\${stepRise.toFixed(1)}mm) outside recommended range (150-220mm)\`);
+  }
+  if (stepRun < 240) {
+    console.warn(\`Warning: Step run (\${stepRun.toFixed(1)}mm) below recommended minimum (240mm)\`);
+  }
+  const walkingFormula = 2 * stepRise + stepRun;
+  if (walkingFormula < 550 || walkingFormula > 700) {
+    console.warn(\`Warning: Walking formula (2R + T = \${walkingFormula.toFixed(1)}mm) outside recommended range (550-700mm)\`);
+  }
+  
+  // Build individual steps
+  let staircase = null;
+  
+  for (let i = 0; i < p.numSteps; i++) {
+    // Calculate step position
+    const x = i * stepRun;
+    const z = i * stepRise;
+    
+    // Create basic step shape
+    let step;
+    if (p.roundedSteps) {
+      // For rounded rectangle, we need width, height, and corner radius
+      step = drawRoundedRectangle(stepRun + p.nosing, p.width, p.cornerRadius)
+        .sketchOnPlane("XY") // Steps are in XY plane
+        .extrude(p.stepThickness) // Extrude to create 3D step
+        .translate([x - p.nosing, 0, z]); // Position step
+    } else {
+      // For regular rectangle using draw
+      step = draw([x - p.nosing, -p.width / 2])
+        .hLine(stepRun + p.nosing) // Horizontal line to the right
+        .vLine(p.width)            // Vertical line up
+        .hLine(-(stepRun + p.nosing)) // Horizontal line to the left
+        .close()
+        .sketchOnPlane("XY")
+        .extrude(p.stepThickness)
+        .translate([-p.nosing, 0, z]);
+    }
+    
+    // Add step to staircase
+    if (staircase === null) {
+      staircase = step;
+    } else {
+      staircase = staircase.fuse(step);
+    }
+  }
+  
+  // Add stringers if requested
+  if (p.includeStringers) {
+    // Create left stringer shape
+    // First create the profile in XZ plane
+    const leftStringerProfile = [];
+    
+    // Add points for the stringer profile
+    leftStringerProfile.push([-p.nosing, 0]); // Bottom front
+    leftStringerProfile.push([p.totalRun, 0]); // Bottom back
+    leftStringerProfile.push([p.totalRun, p.totalHeight]); // Top back
+    leftStringerProfile.push([p.totalRun - stepRun, p.totalHeight]); // Top step
+    
+        // Add sawtooth pattern for steps
+    for (let i = p.numSteps - 1; i >= 0; i--) {
+      leftStringerProfile.push([i * stepRun, i * stepRise + p.stepThickness]);
+      leftStringerProfile.push([i * stepRun, i * stepRise]);
+    }
+    
+    // Create the stringer profile using these points
+    let leftStringerPen = draw(leftStringerProfile[0]);
+    for (let i = 1; i < leftStringerProfile.length; i++) {
+      leftStringerPen = leftStringerPen.lineTo(leftStringerProfile[i]);
+    }
+    
+    // Create left stringer
+    const leftStringerSketch = leftStringerPen.close().sketchOnPlane("XZ");
+    const leftStringer = leftStringerSketch.extrude(p.stringerWidth)
+      .translate([0, -p.width / 2 + p.stringerWidth, 0]);
+    
+    // Create right stringer
+    const rightStringer = leftStringer.clone()
+      .translate([0, p.width - p.stringerWidth, 0]);
+    
+    // Add stringers to staircase
+    staircase = staircase.fuse(leftStringer).fuse(rightStringer);
+  }
+  
+  // Add handrails if requested
+  if (p.includeHandrails) {
+    // Create handrails on both sides
+    
+    // Helper function to create a single baluster
+    const createBaluster = (x, y, z) => {
+      return drawCircle(p.balusterDiameter / 2)
+        .sketchOnPlane("XY")
+        .extrude(p.handrailHeight)
+        .translate([x, y, z]);
+    };
+    
+    // Helper function to create a handrail segment
+    const createHandrailSegment = (x1, y1, z1, x2, y2, z2) => {
+      // Create a cylinder between two points
+      // We'll approximate this with an extruded circle along the Z axis,
+      // then rotate and position it correctly
+      
+      // Calculate segment length and angles
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const dz = z2 - z1;
+      const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      console.log({dx,dy,dz,length})
+      
+      // Create basic cylinder
+      const segment = drawCircle(p.handrailDiameter / 2)
+        .sketchOnPlane("XY")
+        .extrude(length);
+      
+      // If the segment is perfectly vertical, no rotation needed
+      if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
+        return segment.translate([x1, y1, z1]);
+      }
+      
+      // Otherwise we need to rotate to align with the segment direction
+      const angleX = 90 - Math.atan2(dz, Math.sqrt(dx * dx + dy * dy)) * (180 / Math.PI);
+      
+      return segment
+        .rotate(angleX, [0, 1, 0], [0, 1, 0]) // Rotate around Y axis for X-Z angle
+        .translate([x1, y1, z1]); // Move to start position
+    };
+    
+    // Create left and right handrails
+    let leftHandrail = null;
+    let rightHandrail = null;
+    
+    // Left and right Y positions
+    const leftY = -p.width / 2 + p.stringerWidth / 2;
+    const rightY = p.width / 2 - p.stringerWidth / 2;
+    
+    // Create segments for each step section
+    for (let i = 0; i < p.numSteps; i++) {
+      const x1 = i * stepRun;
+      const z1 = i * stepRise;
+      const x2 = (i + 1) * stepRun;
+      const z2 = (i + 1) * stepRise;
+      
+      // Create handrail segments with proper height offset
+      const leftSegment = createHandrailSegment(
+        x1, leftY, z1 + p.handrailHeight,
+        x2, leftY, z2 + p.handrailHeight
+      );
+      
+      const rightSegment = createHandrailSegment(
+        x1, rightY, z1 + p.handrailHeight,
+        x2, rightY, z2 + p.handrailHeight
+      );
+      
+      // Add segments to respective handrails
+      if (leftHandrail === null) {
+        leftHandrail = leftSegment;
+      } else {
+        leftHandrail = leftHandrail.fuse(leftSegment);
+      }
+      
+      if (rightHandrail === null) {
+        rightHandrail = rightSegment;
+      } else {
+        rightHandrail = rightHandrail.fuse(rightSegment);
+      }
+      
+      // Add balusters if requested
+      if (p.balusters) {
+        // Place balusters at start of each step
+        const leftBaluster = createBaluster(x1, leftY, z1);
+        const rightBaluster = createBaluster(x1, rightY, z1);
+        
+        staircase = staircase.fuse(leftBaluster).fuse(rightBaluster);
+        
+        // Add intermediate balusters if step is wide enough
+        if (stepRun > p.balusterSpacing * 1.5) {
+          const numIntermediateBalusters = Math.floor(stepRun / p.balusterSpacing) - 1;
+          
+          for (let j = 1; j <= numIntermediateBalusters; j++) {
+            const balusterX = x1 + (j * stepRun) / (numIntermediateBalusters + 1);
+            const balusterZ = z1 + (j * stepRise) / (numIntermediateBalusters + 1);
+            
+            const intermediateLeftBaluster = createBaluster(balusterX, leftY, balusterZ);
+            const intermediateRightBaluster = createBaluster(balusterX, rightY, balusterZ);
+            
+            staircase = staircase
+              .fuse(intermediateLeftBaluster)
+              .fuse(intermediateRightBaluster);
+          }
+        }
+      }
+    }
+    
+    // Add final balusters at the top
+    if (p.balusters) {
+      const topLeftBaluster = createBaluster(p.totalRun, leftY, p.totalHeight);
+      const topRightBaluster = createBaluster(p.totalRun, rightY, p.totalHeight);
+      staircase = staircase.fuse(topLeftBaluster).fuse(topRightBaluster);
+    }
+    
+    // Add handrails to staircase
+    staircase = staircase.fuse(leftHandrail).fuse(rightHandrail);
+  }
+  
+  return staircase;
+}`;
+
 export const mockModels = [
   {
     id: 'bld_birdhouse',
@@ -802,5 +1058,10 @@ export const mockModels = [
     id: 'bld_card-holder',
     name: 'Card Holder',
     code: cardHolderCode,
+  },
+  {
+    id: 'bld_staircase',
+    name: 'Staircase',
+    code: staircase,
   },
 ] satisfies Model[];

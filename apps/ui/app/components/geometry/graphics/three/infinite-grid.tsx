@@ -91,10 +91,6 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
            }
            
            `,
-
-    extensions: {
-      derivatives: true,
-    },
   });
 
   return material;
@@ -102,5 +98,5 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
 
 export default function InfiniteGrid() {
   const material = useRef(infiniteGridMaterial());
-  return <Plane material={material.current} />;
+  return <Plane userData={{ isPreviewOnly: true }} material={material.current} />;
 }

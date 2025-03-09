@@ -1,7 +1,8 @@
 import { Download } from 'lucide-react';
 import { Button, ButtonProperties } from '@/components/ui/button';
 import React from 'react';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { toast } from '@/components/ui/sonner';
 
 export interface DownloadButtonProperties extends ButtonProperties {
   /**
@@ -14,8 +15,10 @@ export interface DownloadButtonProperties extends ButtonProperties {
   title?: string;
   /**
    * A function to get the blob to download.
+   *
+   * If the function throws an error, the error will be logged to the console and the download will not occur.
    */
-  getBlob?: () => Promise<Blob>;
+  getBlob: () => Promise<Blob>;
   /**
    * Tooltip text.
    */
@@ -23,28 +26,37 @@ export interface DownloadButtonProperties extends ButtonProperties {
 }
 
 export const DownloadButton = React.forwardRef<HTMLButtonElement, DownloadButtonProperties>(
-  ({ text, getBlob, size, title = 'download.txt', tooltip = 'Download', ...properties }, reference) => {
+  ({ getBlob, size, title = 'download.txt', tooltip = 'Download', ...properties }, reference) => {
     const handleDownload = async () => {
-      // New download handler logic without creating an element
-      const newBlob = getBlob ? await getBlob() : new Blob([text as string], { type: 'text/plain' });
-      const url = URL.createObjectURL(newBlob);
+      try {
+        const newBlob = await getBlob();
 
-      fetch(url)
-        .then((response) => response.blob())
-        .then((blob) => {
-          const reader = new FileReader();
-          reader.addEventListener('load', () => {
-            const base64data = reader.result;
-            const a = document.createElement('a');
-            a.href = base64data as string;
-            a.download = title;
-            a.click();
+        const url = URL.createObjectURL(newBlob);
+
+        fetch(url)
+          .then((response) => response.blob())
+          .then((blob) => {
+            const reader = new FileReader();
+            reader.addEventListener('load', () => {
+              const base64data = reader.result;
+              const a = document.createElement('a');
+              a.href = base64data as string;
+              a.download = title;
+              a.click();
+            });
+            reader.readAsDataURL(blob);
+          })
+          .finally(() => {
+            URL.revokeObjectURL(url);
           });
-          reader.readAsDataURL(blob);
-        })
-        .finally(() => {
-          URL.revokeObjectURL(url);
-        });
+      } catch (error) {
+        if (error instanceof Error) {
+          toast.error(`Unable to download ${title}: ${error.message}`);
+        } else {
+          toast.error(`Unable to download ${title}`);
+        }
+        return;
+      }
     };
 
     return (

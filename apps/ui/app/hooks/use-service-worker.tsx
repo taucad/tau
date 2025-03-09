@@ -1,5 +1,5 @@
 import { useSWEffect } from '@remix-pwa/sw';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/sonner';
 import { useNetworkConnectivity } from './use-network-connectivity';
 import { useEffect, useRef } from 'react';
 

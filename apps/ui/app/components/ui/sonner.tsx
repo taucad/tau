@@ -2,6 +2,7 @@
 
 import { useTheme } from 'remix-themes';
 import { Toaster as Sonner } from 'sonner';
+export { toast } from 'sonner';
 
 type ToasterProperties = React.ComponentProps<typeof Sonner>;
 

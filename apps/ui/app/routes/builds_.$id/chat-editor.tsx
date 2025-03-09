@@ -61,18 +61,23 @@ export const ChatEditor = () => {
 
   return (
     <>
-      {/* <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-12 gap-1.5">
+      {/* <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-22 gap-2">
         <CopyButton variant="outline" size="icon" text={code} className="text-muted-foreground" tooltip="Copy code" />
         <DownloadButton
           variant="outline"
           size="icon"
-          text={code}
+          title={`${name}.ts`}
+          getBlob={() =>
+            new Promise((resolve) => {
+              const blob = new Blob([code], { type: 'text/plain' });
+              resolve(blob);
+            })
+          }
           className="text-muted-foreground"
           tooltip="Download code"
         />
       </div> */}
       <CodeEditor
-        //
         loading={<LoaderPinwheel className="size-20 stroke-1 animate-spin text-primary ease-in-out" />}
         className="text-xs bg-background"
         defaultLanguage="typescript"

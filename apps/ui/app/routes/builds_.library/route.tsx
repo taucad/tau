@@ -35,7 +35,7 @@ import { Build } from '@/types/build';
 import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
 import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer';
 import { useBuilds } from '@/hooks/use-builds';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/sonner';
 
 export const handle = {
   breadcrumb: () => {

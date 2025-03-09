@@ -23,9 +23,10 @@ const MODELS = {
       },
       configuration: {
         streaming: true,
+        maxTokens: 64_000,
         thinking: {
           type: 'enabled',
-          budget_tokens: 2000,
+          budget_tokens: 32_000,
         },
       },
     },

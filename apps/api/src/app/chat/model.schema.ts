@@ -7,10 +7,11 @@ export const ModelSupportSchema = z.object({
 export const ModelConfigurationSchema = z.object({
   streaming: z.boolean().describe('Whether the model is streaming'),
   temperature: z.number().describe('The temperature of the model').optional(),
+  maxTokens: z.number().describe('The maximum number of tokens to generate').optional(),
   thinking: z
     .object({
-      type: z.enum(['enabled']).describe('The type of thinking the model supports'),
-      budget_tokens: z.number().describe('The budget of tokens the model is capable of thinking'),
+      type: z.enum(['enabled']).describe('A toggle to enable thinking'),
+      budget_tokens: z.number().describe('The maximum budget of tokens for thinking'),
     })
     .optional(),
 });

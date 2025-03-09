@@ -26,6 +26,7 @@ interface BuildContextType {
   setParameters: (parameters: Record<string, unknown>) => void;
   setMessages: (messages: Message[]) => void;
   updateName: (name: string) => void;
+  updateThumbnail: (thumbnail: string) => void;
 }
 
 const BuildContext = createContext<BuildContextType | undefined>(undefined);
@@ -104,6 +105,16 @@ export function BuildProvider({ children, buildId }: { children: ReactNode; buil
     },
   });
 
+  // Mutation for updating thumbnail
+  const thumbnailUpdate = useMutation({
+    mutationFn: (thumbnail: string) => {
+      return storage.updateBuild(buildId, { thumbnail });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['build', buildId] });
+    },
+  });
+
   const build = buildQuery.data;
   const code = build?.assets.mechanical?.files[build.assets.mechanical.main]?.content || '';
   const parameters = build?.assets.mechanical?.parameters || {};
@@ -119,6 +130,7 @@ export function BuildProvider({ children, buildId }: { children: ReactNode; buil
     setParameters: parameterUpdate.mutate,
     setMessages: messageUpdate.mutate,
     updateName: nameUpdate.mutate,
+    updateThumbnail: thumbnailUpdate.mutate,
   };
 
   return <BuildContext.Provider value={value}>{children}</BuildContext.Provider>;

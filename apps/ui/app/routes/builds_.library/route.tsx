@@ -266,16 +266,18 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
   const navigate = useNavigate();
 
   // Start with preview false, then enable it once we have both code and mesh
-  const [showPreview, setShowPreview] = useState(!!code);
+  const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
-    if (code) {
-      setCode(code);
+    if (showPreview) {
+      if (code) {
+        setCode(code);
+      }
+      if (parameters) {
+        setParameters(parameters);
+      }
     }
-    if (parameters) {
-      setParameters(parameters);
-    }
-  }, [code, setCode, parameters, setParameters]);
+  }, [code, setCode, parameters, setParameters, showPreview]);
 
   const handleDelete = () => {
     deleteBuild(project.id);
@@ -335,7 +337,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
               <img
                 src={project.thumbnail || '/placeholder.svg'}
                 alt={project.name}
-                className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                className="h-full w-full object-cover transition-transform scale-75 group-hover:scale-80"
                 loading="lazy"
               />
             )}
@@ -351,7 +353,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
             <Button
               variant="outline"
               size="icon"
-              className="absolute top-2 right-2"
+              className={cn('absolute top-2 right-2', showPreview && 'text-primary')}
               onClick={(event) => {
                 event.stopPropagation();
                 event.preventDefault();

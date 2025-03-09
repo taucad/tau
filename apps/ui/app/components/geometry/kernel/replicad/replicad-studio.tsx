@@ -113,7 +113,7 @@ export function ReplicadStudio() {
           variant="outline"
           size="icon"
           getBlob={downloadSTL}
-          title="model.stl"
+          title={`${name}.stl`}
           className="text-muted-foreground group"
           disabled={!mesh}
           tooltip="Download STL"

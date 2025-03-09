@@ -913,7 +913,6 @@ function main(r, params = {}) {
       const dy = y2 - y1;
       const dz = z2 - z1;
       const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      console.log({dx,dy,dz,length})
       
       // Create basic cylinder
       const segment = drawCircle(p.handrailDiameter / 2)

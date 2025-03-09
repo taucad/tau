@@ -78,7 +78,7 @@ export const ChatParameters = () => {
             <div key={key} className="flex flex-col gap-1">
               <div className="flex flex-row gap-2 justify-between h-6">
                 <div className="flex flex-row gap-2 items-baseline">
-                  <span className={cn(!!parameters[key] && 'font-bold')}>{prettyKey}</span>
+                  <span className={cn(parameters[key] !== undefined && 'font-bold')}>{prettyKey}</span>
                   <span className="text-xs text-muted-foreground">{valueType}</span>
                 </div>
                 {parameters[key] !== undefined && (

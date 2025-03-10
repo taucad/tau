@@ -55,8 +55,13 @@ const BuildNameEditor = () => {
 export const handle = {
   breadcrumb: () => {
     const { id } = useParams();
+
+    if (!id) {
+      throw new Error('No build id provided');
+    }
+
     return (
-      <BuildProvider buildId={id!}>
+      <BuildProvider buildId={id}>
         <BuildNameEditor />
       </BuildProvider>
     );

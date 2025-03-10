@@ -197,7 +197,7 @@ export class ChatController {
               break;
             }
             case ChatEvent.OnToolEnd: {
-              // The tool doesn't return the results in a fully structured format, so we need to wrap it in an array and parse it
+              // The searxng tool doesn't return the results in a fully structured format, so we need to wrap it in an array and parse it
               const results = JSON.parse(`[${streamEvent.data.output.content}]`);
               observer.next({
                 data: {

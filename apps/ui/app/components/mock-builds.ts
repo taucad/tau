@@ -25,7 +25,7 @@ export const sampleBuilds: Build[] = mockModels.map((model) => ({
   isFavorite: false,
   stars: 0,
   forks: 0,
-  thumbnail: '/placeholder.svg',
+  thumbnail: '',
   messages: [],
 }));
 

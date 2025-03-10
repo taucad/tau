@@ -21,7 +21,6 @@ interface BuildContextType {
   error: Error | null;
   code: string;
   parameters: Record<string, unknown>;
-  name: string;
   setCode: (code: string) => void;
   setParameters: (parameters: Record<string, unknown>) => void;
   setMessages: (messages: Message[]) => void;
@@ -125,7 +124,6 @@ export function BuildProvider({ children, buildId }: { children: ReactNode; buil
     error: buildQuery.error as Error | null,
     code,
     parameters,
-    name: build?.name || '',
     setCode: codeUpdate.mutate,
     setParameters: parameterUpdate.mutate,
     setMessages: messageUpdate.mutate,

@@ -1,4 +1,4 @@
-import { Canvas, CanvasProps, useThree } from '@react-three/fiber';
+import { Canvas, CanvasProps } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Scene } from './scene';
 import { StageOptions } from './stage';
@@ -6,57 +6,7 @@ import InfiniteGrid from './infinite-grid';
 import rotate3dBase64 from './rotate-3d.svg?base64';
 import { cn } from '@/utils/ui';
 import { useEffect, forwardRef, useState, useImperativeHandle, useRef } from 'react';
-
-interface ScreenshotCaptureHandle {
-  captureScreenshot: () => string;
-}
-
-// Component to capture screenshots
-const ScreenshotCapture = forwardRef<ScreenshotCaptureHandle, object>((_, reference) => {
-  const { gl, scene, camera } = useThree();
-
-  useImperativeHandle(
-    reference,
-    () => ({
-      captureScreenshot: () => {
-        if (!gl.domElement) {
-          throw new Error('Screenshot attempted before renderer was ready');
-        }
-
-        const removedObjects: THREE.Object3D[] = [];
-        scene.traverse((object) => {
-          // Check if the object is for preview only
-          if (object.userData?.isPreviewOnly) {
-            object.visible = false;
-            removedObjects.push(object);
-          }
-        });
-
-        // Ensure scene is rendered before capturing
-        gl.render(scene, camera);
-
-        // Capture screenshot
-        const dataURL = gl.domElement.toDataURL('image/png');
-
-        // Restore the objects
-        for (const object of removedObjects) {
-          object.visible = true;
-        }
-
-        // Render the scene again to ensure the objects are visible
-        gl.render(scene, camera);
-
-        return dataURL;
-      },
-    }),
-    [gl, scene, camera],
-  );
-
-  // Return an empty fragment
-  return <></>;
-});
-
-ScreenshotCapture.displayName = 'ScreenshotCapture';
+import { ScreenshotCapture, ScreenshotCaptureHandle, ScreenshotOptions } from './screenshot-capture';
 
 export type CadViewerProperties = {
   enableGizmo?: boolean;
@@ -72,7 +22,7 @@ export type ThreeContextProperties = CanvasProps & CadViewerProperties;
 
 // Updated ref type to include screenshot capability
 export type ThreeCanvasReference = HTMLCanvasElement & {
-  captureScreenshot?: () => string;
+  captureScreenshot?: (options?: ScreenshotOptions) => string;
   isScreenshotReady?: boolean;
 };
 
@@ -115,8 +65,8 @@ export const ThreeProvider = forwardRef<ThreeCanvasReference, ThreeContextProper
         return {} as ThreeCanvasReference;
       }
 
-      (canvas as ThreeCanvasReference).captureScreenshot = () => {
-        return screenshotReference.current?.captureScreenshot() || '';
+      (canvas as ThreeCanvasReference).captureScreenshot = (options?: ScreenshotOptions) => {
+        return screenshotReference.current?.captureScreenshot(options) || '';
       };
 
       return canvas as ThreeCanvasReference;

@@ -2,7 +2,7 @@ import { ReplicadViewer, type ReplicadViewerReference } from './replicad-viewer'
 import { DownloadButton } from '@/components/download-button';
 import { LoaderPinwheel, ImageDown, GalleryThumbnails } from 'lucide-react';
 import { useReplicad } from './replicad-context';
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BoxDown } from '@/components/icons/box-down';
 import { Button } from '@/components/ui/button';
 import { useBuild } from '@/hooks/use-build2';
@@ -11,7 +11,7 @@ import { toast } from '@/components/ui/sonner';
 
 export function ReplicadStudio() {
   const { status, downloadSTL, mesh } = useReplicad();
-  const { updateThumbnail, name } = useBuild();
+  const { updateThumbnail, build } = useBuild();
   const canvasReference = useRef<ReplicadViewerReference>(null);
   const [isScreenshotReady, setIsScreenshotReady] = useState(false);
 
@@ -26,7 +26,13 @@ export function ReplicadStudio() {
     }
 
     // Use the captureScreenshot method to render the scene on demand and capture it
-    const dataURL = canvasReference.current.captureScreenshot?.() || '';
+    const dataURL =
+      canvasReference.current.captureScreenshot?.({
+        output: {
+          format: 'png',
+          quality: 0.92,
+        },
+      }) || '';
 
     // Convert dataURL to Blob
     const response = await fetch(dataURL);
@@ -35,15 +41,38 @@ export function ReplicadStudio() {
     return blob;
   };
 
-  const handleUpdateThumbnail = async () => {
+  const updateThumbnailScreenshot = useCallback(() => {
     if (!canvasReference.current || !isScreenshotReady) {
       throw new Error('Screenshot attempted before renderer was ready');
     }
 
-    const dataURL = canvasReference.current.captureScreenshot?.() || '';
+    const dataURL =
+      canvasReference.current.captureScreenshot?.({
+        output: {
+          format: 'webp',
+          quality: 0.92,
+        },
+      }) || '';
+
     updateThumbnail(dataURL);
+  }, [isScreenshotReady]);
+
+  const handleUpdateThumbnail = async () => {
+    updateThumbnailScreenshot();
     toast.success('Thumbnail updated');
   };
+
+  useEffect(() => {
+    // Check if build exists, has no thumbnail, and screenshot capability is ready
+    if (build && (!build.thumbnail || build.thumbnail === '') && isScreenshotReady) {
+      // Automatically set the thumbnail
+      try {
+        updateThumbnailScreenshot();
+      } catch (error) {
+        console.error('Failed to auto-generate thumbnail:', error);
+      }
+    }
+  }, [build, isScreenshotReady]);
 
   return (
     <>
@@ -98,7 +127,7 @@ export function ReplicadStudio() {
           variant="outline"
           size="icon"
           getBlob={downloadPNG}
-          title={`${name}.png`}
+          title={`${build?.name}.png`}
           className="text-muted-foreground"
           tooltip={isScreenshotReady ? 'Download PNG' : 'Preparing renderer...'}
           disabled={!isScreenshotReady}
@@ -113,7 +142,7 @@ export function ReplicadStudio() {
           variant="outline"
           size="icon"
           getBlob={downloadSTL}
-          title={`${name}.stl`}
+          title={`${build?.name}.stl`}
           className="text-muted-foreground group"
           disabled={!mesh}
           tooltip="Download STL"

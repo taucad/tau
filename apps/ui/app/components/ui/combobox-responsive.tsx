@@ -53,7 +53,7 @@ export function ComboBoxResponsive<T>({
     return (
       <Drawer open={open} onOpenChange={setOpen}>
         <DrawerTrigger asChild>
-          <Button variant="outline" className={cn('w-[150px] justify-start', className)}>
+          <Button variant="ghost" className={cn('w-[150px] justify-start', className)}>
             {selectedItem ? renderButtonContents(selectedItem) : placeholder}
           </Button>
         </DrawerTrigger>
@@ -80,7 +80,7 @@ export function ComboBoxResponsive<T>({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" className={cn('w-[150px] justify-start', className)}>
+        <Button variant="ghost" className={cn('w-[150px] justify-start', className)}>
           {selectedItem ? renderButtonContents(selectedItem) : placeholder}
         </Button>
       </PopoverTrigger>

@@ -1,5 +1,5 @@
 import { useModels } from '@/hooks/use-models';
-import { ChatTextarea } from '@/components/chat/chat-textarea';
+import { ChatTextarea, ChatTextareaProperties } from '@/components/chat/chat-textarea';
 import { Button } from '@/components/ui/button';
 import { Link, useNavigate } from '@remix-run/react';
 import { storage } from '@/db/storage';
@@ -13,15 +13,7 @@ export default function ChatStart() {
   const { data: models } = useModels();
   const navigate = useNavigate();
 
-  const onSubmit = async ({
-    content,
-    model,
-    metadata,
-  }: {
-    content: string;
-    model: string;
-    metadata?: { systemHints?: string[] };
-  }) => {
+  const onSubmit: ChatTextareaProperties['onSubmit'] = async ({ content, model, metadata, imageUrls }) => {
     try {
       // Create the initial message as pending
       const userMessage = createMessage({
@@ -30,6 +22,7 @@ export default function ChatStart() {
         model,
         status: MessageStatus.Pending, // Set as pending
         metadata: { systemHints: metadata?.systemHints ?? [] },
+        imageUrls,
       });
 
       const build = await storage.createBuild({

@@ -8,14 +8,14 @@ import { MarkdownViewer } from '@/components/markdown-viewer';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
 import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { When } from '@/components/ui/utils/when';
-import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarImage } from '@/components/ui/avatar';
+import { ChatTextarea, ChatTextareaProperties } from '@/components/chat/chat-textarea';
+import { Model } from '@/hooks/use-models';
+import { ComingSoon } from '@/components/ui/coming-soon';
 
 const MAX_TITLE_LENGTH = 50;
-const MIN_TEXTAREA_HEIGHT_EM = 3;
-const MAX_TEXTAREA_HEIGHT_EM = 30;
 
 const SOURCE_TOOLS = [
   { icon: Globe2, key: 'web' },
@@ -26,18 +26,17 @@ const SOURCE_TOOLS = [
 
 type ChatMessageProperties = {
   message: Message;
-  onEdit: (content: string) => void;
+  onEdit: ChatTextareaProperties['onSubmit'];
+  models: Model[];
 };
 
-export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
+export function ChatMessage({ message, onEdit, models }: ChatMessageProperties) {
   const isUser = message.role === MessageRole.User;
-  const [content, setContent] = useState(message.content);
   const [activeSources, setActiveSources] = useState<SourceOrigin[]>(['web']);
   const [isEditing, setIsEditing] = useState(false);
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
   const [previousContentLength, setPreviousContentLength] = useState(message.content.length);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const textareaReference = useRef<HTMLTextAreaElement | null>(null);
   const thinkingContentReference = useRef<HTMLDivElement>(null);
 
   // Track content length changes to trigger animation
@@ -53,34 +52,6 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
     setPreviousContentLength(message.content.length);
   }, [message.content.length, previousContentLength]);
 
-  useEffect(() => {
-    if (isEditing && textareaReference.current) {
-      // Select all text when entering edit mode
-      const length = textareaReference.current.value.length;
-      textareaReference.current.setSelectionRange(0, length);
-      resizeTextarea(textareaReference.current);
-    }
-  }, [isEditing]);
-
-  // Handle resizing on content changes
-  useEffect(() => {
-    if (isEditing && textareaReference.current) {
-      resizeTextarea(textareaReference.current);
-    }
-  }, [content, isEditing]);
-
-  // Dynamically resize textarea based on content and font size
-  const resizeTextarea = (textarea: HTMLTextAreaElement) => {
-    const computedStyle = globalThis.getComputedStyle(textarea);
-    const fontSize = Number.parseFloat(computedStyle.fontSize);
-
-    textarea.style.height = 'auto';
-    const heightInEm = textarea.scrollHeight / fontSize;
-    const constrainedHeightInEm = Math.min(Math.max(heightInEm, MIN_TEXTAREA_HEIGHT_EM), MAX_TEXTAREA_HEIGHT_EM);
-
-    textarea.style.height = `${constrainedHeightInEm}em`;
-  };
-
   const relevantSources = message.toolCalls
     ?.filter((toolCall) => activeSources.includes(toolCall.origin))
     .flatMap((toolCall) => toolCall.output.map((source) => ({ ...source, origin: toolCall.origin })));
@@ -91,21 +62,25 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
   };
 
   return (
-    <article className={cn('group flex flex-row items-start', isUser && 'space-x-reverse space-x-2 flex-row-reverse')}>
+    <article
+      className={cn('group/message flex flex-row items-start', isUser && 'space-x-reverse space-x-2 flex-row-reverse')}
+    >
       <When condition={message.role === MessageRole.User}>
-        <Avatar className="w-8 h-8 bg-neutral/20 rounded-full flex items-center justify-center">
-          <AvatarImage src="/avatar-sample.png" alt="User" />
-        </Avatar>
+        {!isEditing && (
+          <Avatar className="w-8 h-8 bg-neutral/20 rounded-full flex items-center justify-center">
+            <AvatarImage src="/avatar-sample.png" alt="User" />
+          </Avatar>
+        )}
       </When>
       <div className={cn('flex flex-col space-y-2 overflow-y-auto', isEditing && 'w-full')}>
         {/* @ts-expect-error - FIXME: message.toolCalls is always defined */}
-        {message.toolCalls.length > 0 && relevantSources && (
+        {message.toolCalls?.length > 0 && relevantSources && (
           <>
             <div className="flex flex-row items-center space-x-2">
               <p className="text-lg">Sources</p>
               {SOURCE_TOOLS.filter((source) => message.toolCalls?.some((s) => s.origin === source.key)).map(
                 (source) => {
-                  const sourceCount = relevantSources.filter((s) => s.origin === source.key).length;
+                  const sourceCount = relevantSources.filter((s) => s.origin === source.key)?.length;
                   return (
                     <Badge
                       variant={'outline'}
@@ -138,7 +113,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                   </Badge>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Add sources</p>
+                  Add sources <ComingSoon variant="tooltip" className="ml-1" />
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -255,36 +230,36 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
             {message.content && <p className="text-lg">Answer</p>}
           </>
         )}
-        <div className={cn(isUser ? 'bg-neutral/20 rounded-xl' : 'pt-[6px]')}>
+        <div className={cn(isUser ? 'bg-neutral/20 rounded-xl' : 'pt-[6px]', isEditing && 'rounded-lg')}>
           {/* Thinking content section with animation */}
           {/* TODO: remove trim when backend is fixed to trim thinking tags */}
           {!isUser && message.thinking?.trim() && (
-            <div className="mb-2 overflow-hidden">
+            <div
+              className={cn(
+                'overflow-hidden transition-[margin-bottom,opacity] duration-300 ease-out',
+                isTransitioning && 'translate-y-0 opacity-100 animate-in fade-in slide-in-from-bottom-2',
+                isThinkingExpanded && 'mb-2',
+              )}
+            >
               {/* Show the collapsible button when message has content */}
-              {message.content.length > 0 && (
-                <div
-                  className={cn(
-                    'transition-all duration-300 ease-out',
-                    isTransitioning && 'translate-y-0 opacity-100 animate-in fade-in slide-in-from-bottom-2',
-                  )}
-                >
-                  <button
+              {message.content[0].type === 'text' && message.content[0].text.length > 0 && (
+                <div>
+                  <Button
+                    variant="ghost"
+                    size="xs"
                     onClick={toggleThinking}
-                    className="flex items-center text-foreground/60 hover:text-foreground/80 transition-colors text-sm font-medium"
+                    className="text-foreground/60 hover:text-foreground/80 font-medium hover:bg-transparent -ml-3"
                   >
                     <ChevronRight
-                      className={cn(
-                        'size-4 mr-1 transition-transform duration-300 ease-in-out',
-                        isThinkingExpanded && 'rotate-90',
-                      )}
+                      className={cn('transition-transform duration-300 ease-in-out', isThinkingExpanded && 'rotate-90')}
                     />
                     Thought Process
-                  </button>
+                  </Button>
                 </div>
               )}
 
               {/* Show "Thinking..." label when no content */}
-              {message.content.length === 0 && (
+              {message.content[0].type === 'text' && message.content[0].text.length === 0 && (
                 <div
                   className={cn(
                     'text-foreground/60 font-medium text-sm mb-2 transition-all duration-300 ease-out',
@@ -301,9 +276,9 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
                 className={cn(
                   'pl-5 border-l border-foreground/20 text-foreground/60 text-sm italic whitespace-pre-wrap',
                   'transition-all duration-300 ease-in-out origin-top',
-                  message.content.length > 0 && !isThinkingExpanded
+                  message.content[0].type === 'text' && message.content[0].text.length > 0 && !isThinkingExpanded
                     ? 'max-h-0 opacity-0 scale-y-95 transform'
-                    : 'max-h-[2000px] opacity-100 scale-y-100 transform mt-2',
+                    : 'max-h-[2000px] opacity-100 scale-y-100 transform',
                 )}
               >
                 {message.thinking.trim()}
@@ -312,37 +287,49 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
           )}
 
           <When condition={isUser && isEditing}>
-            <Textarea
-              ref={textareaReference}
-              className={`p-2 shadow-none border-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-none text-sm md:text-md min-h-[${MIN_TEXTAREA_HEIGHT_EM}em] max-h-[${MAX_TEXTAREA_HEIGHT_EM}em] w-full overflow-y-auto`}
-              autoFocus
-              value={content}
-              onChange={(event) => {
-                setContent(event.target.value);
+            <ChatTextarea
+              initialContent={message.content}
+              onSubmit={async (event) => {
+                onEdit(event);
+                setIsEditing(false);
               }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  onEdit(content);
-                  setIsEditing(false);
-                }
-                if (event.key === 'Escape') {
-                  setIsEditing(false);
-                }
+              onEscapePressed={() => {
+                setIsEditing(false);
               }}
+              models={models}
             />
           </When>
           <When condition={!isEditing}>
             <div className={cn(isUser && 'p-2')}>
-              <MarkdownViewer>{`${message.content}${message.status === MessageStatus.Pending ? '●' : ''}`}</MarkdownViewer>
+              {message.content.map((content) => {
+                if (content.type === 'image_url') {
+                  return (
+                    <img
+                      key={content.image_url.url}
+                      src={content.image_url.url}
+                      alt="Image in message"
+                      className="h-16 w-16 object-cover rounded-md ml-auto"
+                    />
+                  );
+                }
+
+                if (content.type === 'text') {
+                  return (
+                    <Fragment key={content.text}>
+                      <MarkdownViewer>{`${content.text}${!isUser && message.status === MessageStatus.Pending ? '●' : ''}`}</MarkdownViewer>
+
+                      {!isUser && message.status === MessageStatus.Success && (
+                        <div className="flex flex-row justify-start items-center text-foreground/50 mt-2">
+                          <CopyButton size="xs" text={content.text} tooltip="Copy message" />
+                        </div>
+                      )}
+                    </Fragment>
+                  );
+                }
+              })}
             </div>
           </When>
         </div>
-        {!isUser && message.status === MessageStatus.Success && (
-          <div className="flex flex-row justify-start items-center text-foreground/50">
-            <CopyButton size="sm" text={message.content} tooltip="Copy message" />
-          </div>
-        )}
       </div>
       <div className="mt-auto">
         {isUser && (
@@ -351,7 +338,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
               <Button
                 size="icon"
                 variant="ghost"
-                className="rounded-full transition-opacity group-hover:opacity-100 opacity-0 focus:opacity-100"
+                className="rounded-full transition-opacity group-hover/message:opacity-100 opacity-0 focus:opacity-100"
                 onClick={() => {
                   setIsEditing((editing) => !editing);
                 }}
@@ -360,7 +347,7 @@ export function ChatMessage({ message, onEdit }: ChatMessageProperties) {
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Edit message</p>
+              <p>{isEditing ? 'Stop editing' : 'Edit message'}</p>
             </TooltipContent>
           </Tooltip>
         )}

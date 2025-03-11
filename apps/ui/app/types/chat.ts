@@ -15,12 +15,28 @@ export enum MessageStatus {
 
 export type SourceOrigin = 'web' | 'notion' | 'history' | 'projects';
 
+// Define content types using discriminated union
+export type TextContent = {
+  type: 'text';
+  text: string;
+};
+
+export type ImageContent = {
+  type: 'image_url';
+  image_url: {
+    url: string;
+  };
+};
+
+export type MessageContent = TextContent | ImageContent;
+
+// Update Message interface to use the discriminated union
 export interface Message {
   id: string;
   threadId?: string;
   role: MessageRole;
   model: string;
-  content: string;
+  content: MessageContent[];
   thinking?: string;
   status: MessageStatus;
   metadata?: {

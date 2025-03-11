@@ -1,7 +1,7 @@
 import { useRef, useCallback } from 'react';
 import { Eye, Code, Terminal, ArrowDown, MessageCircle, Settings2, LayoutGrid, Rows } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useChat } from '@/contexts/use-chat';
+import { createMessage, useChat } from '@/contexts/use-chat';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useScroll } from '@/hooks/use-scroll';
 import { ChatMessage } from '@/routes/builds_.$id/chat-message';
@@ -114,7 +114,7 @@ const tabs = [
 type ChatTabs = (typeof tabs)[number]['value'];
 
 export const ChatInterface = () => {
-  const { sendMessage, messages, editMessage } = useChat();
+  const { addMessage, messages, editMessage } = useChat();
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
 
@@ -151,17 +151,32 @@ export const ChatInterface = () => {
   const [viewMode, setViewMode] = useCookie<ViewMode>(CHAT_VIEW_MODE_COOKIE_NAME, 'tabs');
   const [chatTab, setChatTab] = useCookie<ChatTabs>(CHAT_TAB_COOKIE_NAME, 'preview');
 
-  const onSubmit: ChatTextareaProperties['onSubmit'] = async ({ content, model, metadata }) => {
-    await sendMessage({
-      message: {
-        content,
-        role: MessageRole.User,
-        status: MessageStatus.Success,
-        metadata: metadata ?? { systemHints: [] },
-        model,
-      },
+  const onSubmit: ChatTextareaProperties['onSubmit'] = async ({ content, model, metadata, imageUrls }) => {
+    const userMessage = createMessage({
+      content,
+      role: MessageRole.User,
+      status: MessageStatus.Success,
+      metadata: metadata ?? { systemHints: [] },
       model,
+      imageUrls,
     });
+    addMessage(userMessage);
+  };
+
+  const onEdit = async (
+    { content, model, metadata, imageUrls }: Parameters<ChatTextareaProperties['onSubmit']>[0],
+    messageId: string,
+  ) => {
+    const userMessage = createMessage({
+      id: messageId,
+      content,
+      role: MessageRole.User,
+      status: MessageStatus.Pending,
+      metadata: metadata ?? { systemHints: [] },
+      model,
+      imageUrls,
+    });
+    editMessage(userMessage);
   };
 
   const toggleChatOpen = () => {
@@ -279,9 +294,8 @@ export const ChatInterface = () => {
                 <ChatMessage
                   message={message}
                   key={index}
-                  onEdit={(content) => {
-                    editMessage({ messageId: message.id, content, model: message.model });
-                  }}
+                  onEdit={(event) => onEdit(event, message.id)}
+                  models={models ?? []}
                 />
               ))}
             </div>

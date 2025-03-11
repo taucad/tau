@@ -72,7 +72,7 @@ const Chat = () => {
   const { id } = useParams();
   const { build, isLoading, setMessages: setBuildMessages } = useBuild();
   const { setCode, setParameters } = useReplicad();
-  const { sendMessage, setMessages, messages } = useChat();
+  const { setMessages, messages } = useChat();
 
   // Load and respond to build changes
   useEffect(() => {
@@ -96,21 +96,6 @@ const Chat = () => {
     if (!build || isLoading) return;
     setBuildMessages(messages);
   }, [messages]);
-
-  // Handle any pending messages
-  useEffect(() => {
-    if (!build || isLoading) return;
-
-    const lastMessage = build.messages.at(-1);
-    if (!lastMessage) return;
-
-    if (lastMessage.status === MessageStatus.Pending) {
-      sendMessage({
-        message: lastMessage,
-        model: lastMessage.model,
-      });
-    }
-  }, [id, isLoading]);
 
   return <ChatInterface />;
 };

@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, ReactNode, useRef, useEffect } from 'react';
-import { Message, MessageRole, MessageStatus } from '@/types/chat';
+import { Message, MessageRole, MessageStatus, MessageContent } from '@/types/chat';
 import { generatePrefixedId } from '@/utils/id';
 import { PREFIX_TYPES } from '@/utils/constants';
 import { useEventSource } from '@/hooks/use-event-source';
@@ -45,13 +45,18 @@ type ChatAction =
   | { type: 'ADD_MESSAGE'; payload: Message }
   | {
       type: 'UPDATE_MESSAGE';
-      payload: { messageId: string; content?: string; thinking?: string; status?: MessageStatus };
+      payload: {
+        messageId: string;
+        content?: string | MessageContent[];
+        thinking?: string;
+        status?: MessageStatus;
+      };
     }
   | {
       type: 'EDIT_MESSAGE';
       payload: {
         messageId: string;
-        content: string;
+        content: string | MessageContent[];
         thinking?: string;
         toolCalls?: Message['toolCalls'];
         status?: MessageStatus;
@@ -84,34 +89,47 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const { messageId, content, thinking, status } = action.payload;
       return {
         ...state,
-        messages: state.messages.map((message) =>
-          message.id === messageId
-            ? {
-                ...message,
-                content: content === undefined ? message.content : message.content + content,
-                thinking:
-                  thinking === undefined ? message.thinking : message.thinking ? message.thinking + thinking : thinking,
-                status: status ?? message.status,
-              }
-            : message,
-        ),
+        messages: state.messages.map((message) => {
+          if (message.id === messageId) {
+            const updatedContent =
+              content === undefined
+                ? message.content
+                : typeof content === 'string'
+                  ? [{ type: 'text' as const, text: content }]
+                  : content;
+
+            return {
+              ...message,
+              content: updatedContent,
+              thinking:
+                thinking === undefined ? message.thinking : message.thinking ? message.thinking + thinking : thinking,
+              status: status ?? message.status,
+              updatedAt: Date.now(),
+            };
+          }
+          return message;
+        }),
       };
     }
     case 'EDIT_MESSAGE': {
       const { messageId, content, thinking, toolCalls, status } = action.payload;
       return {
         ...state,
-        messages: state.messages.map((message) =>
-          message.id === messageId
-            ? {
-                ...message,
-                content,
-                thinking: thinking ?? message.thinking,
-                toolCalls: toolCalls ?? message.toolCalls,
-                status: status ?? message.status,
-              }
-            : message,
-        ),
+        messages: state.messages.map((message) => {
+          if (message.id === messageId) {
+            const updatedContent = typeof content === 'string' ? [{ type: 'text' as const, text: content }] : content;
+
+            return {
+              ...message,
+              content: updatedContent,
+              thinking: thinking ?? message.thinking,
+              toolCalls: toolCalls ?? message.toolCalls,
+              status: status ?? message.status,
+              updatedAt: Date.now(),
+            };
+          }
+          return message;
+        }),
       };
     }
     case 'SET_STATUS': {
@@ -131,11 +149,8 @@ interface ChatContextValue {
   status?: string;
   selectedModel: string;
   setSelectedModel: (model: string) => void;
-  sendMessage: (parameters: {
-    message: Omit<Message, 'id' | 'createdAt' | 'updatedAt'>;
-    model: string;
-  }) => Promise<void>;
-  editMessage: (parameters: { messageId: string; content: string; model: string }) => Promise<void>;
+  addMessage: (message: Message) => void;
+  editMessage: (message: Message) => void;
   setMessages: (messages: Message[]) => void;
 }
 
@@ -185,11 +200,19 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
           } else {
             // Reset existing message content if it's pending
             if (lastMessage.status === MessageStatus.Pending) {
+              // Create a properly formatted empty content array
+              const emptyContent: MessageContent[] = [
+                {
+                  type: 'text',
+                  text: '',
+                },
+              ];
+
               dispatch({
                 type: 'EDIT_MESSAGE',
                 payload: {
                   messageId: lastMessage.id,
-                  content: '',
+                  content: emptyContent,
                   status: MessageStatus.Pending,
                 },
               });
@@ -214,11 +237,31 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
             // Add new content to the buffer
             contentBuffer.current += event.content;
 
+            // Find existing message content
+            const currentContent = [...lastMessage.content];
+
+            // Find if there's an existing text content to update
+            const textContentIndex = currentContent.findIndex((item) => item.type === 'text');
+
+            if (textContentIndex === -1) {
+              // Add new text content
+              currentContent.unshift({
+                type: 'text',
+                text: contentBuffer.current,
+              });
+            } else {
+              // Update existing text content
+              currentContent[textContentIndex] = {
+                type: 'text',
+                text: contentBuffer.current,
+              };
+            }
+
             dispatch({
               type: 'EDIT_MESSAGE',
               payload: {
                 messageId: lastMessage.id,
-                content: contentBuffer.current,
+                content: currentContent,
                 status: MessageStatus.Pending,
               },
             });
@@ -346,51 +389,42 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
     },
   });
 
-  const sendMessage = async ({
-    message,
-    model,
-  }: {
-    message: Omit<Message, 'id' | 'createdAt' | 'updatedAt'> & { id?: string };
-    model: string;
-  }) => {
-    let messageToSend: Message;
+  const sendMessage = async ({ message, model }: { message: Message; model: string }) => {
+    dispatch({ type: 'UPDATE_MESSAGE', payload: { messageId: message.id, status: MessageStatus.Success } });
 
-    // Find any existing pending message with the same content
-    const existingMessage = messagesReference.current.find(
-      (m) => m.role === message.role && m.content === message.content && m.status === MessageStatus.Pending,
-    );
-
-    if (existingMessage) {
-      messageToSend = existingMessage;
-      // If we found an existing message, use its ID as the active stream
-      dispatch({ type: 'SET_ACTIVE_STREAM', payload: existingMessage.id });
-    } else {
-      messageToSend = createMessage({
-        content: message.content,
-        role: message.role,
-        model,
-        status: message.status,
-        metadata: message.metadata,
-      });
-      if (message.id) {
-        dispatch({ type: 'UPDATE_MESSAGE', payload: { messageId: message.id, status: MessageStatus.Success } });
-      } else {
-        dispatch({ type: 'ADD_MESSAGE', payload: messageToSend });
-      }
-    }
-
-    const currentMessages = [...messagesReference.current, messageToSend];
+    const currentMessages = [...messagesReference.current, message];
     await stream({ model, messages: currentMessages });
   };
 
-  const editMessage = async ({ messageId, content, model }: { messageId: string; content: string; model: string }) => {
-    dispatch({ type: 'EDIT_MESSAGE', payload: { messageId, content } });
-    const currentMessages = [...messagesReference.current];
-    await stream({ model, messages: currentMessages });
+  const addMessage = (message: Message) => {
+    dispatch({ type: 'ADD_MESSAGE', payload: message });
+    sendMessage({ message, model: message.model });
   };
 
   const setMessages = (messages: Message[]) => {
     dispatch({ type: 'SET_MESSAGES', payload: messages });
+
+    // Handle any pending messages
+    const lastMessage = messages.at(-1);
+    if (!lastMessage) return;
+
+    if (lastMessage.status === MessageStatus.Pending) {
+      sendMessage({
+        message: lastMessage,
+        model: lastMessage.model,
+      });
+    }
+  };
+
+  const editMessage = async (message: Message) => {
+    const messageIndex = messagesReference.current.findIndex((m) => m.id === message.id);
+    if (messageIndex === -1) return;
+
+    const updatedMessages = [...messagesReference.current.slice(0, messageIndex), message];
+
+    // FIXME: tidy this up to route via the `setMessages` function
+    dispatch({ type: 'SET_MESSAGES', payload: updatedMessages });
+    await stream({ model: message.model, messages: updatedMessages });
   };
 
   return (
@@ -400,8 +434,8 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
         status: state.status,
         selectedModel,
         setSelectedModel,
-        sendMessage,
         editMessage,
+        addMessage,
         setMessages,
       }}
     >
@@ -420,24 +454,40 @@ export function useChat() {
 
 // Helper function to create a new message
 export function createMessage({
+  id,
   content,
   role,
   model,
   thinking,
-  status = MessageStatus.Success,
+  status,
   metadata = {},
+  imageUrls = [],
 }: {
+  id?: string;
   content: string;
   role: MessageRole;
   model: string;
   thinking?: string;
-  status?: MessageStatus;
-  metadata?: Record<string, unknown>;
+  status: MessageStatus;
+  metadata?: {
+    systemHints?: string[];
+  };
+  imageUrls?: string[];
 }): Message {
+  const contentArray: MessageContent[] = [
+    ...imageUrls.map((url) => ({
+      type: 'image_url' as const,
+      image_url: {
+        url,
+      },
+    })),
+    { type: 'text' as const, text: content.trim() },
+  ];
+
   return {
-    id: generatePrefixedId(PREFIX_TYPES.MESSAGE),
+    id: id ?? generatePrefixedId(PREFIX_TYPES.MESSAGE),
     role,
-    content,
+    content: contentArray,
     thinking,
     status,
     model,

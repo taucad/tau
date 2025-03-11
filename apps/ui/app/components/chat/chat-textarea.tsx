@@ -261,8 +261,8 @@ export function ChatTextarea({
                   />
                 </HoverCardTrigger>
                 <HoverCardPortal>
-                  <HoverCardContent side="top" align="start" className="p-0 size-auto max-w-screen">
-                    <img src={image} alt="Uploaded" className="object-cover rounded-md h-48 md:h-96" />
+                  <HoverCardContent side="top" align="start" className="p-0 size-auto max-w-screen overflow-hidden">
+                    <img src={image} alt="Uploaded" className="object-cover h-48 md:h-96" />
                   </HoverCardContent>
                 </HoverCardPortal>
               </HoverCard>

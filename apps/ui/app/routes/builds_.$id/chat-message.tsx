@@ -300,16 +300,22 @@ export function ChatMessage({ message, onEdit, models }: ChatMessageProperties) 
             />
           </When>
           <When condition={!isEditing}>
-            <div className={cn(isUser && 'p-2')}>
+            <div className={cn('flex flex-col gap-2', isUser && 'p-2')}>
               {message.content.map((content) => {
                 if (content.type === 'image_url') {
                   return (
-                    <img
-                      key={content.image_url.url}
-                      src={content.image_url.url}
-                      alt="Image in message"
-                      className="h-16 w-16 object-cover rounded-md ml-auto"
-                    />
+                    <HoverCard openDelay={100} closeDelay={100} key={content.image_url.url}>
+                      <HoverCardTrigger asChild>
+                        <img
+                          src={content.image_url.url}
+                          alt="Image in message"
+                          className="h-16 w-auto object-cover rounded-md ml-auto border-[1px] cursor-zoom-in"
+                        />
+                      </HoverCardTrigger>
+                      <HoverCardContent className="p-0 size-auto max-w-screen overflow-hidden">
+                        <img src={content.image_url.url} alt="Image in message" className="h-48 md:h-96" />
+                      </HoverCardContent>
+                    </HoverCard>
                   );
                 }
 

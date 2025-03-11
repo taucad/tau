@@ -341,15 +341,17 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
                 loading="lazy"
               />
             )}
-            <div
-              className="absolute inset-0"
-              onClick={(event) => {
-                event.stopPropagation();
-                event.preventDefault();
-              }}
-            >
-              {showPreview && <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={1.25} />}
-            </div>
+            {showPreview && (
+              <div
+                className="absolute inset-0"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  event.preventDefault();
+                }}
+              >
+                <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={1.25} />
+              </div>
+            )}
             <Button
               variant="outline"
               size="icon"

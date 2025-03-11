@@ -2,7 +2,7 @@ import { Body, Controller, Post, Logger, Sse } from '@nestjs/common';
 import { Observable } from 'rxjs';
 
 import { SearxngSearch } from '@langchain/community/tools/searxng_search';
-import { AIMessage } from '@langchain/core/messages';
+import { AIMessage, MessageContentComplex } from '@langchain/core/messages';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { StateGraph, MessagesAnnotation, END, START } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
@@ -23,9 +23,56 @@ enum ChatEvent {
   OnToolEnd = 'on_tool_end',
 }
 
+type TauMessage = {
+  type: 'user' | 'assistant';
+  content: MessageContentComplex[];
+  metadata: {
+    systemHints: string[];
+  };
+};
+
 type CreateChatBody = {
-  messages: any[];
+  messages: TauMessage[];
   model: string;
+};
+
+type BaseObservableEvent = {
+  id: string;
+  status: string;
+  timestamp: number;
+};
+
+type ChatModelObservableEvent = BaseObservableEvent & {
+  status: ChatEvent.OnChatModelStart | ChatEvent.OnChatModelEnd;
+};
+
+type TextObservableEvent = BaseObservableEvent & {
+  status: ChatEvent.OnChatModelStream;
+  type: 'text';
+  content: string;
+};
+
+type ThinkingObservableEvent = BaseObservableEvent & {
+  status: ChatEvent.OnChatModelStream;
+  type: 'thinking';
+  content: string;
+};
+
+type ToolObservableEvent = BaseObservableEvent & {
+  status: ChatEvent.OnToolStart | ChatEvent.OnToolEnd;
+  content: {
+    description: string;
+    input: unknown;
+    output?: unknown;
+  };
+};
+
+type ObservableEvent = {
+  data: TextObservableEvent | ThinkingObservableEvent | ToolObservableEvent | ChatModelObservableEvent;
+};
+
+const TEXT_FROM_HINT = {
+  search: "Search the web for information. Use the search results to answer the user's question directly.",
 };
 
 @Controller('chat')
@@ -34,17 +81,7 @@ export class ChatController {
 
   @Post()
   @Sse('sse')
-  async getData(@Body() body: CreateChatBody): Promise<
-    Observable<{
-      data: {
-        id: string;
-        status: string;
-        type?: 'text' | 'thinking';
-        timestamp: number;
-        content?: string | { input?: any; output?: any; description?: string };
-      };
-    }>
-  > {
+  async getData(@Body() body: CreateChatBody): Promise<Observable<ObservableEvent>> {
     // Define the tools for the agent to use
     const tools = [
       // new TavilySearchResults({ maxResults: 3 }),
@@ -94,31 +131,33 @@ export class ChatController {
     // Finally, we compile it into a LangChain Runnable.
     const graph = workflow.compile();
 
-    const textFromHint = {
-      search: "Search the web for information. Use the search results to answer the user's question directly.",
-    };
+    const lastMessage = body.messages.at(-1) as TauMessage;
 
-    // Add hints to the messages
-    const messagesWithHints = body.messages.map((message) => {
-      if (message.metadata?.systemHints) {
-        return {
-          ...message,
-          content: `${message.metadata.systemHints
-            .map((hint: string) => textFromHint[hint as keyof typeof textFromHint])
-            .join(' ')} ${message.content}`,
-        };
-      }
-      return message;
-    });
+    let messagesWithHints = body.messages;
 
-    const inputs: typeof MessagesAnnotation.State = {
-      messages: messagesWithHints,
-    };
+    // Add hints to the last message
+    if (lastMessage.metadata?.systemHints?.length > 0) {
+      const hintText = lastMessage.metadata.systemHints
+        .map((hint: string) => TEXT_FROM_HINT[hint as keyof typeof TEXT_FROM_HINT])
+        .join(' ');
+      messagesWithHints = [
+        ...body.messages.slice(0, -1),
+        {
+          ...lastMessage,
+          content: [...lastMessage.content, { type: 'text', text: hintText }],
+        },
+      ];
+    }
 
-    const eventStream = graph.streamEvents(inputs, {
-      streamMode: 'values',
-      version: 'v2',
-    });
+    const eventStream = graph.streamEvents(
+      {
+        messages: messagesWithHints,
+      },
+      {
+        streamMode: 'values',
+        version: 'v2',
+      },
+    );
 
     return new Observable((observer) => {
       const id = randomUUID();

@@ -27,7 +27,6 @@ export async function getBytes(
 ): Promise<void> {
   const reader = stream.getReader();
   let result: ReadableStreamDefaultReadResult<Uint8Array>;
-  // @ts-expect-error - FIXME
   while (!(result = await reader.read()).done) {
     onChunk(result.value);
   }

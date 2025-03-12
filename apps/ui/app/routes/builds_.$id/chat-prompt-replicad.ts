@@ -1087,5 +1087,5 @@ Include helpful comments explaining the modeling approach
 Follow best practices for CAD modeling (avoid thin features, consider 3D printing constraints)
 The main function should accept parameters and return the final shape
 
-Please implement the solution in TypeScript using the Replicad API.
+Please implement the solution in JavaScript using the Replicad API.
 `;

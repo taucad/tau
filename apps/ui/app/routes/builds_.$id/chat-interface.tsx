@@ -23,6 +23,7 @@ import { KeyShortcut } from '@/components/ui/key-shortcut';
 import { ChatConsole } from './chat-console';
 import { KeyCombination } from '@/utils/keys';
 import { ImperativePanelHandle } from 'react-resizable-panels';
+import { useBuild } from '@/hooks/use-build2';
 
 export const CHAT_HISTORY_OPEN_COOKIE_NAME = 'tau-chat-history-open';
 export const CHAT_PARAMETERS_OPEN_COOKIE_NAME = 'tau-chat-parameters-open';
@@ -115,6 +116,7 @@ type ChatTabs = (typeof tabs)[number]['value'];
 
 export const ChatInterface = () => {
   const { addMessage, messages, editMessage } = useChat();
+  const { setCode } = useBuild();
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
 
@@ -296,6 +298,7 @@ export const ChatInterface = () => {
                   key={index}
                   onEdit={(event) => onEdit(event, message.id)}
                   models={models ?? []}
+                  onCodeApply={setCode}
                 />
               ))}
             </div>

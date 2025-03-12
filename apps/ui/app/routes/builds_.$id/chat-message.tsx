@@ -28,9 +28,10 @@ type ChatMessageProperties = {
   message: Message;
   onEdit: ChatTextareaProperties['onSubmit'];
   models: Model[];
+  onCodeApply?: (code: string) => void;
 };
 
-export function ChatMessage({ message, onEdit, models }: ChatMessageProperties) {
+export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessageProperties) {
   const isUser = message.role === MessageRole.User;
   const [activeSources, setActiveSources] = useState<SourceOrigin[]>(['web']);
   const [isEditing, setIsEditing] = useState(false);
@@ -322,7 +323,9 @@ export function ChatMessage({ message, onEdit, models }: ChatMessageProperties) 
                 if (content.type === 'text') {
                   return (
                     <Fragment key={content.text}>
-                      <MarkdownViewer>{`${content.text}${!isUser && message.status === MessageStatus.Pending ? '●' : ''}`}</MarkdownViewer>
+                      <MarkdownViewer
+                        onCodeApply={isUser ? undefined : onCodeApply}
+                      >{`${content.text}${!isUser && message.status === MessageStatus.Pending ? '●' : ''}`}</MarkdownViewer>
 
                       {!isUser && message.status === MessageStatus.Success && (
                         <div className="flex flex-row justify-start items-center text-foreground/50 mt-2">

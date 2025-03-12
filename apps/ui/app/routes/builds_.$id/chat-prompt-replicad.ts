@@ -180,7 +180,6 @@ interface Sketch extends Shape {
   sweepSketch(profileGen: (basePlane: Plane, startPosition: Point) => Sketch, options?: { withContact?: boolean; withCorrection?: boolean }): Shape3D;
   intersect(other: Sketch): Sketch;
   cut(other: Sketch): Sketch;
-  translate(vector: Point): Sketch;
 }
 
 // Multiple sketches collection type

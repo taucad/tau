@@ -41,8 +41,8 @@ export const CopyButton = React.forwardRef<HTMLButtonElement, CopyButtonProperti
       <Tooltip>
         <TooltipTrigger asChild>
           <Button size={size} variant="ghost" onClick={handleCopy} ref={reference} {...properties}>
-            <span>{copied ? <Check /> : <Copy />}</span>
-            {size !== 'icon' && (copied ? 'Copied' : 'Copy')}
+            {size !== 'icon' && <span data-slot="label">{copied ? 'Copied' : 'Copy'}</span>}
+            {copied ? <Check /> : <Copy />}
           </Button>
         </TooltipTrigger>
         <TooltipContent>{tooltip}</TooltipContent>

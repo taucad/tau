@@ -2,7 +2,6 @@ import { ChatInterface } from '@/routes/builds_.$id/chat-interface';
 import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
 import { useParams } from '@remix-run/react';
 import { useEffect, useState } from 'react';
-import { MessageStatus } from '@/types/chat';
 import { BuildProvider, useBuild } from '@/hooks/use-build2';
 import { Button } from '@/components/ui/button';
 import { ChatProvider, useChat } from '@/contexts/use-chat';

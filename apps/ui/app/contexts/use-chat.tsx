@@ -5,6 +5,7 @@ import { PREFIX_TYPES } from '@/utils/constants';
 import { useEventSource } from '@/hooks/use-event-source';
 import { ENV } from '@/config';
 import { useCookie } from '@/utils/cookies';
+import { replicadSystemPrompt } from '@/routes/builds_.$id/chat-prompt-replicad';
 
 const CHAT_MODEL_COOKIE_NAME = 'tau-chat-model';
 const DEFAULT_CHAT_MODEL = 'gpt-4o-mini';
@@ -392,7 +393,13 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
   const sendMessage = async ({ message, model }: { message: Message; model: string }) => {
     dispatch({ type: 'UPDATE_MESSAGE', payload: { messageId: message.id, status: MessageStatus.Success } });
 
-    const currentMessages = [...messagesReference.current, message];
+    const systemMessage = createMessage({
+      content: replicadSystemPrompt,
+      role: MessageRole.User,
+      model: '',
+      status: MessageStatus.Success,
+    });
+    const currentMessages = [systemMessage, ...messagesReference.current, message];
     await stream({ model, messages: currentMessages });
   };
 
@@ -424,7 +431,16 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
 
     // FIXME: tidy this up to route via the `setMessages` function
     dispatch({ type: 'SET_MESSAGES', payload: updatedMessages });
-    await stream({ model: message.model, messages: updatedMessages });
+
+    const systemMessage = createMessage({
+      content: replicadSystemPrompt,
+      role: MessageRole.User,
+      model: '',
+      status: MessageStatus.Success,
+    });
+    const currentMessages = [systemMessage, ...updatedMessages];
+
+    await stream({ model: message.model, messages: currentMessages });
   };
 
   return (

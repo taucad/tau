@@ -757,7 +757,7 @@ const main = ({ Sketcher, sketchRectangle, sketchCircle, Plane, makeSphere,FaceF
 }
 `;
 
-export const staircase = `// Parametric Staircase Model
+export const staircaseCode = `// Parametric Staircase Model
 const { draw, drawRoundedRectangle, drawCircle } = replicad;
 
 const defaultParams = {
@@ -1012,6 +1012,421 @@ function main(r, params = {}) {
   return staircase;
 }`;
 
+const tableCode = `/**
+ * Parametric Table
+ * A customizable table with adjustable dimensions, leg style options, and optional features.
+ * Suitable for 3D printing, woodworking plans, or visualization.
+ */
+const defaultParams = {
+  // Table dimensions
+  width: 800,      // Width of the table in mm
+  length: 1200,    // Length of the table in mm
+  height: 750,     // Height of the table in mm
+  
+  // Table top
+  topThickness: 25, // Thickness of the tabletop in mm
+  roundedCorners: true, // Whether to create rounded corners on the tabletop
+  cornerRadius: 50, // Radius for rounded corners (if enabled)
+  
+  // Legs
+  legStyle: "square", // "square" or "round"
+  legWidth: 50,      // Width/diameter of the legs in mm
+  legInset: 25,      // Distance from edge to OUTER edge of leg
+  
+  // Apron (the frame under the tabletop)
+  includeApron: true, // Whether to include an apron
+  apronHeight: 80,    // Height of the apron in mm
+  apronThickness: 20, // Thickness of the apron in mm
+  
+  // Additional features
+  includeShelf: false, // Whether to include a lower shelf
+  shelfHeight: 150,    // Height from floor to shelf in mm
+  shelfThickness: 15,  // Thickness of the shelf in mm
+  shelfInset: 50,      // Inset of shelf from edges
+};
+
+const { drawRoundedRectangle, drawCircle, draw } = replicad;
+
+/**
+ * Creates the tabletop of the table
+ * @param p - Parameters for the table
+ * @returns The tabletop 3D shape
+ */
+function createTabletop(p) {
+  // Create tabletop at the exact final height
+  if (p.roundedCorners) {
+    return drawRoundedRectangle(p.width, p.length, p.cornerRadius)
+      .sketchOnPlane()
+      .extrude(p.topThickness)
+      .translate([0, 0, p.height - p.topThickness]);
+  } else {
+    return draw([-p.width/2, -p.length/2])
+      .hLine(p.width)
+      .vLine(p.length)
+      .hLine(-p.width)
+      .close()
+      .sketchOnPlane()
+      .extrude(p.topThickness)
+      .translate([0, 0, p.height - p.topThickness]);
+  }
+}
+
+/**
+ * Creates a single leg for the table
+ * @param p - Parameters for the table
+ * @param x - X position of the leg
+ * @param y - Y position of the leg
+ * @returns The leg 3D shape
+ */
+function createLeg(p, x, y) {
+  // Start legs from Z=0 and extrude up to meet the apron
+  const legHeight = p.height - p.topThickness;
+    
+  if (p.legStyle === "round") {
+    return drawCircle(p.legWidth / 2)
+      .sketchOnPlane()
+      .extrude(legHeight)
+      .translate([x, y, 0]);
+  } else {
+    return draw([x - p.legWidth/2, y - p.legWidth/2])
+      .hLine(p.legWidth)
+      .vLine(p.legWidth)
+      .hLine(-p.legWidth)
+      .close()
+      .sketchOnPlane()
+      .extrude(legHeight)
+      .translate([0, 0, 0]);
+  }
+}
+
+/**
+ * Creates all four legs for the table
+ * @param p - Parameters for the table
+ * @returns The combined legs 3D shape
+ */
+function createLegs(p) {
+  // Calculate leg positions - now include legWidth for proper inset
+  // For each leg, position the center so the outer edge is exactly legInset from table edge
+  const legXPos = p.width/2 - p.legInset - p.legWidth/2;
+  const legYPos = p.length/2 - p.legInset - p.legWidth/2;
+  
+  // Create all four legs
+  const leg1 = createLeg(p, -legXPos, -legYPos);
+  const leg2 = createLeg(p, legXPos, -legYPos);
+  const leg3 = createLeg(p, legXPos, legYPos);
+  const leg4 = createLeg(p, -legXPos, legYPos);
+  
+  // Combine legs into a single shape
+  return leg1.fuse(leg2).fuse(leg3).fuse(leg4);
+}
+
+/**
+ * Creates the apron frame under the tabletop
+ * @param p - Parameters for the table
+ * @returns The apron 3D shape or null if apron is disabled
+ */
+function createApron(p) {
+  if (!p.includeApron) {
+    return null;
+  }
+  
+  // Calculate leg positions
+  const legXPos = p.width/2 - p.legInset - p.legWidth/2;
+  const legYPos = p.length/2 - p.legInset - p.legWidth/2;
+  
+  // Position the apron to meet exactly with the bottom of the tabletop
+  const apronZ = p.height - p.topThickness - p.apronHeight;
+  
+  // Calculate the positions of the leg corners that the apron should connect to
+  const legHalfWidth = p.legWidth / 2;
+  
+  // Front apron (Y-) - extends from left leg to right leg
+  const frontApron = draw([-legXPos - legHalfWidth, -legYPos - legHalfWidth])
+    .hLine(2 * legXPos + p.legWidth)  // Full width between outer edges of legs
+    .vLine(p.apronThickness)
+    .hLine(-(2 * legXPos + p.legWidth))
+    .close()
+    .sketchOnPlane()
+    .extrude(p.apronHeight)
+    .translate([0, 0, apronZ]);
+    
+  // Back apron (Y+) - extends from left leg to right leg
+  const backApron = draw([-legXPos - legHalfWidth, legYPos + legHalfWidth - p.apronThickness])
+    .hLine(2 * legXPos + p.legWidth)
+    .vLine(p.apronThickness)
+    .hLine(-(2 * legXPos + p.legWidth))
+    .close()
+    .sketchOnPlane()
+    .extrude(p.apronHeight)
+    .translate([0, 0, apronZ]);
+    
+  // Left apron (X-) - extends from front leg to back leg
+  const leftApron = draw([-legXPos - legHalfWidth, -legYPos - legHalfWidth + p.apronThickness])
+    .hLine(p.apronThickness)
+    .vLine(2 * legYPos + p.legWidth - p.apronThickness)
+    .hLine(-p.apronThickness)
+    .close()
+    .sketchOnPlane()
+    .extrude(p.apronHeight)
+    .translate([0, 0, apronZ]);
+    
+  // Right apron (X+) - extends from front leg to back leg
+  const rightApron = draw([legXPos + legHalfWidth - p.apronThickness, -legYPos - legHalfWidth + p.apronThickness])
+    .hLine(p.apronThickness)
+    .vLine(2 * legYPos + p.legWidth - p.apronThickness)
+    .hLine(-p.apronThickness)
+    .close()
+    .sketchOnPlane()
+    .extrude(p.apronHeight)
+    .translate([0, 0, apronZ]);
+  
+  // Combine apron sides
+  return frontApron.fuse(backApron).fuse(leftApron).fuse(rightApron);
+}
+
+/**
+ * Creates an optional lower shelf for the table
+ * @param p - Parameters for the table
+ * @returns The shelf 3D shape or null if shelf is disabled
+ */
+function createShelf(p) {
+  if (!p.includeShelf) {
+    return null;
+  }
+  
+  // Calculate shelf dimensions with inset
+  const shelfWidth = p.width - 2 * p.shelfInset;
+  const shelfLength = p.length - 2 * p.shelfInset;
+  
+  // Create the shelf shape at exact specified height
+  if (p.roundedCorners) {
+    const shelfRadius = Math.min(p.cornerRadius * 0.8, Math.min(shelfWidth, shelfLength) * 0.2);
+    
+    return drawRoundedRectangle(shelfWidth, shelfLength, shelfRadius)
+      .sketchOnPlane()
+      .extrude(p.shelfThickness)
+      .translate([0, 0, p.shelfHeight]);
+  } else {
+    return draw([-shelfWidth/2, -shelfLength/2])
+      .hLine(shelfWidth)
+      .vLine(shelfLength)
+      .hLine(-shelfWidth)
+      .close()
+      .sketchOnPlane()
+      .extrude(p.shelfThickness)
+      .translate([0, 0, p.shelfHeight]);
+  }
+}
+
+/**
+ * Creates a parametric table with customizable features
+ * @param _ - Unused parameter (required by replicad)
+ * @param params - Custom parameters to override defaults
+ * @returns The complete table model
+ */
+function main(_, params) {
+  // Merge default parameters with provided ones
+  const p = { ...defaultParams, ...params };
+  
+  // Create table components
+  const tabletop = createTabletop(p);
+  const legs = createLegs(p);
+  let table = tabletop.fuse(legs);
+  
+  // Add optional apron
+  if (p.includeApron) {
+    const apron = createApron(p);
+    if (apron) {
+      table = table.fuse(apron);
+    }
+  }
+  
+  // Add optional shelf
+  if (p.includeShelf) {
+    const shelf = createShelf(p);
+    if (shelf) {
+      table = table.fuse(shelf);
+    }
+  }
+  
+  return table;
+}`;
+
+const legoCode = `
+/**
+ * Parametric LEGO Brick
+ * A simplified and more robust version with standard LEGO dimensions.
+ * Features hollow bottom for connecting to other bricks.
+ */
+
+const defaultParams = {
+  // Basic brick dimensions in LEGO units
+  width: 2,       // Number of studs wide
+  length: 4,      // Number of studs long
+  height: 1,      // Height (1 = standard brick, 1/3 = plate)
+  
+  // Standard LEGO dimensions in mm
+  studDiameter: 4.8,
+  studHeight: 1.8,
+  wallThickness: 1.5,    // Increased for better stability
+  baseThickness: 1.2,    // Slightly thicker base
+  
+  // Tube dimensions
+  tubeOuterDiameter: 6.5,
+  tubeInnerDiameter: 4.8,
+  tubeHeight: 8.0 - 1.2, // Full height minus base thickness
+  
+  // Base unit (1 LEGO unit = 8mm)
+  unit: 8.0,
+  
+  // Features
+  withTubes: true,      // Include bottom tubes
+  rounded: false,       // Simplified version without rounds
+};
+
+const { 
+  drawCircle, 
+  drawRectangle,
+  draw
+} = replicad;
+
+/**
+ * Creates a single stud
+ * @param p Parameters object
+ * @returns The stud shape
+ */
+function createStud(p) {
+  return drawCircle(p.studDiameter / 2)
+    .sketchOnPlane()
+    .extrude(p.studHeight);
+}
+
+/**
+ * Creates a bottom tube (hollow cylinder)
+ * @param p Parameters object
+ * @returns The tube shape
+ */
+function createBottomTube(p) {
+  const outer = drawCircle(p.tubeOuterDiameter / 2)
+    .sketchOnPlane()
+    .extrude(p.tubeHeight);
+    
+  const inner = drawCircle(p.tubeInnerDiameter / 2)
+    .sketchOnPlane()
+    .extrude(p.tubeHeight);
+    
+  return outer.cut(inner);
+}
+
+/**
+ * Determines tube positions for any brick size
+ * @param width Number of studs wide
+ * @param length Number of studs long
+ * @returns Array of [x,y] positions for tubes
+ */
+function calculateTubePositions(width, length) {
+  const positions = [];
+  
+  if (width === 1) {
+    // 1-wide bricks don't have tubes
+    return positions;
+  }
+  
+  // if (width === 2) {
+  //   // 2-wide bricks have tubes only in center line
+  //   const numTubes = length - 1;
+  //   for (let i = 0; i < numTubes; i++) {
+  //     positions.push([0, i - (numTubes - 1) / 2]);
+  //   }
+  //   return positions;
+  // }
+  
+  // For wider bricks, create appropriate grid of tubes
+  // Skip outer edges, place tubes in interior
+  // For wider bricks, place tubes at intersection of 4 studs
+  for (let x = 0; x < width - 1; x++) {
+    for (let y = 0; y < length - 1; y++) {
+      // Convert to centered coordinates and offset by 0.5 to place between studs
+      const xPos = (x - (width - 2) / 2);
+      const yPos = (y - (length - 2) / 2);
+      positions.push([xPos, yPos]);
+    }
+  }
+  
+  return positions;
+}
+
+/**
+ * Creates a LEGO brick with hollow bottom
+ * @param _ Unused parameter
+ * @param params Custom parameters
+ * @returns The LEGO brick model
+ */
+function main(_, params) {
+  // Merge parameters
+  const p = { ...defaultParams, ...params };
+  
+  // Calculate dimensions
+  const totalWidth = p.width * p.unit;
+  const totalLength = p.length * p.unit;
+  const totalHeight = p.height * p.unit;
+  
+  // Create main body
+  const brickBody = drawRectangle(
+    totalWidth,
+    totalLength
+  )
+    .sketchOnPlane()
+    .extrude(totalHeight);
+  
+  // Create bottom hollow
+  const hollowWidth = totalWidth - 2 * p.wallThickness;
+  const hollowLength = totalLength - 2 * p.wallThickness;
+  const hollowHeight = totalHeight - p.baseThickness;
+  
+  const bottomHollow = drawRectangle(
+    hollowWidth,
+    hollowLength
+  )
+    .sketchOnPlane()
+    .extrude(hollowHeight);
+  
+  // Start building the brick
+  let brick = brickBody;
+  
+  // Add studs
+  for (let x = 0; x < p.width; x++) {
+    for (let y = 0; y < p.length; y++) {
+      const xPos = (x - (p.width - 1) / 2) * p.unit;
+      const yPos = (y - (p.length - 1) / 2) * p.unit;
+      
+      const stud = createStud(p).translate([xPos, yPos, totalHeight]);
+      brick = brick.fuse(stud);
+    }
+  }
+  
+  // Cut out the bottom hollow
+  brick = brick.cut(
+    bottomHollow.translate([0, 0, 0])
+  );
+  
+  // Add bottom tubes
+  if (p.withTubes) {
+    const tubePositions = calculateTubePositions(p.width, p.length);
+    
+    for (const [x, y] of tubePositions) {
+      const xPos = x * p.unit;
+      const yPos = y * p.unit;
+      
+      const tube = createBottomTube(p).translate([xPos, yPos, 0]);
+      brick = brick.fuse(tube);
+    }
+  }
+  
+  return brick;
+}
+`;
+
 export const mockModels = [
   {
     id: 'bld_birdhouse',
@@ -1061,6 +1476,16 @@ export const mockModels = [
   {
     id: 'bld_staircase',
     name: 'Staircase',
-    code: staircase,
+    code: staircaseCode,
+  },
+  {
+    id: 'bld_table',
+    name: 'Table',
+    code: tableCode,
+  },
+  {
+    id: 'bld_lego',
+    name: 'Lego',
+    code: legoCode,
   },
 ] satisfies Model[];

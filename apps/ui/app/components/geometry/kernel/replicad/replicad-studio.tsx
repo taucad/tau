@@ -1,6 +1,6 @@
 import { ReplicadViewer, type ReplicadViewerReference } from './replicad-viewer';
 import { DownloadButton } from '@/components/download-button';
-import { LoaderPinwheel, ImageDown, GalleryThumbnails } from 'lucide-react';
+import { LoaderPinwheel, ImageDown, GalleryThumbnails, Clipboard } from 'lucide-react';
 import { useReplicad } from './replicad-context';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BoxDown } from '@/components/icons/box-down';
@@ -60,6 +60,39 @@ export function ReplicadStudio() {
   const handleUpdateThumbnail = async () => {
     updateThumbnailScreenshot();
     toast.success('Thumbnail updated');
+  };
+
+  const copyToClipboard = async () => {
+    if (!canvasReference.current || !isScreenshotReady) {
+      throw new Error('Screenshot attempted before renderer was ready');
+    }
+
+    try {
+      // Get the screenshot as a blob
+      const dataURL =
+        canvasReference.current.captureScreenshot?.({
+          output: {
+            format: 'png',
+            quality: 0.92,
+          },
+        }) || '';
+
+      // Convert dataURL to Blob
+      const response = await fetch(dataURL);
+      const blob = await response.blob();
+
+      // Copy to clipboard
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          [blob.type]: blob,
+        }),
+      ]);
+
+      toast.success('Image copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy image to clipboard:', error);
+      toast.error('Failed to copy image to clipboard');
+    }
   };
 
   useEffect(() => {
@@ -123,6 +156,26 @@ export function ReplicadStudio() {
           </TooltipTrigger>
           <TooltipContent>Update thumbnail</TooltipContent>
         </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={copyToClipboard}
+              className="text-muted-foreground relative group"
+              disabled={!isScreenshotReady}
+            >
+              {isScreenshotReady ? (
+                <Clipboard className="size-4" />
+              ) : (
+                <LoaderPinwheel className="animate-spin ease-in-out" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Copy to clipboard</TooltipContent>
+        </Tooltip>
+
         <DownloadButton
           variant="outline"
           size="icon"

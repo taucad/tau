@@ -99,6 +99,21 @@ const MODELS = {
     },
   },
   openai: {
+    'gpt-4.5-preview': {
+      id: 'openai-gpt-4.5-preview',
+      name: 'GPT-4.5 Preview',
+      provider: 'openai',
+      model: 'gpt-4.5-preview-2025-02-27',
+      details: {
+        family: 'GPT-4.5',
+        families: ['GPT-4.5'],
+        contextWindow: 128_000,
+        maxTokens: 16_384,
+      },
+      configuration: {
+        streaming: true,
+      },
+    },
     'gpt-o3-mini': {
       id: 'openai-gpt-o3-mini',
       name: 'GPT-o3 Mini',

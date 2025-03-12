@@ -23,10 +23,12 @@ const MODELS = {
       },
       configuration: {
         streaming: true,
-        maxTokens: 64_000,
+        maxTokens: 20_000,
+        // @ts-expect-error - FIXME
+        max_tokens: 20_000,
         thinking: {
           type: 'enabled',
-          budget_tokens: 32_000,
+          budget_tokens: 5000,
         },
       },
     },

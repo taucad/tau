@@ -497,13 +497,13 @@ export const ChatInterface = () => {
         defaultSize={chatResizeMain[2]}
         className={cn(
           'hidden',
-          isParametersOpen && 'md:flex w-64 xl:w-96 shrink-0 p-2 pt-3 pl-3 gap-3 text-sm flex-col',
+          isParametersOpen && 'md:flex w-64 xl:w-96 shrink-0 gap-3 text-sm flex-col',
           isMobile && isChatOpen && 'hidden',
         )}
         id="chat-parameters"
       >
-        <span className="font-bold font-mono text-lg">Parameters</span>
-        <div className="flex flex-col gap-2 overflow-y-auto">
+        <span className="font-bold font-mono text-lg m-2 mb-0">Parameters</span>
+        <div className="flex flex-col gap-2 p-2 pt-0 overflow-y-auto">
           <ChatParameters />
         </div>
       </ResizablePanel>

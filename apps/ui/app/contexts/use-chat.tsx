@@ -159,14 +159,10 @@ const ChatContext = createContext<ChatContextValue | undefined>(undefined);
 
 interface ChatProviderProperties {
   children: ReactNode;
-  initialMessages?: Message[];
 }
 
-export function ChatProvider({ children, initialMessages }: ChatProviderProperties) {
-  const [state, dispatch] = useReducer(chatReducer, {
-    ...initialState,
-    messages: initialMessages ?? [],
-  });
+export function ChatProvider({ children }: ChatProviderProperties) {
+  const [state, dispatch] = useReducer(chatReducer, initialState);
   const messagesReference = useRef(state.messages);
   const contentBuffer = useRef('');
 
@@ -175,12 +171,6 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
   useEffect(() => {
     messagesReference.current = state.messages;
   }, [state.messages]);
-
-  // Handle initial messages loading
-  useEffect(() => {
-    // Set messages first
-    dispatch({ type: 'SET_MESSAGES', payload: initialMessages ?? [] });
-  }, [initialMessages]);
 
   const { stream } = useEventSource<MessageEventSchema, { model: string; messages: Message[] }>({
     url: `${ENV.TAU_API_URL}/v1/chat`,

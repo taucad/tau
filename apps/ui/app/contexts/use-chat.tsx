@@ -8,7 +8,7 @@ import { useCookie } from '@/utils/cookies';
 import { replicadSystemPrompt } from '@/routes/builds_.$id/chat-prompt-replicad';
 
 const CHAT_MODEL_COOKIE_NAME = 'tau-chat-model';
-const DEFAULT_CHAT_MODEL = 'gpt-4o-mini';
+const DEFAULT_CHAT_MODEL = 'anthropic-claude-3.7-sonnet-thinking';
 
 export enum ChatEvent {
   OnChatModelStart = 'on_chat_model_start',

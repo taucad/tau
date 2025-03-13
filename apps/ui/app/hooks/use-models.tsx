@@ -23,8 +23,7 @@ export const getModels = async (): Promise<Model[]> => {
     const data = await response.json();
 
     return data;
-  } catch (error) {
-    console.error(error);
+  } catch {
     return [];
   }
 };

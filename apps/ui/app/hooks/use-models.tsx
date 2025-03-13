@@ -14,14 +14,19 @@ export type Model = {
 };
 
 export const getModels = async (): Promise<Model[]> => {
-  const response = await fetch(`${ENV.TAU_API_URL}/v1/models`, {
-    headers: {
-      'ngrok-skip-browser-warning': 'true',
-    },
-  });
-  const data = await response.json();
+  try {
+    const response = await fetch(`${ENV.TAU_API_URL}/v1/models`, {
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+      },
+    });
+    const data = await response.json();
 
-  return data;
+    return data;
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
 };
 
 export const useModels = () => {

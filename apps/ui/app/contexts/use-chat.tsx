@@ -190,7 +190,16 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
       switch (event.status) {
         case ChatEvent.OnChatModelStart: {
           const lastMessage = messagesReference.current.at(-1);
-          if (!lastMessage || lastMessage.role !== MessageRole.Assistant) {
+
+          if (!lastMessage) {
+            throw new Error('No last message found');
+          }
+
+          if (lastMessage.role === MessageRole.User) {
+            // After the server responds to the user's message, set it to success
+            dispatch({ type: 'UPDATE_MESSAGE', payload: { messageId: lastMessage.id, status: MessageStatus.Success } });
+
+            // Create a new assistant message to append subsequent content to
             const newMessage = createMessage({
               content: '',
               role: MessageRole.Assistant,
@@ -199,7 +208,10 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
             });
             dispatch({ type: 'ADD_MESSAGE', payload: newMessage });
           } else {
-            // Reset existing message content if it's pending
+            // Reset existing message content if it's pending.
+            // This happens when the server responds to a tool call.
+            // TODO: revise this logic to ensure that the full assistant message content is shown to the user,
+            // currently the tool call content is not shown with this logic.
             if (lastMessage.status === MessageStatus.Pending) {
               // Create a properly formatted empty content array
               const emptyContent: MessageContent[] = [
@@ -391,8 +403,6 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
   });
 
   const sendMessage = async ({ message, model }: { message: Message; model: string }) => {
-    dispatch({ type: 'UPDATE_MESSAGE', payload: { messageId: message.id, status: MessageStatus.Success } });
-
     const systemMessage = createMessage({
       content: replicadSystemPrompt,
       role: MessageRole.User,
@@ -411,7 +421,9 @@ export function ChatProvider({ children, initialMessages }: ChatProviderProperti
   const setMessages = (messages: Message[]) => {
     dispatch({ type: 'SET_MESSAGES', payload: messages });
 
-    // Handle any pending messages
+    // Handle any pending messages. Messages are set to pending when they are created,
+    // then set to success after the stream has completed. This ensures that when network
+    // connectivity is restored, the message is sent again.
     const lastMessage = messages.at(-1);
     if (!lastMessage) return;
 

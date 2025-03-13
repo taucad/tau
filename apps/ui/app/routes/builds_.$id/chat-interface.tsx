@@ -157,7 +157,7 @@ export const ChatInterface = () => {
     const userMessage = createMessage({
       content,
       role: MessageRole.User,
-      status: MessageStatus.Success,
+      status: MessageStatus.Pending,
       metadata: metadata ?? { systemHints: [] },
       model,
       imageUrls,

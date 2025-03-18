@@ -25,6 +25,8 @@ import {
   TableCaption,
 } from '@/components/ui/table';
 import { InfoTooltip } from '@/components/info-tooltip';
+import { SvgIcon } from '@/components/icons/svg-icon';
+import { ModelProvider } from '@/types/cad';
 
 const MAX_TITLE_LENGTH = 50;
 
@@ -360,6 +362,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                 }
 
                 if (content.type === 'text') {
+                  const model = models.find((model) => model.id === message.model);
                   return (
                     <Fragment key={content.text}>
                       <MarkdownViewer
@@ -380,9 +383,16 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                                 </Badge>
                               </HoverCardTrigger>
                               <HoverCardContent className="w-auto p-2">
-                                <div className="flex flex-col space-y-2">
-                                  <h4 className="font-medium p-2 pb-0">Usage Details</h4>
-                                  <Table className="">
+                                <div className="flex flex-col space-y-1">
+                                  <div className="flex flex-col space-y-1 p-2 pb-0">
+                                    <h4 className="font-medium">Usage Details</h4>
+                                    {model && (
+                                      <div className="flex items-center gap-2 text-xs">
+                                        <SvgIcon id={model.provider as ModelProvider} className="size-4" />
+                                        <span className="font-mono">{model.name}</span>
+                                      </div>
+                                    )}
+                                  </div>
                                     <TableHeader>
                                       <TableRow>
                                         <TableHead>Metric</TableHead>

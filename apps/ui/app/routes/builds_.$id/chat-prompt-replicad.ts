@@ -345,7 +345,7 @@ interface Blueprints {
  */
 const { sketchRectangle, EdgeFinder } = replicad;
 
-export const defaultParams = {
+const defaultParams = {
   length: 100,    // Length of cube sides in mm
   filletRadius: 5, // Radius for rounded edges in mm
 };

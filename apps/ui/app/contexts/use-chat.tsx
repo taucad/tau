@@ -5,7 +5,6 @@ import { PREFIX_TYPES } from '@/utils/constants';
 import { useEventSource } from '@/hooks/use-event-source';
 import { ENV } from '@/config';
 import { useCookie } from '@/utils/cookies';
-import { replicadSystemPrompt } from '@/routes/builds_.$id/chat-prompt-replicad';
 import { ChatUsageTokens, ChatUsageCost } from '@/types/chat';
 
 const CHAT_MODEL_COOKIE_NAME = 'tau-chat-model';
@@ -164,9 +163,10 @@ const ChatContext = createContext<ChatContextValue | undefined>(undefined);
 
 interface ChatProviderProperties {
   children: ReactNode;
+  systemMessageText?: string;
 }
 
-export function ChatProvider({ children }: ChatProviderProperties) {
+export function ChatProvider({ children, systemMessageText }: ChatProviderProperties) {
   const [state, dispatch] = useReducer(chatReducer, initialState);
   const messagesReference = useRef(state.messages);
   const contentBuffer = useRef('');
@@ -399,13 +399,20 @@ export function ChatProvider({ children }: ChatProviderProperties) {
   });
 
   const sendMessage = async ({ message, model }: { message: Message; model: string }) => {
-    const systemMessage = createMessage({
-      content: replicadSystemPrompt,
-      role: MessageRole.User,
-      model: '',
-      status: MessageStatus.Success,
-    });
-    const currentMessages = [systemMessage, ...messagesReference.current, message];
+    const systemMessages: Message[] = [];
+
+    if (systemMessageText) {
+      systemMessages.push(
+        createMessage({
+          content: systemMessageText,
+          role: MessageRole.User,
+          model: '',
+          status: MessageStatus.Success,
+        }),
+      );
+    }
+
+    const currentMessages = [...systemMessages, ...messagesReference.current, message];
     await stream({ model, messages: currentMessages });
   };
 
@@ -440,13 +447,20 @@ export function ChatProvider({ children }: ChatProviderProperties) {
     // FIXME: tidy this up to route via the `setMessages` function
     dispatch({ type: 'SET_MESSAGES', payload: updatedMessages });
 
-    const systemMessage = createMessage({
-      content: replicadSystemPrompt,
-      role: MessageRole.User,
-      model: '',
-      status: MessageStatus.Success,
-    });
-    const currentMessages = [systemMessage, ...updatedMessages];
+    const systemMessages: Message[] = [];
+
+    if (systemMessageText) {
+      systemMessages.push(
+        createMessage({
+          content: systemMessageText,
+          role: MessageRole.User,
+          model: '',
+          status: MessageStatus.Success,
+        }),
+      );
+    }
+
+    const currentMessages = [...systemMessages, ...updatedMessages];
 
     await stream({ model: message.model, messages: currentMessages });
   };

@@ -8,15 +8,57 @@ import { ChatProvider, useChat } from '@/contexts/use-chat';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { LogProvider } from '@/contexts/log-context';
+import { replicadSystemPrompt } from './chat-prompt-replicad';
+import { Message, MessageRole, MessageStatus } from '@/types/chat';
+
+const nameGenerationSystemPrompt = `
+You are a helpful assistant that generates titles for AI chat conversations.
+
+The conversations primarily revolve around designing and building 3D models,
+but can include other topics. When the conversation is about 3D models,
+the title should be a single sentence that describes the item being designed.
+
+The title should be 1-3 words, and should not include any special characters.
+`;
 
 const BuildNameEditor = () => {
   const { build, updateName } = useBuild();
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState<string>();
+  const { addMessage, messages, status } = useChat();
 
+  // Set initial name and trigger generation if needed
   useEffect(() => {
-    setName(build?.name || 'Untitled Build');
-  }, [build?.name]);
+    if (build?.name === 'New Build' && build.messages?.[0]) {
+      // Create and send message for name generation
+      const message = {
+        ...build.messages[0],
+        model: 'openai-gpt-4o',
+        metadata: {
+          systemHints: ['no-search'],
+        },
+      } as const satisfies Message;
+      addMessage(message);
+    }
+  }, [build?.name, build?.messages]);
+
+  // Update name as it streams in
+  useEffect(() => {
+    const lastMessage = messages.at(-1);
+
+    if (!lastMessage) return;
+
+    if (
+      lastMessage.role === MessageRole.Assistant &&
+      lastMessage.content[0].type === 'text' &&
+      lastMessage.content[0].text
+    ) {
+      setName(lastMessage.content[0].text);
+      if (lastMessage.status === MessageStatus.Success) {
+        updateName(lastMessage.content[0].text);
+      }
+    }
+  }, [messages, status]);
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -61,7 +103,9 @@ export const handle = {
 
     return (
       <BuildProvider buildId={id}>
-        <BuildNameEditor />
+        <ChatProvider systemMessageText={nameGenerationSystemPrompt}>
+          <BuildNameEditor />
+        </ChatProvider>
       </BuildProvider>
     );
   },
@@ -110,7 +154,7 @@ export default function ChatRoute() {
     <LogProvider>
       <BuildProvider buildId={id}>
         <ReplicadProvider withExceptions>
-          <ChatProvider>
+          <ChatProvider systemMessageText={replicadSystemPrompt}>
             <div className="flex h-full">
               <Chat />
             </div>

@@ -1085,6 +1085,7 @@ Use appropriate Replicad functions for the geometry needed
 Include helpful comments explaining the modeling approach
 Follow best practices for CAD modeling (avoid thin features, consider 3D printing constraints)
 The main function should accept parameters and return the final shape
+Output the entire response in markdown format.
 
 Please implement the solution in JavaScript using the Replicad API.
 `;

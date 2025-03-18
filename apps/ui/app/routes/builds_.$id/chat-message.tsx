@@ -14,16 +14,7 @@ import { Avatar, AvatarImage } from '@/components/ui/avatar';
 import { ChatTextarea, ChatTextareaProperties } from '@/components/chat/chat-textarea';
 import { Model } from '@/hooks/use-models';
 import { ComingSoon } from '@/components/ui/coming-soon';
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableFooter,
-  TableRow,
-  TableHead,
-  TableCell,
-  TableCaption,
-} from '@/components/ui/table';
+import { Table, TableHeader, TableBody, TableFooter, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { SvgIcon } from '@/components/icons/svg-icon';
 import { ModelProvider } from '@/types/cad';
@@ -384,7 +375,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                               </HoverCardTrigger>
                               <HoverCardContent className="w-auto p-2">
                                 <div className="flex flex-col space-y-1">
-                                  <div className="flex flex-col space-y-1 p-2 pb-0">
+                                  <div className="flex flex-row items-center justify-between space-x-1 p-2 pb-0">
                                     <h4 className="font-medium">Usage Details</h4>
                                     {model && (
                                       <div className="flex items-center gap-2 text-xs">
@@ -393,6 +384,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                                       </div>
                                     )}
                                   </div>
+                                  <Table className="rounded-md overflow-clip">
                                     <TableHeader>
                                       <TableRow>
                                         <TableHead>Metric</TableHead>
@@ -452,7 +444,6 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                                         <TableCell>{formatCurrency(message.usage.totalCost)}</TableCell>
                                       </TableRow>
                                     </TableFooter>
-                                    <TableCaption>All prices are in USD</TableCaption>
                                   </Table>
                                 </div>
                               </HoverCardContent>

@@ -62,6 +62,17 @@ export function ReplicadStudio() {
     toast.success('Thumbnail updated');
   };
 
+  useEffect(() => {
+    if (mesh && isScreenshotReady && !status.isComputing) {
+      // Update the thumbnail after a delay to allow the canvas to render
+      const timeout = setTimeout(() => {
+        updateThumbnailScreenshot();
+      }, 100);
+
+      return () => clearTimeout(timeout);
+    }
+  }, [mesh, isScreenshotReady, status.isComputing]);
+
   const copyToClipboard = async () => {
     if (!canvasReference.current || !isScreenshotReady) {
       throw new Error('Screenshot attempted before renderer was ready');

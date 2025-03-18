@@ -304,7 +304,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
   if (viewMode === 'list') {
     return (
       <Link to={`/builds/${project.id}`} className="block">
-        <div className="flex items-center space-x-4 p-4 border rounded-lg hover:bg-accent">
+        <div className="flex items-center gap-4 p-4 border rounded-lg hover:bg-accent">
           <div className="flex-shrink-0">
             <Avatar className="h-12 w-12">
               <AvatarImage src={project.thumbnail || project.author.avatar} alt={project.name} />

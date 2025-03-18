@@ -87,7 +87,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
     <article
       className={cn(
         'group/message flex flex-row items-start w-full',
-        isUser && 'space-x-reverse space-x-2 flex-row-reverse',
+        isUser && 'space-x-reverse gap-2 flex-row-reverse',
       )}
     >
       <When condition={message.role === MessageRole.User}>
@@ -109,7 +109,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
         {/* @ts-expect-error - FIXME: message.toolCalls is always defined */}
         {message.toolCalls?.length > 0 && relevantSources && (
           <>
-            <div className="flex flex-row items-center space-x-2">
+            <div className="flex flex-row items-center gap-2">
               <p className="text-lg">Sources</p>
               {SOURCE_TOOLS.filter((source) => message.toolCalls?.some((s) => s.origin === source.key)).map(
                 (source) => {
@@ -127,7 +127,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                         });
                       }}
                       key={source.key}
-                      className="rounded-full hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30 flex flex-row items-center space-x-1 cursor-pointer select-none transition-transform duration-200 ease-in-out"
+                      className="rounded-full hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30 flex flex-row items-center gap-1 cursor-pointer select-none transition-transform duration-200 ease-in-out"
                     >
                       <source.icon className="size-3" />
                       <p className="text-xs">{sourceCount}</p>
@@ -140,7 +140,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                 <TooltipTrigger>
                   <Badge
                     variant={'outline'}
-                    className="rounded-full hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30 flex flex-row items-center space-x-1 cursor-pointer select-none transition-transform duration-200 ease-in-out"
+                    className="rounded-full hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30 flex flex-row items-center gap-1 cursor-pointer select-none transition-transform duration-200 ease-in-out"
                   >
                     <p className="text-xs">+</p>
                   </Badge>
@@ -176,7 +176,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                           className="flex flex-col bg-neutral/5 hover:bg-neutral/10 p-2 justify-between rounded-md h-24"
                         >
                           <p className="text-xs font-medium line-clamp-3">{source.title}</p>
-                          <div className="flex flex-row items-center space-x-2">
+                          <div className="flex flex-row items-center gap-2">
                             <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
                             <p className="text-xs text-foreground/50 font-medium truncate">{sourceDomain}</p>
                           </div>
@@ -184,7 +184,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                       </a>
                     </HoverCardTrigger>
                     <HoverCardContent className="flex flex-col space-y-2">
-                      <div className="flex flex-row items-center space-x-2">
+                      <div className="flex flex-row items-center gap-2">
                         <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
                         <p className="text-sm text-foreground/50">{sourceDomain}</p>
                       </div>
@@ -245,7 +245,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                                 className="w-full bg-neutral/5 hover:bg-neutral/10 p-2 rounded-md flex flex-col space-y-2"
                               >
                                 <p className="text-sm font-medium text-foreground">{source.title}</p>
-                                <div className="flex flex-row items-center space-x-2">
+                                <div className="flex flex-row items-center gap-2">
                                   <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
                                   <p className="text-xs text-foreground/50 font-medium">{sourceDomain}</p>
                                 </div>
@@ -361,7 +361,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                       >{`${content.text}${!isUser && message.status === MessageStatus.Pending ? '●' : ''}`}</MarkdownViewer>
 
                       {!isUser && message.status === MessageStatus.Success && (
-                        <div className="flex flex-row justify-start items-center text-foreground/50 mt-2 space-x-2">
+                        <div className="flex flex-row justify-start items-center text-foreground/50 mt-2 gap-2">
                           <CopyButton size="xs" text={content.text} tooltip="Copy message" />
                           {message.usage && (
                             <HoverCard openDelay={100} closeDelay={100}>
@@ -375,7 +375,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                               </HoverCardTrigger>
                               <HoverCardContent className="w-auto p-2">
                                 <div className="flex flex-col space-y-1">
-                                  <div className="flex flex-row items-center justify-between space-x-1 p-2 pb-0">
+                                  <div className="flex flex-row items-center justify-between gap-1 p-2 pb-0">
                                     <h4 className="font-medium">Usage Details</h4>
                                     {model && (
                                       <div className="flex items-center gap-2 text-xs">
@@ -394,7 +394,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                                     </TableHeader>
                                     <TableBody>
                                       <TableRow>
-                                        <TableCell className="flex flex-row items-center space-x-1">
+                                        <TableCell className="flex flex-row items-center gap-1">
                                           <span>Input</span>
                                           <InfoTooltip tooltip="The number of tokens in the input prompt. This includes the user prompt, system message, and any previous messages." />
                                         </TableCell>
@@ -402,7 +402,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                                         <TableCell>{formatCurrency(message.usage.inputTokensCost)}</TableCell>
                                       </TableRow>
                                       <TableRow>
-                                        <TableCell className="flex flex-row items-center space-x-1">
+                                        <TableCell className="flex flex-row items-center gap-1">
                                           <span>Output</span>
                                           <InfoTooltip tooltip="The number of tokens in the output response." />
                                         </TableCell>
@@ -411,7 +411,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                                       </TableRow>
                                       {message.usage.cachedReadTokens > 0 && (
                                         <TableRow>
-                                          <TableCell className="flex flex-row items-center space-x-1">
+                                          <TableCell className="flex flex-row items-center gap-1">
                                             <span>Cached Read</span>
                                             <InfoTooltip tooltip="The number of tokens read from the prompt cache. This improves performance by avoiding re-processing the same prompt." />
                                           </TableCell>
@@ -421,7 +421,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                                       )}
                                       {message.usage.cachedWriteTokens > 0 && (
                                         <TableRow>
-                                          <TableCell className="flex flex-row items-center space-x-1">
+                                          <TableCell className="flex flex-row items-center gap-1">
                                             <span>Cached Write</span>
                                             <InfoTooltip tooltip="The number of tokens written to the prompt cache. This improves performance by avoiding re-processing the same prompt." />
                                           </TableCell>

@@ -14,6 +14,17 @@ import { Avatar, AvatarImage } from '@/components/ui/avatar';
 import { ChatTextarea, ChatTextareaProperties } from '@/components/chat/chat-textarea';
 import { Model } from '@/hooks/use-models';
 import { ComingSoon } from '@/components/ui/coming-soon';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableFooter,
+  TableRow,
+  TableHead,
+  TableCell,
+  TableCaption,
+} from '@/components/ui/table';
+import { InfoTooltip } from '@/components/info-tooltip';
 
 const MAX_TITLE_LENGTH = 50;
 
@@ -29,6 +40,23 @@ type ChatMessageProperties = {
   onEdit: ChatTextareaProperties['onSubmit'];
   models: Model[];
   onCodeApply?: (code: string) => void;
+};
+
+/**
+ * Format a number as a currency string, uses USD as the currency
+ * @param value - The number to format
+ * @returns A formatted currency string
+ */
+const formatCurrency = (value: number) => {
+  return value.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 6,
+  });
+};
+
+const formatTokens = (value: number) => {
+  return value.toLocaleString();
 };
 
 export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessageProperties) {
@@ -328,8 +356,87 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                       >{`${content.text}${!isUser && message.status === MessageStatus.Pending ? '●' : ''}`}</MarkdownViewer>
 
                       {!isUser && message.status === MessageStatus.Success && (
-                        <div className="flex flex-row justify-start items-center text-foreground/50 mt-2">
+                        <div className="flex flex-row justify-start items-center text-foreground/50 mt-2 space-x-2">
                           <CopyButton size="xs" text={content.text} tooltip="Copy message" />
+                          {message.usage && (
+                            <HoverCard openDelay={100} closeDelay={100}>
+                              <HoverCardTrigger className="flex flex-row items-center">
+                                <Badge
+                                  variant="outline"
+                                  className="cursor-help text-inherit font-medium hover:bg-neutral/20"
+                                >
+                                  {formatCurrency(message.usage.totalCost)}
+                                </Badge>
+                              </HoverCardTrigger>
+                              <HoverCardContent className="w-auto p-2">
+                                <div className="flex flex-col space-y-2">
+                                  <h4 className="font-medium p-2 pb-0">Usage Details</h4>
+                                  <Table className="">
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>Metric</TableHead>
+                                        <TableHead>Tokens</TableHead>
+                                        <TableHead>Cost</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      <TableRow>
+                                        <TableCell className="flex flex-row items-center space-x-1">
+                                          <span>Input</span>
+                                          <InfoTooltip tooltip="The number of tokens in the input prompt. This includes the user prompt, system message, and any previous messages." />
+                                        </TableCell>
+                                        <TableCell>{formatTokens(message.usage.inputTokens)}</TableCell>
+                                        <TableCell>{formatCurrency(message.usage.inputTokensCost)}</TableCell>
+                                      </TableRow>
+                                      <TableRow>
+                                        <TableCell className="flex flex-row items-center space-x-1">
+                                          <span>Output</span>
+                                          <InfoTooltip tooltip="The number of tokens in the output response." />
+                                        </TableCell>
+                                        <TableCell>{formatTokens(message.usage.outputTokens)}</TableCell>
+                                        <TableCell>{formatCurrency(message.usage.outputTokensCost)}</TableCell>
+                                      </TableRow>
+                                      {message.usage.cachedReadTokens > 0 && (
+                                        <TableRow>
+                                          <TableCell className="flex flex-row items-center space-x-1">
+                                            <span>Cached Read</span>
+                                            <InfoTooltip tooltip="The number of tokens read from the prompt cache. This improves performance by avoiding re-processing the same prompt." />
+                                          </TableCell>
+                                          <TableCell>{formatTokens(message.usage.cachedReadTokens)}</TableCell>
+                                          <TableCell>{formatCurrency(message.usage.cachedReadTokensCost)}</TableCell>
+                                        </TableRow>
+                                      )}
+                                      {message.usage.cachedWriteTokens > 0 && (
+                                        <TableRow>
+                                          <TableCell className="flex flex-row items-center space-x-1">
+                                            <span>Cached Write</span>
+                                            <InfoTooltip tooltip="The number of tokens written to the prompt cache. This improves performance by avoiding re-processing the same prompt." />
+                                          </TableCell>
+                                          <TableCell>{formatTokens(message.usage.cachedWriteTokens)}</TableCell>
+                                          <TableCell>{formatCurrency(message.usage.cachedWriteTokensCost)}</TableCell>
+                                        </TableRow>
+                                      )}
+                                    </TableBody>
+                                    <TableFooter className="rounded-b-md overflow-clip">
+                                      <TableRow>
+                                        <TableCell>Total</TableCell>
+                                        <TableCell>
+                                          {formatTokens(
+                                            message.usage.inputTokens +
+                                              message.usage.outputTokens +
+                                              message.usage.cachedReadTokens +
+                                              message.usage.cachedWriteTokens,
+                                          )}
+                                        </TableCell>
+                                        <TableCell>{formatCurrency(message.usage.totalCost)}</TableCell>
+                                      </TableRow>
+                                    </TableFooter>
+                                    <TableCaption>All prices are in USD</TableCaption>
+                                  </Table>
+                                </div>
+                              </HoverCardContent>
+                            </HoverCard>
+                          )}
                         </div>
                       )}
                     </Fragment>

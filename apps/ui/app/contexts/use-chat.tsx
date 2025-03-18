@@ -6,6 +6,7 @@ import { useEventSource } from '@/hooks/use-event-source';
 import { ENV } from '@/config';
 import { useCookie } from '@/utils/cookies';
 import { replicadSystemPrompt } from '@/routes/builds_.$id/chat-prompt-replicad';
+import { ChatUsageTokens, ChatUsageCost } from '@/types/chat';
 
 const CHAT_MODEL_COOKIE_NAME = 'tau-chat-model';
 const DEFAULT_CHAT_MODEL = 'anthropic-claude-3.7-sonnet-thinking';
@@ -34,6 +35,7 @@ type MessageEventSchema = {
         }[];
       };
   status: ChatEvent;
+  usage?: ChatUsageTokens & ChatUsageCost;
 };
 
 interface ChatState {
@@ -51,6 +53,7 @@ type ChatAction =
         content?: string | MessageContent[];
         thinking?: string;
         status?: MessageStatus;
+        usage?: ChatUsageTokens & ChatUsageCost;
       };
     }
   | {
@@ -61,6 +64,7 @@ type ChatAction =
         thinking?: string;
         toolCalls?: Message['toolCalls'];
         status?: MessageStatus;
+        usage?: ChatUsageTokens & ChatUsageCost;
       };
     }
   | { type: 'SET_STATUS'; payload: string }
@@ -113,7 +117,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
     }
     case 'EDIT_MESSAGE': {
-      const { messageId, content, thinking, toolCalls, status } = action.payload;
+      const { messageId, content, thinking, toolCalls, status, usage } = action.payload;
       return {
         ...state,
         messages: state.messages.map((message) => {
@@ -126,6 +130,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
               thinking: thinking ?? message.thinking,
               toolCalls: toolCalls ?? message.toolCalls,
               status: status ?? message.status,
+              usage: usage ?? message.usage,
               updatedAt: Date.now(),
             };
           }
@@ -380,6 +385,7 @@ export function ChatProvider({ children }: ChatProviderProperties) {
               content: contentBuffer.current || lastMessage.content || '',
               toolCalls: lastMessage.toolCalls,
               status: MessageStatus.Success,
+              usage: event.usage,
             },
           });
           // Clear active stream and buffer when complete
@@ -480,6 +486,7 @@ export function createMessage({
   status,
   metadata = {},
   imageUrls = [],
+  cache = false,
 }: {
   id?: string;
   content: string;
@@ -491,6 +498,7 @@ export function createMessage({
     systemHints?: string[];
   };
   imageUrls?: string[];
+  cache?: boolean;
 }): Message {
   const contentArray: MessageContent[] = [
     ...imageUrls.map((url) => ({
@@ -499,7 +507,15 @@ export function createMessage({
         url,
       },
     })),
-    { type: 'text' as const, text: content.trim() },
+    {
+      type: 'text' as const,
+      text: content.trim(),
+      // Mark the last message as ephemeral to add a caching breakpoint.
+      // This improves performance by preventing the LLM from needing to re-process
+      // the same prompt.
+      // @see https://js.langchain.com/docs/integrations/chat/anthropic/#prompt-caching
+      ...(cache ? { cache_control: { type: 'ephemeral' } } : {}),
+    },
   ];
 
   return {

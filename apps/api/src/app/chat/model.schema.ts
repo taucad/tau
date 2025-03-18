@@ -25,6 +25,12 @@ export const ModelDetailsSchema = z.object({
   quantizationLevel: z.string().describe('The quantization level of the model').optional(),
   contextWindow: z.number().describe('The context window of the model'),
   maxTokens: z.number().describe('The max tokens the model is capable of generating'),
+  cost: z.object({
+    inputTokens: z.number().describe('The cost of the input tokens of the model'),
+    outputTokens: z.number().describe('The cost of the output tokens of the model'),
+    cachedReadTokens: z.number().describe('The cost of the cached input tokens of the model'),
+    cachedWriteTokens: z.number().describe('The cost of the cached output tokens of the model'),
+  }),
 });
 
 export const ModelSchema = z.object({
@@ -40,17 +46,18 @@ export const ModelSchema = z.object({
   support: ModelSupportSchema.optional(),
 });
 
-export const ProviderSchema = z.object({
+export const ModelProviderSchema = z.object({
   provider: z.string().describe('The provider of the model'),
+  inputTokensIncludesCachedReadTokens: z.boolean().describe('Whether the input tokens include cached read tokens'),
   configuration: z
     .object({
-      apiKey: z.string().describe('The API key of the provider'),
-      baseURL: z.string().describe('The base URL of the provider'),
+      apiKey: z.string().describe('The API key of the provider').optional(),
+      baseURL: z.string().describe('The base URL of the provider').optional(),
     })
     .describe('The configuration of the provider'),
 });
 
 export type Model = z.infer<typeof ModelSchema>;
 export type ModelDetails = z.infer<typeof ModelDetailsSchema>;
-export type Provider = z.infer<typeof ProviderSchema>;
+export type ModelProvider = z.infer<typeof ModelProviderSchema>;
 export type ModelSupport = z.infer<typeof ModelSupportSchema>;

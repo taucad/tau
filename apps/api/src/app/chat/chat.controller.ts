@@ -7,6 +7,7 @@ import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { StateGraph, MessagesAnnotation, END, START } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
 import { ModelService } from './model.service';
+import { ChatUsageCost, ChatUsageTokens } from './chat.schema';
 
 enum ChatNode {
   Start = START,
@@ -42,10 +43,14 @@ type BaseObservableEvent = {
   timestamp: number;
 };
 
-type ChatModelObservableEvent = BaseObservableEvent & {
-  status: ChatEvent.OnChatModelStart | ChatEvent.OnChatModelEnd;
+type ChatModelStartObservableEvent = BaseObservableEvent & {
+  status: ChatEvent.OnChatModelStart;
 };
 
+type ChatModelEndObservableEvent = BaseObservableEvent & {
+  status: ChatEvent.OnChatModelEnd;
+  usage: ChatUsageTokens & ChatUsageCost;
+};
 type TextObservableEvent = BaseObservableEvent & {
   status: ChatEvent.OnChatModelStream;
   type: 'text';
@@ -68,12 +73,17 @@ type ToolObservableEvent = BaseObservableEvent & {
 };
 
 type ObservableEvent = {
-  data: TextObservableEvent | ThinkingObservableEvent | ToolObservableEvent | ChatModelObservableEvent;
+  data:
+    | TextObservableEvent
+    | ThinkingObservableEvent
+    | ToolObservableEvent
+    | ChatModelStartObservableEvent
+    | ChatModelEndObservableEvent;
 };
 
 const TEXT_FROM_HINT = {
   search: "Search the web for information. Use the search results to answer the user's question directly.",
-};
+} as const;
 
 @Controller('chat')
 export class ChatController {
@@ -217,7 +227,22 @@ export class ChatController {
               break;
             }
             case ChatEvent.OnChatModelEnd: {
-              observer.next({ data: { id, status: streamEvent.event, timestamp: Date.now() } });
+              const usageTokens = this.modelService.normalizeUsageTokens(body.model, {
+                inputTokens: streamEvent.data.output.usage_metadata.input_tokens,
+                outputTokens: streamEvent.data.output.usage_metadata.output_tokens,
+                cachedReadTokens: streamEvent.data.output.usage_metadata.input_token_details.cache_read,
+                cachedWriteTokens: streamEvent.data.output.usage_metadata.input_token_details.cache_creation,
+              });
+              const usageCost = this.modelService.getModelCost(body.model, usageTokens);
+
+              observer.next({
+                data: {
+                  id,
+                  status: streamEvent.event,
+                  timestamp: Date.now(),
+                  usage: { ...usageTokens, ...usageCost },
+                },
+              });
 
               break;
             }

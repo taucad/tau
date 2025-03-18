@@ -1,11 +1,12 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 
-import { Model, ModelSupport } from './model.schema';
+import { Model, ModelProvider, ModelSupport } from './model.schema';
 import { ChatOllama, ChatOllamaInput } from '@langchain/ollama';
 import { ChatOpenAI, ChatOpenAIFields } from '@langchain/openai';
 import { ChatAnthropic, type ChatAnthropicCallOptions } from '@langchain/anthropic';
 import ollama from 'ollama';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { ChatUsageCost, ChatUsageTokens } from './chat.schema';
 
 const MODELS = {
   anthropic: {
@@ -20,6 +21,12 @@ const MODELS = {
         contextWindow: 200_000,
         // Extended thinking mode supports up to 64000 tokens
         maxTokens: 64_000,
+        cost: {
+          inputTokens: 3,
+          outputTokens: 15,
+          cachedReadTokens: 3.75,
+          cachedWriteTokens: 0.3,
+        },
       },
       configuration: {
         streaming: true,
@@ -42,6 +49,12 @@ const MODELS = {
         families: ['Claude'],
         contextWindow: 200_000,
         maxTokens: 8192,
+        cost: {
+          inputTokens: 3,
+          outputTokens: 15,
+          cachedReadTokens: 3.75,
+          cachedWriteTokens: 0.3,
+        },
       },
       configuration: {
         streaming: true,
@@ -58,6 +71,12 @@ const MODELS = {
         families: ['Claude'],
         contextWindow: 200_000,
         maxTokens: 8192,
+        cost: {
+          inputTokens: 3,
+          outputTokens: 15,
+          cachedReadTokens: 3.75,
+          cachedWriteTokens: 0.3,
+        },
       },
       configuration: {
         streaming: true,
@@ -74,6 +93,12 @@ const MODELS = {
         families: ['Claude'],
         contextWindow: 200_000,
         maxTokens: 8192,
+        cost: {
+          inputTokens: 0.8,
+          outputTokens: 4,
+          cachedReadTokens: 1,
+          cachedWriteTokens: 0.08,
+        },
       },
       configuration: {
         streaming: true,
@@ -93,6 +118,12 @@ const MODELS = {
         parameterSize: '70B',
         contextWindow: 128_000,
         maxTokens: 16_384,
+        cost: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedReadTokens: 0,
+          cachedWriteTokens: 0,
+        },
       },
       configuration: {
         streaming: true,
@@ -111,6 +142,33 @@ const MODELS = {
         families: ['GPT-4.5'],
         contextWindow: 128_000,
         maxTokens: 16_384,
+        cost: {
+          inputTokens: 75,
+          outputTokens: 150,
+          cachedReadTokens: 37.5,
+          cachedWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+      },
+    },
+    'gpt-o1': {
+      id: 'openai-gpt-o1',
+      name: 'GPT-o1',
+      provider: 'openai',
+      model: 'o1-2024-12-17',
+      details: {
+        family: 'GPT-O3',
+        families: ['GPT-O3'],
+        contextWindow: 200_000,
+        maxTokens: 100_000,
+        cost: {
+          inputTokens: 15,
+          outputTokens: 60,
+          cachedReadTokens: 7.5,
+          cachedWriteTokens: 0,
+        },
       },
       configuration: {
         streaming: true,
@@ -126,6 +184,12 @@ const MODELS = {
         families: ['GPT-O3'],
         contextWindow: 200_000,
         maxTokens: 100_000,
+        cost: {
+          inputTokens: 1.1,
+          outputTokens: 4.4,
+          cachedReadTokens: 0.55,
+          cachedWriteTokens: 0,
+        },
       },
       configuration: {
         streaming: true,
@@ -141,6 +205,12 @@ const MODELS = {
         families: ['GPT-4o'],
         contextWindow: 128_000,
         maxTokens: 16_384,
+        cost: {
+          inputTokens: 0.15,
+          outputTokens: 0.6,
+          cachedReadTokens: 0.075,
+          cachedWriteTokens: 0,
+        },
       },
       configuration: {
         streaming: true,
@@ -157,6 +227,12 @@ const MODELS = {
         families: ['GPT-4o'],
         contextWindow: 128_000,
         maxTokens: 4096,
+        cost: {
+          inputTokens: 2.5,
+          outputTokens: 10,
+          cachedReadTokens: 1.25,
+          cachedWriteTokens: 0,
+        },
       },
       configuration: {
         streaming: true,
@@ -170,6 +246,7 @@ const PROVIDERS = {
   openai: {
     provider: 'openai',
     configuration: {},
+    inputTokensIncludesCachedReadTokens: true,
     createClass: (options: ChatOpenAIFields) => new ChatOpenAI(options),
   },
   ollama: {
@@ -177,21 +254,24 @@ const PROVIDERS = {
     configuration: {
       baseURL: 'http://localhost:11434',
     },
+    inputTokensIncludesCachedReadTokens: false,
     createClass: (options: ChatOllamaInput) => new ChatOllama(options),
   },
   sambanova: {
     provider: 'sambanova',
     configuration: {
-      apiKey: process.env.SAMBA_API_KEY,
+      apiKey: process.env.SAMBA_API_KEY as string,
       baseURL: 'https://api.sambanova.ai/v1',
     },
+    inputTokensIncludesCachedReadTokens: false,
     createClass: (options: ChatOpenAIFields) => new ChatOpenAI(options),
   },
   anthropic: {
     provider: 'anthropic',
     configuration: {
-      apiKey: process.env.ANTHROPIC_API_KEY,
+      apiKey: process.env.ANTHROPIC_API_KEY as string,
     },
+    inputTokensIncludesCachedReadTokens: false,
     createClass: (options: ChatAnthropicCallOptions) =>
       new ChatAnthropic({
         ...options,
@@ -199,11 +279,11 @@ const PROVIDERS = {
         maxRetries: 2,
       }),
   },
-} as const;
+} as const satisfies Record<string, ModelProvider & { createClass: (options: never) => BaseChatModel }>;
 
 const ollamaToolSupportFamilies = new Set(['llama']);
 
-type Provider = keyof typeof PROVIDERS;
+type ProviderId = keyof typeof PROVIDERS;
 
 @Injectable()
 export class ModelService implements OnModuleInit {
@@ -227,7 +307,7 @@ export class ModelService implements OnModuleInit {
 
     if (!modelConfig) throw new Error(`Could not find model ${modelId}`);
 
-    const provider = PROVIDERS[modelConfig.provider as Provider];
+    const provider = PROVIDERS[modelConfig.provider as ProviderId];
 
     const modelClass = provider.createClass({
       model: modelConfig.model,
@@ -238,6 +318,51 @@ export class ModelService implements OnModuleInit {
     return {
       model: modelClass,
       support: modelConfig.support,
+    };
+  }
+
+  public normalizeUsageTokens(modelId: string, usage: ChatUsageTokens): ChatUsageTokens {
+    const modelConfig = this.models.find((model) => model.id === modelId);
+    if (!modelConfig) throw new Error(`Could not find model ${modelId}`);
+
+    const providerConfig = PROVIDERS[modelConfig.provider as ProviderId];
+
+    return {
+      // Some providers include cached read tokens in the input tokens,
+      // so we need to subtract them if necessary.
+      inputTokens:
+        usage.inputTokens - (providerConfig.inputTokensIncludesCachedReadTokens ? usage.cachedReadTokens : 0),
+      outputTokens: usage.outputTokens,
+      cachedReadTokens: usage.cachedReadTokens ?? 0,
+      cachedWriteTokens: usage.cachedWriteTokens ?? 0,
+    };
+  }
+
+  public getModelCost(modelId: string, usage: ChatUsageTokens): ChatUsageCost {
+    const modelConfig = this.models.find((model) => model.id === modelId);
+    if (!modelConfig) throw new Error(`Could not find model ${modelId}`);
+
+    // Convert cost per million tokens to cost per token
+    const inputCostPerToken = modelConfig.details.cost.inputTokens / 1_000_000;
+    const outputCostPerToken = modelConfig.details.cost.outputTokens / 1_000_000;
+    const cachedReadCostPerToken = modelConfig.details.cost.cachedReadTokens / 1_000_000;
+    const cachedWriteCostPerToken = modelConfig.details.cost.cachedWriteTokens / 1_000_000;
+
+    // Calculate individual costs
+    const inputTokensCost = usage.inputTokens * inputCostPerToken;
+    const outputTokensCost = usage.outputTokens * outputCostPerToken;
+    const cachedReadTokensCost = usage.cachedReadTokens * cachedReadCostPerToken;
+    const cachedWriteTokensCost = usage.cachedWriteTokens * cachedWriteCostPerToken;
+
+    // Calculate total cost
+    const totalCost = inputTokensCost + outputTokensCost + cachedReadTokensCost + cachedWriteTokensCost;
+
+    return {
+      inputTokensCost,
+      outputTokensCost,
+      cachedReadTokensCost,
+      cachedWriteTokensCost,
+      totalCost,
     };
   }
 
@@ -260,6 +385,12 @@ export class ModelService implements OnModuleInit {
           quantizationLevel: model.details.quantization_level,
           contextWindow: 200_000,
           maxTokens: 100_000,
+          cost: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cachedReadTokens: 0,
+            cachedWriteTokens: 0,
+          },
         },
         configuration: {
           streaming: true,

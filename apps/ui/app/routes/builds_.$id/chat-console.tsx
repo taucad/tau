@@ -205,7 +205,7 @@ export const ChatConsole = ({
   return (
     <div
       className={cn(
-        'flex flex-col w-full group/console',
+        'flex flex-col w-full group/console @container/console',
         // Full height for both modes with different adjustments
         'group-data-[view=split]/console:h-full group-data-[view=split]/console:min-h-0',
         // Fix scrolling issues
@@ -220,10 +220,10 @@ export const ChatConsole = ({
             <Button
               variant="outline"
               size="xs"
-              className="gap-2 w-fit pr-1 hidden group-data-[view=split]/console:flex"
+              className="gap-2 w-fit px-1 @xs/console:pl-2 hidden group-data-[view=split]/console:flex"
               onClick={(event) => onButtonClick?.(event)}
             >
-              <span className="font-mono text-xs">Console</span>
+              <span className="font-mono text-xs hidden @xs/console:block">Console</span>
               <span className="relative flex flex-col gap-2 size-4 ease-in-out">
                 <span className="absolute inset-0 flex flex-col gap-2 size-4 scale-100 group-data-[state=open]/console:scale-0 transition-transform duration-200 ease-in-out">
                   <ChevronUp className="absolute -bottom-0.5 left-1/2 -translate-x-1/2" />

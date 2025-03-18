@@ -375,11 +375,14 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                               </HoverCardTrigger>
                               <HoverCardContent className="w-auto p-2">
                                 <div className="flex flex-col space-y-1">
-                                  <div className="flex flex-row items-center justify-between gap-1 p-2 pb-0">
+                                  <div className="flex flex-row items-baseline justify-between gap-4 p-2 pb-0">
                                     <h4 className="font-medium">Usage Details</h4>
                                     {model && (
-                                      <div className="flex items-center gap-2 text-xs">
-                                        <SvgIcon id={model.provider as ModelProvider} className="size-4" />
+                                      <div className="flex items-baseline gap-2 text-xs">
+                                        <SvgIcon
+                                          id={model.provider as ModelProvider}
+                                          className="size-4 translate-y-[0.25em]"
+                                        />
                                         <span className="font-mono">{model.name}</span>
                                       </div>
                                     )}

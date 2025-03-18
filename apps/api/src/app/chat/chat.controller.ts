@@ -231,8 +231,8 @@ export class ChatController {
               const usageTokens = this.modelService.normalizeUsageTokens(body.model, {
                 inputTokens: streamEvent.data.output.usage_metadata.input_tokens,
                 outputTokens: streamEvent.data.output.usage_metadata.output_tokens,
-                cachedReadTokens: streamEvent.data.output.usage_metadata.input_token_details.cache_read,
-                cachedWriteTokens: streamEvent.data.output.usage_metadata.input_token_details.cache_creation,
+                cachedReadTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_read,
+                cachedWriteTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_creation,
               });
               const usageCost = this.modelService.getModelCost(body.model, usageTokens);
 

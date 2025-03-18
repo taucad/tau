@@ -337,6 +337,41 @@ interface Blueprints {
 - Always use descriptive names for functions and variables.
 - Always add a typedoc comment to functions explaining what they do.
 
+## Example: Parametric Cube
+\`\`\`typescript
+/**
+ * Parametric Cube with Filleted Edges
+ * A simple cube with adjustable dimensions and rounded edges.
+ */
+const { sketchRectangle, EdgeFinder } = replicad;
+
+export const defaultParams = {
+  length: 100,    // Length of cube sides in mm
+  filletRadius: 5, // Radius for rounded edges in mm
+};
+
+/**
+ * Creates a cube with filleted edges
+ * @param _ Unused parameter (required by replicad)
+ * @param params Custom parameters to override defaults
+ * @returns The complete cube model
+ */
+function main(_, params) {
+  // Merge default parameters with provided ones
+  const p = { ...defaultParams, ...params };
+  
+  // Create base cube shape
+  let shape = sketchRectangle(p.length, p.length)
+    .extrude(p.length)
+    .fillet({
+      radius: p.filletRadius,
+      filter: new EdgeFinder(),
+    });
+
+  return shape;
+}
+\`\`\`
+
 ## Example: Parametric Box
 \`\`\`typescript
 /**
@@ -368,17 +403,10 @@ function main(_, params) {
     .sketchOnPlane()
     .extrude(p.height);
   
-  // Create inner shape for hollowing
-  const inner = drawRoundedRectangle(
-    p.width - 2 * p.thickness, 
-    p.length - 2 * p.thickness, 
-    p.cornerRadius - p.thickness
-  )
-    .sketchOnPlane()
-    .extrude(p.height - p.thickness);
-  
-  // Create hollow box by subtracting inner from outer
-  return outer.cut(inner.translate([0, 0, p.thickness]));
+  // Hollow out the box using the shell function
+  const hollowBox = outer.shell(p.thickness, (f) => f.inPlane("XY", p.height));
+
+  return hollowBox;
 }
 \`\`\`
 

@@ -10,26 +10,35 @@ import { Input } from '@/components/ui/input';
 import { LogProvider } from '@/contexts/log-context';
 import { replicadSystemPrompt } from './chat-prompt-replicad';
 import { Message, MessageRole, MessageStatus } from '@/types/chat';
+import { DEFAULT_BUILD_NAME } from '@/constants/build.constants';
 
 const nameGenerationSystemPrompt = `
 You are a helpful assistant that generates titles for AI chat conversations.
 
-The conversations primarily revolve around designing and building 3D models,
+The conversations primarily focus on designing and building 3D models,
 but can include other topics. When the conversation is about 3D models,
 the title should be a single sentence that describes the item being designed.
+Otherwise, the title should simply describe the conversation.
 
 The title should be 1-3 words, and should not include any special characters.
+Do NOT include redundant words like "Design" or "Model".
+
+You are not answering the prompt, you are generating the title for the conversation.
+You should ONLY respond with the title, and nothing else.
 `;
 
 const BuildNameEditor = () => {
-  const { build, updateName } = useBuild();
+  const { build, updateName, isLoading } = useBuild();
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState<string>();
+  const [displayName, setDisplayName] = useState<string>(build?.name || '');
   const { addMessage, messages, status } = useChat();
 
   // Set initial name and trigger generation if needed
   useEffect(() => {
-    if (build?.name === 'New Build' && build.messages?.[0]) {
+    if (isLoading || !build) return;
+
+    if (build.name === DEFAULT_BUILD_NAME && build.messages[0]) {
       // Create and send message for name generation
       const message = {
         ...build.messages[0],
@@ -39,8 +48,11 @@ const BuildNameEditor = () => {
         },
       } as const satisfies Message;
       addMessage(message);
+    } else if (!isLoading) {
+      setName(build.name);
+      setDisplayName(build.name);
     }
-  }, [build?.name, build?.messages]);
+  }, [build?.name, isLoading]);
 
   // Update name as it streams in
   useEffect(() => {
@@ -60,6 +72,24 @@ const BuildNameEditor = () => {
     }
   }, [messages, status]);
 
+  // Typewriter effect
+  useEffect(() => {
+    // Don't show the typewriter effect if the name is being edited
+    if (!name || name === build?.name || isEditing) return;
+
+    let currentIndex = 0;
+    const interval = setInterval(() => {
+      if (currentIndex <= name.length) {
+        setDisplayName(name.slice(0, currentIndex));
+        currentIndex++;
+      } else {
+        clearInterval(interval);
+      }
+    }, 50); // Adjust speed by changing this value (milliseconds)
+
+    return () => clearInterval(interval);
+  }, [name]);
+
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     if (name) {
@@ -72,7 +102,7 @@ const BuildNameEditor = () => {
     <Popover open={isEditing} onOpenChange={setIsEditing}>
       <PopoverTrigger asChild>
         <Button variant="ghost" className="p-2">
-          {build?.name}
+          {displayName}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="-translate-x-2 w-64 p-1">

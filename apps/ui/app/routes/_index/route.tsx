@@ -8,6 +8,7 @@ import { ChatProvider, createMessage } from '@/contexts/use-chat';
 import { cubeCode } from '@/components/mock-code';
 import { CommunityBuildGrid } from '@/components/project-grid';
 import { sampleBuilds } from '@/components/mock-builds';
+import { DEFAULT_BUILD_NAME } from '@/constants/build.constants';
 
 export default function ChatStart() {
   const { data: models } = useModels();
@@ -26,7 +27,7 @@ export default function ChatStart() {
       });
 
       const build = await storage.createBuild({
-        name: 'New Build',
+        name: DEFAULT_BUILD_NAME,
         description: '',
         stars: 0,
         forks: 0,

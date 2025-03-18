@@ -83,6 +83,7 @@ type ObservableEvent = {
 
 const TEXT_FROM_HINT = {
   search: "Search the web for information. Use the search results to answer the user's question directly.",
+  'no-search': 'Do not search the web for information. Do not use the search tool.',
 } as const;
 
 @Controller('chat')

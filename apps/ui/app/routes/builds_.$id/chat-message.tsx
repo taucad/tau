@@ -92,7 +92,10 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
 
   return (
     <article
-      className={cn('group/message flex flex-row items-start', isUser && 'space-x-reverse space-x-2 flex-row-reverse')}
+      className={cn(
+        'group/message flex flex-row items-start w-full',
+        isUser && 'space-x-reverse space-x-2 flex-row-reverse',
+      )}
     >
       <When condition={message.role === MessageRole.User}>
         {!isEditing && (
@@ -101,7 +104,15 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
           </Avatar>
         )}
       </When>
-      <div className={cn('flex flex-col space-y-2 overflow-y-auto', isEditing && 'w-full')}>
+      <div
+        className={cn(
+          'flex flex-col space-y-2 overflow-y-auto',
+          // Only make the text area full when editing.
+          isEditing && 'w-full',
+          // Only the assistant messages should take up the full width.
+          !isUser && 'w-full',
+        )}
+      >
         {/* @ts-expect-error - FIXME: message.toolCalls is always defined */}
         {message.toolCalls?.length > 0 && relevantSources && (
           <>

@@ -46,13 +46,12 @@ export function ReplicadStudio() {
       throw new Error('Screenshot attempted before renderer was ready');
     }
 
-    const dataURL =
-      canvasReference.current.captureScreenshot?.({
-        output: {
-          format: 'webp',
-          quality: 0.92,
-        },
-      }) || '';
+    const dataURL = canvasReference.current.captureScreenshot({
+      output: {
+        format: 'webp',
+        quality: 0.92,
+      },
+    });
 
     updateThumbnail(dataURL);
   }, [isScreenshotReady]);
@@ -62,6 +61,7 @@ export function ReplicadStudio() {
     toast.success('Thumbnail updated');
   };
 
+  // Automatically update the thumbnail when the mesh is loaded and the screenshot is ready
   useEffect(() => {
     if (mesh && isScreenshotReady && !status.isComputing) {
       // Update the thumbnail after a delay to allow the canvas to render
@@ -80,13 +80,12 @@ export function ReplicadStudio() {
 
     try {
       // Get the screenshot as a blob
-      const dataURL =
-        canvasReference.current.captureScreenshot?.({
-          output: {
-            format: 'png',
-            quality: 0.92,
-          },
-        }) || '';
+      const dataURL = canvasReference.current.captureScreenshot({
+        output: {
+          format: 'png',
+          quality: 0.92,
+        },
+      });
 
       // Convert dataURL to Blob
       const response = await fetch(dataURL);

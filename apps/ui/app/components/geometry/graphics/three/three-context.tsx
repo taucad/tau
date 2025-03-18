@@ -22,8 +22,8 @@ export type ThreeContextProperties = CanvasProps & CadViewerProperties;
 
 // Updated ref type to include screenshot capability
 export type ThreeCanvasReference = HTMLCanvasElement & {
-  captureScreenshot?: (options?: ScreenshotOptions) => string;
-  isScreenshotReady?: boolean;
+  captureScreenshot: (options?: ScreenshotOptions) => string;
+  isScreenshotReady: boolean;
 };
 
 export const ThreeProvider = forwardRef<ThreeCanvasReference, ThreeContextProperties>(

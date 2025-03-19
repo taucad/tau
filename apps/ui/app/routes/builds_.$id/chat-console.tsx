@@ -344,7 +344,7 @@ export const ChatConsole = ({
           </Tooltip>
         </div>
       </div>
-      <div className="flex flex-col group-data-[view=split]/console:flex-col-reverse gap-0.5 overflow-y-auto p-2 pt-0 min-h-0 flex-grow">
+      <div className="flex flex-col group-data-[view=split]/console:flex-col-reverse gap-0.5 overflow-y-auto overflow-x-hidden p-2 pt-0 min-h-0 flex-grow">
         {/* Display console logs */}
         {filteredLogs.length > 0 ? (
           filteredLogs.map((log) => (
@@ -353,6 +353,7 @@ export const ChatConsole = ({
               className={cn(
                 'text-xs bg-background font-mono py-1 px-2 rounded border-l-2',
                 'hover:bg-muted/20 transition-colors cursor-default group/log border-primary',
+                'overflow-x-auto',
                 {
                   'border-destructive': log.level === LOG_LEVELS.ERROR,
                   'border-warning': log.level === LOG_LEVELS.WARN,
@@ -370,9 +371,7 @@ export const ChatConsole = ({
                 {displayConfig.showComponent && <ComponentBadge origin={log.origin} />}
                 <span className="mr-auto">{log.message}</span>
               </div>
-              {log.data !== undefined && displayConfig.showData && (
-                <div className="block opacity-80 overflow-x-auto">{JSON.stringify(log.data, undefined, 2)}</div>
-              )}
+              {log.data !== undefined && displayConfig.showData && <div>{JSON.stringify(log.data, undefined, 2)}</div>}
             </pre>
           ))
         ) : (

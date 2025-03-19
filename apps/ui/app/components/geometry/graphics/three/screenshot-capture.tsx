@@ -49,7 +49,7 @@ export interface ScreenshotOptions {
      * File format for the output image
      * @default 'png'
      */
-    format?: 'png' | 'jpeg' | 'webp';
+    format?: 'image/png' | 'image/jpeg' | 'image/webp';
 
     /**
      * Quality level for lossy formats (0.0 to 1.0)
@@ -57,6 +57,14 @@ export interface ScreenshotOptions {
      * @default 0.92
      */
     quality?: number;
+
+    /**
+     * Whether to screenshot the scene as a preview.
+     *
+     * When true, the scene will be rendered without gizmos, grid, or zoom.
+     * @default true
+     */
+    isPreview?: boolean;
   };
 }
 
@@ -86,8 +94,9 @@ export const ScreenshotCapture = forwardRef<ScreenshotCaptureHandle, object>((_,
             lineWidthEnhancement: 2,
           },
           output: {
-            format: 'png',
+            format: 'image/png',
             quality: 0.92,
+            isPreview: true,
           },
         } as const satisfies ScreenshotOptions;
 
@@ -108,13 +117,17 @@ export const ScreenshotCapture = forwardRef<ScreenshotCaptureHandle, object>((_,
           : defaultOptions;
 
         const removedObjects: THREE.Object3D[] = [];
-        scene.traverse((object) => {
-          // Check if the object is for preview only
-          if (object.userData?.isPreviewOnly) {
-            object.visible = false;
-            removedObjects.push(object);
-          }
-        });
+
+        // If we are in preview mode, remove all objects that are not for preview only
+        if (config.output.isPreview) {
+          scene.traverse((object) => {
+            // Check if the object is for preview only
+            if (object.userData?.isPreviewOnly) {
+              object.visible = false;
+              removedObjects.push(object);
+            }
+          });
+        }
 
         // Store original canvas size for aspect ratio calculations
         const originalWidth = gl.domElement.width;
@@ -278,16 +291,11 @@ export const ScreenshotCapture = forwardRef<ScreenshotCaptureHandle, object>((_,
         );
 
         // Get the data URL with the specified format and quality
-        const mimeType =
-          config.output?.format === 'jpeg'
-            ? 'image/jpeg'
-            : config.output?.format === 'webp'
-              ? 'image/webp'
-              : 'image/png';
+        const mimeType = config.output?.format;
 
         // Only use quality for lossy formats
         const outputQuality =
-          config.output?.format === 'jpeg' || config.output?.format === 'webp' ? config.output.quality : undefined;
+          mimeType === 'image/jpeg' || mimeType === 'image/webp' ? config.output.quality : undefined;
 
         const dataURL = temporaryCanvas.toDataURL(mimeType, outputQuality);
 

@@ -26,13 +26,12 @@ export function ReplicadStudio() {
     }
 
     // Use the captureScreenshot method to render the scene on demand and capture it
-    const dataURL =
-      canvasReference.current.captureScreenshot?.({
-        output: {
-          format: 'png',
-          quality: 0.92,
-        },
-      }) || '';
+    const dataURL = canvasReference.current.captureScreenshot({
+      output: {
+        format: 'image/png',
+        quality: 0.92,
+      },
+    });
 
     // Convert dataURL to Blob
     const response = await fetch(dataURL);
@@ -48,7 +47,7 @@ export function ReplicadStudio() {
 
     const dataURL = canvasReference.current.captureScreenshot({
       output: {
-        format: 'webp',
+        format: 'image/webp',
         quality: 0.92,
       },
     });
@@ -82,8 +81,9 @@ export function ReplicadStudio() {
       // Get the screenshot as a blob
       const dataURL = canvasReference.current.captureScreenshot({
         output: {
-          format: 'png',
+          format: 'image/png',
           quality: 0.92,
+          isPreview: false,
         },
       });
 

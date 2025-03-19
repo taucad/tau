@@ -12,6 +12,7 @@ export type CadViewerProperties = {
   enableGizmo?: boolean;
   enableGrid?: boolean;
   enableZoom?: boolean;
+  enableDamping?: boolean;
   className?: string;
   center?: boolean;
   stageOptions?: StageOptions;
@@ -33,6 +34,7 @@ export const ThreeProvider = forwardRef<ThreeCanvasReference, ThreeContextProper
       enableGizmo = false,
       enableGrid = false,
       enableZoom = false,
+      enableDamping = false,
       className,
       stageOptions = {},
       center = true,
@@ -90,7 +92,7 @@ export const ThreeProvider = forwardRef<ThreeCanvasReference, ThreeContextProper
         <Scene
           enableGizmo={enableGizmo}
           center={center}
-          enableDamping={true}
+          enableDamping={enableDamping}
           enableZoom={enableZoom}
           stageOptions={stageOptions}
         >

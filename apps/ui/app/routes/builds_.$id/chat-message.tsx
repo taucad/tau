@@ -10,7 +10,6 @@ import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTr
 import { Badge } from '@/components/ui/badge';
 import { useState, useEffect, useRef, Fragment } from 'react';
 import { When } from '@/components/ui/utils/when';
-import { Avatar, AvatarImage } from '@/components/ui/avatar';
 import { ChatTextarea, ChatTextareaProperties } from '@/components/chat/chat-textarea';
 import { Model } from '@/hooks/use-models';
 import { ComingSoon } from '@/components/ui/coming-soon';
@@ -90,13 +89,6 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
         isUser && 'space-x-reverse gap-2 flex-row-reverse',
       )}
     >
-      <When condition={message.role === MessageRole.User}>
-        {!isEditing && (
-          <Avatar className="w-8 h-8 bg-neutral/20 rounded-full flex items-center justify-center">
-            <AvatarImage src="/avatar-sample.png" alt="User" />
-          </Avatar>
-        )}
-      </When>
       <div
         className={cn(
           'flex flex-col space-y-2 overflow-y-auto',

@@ -126,6 +126,7 @@ export function ReplicadStudio() {
             enableGizmo
             enableGrid
             enableZoom
+            enableAxesHelper
             ref={canvasReference}
             onCanvasReady={handleCanvasReady}
           />

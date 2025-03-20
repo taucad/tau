@@ -41,13 +41,7 @@ const BreadcrumbLink = React.forwardRef<
 >(({ asChild, className, ...properties }, reference) => {
   const Comp = asChild ? Slot : 'a';
 
-  return (
-    <Comp
-      ref={reference}
-      className={cn('hover:text-foreground hover:underline', className)}
-      {...properties}
-    />
-  );
+  return <Comp ref={reference} className={cn('hover:text-foreground hover:underline', className)} {...properties} />;
 });
 BreadcrumbLink.displayName = 'BreadcrumbLink';
 

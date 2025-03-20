@@ -139,15 +139,9 @@ export const ChatConsole = ({
   const log = useConsole({ defaultOrigin: { component: 'ChatConsole' } });
   const [filter, setFilter] = useState('');
 
-  // Cookie-persisted state for log levels with proper parse and stringify
-  const [enabledLevels, setEnabledLevels] = useCookie<typeof DEFAULT_LOG_LEVELS>(
-    CONSOLE_LOG_LEVELS_COOKIE,
-    DEFAULT_LOG_LEVELS,
-  );
-  const [displayConfig, setDisplayConfig] = useCookie<typeof DEFAULT_DISPLAY_CONFIG>(
-    CONSOLE_DISPLAY_CONFIG_COOKIE,
-    DEFAULT_DISPLAY_CONFIG,
-  );
+  // Cookie-persisted state for log levels
+  const [enabledLevels, setEnabledLevels] = useCookie(CONSOLE_LOG_LEVELS_COOKIE, DEFAULT_LOG_LEVELS);
+  const [displayConfig, setDisplayConfig] = useCookie(CONSOLE_DISPLAY_CONFIG_COOKIE, DEFAULT_DISPLAY_CONFIG);
 
   // Handle filter changes
   const handleFilterChange = useCallback(

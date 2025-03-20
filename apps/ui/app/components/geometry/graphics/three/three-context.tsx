@@ -78,7 +78,7 @@ export const ThreeProvider = forwardRef<ThreeCanvasReference, ThreeContextProper
       <Canvas
         style={{
           // 12 is half the size of the cursor image
-          cursor: `url(data:image/svg+xml;base64,${rotate3dBase64}) 12 12, auto`,
+          cursor: `url(data:image/svg+xml;base64,${rotate3dBase64}) 13 13, auto`,
         }}
         dpr={dpr}
         frameloop="demand"

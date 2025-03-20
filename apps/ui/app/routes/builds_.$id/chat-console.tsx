@@ -348,7 +348,7 @@ export const ChatConsole = ({
               className={cn(
                 'text-xs bg-background font-mono py-1 px-2 rounded border-l-2',
                 'hover:bg-muted/20 transition-colors cursor-default group/log border-primary',
-                'overflow-x-auto',
+                'overflow-x-auto flex-shrink-0',
                 {
                   'border-destructive': log.level === LOG_LEVELS.ERROR,
                   'border-warning': log.level === LOG_LEVELS.WARN,

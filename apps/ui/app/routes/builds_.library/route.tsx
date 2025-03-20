@@ -4,7 +4,6 @@ import {
   Filter,
   Grid,
   List,
-  ChevronDown,
   Zap,
   Cpu,
   Layout,
@@ -36,8 +35,9 @@ import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/repl
 import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer';
 import { useBuilds } from '@/hooks/use-builds';
 import { toast } from '@/components/ui/sonner';
+import { Handle } from '@/types/matches';
 
-export const handle = {
+export const handle: Handle = {
   breadcrumb: () => {
     return (
       <Link to="/builds/library" tabIndex={-1}>
@@ -50,11 +50,6 @@ export const handle = {
 };
 
 const ITEMS_PER_PAGE = 12;
-
-const handleStatusChange = (projectId: string, newStatus: string) => {
-  console.log(`Changing status of project ${projectId} to ${newStatus}`);
-  // Implement status change logic here
-};
 
 export default function PersonalCadProjects() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -108,6 +103,8 @@ export default function PersonalCadProjects() {
         </div>
       </div>
 
+      {/* Permissble as `Tabs` loses type information */}
+      {/* eslint-disable-next-line @typescript-eslint/consistent-type-assertions */}
       <Tabs value={activeFilter} onValueChange={(value) => setActiveFilter(value as 'all' | Category)}>
         <div className="flex flex-wrap gap-2 justify-between items-center mb-8">
           <TabsList className="">
@@ -205,7 +202,7 @@ function LibraryBuildGrid({
   );
 }
 
-function CategoryBadge({ category }: { category: string }) {
+function CategoryBadge({ category }: { category: Category }) {
   const icons = {
     mechanical: <Cog className="size-4" />,
     electrical: <Zap className="size-4" />,
@@ -219,49 +216,48 @@ function CategoryBadge({ category }: { category: string }) {
   };
 
   return (
-    <div className={cn('flex items-center gap-1.5', colors[category as keyof typeof colors])}>
-      {icons[category as keyof typeof icons]}
+    <div className={cn('flex items-center gap-1.5', colors[category])}>
+      {icons[category]}
       <span className="capitalize">{category}</span>
     </div>
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function StatusDropdown({ status, projectId }: { status: string; projectId: string }) {
-  const statusColors = {
-    draft: 'bg-gray-100 hover:bg-neutral',
-    published: 'bg-blue-100 hover:bg-blue-200',
-    archived: 'bg-red-100 hover:bg-red-200',
-  };
+// TODO: review statuses
+// function StatusDropdown({ status, projectId }: { status: string; projectId: string }) {
+//   const statusColors = {
+//     draft: 'bg-gray-100 hover:bg-neutral',
+//     published: 'bg-blue-100 hover:bg-blue-200',
+//     archived: 'bg-red-100 hover:bg-red-200',
+//   };
 
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={cn('h-7 text-xs font-normal', statusColors[status as keyof typeof statusColors])}
-        >
-          {status}
-          <ChevronDown className="ml-1 h-3 w-3" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'draft')}>Draft</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'review')}>Review</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'published')}>Published</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'completed')}>Completed</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'archived')}>Archived</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
+//   return (
+//     <DropdownMenu>
+//       <DropdownMenuTrigger asChild>
+//         <Button
+//           variant="outline"
+//           size="sm"
+//           className={cn('h-7 text-xs font-normal', statusColors[status as keyof typeof statusColors])}
+//         >
+//           {status}
+//           <ChevronDown className="ml-1 h-3 w-3" />
+//         </Button>
+//       </DropdownMenuTrigger>
+//       <DropdownMenuContent align="end">
+//         <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'draft')}>Draft</DropdownMenuItem>
+//         <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'review')}>Review</DropdownMenuItem>
+//         <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'published')}>Published</DropdownMenuItem>
+//         <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'completed')}>Completed</DropdownMenuItem>
+//         <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'archived')}>Archived</DropdownMenuItem>
+//       </DropdownMenuContent>
+//     </DropdownMenu>
+//   );
+// }
 
 function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'grid' | 'list' }) {
   const { setCode, setParameters, mesh } = useReplicad();
   const { deleteBuild, duplicateBuild } = useBuilds();
-  const main = project.assets.mechanical?.main;
-  const code = project.assets.mechanical?.files[main as string]?.content;
+  const code = project.assets.mechanical?.files[project.assets.mechanical?.main]?.content;
   const parameters = project.assets.mechanical?.parameters;
   const navigate = useNavigate();
 
@@ -318,7 +314,9 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
           <div className="flex items-center gap-4">
             <div className="flex gap-2">
               {Object.keys(project.assets).map((cat) => (
-                <CategoryBadge key={cat} category={cat} />
+                // Permissible as `Object.keys` loses type information
+                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+                <CategoryBadge key={cat} category={cat as Category} />
               ))}
             </div>
             {/* <StatusDropdown status={project.status} projectId={project.id} /> */}
@@ -329,93 +327,93 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
   }
 
   return (
-    <>
-      <Link to={`/builds/${project.id}`} draggable={!showPreview}>
-        <Card className="group relative overflow-hidden flex flex-col">
-          <div className="relative aspect-video overflow-hidden bg-muted">
-            {!showPreview && (
-              <img
-                src={project.thumbnail || '/placeholder.svg'}
-                alt={project.name}
-                className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                loading="lazy"
-              />
-            )}
-            {showPreview && (
-              <div
-                className="absolute inset-0"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  event.preventDefault();
-                }}
-              >
-                <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={1.25} />
-              </div>
-            )}
-            <Button
-              variant="outline"
-              size="icon"
-              className={cn('absolute top-2 right-2', showPreview && 'text-primary')}
+    <Link to={`/builds/${project.id}`} draggable={!showPreview}>
+      <Card className="group relative overflow-hidden flex flex-col">
+        <div className="relative aspect-video overflow-hidden bg-muted">
+          {!showPreview && (
+            <img
+              src={project.thumbnail || '/placeholder.svg'}
+              alt={project.name}
+              className="h-full w-full object-cover transition-transform group-hover:scale-105"
+              loading="lazy"
+            />
+          )}
+          {showPreview && (
+            <div
+              className="absolute inset-0"
               onClick={(event) => {
                 event.stopPropagation();
                 event.preventDefault();
-                setShowPreview(!showPreview);
               }}
             >
-              <Eye className="size-4" />
-            </Button>
+              <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={1.25} />
+            </div>
+          )}
+          <Button
+            variant="outline"
+            size="icon"
+            className={cn('absolute top-2 right-2', showPreview && 'text-primary')}
+            onClick={(event) => {
+              event.stopPropagation();
+              event.preventDefault();
+              setShowPreview(!showPreview);
+            }}
+          >
+            <Eye className="size-4" />
+          </Button>
+        </div>
+        <CardHeader>
+          <div className="flex justify-between items-start">
+            <CardTitle>{project.name}</CardTitle>
           </div>
-          <CardHeader>
-            <div className="flex justify-between items-start">
-              <CardTitle>{project.name}</CardTitle>
+          <CardDescription>{project.description}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex-grow">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap gap-2">
+              {Object.keys(project.assets).map((cat) => (
+                // Permissible as `Object.keys` loses type information
+                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+                <CategoryBadge key={cat} category={cat as Category} />
+              ))}
             </div>
-            <CardDescription>{project.description}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex-grow">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex flex-wrap gap-2">
-                {Object.keys(project.assets).map((cat) => (
-                  <CategoryBadge key={cat} category={cat} />
-                ))}
-              </div>
-              {/* <StatusDropdown status={project.status} projectId={project.id} /> */}
-            </div>
-          </CardContent>
-          <CardFooter className="flex justify-between items-center">
-            <Button variant="outline">
-              <span>Open</span>
-              <ArrowRight className="size-4" />
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon">
-                  <Ellipsis className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                onClick={(event) => {
-                  event.stopPropagation();
-                  event.preventDefault();
-                }}
-                align="end"
-              >
-                <DropdownMenuItem onClick={handleDuplicate}>
-                  <Copy className="mr-2 size-4" />
-                  <span>Duplicate</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <Star className="mr-2 size-4" />
-                  <span>Favorite</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
-                  <Trash className="mr-2 size-4" />
-                  <span>Delete</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </CardFooter>
-        </Card>
-      </Link>
-    </>
+            {/* <StatusDropdown status={project.status} projectId={project.id} /> */}
+          </div>
+        </CardContent>
+        <CardFooter className="flex justify-between items-center">
+          <Button variant="outline">
+            <span>Open</span>
+            <ArrowRight className="size-4" />
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon">
+                <Ellipsis className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              onClick={(event) => {
+                event.stopPropagation();
+                event.preventDefault();
+              }}
+              align="end"
+            >
+              <DropdownMenuItem onClick={handleDuplicate}>
+                <Copy className="mr-2 size-4" />
+                <span>Duplicate</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Star className="mr-2 size-4" />
+                <span>Favorite</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
+                <Trash className="mr-2 size-4" />
+                <span>Delete</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </CardFooter>
+      </Card>
+    </Link>
   );
 }

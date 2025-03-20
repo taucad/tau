@@ -11,6 +11,7 @@ import { LogProvider } from '@/contexts/log-context';
 import { replicadSystemPrompt } from './chat-prompt-replicad';
 import { Message, MessageRole, MessageStatus } from '@/types/chat';
 import { DEFAULT_BUILD_NAME } from '@/constants/build.constants';
+import { Handle } from '@/types/matches';
 
 const nameGenerationSystemPrompt = `
 You are a helpful assistant that generates titles for AI chat conversations.
@@ -74,7 +75,7 @@ const BuildNameEditor = () => {
 
   // Typewriter effect
   useEffect(() => {
-    // Don't show the typewriter effect if the name is being edited
+    // Don't show the typewriter effect if the name is being edited, if the name is not loaded, or if the name is the same as the build name
     if (!name || name === build?.name || isEditing) return;
 
     let currentIndex = 0;
@@ -123,9 +124,9 @@ const BuildNameEditor = () => {
   );
 };
 
-export const handle = {
-  breadcrumb: () => {
-    const { id } = useParams();
+export const handle: Handle = {
+  breadcrumb: (match) => {
+    const { id } = match.params;
 
     if (!id) {
       throw new Error('No build id provided');

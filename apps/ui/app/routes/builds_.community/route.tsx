@@ -13,8 +13,9 @@ import {
 import { CAD_PROVIDERS, CadProvider } from '@/types/cad';
 import { sampleBuilds } from '@/components/mock-builds';
 import { CommunityBuildGrid } from '@/components/project-grid';
+import { Handle } from '@/types/matches';
 
-export const handle = {
+export const handle: Handle = {
   breadcrumb: () => {
     return (
       <Link to="/builds/community" tabIndex={-1}>
@@ -108,8 +109,8 @@ export default function CadCommunity() {
               <DropdownMenuContent align="end" className="w-[180px]">
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => setSelectedLanguage('all')}>All Languages</DropdownMenuItem>
-                  {Object.entries(CAD_PROVIDERS).map(([key]) => (
-                    <DropdownMenuItem key={key} onClick={() => setSelectedLanguage(key as CadProvider)}>
+                  {CAD_PROVIDERS.map((key) => (
+                    <DropdownMenuItem key={key} onClick={() => setSelectedLanguage(key)}>
                       {key}
                     </DropdownMenuItem>
                   ))}

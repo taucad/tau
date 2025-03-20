@@ -1,4 +1,4 @@
-import { Outlet, useMatches } from '@remix-run/react';
+import { Outlet } from '@remix-run/react';
 import { AppSidebar } from '@/components/app-sidebar';
 import {
   Breadcrumb,
@@ -17,16 +17,16 @@ import { Fragment } from 'react/jsx-runtime';
 import { ReactNode } from 'react';
 import { KeyShortcut } from '@/components/ui/key-shortcut';
 import { formatKeyCombination } from '@/utils/keys';
+import { useTypedMatches } from '@/types/matches';
 
 export const HEADER_HEIGHT = '3rem';
 
 export function Page({ error }: { error?: ReactNode }) {
-  const matches = useMatches();
+  const matches = useTypedMatches();
 
   const isOnline = useNetworkConnectivity();
 
-  // @ts-expect-error - FIXME: breadcrumb is not typed
-  const breadcrumbItems = matches.filter((match) => match.handle && match.handle.breadcrumb);
+  const breadcrumbItems = matches.filter((match) => Boolean(match.handle?.breadcrumb));
 
   return (
     <SidebarProvider>
@@ -55,8 +55,7 @@ export function Page({ error }: { error?: ReactNode }) {
                   <Fragment key={match.id}>
                     <BreadcrumbSeparator className="hidden md:block first:hidden" />
                     <BreadcrumbItem className="hidden md:block last:block">
-                      {/* @ts-expect-error - FIXME: match.handle.breadcrumb is not typed */}
-                      <BreadcrumbLink asChild>{match.handle.breadcrumb(match)}</BreadcrumbLink>
+                      <BreadcrumbLink asChild>{match.handle.breadcrumb?.(match)}</BreadcrumbLink>
                     </BreadcrumbItem>
                   </Fragment>
                 ))}

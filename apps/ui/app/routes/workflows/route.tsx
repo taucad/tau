@@ -1,8 +1,9 @@
 import { Button } from '@/components/ui/button';
 import { Link } from '@remix-run/react';
 import { ComingSoon } from '@/components/ui/coming-soon';
+import { Handle } from '@/types/matches';
 
-export const handle = {
+export const handle: Handle = {
   breadcrumb: () => {
     return (
       <Link to="/workflows" tabIndex={-1}>

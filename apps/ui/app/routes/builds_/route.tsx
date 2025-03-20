@@ -3,8 +3,9 @@ import { Link, Outlet, redirect, useLocation } from '@remix-run/react';
 import { useEffect } from 'react';
 import { useNavigate } from '@remix-run/react';
 import { LoaderFunctionArgs } from '@remix-run/node';
+import { Handle } from '@/types/matches';
 
-export const handle = {
+export const handle: Handle = {
   breadcrumb: () => {
     return (
       <Link to="/builds/library" tabIndex={-1}>

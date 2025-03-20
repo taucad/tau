@@ -1,5 +1,6 @@
 import { expose } from 'comlink';
 import * as replicad from 'replicad';
+import { OpenCascadeInstance } from 'replicad-opencascadejs/src/replicad_with_exceptions.js';
 
 import { initOpenCascade, initOpenCascadeWithExceptions } from './init-open-cascade';
 import { StudioHelper } from './utils/studio-helper';
@@ -10,12 +11,9 @@ import { renderOutput, ShapeStandardizer } from './utils/render-output';
 // Track whether we've already set OC in replicad to avoid repeated calls
 let replicadHasOC = false;
 
-// Define types for OC to avoid typescript errors
-interface OpenCascadeInstance {
-  [key: string]: any;
-}
-
-// Make replicad available in the global scope
+// Make replicad available in the global scope.
+// Eslint overrides are permissible as replicad needs to be global for the vm to work.
+// eslint-disable-next-line @typescript-eslint/consistent-type-assertions
 (globalThis as any).replicad = replicad;
 
 /**
@@ -24,7 +22,7 @@ interface OpenCascadeInstance {
  * @param context
  * @returns the result of the code
  */
-export function runInContextAsOC(code: string, context: Record<string, any> = {}): any {
+export function runInContextAsOC(code: string, context: Record<string, unknown> = {}): any {
   const editedText = `
 ${code}
 let dp = {}
@@ -37,7 +35,7 @@ return main(replicad, __inputParams || dp)
   return runInContext(editedText, context);
 }
 
-async function runAsFunction(code: string, parameters: any): Promise<any> {
+async function runAsFunction(code: string, parameters: Record<string, unknown>): Promise<any> {
   const oc = await OC;
   return runInContextAsOC(code, {
     oc,
@@ -46,7 +44,7 @@ async function runAsFunction(code: string, parameters: any): Promise<any> {
   });
 }
 
-export async function runAsModule(code: string, parameters: any): Promise<any> {
+export async function runAsModule(code: string, parameters: Record<string, unknown>): Promise<any> {
   const startTime = performance.now();
   const module = await buildModuleEvaluator(code);
   const buildTime = performance.now();
@@ -62,7 +60,7 @@ export async function runAsModule(code: string, parameters: any): Promise<any> {
   return result;
 }
 
-const runCode = async (code: string, parameters: any): Promise<any> => {
+const runCode = async (code: string, parameters: Record<string, unknown>): Promise<any> => {
   console.log('Starting runCode evaluation');
   const startTime = performance.now();
 
@@ -226,12 +224,13 @@ const formatException = (oc: any, error: any): { error: boolean; message: string
   };
 };
 
-const buildShapesFromCode = async (code: string, parameters: any): Promise<any> => {
+const buildShapesFromCode = async (code: string, parameters: Record<string, unknown>): Promise<any> => {
   const startTime = performance.now();
   console.log('building shapes from code');
 
   try {
     // Ensure font is loaded
+    // TODO: Review font loading
     // if (!replicad.getFont()) {
     //   await replicad.loadFont('/fonts/HKGrotesk-Regular.ttf');
     // }
@@ -244,8 +243,9 @@ const buildShapesFromCode = async (code: string, parameters: any): Promise<any> 
 
     try {
       // Set up global helpers
-      (globalThis as any).$ = helper;
-      (globalThis as any).registerShapeStandardizer = standardizer.registerAdapter.bind(standardizer);
+      // TODO: Review if this is needed.
+      // (globalThis as any).$ = helper;
+      // (globalThis as any).registerShapeStandardizer = standardizer.registerAdapter.bind(standardizer);
 
       // Run the code with measurements
       const runCodeStartTime = performance.now();
@@ -257,7 +257,7 @@ const buildShapesFromCode = async (code: string, parameters: any): Promise<any> 
     } catch (error) {
       const endTime = performance.now();
       console.log(`Error occurred after ${endTime - startTime}ms`);
-      return formatException(OC, error);
+      return formatException(await OC, error);
     }
 
     // Process shapes efficiently
@@ -285,7 +285,7 @@ const buildShapesFromCode = async (code: string, parameters: any): Promise<any> 
   }
 };
 
-const DEFAULT_MESH_CONFIG = { tolerance: 0.01, angularTolerance: 30 };
+const DEFAULT_EXPORT_MESH_CONFIG = { tolerance: 0.01, angularTolerance: 30 };
 
 const buildBlob = (shape: any, fileType: string, meshConfig: { tolerance: number; angularTolerance: number }): Blob => {
   if (fileType === 'stl') return shape.blobSTL(meshConfig);
@@ -295,9 +295,9 @@ const buildBlob = (shape: any, fileType: string, meshConfig: { tolerance: number
 };
 
 const exportShape = async (
-  fileType = 'stl' as 'stl' | 'stl-binary' | 'step' | 'step-assembly',
+  fileType: 'stl' | 'stl-binary' | 'step' | 'step-assembly' = 'stl',
   shapeId = 'defaultShape',
-  meshConfig = DEFAULT_MESH_CONFIG,
+  meshConfig = DEFAULT_EXPORT_MESH_CONFIG,
 ): Promise<{ blob: Blob; name: string }[]> => {
   if (!SHAPES_MEMORY[shapeId]) throw new Error(`Shape ${shapeId} not computed yet`);
   if (fileType === 'step-assembly') {
@@ -345,7 +345,7 @@ const initialize = async (withExceptions: boolean): Promise<void> => {
   // Set replicad OC once we have it
   if (!replicadHasOC) {
     console.log('Setting OC in replicad');
-    replicad.setOC(oc as any); // Cast to any to avoid TypeScript errors
+    replicad.setOC(oc);
     replicadHasOC = true;
   }
 };

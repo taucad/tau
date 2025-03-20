@@ -183,7 +183,7 @@ export class ShapeStandardizer {
         shape: this.adaptShape(shape),
         ...rest,
       }))
-      .filter(checkShapeConfigIsValid);
+      .filter((element) => checkShapeConfigIsValid(element));
   }
 }
 
@@ -206,10 +206,10 @@ function renderMesh(shapeConfig: MeshableConfiguration) {
     name,
     color,
     opacity,
-    mesh: null,
-    edges: null,
+    mesh: undefined,
+    edges: undefined,
     error: false,
-    highlight: null,
+    highlight: undefined,
   };
 
   try {
@@ -251,7 +251,9 @@ export function renderOutput(
 ) {
   const standardizer = shapeStandardizer || new ShapeStandardizer();
 
-  const baseShape = createBasicShapeConfig(shapes, defaultName).map(normalizeColorAndOpacity).map(normalizeHighlight);
+  const baseShape = createBasicShapeConfig(shapes, defaultName)
+    .map((element) => normalizeColorAndOpacity(element))
+    .map((element) => normalizeHighlight(element));
   const standardizedShapes = standardizer.standardizeShape(baseShape);
 
   const config = beforeRender ? beforeRender(standardizedShapes) : standardizedShapes;

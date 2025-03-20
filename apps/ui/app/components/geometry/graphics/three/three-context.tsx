@@ -2,7 +2,6 @@ import { Canvas, CanvasProps } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Scene } from './scene';
 import { StageOptions } from './stage';
-import InfiniteGrid from './infinite-grid';
 import rotate3dBase64 from './rotate-3d.svg?base64';
 import { cn } from '@/utils/ui';
 import { useEffect, forwardRef, useState, useImperativeHandle, useRef } from 'react';
@@ -11,6 +10,7 @@ import { ScreenshotCapture, ScreenshotCaptureHandle, ScreenshotOptions } from '.
 export type CadViewerProperties = {
   enableGizmo?: boolean;
   enableGrid?: boolean;
+  enableAxesHelper?: boolean;
   enableZoom?: boolean;
   enableDamping?: boolean;
   className?: string;
@@ -33,6 +33,7 @@ export const ThreeProvider = forwardRef<ThreeCanvasReference, ThreeContextProper
       children,
       enableGizmo = false,
       enableGrid = false,
+      enableAxesHelper = false,
       enableZoom = false,
       enableDamping = false,
       className,
@@ -94,9 +95,10 @@ export const ThreeProvider = forwardRef<ThreeCanvasReference, ThreeContextProper
           center={center}
           enableDamping={enableDamping}
           enableZoom={enableZoom}
+          enableGrid={enableGrid}
+          enableAxesHelper={enableAxesHelper}
           stageOptions={stageOptions}
         >
-          {enableGrid && <InfiniteGrid />}
           {children}
           <ScreenshotCapture ref={screenshotReference} />
         </Scene>

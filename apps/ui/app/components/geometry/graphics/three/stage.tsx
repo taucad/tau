@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { useMemo } from 'react';
 import { PerspectiveCamera } from '@react-three/drei';
+import { InfiniteGrid } from './infinite-grid';
+import { AxesHelper } from './axes-helper';
 
 export type StageOptions = {
   perspective?: {
@@ -77,6 +79,8 @@ type StageProperties = {
   controls: React.RefObject<any>;
   center?: boolean;
   stageOptions: StageOptions;
+  enableGrid?: boolean;
+  enableAxesHelper?: boolean;
 } & React.HTMLAttributes<HTMLDivElement>;
 
 export function Stage({ children, center = true, stageOptions, ...properties }: StageProperties) {
@@ -189,6 +193,8 @@ export function Stage({ children, center = true, stageOptions, ...properties }: 
     <group {...properties}>
       <PerspectiveCamera makeDefault zoom={perspective.zoomLevel} />
       <group ref={outer}>
+        {properties.enableAxesHelper && <AxesHelper />}
+        {properties.enableGrid && <InfiniteGrid />}
         <group ref={inner}>{children}</group>
       </group>
     </group>

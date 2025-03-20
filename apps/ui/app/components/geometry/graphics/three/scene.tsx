@@ -7,6 +7,8 @@ type SceneProperties = {
   enableGizmo?: boolean;
   enableDamping?: boolean;
   enableZoom?: boolean;
+  enableGrid?: boolean;
+  enableAxesHelper?: boolean;
   stageOptions: StageOptions;
   center?: boolean;
 };
@@ -16,6 +18,8 @@ export function Scene({
   enableGizmo = false,
   enableDamping = false,
   enableZoom = false,
+  enableGrid = false,
+  enableAxesHelper = false,
   stageOptions,
   center = true,
 }: SceneProperties) {
@@ -29,7 +33,13 @@ export function Scene({
         enableDamping={enableDamping}
         enableZoom={enableZoom}
       />
-      <Stage controls={controlsReference} stageOptions={stageOptions} center={center}>
+      <Stage
+        controls={controlsReference}
+        stageOptions={stageOptions}
+        center={center}
+        enableGrid={enableGrid}
+        enableAxesHelper={enableAxesHelper}
+      >
         {children}
       </Stage>
     </>

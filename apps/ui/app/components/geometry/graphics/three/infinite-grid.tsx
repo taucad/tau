@@ -96,7 +96,7 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
   return material;
 };
 
-export default function InfiniteGrid() {
+export const InfiniteGrid = () => {
   const material = useRef(infiniteGridMaterial());
   return <Plane userData={{ isPreviewOnly: true }} material={material.current} />;
-}
+};

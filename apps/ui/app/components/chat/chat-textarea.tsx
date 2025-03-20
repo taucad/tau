@@ -42,7 +42,7 @@ export function ChatTextarea({
 }: ChatTextareaProperties) {
   const { initialInputText, initialImageUrls } = useMemo(() => {
     // eslint-disable-next-line unicorn/no-array-reduce
-    return initialContent.reduce(
+    return initialContent.reduce<{ initialInputText: string; initialImageUrls: string[] }>(
       (accumulator, content) => {
         if (content.type === 'text') {
           accumulator.initialInputText = content.text;
@@ -52,13 +52,13 @@ export function ChatTextarea({
         }
         return accumulator;
       },
-      { initialInputText: '', initialImageUrls: [] as string[] },
+      { initialInputText: '', initialImageUrls: [] },
     );
   }, [initialContent]);
   const [inputText, setInputText] = useState(initialInputText);
   const [isSearching, setIsSearching] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
-  const [images, setImages] = useState<string[]>(initialImageUrls);
+  const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputReference = useRef<HTMLInputElement>(null);
   const textareaReference = useRef<HTMLTextAreaElement | null>(null);
@@ -114,8 +114,11 @@ export function ChatTextarea({
         if (file.type.startsWith('image/')) {
           const reader = new FileReader();
           const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
-            if (readerEvent.target?.result) {
-              setImages((previous) => [...previous, readerEvent.target?.result as string]);
+            if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
+              const result = readerEvent.target?.result;
+              if (result !== '') {
+                setImages((previous) => [...previous, result]);
+              }
             }
             reader.removeEventListener('load', handleLoad);
           };
@@ -136,8 +139,11 @@ export function ChatTextarea({
         if (file.type.startsWith('image/')) {
           const reader = new FileReader();
           const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
-            if (readerEvent.target?.result) {
-              setImages((previous) => [...previous, readerEvent.target?.result as string]);
+            if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
+              const result = readerEvent.target?.result;
+              if (result !== '') {
+                setImages((previous) => [...previous, result]);
+              }
             }
             reader.removeEventListener('load', handleLoad);
           };
@@ -186,8 +192,11 @@ export function ChatTextarea({
         if (file) {
           const reader = new FileReader();
           const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
-            if (readerEvent.target?.result) {
-              setImages((previous) => [...previous, readerEvent.target?.result as string]);
+            if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
+              const result = readerEvent.target?.result;
+              if (result !== '') {
+                setImages((previous) => [...previous, result]);
+              }
             }
             reader.removeEventListener('load', handleLoad);
           };
@@ -312,6 +321,8 @@ export function ChatTextarea({
           renderLabel={(item) => (
             <span className="text-xs flex items-center justify-between w-full">
               <div className="flex items-center gap-2">
+                {/* item.provider is not typed as ModelProvider, but it is */}
+                {/* eslint-disable-next-line @typescript-eslint/consistent-type-assertions */}
                 <SvgIcon id={item.provider as ModelProvider} />
                 <span className="font-mono">{item.name}</span>
               </div>

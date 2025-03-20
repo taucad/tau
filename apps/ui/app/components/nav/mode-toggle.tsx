@@ -11,28 +11,12 @@ import { KeyShortcut } from '../ui/key-shortcut';
 
 const THEME_COOKIE_NAME = 'tau-theme-mode';
 
-type ThemeCookie = Theme | 'system';
-
-const parseThemeCookie = (value: string): Theme | null => {
-  if (value === 'system') {
-    return null;
-  }
-  return value as Theme;
-};
-
-const stringifyThemeCookie = (value: Theme | null): ThemeCookie => {
-  if (value === null) {
-    return 'system';
-  }
-  return value;
-};
+// null is used to represent the system theme
+type ThemeWithSystem = Theme | null;
 
 export function ModeToggle() {
   const [, setTheme] = useTheme();
-  const [theme, setThemeCookie] = useCookie(THEME_COOKIE_NAME, null, {
-    parse: parseThemeCookie,
-    stringify: stringifyThemeCookie,
-  });
+  const [theme, setThemeCookie] = useCookie<ThemeWithSystem>(THEME_COOKIE_NAME, null);
 
   const cycleTheme = () => {
     let newTheme;
@@ -64,7 +48,7 @@ export function ModeToggle() {
             size="icon"
             onClick={cycleTheme}
             className="group relative overflow-hidden w-auto"
-            data-theme={stringifyThemeCookie(theme)}
+            data-theme={theme ?? 'system'}
           >
             <Sun
               className="h-[1.2rem] w-[1.2rem] transition-transform duration-500 -translate-x-[400%] rotate-[-180deg] origin-right

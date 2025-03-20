@@ -140,14 +140,14 @@ export const ChatConsole = ({
   const [filter, setFilter] = useState('');
 
   // Cookie-persisted state for log levels with proper parse and stringify
-  const [enabledLevels, setEnabledLevels] = useCookie(CONSOLE_LOG_LEVELS_COOKIE, DEFAULT_LOG_LEVELS, {
-    parse: JSON.parse,
-    stringify: JSON.stringify,
-  });
-  const [displayConfig, setDisplayConfig] = useCookie(CONSOLE_DISPLAY_CONFIG_COOKIE, DEFAULT_DISPLAY_CONFIG, {
-    parse: JSON.parse,
-    stringify: JSON.stringify,
-  });
+  const [enabledLevels, setEnabledLevels] = useCookie<typeof DEFAULT_LOG_LEVELS>(
+    CONSOLE_LOG_LEVELS_COOKIE,
+    DEFAULT_LOG_LEVELS,
+  );
+  const [displayConfig, setDisplayConfig] = useCookie<typeof DEFAULT_DISPLAY_CONFIG>(
+    CONSOLE_DISPLAY_CONFIG_COOKIE,
+    DEFAULT_DISPLAY_CONFIG,
+  );
 
   // Handle filter changes
   const handleFilterChange = useCallback(
@@ -312,18 +312,19 @@ export const ChatConsole = ({
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>Display Options</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {Object.keys(DEFAULT_DISPLAY_CONFIG).map((key) => (
-                <DropdownMenuCheckboxItem
-                  key={key}
-                  checked={displayConfig[key as keyof typeof DEFAULT_DISPLAY_CONFIG]}
-                  onSelect={(event) => event.preventDefault()}
-                  onCheckedChange={(checked) =>
-                    toggleDisplayConfig(key as keyof typeof DEFAULT_DISPLAY_CONFIG, checked)
-                  }
-                >
-                  {key.replaceAll(/([A-Z])/g, ' $1').replace(/^./, (string_) => string_.toUpperCase())}
-                </DropdownMenuCheckboxItem>
-              ))}
+              {
+                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+                (Object.keys(DEFAULT_DISPLAY_CONFIG) as (keyof typeof DEFAULT_DISPLAY_CONFIG)[]).map((key) => (
+                  <DropdownMenuCheckboxItem
+                    key={key}
+                    checked={displayConfig[key]}
+                    onSelect={(event) => event.preventDefault()}
+                    onCheckedChange={(checked) => toggleDisplayConfig(key, checked)}
+                  >
+                    {key.replaceAll(/([A-Z])/g, ' $1').replace(/^./, (string_) => string_.toUpperCase())}
+                  </DropdownMenuCheckboxItem>
+                ))
+              }
             </DropdownMenuContent>
           </DropdownMenu>
 

@@ -32,10 +32,17 @@ export const parseCookies = (cookie: string) => {
 export const useCookie = <T>(
   name: string,
   defaultValue: T,
-  options: { maxAge?: number; parse?: (value: string) => T; stringify?: (value: T) => string } = {},
+  options: {
+    maxAge?: number;
+    parse?: (value: string) => T;
+    stringify?: (value: T) => string;
+  } = {},
 ) => {
-  const parser = options.parse ?? ((value: string) => value as T);
-  const stringifier = options.stringify ?? String;
+  // We can safely assert the type here because we know the value is a string,
+  // which is the only type that can be stored in a cookie.
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+  const parser = options.parse ?? (JSON.parse as (value: string) => T);
+  const stringifier = options.stringify ?? JSON.stringify;
 
   // Get the latest cookie value from route data on each render
   const data = useRouteLoaderData<typeof loader>('root');
@@ -58,6 +65,8 @@ export const useCookie = <T>(
         // If oldValue is undefined, use the current value from cookie
         const currentValue = oldValue === undefined ? cookieValue : oldValue;
         const updatedValue =
+          // Since only a value or a function is passed, we can safely assert the type
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
           typeof valueOrUpdater === 'function' ? (valueOrUpdater as (value: T) => T)(currentValue) : valueOrUpdater;
 
         const stringifiedValue = stringifier(updatedValue);

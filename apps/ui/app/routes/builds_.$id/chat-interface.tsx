@@ -37,23 +37,6 @@ export const CHAT_TAB_COOKIE_NAME = 'tau-chat-tab';
 export const CONSOLE_OPEN_COOKIE_NAME = 'tau-console-open';
 type ViewMode = 'tabs' | 'split';
 
-const parseResizeCookie = (cookie: string): [number, number] => {
-  try {
-    return JSON.parse(cookie);
-  } catch {
-    return [40, 60];
-  }
-};
-
-const stringifyResizeCookie = (sizes: [number, number]): string => {
-  return JSON.stringify(sizes);
-};
-
-const resizeCookieOptions = {
-  parse: parseResizeCookie,
-  stringify: stringifyResizeCookie,
-};
-
 const toggleChatKeyCombination = {
   key: 'c',
   ctrlKey: true,
@@ -120,35 +103,14 @@ export const ChatInterface = () => {
   const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo, scrollTo } = useScroll({ reference: chatEndReference });
 
-  const [isChatOpen, setIsChatOpen] = useCookie(CHAT_HISTORY_OPEN_COOKIE_NAME, true, {
-    parse: (value) => value === 'true',
-  });
-  const [isParametersOpen, setIsParametersOpen] = useCookie(CHAT_PARAMETERS_OPEN_COOKIE_NAME, true, {
-    parse: (value) => value === 'true',
-  });
-  const [isConsoleOpen, setIsConsoleOpen] = useCookie(CONSOLE_OPEN_COOKIE_NAME, true, {
-    parse: (value) => value === 'true',
-  });
-  const [chatResizeMain, setChatResizeMain] = useCookie(CHAT_RESIZE_COOKIE_NAME_MAIN, [25, 60, 15], {
-    parse: (cookie: string): [number, number, number] => {
-      try {
-        return JSON.parse(cookie);
-      } catch {
-        return [25, 60, 15];
-      }
-    },
-    stringify: (sizes: [number, number, number]): string => {
-      return JSON.stringify(sizes);
-    },
-  });
-  const [chatResizeHistory, setChatResizeHistory] = useCookie(
-    CHAT_RESIZE_COOKIE_NAME_HISTORY,
-    [85, 15],
-    resizeCookieOptions,
-  );
+  const [isChatOpen, setIsChatOpen] = useCookie(CHAT_HISTORY_OPEN_COOKIE_NAME, true);
+  const [isParametersOpen, setIsParametersOpen] = useCookie(CHAT_PARAMETERS_OPEN_COOKIE_NAME, true);
+  const [isConsoleOpen, setIsConsoleOpen] = useCookie(CONSOLE_OPEN_COOKIE_NAME, true);
+  const [chatResizeMain, setChatResizeMain] = useCookie(CHAT_RESIZE_COOKIE_NAME_MAIN, [25, 60, 15]);
+  const [chatResizeHistory, setChatResizeHistory] = useCookie(CHAT_RESIZE_COOKIE_NAME_HISTORY, [85, 15]);
   const { data: models } = useModels();
-  const [consoleSize, setConsoleSize] = useCookie(CHAT_RESIZE_CODE_COOKIE_NAME, [85, 15], resizeCookieOptions);
-  const [codeSize, setCodeSize] = useCookie(CHAT_RESIZE_VIEWER_COOKIE_NAME, [60, 40], resizeCookieOptions);
+  const [consoleSize, setConsoleSize] = useCookie(CHAT_RESIZE_CODE_COOKIE_NAME, [85, 15]);
+  const [codeSize, setCodeSize] = useCookie(CHAT_RESIZE_VIEWER_COOKIE_NAME, [60, 40]);
 
   const [viewMode, setViewMode] = useCookie<ViewMode>(CHAT_VIEW_MODE_COOKIE_NAME, 'tabs');
   const [chatTab, setChatTab] = useCookie<ChatTabs>(CHAT_TAB_COOKIE_NAME, 'preview');
@@ -240,9 +202,7 @@ export const ChatInterface = () => {
     <ResizablePanelGroup
       direction="horizontal"
       className="relative flex flex-1 bg-background"
-      onLayout={(sizes) => {
-        setChatResizeMain(sizes as [number, number, number]);
-      }}
+      onLayout={setChatResizeMain}
       autoSaveId={CHAT_RESIZE_COOKIE_NAME_MAIN}
     >
       <Tooltip>
@@ -279,9 +239,7 @@ export const ChatInterface = () => {
       >
         <ResizablePanelGroup
           direction="vertical"
-          onLayout={(sizes) => {
-            setChatResizeHistory(sizes as [number, number]);
-          }}
+          onLayout={setChatResizeHistory}
           autoSaveId={CHAT_RESIZE_COOKIE_NAME_HISTORY}
         >
           <ResizablePanel
@@ -345,6 +303,8 @@ export const ChatInterface = () => {
               defaultValue={chatTab}
               className={cn('h-full w-full flex-1', chatTab === 'editor' && 'dark:bg-[rgb(30,_30,_30)]')}
               onValueChange={(value) => {
+                // Permissible as Tabs doesn't preserve the type
+                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
                 setChatTab(value as ChatTabs);
               }}
             >
@@ -383,7 +343,7 @@ export const ChatInterface = () => {
               autoSaveId={CHAT_RESIZE_VIEWER_COOKIE_NAME}
               direction="horizontal"
               className="h-full"
-              onLayout={(sizes) => setCodeSize(sizes as [number, number])}
+              onLayout={setCodeSize}
             >
               <ResizablePanel order={1} defaultSize={codeSize[0]} minSize={30} id="chat-viewer">
                 <ChatViewer />
@@ -393,7 +353,7 @@ export const ChatInterface = () => {
                 <ResizablePanelGroup
                   direction="vertical"
                   autoSaveId={CHAT_RESIZE_CODE_COOKIE_NAME}
-                  onLayout={(sizes) => setConsoleSize(sizes as [number, number])}
+                  onLayout={setConsoleSize}
                 >
                   <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-editor">
                     <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-12 gap-1.5"></div>

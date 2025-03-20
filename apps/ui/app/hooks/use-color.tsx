@@ -31,6 +31,8 @@ const DEFAULT_LIGHTNESS = 0.5719;
 const DEFAULT_CHROMA = 0.1898;
 
 const getRootColorStyle = (hue: number) => {
+  // Permissible for CSS variables
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
   return { [HUE_CSS_VAR]: `${hue}deg` } as CSSProperties;
 };
 
@@ -54,10 +56,7 @@ interface ColorContextType {
 const ColorContext = createContext<ColorContextType | undefined>(undefined);
 
 export function ColorProvider({ children }: { children: React.ReactNode }) {
-  const [hue, setHue] = useCookie(COLOR_COOKIE_NAME, DEFAULT_HUE, {
-    parse: Number,
-    stringify: String,
-  });
+  const [hue, setHue] = useCookie(COLOR_COOKIE_NAME, DEFAULT_HUE);
 
   // Update styles whenever the colorCookie changes
   useEffect(() => {
@@ -88,8 +87,12 @@ export function ColorProvider({ children }: { children: React.ReactNode }) {
     };
 
     const serialized = {
+      // The arguments are always defined, so we can safely assert the type
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
       hex: serializeHex(rgb) as string,
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
       rgb: serializeRgb(rgb) as string,
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
       hsl: serializeHsl(hsl) as string,
       oklch: `oklch(${oklch.l} ${oklch.c} ${oklch.h})`,
     };

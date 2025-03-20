@@ -33,9 +33,7 @@ export function Page({ error }: { error?: ReactNode }) {
       <AppSidebar />
       <SidebarInset
         className="w-[calc(100dvw-var(--sidebar-width-current)-1px)]"
-        // Permissible when passing CSS variables to style.
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-        style={{ '--header-height': HEADER_HEIGHT } as React.CSSProperties}
+        style={{ '--header-height': HEADER_HEIGHT }}
       >
         <header className="flex h-[var(--header-height)] justify-between shrink-0 items-center border-b-[1px] border-border gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
           <div className="flex items-center gap-1 px-4">

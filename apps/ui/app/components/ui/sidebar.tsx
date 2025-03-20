@@ -26,7 +26,7 @@ export const SIDEBAR_TOGGLE_KEY_COMBO = {
   metaKey: true,
 } as const satisfies KeyCombination;
 
-type SidebarContext = {
+type SidebarContextProperties = {
   state: 'expanded' | 'collapsed';
   open: boolean;
   setOpen: (open: boolean) => void;
@@ -36,7 +36,7 @@ type SidebarContext = {
   toggleSidebar: () => void;
 };
 
-const SidebarContext = React.createContext<SidebarContext | undefined>(undefined);
+const SidebarContext = React.createContext<SidebarContextProperties | undefined>(undefined);
 
 function useSidebar() {
   const context = React.useContext(SidebarContext);
@@ -70,7 +70,7 @@ const SidebarProvider = React.forwardRef<
         _setOpen(openState);
       }
     },
-    [setOpenProperty, open],
+    [open, setOpenProperty, _setOpen],
   );
 
   // Helper to toggle the sidebar.
@@ -87,7 +87,7 @@ const SidebarProvider = React.forwardRef<
   // This makes it easier to style the sidebar with Tailwind classes.
   const state = open ? 'expanded' : 'collapsed';
 
-  const contextValue = React.useMemo<SidebarContext>(
+  const contextValue = React.useMemo<SidebarContextProperties>(
     () => ({
       state,
       open,
@@ -103,16 +103,12 @@ const SidebarProvider = React.forwardRef<
   return (
     <SidebarContext.Provider value={contextValue}>
       <div
-        style={
-          // Permissible when passing CSS variables to style.
-          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-          {
-            '--sidebar-width': SIDEBAR_WIDTH,
-            '--sidebar-width-icon': SIDEBAR_WIDTH_ICON,
-            '--sidebar-width-current': isMobile ? SIDEBAR_WIDTH_MOBILE : open ? SIDEBAR_WIDTH : SIDEBAR_WIDTH_ICON,
-            ...style,
-          } as React.CSSProperties
-        }
+        style={{
+          '--sidebar-width': SIDEBAR_WIDTH,
+          '--sidebar-width-icon': SIDEBAR_WIDTH_ICON,
+          '--sidebar-width-current': isMobile ? SIDEBAR_WIDTH_MOBILE : open ? SIDEBAR_WIDTH : SIDEBAR_WIDTH_ICON,
+          ...style,
+        }}
         className={cn('group/sidebar-wrapper flex min-h-svh w-full has-[[data-variant=inset]]:bg-sidebar', className)}
         ref={reference}
         {...properties}
@@ -157,13 +153,9 @@ const Sidebar = React.forwardRef<
             data-sidebar="sidebar"
             data-mobile="true"
             className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
-            style={
-              // Permissible when passing CSS variables to style.
-              // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-              {
-                '--sidebar-width': SIDEBAR_WIDTH_MOBILE,
-              } as React.CSSProperties
-            }
+            style={{
+              '--sidebar-width': SIDEBAR_WIDTH_MOBILE,
+            }}
             side={side}
           >
             <div className="flex h-full w-full flex-col">{children}</div>
@@ -498,7 +490,7 @@ const SidebarMenuButton = React.forwardRef<
         }
         onClick?.(event);
       },
-      [isMobile, state, toggleSidebar],
+      [disableAutoClose, isMobile, onClick, state, toggleSidebar],
     );
 
     const button = (

@@ -151,7 +151,7 @@ const Chat = () => {
   useEffect(() => {
     if (!build || isLoading) return;
     // Set code
-    setCode(build.assets.mechanical?.files[build.assets.mechanical?.main as string]?.content || '');
+    setCode(build.assets.mechanical?.files[build.assets.mechanical.main]?.content || '');
 
     // Set parameters
     const parameters = build.assets.mechanical?.parameters;

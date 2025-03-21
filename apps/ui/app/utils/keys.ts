@@ -22,13 +22,18 @@ const formatKey = (key: KeyCombination['key']): string => {
     ' ': 'Space',
   };
 
-  return specialKeys[key] || key.length === 1 ? key.toUpperCase() : key;
+  const specialKey = specialKeys[key];
+
+  if (specialKey) return specialKey;
+
+  return key.length === 1 ? key.toUpperCase() : key;
 };
 
 /**
  * Formats a key combination into platform-specific notation
  */
 export const formatKeyCombination = (combo: KeyCombination): string => {
+  // TODO: Add support for non-mac platforms
   // const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC');
   const parts: string[] = [];
 

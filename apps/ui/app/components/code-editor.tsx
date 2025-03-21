@@ -14,12 +14,19 @@ type CodeEditorProperties = EditorProps & {
 
 export function CodeEditor({ className, ...rest }: CodeEditorProperties) {
   const [theme] = useTheme();
+
   return (
     <Editor
-      className={cn(className)}
+      className={cn(className, 'bg-background')}
       theme={theme === 'dark' ? 'vs-dark' : 'vs'}
       defaultLanguage="typescript"
-      options={{ minimap: { enabled: false }, extraEditorClassName: 'bg-background' }}
+      options={{
+        minimap: { enabled: false },
+        // Ensure widgets like intellisense can appear above nearby elements
+        fixedOverflowWidgets: true,
+        // help Monaco resize properly in flex containers
+        automaticLayout: true,
+      }}
       {...rest}
     />
   );

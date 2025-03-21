@@ -21,10 +21,15 @@ type UseEventSourceProperties<T> = {
  * Subscribe to an event source and return the latest event.
  * @param url The URL of the event source to connect to
  * @param options The options to pass to the EventSource constructor
- * @returns The last event received from the server
+ * @returns The stream and abortStream functions
  */
-export function useEventSource<T, U>(properties: UseEventSourceProperties<T>) {
-  const abortControllerReference = useRef<AbortController | null>(null);
+export function useEventSource<T, U>(
+  properties: UseEventSourceProperties<T>,
+): {
+  stream: (body: U) => Promise<void>;
+  abortStream: () => void;
+} {
+  const abortControllerReference = useRef<AbortController | undefined>(undefined);
 
   const stream = async (body: U) => {
     abortControllerReference.current = new AbortController();
@@ -46,8 +51,12 @@ export function useEventSource<T, U>(properties: UseEventSourceProperties<T>) {
       },
       onmessage(event) {
         if (event.data.length > 0) {
-          const parsedData = JSON.parse(event.data) as T;
-          properties.onStreamEvent(parsedData);
+          try {
+            const parsedData = JSON.parse(event.data);
+            properties.onStreamEvent(parsedData);
+          } catch (error) {
+            console.error('Failed to parse event data:', error);
+          }
         }
       },
       onclose() {
@@ -61,6 +70,14 @@ export function useEventSource<T, U>(properties: UseEventSourceProperties<T>) {
     });
   };
 
+  const abortStream = () => {
+    if (abortControllerReference.current) {
+      abortControllerReference.current.abort();
+      abortControllerReference.current = undefined;
+      properties.onStreamEnd?.();
+    }
+  };
+
   useEffect(() => {
     return () => {
       if (abortControllerReference.current) {
@@ -69,5 +86,5 @@ export function useEventSource<T, U>(properties: UseEventSourceProperties<T>) {
     };
   }, []);
 
-  return { stream };
+  return { stream, abortStream };
 }

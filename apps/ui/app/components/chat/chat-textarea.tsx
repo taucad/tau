@@ -38,7 +38,7 @@ export function ChatTextarea({
   models,
   autoFocus = true,
   initialContent = [],
-  onEscapePressed: onFocusLost,
+  onEscapePressed,
 }: ChatTextareaProperties) {
   const { initialInputText, initialImageUrls } = useMemo(() => {
     // eslint-disable-next-line unicorn/no-array-reduce
@@ -92,7 +92,7 @@ export function ChatTextarea({
       event.preventDefault();
       removeImage(images.length - 1);
     } else if (event.key === 'Escape') {
-      onFocusLost?.();
+      onEscapePressed?.();
     }
   };
 

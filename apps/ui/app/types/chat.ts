@@ -11,6 +11,7 @@ export enum MessageStatus {
   Pending = 'pending',
   Success = 'success',
   Error = 'error',
+  Cancelled = 'cancelled',
 }
 
 export type SourceOrigin = 'web' | 'notion' | 'history' | 'projects';

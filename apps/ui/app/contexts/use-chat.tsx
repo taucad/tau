@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, ReactNode, useRef, useEffect } from 'react';
+import { createContext, useContext, useReducer, ReactNode, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Message, MessageRole, MessageStatus, MessageContent } from '@/types/chat';
 import { generatePrefixedId } from '@/utils/id';
 import { PREFIX_TYPES } from '@/utils/constants';
@@ -157,6 +157,8 @@ interface ChatContextValue {
   addMessage: (message: Message) => void;
   editMessage: (message: Message) => void;
   setMessages: (messages: Message[]) => void;
+  cancelMessage: () => void;
+  isStreaming: boolean;
 }
 
 const ChatContext = createContext<ChatContextValue | undefined>(undefined);
@@ -177,7 +179,7 @@ export function ChatProvider({ children, systemMessageText }: ChatProviderProper
     messagesReference.current = state.messages;
   }, [state.messages]);
 
-  const { stream } = useEventSource<MessageEventSchema, { model: string; messages: Message[] }>({
+  const { stream, abortStream } = useEventSource<MessageEventSchema, { model: string; messages: Message[] }>({
     url: `${ENV.TAU_API_URL}/v1/chat`,
     onStreamEvent: (event) => {
       dispatch({ type: 'SET_STATUS', payload: event.status });
@@ -417,6 +419,13 @@ export function ChatProvider({ children, systemMessageText }: ChatProviderProper
   };
 
   const addMessage = (message: Message) => {
+    // If there's a stream in progress, cancel it first
+    if (isStreaming) {
+      // First cancel the current stream
+      cancelMessage();
+    }
+
+    // Then add the new message and send it
     dispatch({ type: 'ADD_MESSAGE', payload: message });
     sendMessage({ message, model: message.model });
   };
@@ -465,6 +474,39 @@ export function ChatProvider({ children, systemMessageText }: ChatProviderProper
     await stream({ model: message.model, messages: currentMessages });
   };
 
+  const cancelMessage = useCallback(() => {
+    // Abort the stream
+    abortStream();
+
+    // Update the message status to cancelled
+    const lastMessage = messagesReference.current.at(-1);
+    if (lastMessage && lastMessage.role === MessageRole.Assistant && lastMessage.status === MessageStatus.Pending) {
+      dispatch({
+        type: 'EDIT_MESSAGE',
+        payload: {
+          messageId: lastMessage.id,
+          content: lastMessage.content || '',
+          status: MessageStatus.Cancelled,
+        },
+      });
+    }
+
+    // Clear the content buffer
+    contentBuffer.current = '';
+
+    // Reset the status
+    dispatch({ type: 'SET_STATUS', payload: '' });
+  }, [abortStream]);
+
+  // Check if there's an ongoing stream
+  const isStreaming = useMemo(() => {
+    return (
+      state.status === ChatEvent.OnChatModelStart ||
+      state.status === ChatEvent.OnChatModelStream ||
+      state.status === ChatEvent.OnToolStart
+    );
+  }, [state.status]);
+
   return (
     <ChatContext.Provider
       value={{
@@ -475,6 +517,8 @@ export function ChatProvider({ children, systemMessageText }: ChatProviderProper
         editMessage,
         addMessage,
         setMessages,
+        cancelMessage,
+        isStreaming,
       }}
     >
       {children}

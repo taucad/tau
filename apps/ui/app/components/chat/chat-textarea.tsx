@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Globe, ArrowRight, ChevronDown, CircuitBoard, AudioLines, Image, X } from 'lucide-react';
+import { Globe, ArrowRight, ChevronDown, CircuitBoard, AudioLines, Image, X, OctagonX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +13,10 @@ import { useChat } from '@/contexts/use-chat';
 import { cn } from '@/utils/ui';
 import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '../ui/hover-card';
 import { MessageContent } from '@/types/chat';
+import { useKeydown } from '@/hooks/use-keydown';
+import { KeyShortcut } from '@/components/ui/key-shortcut';
+import { KeyCombination } from '@/utils/keys';
+import { toast } from '@/components/ui/sonner';
 
 export interface ChatTextareaProperties {
   onSubmit: ({
@@ -32,6 +36,12 @@ export interface ChatTextareaProperties {
   autoFocus?: boolean;
   initialContent?: MessageContent[];
 }
+
+// Define the key combination for cancelling the stream
+const cancelKeyCombination: KeyCombination = {
+  key: 'Backspace',
+  metaKey: true,
+};
 
 export function ChatTextarea({
   onSubmit,
@@ -62,12 +72,13 @@ export function ChatTextarea({
   const [isDragging, setIsDragging] = useState(false);
   const fileInputReference = useRef<HTMLInputElement>(null);
   const textareaReference = useRef<HTMLTextAreaElement | null>(null);
-  const { selectedModel, setSelectedModel } = useChat();
+  const { selectedModel, setSelectedModel, cancelMessage, isStreaming } = useChat();
 
   const handleSubmit = async () => {
     // If there is no text or images, do not submit
     if (inputText.trim().length === 0) return;
 
+    // The useChat hook will handle cancelling any ongoing stream
     setInputText('');
     setImages([]);
     await onSubmit({
@@ -77,6 +88,17 @@ export function ChatTextarea({
       imageUrls: images,
     });
   };
+
+  const handleCancelClick = () => {
+    cancelMessage();
+  };
+
+  // Register keyboard shortcut for cancellation
+  const { formattedKeyCombination: formattedCancelKeyCombination } = useKeydown(cancelKeyCombination, () => {
+    if (isStreaming) {
+      cancelMessage();
+    }
+  });
 
   const handleTextareaKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -124,6 +146,8 @@ export function ChatTextarea({
           };
           reader.addEventListener('load', handleLoad);
           reader.readAsDataURL(file);
+        } else {
+          toast.error('Only images are supported');
         }
       }
     }
@@ -247,7 +271,7 @@ export function ChatTextarea({
             setIsFocused(false);
           }}
           ref={textareaReference}
-          className="border-none shadow-none ring-0 p-4 pr-10 pb-0 mb-8 focus-visible:ring-0 focus-visible:outline-none w-full resize-none h-full"
+          className="border-none shadow-none ring-0 p-4 pt-3 pr-10 pb-0 mb-8 focus-visible:ring-0 focus-visible:outline-none w-full resize-none h-full"
           rows={3}
           value={inputText}
           onChange={(event) => setInputText(event.target.value)}
@@ -298,15 +322,43 @@ export function ChatTextarea({
       )}
 
       {/* Submit button */}
-      <Button
-        size="icon"
-        variant="ghost"
-        className="absolute right-2 top-2"
-        onClick={handleSubmit}
-        disabled={inputText.length === 0}
-      >
-        <ArrowRight className="size-4" />
-      </Button>
+      {isStreaming ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="absolute right-2 top-2 gap-1 text-muted-foreground w-8 @xs:w-fit @xs:pr-1"
+              onClick={handleCancelClick}
+            >
+              <span className="hidden @xs:block">Stop</span>
+              {/* !important is needed as `tailwind-merge` doesn't respect container queries */}
+              <KeyShortcut className="hidden! @xs:block!" variant="ghost">
+                {formattedCancelKeyCombination}
+              </KeyShortcut>
+              <OctagonX className="block @xs:hidden" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Stop</TooltipContent>
+        </Tooltip>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="absolute right-2 top-2"
+              onClick={handleSubmit}
+              disabled={inputText.length === 0}
+            >
+              <ArrowRight className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Send</p>
+          </TooltipContent>
+        </Tooltip>
+      )}
 
       {/* Main input controls */}
       <div className="absolute left-2 bottom-2 flex flex-row items-center gap-1">

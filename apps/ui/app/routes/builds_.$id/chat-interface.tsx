@@ -357,7 +357,7 @@ export const ChatInterface = () => {
                 >
                   <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-editor">
                     <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-12 gap-1.5"></div>
-                    <div className="pt-14 overflow-y-scroll dark:bg-[rgb(30,_30,_30)] w-full h-full">
+                    <div className="pt-12 overflow-y-scroll dark:bg-[rgb(30,_30,_30)] w-full h-full">
                       <ChatEditor />
                     </div>
                   </ResizablePanel>

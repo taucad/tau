@@ -99,7 +99,7 @@ export const MarkdownViewer = ({
               {...rest}
               className={cn(
                 className,
-                'bg-neutral/20 text-foreground/80 p-1 font-normal rounded-sm after:content-none before:content-none',
+                'bg-neutral/20 text-foreground/80 px-1 py-0.5 font-normal rounded-sm after:content-none before:content-none',
               )}
             >
               {children}

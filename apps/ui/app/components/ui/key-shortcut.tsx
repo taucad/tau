@@ -8,6 +8,7 @@ const keyboardShortcutVariants = cva(
     variants: {
       variant: {
         tooltip: 'bg-white/30 dark:bg-white/20 text-white dark:text-white',
+        ghost: 'bg-transparent text-muted-foreground',
         default: 'bg-muted text-muted-foreground',
       },
     },

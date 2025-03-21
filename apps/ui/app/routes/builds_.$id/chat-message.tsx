@@ -162,7 +162,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                 return (
                   <HoverCard openDelay={100} closeDelay={100} key={title}>
                     <HoverCardTrigger asChild>
-                      <a href={source.link} target="_blank">
+                      <a href={source.link} target="_blank" rel="noreferrer">
                         <div
                           key={source.title}
                           className="flex flex-col bg-neutral/5 hover:bg-neutral/10 p-2 justify-between rounded-md h-24"
@@ -231,7 +231,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                           );
                           sourceFaviconUrl.searchParams.set('url', source.link);
                           return (
-                            <a href={source.link} target="_blank" key={source.link} className="w-full">
+                            <a href={source.link} target="_blank" key={source.link} className="w-full" rel="noreferrer">
                               <div
                                 key={source.title}
                                 className="w-full bg-neutral/5 hover:bg-neutral/10 p-2 rounded-md flex flex-col space-y-2"
@@ -333,12 +333,12 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                       <HoverCardTrigger asChild>
                         <img
                           src={content.image_url.url}
-                          alt="Image in message"
-                          className="h-16 w-auto object-cover rounded-md ml-auto border-[1px] cursor-zoom-in"
+                          alt="Chat message"
+                          className="h-16 w-auto object-cover rounded-md ml-auto border bg-muted cursor-zoom-in"
                         />
                       </HoverCardTrigger>
                       <HoverCardContent className="p-0 size-auto max-w-screen overflow-hidden">
-                        <img src={content.image_url.url} alt="Image in message" className="h-48 md:h-96" />
+                        <img src={content.image_url.url} alt="Chat message zoomed" className="h-48 md:h-96" />
                       </HoverCardContent>
                     </HoverCard>
                   );
@@ -372,6 +372,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                                     {model && (
                                       <div className="flex items-baseline gap-2 text-xs">
                                         <SvgIcon
+                                          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
                                           id={model.provider as ModelProvider}
                                           className="size-4 translate-y-[0.25em]"
                                         />
@@ -449,6 +450,9 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                     </Fragment>
                   );
                 }
+
+                // eslint-disable-next-line unicorn/no-null
+                return null;
               })}
             </div>
           </When>

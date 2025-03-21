@@ -266,7 +266,7 @@ export function ChatTextarea({
                   <img
                     src={image}
                     alt="Uploaded"
-                    className="h-8 w-8 object-cover rounded-md border-[1px] cursor-zoom-in"
+                    className="h-8 w-8 object-cover rounded-md border bg-muted cursor-zoom-in"
                   />
                 </HoverCardTrigger>
                 <HoverCardPortal>

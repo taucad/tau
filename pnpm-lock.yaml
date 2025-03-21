@@ -210,14 +210,14 @@ importers:
         specifier: ^2.0.4
         version: 2.0.4(react-router@7.1.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
       replicad:
-        specifier: ^0.17.4
-        version: 0.17.4
+        specifier: ^0.18.2
+        version: 0.18.2
       replicad-opencascadejs:
-        specifier: ^0.17.4
-        version: 0.17.4
+        specifier: ^0.18.0
+        version: 0.18.0
       replicad-threejs-helper:
-        specifier: ^0.17.0
-        version: 0.17.0(three@0.173.0)
+        specifier: ^0.18.0
+        version: 0.18.0(three@0.173.0)
       rxjs:
         specifier: ^7.8.1
         version: 7.8.1
@@ -321,9 +321,6 @@ importers:
       '@types/culori':
         specifier: ^2.1.1
         version: 2.1.1
-      '@types/deepmerge':
-        specifier: ^2.2.3
-        version: 2.2.3
       '@types/jest':
         specifier: ^29.5.14
         version: 29.5.14
@@ -4367,10 +4364,6 @@ packages:
 
   '@types/debug@4.1.12':
     resolution: {integrity: sha512-vIChWdVG3LG1SMxEvI/AK+FWJthlrqlTu7fbrlywTkkaONwk/UAGaULXRlf8vkzFBLVm0zkMdCquhL5aOjhXPQ==}
-
-  '@types/deepmerge@2.2.3':
-    resolution: {integrity: sha512-ct4srnukH/SHdVPyJIFV73YJIt9PTYTaqQbjrCvRrbc9LxHdGcJb132SuWwnDTPyx5UjCVS/I00wj0i5IXfqSA==}
-    deprecated: This is a stub types definition. deepmerge provides its own type definitions, so you do not need this installed.
 
   '@types/draco3d@1.4.10':
     resolution: {integrity: sha512-AX22jp8Y7wwaBgAixaSvkoG4M/+PlAcm3Qs4OW8yT9DM4xUpWKeFhLueTAyZF39pviAdcDdeJoACapiAceqNcw==}
@@ -9818,16 +9811,16 @@ packages:
     resolution: {integrity: sha512-yD5BHCe7quCgBph4rMQ+0KkIRKwWCrHDOX1p1Gp6HwjPM5kVoCdKGNhN7ydqqsX6lJEnQDKZ/tFMiEdQ1dvPEw==}
     engines: {node: '>= 0.10'}
 
-  replicad-opencascadejs@0.17.4:
-    resolution: {integrity: sha512-+KCZZkqCA8Y7iSJ0f8wMPaArrE8OZ5fzi03//3HiOw33iRNuBeQs+1/Byst7QUkV9TU6AyXCvvmzpSjHr4r0pg==}
+  replicad-opencascadejs@0.18.0:
+    resolution: {integrity: sha512-8QW2MOzUs4VNk2Abqqf3A2ra8xEMG8fPUiyfPhKhvQ77RxsBZ4GX4410KCsBWcmRphYJXHUjEJjIYD8UzfcM9A==}
 
-  replicad-threejs-helper@0.17.0:
-    resolution: {integrity: sha512-8Nd9H4CgjdysHrA/qVp/+QIn76Micbf+MELYmoTxUKzVWrwmN/riaj2Jx2AnmNVMoVBU//5Cw8jPp+9jwWm0Mw==}
+  replicad-threejs-helper@0.18.0:
+    resolution: {integrity: sha512-FZj5a3nA8I5nUVgbOyRMIPbu6p6jAXBNawzQJIeHzIKZ5U/brHKVjB3ba8Zg7RgxOyYKKPEupOYq47PPnCLilw==}
     peerDependencies:
       three: '>=0.155.0'
 
-  replicad@0.17.4:
-    resolution: {integrity: sha512-tfa8yztbBOtPzatMf7mMR4QK23b1CYKGW7QVgxoi4WkdjNUn9Rwi7D5FTy21OFMK+wisw/a40Y80spOBHqO0+A==}
+  replicad@0.18.2:
+    resolution: {integrity: sha512-C3ZQUXSXDEhAJbtTj1qtVp/Ngu5uDYmEVokPDt3aKH5SDn7fEdmrRA6Zvnm1mXQbY2O36fyddNXpkqwmFRlBmw==}
 
   require-directory@2.1.1:
     resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
@@ -15836,10 +15829,6 @@ snapshots:
   '@types/debug@4.1.12':
     dependencies:
       '@types/ms': 2.1.0
-
-  '@types/deepmerge@2.2.3':
-    dependencies:
-      deepmerge: 4.3.1
 
   '@types/draco3d@1.4.10': {}
 
@@ -22539,13 +22528,13 @@ snapshots:
 
   replace-ext@1.0.1: {}
 
-  replicad-opencascadejs@0.17.4: {}
+  replicad-opencascadejs@0.18.0: {}
 
-  replicad-threejs-helper@0.17.0(three@0.173.0):
+  replicad-threejs-helper@0.18.0(three@0.173.0):
     dependencies:
       three: 0.173.0
 
-  replicad@0.17.4:
+  replicad@0.18.2:
     dependencies:
       '@types/opentype.js': 1.3.4
       flatbush: 4.4.0

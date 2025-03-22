@@ -23,14 +23,13 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties) {
         // Target Monaco editor elements with Tailwind's nested syntax
         // Apply scrollbar colors
         '[&_.monaco-scrollable-element_>_.scrollbar]:bg-scrollbar-track',
-        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:!bg-(--scrollbar-thumb)',
+        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:bg-(--scrollbar-thumb)',
         // Apply scrollbar dimensions
+        // !important is needed to override the `style` attribute set by Monaco
         '[&_.monaco-scrollable-element_>_.scrollbar.vertical_>_.slider]:!w-[6px]',
         '[&_.monaco-scrollable-element_>_.scrollbar.horizontal_>_.slider]:!h-[6px]',
         // Apply rounded corners to scrollbar sliders
-        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:!rounded-[3px]',
-        // Hide decorations overview ruler
-        '[&_.monaco-scrollable-element_.decorationsOverviewRuler]:!hidden',
+        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:rounded-[3px]',
         // Ensure scrollbars don't overlap content
         '[&_.monaco-scrollable-element]:overflow-hidden',
       )}
@@ -54,8 +53,8 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties) {
           horizontalScrollbarSize: 7,
           verticalSliderSize: 7,
           horizontalSliderSize: 7,
-          // Ensure browser back and forward scroll do not take effect,
-          // as they cause janky editor behavior resulting in poor UX.
+          // Ensure browser back and forward navigation scroll does not take effect,
+          // as it causes janky editor behavior resulting in poor UX.
           alwaysConsumeMouseWheel: true,
         },
       }}

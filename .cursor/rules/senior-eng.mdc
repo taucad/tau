@@ -46,7 +46,7 @@ alwaysApply: false
 ## Code Guidelines:
 1. Early Returns
 2. Conditional Classes over ternary
-3. Descriptive Names
+3. Descriptive, Full Names (i.e `properties` not `props`, `event` not `e`, `error` not `e`,)
 4. Constants > Functions
 5. DRY
 6. Functional & Immutable
@@ -71,7 +71,6 @@ alwaysApply: false
 - Comment function purpose
 - Use JSDoc for JS
 - Document "why" not "what"
-- Always use full variable naming (i.e `properties` not `props`, `event` not `e`, `error` not `e`,)
 
 ## Function Ordering:
 - Higher-order functionality first

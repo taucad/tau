@@ -49,7 +49,6 @@ export const MarkdownViewer = ({
           );
         },
         code: (properties) => {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const { children, className, ref, node, style, ...rest } = properties;
           const match = /language-(\w+)/.exec(className || '');
           const language = match ? match[1] : 'text';

@@ -35,7 +35,6 @@ const toggleParametersKeyCombination = {
 const toggleViewModeKeyCombination = {
   key: 't',
   ctrlKey: true,
-  requireAllModifiers: true,
 } satisfies KeyCombination;
 
 export const ChatInterface = () => {

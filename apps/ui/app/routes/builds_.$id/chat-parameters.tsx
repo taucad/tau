@@ -45,7 +45,6 @@ export const ChatParameters = () => {
 
   const resetSingleParameter = useCallback(
     (key: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [key]: _, ...rest } = parameters;
       setParameters(rest);
     },
@@ -77,14 +76,13 @@ export const ChatParameters = () => {
       </div>
       {allParameters &&
         Object.entries(allParameters).map(([key, value]) => {
-          const valueType = typeof value;
           const prettyKey = pascalCaseToWords(key);
           return (
             <div key={key} className="flex flex-col gap-1">
               <div className="flex flex-row gap-2 justify-between h-6">
                 <div className="flex flex-row gap-2 items-baseline">
                   <span className={cn(parameters[key] !== undefined && 'font-bold')}>{prettyKey}</span>
-                  <span className="text-xs text-muted-foreground">{valueType}</span>
+                  <span className="text-xs text-muted-foreground">{typeof value}</span>
                 </div>
                 {parameters[key] !== undefined && (
                   <Tooltip>
@@ -103,9 +101,9 @@ export const ChatParameters = () => {
                 )}
               </div>
               <div className="flex flex-row gap-2 w-full mt-auto">
-                {valueType === 'number' && (
+                {typeof value === 'number' && (
                   <Slider
-                    value={[value as number]}
+                    value={[value]}
                     min={0}
                     max={defaultParameters[key] * 4}
                     step={1}
@@ -121,23 +119,23 @@ export const ChatParameters = () => {
                     )}
                   />
                 )}
-                {valueType === 'boolean' ? (
+                {typeof value === 'boolean' ? (
                   <Switch
                     size="lg"
-                    checked={value as boolean}
+                    checked={value}
                     onCheckedChange={(checked) => handleParameterChange(key, checked)}
                   />
-                ) : valueType === 'number' ? (
+                ) : typeof value === 'number' ? (
                   <Input
                     type="number"
-                    value={value as number}
+                    value={value}
                     onChange={(event) => handleParameterChange(key, Number.parseFloat(event.target.value))}
                     className="w-14 h-8 p-1 bg-background shadow-none"
                   />
-                ) : valueType === 'string' ? (
+                ) : typeof value === 'string' ? (
                   <Input
                     type="text"
-                    value={value as string}
+                    value={value}
                     onChange={(event) => handleParameterChange(key, event.target.value)}
                     className="h-8 p-1 bg-background shadow-none"
                   />

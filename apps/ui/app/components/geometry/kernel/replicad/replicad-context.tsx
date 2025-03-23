@@ -223,12 +223,28 @@ export function ReplicadProvider({
 
       if (!worker || !code) return;
 
+      const loadDefaultParameters = async (code: string) => {
+        try {
+          const defaultParameters = await worker.extractDefaultParametersFromCode(code);
+          dispatch({ type: 'SET_DEFAULT_PARAMETERS', payload: defaultParameters });
+          log.debug('Loaded default parameters', { data: defaultParameters });
+
+          return defaultParameters;
+        } catch (error) {
+          log.error('Failed to load default parameters', {
+            data: error instanceof Error ? error.message : String(error),
+          });
+        }
+      };
+
       try {
+        const defaultParameters = await loadDefaultParameters(code);
+        const mergedParameters = { ...defaultParameters, ...parameters };
         log.debug('Building shape');
         dispatch({ type: 'SET_STATUS', payload: { isComputing: true, error: undefined } });
 
         const buildStartTime = performance.now();
-        const result = await worker.buildShapesFromCode(code, parameters);
+        const result = await worker.buildShapesFromCode(code, mergedParameters);
         const buildEndTime = performance.now();
         log.debug(`Shape building took ${buildEndTime - buildStartTime}ms`);
 
@@ -264,80 +280,26 @@ export function ReplicadProvider({
     [getOrInitWorker],
   );
 
-  // Track evaluation state
-  const evaluationInProgress = useRef(false);
-  const pendingEvaluation = useRef(false);
-
   // Create stable debounced evaluation function
   const debouncedEvaluate = useMemo(
     () =>
-      debounce((code: string, parameters: Record<string, any>, defaultParameters: Record<string, any>) => {
+      debounce((code: string, parameters: Record<string, any>) => {
         dispatch({ type: 'SET_STATUS', payload: { isBuffering: false } });
 
-        if (evaluationInProgress.current) {
-          pendingEvaluation.current = true;
-          log.debug('Evaluation already in progress, marking for re-evaluation after completion');
-          return;
-        }
-
         log.debug('Evaluating code after debounce');
-        evaluationInProgress.current = true;
 
-        const mergedParameters = { ...defaultParameters, ...parameters };
-        evaluateCode(code, mergedParameters).finally(() => {
-          evaluationInProgress.current = false;
-
-          if (pendingEvaluation.current) {
-            pendingEvaluation.current = false;
-            log.debug('Processing pending evaluation');
-            debouncedEvaluate(code, parameters, defaultParameters);
-          }
-        });
-
-        log.debug('Evaluation started');
+        evaluateCode(code, parameters);
       }, evaluateDebounceTime),
     [evaluateCode],
   );
 
-  // Only run code evaluation once when user changes inputs
-  const lastCodeReference = useRef<string>('');
-  const lastParametersReference = useRef<string>('{}');
-
   // Effect to handle code/parameter changes
   useEffect(() => {
-    const parametersString = JSON.stringify(state.parameters);
-
-    // Update refs
-    lastCodeReference.current = state.code;
-    lastParametersReference.current = parametersString;
-
     const debounceStartTime = performance.now();
     log.debug(`Starting debounce at ${debounceStartTime}ms`);
     dispatch({ type: 'SET_STATUS', payload: { isBuffering: true } });
-    debouncedEvaluate(state.code, state.parameters, state.defaultParameters ?? {});
-  }, [state.code, state.parameters, state.defaultParameters, debouncedEvaluate]);
-
-  // Load default parameters when code changes
-  useEffect(() => {
-    if (!state.code) return;
-
-    const loadDefaultParameters = async () => {
-      try {
-        const worker = await getOrInitWorker();
-        if (!worker) return;
-
-        const defaultParameters = await worker.extractDefaultParametersFromCode(state.code);
-        dispatch({ type: 'SET_DEFAULT_PARAMETERS', payload: defaultParameters });
-        log.debug('Loaded default parameters', { data: defaultParameters });
-      } catch (error) {
-        log.error('Failed to load default parameters', {
-          data: error instanceof Error ? error.message : String(error),
-        });
-      }
-    };
-
-    loadDefaultParameters();
-  }, [state.code, getOrInitWorker]);
+    debouncedEvaluate(state.code, state.parameters);
+  }, [state.code, state.parameters, debouncedEvaluate]);
 
   // Cleanup worker on unmount
   useEffect(() => {

@@ -184,7 +184,7 @@ export default function ChatRoute() {
   return (
     <LogProvider>
       <BuildProvider buildId={id}>
-        <ReplicadProvider withExceptions>
+        <ReplicadProvider withExceptions evaluateDebounceTime={300}>
           <ChatProvider systemMessageText={replicadSystemPrompt}>
             <div className="flex h-full">
               <Chat />

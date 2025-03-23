@@ -37,8 +37,6 @@ const initialState: ReplicadState = {
   mesh: undefined,
 };
 
-const DEBOUNCE_TIME = 300;
-
 function useReplicadWorker() {
   const { log } = useConsole({ defaultOrigin: { component: 'Replicad' } });
   const wrappedWorkerReference = useRef<Remote<BuilderWorkerInterface> | undefined>(undefined);
@@ -166,13 +164,16 @@ const ReplicadContext = createContext<
  * Provider component for Replicad functionality
  * @param children - React children
  * @param withExceptions - Whether to initialize OpenCascade with exceptions mode (default: false)
+ * @param evaluateDebounceTime - The debounce time for the evaluation function (default: 0)
  */
 export function ReplicadProvider({
   children,
   withExceptions = false,
+  evaluateDebounceTime = 0,
 }: {
   children: ReactNode;
   withExceptions?: boolean;
+  evaluateDebounceTime?: number;
 }) {
   const [state, dispatch] = useReducer(replicadReducer, initialState);
   const { initWorker, terminateWorker } = useReplicadWorker();
@@ -271,7 +272,6 @@ export function ReplicadProvider({
   const debouncedEvaluate = useMemo(
     () =>
       debounce((code: string, parameters: Record<string, any>, defaultParameters: Record<string, any>) => {
-        performance.now(); // Track time but don't log it
         dispatch({ type: 'SET_STATUS', payload: { isBuffering: false } });
 
         if (evaluationInProgress.current) {
@@ -295,7 +295,7 @@ export function ReplicadProvider({
         });
 
         log.debug('Evaluation started');
-      }, DEBOUNCE_TIME),
+      }, evaluateDebounceTime),
     [evaluateCode],
   );
 
@@ -305,8 +305,6 @@ export function ReplicadProvider({
 
   // Effect to handle code/parameter changes
   useEffect(() => {
-    if (!state.defaultParameters) return;
-
     const parametersString = JSON.stringify(state.parameters);
 
     // Update refs
@@ -316,7 +314,7 @@ export function ReplicadProvider({
     const debounceStartTime = performance.now();
     log.debug(`Starting debounce at ${debounceStartTime}ms`);
     dispatch({ type: 'SET_STATUS', payload: { isBuffering: true } });
-    debouncedEvaluate(state.code, state.parameters, state.defaultParameters);
+    debouncedEvaluate(state.code, state.parameters, state.defaultParameters ?? {});
   }, [state.code, state.parameters, state.defaultParameters, debouncedEvaluate]);
 
   // Load default parameters when code changes

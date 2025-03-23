@@ -231,7 +231,7 @@ export const ChatConsole = ({
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            <span>Toggle console</span>
+            Toggle console{``}
             {keyCombination && (
               <KeyShortcut variant="tooltip" className="ml-1">
                 {keyCombination}

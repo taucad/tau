@@ -189,7 +189,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
               {relevantSources.length > 3 && (
                 <Sheet>
                   <SheetTrigger className="flex flex-col bg-neutral/5 hover:bg-neutral/10 p-2 justify-between rounded-md h-24">
-                    <div className="flex flex-row items-center space-x-[1px] flex-wrap">
+                    <div className="flex flex-row items-center gap-px flex-wrap">
                       {relevantSources.slice(3, 9).map((source) => {
                         const sourceUrl = new URL(source.link);
                         const sourceDomain = sourceUrl.hostname.replace('www.', '').split('.').slice(0, -1).join('.');

@@ -1,10 +1,10 @@
 import { Copy, Check } from 'lucide-react';
-import { Button, ButtonProperties } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { useState, useEffect } from 'react';
 import React from 'react';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
-export interface CopyButtonProperties extends ButtonProperties {
+export interface CopyButtonProperties extends React.ComponentProps<typeof Button> {
   /**
    * The text to copy.
    */

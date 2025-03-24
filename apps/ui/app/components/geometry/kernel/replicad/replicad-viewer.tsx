@@ -6,6 +6,7 @@ import { LoaderPinwheel } from 'lucide-react';
 type ReplicadViewerProperties = CadViewerProperties & {
   mesh: any;
   zoomLevel?: number;
+  ref?: React.RefObject<ReplicadViewerReference>;
 };
 
 export type ReplicadViewerReference = ThreeCanvasReference;
@@ -21,9 +22,7 @@ export const ReplicadViewer = ({
   zoomLevel = 0.75,
   onCanvasReady,
   ...rest
-}: ReplicadViewerProperties & {
-  ref: React.RefObject<ReplicadViewerReference>;
-}) => {
+}: ReplicadViewerProperties) => {
   return (
     <div className="w-full h-full">
       {mesh ? (

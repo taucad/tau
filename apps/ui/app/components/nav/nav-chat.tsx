@@ -36,6 +36,7 @@ export const NavChat = () => {
               ),
             }}
             variant="outline"
+            // this padding hack is to ensure the icon is centered correctly when the sidebar is collapsed
             className="whitespace-nowrap group-data-[collapsible=icon]:pl-[7px]! pl-[7px]!"
           >
             <Plus className="size-4 shrink-0" />

@@ -46,7 +46,11 @@ export function Page({ error }: { error?: ReactNode }) {
                 <KeyShortcut variant="tooltip">{formatKeyCombination(SIDEBAR_TOGGLE_KEY_COMBO)}</KeyShortcut>
               </TooltipContent>
             </Tooltip>
-            {breadcrumbItems.length > 0 && <Separator orientation="vertical" className="h-4" />}
+            {breadcrumbItems.length > 0 && (
+              <span className="h-4">
+                <Separator orientation="vertical" />
+              </span>
+            )}
             <Breadcrumb>
               <BreadcrumbList className="sm:gap-0">
                 {breadcrumbItems.map((match) => (

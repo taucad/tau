@@ -15,40 +15,36 @@ export interface CopyButtonProperties extends React.ComponentProps<typeof Button
   tooltip?: string;
 }
 
-export const CopyButton = React.forwardRef<HTMLButtonElement, CopyButtonProperties>(
-  ({ text, size, tooltip = 'Copy', ...properties }, reference) => {
-    const [copied, setCopied] = useState(false);
+export function CopyButton({ text, size, tooltip = 'Copy', ...properties }: CopyButtonProperties) {
+  const [copied, setCopied] = useState(false);
 
-    const handleCopy = () => {
-      setCopied(true);
-      if (globalThis.isSecureContext) {
-        navigator.clipboard.writeText(text || '');
-      } else {
-        console.warn('Clipboard operations are only allowed in secure contexts.');
-      }
-    };
+  const handleCopy = () => {
+    setCopied(true);
+    if (globalThis.isSecureContext) {
+      navigator.clipboard.writeText(text || '');
+    } else {
+      console.warn('Clipboard operations are only allowed in secure contexts.');
+    }
+  };
 
-    useEffect(() => {
-      if (copied) {
-        const timer = setTimeout(() => {
-          setCopied(false);
-        }, 2000);
-        return () => clearTimeout(timer);
-      }
-    }, [copied]);
+  useEffect(() => {
+    if (copied) {
+      const timer = setTimeout(() => {
+        setCopied(false);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [copied]);
 
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button size={size} variant="ghost" onClick={handleCopy} ref={reference} {...properties}>
-            {size !== 'icon' && <span data-slot="label">{copied ? 'Copied' : 'Copy'}</span>}
-            {copied ? <Check /> : <Copy />}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{tooltip}</TooltipContent>
-      </Tooltip>
-    );
-  },
-);
-
-CopyButton.displayName = 'CopyButton';
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button size={size} variant="ghost" onClick={handleCopy} {...properties}>
+          {size !== 'icon' && <span data-slot="label">{copied ? 'Copied' : 'Copy'}</span>}
+          {copied ? <Check /> : <Copy />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}

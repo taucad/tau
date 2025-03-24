@@ -11,32 +11,11 @@ type ReplicadViewerProperties = CadViewerProperties & {
 
 export type ReplicadViewerReference = ThreeCanvasReference;
 
-export const ReplicadViewer = ({
-  ref: reference,
-  mesh,
-  enableGizmo,
-  enableGrid,
-  enableZoom,
-  enableAxesHelper,
-  className,
-  zoomLevel = 0.75,
-  onCanvasReady,
-  ...rest
-}: ReplicadViewerProperties) => {
+export function ReplicadViewer({ mesh, zoomLevel = 0.75, ...properties }: ReplicadViewerProperties) {
   return (
     <div className="w-full h-full">
       {mesh ? (
-        <ThreeProvider
-          enableGizmo={enableGizmo}
-          enableGrid={enableGrid}
-          enableZoom={enableZoom}
-          enableAxesHelper={enableAxesHelper}
-          className={className}
-          stageOptions={{ perspective: { zoomLevel } }}
-          ref={reference}
-          onCanvasReady={onCanvasReady}
-          {...rest}
-        >
+        <ThreeProvider stageOptions={{ perspective: { zoomLevel } }} {...properties}>
           <ReplicadMesh {...mesh} />
         </ThreeProvider>
       ) : (
@@ -46,6 +25,4 @@ export const ReplicadViewer = ({
       )}
     </div>
   );
-};
-
-ReplicadViewer.displayName = 'ReplicadViewer';
+}

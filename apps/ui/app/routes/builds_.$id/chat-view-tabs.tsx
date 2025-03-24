@@ -57,7 +57,7 @@ export const ChatViewTabs = ({ isChatOpen }: { isChatOpen: boolean }) => {
   return (
     <Tabs
       defaultValue={chatTab}
-      className={cn('h-full w-full flex-1 gap-0', chatTab === 'editor' && 'dark:bg-[rgb(30,_30,_30)]')}
+      className={cn('h-full w-full flex-1 gap-0')}
       onValueChange={(value) => {
         // Permissible as Tabs doesn't preserve the type
         // eslint-disable-next-line @typescript-eslint/consistent-type-assertions

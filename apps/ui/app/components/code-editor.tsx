@@ -22,6 +22,10 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties) {
         // Target Monaco editor elements with Tailwind's nested syntax
         // Override the background color of the Monaco editor
         '[&_.monaco-editor]:![--vscode-editor-background:var(--background)]',
+        '[&_.monaco-editor]:![--vscode-editorStickyScroll-background:var(--background)]',
+        '[&_.monaco-editor]:![--vscode-breadcrumb-background:var(--background)]',
+        '[&_.monaco-editor]:![--vscode-multiDiffEditor-background:var(--background)]',
+        '[&_.monaco-editor]:![--vscode-editorMarkerNavigation-background:var(--background)]',
         '[&_.monaco-editor]:![--vscode-editorGutter-background:var(--background)]',
         // Existing scrollbar styles
         '[&_.monaco-scrollable-element_>_.scrollbar]:!bg-(--scrollbar-track)',

@@ -1,6 +1,6 @@
 @import 'tailwindcss';
+@import 'tw-animate-css';
 
-@plugin 'tailwindcss-animate';
 @plugin '@tailwindcss/typography';
 
 :root {

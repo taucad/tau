@@ -342,5 +342,3 @@ export function ScreenshotCapture({ ref: reference }: { ref: React.RefObject<Scr
   // Return an empty fragment
   return <></>;
 }
-
-ScreenshotCapture.displayName = 'ScreenshotCapture';

@@ -23,10 +23,6 @@ export interface DownloadButtonProperties extends React.ComponentProps<typeof Bu
    * Tooltip text.
    */
   tooltip?: string;
-  /**
-   * The ref to the button.
-   */
-  ref: React.RefObject<HTMLButtonElement>;
 }
 
 export function DownloadButton({
@@ -84,5 +80,3 @@ export function DownloadButton({
     </Tooltip>
   );
 }
-
-DownloadButton.displayName = 'DownloadButton';

@@ -3,7 +3,6 @@ import { HslColor } from 'react-colorful';
 import { cn } from '@/utils/ui';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Slot } from '@radix-ui/react-slot';
 import { RotateCcw } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from './tooltip';
 import { Slider } from './slider';
@@ -19,18 +18,14 @@ interface ColorPickerProperties
   value: ColorPickerValue;
   onChange: (value: ColorPickerValue) => void;
   onBlur?: () => void;
-  children?: React.ReactNode;
-  asChild?: boolean;
   onReset?: () => void;
   ref?: React.RefObject<typeof Slider>;
 }
 
 const ColorPicker: React.FC<
   Omit<React.ComponentProps<typeof Button>, 'value' | 'onChange' | 'onBlur'> & ColorPickerProperties
-> = ({ disabled, value, onChange, onBlur, name, className, asChild, onReset, ref, ...properties }) => {
+> = ({ disabled, value, onChange, onBlur, name, className, onReset, ref, ...properties }) => {
   const [open, setOpen] = useState(false);
-
-  const Comp = asChild ? Slot : Button;
 
   const handleChange = (value: HslColor) => {
     onChange(value);
@@ -48,7 +43,7 @@ const ColorPicker: React.FC<
       <Tooltip>
         <PopoverTrigger asChild disabled={disabled} onBlur={onBlur}>
           <TooltipTrigger asChild>
-            <Comp
+            <Button
               {...properties}
               className={cn('block', className)}
               name={name}

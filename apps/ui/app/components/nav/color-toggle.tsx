@@ -15,7 +15,7 @@ export const ColorToggle = () => {
           variant="ghost"
           size="icon"
           className={cn(
-            'w-auto overflow-hidden',
+            'w-auto overflow-hidden bg-transparent dark:bg-transparent border-none',
             // Active styles
             'data-[state=open]:bg-primary hover:data-[state=open]:bg-primary',
             // Text styles

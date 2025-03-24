@@ -406,7 +406,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
                 <Star className="mr-2 size-4" />
                 <span>Favorite</span>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
+              <DropdownMenuItem onClick={handleDelete} variant="destructive">
                 <Trash className="mr-2 size-4" />
                 <span>Delete</span>
               </DropdownMenuItem>

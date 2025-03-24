@@ -128,7 +128,7 @@ export const ChatParameters = () => {
                     type="number"
                     value={value}
                     onChange={(event) => handleParameterChange(key, Number.parseFloat(event.target.value))}
-                    className="w-14 h-6 p-1 bg-background shadow-none"
+                    className="min-w-14 w-14 h-6 p-1 bg-background shadow-none"
                   />
                 ) : typeof value === 'string' ? (
                   <Input

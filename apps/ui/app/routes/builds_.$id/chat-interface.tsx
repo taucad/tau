@@ -176,7 +176,7 @@ export const ChatInterface = () => {
 
       <ResizablePanel
         order={3}
-        minSize={15}
+        minSize={10}
         maxSize={30}
         defaultSize={chatResizeMain[2]}
         className={cn(

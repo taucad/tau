@@ -1,7 +1,6 @@
-import { forwardRef, useState } from 'react';
+import { useState } from 'react';
 import { HslColor } from 'react-colorful';
 import { cn } from '@/utils/ui';
-import type { ButtonProperties } from '@/components/ui/button';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Slot } from '@radix-ui/react-slot';
@@ -22,12 +21,12 @@ interface ColorPickerProperties {
   children?: React.ReactNode;
   asChild?: boolean;
   onReset?: () => void;
+  ref?: React.RefObject<HTMLSpanElement>;
 }
 
-const ColorPicker = forwardRef<
-  HTMLInputElement,
-  Omit<ButtonProperties, 'value' | 'onChange' | 'onBlur'> & ColorPickerProperties
->(({ disabled, value, onChange, onBlur, name, className, asChild, onReset, ...properties }, forwardedReference) => {
+const ColorPicker: React.FC<
+  Omit<React.ComponentProps<typeof Button>, 'value' | 'onChange' | 'onBlur'> & ColorPickerProperties
+> = ({ disabled, value, onChange, onBlur, name, className, asChild, onReset, ref, ...properties }) => {
   const [open, setOpen] = useState(false);
 
   const Comp = asChild ? Slot : Button;
@@ -91,22 +90,22 @@ const ColorPicker = forwardRef<
             value={[value.h]}
             onValueChange={([h]) => handleChange({ h, s: 50, l: 50 })}
             className={cn(
-              '[&_[data-slot="range"]]:bg-transparent',
-              '[&_[data-slot="track"]]:bg-[linear-gradient(_to_right,_oklch(var(--l-primary)_var(--c-primary)_0),_oklch(var(--l-primary)_var(--c-primary)_120),_oklch(var(--l-primary)_var(--c-primary)_240),_oklch(var(--l-primary)_var(--c-primary)_360)_)]',
-              '[&_[data-slot="track"]]:border-x-[oklch(var(--l-primary)_var(--c-primary)_0)]',
-              '[&_[data-slot="track"]]:border-x-9',
-              '[&_[data-slot="track"]]:h-6',
-              '[&_[data-slot="track"]]:rounded-md',
-              '[&_[data-slot="thumb"]]:bg-primary',
-              '[&_[data-slot="thumb"]]:size-9',
-              '[&_[data-slot="thumb"]]:border-border',
-              '[&_[data-slot="thumb"]]:border-2',
+              '[&_[data-slot="slider-range"]]:bg-transparent',
+              '[&_[data-slot="slider-track"]]:bg-[linear-gradient(_to_right,_oklch(var(--l-primary)_var(--c-primary)_0),_oklch(var(--l-primary)_var(--c-primary)_120),_oklch(var(--l-primary)_var(--c-primary)_240),_oklch(var(--l-primary)_var(--c-primary)_360)_)]',
+              '[&_[data-slot="slider-track"]]:border-x-[oklch(var(--l-primary)_var(--c-primary)_0)]',
+              '[&_[data-slot="slider-track"]]:border-x-9',
+              '[&_[data-slot="slider-track"]]:h-6',
+              '[&_[data-slot="slider-track"]]:rounded-md',
+              '[&_[data-slot="slider-thumb"]]:bg-primary',
+              '[&_[data-slot="slider-thumb"]]:size-9',
+              '[&_[data-slot="slider-thumb"]]:border-border',
+              '[&_[data-slot="slider-thumb"]]:border-2',
             )}
-            ref={forwardedReference}
+            ref={ref}
           />
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="outline" size="icon" onClick={onReset} className="w-12">
+              <Button variant="outline" size="icon" onClick={onReset}>
                 <RotateCcw className="size-4" />
               </Button>
             </TooltipTrigger>
@@ -116,7 +115,7 @@ const ColorPicker = forwardRef<
       </PopoverContent>
     </Popover>
   );
-});
+};
 ColorPicker.displayName = 'ColorPicker';
 
 export { ColorPicker };

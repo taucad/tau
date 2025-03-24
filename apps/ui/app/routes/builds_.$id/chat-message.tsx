@@ -217,12 +217,12 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                       <ChevronRight className="size-4" />
                     </div>
                   </SheetTrigger>
-                  <SheetContent className="overflow-y-scroll">
+                  <SheetContent>
                     <SheetHeader>
                       <SheetTitle>{relevantSources.length} Sources</SheetTitle>
                     </SheetHeader>
                     <SheetDescription asChild>
-                      <div className="flex flex-col items-center space-y-2 flex-wrap mt-2 overflow-y-scroll">
+                      <div className="grid grid-cols-1 items-center gap-2 flex-wrap p-4 pt-0 overflow-y-scroll">
                         {relevantSources.map((source) => {
                           const sourceUrl = new URL(source.link);
                           const sourceDomain = sourceUrl.hostname.replace('www.', '').split('.').slice(0, -1).join('.');

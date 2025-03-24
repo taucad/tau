@@ -4,6 +4,8 @@
   "description": "",
   "license": "",
   "scripts": {},
+  "$comment1": "This package.json is currently needed by Remix with NX.",
+  "$comment2": "It is not used for anything else.",
   "type": "module",
   "engines": {
     "node": ">=14"

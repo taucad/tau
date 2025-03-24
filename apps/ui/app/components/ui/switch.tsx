@@ -1,17 +1,18 @@
 import * as React from 'react';
-import * as SwitchPrimitives from '@radix-ui/react-switch';
+import * as SwitchPrimitive from '@radix-ui/react-switch';
 import { cva, type VariantProps } from 'class-variance-authority';
 
 import { cn } from '@/utils/ui';
 
 const switchVariants = cva(
-  'peer inline-flex shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=unchecked]:bg-input',
+  'peer data-[state=checked]:bg-primary data-[state=unchecked]:bg-input focus-visible:border-ring focus-visible:ring-ring/50 dark:data-[state=unchecked]:bg-input/80 inline-flex shrink-0 items-center rounded-full border border-transparent shadow-xs outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50',
   {
     variants: {
       size: {
-        sm: 'h-4 w-7',
-        md: 'h-5 w-9',
-        lg: 'h-6 w-11',
+        // Sizes are slightly larger than thumb to present an elegant, thin appearance
+        sm: 'h-3.15 w-6',
+        md: 'h-4.15 w-8',
+        lg: 'h-5.15 w-10',
       },
     },
     defaultVariants: {
@@ -21,13 +22,13 @@ const switchVariants = cva(
 );
 
 const thumbVariants = cva(
-  'pointer-events-none block rounded-full bg-background shadow-lg ring-0 transition-transform data-[state=checked]:translate-x-0',
+  'bg-background dark:data-[state=checked]:bg-background pointer-events-none block size-4 rounded-full ring-0 transition-transform data-[state=checked]:translate-x-[calc(100%-2px)] data-[state=unchecked]:translate-x-0',
   {
     variants: {
       size: {
-        sm: 'size-3 data-[state=checked]:translate-x-3',
-        md: 'size-4 data-[state=checked]:translate-x-4',
-        lg: 'size-5 data-[state=checked]:translate-x-5',
+        sm: 'size-3',
+        md: 'size-4',
+        lg: 'size-5',
       },
     },
     defaultVariants: {
@@ -36,17 +37,16 @@ const thumbVariants = cva(
   },
 );
 
-interface SwitchProperties
-  extends React.ComponentPropsWithoutRef<typeof SwitchPrimitives.Root>,
-    VariantProps<typeof switchVariants> {}
-
-const Switch = React.forwardRef<React.ElementRef<typeof SwitchPrimitives.Root>, SwitchProperties>(
-  ({ className, size, ...properties }, reference) => (
-    <SwitchPrimitives.Root className={cn(switchVariants({ size, className }))} {...properties} ref={reference}>
-      <SwitchPrimitives.Thumb className={cn(thumbVariants({ size }))} />
-    </SwitchPrimitives.Root>
-  ),
-);
-Switch.displayName = SwitchPrimitives.Root.displayName;
+function Switch({
+  className,
+  size,
+  ...properties
+}: React.ComponentProps<typeof SwitchPrimitive.Root> & VariantProps<typeof switchVariants>) {
+  return (
+    <SwitchPrimitive.Root data-slot="switch" className={cn(switchVariants({ size, className }))} {...properties}>
+      <SwitchPrimitive.Thumb data-slot="switch-thumb" className={cn(thumbVariants({ size }))} />
+    </SwitchPrimitive.Root>
+  );
+}
 
 export { Switch };

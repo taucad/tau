@@ -124,7 +124,7 @@ export default function PersonalCadProjects() {
               value={sortBy}
               onValueChange={(value: 'lastOpened' | 'createdAt' | 'updatedAt' | 'name') => setSortBy(value)}
             >
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger size="sm" className="w-[180px]">
                 <SelectValue placeholder="Sort by" />
               </SelectTrigger>
               <SelectContent>

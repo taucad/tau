@@ -1,6 +1,5 @@
 import { History, MoreHorizontal } from 'lucide-react';
-import { storage } from '@/db/storage';
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { type Build } from '@/types/build';
 import { NavLink, useMatch, useNavigate } from '@remix-run/react';
 import {
@@ -19,14 +18,12 @@ const MAX_SHORTCUT_LENGTH = 9;
 
 export function NavHistory() {
   const [visibleCount, setVisibleCount] = useState(BUILDS_PER_PAGE);
-  const [visibleBuilds, setVisibleBuilds] = useState<Build[]>([]);
   const { builds } = useBuilds();
 
-  useEffect(() => {
-    // Get all builds from storage and sort by most recently updated
-    const builds = storage.getBuilds().sort((a, b) => b.updatedAt - a.updatedAt);
-    setVisibleBuilds(builds.slice(0, visibleCount));
-  }, [visibleCount]);
+  const visibleBuilds = useMemo(() => {
+    const sortedBuilds = builds.sort((a, b) => b.updatedAt - a.updatedAt);
+    return sortedBuilds.slice(0, visibleCount);
+  }, [builds, visibleCount]);
 
   const handleLoadMore = () => {
     setVisibleCount((previous) => previous + BUILDS_PER_PAGE);

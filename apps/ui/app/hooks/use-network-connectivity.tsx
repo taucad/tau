@@ -17,6 +17,7 @@ const subscribeToNetworkConnectivity = (callback: () => void) => {
 
 const getNetworkConnectivitySnapshot = () => globalThis.navigator.onLine;
 
+// Always show "Online" for server-generated HTML
 const getNetworkConnectivityServerSnapshot = () => true;
 
 export const useNetworkConnectivity = (

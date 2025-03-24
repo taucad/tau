@@ -238,10 +238,10 @@ export function ReplicadProvider({
       };
 
       try {
+        dispatch({ type: 'SET_STATUS', payload: { isComputing: true, error: undefined } });
         const defaultParameters = await loadDefaultParameters(code);
         const mergedParameters = { ...defaultParameters, ...parameters };
         log.debug('Building shape');
-        dispatch({ type: 'SET_STATUS', payload: { isComputing: true, error: undefined } });
 
         const buildStartTime = performance.now();
         const result = await worker.buildShapesFromCode(code, mergedParameters);

@@ -78,11 +78,11 @@ export const ChatParameters = () => {
         Object.entries(allParameters).map(([key, value]) => {
           const prettyKey = pascalCaseToWords(key);
           return (
-            <div key={key} className="flex flex-col gap-1">
-              <div className="flex flex-row gap-2 justify-between h-6">
+            <div key={key} className="flex flex-col gap-0.5 @container/parameter">
+              <div className="flex flex-row gap-2 justify-between min-h-6 h-auto">
                 <div className="flex flex-row gap-2 items-baseline">
                   <span className={cn(parameters[key] !== undefined && 'font-bold')}>{prettyKey}</span>
-                  <span className="text-xs text-muted-foreground">{typeof value}</span>
+                  <span className="text-xs text-muted-foreground hidden @[10rem]/parameter:block">{typeof value}</span>
                 </div>
                 {parameters[key] !== undefined && (
                   <Tooltip>
@@ -96,7 +96,7 @@ export const ChatParameters = () => {
                         <RefreshCcwDot />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>Reset {prettyKey}</TooltipContent>
+                    <TooltipContent>Reset "{prettyKey}"</TooltipContent>
                   </Tooltip>
                 )}
               </div>
@@ -110,12 +110,10 @@ export const ChatParameters = () => {
                     onValueChange={([newValue]) => handleParameterChange(key, Number(newValue))}
                     className={cn(
                       //
-                      '[&_[data-slot="track"]]:h-6',
-                      '[&_[data-slot="track"]]:rounded-md',
-                      '[&_[data-slot="thumb"]]:bg-primary',
-                      '[&_[data-slot="thumb"]]:size-9',
-                      '[&_[data-slot="thumb"]]:border-border',
-                      '[&_[data-slot="thumb"]]:border-2',
+                      '[&_[data-slot="slider-track"]]:h-4',
+                      '[&_[data-slot="slider-track"]]:rounded-md',
+                      '[&_[data-slot="slider-thumb"]]:size-5.5',
+                      '[&_[data-slot="slider-thumb"]]:border-1',
                     )}
                   />
                 )}
@@ -130,14 +128,14 @@ export const ChatParameters = () => {
                     type="number"
                     value={value}
                     onChange={(event) => handleParameterChange(key, Number.parseFloat(event.target.value))}
-                    className="w-14 h-8 p-1 bg-background shadow-none"
+                    className="w-14 h-6 p-1 bg-background shadow-none"
                   />
                 ) : typeof value === 'string' ? (
                   <Input
                     type="text"
                     value={value}
                     onChange={(event) => handleParameterChange(key, event.target.value)}
-                    className="h-8 p-1 bg-background shadow-none"
+                    className="h-6 p-1 bg-background shadow-none"
                   />
                 ) : // eslint-disable-next-line unicorn/no-null
                 null}

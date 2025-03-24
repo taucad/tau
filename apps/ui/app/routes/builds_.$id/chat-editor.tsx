@@ -8,8 +8,9 @@ import { useMonaco } from '@monaco-editor/react';
 import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
 import { useConsole } from '@/hooks/use-console';
 import './chat-config';
+import { cn } from '@/utils/ui';
 
-export const ChatEditor = () => {
+export const ChatEditor = ({ className }: { className?: string }) => {
   const { setCode, code } = useBuild();
   const { log } = useConsole({ defaultOrigin: { component: 'Editor' } });
 
@@ -79,7 +80,7 @@ export const ChatEditor = () => {
       </div> */}
       <CodeEditor
         loading={<LoaderPinwheel className="size-20 stroke-1 animate-spin text-primary ease-in-out" />}
-        className="text-xs bg-background"
+        className={cn('text-xs bg-background', className)}
         defaultLanguage="typescript"
         defaultValue={code}
         onChange={handleCodeChange}

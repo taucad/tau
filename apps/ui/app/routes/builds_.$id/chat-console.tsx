@@ -182,7 +182,7 @@ export const ChatConsole = ({
   );
 
   // Filter logs based on search text and verbosity levels
-  const filteredLogs = log.logs.filter((log) => {
+  const filteredLogs = log.filterLogs((log) => {
     // Check if log level is enabled
     if (!enabledLevels[log.level]) {
       return false;
@@ -347,7 +347,7 @@ export const ChatConsole = ({
               key={log.id}
               className={cn(
                 'text-xs bg-background font-mono py-1 px-2 rounded border-l-2',
-                'hover:bg-muted/20 transition-colors cursor-default group/log border-primary',
+                'hover:bg-muted/20 cursor-default group/log border-primary',
                 'overflow-x-auto flex-shrink-0',
                 {
                   'border-destructive': log.level === LOG_LEVELS.ERROR,

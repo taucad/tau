@@ -194,9 +194,9 @@ export const ChatInterface = () => {
 
       {isMobile && !isChatOpen && (
         <Drawer open={isParametersOpen} onOpenChange={setIsParametersOpen}>
-          <DrawerContent className={cn('p-4 pt-0 text-sm flex flex-col gap-2 justify-between', 'md:hidden')}>
-            <span className="font-bold text-lg">Parameters</span>
-            <div className="grid grid-cols-2 gap-2">
+          <DrawerContent className={cn('text-sm flex flex-col gap-2 justify-between', 'md:hidden')}>
+            <span className="px-4 font-bold text-lg">Parameters</span>
+            <div className="p-4 grid grid-cols-2 gap-2 overflow-y-auto">
               <ChatParameters />
             </div>
           </DrawerContent>

@@ -101,6 +101,7 @@ export function BuildProvider({ children, buildId }: { children: ReactNode; buil
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['build', buildId] });
+      queryClient.invalidateQueries({ queryKey: ['builds'] });
     },
   });
 

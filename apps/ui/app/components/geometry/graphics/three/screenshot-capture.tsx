@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle } from 'react';
+import { useImperativeHandle } from 'react';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
@@ -73,7 +73,7 @@ export interface ScreenshotCaptureHandle {
 }
 
 // Component to capture screenshots
-export const ScreenshotCapture = forwardRef<ScreenshotCaptureHandle, object>((_, reference) => {
+export function ScreenshotCapture({ ref: reference }: { ref: React.RefObject<ScreenshotCaptureHandle> }) {
   const { gl, scene, camera } = useThree();
 
   useImperativeHandle(
@@ -341,6 +341,6 @@ export const ScreenshotCapture = forwardRef<ScreenshotCaptureHandle, object>((_,
 
   // Return an empty fragment
   return <></>;
-});
+}
 
 ScreenshotCapture.displayName = 'ScreenshotCapture';

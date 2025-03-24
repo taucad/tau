@@ -24,13 +24,13 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties) {
         // Apply scrollbar colors
         // !important is needed to override the `style` attribute set by Monaco
         '[&_.monaco-scrollable-element_>_.scrollbar]:!bg-(--scrollbar-track)',
-        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:!bg-(--scrollbar-thumb)',
+        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:!bg-(--scrollbar-thumb)/80',
         // Apply scrollbar dimensions
         // !important is needed to override the `style` attribute set by Monaco
-        '[&_.monaco-scrollable-element_>_.scrollbar.vertical_>_.slider]:!w-[6px]',
-        '[&_.monaco-scrollable-element_>_.scrollbar.horizontal_>_.slider]:!h-[6px]',
+        '[&_.monaco-scrollable-element_>_.scrollbar.vertical_>_.slider]:!w-[calc(var(--scrollbar-thickness)_-_var(--scrollbar-padding)_*_2)]',
+        '[&_.monaco-scrollable-element_>_.scrollbar.horizontal_>_.slider]:!h-[calc(var(--scrollbar-thickness)_-_var(--scrollbar-padding)_*_2)]',
         // Apply rounded corners to scrollbar sliders
-        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:rounded-[3px]',
+        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:rounded-[calc(var(--scrollbar-thickness)_-_var(--scrollbar-padding)_*_2)]',
         // Ensure scrollbars don't overlap content
         '[&_.monaco-scrollable-element]:overflow-hidden',
       )}
@@ -49,7 +49,8 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties) {
         // Custom scrollbar styling to match global scrollbar styles
         scrollbar: {
           // Applying to ensure that other elements that use the scrollbar
-          // dimensions are styled correctly
+          // dimensions are styled correctly.
+          // This is equivalent to `calc(var(--scrollbar-thickness) - var(--scrollbar-padding) * 2)`
           verticalScrollbarSize: 7,
           horizontalScrollbarSize: 7,
           verticalSliderSize: 7,

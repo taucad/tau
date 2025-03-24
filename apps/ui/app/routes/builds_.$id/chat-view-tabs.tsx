@@ -6,6 +6,7 @@ import { Eye, Code, Terminal } from 'lucide-react';
 import { ChatConsole } from './chat-console';
 import { ChatEditor } from './chat-editor';
 import { ChatViewer } from './chat-viewer';
+import { buttonVariants } from '@/components/ui/button';
 
 const CHAT_TAB_COOKIE_NAME = 'tau-chat-tab';
 type ChatTabs = (typeof tabs)[number]['value'];
@@ -56,7 +57,7 @@ export const ChatViewTabs = ({ isChatOpen }: { isChatOpen: boolean }) => {
   return (
     <Tabs
       defaultValue={chatTab}
-      className={cn('h-full w-full flex-1', chatTab === 'editor' && 'dark:bg-[rgb(30,_30,_30)]')}
+      className={cn('h-full w-full flex-1 gap-0', chatTab === 'editor' && 'dark:bg-[rgb(30,_30,_30)]')}
       onValueChange={(value) => {
         // Permissible as Tabs doesn't preserve the type
         // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
@@ -66,16 +67,21 @@ export const ChatViewTabs = ({ isChatOpen }: { isChatOpen: boolean }) => {
       <TabsList
         defaultValue="editor"
         className={cn(
-          '[&>*]:data-[state=active]:bg-accent [&>*]:border-[1px] [&>*]:border-border [&>*]:hover:bg-accent/70 bg-transparent ml-2 mr-auto w-full flex justify-start my-1.5 gap-2 z-30 p-0',
+          'bg-transparent ml-2 my-1.5 gap-2 z-10 p-0',
+          'absolute top-0 left-0 ',
           !isChatOpen && 'ml-13 md:ml-12',
-          chatTab === 'preview' && 'absolute top-0 left-0 ',
         )}
       >
         {tabs.map((tab) => (
           <TabsTrigger
             key={tab.value}
             value={tab.value}
-            className={'gap-2 border-[1px] md:border-none size-8 md:h-8 md:w-auto px-1 md:px-3'}
+            className={buttonVariants({
+              variant: 'outline',
+              size: 'sm',
+              className:
+                'text-sm border-px gap-2.5 w-8 md:w-auto data-[state=active]:shadow-none data-[state=active]:bg-accent',
+            })}
           >
             <tab.icon className="size-4" />
             <span className="hidden md:block">{tab.label}</span>
@@ -87,10 +93,10 @@ export const ChatViewTabs = ({ isChatOpen }: { isChatOpen: boolean }) => {
       </TabsContent>
       {/* subtract 6rem for the chat history and chat input as they don't take the full height */}
       <TabsContent value="editor" className="h-[calc(100vh-6rem)] mt-0 flex flex-1 w-full">
-        <ChatEditor />
+        <ChatEditor className="mt-[3rem]" />
       </TabsContent>
       <TabsContent value="console" className="h-[calc(100vh-6rem)] mt-0 flex flex-1 w-full">
-        <ChatConsole data-view="tabs" className="pt-0" />
+        <ChatConsole data-view="tabs" className="mt-[3rem]" />
       </TabsContent>
     </Tabs>
   );

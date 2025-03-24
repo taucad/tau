@@ -111,9 +111,9 @@ const data = {
 export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar collapsible="icon" {...properties}>
-      <SidebarHeader style={{ height: HEADER_HEIGHT }} className="border-b-[1px] border-border">
+      <SidebarHeader style={{ height: HEADER_HEIGHT }} className="border-b border-border">
         <Link to="/" tabIndex={-1}>
-          <SidebarMenuButton tooltip="Home" className="[&>svg]:size-8 !p-0">
+          <SidebarMenuButton tooltip="Home" className="[&>svg]:size-8 group-data-[collapsible=icon]:p-0! p-0!">
             <Tau className="text-primary bg-primary rounded-md overflow-clip" />
             <h1 className="text-2xl font-semibold font-mono tracking-wider">Tau</h1>
             <span className="sr-only">Home</span>

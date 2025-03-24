@@ -14,14 +14,15 @@ import { CadLoader } from '../geometry/kernel/replicad/cad-loader';
 
 export type ColorPickerValue = HslColor;
 
-interface ColorPickerProperties {
+interface ColorPickerProperties
+  extends Omit<React.ComponentProps<typeof Button>, 'value' | 'onChange' | 'onBlur' | 'ref'> {
   value: ColorPickerValue;
   onChange: (value: ColorPickerValue) => void;
   onBlur?: () => void;
   children?: React.ReactNode;
   asChild?: boolean;
   onReset?: () => void;
-  ref?: React.RefObject<HTMLSpanElement>;
+  ref?: React.RefObject<typeof Slider>;
 }
 
 const ColorPicker: React.FC<

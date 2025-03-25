@@ -24,7 +24,7 @@ export const MarkdownViewer = ({
   return (
     <Markdown
       className={cn(
-        'text-sm prose text-foreground w-full max-w-full',
+        'prose w-full max-w-full text-sm text-foreground',
         '[--tw-prose-headings:text-foreground]',
         '[--tw-prose-bullets:text-foreground]',
         '[--tw-prose-bold:text-foreground]',
@@ -35,7 +35,7 @@ export const MarkdownViewer = ({
         '[--tw-prose-kbd:text-foreground]',
         '[--tw-prose-links:text-foreground]',
         /* <pre> */
-        'prose-pre:p-0 prose-pre:ps-0 prose-pre:pe-0 prose-pre:bg-neutral/10',
+        'prose-pre:bg-neutral/10 prose-pre:p-0 prose-pre:ps-0 prose-pre:pe-0',
       )}
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex]}
@@ -56,8 +56,8 @@ export const MarkdownViewer = ({
           const text = String(children).replace(/\n$/, '');
 
           return match ? (
-            <div className="@container/code border border-neutral-200 rounded-md font-sans overflow-hidden">
-              <div className="flex flex-row justify-between items-center pl-3 pr-1 py-1 text-foreground/50 sticky top-0 border-b border-neutral/20">
+            <div className="border-neutral-200 @container/code overflow-hidden rounded-md border font-sans">
+              <div className="sticky top-0 flex flex-row items-center justify-between border-b border-neutral/20 py-1 pr-1 pl-3 text-foreground/50">
                 <div className="text-xs">{language}</div>
                 <div className="flex flex-row gap-1">
                   <CopyButton
@@ -98,7 +98,7 @@ export const MarkdownViewer = ({
               {...rest}
               className={cn(
                 className,
-                'bg-neutral/20 text-foreground/80 px-1 py-0.5 font-normal rounded-sm after:content-none before:content-none',
+                'rounded-sm bg-neutral/20 px-1 py-0.5 font-normal text-foreground/80 before:content-none after:content-none',
               )}
             >
               {children}

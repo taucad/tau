@@ -18,7 +18,7 @@ export function TeamSwitcher({
 }: {
   teams: {
     name: string;
-    logo: React.ElementType;
+    logo: React.ComponentType<{ className: string }>;
     plan: string;
   }[];
 }) {

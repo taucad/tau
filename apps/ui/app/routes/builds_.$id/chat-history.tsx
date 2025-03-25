@@ -78,8 +78,8 @@ export const ChatHistory = () => {
           size="icon"
           variant="outline"
           className={cn(
-            'sticky flex justify-center bottom-4 left-1/2 -translate-x-1/2 rounded-full',
-            isScrolledTo && 'opacity-0 select-none pointer-events-none',
+            'sticky bottom-4 left-1/2 flex -translate-x-1/2 justify-center rounded-full',
+            isScrolledTo && 'pointer-events-none opacity-0 select-none',
             !isScrolledTo && 'animate-bounce-subtle',
           )}
           tabIndex={isScrolledTo ? -1 : 0}

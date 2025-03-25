@@ -9,8 +9,7 @@ type TypedUIMatch = UIMatch & {
 };
 
 export const useTypedMatches = () => {
-  // Permissible as `useMatches` does not support generic typing
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `useMatches` does not support generic typing
   const matches = useMatches() as TypedUIMatch[];
 
   return matches;

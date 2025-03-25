@@ -85,8 +85,8 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
   return (
     <article
       className={cn(
-        'group/message flex flex-row items-start w-full',
-        isUser && 'space-x-reverse gap-2 flex-row-reverse',
+        'group/message flex w-full flex-row items-start',
+        isUser && 'flex-row-reverse gap-2 space-x-reverse',
       )}
     >
       <div
@@ -119,7 +119,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                         });
                       }}
                       key={source.key}
-                      className="rounded-full hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30 flex flex-row items-center gap-1 cursor-pointer select-none transition-transform duration-200 ease-in-out"
+                      className="flex cursor-pointer flex-row items-center gap-1 rounded-full transition-transform duration-200 ease-in-out select-none hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30"
                     >
                       <source.icon className="size-3" />
                       <p className="text-xs">{sourceCount}</p>
@@ -132,7 +132,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                 <TooltipTrigger>
                   <Badge
                     variant={'outline'}
-                    className="rounded-full hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30 flex flex-row items-center gap-1 cursor-pointer select-none transition-transform duration-200 ease-in-out"
+                    className="flex cursor-pointer flex-row items-center gap-1 rounded-full transition-transform duration-200 ease-in-out select-none hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30"
                   >
                     <p className="text-xs">+</p>
                   </Badge>
@@ -143,7 +143,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
               </Tooltip>
             </div>
             <When condition={relevantSources?.length === 0}>
-              <p className="italic text-foreground/50 text-sm">No sources, expand your search</p>
+              <p className="text-sm text-foreground/50 italic">No sources, expand your search</p>
             </When>
             <div className="grid grid-cols-4 gap-2">
               {relevantSources.slice(0, 3).map((source) => {
@@ -165,12 +165,12 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                       <a href={source.link} target="_blank" rel="noreferrer">
                         <div
                           key={source.title}
-                          className="flex flex-col bg-neutral/5 hover:bg-neutral/10 p-2 justify-between rounded-md h-24"
+                          className="flex h-24 flex-col justify-between rounded-md bg-neutral/5 p-2 hover:bg-neutral/10"
                         >
-                          <p className="text-xs font-medium line-clamp-3">{source.title}</p>
+                          <p className="line-clamp-3 text-xs font-medium">{source.title}</p>
                           <div className="flex flex-row items-center gap-2">
                             <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
-                            <p className="text-xs text-foreground/50 font-medium truncate">{sourceDomain}</p>
+                            <p className="truncate text-xs font-medium text-foreground/50">{sourceDomain}</p>
                           </div>
                         </div>
                       </a>
@@ -188,8 +188,8 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
               })}
               {relevantSources.length > 3 && (
                 <Sheet>
-                  <SheetTrigger className="flex flex-col bg-neutral/5 hover:bg-neutral/10 p-2 justify-between rounded-md h-24">
-                    <div className="flex flex-row items-center gap-px flex-wrap">
+                  <SheetTrigger className="flex h-24 flex-col justify-between rounded-md bg-neutral/5 p-2 hover:bg-neutral/10">
+                    <div className="flex flex-row flex-wrap items-center gap-px">
                       {relevantSources.slice(3, 9).map((source) => {
                         const sourceUrl = new URL(source.link);
                         const sourceDomain = sourceUrl.hostname.replace('www.', '').split('.').slice(0, -1).join('.');
@@ -202,17 +202,17 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                             key={source.title}
                             src={sourceFaviconUrl.href}
                             alt={sourceDomain}
-                            className="size-4 sm:w-5 sm:h-5 rounded-full"
+                            className="size-4 rounded-full sm:h-5 sm:w-5"
                           />
                         );
                       })}
                       {relevantSources.length > 9 && (
-                        <div className="flex items-center justify-center size-4 sm:w-5 sm:h-5 rounded-full bg-neutral/20 text-[8px] sm:text-[8px] text-foreground/50 font-medium">
+                        <div className="flex size-4 items-center justify-center rounded-full bg-neutral/20 text-[8px] font-medium text-foreground/50 sm:h-5 sm:w-5 sm:text-[8px]">
                           +{relevantSources.length - 9}
                         </div>
                       )}
                     </div>
-                    <div className="flex flex-row items-center text-foreground/50 font-medium">
+                    <div className="flex flex-row items-center font-medium text-foreground/50">
                       <p className="text-xs">Show all</p>
                       <ChevronRight className="size-4" />
                     </div>
@@ -222,7 +222,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                       <SheetTitle>{relevantSources.length} Sources</SheetTitle>
                     </SheetHeader>
                     <SheetDescription asChild>
-                      <div className="grid grid-cols-1 items-center gap-2 flex-wrap p-4 pt-0 overflow-y-scroll">
+                      <div className="grid grid-cols-1 flex-wrap items-center gap-2 overflow-y-scroll p-4 pt-0">
                         {relevantSources.map((source) => {
                           const sourceUrl = new URL(source.link);
                           const sourceDomain = sourceUrl.hostname.replace('www.', '').split('.').slice(0, -1).join('.');
@@ -234,12 +234,12 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                             <a href={source.link} target="_blank" key={source.link} className="w-full" rel="noreferrer">
                               <div
                                 key={source.title}
-                                className="w-full bg-neutral/5 hover:bg-neutral/10 p-2 rounded-md flex flex-col space-y-2"
+                                className="flex w-full flex-col space-y-2 rounded-md bg-neutral/5 p-2 hover:bg-neutral/10"
                               >
                                 <p className="text-sm font-medium text-foreground">{source.title}</p>
                                 <div className="flex flex-row items-center gap-2">
                                   <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
-                                  <p className="text-xs text-foreground/50 font-medium">{sourceDomain}</p>
+                                  <p className="text-xs font-medium text-foreground/50">{sourceDomain}</p>
                                 </div>
                                 <p className="text-xs text-foreground">{source.snippet}</p>
                               </div>
@@ -255,14 +255,14 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
             {message.content && <p className="text-lg">Answer</p>}
           </>
         )}
-        <div className={cn(isUser ? 'bg-neutral/20 rounded-xl' : 'pt-[6px]', isEditing && 'rounded-lg')}>
+        <div className={cn(isUser ? 'rounded-xl bg-neutral/20' : 'pt-[6px]', isEditing && 'rounded-lg')}>
           {/* Thinking content section with animation */}
           {/* TODO: remove trim when backend is fixed to trim thinking tags */}
           {!isUser && message.thinking?.trim() && (
             <div
               className={cn(
                 'overflow-hidden transition-[margin-bottom,opacity] duration-300 ease-out',
-                isTransitioning && 'translate-y-0 opacity-100 animate-in fade-in slide-in-from-bottom-2',
+                isTransitioning && 'translate-y-0 animate-in opacity-100 fade-in slide-in-from-bottom-2',
                 isThinkingExpanded && 'mb-2',
               )}
             >
@@ -273,7 +273,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                     variant="ghost"
                     size="xs"
                     onClick={toggleThinking}
-                    className="text-foreground/60 hover:text-foreground/80 font-medium hover:bg-transparent -ml-3"
+                    className="-ml-3 font-medium text-foreground/60 hover:bg-transparent hover:text-foreground/80"
                   >
                     <ChevronRight
                       className={cn('transition-transform duration-300 ease-in-out', isThinkingExpanded && 'rotate-90')}
@@ -287,8 +287,8 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
               {message.content[0].type === 'text' && message.content[0].text.length === 0 && (
                 <div
                   className={cn(
-                    'text-foreground/60 font-medium text-sm mb-2 transition-all duration-300 ease-out',
-                    isTransitioning && 'opacity-0 translate-y-2',
+                    'mb-2 text-sm font-medium text-foreground/60 transition-all duration-300 ease-out',
+                    isTransitioning && 'translate-y-2 opacity-0',
                   )}
                 >
                   Thinking...
@@ -299,11 +299,11 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
               <div
                 ref={thinkingContentReference}
                 className={cn(
-                  'pl-5 border-l border-foreground/20 text-foreground/60 text-sm italic whitespace-pre-wrap',
-                  'transition-all duration-300 ease-in-out origin-top',
+                  'border-l border-foreground/20 pl-5 text-sm whitespace-pre-wrap text-foreground/60 italic',
+                  'origin-top transition-all duration-300 ease-in-out',
                   message.content[0].type === 'text' && message.content[0].text.length > 0 && !isThinkingExpanded
-                    ? 'max-h-0 opacity-0 scale-y-95 transform'
-                    : 'max-h-[2000px] opacity-100 scale-y-100 transform',
+                    ? 'max-h-0 scale-y-95 transform opacity-0'
+                    : 'max-h-[2000px] scale-y-100 transform opacity-100',
                 )}
               >
                 {message.thinking.trim()}
@@ -334,10 +334,10 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                         <img
                           src={content.image_url.url}
                           alt="Chat message"
-                          className="h-16 w-auto object-cover rounded-md ml-auto border bg-muted cursor-zoom-in"
+                          className="ml-auto h-16 w-auto cursor-zoom-in rounded-md border bg-muted object-cover"
                         />
                       </HoverCardTrigger>
-                      <HoverCardContent className="p-0 size-auto max-w-screen overflow-hidden">
+                      <HoverCardContent className="size-auto max-w-screen overflow-hidden p-0">
                         <img src={content.image_url.url} alt="Chat message zoomed" className="h-48 md:h-96" />
                       </HoverCardContent>
                     </HoverCard>
@@ -353,14 +353,14 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                       >{`${content.text}${!isUser && message.status === MessageStatus.Pending ? '●' : ''}`}</MarkdownViewer>
 
                       {!isUser && message.status === MessageStatus.Success && (
-                        <div className="flex flex-row justify-start items-center text-foreground/50 mt-2 gap-2">
+                        <div className="mt-2 flex flex-row items-center justify-start gap-2 text-foreground/50">
                           <CopyButton size="xs" text={content.text} tooltip="Copy message" />
                           {message.usage && (
                             <HoverCard openDelay={100} closeDelay={100}>
                               <HoverCardTrigger className="flex flex-row items-center">
                                 <Badge
                                   variant="outline"
-                                  className="cursor-help text-inherit font-medium hover:bg-neutral/20"
+                                  className="cursor-help font-medium text-inherit hover:bg-neutral/20"
                                 >
                                   {formatCurrency(message.usage.totalCost)}
                                 </Badge>
@@ -372,7 +372,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                                     {model && (
                                       <div className="flex items-baseline gap-2 text-xs">
                                         <SvgIcon
-                                          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+                                          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- model.provider is always defined
                                           id={model.provider as ModelProvider}
                                           className="size-4 translate-y-[0.25em]"
                                         />
@@ -380,7 +380,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                                       </div>
                                     )}
                                   </div>
-                                  <Table className="rounded-md overflow-clip">
+                                  <Table className="overflow-clip rounded-md">
                                     <TableHeader>
                                       <TableRow>
                                         <TableHead>Metric</TableHead>
@@ -426,7 +426,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                                         </TableRow>
                                       )}
                                     </TableBody>
-                                    <TableFooter className="rounded-b-md overflow-clip">
+                                    <TableFooter className="overflow-clip rounded-b-md">
                                       <TableRow>
                                         <TableCell>Total</TableCell>
                                         <TableCell>
@@ -451,7 +451,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                   );
                 }
 
-                // eslint-disable-next-line unicorn/no-null
+                // eslint-disable-next-line unicorn/no-null -- null is required by React
                 return null;
               })}
             </div>
@@ -465,7 +465,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
               <Button
                 size="icon"
                 variant="ghost"
-                className="rounded-full transition-opacity group-hover/message:opacity-100 opacity-0 focus:opacity-100"
+                className="rounded-full opacity-0 transition-opacity group-hover/message:opacity-100 focus:opacity-100"
                 onClick={() => {
                   setIsEditing((editing) => !editing);
                 }}

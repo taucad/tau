@@ -73,7 +73,7 @@ export interface ScreenshotCaptureHandle {
 }
 
 // Component to capture screenshots
-export function ScreenshotCapture({ ref: reference }: { ref: React.RefObject<ScreenshotCaptureHandle> }) {
+export function ScreenshotCapture({ ref: reference }: { ref: React.RefObject<ScreenshotCaptureHandle | null> }) {
   const { gl, scene, camera } = useThree();
 
   useImperativeHandle(
@@ -87,7 +87,7 @@ export function ScreenshotCapture({ ref: reference }: { ref: React.RefObject<Scr
         // Setup default options
         const defaultOptions = {
           aspectRatio: 16 / 9,
-          zoomLevel: 1.6,
+          zoomLevel: 1.5,
           quality: {
             supersamplingFactor: 1,
             antiAliasingSamples: 0,
@@ -339,6 +339,6 @@ export function ScreenshotCapture({ ref: reference }: { ref: React.RefObject<Scr
     [gl, scene, camera],
   );
 
-  // Return an empty fragment
-  return <></>;
+  // eslint-disable-next-line unicorn/no-null -- Required by React
+  return null;
 }

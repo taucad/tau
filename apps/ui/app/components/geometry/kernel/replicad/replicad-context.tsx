@@ -18,6 +18,8 @@ interface ReplicadState {
   mesh?: {
     edges: any;
     faces: any;
+    color?: string;
+    opacity?: number;
   };
 }
 
@@ -146,7 +148,7 @@ function replicadReducer(state: ReplicadState, action: ReplicadAction): Replicad
 
 const ReplicadContext = createContext<
   | {
-      mesh: { edges: any; faces: any } | undefined;
+      mesh: { edges: any; faces: any; color?: string } | undefined;
       status: {
         isComputing: boolean;
         isBuffering: boolean;
@@ -262,7 +264,12 @@ export function ReplicadProvider({
         log.debug('Built shape');
         dispatch({
           type: 'SET_MESH',
-          payload: { faces: firstShape.mesh, edges: firstShape.edges },
+          payload: {
+            faces: firstShape.mesh,
+            edges: firstShape.edges,
+            color: firstShape.color,
+            opacity: firstShape.opacity,
+          },
         });
         const processingEndTime = performance.now();
         log.debug(`Mesh processing and dispatch took ${processingEndTime - processingStartTime}ms`);

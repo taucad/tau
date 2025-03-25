@@ -28,7 +28,7 @@ export type ThreeCanvasReference = HTMLCanvasElement & {
 };
 
 export const ThreeProvider = ({
-  ref: reference,
+  ref,
   children,
   enableGizmo = false,
   enableGrid = false,
@@ -41,12 +41,14 @@ export const ThreeProvider = ({
   onCanvasReady,
   ...properties
 }: ThreeContextProperties & {
-  ref?: React.RefObject<ThreeCanvasReference>;
+  ref?: React.RefObject<ThreeCanvasReference | null>;
 }) => {
   const dpr = Math.min(window.devicePixelRatio, 2);
   const [isCanvasReady, setIsCanvasReady] = useState(false);
   const screenshotReference = useRef<ScreenshotCaptureHandle>(null);
-  const canvasReference = useRef<HTMLCanvasElement>(null);
+  const canvasReference = useRef<HTMLCanvasElement & { captureScreenshot: (options?: ScreenshotOptions) => string }>(
+    null,
+  );
 
   useEffect(() => {
     THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
@@ -60,19 +62,18 @@ export const ThreeProvider = ({
   }, [isCanvasReady, onCanvasReady]);
 
   // Combine refs to provide both the canvas element and screenshot functionality
-  useImperativeHandle(reference, () => {
+  useImperativeHandle(ref, () => {
     const canvas = canvasReference.current;
     if (!canvas) {
-      // Return an empty object that matches the expected interface
-      return {} as ThreeCanvasReference;
+      throw new Error('Canvas reference is not found');
     }
 
-    (canvas as ThreeCanvasReference).captureScreenshot = (options?: ScreenshotOptions) => {
+    canvas.captureScreenshot = (options?: ScreenshotOptions) => {
       return screenshotReference.current?.captureScreenshot(options) || '';
     };
 
-    return canvas as ThreeCanvasReference;
-  }, [canvasReference, screenshotReference, isCanvasReady]);
+    return canvas;
+  }, [canvasReference, screenshotReference]);
 
   return (
     <Canvas

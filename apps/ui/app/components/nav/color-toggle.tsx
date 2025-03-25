@@ -15,14 +15,14 @@ export const ColorToggle = () => {
           variant="ghost"
           size="icon"
           className={cn(
-            'w-auto overflow-hidden bg-transparent dark:bg-transparent border-none',
+            'w-auto overflow-hidden border-none bg-transparent dark:bg-transparent',
             // Active styles
             'data-[state=open]:bg-primary hover:data-[state=open]:bg-primary',
             // Text styles
             'data-[state=open]:text-primary-foreground hover:data-[state=open]:text-primary-foreground',
           )}
         >
-          <Pipette className="w-4 h-4" />
+          <Pipette className="size-4" />
         </Button>
       </ColorPicker>
     </SidebarMenuButton>

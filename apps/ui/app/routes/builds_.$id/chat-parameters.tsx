@@ -65,7 +65,7 @@ export const ChatParameters = () => {
                 variant="outline"
                 size="icon"
                 onClick={resetAllParameters}
-                className="mr-12 mt-2 text-muted-foreground"
+                className="mt-2 mr-12 text-muted-foreground"
               >
                 <RefreshCcw />
               </Button>
@@ -78,11 +78,11 @@ export const ChatParameters = () => {
         Object.entries(allParameters).map(([key, value]) => {
           const prettyKey = pascalCaseToWords(key);
           return (
-            <div key={key} className="flex flex-col gap-0.5 @container/parameter">
-              <div className="flex flex-row gap-2 justify-between min-h-6 h-auto">
-                <div className="flex flex-row gap-2 items-baseline">
+            <div key={key} className="@container/parameter flex flex-col gap-0.5">
+              <div className="flex h-auto min-h-6 flex-row justify-between gap-2">
+                <div className="flex flex-row items-baseline gap-2">
                   <span className={cn(parameters[key] !== undefined && 'font-bold')}>{prettyKey}</span>
-                  <span className="text-xs text-muted-foreground hidden @[10rem]/parameter:block">{typeof value}</span>
+                  <span className="hidden text-xs text-muted-foreground @[10rem]/parameter:block">{typeof value}</span>
                 </div>
                 {parameters[key] !== undefined && (
                   <Tooltip>
@@ -100,7 +100,7 @@ export const ChatParameters = () => {
                   </Tooltip>
                 )}
               </div>
-              <div className="flex flex-row gap-2 w-full mt-auto">
+              <div className="mt-auto flex w-full flex-row gap-2">
                 {typeof value === 'number' && (
                   <Slider
                     value={[value]}
@@ -128,16 +128,16 @@ export const ChatParameters = () => {
                     type="number"
                     value={value}
                     onChange={(event) => handleParameterChange(key, Number.parseFloat(event.target.value))}
-                    className="min-w-14 w-14 h-6 p-1 bg-background"
+                    className="h-6 w-14 min-w-14 bg-background p-1"
                   />
                 ) : typeof value === 'string' ? (
                   <Input
                     type="text"
                     value={value}
                     onChange={(event) => handleParameterChange(key, event.target.value)}
-                    className="h-6 p-1 bg-background"
+                    className="h-6 bg-background p-1"
                   />
-                ) : // eslint-disable-next-line unicorn/no-null
+                ) : // eslint-disable-next-line unicorn/no-null -- null is required by React
                 null}
               </div>
             </div>

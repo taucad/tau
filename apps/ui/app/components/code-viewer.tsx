@@ -13,9 +13,9 @@ export function CodeViewer({
   showLineNumbers,
   language,
   ...rest
-}: SyntaxHighlighterProps & { className?: string }) {
+}: SyntaxHighlighterProps & { className?: string; ref?: React.RefObject<SyntaxHighlighter> }) {
   return (
-    <div className="w-full max-w-full relative overflow-hidden">
+    <div className="relative w-full max-w-full overflow-hidden">
       <div className="w-full max-w-full overflow-x-auto">
         <SyntaxHighlighter
           {...rest}
@@ -29,6 +29,7 @@ export function CodeViewer({
             minWidth: '100%', // Ensure it fills container
             ...(showLineNumbers ? { paddingLeft: '3.8em', paddingTop: '0.5em', paddingBottom: '0.5em' } : {}),
           }}
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Allow to attempt retrieving the language from the displayLanguageFromOriginalLanguage object.
           language={language ? displayLanguageFromOriginalLanguage[language as MappedLanguage] || language : undefined}
           codeTagProps={{
             className: cn(
@@ -41,7 +42,7 @@ export function CodeViewer({
               '[&_*]:!bg-transparent',
             ),
           }}
-          ref={ref as React.Ref<SyntaxHighlighter>}
+          ref={ref}
           PreTag="pre"
         />
       </div>

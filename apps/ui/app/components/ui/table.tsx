@@ -22,7 +22,7 @@ function TableFooter({ className, ...properties }: React.ComponentProps<'tfoot'>
   return (
     <tfoot
       data-slot="table-footer"
-      className={cn('bg-muted/50 border-t font-medium [&>tr]:last:border-b-0', className)}
+      className={cn('border-t bg-muted/50 font-medium [&>tr]:last:border-b-0', className)}
       {...properties}
     />
   );
@@ -32,7 +32,7 @@ function TableRow({ className, ...properties }: React.ComponentProps<'tr'>) {
   return (
     <tr
       data-slot="table-row"
-      className={cn('hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors', className)}
+      className={cn('border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted', className)}
       {...properties}
     />
   );
@@ -43,7 +43,7 @@ function TableHead({ className, ...properties }: React.ComponentProps<'th'>) {
     <th
       data-slot="table-head"
       className={cn(
-        'text-muted-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
+        'h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-muted-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
         className,
       )}
       {...properties}
@@ -68,7 +68,7 @@ function TableCaption({ className, ...properties }: React.ComponentProps<'captio
   return (
     <caption
       data-slot="table-caption"
-      className={cn('text-muted-foreground mt-4 text-xs', className)}
+      className={cn('mt-4 text-xs text-muted-foreground', className)}
       {...properties}
     />
   );

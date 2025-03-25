@@ -151,7 +151,7 @@ export function AppError() {
   if (isRouteErrorResponse(error)) {
     console.error('Route error', error);
     return (
-      <div className="flex flex-col h-full w-full items-center justify-center gap-4">
+      <div className="flex h-full w-full flex-col items-center justify-center gap-4">
         <h1 className="text-xl">
           {error.status} {error.statusText}
         </h1>
@@ -160,7 +160,7 @@ export function AppError() {
           Please try again later,{' '}
           <button
             onClick={goBack}
-            className={cn(buttonVariants({ variant: 'link' }), 'p-0 h-auto text-base underline cursor-pointer')}
+            className={cn(buttonVariants({ variant: 'link' }), 'h-auto cursor-pointer p-0 text-base underline')}
           >
             head back
           </button>
@@ -171,7 +171,7 @@ export function AppError() {
     );
   } else if (error instanceof Error) {
     return (
-      <div className="p-2 flex flex-col gap-4">
+      <div className="flex flex-col gap-4 p-2">
         <h1 className="text-xl">Error</h1>
         <p>{error.message}</p>
         <p>The stack trace is:</p>

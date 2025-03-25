@@ -1,6 +1,7 @@
 import nx from '@nx/eslint-plugin';
 import eslintPluginUnicorn from 'eslint-plugin-unicorn';
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
+import eslintComments from '@eslint-community/eslint-plugin-eslint-comments/configs';
 
 export default [
   ...nx.configs['flat/base'],
@@ -8,6 +9,7 @@ export default [
   ...nx.configs['flat/javascript'],
   ...nx.configs['flat/react'],
   eslintPluginUnicorn.configs['flat/all'],
+  eslintComments.recommended,
   eslintPluginPrettierRecommended,
   {
     ignores: ['**/dist'],
@@ -33,6 +35,7 @@ export default [
       '@typescript-eslint/no-unused-vars': 'error',
       '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }],
       '@typescript-eslint/no-explicit-any': 'error',
+      '@eslint-community/eslint-comments/require-description': ['error', { ignore: [] }],
     },
     linterOptions: {
       reportUnusedDisableDirectives: 'error',

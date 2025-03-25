@@ -1,5 +1,3 @@
-'use client';
-
 import { useTheme } from 'remix-themes';
 import { Toaster as Sonner } from 'sonner';
 export { toast } from 'sonner';
@@ -11,6 +9,7 @@ const Toaster = ({ ...properties }: ToasterProperties) => {
 
   return (
     <Sonner
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- theme is always a ToasterProperties['theme']
       theme={theme as ToasterProperties['theme']}
       className="toaster group"
       toastOptions={{

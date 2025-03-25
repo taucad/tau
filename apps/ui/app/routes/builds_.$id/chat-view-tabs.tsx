@@ -59,16 +59,15 @@ export const ChatViewTabs = ({ isChatOpen }: { isChatOpen: boolean }) => {
       defaultValue={chatTab}
       className={cn('h-full w-full flex-1 gap-0')}
       onValueChange={(value) => {
-        // Permissible as Tabs doesn't preserve the type
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Tabs doesn't preserve the type
         setChatTab(value as ChatTabs);
       }}
     >
       <TabsList
         defaultValue="editor"
         className={cn(
-          'bg-transparent ml-2 my-1.5 gap-2 z-10 p-0',
-          'absolute top-0 left-0 ',
+          'z-10 my-1.5 ml-2 gap-2 bg-transparent p-0',
+          'absolute top-0 left-0',
           !isChatOpen && 'ml-13 md:ml-12',
         )}
       >
@@ -80,7 +79,7 @@ export const ChatViewTabs = ({ isChatOpen }: { isChatOpen: boolean }) => {
               variant: 'outline',
               size: 'sm',
               className:
-                'text-sm border-px gap-2.5 w-8 md:w-auto data-[state=active]:shadow-none data-[state=active]:bg-accent',
+                'border-px w-8 gap-2.5 text-sm data-[state=active]:bg-accent data-[state=active]:shadow-none md:w-auto',
             })}
           >
             <tab.icon className="size-4" />
@@ -88,14 +87,14 @@ export const ChatViewTabs = ({ isChatOpen }: { isChatOpen: boolean }) => {
           </TabsTrigger>
         ))}
       </TabsList>
-      <TabsContent value="preview" className="h-full mt-0 flex flex-1 w-full">
+      <TabsContent value="preview" className="mt-0 flex h-full w-full flex-1">
         <ChatViewer />
       </TabsContent>
       {/* subtract 6rem for the chat history and chat input as they don't take the full height */}
-      <TabsContent value="editor" className="h-[calc(100vh-6rem)] mt-0 flex flex-1 w-full">
+      <TabsContent value="editor" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
         <ChatEditor className="mt-[3rem]" />
       </TabsContent>
-      <TabsContent value="console" className="h-[calc(100vh-6rem)] mt-0 flex flex-1 w-full">
+      <TabsContent value="console" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
         <ChatConsole data-view="tabs" className="mt-[3rem]" />
       </TabsContent>
     </Tabs>

@@ -76,7 +76,7 @@ export default function CadCommunity() {
   };
 
   return (
-    <div className="container mx-auto py-8 px-4 space-y-8">
+    <div className="container mx-auto space-y-8 px-4 py-8">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-2">
           <h1 className="text-3xl font-bold">Community</h1>
@@ -90,7 +90,7 @@ export default function CadCommunity() {
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-4 md:flex-row md:items-center">
           <div className="relative flex-grow">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Search projects..."
               value={searchTerm}

@@ -75,15 +75,14 @@ export default function PersonalCadProjects() {
           : a.name.localeCompare(b.name);
     });
 
-  // TODO: add load more
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- TODO: add load more
   const loadMore = useCallback(() => {
     setVisibleProjects((previous) => Math.min(previous + ITEMS_PER_PAGE, filteredProjects.length));
   }, [filteredProjects.length]);
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6 flex items-center justify-between">
         <h1 className="text-3xl font-bold">Builds</h1>
         <Link to="/" tabIndex={-1}>
           <Button>New Build</Button>
@@ -91,9 +90,9 @@ export default function PersonalCadProjects() {
       </div>
 
       {/* Search and Controls */}
-      <div className="flex flex-col sm:flex-row gap-4 mb-8">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row">
         <div className="relative flex-grow">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             className="pl-10"
             placeholder="Search builds..."
@@ -103,10 +102,9 @@ export default function PersonalCadProjects() {
         </div>
       </div>
 
-      {/* Permissble as `Tabs` loses type information */}
-      {/* eslint-disable-next-line @typescript-eslint/consistent-type-assertions */}
+      {/* eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `Tabs` loses type information */}
       <Tabs value={activeFilter} onValueChange={(value) => setActiveFilter(value as 'all' | Category)}>
-        <div className="flex flex-wrap gap-2 justify-between items-center mb-8">
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-2">
           <TabsList className="">
             <TabsTrigger value="all" className="flex items-center gap-2">
               <Layout className="size-4" />
@@ -300,7 +298,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
   if (viewMode === 'list') {
     return (
       <Link to={`/builds/${project.id}`} className="block">
-        <div className="flex items-center gap-4 p-4 border rounded-lg hover:bg-accent">
+        <div className="flex items-center gap-4 rounded-lg border p-4 hover:bg-accent">
           <div className="flex-shrink-0">
             <Avatar className="h-12 w-12">
               <AvatarImage src={project.thumbnail || project.author.avatar} alt={project.name} />
@@ -314,8 +312,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
           <div className="flex items-center gap-4">
             <div className="flex gap-2">
               {Object.keys(project.assets).map((cat) => (
-                // Permissible as `Object.keys` loses type information
-                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `Object.keys` loses type information
                 <CategoryBadge key={cat} category={cat as Category} />
               ))}
             </div>
@@ -328,7 +325,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
 
   return (
     <Link to={`/builds/${project.id}`} draggable={!showPreview}>
-      <Card className="group relative overflow-hidden flex flex-col">
+      <Card className="group relative flex flex-col overflow-hidden">
         <div className="relative aspect-video overflow-hidden bg-muted">
           {!showPreview && (
             <img
@@ -346,7 +343,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
                 event.preventDefault();
               }}
             >
-              <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={1.25} />
+              <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={2} />
             </div>
           )}
           <Button
@@ -363,7 +360,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
           </Button>
         </div>
         <CardHeader>
-          <div className="flex justify-between items-start">
+          <div className="flex items-start justify-between">
             <CardTitle>{project.name}</CardTitle>
           </div>
           <CardDescription>{project.description}</CardDescription>
@@ -372,15 +369,14 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap gap-2">
               {Object.keys(project.assets).map((cat) => (
-                // Permissible as `Object.keys` loses type information
-                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `Object.keys` loses type information
                 <CategoryBadge key={cat} category={cat as Category} />
               ))}
             </div>
             {/* <StatusDropdown status={project.status} projectId={project.id} /> */}
           </div>
         </CardContent>
-        <CardFooter className="flex justify-between items-center">
+        <CardFooter className="flex items-center justify-between">
           <Button variant="outline">
             <span>Open</span>
             <ArrowRight className="size-4" />

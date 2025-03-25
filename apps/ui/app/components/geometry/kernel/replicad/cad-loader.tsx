@@ -1,29 +1,25 @@
 import { useEffect, useRef } from 'react';
 import { useGLTF, useAnimations, useTexture } from '@react-three/drei';
-import { Group, MeshMatcapMaterial } from 'three';
+import { Group, Mesh, MeshMatcapMaterial } from 'three';
 import { useFrame } from '@react-three/fiber';
 import { LoopRepeat } from 'three';
 import { useColor } from '@/hooks/use-color';
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const allActions = [
-  'Dance',
-  'Death',
-  'Idle',
-  'Jump',
-  'No',
-  'Punch',
-  'Running',
-  'Sitting',
-  'Standing',
-  'ThumbsUp',
-  'Walking',
-  'WalkJump',
-  'Wave',
-  'Yes',
-] as const;
-
-type Action = (typeof allActions)[number];
+type Action =
+  | 'Dance'
+  | 'Death'
+  | 'Idle'
+  | 'Jump'
+  | 'No'
+  | 'Punch'
+  | 'Running'
+  | 'Sitting'
+  | 'Standing'
+  | 'ThumbsUp'
+  | 'Walking'
+  | 'WalkJump'
+  | 'Wave'
+  | 'Yes';
 
 type CadLoaderProperties = {
   action?: Action;
@@ -52,8 +48,8 @@ export function CadLoader({ action = 'Idle' }: CadLoaderProperties) {
 
   // Update materials when color changes
   useEffect(() => {
-    scene.traverse((child: any) => {
-      if (child.isMesh) {
+    scene.traverse((child) => {
+      if (child instanceof Mesh) {
         const originalMaterial = child.material;
 
         // Create new matcap material while preserving original material properties
@@ -76,16 +72,13 @@ export function CadLoader({ action = 'Idle' }: CadLoaderProperties) {
   });
 
   return (
-    <>
-      {/* With matcap material, we don't need additional lights */}
-      <group
-        ref={group}
-        position={[0, 0, 0]}
-        rotation={[Math.PI / 2, 0, 0]} // Changed rotation to fix orientation
-      >
-        <primitive object={scene} />
-      </group>
-    </>
+    <group
+      ref={group}
+      position={[0, 0, 0]}
+      rotation={[Math.PI / 2, 0, 0]} // Changed rotation to fix orientation
+    >
+      <primitive object={scene} />
+    </group>
   );
 }
 

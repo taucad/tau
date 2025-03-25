@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { Stage, StageOptions } from './stage';
 import { Controls } from './controls';
 
@@ -23,23 +23,10 @@ export function Scene({
   stageOptions,
   center = true,
 }: SceneProperties) {
-  const controlsReference = useRef<typeof Controls>(null);
-
   return (
     <>
-      <Controls
-        enableGizmo={enableGizmo}
-        ref={controlsReference}
-        enableDamping={enableDamping}
-        enableZoom={enableZoom}
-      />
-      <Stage
-        controls={controlsReference}
-        stageOptions={stageOptions}
-        center={center}
-        enableGrid={enableGrid}
-        enableAxesHelper={enableAxesHelper}
-      >
+      <Controls enableGizmo={enableGizmo} enableDamping={enableDamping} enableZoom={enableZoom} />
+      <Stage stageOptions={stageOptions} center={center} enableGrid={enableGrid} enableAxesHelper={enableAxesHelper}>
         {children}
       </Stage>
     </>

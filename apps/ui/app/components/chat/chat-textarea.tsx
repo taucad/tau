@@ -38,10 +38,10 @@ export interface ChatTextareaProperties {
 }
 
 // Define the key combination for cancelling the stream
-const cancelKeyCombination: KeyCombination = {
+const cancelKeyCombination = {
   key: 'Backspace',
   metaKey: true,
-};
+} satisfies KeyCombination;
 
 export function ChatTextarea({
   onSubmit,
@@ -51,19 +51,19 @@ export function ChatTextarea({
   onEscapePressed,
 }: ChatTextareaProperties) {
   const { initialInputText, initialImageUrls } = useMemo(() => {
-    // eslint-disable-next-line unicorn/no-array-reduce
-    return initialContent.reduce<{ initialInputText: string; initialImageUrls: string[] }>(
-      (accumulator, content) => {
-        if (content.type === 'text') {
-          accumulator.initialInputText = content.text;
-        }
-        if (content.type === 'image_url') {
-          accumulator.initialImageUrls.push(content.image_url.url);
-        }
-        return accumulator;
-      },
-      { initialInputText: '', initialImageUrls: [] },
-    );
+    let initialInputText = '';
+    const initialImageUrls: string[] = [];
+
+    for (const content of initialContent) {
+      if (content.type === 'text') {
+        initialInputText = content.text;
+      }
+      if (content.type === 'image_url') {
+        initialImageUrls.push(content.image_url.url);
+      }
+    }
+
+    return { initialInputText, initialImageUrls };
   }, [initialContent]);
   const [inputText, setInputText] = useState(initialInputText);
   const [isSearching, setIsSearching] = useState(false);
@@ -248,7 +248,7 @@ export function ChatTextarea({
   }, [handlePaste]);
 
   return (
-    <div className="relative h-full @container">
+    <div className="@container relative h-full">
       {/* Textarea */}
       <div
         data-state={isFocused ? 'active' : 'inactive'}
@@ -256,7 +256,7 @@ export function ChatTextarea({
           focusInput();
         }}
         className={cn(
-          'flex flex-col h-full border shadow-md rounded-lg data-[state=active]:border-primary w-full resize-none overflow-auto cursor-text',
+          'flex h-full w-full cursor-text resize-none flex-col overflow-auto rounded-lg border shadow-md data-[state=active]:border-primary',
           images.length > 0 && 'pt-10',
         )}
         onDragOver={handleDragOver}
@@ -271,7 +271,7 @@ export function ChatTextarea({
             setIsFocused(false);
           }}
           ref={textareaReference}
-          className="border-none shadow-none ring-0 p-4 pt-3 pr-10 pb-0 mb-8 focus-visible:ring-0 focus-visible:outline-none w-full resize-none h-full"
+          className="mb-8 h-full w-full resize-none border-none p-4 pt-3 pr-10 pb-0 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
           rows={3}
           value={inputText}
           onChange={(event) => setInputText(event.target.value)}
@@ -282,7 +282,7 @@ export function ChatTextarea({
 
       {/* Image previews */}
       {images.length > 0 && (
-        <div className="absolute top-0 left-0 flex flex-wrap gap-2 m-4">
+        <div className="absolute top-0 left-0 m-4 flex flex-wrap gap-2">
           {images.map((image, index) => (
             <div key={index} className="relative">
               <HoverCard openDelay={100} closeDelay={100}>
@@ -290,12 +290,12 @@ export function ChatTextarea({
                   <img
                     src={image}
                     alt="Uploaded"
-                    className="h-8 w-8 object-cover rounded-md border bg-muted cursor-zoom-in"
+                    className="h-8 w-8 cursor-zoom-in rounded-md border bg-muted object-cover"
                   />
                 </HoverCardTrigger>
                 <HoverCardPortal>
-                  <HoverCardContent side="top" align="start" className="p-0 size-auto max-w-screen overflow-hidden">
-                    <img src={image} alt="Uploaded" className="object-cover h-48 md:h-96" />
+                  <HoverCardContent side="top" align="start" className="size-auto max-w-screen overflow-hidden p-0">
+                    <img src={image} alt="Uploaded" className="h-48 object-cover md:h-96" />
                   </HoverCardContent>
                 </HoverCardPortal>
               </HoverCard>
@@ -303,7 +303,7 @@ export function ChatTextarea({
                 variant="ghost"
                 size="icon"
                 onClick={() => removeImage(index)}
-                className="absolute -top-2 -right-2 text-foreground bg-background border-[1px] rounded-full size-4"
+                className="absolute -top-2 -right-2 size-4 rounded-full border-[1px] bg-background text-foreground"
                 aria-label="Remove image"
                 type="button"
               >
@@ -316,8 +316,8 @@ export function ChatTextarea({
 
       {/* Drag and drop feedback */}
       {isDragging && (
-        <div className="absolute inset-0 flex items-center justify-center bg-primary/10 pointer-events-none rounded-md backdrop-blur-xs z-10">
-          <p className="text-primary font-medium bg-background/50 px-2 rounded-md">Drop images here</p>
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-primary/10 backdrop-blur-xs">
+          <p className="rounded-md bg-background/50 px-2 font-medium text-primary">Drop images here</p>
         </div>
       )}
 
@@ -328,7 +328,7 @@ export function ChatTextarea({
             <Button
               size="sm"
               variant="ghost"
-              className="absolute right-2 top-2 gap-1 text-muted-foreground w-8 @xs:w-fit @xs:pr-1"
+              className="absolute top-2 right-2 w-8 gap-1 text-muted-foreground @xs:w-fit @xs:pr-1"
               onClick={handleCancelClick}
             >
               <span className="hidden @xs:block">Stop</span>
@@ -347,7 +347,7 @@ export function ChatTextarea({
             <Button
               size="icon"
               variant="ghost"
-              className="absolute right-2 top-2"
+              className="absolute top-2 right-2"
               onClick={handleSubmit}
               disabled={inputText.length === 0}
             >
@@ -361,20 +361,19 @@ export function ChatTextarea({
       )}
 
       {/* Main input controls */}
-      <div className="absolute left-2 bottom-2 flex flex-row items-center gap-1">
+      <div className="absolute bottom-2 left-2 flex flex-row items-center gap-1">
         {/* Model selector */}
         <ComboBoxResponsive
-          className="group text-xs w-[initial] px-2 h-6 border-none flex items-center justify-between gap-2"
+          className="group flex h-6 w-[initial] items-center justify-between gap-2 border-none px-2 text-xs"
           popoverContentClassName="w-[300px]"
           groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({
             name: provider,
             items: models,
           }))}
           renderLabel={(item) => (
-            <span className="text-xs flex items-center justify-between w-full">
+            <span className="flex w-full items-center justify-between text-xs">
               <div className="flex items-center gap-2">
-                {/* item.provider is not typed as ModelProvider, but it is */}
-                {/* eslint-disable-next-line @typescript-eslint/consistent-type-assertions */}
+                {/* eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- item.provider is not typed as ModelProvider, but it is */}
                 <SvgIcon id={item.provider as ModelProvider} />
                 <span className="font-mono">{item.name}</span>
               </div>
@@ -388,11 +387,11 @@ export function ChatTextarea({
           renderButtonContents={(item) => (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="flex flex-row items-center gap-2 group-data-[state=open]:text-primary max-w-24 @md:max-w-fit shrink-0">
-                  <span className="text-xs truncate hidden @xs:block">{item.name}</span>
+                <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 group-data-[state=open]:text-primary @md:max-w-fit">
+                  <span className="hidden truncate text-xs @xs:block">{item.name}</span>
                   <span className="relative flex size-4 items-center justify-center">
-                    <ChevronDown className="scale-0 @xs:scale-100 absolute group-hover:scale-0 transition-transform duration-200 ease-in-out" />
-                    <CircuitBoard className="absolute scale-100 @xs:scale-0 group-hover:scale-100 transition-transform duration-200 ease-in-out" />
+                    <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @xs:scale-100" />
+                    <CircuitBoard className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @xs:scale-0" />
                   </span>
                 </span>
               </TooltipTrigger>
@@ -420,14 +419,14 @@ export function ChatTextarea({
               data-state={isSearching ? 'active' : 'inactive'}
               size="xs"
               variant="ghost"
-              className="group data-[state=active]:bg-neutral/20 data-[state=active]:text-primary data-[state=active]:shadow transition-transform duration-200 ease-in-out"
+              className="group transition-transform duration-200 ease-in-out data-[state=active]:bg-neutral/20 data-[state=active]:text-primary data-[state=active]:shadow"
               onClick={() => {
                 setIsSearching((previous) => !previous);
                 focusInput();
               }}
             >
-              <span className="text-xs hidden @xs:block">Search</span>
-              <Globe className="group-hover:rotate-180 transition-transform duration-200 ease-in-out" />
+              <span className="hidden text-xs @xs:block">Search</span>
+              <Globe className="transition-transform duration-200 ease-in-out group-hover:rotate-180" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>
@@ -440,7 +439,7 @@ export function ChatTextarea({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="xs" onClick={handleFileSelect} title="Add image" type="button">
-                <span className="text-xs hidden @xs:block">Upload</span>
+                <span className="hidden text-xs @xs:block">Upload</span>
                 <Image />
               </Button>
             </TooltipTrigger>

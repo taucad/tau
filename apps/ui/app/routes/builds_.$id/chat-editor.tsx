@@ -3,8 +3,7 @@ import { useBuild } from '@/hooks/use-build2';
 import { LoaderPinwheel } from 'lucide-react';
 import { useCallback, useEffect } from 'react';
 import { useMonaco } from '@monaco-editor/react';
-// TODO: find a better way to import Replicad types
-// eslint-disable-next-line @nx/enforce-module-boundaries
+// eslint-disable-next-line @nx/enforce-module-boundaries -- TODO: find a better way to import Replicad types
 import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
 import { useConsole } from '@/hooks/use-console';
 import './chat-config';
@@ -79,8 +78,8 @@ export const ChatEditor = ({ className }: { className?: string }) => {
         />
       </div> */}
       <CodeEditor
-        loading={<LoaderPinwheel className="size-20 stroke-1 animate-spin text-primary ease-in-out" />}
-        className={cn('text-xs bg-background', className)}
+        loading={<LoaderPinwheel className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
+        className={cn('bg-background text-xs', className)}
         defaultLanguage="typescript"
         defaultValue={code}
         onChange={handleCodeChange}

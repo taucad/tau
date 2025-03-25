@@ -154,8 +154,7 @@ export class ChatController {
     if (lastMessage && lastMessage.metadata?.systemHints?.length > 0) {
       const hintText = lastMessage.metadata.systemHints
         .filter((hint) => hint in TEXT_FROM_HINT)
-        // Permissible because we've already filtered the hints
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- we've already filtered the hints
         .map((hint) => TEXT_FROM_HINT[hint as keyof typeof TEXT_FROM_HINT])
         .join(' ');
       messagesWithHints = [

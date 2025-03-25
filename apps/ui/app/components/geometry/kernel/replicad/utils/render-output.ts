@@ -9,7 +9,7 @@ import {
   Sketches,
   CompoundSketch,
 } from 'replicad';
-import normalizeColor from './normalize-color';
+import { normalizeColor } from './normalize-color';
 
 interface Meshable {
   mesh: (config: { tolerance: number; angularTolerance: number }) => any;

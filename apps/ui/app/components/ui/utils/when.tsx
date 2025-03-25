@@ -6,6 +6,6 @@
  * @returns The children if the condition is true, otherwise null.
  */
 export const When = ({ condition, children }: { condition: boolean; children: React.ReactNode }) => {
-  // eslint-disable-next-line unicorn/no-null
-  return condition ? <>{children}</> : null;
+  // eslint-disable-next-line unicorn/no-null -- null is required by React
+  return condition ? children : null;
 };

@@ -106,8 +106,8 @@ const BuildNameEditor = () => {
           {displayName}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="-translate-x-2 w-64 p-1">
-        <form onSubmit={handleSubmit} className="flex gap-2  align-middle items-center">
+      <PopoverContent align="start" className="w-64 -translate-x-2 p-1">
+        <form onSubmit={handleSubmit} className="flex items-center gap-2 align-middle">
           <Input
             value={name}
             onChange={(event) => setName(event.target.value)}

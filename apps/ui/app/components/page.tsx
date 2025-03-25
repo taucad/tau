@@ -35,7 +35,7 @@ export function Page({ error }: { error?: ReactNode }) {
         className="w-[calc(100dvw-var(--sidebar-width-current)-1px)]"
         style={{ '--header-height': HEADER_HEIGHT }}
       >
-        <header className="flex h-[var(--header-height)] justify-between shrink-0 items-center border-b-[1px] border-border gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
+        <header className="flex h-[var(--header-height)] shrink-0 items-center justify-between gap-2 border-b-[1px] border-border transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
           <div className="flex items-center gap-1 px-4">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -55,8 +55,8 @@ export function Page({ error }: { error?: ReactNode }) {
               <BreadcrumbList className="sm:gap-0">
                 {breadcrumbItems.map((match) => (
                   <Fragment key={match.id}>
-                    <BreadcrumbSeparator className="hidden md:block first:hidden" />
-                    <BreadcrumbItem className="hidden md:block last:block">
+                    <BreadcrumbSeparator className="hidden first:hidden md:block" />
+                    <BreadcrumbItem className="hidden last:block md:block">
                       <BreadcrumbLink asChild>{match.handle.breadcrumb?.(match)}</BreadcrumbLink>
                     </BreadcrumbItem>
                   </Fragment>

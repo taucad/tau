@@ -113,9 +113,9 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
     <Sidebar collapsible="icon" {...properties}>
       <SidebarHeader style={{ height: HEADER_HEIGHT }} className="border-b border-border">
         <Link to="/" tabIndex={-1}>
-          <SidebarMenuButton tooltip="Home" className="[&>svg]:size-8 group-data-[collapsible=icon]:p-0! p-0!">
-            <Tau className="text-primary bg-primary rounded-md overflow-clip" />
-            <h1 className="text-2xl font-semibold font-mono tracking-wider">Tau</h1>
+          <SidebarMenuButton tooltip="Home" className="p-0! group-data-[collapsible=icon]:p-0! [&>svg]:size-8">
+            <Tau className="overflow-clip rounded-md bg-primary text-primary" />
+            <h1 className="font-mono text-2xl font-semibold tracking-wider">Tau</h1>
             <span className="sr-only">Home</span>
           </SidebarMenuButton>
         </Link>
@@ -126,7 +126,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
         <NavMain items={data.navMain} />
         <NavProjects projects={data.projects} />
       </SidebarContent>
-      <SidebarFooter className="flex flex-col transition-transform duration-200 ease-linear items-end group-data-[collapsible=icon]:items-center">
+      <SidebarFooter className="flex flex-col items-end transition-transform duration-200 ease-linear group-data-[collapsible=icon]:items-center">
         <ColorToggle />
         <ModeToggle />
         <NavUser user={data.user} />

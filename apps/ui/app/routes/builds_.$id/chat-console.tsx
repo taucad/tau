@@ -109,7 +109,7 @@ const VerbosityBadge = ({ level }: { level: LogLevel }) => {
   return (
     <Badge
       className={cn(
-        'text-xs font-normal flex items-center justify-center',
+        'flex items-center justify-center text-xs font-normal',
         'w-12', // Fixed width
         getBadgeColor(),
         `hover:bg-initial`,
@@ -199,31 +199,31 @@ export const ChatConsole = ({
   return (
     <div
       className={cn(
-        'flex flex-col w-full group/console @container/console',
+        'group/console @container/console flex w-full flex-col',
         // Full height for both modes with different adjustments
         'group-data-[view=split]/console:h-full group-data-[view=split]/console:min-h-0',
         // Fix scrolling issues
-        'min-h-0 max-h-full overflow-hidden',
+        'max-h-full min-h-0 overflow-hidden',
         className,
       )}
       {...properties}
     >
-      <div className="flex flex-row gap-2 sticky top-0 bg-background p-2">
+      <div className="sticky top-0 flex flex-row gap-2 bg-background p-2">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="outline"
               size="xs"
-              className="gap-2 w-fit px-1 @xs/console:pl-2 hidden group-data-[view=split]/console:flex"
+              className="hidden w-fit gap-2 px-1 group-data-[view=split]/console:flex @xs/console:pl-2"
               onClick={(event) => onButtonClick?.(event)}
             >
-              <span className="font-mono text-xs hidden @xs/console:block">Console</span>
-              <span className="relative flex flex-col gap-2 size-4 ease-in-out">
-                <span className="absolute inset-0 flex flex-col gap-2 size-4 scale-100 group-data-[state=open]/console:scale-0 transition-transform duration-200 ease-in-out">
+              <span className="hidden font-mono text-xs @xs/console:block">Console</span>
+              <span className="relative flex size-4 flex-col gap-2 ease-in-out">
+                <span className="absolute inset-0 flex size-4 scale-100 flex-col gap-2 transition-transform duration-200 ease-in-out group-data-[state=open]/console:scale-0">
                   <ChevronUp className="absolute -bottom-0.5 left-1/2 -translate-x-1/2" />
                   <ChevronUp className="absolute bottom-0.5 left-1/2 -translate-x-1/2" />
                 </span>
-                <span className="absolute inset-0 flex flex-col gap-2 size-4 rotate-180 scale-0 group-data-[state=open]/console:scale-100 transition-transform duration-200 ease-in-out">
+                <span className="absolute inset-0 flex size-4 scale-0 rotate-180 flex-col gap-2 transition-transform duration-200 ease-in-out group-data-[state=open]/console:scale-100">
                   <ChevronUp className="absolute -bottom-0.5 left-1/2 -translate-x-1/2" />
                   <ChevronUp className="absolute bottom-0.5 left-1/2 -translate-x-1/2" />
                 </span>
@@ -240,7 +240,7 @@ export const ChatConsole = ({
           </TooltipContent>
         </Tooltip>
         <Input
-          className="h-6 group-data-[view=tabs]/console:h-8 w-full"
+          className="h-6 w-full group-data-[view=tabs]/console:h-8"
           placeholder="Filter..."
           onChange={handleFilterChange}
           value={filter}
@@ -307,7 +307,7 @@ export const ChatConsole = ({
               <DropdownMenuLabel>Display Options</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {
-                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys() loses type information
                 (Object.keys(DEFAULT_DISPLAY_CONFIG) as (keyof typeof DEFAULT_DISPLAY_CONFIG)[]).map((key) => (
                   <DropdownMenuCheckboxItem
                     key={key}
@@ -339,16 +339,16 @@ export const ChatConsole = ({
           </Tooltip>
         </div>
       </div>
-      <div className="flex flex-col group-data-[view=split]/console:flex-col-reverse gap-0.5 overflow-y-auto overflow-x-hidden p-2 pt-0 min-h-0 flex-grow">
+      <div className="flex min-h-0 flex-grow flex-col gap-0.5 overflow-x-hidden overflow-y-auto p-2 pt-0 group-data-[view=split]/console:flex-col-reverse">
         {/* Display console logs */}
         {filteredLogs.length > 0 ? (
           filteredLogs.map((log) => (
             <pre
               key={log.id}
               className={cn(
-                'text-xs bg-background font-mono py-1 px-2 rounded border-l-2',
-                'hover:bg-muted/20 cursor-default group/log border-primary',
-                'overflow-x-auto flex-shrink-0',
+                'rounded border-l-2 bg-background px-2 py-1 font-mono text-xs',
+                'group/log cursor-default border-primary hover:bg-muted/20',
+                'flex-shrink-0 overflow-x-auto',
                 {
                   'border-destructive': log.level === LOG_LEVELS.ERROR,
                   'border-warning': log.level === LOG_LEVELS.WARN,
@@ -358,9 +358,9 @@ export const ChatConsole = ({
                 },
               )}
             >
-              <div className="flex items-baseline flex-wrap gap-2">
+              <div className="flex flex-wrap items-baseline gap-2">
                 {displayConfig.showTimestamp && (
-                  <span className="opacity-60 shrink-0">[{formatTimestamp(log.timestamp)}]</span>
+                  <span className="shrink-0 opacity-60">[{formatTimestamp(log.timestamp)}]</span>
                 )}
                 {displayConfig.showVerbosity && <VerbosityBadge level={log.level} />}
                 {displayConfig.showComponent && <ComponentBadge origin={log.origin} />}
@@ -370,7 +370,7 @@ export const ChatConsole = ({
             </pre>
           ))
         ) : (
-          <div className="flex-1 flex items-center justify-center text-muted-foreground">
+          <div className="flex flex-1 items-center justify-center text-muted-foreground">
             <p className="text-sm">No logs to display</p>
           </div>
         )}

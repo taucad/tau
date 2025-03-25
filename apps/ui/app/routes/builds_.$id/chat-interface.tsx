@@ -82,7 +82,7 @@ export const ChatInterface = () => {
             size={'icon'}
             variant="outline"
             onClick={toggleChatOpen}
-            className="group absolute top-0 left-0 text-muted-foreground m-2 z-30"
+            className="group absolute top-0 left-0 z-30 m-2 text-muted-foreground"
             data-state={isChatOpen ? 'open' : 'closed'}
           >
             <MessageCircle className="scale-100 transition-transform duration-200 ease-in-out group-data-[state=open]:-rotate-90 group-data-[state=open]:text-primary" />
@@ -123,7 +123,7 @@ export const ChatInterface = () => {
               variant="outline"
               size="icon"
               className={cn(
-                'group absolute top-0 right-0 text-muted-foreground m-2 z-30',
+                'group absolute top-0 right-0 z-30 m-2 text-muted-foreground',
                 'hidden md:flex',
                 isChatOpen && 'hidden',
                 !isParametersOpen && 'mr-12',
@@ -131,9 +131,9 @@ export const ChatInterface = () => {
               onClick={() => setViewMode(viewMode === 'tabs' ? 'split' : 'tabs')}
               data-state={viewMode === 'split' ? 'open' : 'closed'}
             >
-              <span className="size-4 relative group" data-state={viewMode}>
-                <Rows className="rotate-90 absolute scale-0 group-data-[state=tabs]:scale-100 transition-transform duration-200 ease-in-out" />
-                <LayoutGrid className="absolute scale-0 group-data-[state=split]:scale-100 transition-transform duration-200 ease-in-out" />
+              <span className="group relative size-4" data-state={viewMode}>
+                <Rows className="absolute scale-0 rotate-90 transition-transform duration-200 ease-in-out group-data-[state=tabs]:scale-100" />
+                <LayoutGrid className="absolute scale-0 transition-transform duration-200 ease-in-out group-data-[state=split]:scale-100" />
               </span>
             </Button>
           </TooltipTrigger>
@@ -155,14 +155,14 @@ export const ChatInterface = () => {
             variant="outline"
             onClick={toggleParametersOpen}
             className={cn(
-              'group absolute top-0 right-0 text-muted-foreground m-2 z-30',
+              'group absolute top-0 right-0 z-30 m-2 text-muted-foreground',
               'flex', // Show by default
               isChatOpen && 'hidden md:flex', // Hide on mobile when chat is open, show on desktop always
             )}
             data-state={isParametersOpen ? 'open' : 'closed'}
           >
             <span className="size-4">
-              <Settings2 className="scale-100 group-data-[state=open]:-rotate-90 group-data-[state=open]:text-primary transition-transform duration-200 ease-in-out" />
+              <Settings2 className="scale-100 transition-transform duration-200 ease-in-out group-data-[state=open]:-rotate-90 group-data-[state=open]:text-primary" />
             </span>
           </Button>
         </TooltipTrigger>
@@ -181,22 +181,22 @@ export const ChatInterface = () => {
         defaultSize={chatResizeMain[2]}
         className={cn(
           'hidden',
-          isParametersOpen && 'md:flex w-64 xl:w-96 shrink-0 gap-3 text-sm flex-col',
+          isParametersOpen && 'w-64 shrink-0 flex-col gap-3 text-sm md:flex xl:w-96',
           isMobile && isChatOpen && 'hidden',
         )}
         id="chat-parameters"
       >
-        <span className="font-bold font-mono text-lg m-2 mb-0">Parameters</span>
-        <div className="flex flex-col gap-2 p-2 pt-0 overflow-y-auto">
+        <span className="m-2 mb-0 font-mono text-lg font-bold">Parameters</span>
+        <div className="flex flex-col gap-2 overflow-y-auto p-2 pt-0">
           <ChatParameters />
         </div>
       </ResizablePanel>
 
       {isMobile && !isChatOpen && (
         <Drawer open={isParametersOpen} onOpenChange={setIsParametersOpen}>
-          <DrawerContent className={cn('text-sm flex flex-col gap-2 justify-between', 'md:hidden')}>
-            <span className="px-4 font-bold text-lg">Parameters</span>
-            <div className="p-4 grid grid-cols-2 gap-2 overflow-y-auto">
+          <DrawerContent className={cn('flex flex-col justify-between gap-2 text-sm', 'md:hidden')}>
+            <span className="px-4 text-lg font-bold">Parameters</span>
+            <div className="grid grid-cols-2 gap-2 overflow-y-auto p-4">
               <ChatParameters />
             </div>
           </DrawerContent>

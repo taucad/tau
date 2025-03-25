@@ -57,8 +57,8 @@ export const ChatViewSplit = () => {
       <ResizablePanel order={2} defaultSize={codeSize[1]} minSize={30} id="chat-editor-container">
         <ResizablePanelGroup direction="vertical" autoSaveId={CHAT_RESIZE_CODE_COOKIE_NAME} onLayout={setConsoleSize}>
           <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-editor">
-            <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-12 gap-1.5"></div>
-            <div className="pt-12 overflow-y-scroll w-full h-full">
+            <div className="absolute top-0 right-0 my-2 mr-12 flex flex-row items-center justify-between gap-1.5"></div>
+            <div className="h-full w-full overflow-y-scroll pt-12">
               <ChatEditor />
             </div>
           </ResizablePanel>

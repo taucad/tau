@@ -72,7 +72,7 @@ const NavHistoryItem = ({ build, index }: { build: Build; index: number }) => {
         {({ isActive }) => (
           <SidebarMenuButton isActive={isActive}>
             <History className="size-4 shrink-0" />
-            <span className="truncate flex-1">{build.name}</span>
+            <span className="flex-1 truncate">{build.name}</span>
             {index < MAX_SHORTCUT_LENGTH && (
               <KeyShortcut className="ml-2 shrink-0">{formattedKeyCombination}</KeyShortcut>
             )}

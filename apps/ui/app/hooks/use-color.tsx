@@ -31,9 +31,7 @@ const DEFAULT_LIGHTNESS = 0.5719;
 const DEFAULT_CHROMA = 0.1898;
 
 const getRootColorStyle = (hue: number) => {
-  // Permissible for CSS variables
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-  return { [HUE_CSS_VAR]: `${hue}deg` } as CSSProperties;
+  return { [HUE_CSS_VAR]: `${hue}deg` };
 };
 
 interface ColorContextType {
@@ -87,12 +85,11 @@ export function ColorProvider({ children }: { children: React.ReactNode }) {
     };
 
     const serialized = {
-      // The arguments are always defined, so we can safely assert the type
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- rgb is always defined
       hex: serializeHex(rgb) as string,
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- rgb is always defined
       rgb: serializeRgb(rgb) as string,
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- hsl is always defined
       hsl: serializeHsl(hsl) as string,
       oklch: `oklch(${oklch.l} ${oklch.c} ${oklch.h})`,
     };

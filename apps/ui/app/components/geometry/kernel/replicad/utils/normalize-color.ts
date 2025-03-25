@@ -1,27 +1,17 @@
 // import parse from 'parse-css-color';
+import { converter, serializeHex } from 'culori';
 
-const rgbToHex = (color: [number, number, number]) => {
-  const [r, g, b] = color;
+const rgb = converter('rgb');
 
-  return (
-    '#' +
-    [r, g, b]
-      .map((x) => {
-        const hex = x.toString(16);
-        return hex.length === 1 ? '0' + hex : hex;
-      })
-      .join('')
-  );
-};
+/**
+ * Normalize a color string to a hex color and alpha value.
+ * @param color - The color string to normalize.
+ * @returns The normalized color and alpha value.
+ */
+export function normalizeColor(color: string): { color: string; alpha: number } {
+  const parsedRgb = rgb(color);
+  if (!parsedRgb) return { color: '#fff', alpha: 1 };
+  const hex = serializeHex(parsedRgb);
 
-export default function normalizeColor(color: string) {
-  //   const parsed = parse(color);
-  const parsed = {
-    type: 'rgb',
-    values: [255, 255, 255],
-    alpha: 1,
-  };
-
-  if (!parsed || parsed.type.startsWith('hsl')) return { color: '#fff', alpha: 1 };
-  return { color: rgbToHex(parsed.values as [number, number, number]), alpha: parsed.alpha };
+  return { color: hex, alpha: parsedRgb.alpha ?? 1 };
 }

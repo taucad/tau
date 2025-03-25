@@ -58,9 +58,9 @@ export default function ChatStart() {
 
   return (
     <>
-      <div className="max-w-3xl mx-auto py-6 px-4 md:pt-32 md:px-6 space-y-6 md:space-y-8 pb-12">
+      <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 pb-12 md:space-y-8 md:px-6 md:pt-32">
         <div className="mb-12 text-center">
-          <h1 className="text-3xl md:text-5xl font-semibold tracking-tight">What can I help you build?</h1>
+          <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">What can I help you build?</h1>
         </div>
 
         <ChatProvider>
@@ -68,7 +68,7 @@ export default function ChatStart() {
         </ChatProvider>
       </div>
       <div className="container mx-auto px-4 py-8">
-        <div className="flex flex-row justify-between items-center mb-2">
+        <div className="mb-2 flex flex-row items-center justify-between">
           <h1 className="text-lg font-medium tracking-tight">From the Community</h1>
           <Link to="/builds/community" tabIndex={-1}>
             <Button variant="link" size="lg" className="p-0">

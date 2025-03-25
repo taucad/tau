@@ -1,15 +1,30 @@
-import { useRef } from 'react';
 import * as THREE from 'three';
 import { Plane } from '@react-three/drei';
+import React from 'react';
+import { useTheme } from 'remix-themes';
+
+type InfiniteGridProperties = {
+  size1: number;
+  size2: number;
+  color?: THREE.Color;
+  axes?: 'xyz' | 'xzy' | 'yxz' | 'yzx' | 'zxy' | 'zyx';
+  showSize?: boolean;
+};
 
 // Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
 const infiniteGridMaterial = function InfiniteGridMaterial({
-  size1 = 10,
-  size2 = 100,
+  size1,
+  size2,
   color = new THREE.Color('grey'),
-  distance = 8000,
   axes = 'xyz',
-} = {}) {
+}: InfiniteGridProperties) {
+  // Validate to ensure axes cannot be used to inject malicious code
+  if (!['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'].includes(axes)) {
+    throw new Error('Invalid axes parameter');
+  }
+
+  const distance = size1 * 1000;
+
   const planeAxes = axes.slice(0, 2);
 
   const material = new THREE.ShaderMaterial({
@@ -30,7 +45,6 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
       },
     },
     transparent: true,
-    // @SECURITY - is this safe from injection?
     vertexShader: `
       varying vec3 worldPosition;
   
@@ -72,8 +86,8 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
         float g2 = getGrid(uSize2);
         
         
-        gl_FragColor = vec4(uColor.rgb, mix(g2, g1, g1) * pow(d, 3.0));
-        gl_FragColor.a = mix(0.5 * gl_FragColor.a, gl_FragColor.a, g2);
+        gl_FragColor = vec4(uColor.rgb, mix(g2, g1, g1) * pow(d, uDistance / 200.0));
+        gl_FragColor.a = mix(0.7 * gl_FragColor.a, gl_FragColor.a, g2);
       
         if ( gl_FragColor.a <= 0.0 ) discard;
       }
@@ -83,7 +97,17 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
   return material;
 };
 
-export const InfiniteGrid = () => {
-  const material = useRef(infiniteGridMaterial());
-  return <Plane userData={{ isPreviewOnly: true }} material={material.current} />;
+export const InfiniteGrid = ({ size1, size2 }: InfiniteGridProperties) => {
+  const [theme] = useTheme();
+  const material = React.useMemo(
+    () =>
+      infiniteGridMaterial({
+        size1,
+        size2,
+        color: theme === 'light' ? new THREE.Color('lightgrey') : new THREE.Color('grey'),
+      }),
+    [size1, size2, theme],
+  );
+
+  return <Plane userData={{ isPreviewOnly: true }} material={material} />;
 };

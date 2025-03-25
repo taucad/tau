@@ -65,21 +65,23 @@ const ColorPicker: React.FC<
           </KeyShortcut>
         </TooltipContent>
       </Tooltip>
-      <PopoverContent side="right" className="w-48 flex flex-col gap-2 p-2">
+      <PopoverContent side="right" className="flex w-48 flex-col gap-2 p-2">
         <ThreeProvider
           className={cn(className, 'p-0')}
           stageOptions={{
             perspective: {
-              sideOffsetRatio: -4.5,
-              verticalOffsetRatio: -7,
-              zoomLevel: 3.5,
+              zoomLevel: 1.75,
+            },
+            rotation: {
+              side: -(Math.PI * 4) / 6,
+              vertical: Math.PI / 6,
             },
           }}
           frameloop="always"
         >
           <CadLoader action="Running" />
         </ThreeProvider>
-        <div className="flex flex-row gap-2 w-full">
+        <div className="flex w-full flex-row gap-2">
           <Slider
             min={0}
             max={360}

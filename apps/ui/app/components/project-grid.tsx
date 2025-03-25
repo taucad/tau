@@ -111,7 +111,7 @@ function ProjectCard({
     }
   }, [isVisible, showPreview, replicadCode, setCode]);
 
-  // eslint-disable-next-line unicorn/consistent-function-scoping
+  // eslint-disable-next-line unicorn/consistent-function-scoping -- This is a placeholder for future functionality
   const handleStar = () => {
     // TODO: Implement star functionality
   };
@@ -139,7 +139,7 @@ function ProjectCard({
   };
 
   return (
-    <Card ref={cardReference} className="group relative overflow-hidden flex flex-col">
+    <Card ref={cardReference} className="group relative flex flex-col overflow-hidden">
       <div className="relative aspect-video overflow-hidden bg-muted">
         {!showPreview && !isVisible && (
           <img
@@ -189,8 +189,9 @@ function ProjectCard({
         <CardDescription className="line-clamp-2">{description}</CardDescription>
       </CardHeader>
       <CardContent className="flex-grow">
-        <div className="flex flex-wrap gap-2 mb-2">
+        <div className="mb-2 flex flex-wrap gap-2">
           {Object.keys(assets).map((category) => {
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys() returns a string array.
             const { icon: Icon, color } = CATEGORIES[category as Category];
             return (
               <span key={category} className={`flex items-center gap-1 text-sm ${color}`}>

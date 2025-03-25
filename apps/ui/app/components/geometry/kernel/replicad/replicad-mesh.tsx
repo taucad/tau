@@ -26,7 +26,7 @@ export const useFaceEvent = (onEvent: (event: ThreeEvent<MouseEvent>, faceIndex:
   }, [onEvent]);
 
   return useCallback((event: ThreeEvent<MouseEvent>) => {
-    if (!function_.current) return null;
+    if (!function_.current) return;
     const faceIndex = r3js.getFaceIndex(event.faceIndex, event.object.geometry);
     function_.current(event, faceIndex);
   }, []);
@@ -38,23 +38,27 @@ interface ReplicadMeshProperties {
   onFaceClick?: (event: ThreeEvent<MouseEvent>, faceIndex: number) => void;
   selected?: number;
   faceHover?: boolean;
+  color?: string;
+  opacity?: number;
 }
 
 export const ReplicadMesh = React.memo(function ShapeMeshes({
   faces,
   edges,
+  color,
+  opacity,
   onFaceClick,
   selected,
   faceHover,
 }: ReplicadMeshProperties) {
   const { invalidate } = useThree();
-  const color = useColor();
+  const colors = useColor();
 
   const body = useRef(new BufferGeometry());
   const lines = useRef(new BufferGeometry());
 
   const onClick = useFaceEvent(onFaceClick);
-  const onHover = (event: ThreeEvent<MouseEvent> | undefined) => {
+  const onHover = (event?: ThreeEvent<MouseEvent>) => {
     if (!faceHover) return;
     let toHighlight;
     if (event === undefined) toHighlight = [];
@@ -101,9 +105,16 @@ export const ReplicadMesh = React.memo(function ShapeMeshes({
         onClick={onClick}
         onPointerOver={onHover}
         onPointerMove={onHover}
-        onPointerLeave={() => onHover(null)}
+        onPointerLeave={onHover}
       >
-        <MatcapMaterial color={color.serialized.hex} polygonOffset polygonOffsetFactor={2} polygonOffsetUnits={1} />
+        <MatcapMaterial
+          color={color ?? colors.serialized.hex}
+          opacity={opacity ?? 1}
+          transparent={opacity !== 1}
+          polygonOffset
+          polygonOffsetFactor={2}
+          polygonOffsetUnits={1}
+        />
       </mesh>
       <lineSegments geometry={lines.current}>
         <lineBasicMaterial color="#244224" />

@@ -20,6 +20,7 @@ declare global {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- The env is always injected via root.tsx
 export const ENV = (globalThis.window ? globalThis.window.ENV : process.env) as Environment;
 
 /**

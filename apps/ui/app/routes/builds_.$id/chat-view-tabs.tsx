@@ -79,7 +79,7 @@ export const ChatViewTabs = ({ isChatOpen }: { isChatOpen: boolean }) => {
               variant: 'outline',
               size: 'sm',
               className:
-                'border-px w-8 gap-2.5 text-sm data-[state=active]:bg-accent data-[state=active]:shadow-none md:w-auto',
+                'border-px w-8 gap-2.5 text-sm data-[state=active]:bg-accent data-[state=active]:shadow-xs md:w-auto',
             })}
           >
             <tab.icon className="size-4" />

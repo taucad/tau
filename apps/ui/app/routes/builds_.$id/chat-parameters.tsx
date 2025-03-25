@@ -128,14 +128,14 @@ export const ChatParameters = () => {
                     type="number"
                     value={value}
                     onChange={(event) => handleParameterChange(key, Number.parseFloat(event.target.value))}
-                    className="min-w-14 w-14 h-6 p-1 bg-background shadow-none"
+                    className="min-w-14 w-14 h-6 p-1 bg-background"
                   />
                 ) : typeof value === 'string' ? (
                   <Input
                     type="text"
                     value={value}
                     onChange={(event) => handleParameterChange(key, event.target.value)}
-                    className="h-6 p-1 bg-background shadow-none"
+                    className="h-6 p-1 bg-background"
                   />
                 ) : // eslint-disable-next-line unicorn/no-null
                 null}

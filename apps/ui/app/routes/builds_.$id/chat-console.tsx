@@ -240,7 +240,7 @@ export const ChatConsole = ({
           </TooltipContent>
         </Tooltip>
         <Input
-          className="h-6 group-data-[view=tabs]/console:h-8 w-full shadow-none"
+          className="h-6 group-data-[view=tabs]/console:h-8 w-full"
           placeholder="Filter..."
           onChange={handleFilterChange}
           value={filter}

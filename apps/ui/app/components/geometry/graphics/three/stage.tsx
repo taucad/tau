@@ -283,7 +283,7 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
       <PerspectiveCamera makeDefault zoom={perspective.zoomLevel} />
       <group ref={outer}>
         {properties.enableAxesHelper && <AxesHelper />}
-        {properties.enableGrid && <InfiniteGrid size1={1} size2={10} />}
+        {properties.enableGrid && <InfiniteGrid size1={10} size2={100} />}
         <group ref={inner}>{children}</group>
       </group>
     </group>

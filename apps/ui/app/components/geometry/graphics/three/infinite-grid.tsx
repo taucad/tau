@@ -86,7 +86,7 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
         float g2 = getGrid(uSize2);
         
         
-        gl_FragColor = vec4(uColor.rgb, mix(g2, g1, g1) * pow(d, uDistance / 200.0));
+        gl_FragColor = vec4(uColor.rgb, mix(g2, g1, g1) * pow(d, uDistance / 400.0));
         gl_FragColor.a = mix(0.7 * gl_FragColor.a, gl_FragColor.a, g2);
       
         if ( gl_FragColor.a <= 0.0 ) discard;

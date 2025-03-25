@@ -24,7 +24,7 @@ enum ChatEvent {
   OnToolEnd = 'on_tool_end',
 }
 
-type TauMessage = {
+type ChatMessage = {
   type: 'user' | 'assistant';
   content: MessageContentComplex[];
   metadata: {
@@ -33,7 +33,7 @@ type TauMessage = {
 };
 
 type CreateChatBody = {
-  messages: TauMessage[];
+  messages: ChatMessage[];
   model: string;
 };
 
@@ -113,7 +113,11 @@ export class ChatController {
 
     // Define the function that det ermines whether to continue or not
     function shouldContinue({ messages }: typeof MessagesAnnotation.State) {
-      const lastMessage = messages.at(-1) as AIMessage;
+      const lastMessage = messages.at(-1);
+
+      if (!(lastMessage instanceof AIMessage)) {
+        throw new TypeError('Last message is not an AIMessage');
+      }
 
       // If the LLM makes a tool call, then we route to the ChatNode.Tools node
       if (lastMessage.tool_calls && lastMessage.tool_calls.length > 0) {
@@ -142,14 +146,17 @@ export class ChatController {
     // Finally, we compile it into a LangChain Runnable.
     const graph = workflow.compile();
 
-    const lastMessage = body.messages.at(-1) as TauMessage;
+    const lastMessage = body.messages.at(-1);
 
     let messagesWithHints = body.messages;
 
     // Add hints to the last message
-    if (lastMessage.metadata?.systemHints?.length > 0) {
+    if (lastMessage && lastMessage.metadata?.systemHints?.length > 0) {
       const hintText = lastMessage.metadata.systemHints
-        .map((hint: string) => TEXT_FROM_HINT[hint as keyof typeof TEXT_FROM_HINT])
+        .filter((hint) => hint in TEXT_FROM_HINT)
+        // Permissible because we've already filtered the hints
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+        .map((hint) => TEXT_FROM_HINT[hint as keyof typeof TEXT_FROM_HINT])
         .join(' ');
       messagesWithHints = [
         ...body.messages.slice(0, -1),

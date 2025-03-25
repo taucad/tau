@@ -25,7 +25,7 @@ const ResizableHandle = ({
   <ResizablePrimitive.PanelResizeHandle
     className={cn(
       'relative flex w-0 items-center justify-center bg-border',
-      'after:absolute after:inset-y-0 after:left-1/2 after:w-[1px] after:-translate-x-1/2 after:bg-border after:z-10 after:transition-[width,height] after:ease-in-out after:duration-200',
+      'after:absolute after:inset-y-0 after:left-1/2 after:w-[1px] after:-translate-x-1/2 after:bg-border after:z-10 after:transition-[width,height] data-[resize-handle-state=hover]:after:transition-colors after:ease-in-out after:duration-200',
       'data-[resize-handle-state=hover]:after:w-[3px] data-[resize-handle-state=drag]:after:w-[3px]',
       'data-[resize-handle-state=drag]:after:bg-neutral/50',
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',

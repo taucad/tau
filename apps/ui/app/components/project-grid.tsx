@@ -145,7 +145,7 @@ function ProjectCard({
           <img
             src={thumbnail || '/placeholder.svg'}
             alt={name}
-            className="h-full w-full object-cover transition-transform group-hover:scale-105"
+            className="size-full object-cover transition-transform group-hover:scale-105"
             loading="lazy"
           />
         )}
@@ -156,7 +156,7 @@ function ProjectCard({
         )}
         {replicadCode && (
           <Button
-            variant="outline"
+            variant="overlay"
             size="icon"
             className="absolute top-2 right-2 z-10"
             onClick={(event) => {

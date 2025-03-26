@@ -331,7 +331,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
             <img
               src={project.thumbnail || '/placeholder.svg'}
               alt={project.name}
-              className="h-full w-full object-cover transition-transform group-hover:scale-105"
+              className="size-full object-cover transition-transform group-hover:scale-105"
               loading="lazy"
             />
           )}

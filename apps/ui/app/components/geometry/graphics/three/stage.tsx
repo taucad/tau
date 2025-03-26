@@ -132,6 +132,12 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
     };
   }, [stageOptions]);
 
+  // Track previous size for orthographic camera adjustments
+  const previousSize = React.useRef<{ width: number; height: number } | null>(null);
+
+  // Add a ref to store the base frustum size for orthographic camera
+  const baseFrustumSize = React.useRef<number | null>(null);
+
   /**
    * Position the scene.
    */
@@ -206,6 +212,12 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
     // Check if camera type has changed
     const hasCameraTypeChanged = previousCameraType.current !== null && previousCameraType.current !== camera.type;
 
+    // Check if window size has changed for orthographic camera
+    const hasSizeChanged =
+      camera instanceof THREE.OrthographicCamera &&
+      previousSize.current &&
+      (previousSize.current.width !== size.width || previousSize.current.height !== size.height);
+
     // If the scene radius is undefined, we need to initialize the camera, so we default to true.
     // Force update when camera type changes
     const isSignificantChange =
@@ -216,29 +228,44 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
     // Update the previous camera type reference
     previousCameraType.current = camera.type;
 
-    if (isSignificantChange || hasCameraTypeChanged) {
+    if (isSignificantChange || hasCameraTypeChanged || hasSizeChanged) {
       if (camera instanceof THREE.OrthographicCamera) {
         const [x, y] = getPositionOnCircle(shapeRadius, rotation.side);
         const [, z] = getPositionOnCircle(shapeRadius, rotation.vertical);
         camera.position.set(x, y, z);
 
-        // Use the canvas dimensions from Three.js state
+        // Store current size to detect changes
+        previousSize.current = { width: size.width, height: size.height };
+
+        // Get aspect ratio
         const aspect = size.width / size.height;
 
-        // Add these lines to set the orthographic camera frustum.
-        // 6 is a magic number that works to align the orthographic zoom to the perspective zoom.
-        const frustumSize = shapeRadius * 6;
-        camera.left = -frustumSize * aspect;
-        camera.right = frustumSize * aspect;
-        camera.top = frustumSize;
-        camera.bottom = -frustumSize;
+        // On first setup or camera type change, initialize the base frustum size
+        if (baseFrustumSize.current === null || hasCameraTypeChanged) {
+          // Drastically increase this multiplier to zoom out much more
+          baseFrustumSize.current = shapeRadius * 70;
 
-        // Adjust near and far planes to ensure the entire scene is visible
-        camera.near = -Math.max(orthographic.minimumNearPlane, shapeRadius * orthographic.offsetRatio * 2);
-        camera.far = Math.abs(camera.near); // Make far plane symmetric with near plane
+          // Use the configured zoom level as the starting point
+          camera.zoom = orthographic.zoomLevel;
+        }
 
-        camera.zoom = orthographic.zoomLevel;
+        // Use the stored base frustum size and apply current zoom
+        const frustumHeight = baseFrustumSize.current / camera.zoom;
+        const frustumWidth = frustumHeight * aspect;
+
+        // Set camera frustum
+        camera.left = -frustumWidth / 2;
+        camera.right = frustumWidth / 2;
+        camera.top = frustumHeight / 2;
+        camera.bottom = -frustumHeight / 2;
+
+        // Adjust near and far planes to accommodate the much larger view
+        camera.near = -Math.max(orthographic.minimumNearPlane, shapeRadius * orthographic.offsetRatio * 5);
+        camera.far = Math.abs(camera.near) * 2; // Make far plane even more generous
       } else {
+        // Reset our base frustum size when switching away from orthographic
+        baseFrustumSize.current = null;
+
         const [x, y] = getPositionOnCircle(shapeRadius * perspective.offsetRatio, rotation.side);
         const [, z] = getPositionOnCircle(shapeRadius * perspective.offsetRatio, rotation.vertical);
         camera.position.set(x, y, z);
@@ -248,6 +275,7 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
         // @ts-expect-error saveState exists on OrbitControls
         controls?.saveState();
       }
+
       originalDistanceReference.current = camera.position.distanceTo(new THREE.Vector3(0, 0, 0));
       // Aim the camera at the center of the scene
       camera.lookAt(0, 0, 0);

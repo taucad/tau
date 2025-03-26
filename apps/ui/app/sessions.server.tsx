@@ -1,12 +1,13 @@
 import { createCookieSessionStorage } from '@remix-run/node';
 import { createThemeSessionResolver } from 'remix-themes';
+import { metaConfig } from '@/config';
 
 // You can default to 'development' if process.env.NODE_ENV is not set
 const isProduction = process.env.NODE_ENV === 'production';
 
 const sessionStorage = createCookieSessionStorage({
   cookie: {
-    name: 'tau-theme',
+    name: `${metaConfig.cookiePrefix}theme`,
     path: '/',
     httpOnly: true,
     sameSite: 'lax',

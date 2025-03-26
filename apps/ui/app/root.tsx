@@ -151,7 +151,7 @@ export function AppError() {
   if (isRouteErrorResponse(error)) {
     console.error('Route error', error);
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-4">
+      <div className="flex size-full flex-col items-center justify-center gap-4">
         <h1 className="text-xl">
           {error.status} {error.statusText}
         </h1>

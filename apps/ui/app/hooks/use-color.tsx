@@ -24,7 +24,7 @@ import {
  * The hue is the hue in the OKLCH space.
  */
 
-const COLOR_COOKIE_NAME = 'tau-color-hue';
+const COLOR_COOKIE_NAME = 'color-hue';
 const HUE_CSS_VAR = '--hue-primary';
 const DEFAULT_HUE = 266;
 const DEFAULT_LIGHTNESS = 0.5719;

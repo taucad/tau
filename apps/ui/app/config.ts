@@ -28,6 +28,7 @@ export const ENV = (globalThis.window ? globalThis.window.ENV : process.env) as 
  */
 export const metaConfig = {
   name: 'Tau',
+  cookiePrefix: 'tau-',
   githubUrl: 'https://github.com/opensrchq/tau',
   description:
     'Your AI-powered workshop companion - a free, open-source CAD platform that works offline. Design anything from 3D prints to woodworking projects with intelligent assistance, right in your browser.',

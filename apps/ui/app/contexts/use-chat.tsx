@@ -7,7 +7,7 @@ import { ENV } from '@/config';
 import { useCookie } from '@/utils/cookies';
 import { ChatUsageTokens, ChatUsageCost } from '@/types/chat';
 
-const CHAT_MODEL_COOKIE_NAME = 'tau-chat-model';
+const CHAT_MODEL_COOKIE_NAME = 'chat-model';
 const DEFAULT_CHAT_MODEL = 'anthropic-claude-3.7-sonnet-thinking';
 
 export enum ChatEvent {

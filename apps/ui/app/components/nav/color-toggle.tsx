@@ -15,7 +15,7 @@ export const ColorToggle = () => {
           variant="ghost"
           size="icon"
           className={cn(
-            'w-auto overflow-hidden border-none bg-transparent dark:bg-transparent',
+            'w-auto overflow-hidden border-none bg-transparent shadow-none ring-sidebar-ring! dark:bg-transparent',
             // Active styles
             'data-[state=open]:bg-primary hover:data-[state=open]:bg-primary',
             // Text styles

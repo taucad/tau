@@ -62,9 +62,9 @@ export const ChatEditor = ({ className }: { className?: string }) => {
   return (
     <>
       {/* <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-22 gap-2">
-        <CopyButton variant="outline" size="icon" text={code} className="text-muted-foreground" tooltip="Copy code" />
+        <CopyButton variant="overlay" size="icon" text={code} className="text-muted-foreground" tooltip="Copy code" />
         <DownloadButton
-          variant="outline"
+          variant="overlay"
           size="icon"
           title={`${name}.ts`}
           getBlob={() =>

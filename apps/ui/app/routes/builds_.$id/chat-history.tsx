@@ -12,7 +12,7 @@ import { useBuild } from '@/hooks/use-build2';
 import { useCookie } from '@/utils/cookies';
 import { useModels } from '@/hooks/use-models';
 
-const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'tau-chat-history-resize';
+const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'chat-history-resize';
 
 export const ChatHistory = () => {
   const chatEndReference = useRef<HTMLDivElement | null>(null);
@@ -76,7 +76,7 @@ export const ChatHistory = () => {
         </div>
         <Button
           size="icon"
-          variant="outline"
+          variant="overlay"
           className={cn(
             'sticky bottom-4 left-1/2 flex -translate-x-1/2 justify-center rounded-full',
             isScrolledTo && 'pointer-events-none opacity-0 select-none',

@@ -62,7 +62,7 @@ export const ChatParameters = () => {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                variant="outline"
+                variant="overlay"
                 size="icon"
                 onClick={resetAllParameters}
                 className="mt-2 mr-12 text-muted-foreground"

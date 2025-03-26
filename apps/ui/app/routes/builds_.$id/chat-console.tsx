@@ -27,8 +27,8 @@ type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
 };
 
 // Cookie names for persisting console settings
-const CONSOLE_LOG_LEVELS_COOKIE = 'tau-console-log-levels';
-const CONSOLE_DISPLAY_CONFIG_COOKIE = 'tau-console-display-config';
+const CONSOLE_LOG_LEVELS_COOKIE_NAME = 'console-log-levels';
+const CONSOLE_DISPLAY_CONFIG_COOKIE_NAME = 'console-display-config';
 
 // Default values for enabled log levels
 const DEFAULT_LOG_LEVELS: Record<LogLevel, boolean> = {
@@ -140,8 +140,8 @@ export const ChatConsole = ({
   const [filter, setFilter] = useState('');
 
   // Cookie-persisted state for log levels
-  const [enabledLevels, setEnabledLevels] = useCookie(CONSOLE_LOG_LEVELS_COOKIE, DEFAULT_LOG_LEVELS);
-  const [displayConfig, setDisplayConfig] = useCookie(CONSOLE_DISPLAY_CONFIG_COOKIE, DEFAULT_DISPLAY_CONFIG);
+  const [enabledLevels, setEnabledLevels] = useCookie(CONSOLE_LOG_LEVELS_COOKIE_NAME, DEFAULT_LOG_LEVELS);
+  const [displayConfig, setDisplayConfig] = useCookie(CONSOLE_DISPLAY_CONFIG_COOKIE_NAME, DEFAULT_DISPLAY_CONFIG);
 
   // Handle filter changes
   const handleFilterChange = useCallback(

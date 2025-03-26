@@ -8,9 +8,9 @@ import { ChatConsole } from './chat-console';
 import { ChatEditor } from './chat-editor';
 import { ChatViewer } from './chat-viewer';
 
-const CHAT_RESIZE_VIEWER_COOKIE_NAME = 'tau-chat-resize-viewer';
-const CHAT_RESIZE_CODE_COOKIE_NAME = 'tau-chat-resize-editor';
-const CONSOLE_OPEN_COOKIE_NAME = 'tau-console-open';
+const CHAT_RESIZE_VIEWER_COOKIE_NAME = 'chat-resize-viewer';
+const CHAT_RESIZE_CODE_COOKIE_NAME = 'chat-resize-editor';
+const CONSOLE_OPEN_COOKIE_NAME = 'console-open';
 const toggleConsoleKeyCombination = {
   key: 'l',
   ctrlKey: true,
@@ -58,7 +58,7 @@ export const ChatViewSplit = () => {
         <ResizablePanelGroup direction="vertical" autoSaveId={CHAT_RESIZE_CODE_COOKIE_NAME} onLayout={setConsoleSize}>
           <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-editor">
             <div className="absolute top-0 right-0 my-2 mr-12 flex flex-row items-center justify-between gap-1.5"></div>
-            <div className="h-full w-full overflow-y-scroll pt-12">
+            <div className="size-full overflow-y-scroll pt-12">
               <ChatEditor />
             </div>
           </ResizablePanel>

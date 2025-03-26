@@ -3,7 +3,7 @@ import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
 import { generatePrefixedId } from '@/utils/id';
 import { PREFIX_TYPES } from '@/utils/constants';
-
+import { metaConfig } from '@/config';
 export interface StorageProvider {
   // Build operations
   createBuild(build: Build): Promise<Build>;
@@ -17,7 +17,7 @@ export interface StorageProvider {
 }
 
 export class LocalStorageProvider implements StorageProvider {
-  private readonly BUILDS_KEY = 'tau-builds';
+  private readonly BUILDS_KEY = `${metaConfig.cookiePrefix}builds`;
 
   private getBuildsInternal(): Build[] {
     const data = localStorage.getItem(this.BUILDS_KEY);
@@ -62,6 +62,7 @@ export class LocalStorageProvider implements StorageProvider {
 
     // Custom merge function that doesn't merge leaf nodes for 'files' and 'parameters'
     const mergeIgnoreKeys = new Set(options?.ignoreKeys || []);
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- This is safe because the build is already a Build
     const updatedBuild = deepmerge(
       builds[index],
       { ...update, updatedAt: Date.now() },

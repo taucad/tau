@@ -2,7 +2,7 @@ import React from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { useMemo } from 'react';
-import { Html, PerspectiveCamera } from '@react-three/drei';
+import { OrthographicCamera, PerspectiveCamera } from '@react-three/drei';
 import { InfiniteGrid } from './infinite-grid';
 import { AxesHelper } from './axes-helper';
 
@@ -19,7 +19,7 @@ export type StageOptions = {
     /**
      * The minimum far plane of the camera.
      */
-    minFarPlane?: number;
+    minimumFarPlane?: number;
     /**
      * The multiplier for the camera's far plane.
      */
@@ -31,17 +31,17 @@ export type StageOptions = {
   };
   orthographic?: {
     /**
-     * The ratio of the camera's position to the scene's radius.
+     * The ratio of the scene's radius to offset the camera from the center. Adjusting this value will change the applied perspective of the scene.
      */
-    positionRatio?: number;
-    /**
-     * The ratio of the camera's vertical offset to the scene's radius.
-     */
-    verticalOffsetRatio?: number;
+    offsetRatio?: number;
     /**
      * The zoom level of the camera.
      */
     zoomLevel?: number;
+    /**
+     * The minimum near plane of the camera.
+     */
+    minimumNearPlane?: number;
   };
   rotation?: {
     /**
@@ -61,14 +61,14 @@ export const DEFAULT_SCENE_OPTIONS = {
   perspective: {
     offsetRatio: 3,
     nearPlane: 0.2,
-    minFarPlane: 10_000,
+    minimumFarPlane: 1_000_000,
     farPlaneRadiusMultiplier: 5,
     zoomLevel: 1.25,
   },
   orthographic: {
-    positionRatio: 1,
-    verticalOffsetRatio: -0.5,
+    offsetRatio: 3,
     zoomLevel: 5,
+    minimumNearPlane: 1,
   },
   rotation: {
     side: -Math.PI / 4, // Default rotation is 45 degrees counter-clockwise
@@ -92,6 +92,7 @@ type StageProperties = {
   stageOptions: StageOptions;
   enableGrid?: boolean;
   enableAxesHelper?: boolean;
+  cameraMode?: 'perspective' | 'orthographic';
 } & Omit<React.HTMLAttributes<HTMLDivElement>, 'id'>;
 
 export function Stage({ children, center = false, stageOptions, ...properties }: StageProperties) {
@@ -104,34 +105,6 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
   // Add state for tracking zoom
   const [currentZoom, setCurrentZoom] = React.useState<number>(1);
   const originalDistanceReference = React.useRef<number | null>(null);
-
-  // Add effect to track zoom changes
-  React.useEffect(() => {
-    if (!controls) return;
-
-    const handleControlsChange = () => {
-      if (originalDistanceReference.current === null) {
-        // @ts-expect-error getDistance exists on OrbitControls
-        originalDistanceReference.current = controls.getDistance?.();
-      }
-
-      // @ts-expect-error getDistance exists on OrbitControls
-      const distance = controls.getDistance?.();
-      if (distance && originalDistanceReference.current) {
-        const zoom = originalDistanceReference.current / distance;
-        // Multiply by 10_000 to avoid floating point precision issues
-        setCurrentZoom(Math.round(zoom * 10_000) / 10_000);
-      }
-    };
-
-    // @ts-expect-error addEventListener exists on OrbitControls
-    controls.addEventListener?.('change', handleControlsChange);
-
-    return () => {
-      // @ts-expect-error removeEventListener exists on OrbitControls
-      controls.removeEventListener?.('change', handleControlsChange);
-    };
-  }, [controls]);
 
   const [{ shapeRadius, sceneRadius, top }, set] = React.useState<{
     // The radius of the scene. Used to determine if the camera needs to be updated
@@ -188,6 +161,39 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
     });
   }, [center, children]);
 
+  // Add effect to track zoom changes
+  React.useEffect(() => {
+    if (!controls) return;
+
+    const handleControlsChange = () => {
+      if (camera.type === 'OrthographicCamera') {
+        const zoom = camera.zoom;
+        setCurrentZoom(zoom);
+      } else {
+        if (originalDistanceReference.current === null) {
+          // @ts-expect-error getDistance exists on OrbitControls
+          originalDistanceReference.current = controls.getDistance?.();
+        }
+
+        // @ts-expect-error getDistance exists on OrbitControls
+        const distance = controls.getDistance?.();
+        if (distance && originalDistanceReference.current) {
+          const zoom = originalDistanceReference.current / distance;
+          // Multiply by 10_000 to avoid floating point precision issues
+          setCurrentZoom(Math.round(zoom * 10_000) / 10_000);
+        }
+      }
+    };
+
+    // @ts-expect-error addEventListener exists on OrbitControls
+    controls.addEventListener?.('change', handleControlsChange);
+
+    return () => {
+      // @ts-expect-error removeEventListener exists on OrbitControls
+      controls.removeEventListener?.('change', handleControlsChange);
+    };
+  }, [camera.type, camera.zoom, controls]);
+
   /**
    * Position the camera based on the scene's bounding box.
    */
@@ -197,24 +203,25 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
 
     if (isSignificantChange) {
       if (camera.type === 'OrthographicCamera') {
-        camera.position.set(
-          shapeRadius * orthographic.positionRatio,
-          shapeRadius * orthographic.verticalOffsetRatio,
-          shapeRadius,
-        );
+        const [x, y] = getPositionOnCircle(shapeRadius, rotation.side);
+        const [, z] = getPositionOnCircle(shapeRadius, rotation.vertical);
+        camera.position.set(x, y, z);
+        camera.near = -Math.max(orthographic.minimumNearPlane, shapeRadius * orthographic.offsetRatio);
+
         camera.zoom = orthographic.zoomLevel;
-        camera.near = -Math.max(perspective.minFarPlane, shapeRadius * perspective.farPlaneRadiusMultiplier);
       } else {
         const [x, y] = getPositionOnCircle(shapeRadius * perspective.offsetRatio, rotation.side);
         const [, z] = getPositionOnCircle(shapeRadius * perspective.offsetRatio, rotation.vertical);
-
-        camera.zoom = perspective.zoomLevel;
         camera.position.set(x, y, z);
+        camera.zoom = perspective.zoomLevel;
         camera.near = perspective.nearPlane;
-        camera.far = Math.max(perspective.minFarPlane, shapeRadius * perspective.farPlaneRadiusMultiplier);
-        camera.lookAt(0, 0, sceneRadius ?? 0);
-        originalDistanceReference.current = camera.position.distanceTo(new THREE.Vector3(0, 0, 0));
+        camera.far = Math.max(perspective.minimumFarPlane, shapeRadius * perspective.farPlaneRadiusMultiplier);
+        // @ts-expect-error saveState exists on OrbitControls
+        controls?.saveState();
       }
+      originalDistanceReference.current = camera.position.distanceTo(new THREE.Vector3(0, 0, 0));
+      // Aim the camera at the center of the scene
+      camera.lookAt(0, 0, 0);
       // Update the radius
       set((previous) => {
         return {
@@ -232,16 +239,17 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
     stageOptions,
     camera,
     invalidate,
-    orthographic.positionRatio,
-    orthographic.verticalOffsetRatio,
+    orthographic.offsetRatio,
     orthographic.zoomLevel,
-    perspective.minFarPlane,
+    perspective.minimumFarPlane,
     perspective.farPlaneRadiusMultiplier,
     perspective.zoomLevel,
     perspective.nearPlane,
     rotation.side,
     perspective.offsetRatio,
     rotation.vertical,
+    orthographic.minimumNearPlane,
+    controls,
   ]);
 
   // Calculate grid sizes based on zoom and shape radius
@@ -253,27 +261,27 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
         effectiveSize: 0,
       };
     }
-    const effectiveZoom = currentZoom * perspective.zoomLevel;
+    let effectiveZoom;
+    // eslint-disable-next-line unicorn/prefer-ternary -- the math is easier to read this way
+    if (camera.type === 'OrthographicCamera') {
+      effectiveZoom = currentZoom / 28;
+    } else {
+      effectiveZoom = currentZoom;
+    }
     const baseSize = shapeRadius * effectiveZoom;
-    const effectiveSize = (1 / baseSize) * 50e1;
+    const effectiveSize = (1 / baseSize) * 50;
 
-    // Define grid size thresholds in millimeters
-    const sizes = [
-      0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10_000, 50_000, 100_000, 500_000,
-      1_000_000,
-    ];
+    // Calculate the appropriate grid size using logarithms
+    // This finds the nearest power of 10 multiplied by either 1 or 5
+    const exponent = Math.floor(Math.log10(effectiveSize));
+    const mantissa = effectiveSize / Math.pow(10, exponent);
 
-    // Find the appropriate size based on the current zoom level
-    let largeSize = sizes[0]; // Start with smallest size as default
-
-    // Look for larger sizes if needed
-    for (const size of sizes) {
-      // We want smaller grid sizes when baseSize is larger (when zoomed in)
-      if (effectiveSize > size) {
-        largeSize = size;
-      } else {
-        break;
-      }
+    let largeSize;
+    // eslint-disable-next-line unicorn/prefer-ternary -- the math is easier to read this way
+    if (mantissa < 2.5) {
+      largeSize = Math.pow(10, exponent);
+    } else {
+      largeSize = 5 * Math.pow(10, exponent);
     }
 
     const value = {
@@ -284,45 +292,41 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
     };
 
     return value;
-  }, [currentZoom, perspective.zoomLevel, properties.enableGrid, shapeRadius]);
-
-  // console.log('camera', camera);
-  // console.log('gridSizes', gridSizes);
-  // console.log('currentZoom', currentZoom);
-  // console.log('shapeRadius', shapeRadius);
-  // console.log('effectiveSize', gridSizes.effectiveSize);
-  // console.log('multiplied', (1 / (shapeRadius * currentZoom * perspective.zoomLevel)) * 70);
+  }, [camera.type, currentZoom, properties.enableGrid, shapeRadius]);
+  console.log(camera);
+  console.log(controls);
+  console.log(gridSizes);
 
   return (
     <group {...properties}>
-      <PerspectiveCamera makeDefault />
+      {properties.cameraMode === 'perspective' && <PerspectiveCamera makeDefault />}
+      {properties.cameraMode === 'orthographic' && <OrthographicCamera makeDefault />}
       <group ref={outer}>
         {properties.enableAxesHelper && <AxesHelper />}
-        {properties.enableGrid && <InfiniteGrid smallSize={gridSizes.smallSize} largeSize={gridSizes.largeSize} />}
+        {properties.enableGrid && <InfiniteGrid smallSize={10} largeSize={100} />}
         <group ref={inner}>{children}</group>
-        <Html
-          // position={[0, 0, 0]}
-          style={{
-            position: 'absolute',
-            bottom: '20px',
-            left: '20px',
-            pointerEvents: 'none',
-            zIndex: 999,
-            width: '100%',
-            height: '100%',
-          }}
-          transform={false}
-          translate={'yes'}
-          // fullscreen
-          portal={{
-            current: document.body,
-          }}
-          distanceFactor={0}
-        >
-          <div className="w-32 rounded-md border bg-white p-1">
-            <span>Grid Size: {gridSizes.largeSize}mm</span>
+        {/* <Html position={[0, 0, 10]}>
+          <div className="rounded-md border bg-background p-1 text-xs">
+            {Object.entries(gridSizes).map(([key, value]) => (
+              <div key={key}>
+                <span className="whitespace-nowrap">
+                  {key}: {value}
+                </span>
+              </div>
+            ))}
+            <div>
+              <span className="whitespace-nowrap">shapeRadius: {shapeRadius}</span>
+            </div>
+            <div>
+              <span className="whitespace-nowrap">zoom: {currentZoom}</span>
+            </div>
+            <div>
+              <span className="whitespace-nowrap">
+                distance to origin camera: {camera.position.distanceTo(new THREE.Vector3(0, 0, 0))}
+              </span>
+            </div>
           </div>
-        </Html>
+        </Html> */}
       </group>
     </group>
   );

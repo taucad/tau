@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { useBuild } from '@/hooks/use-build2';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui/sonner';
+import { cn } from '@/utils/ui';
 
 export function ReplicadStudio() {
   const { status, downloadSTL, mesh } = useReplicad();
@@ -66,7 +67,7 @@ export function ReplicadStudio() {
       // Update the thumbnail after a delay to allow the canvas to render
       const timeout = setTimeout(() => {
         updateThumbnailScreenshot();
-      }, 100);
+      }, 500);
 
       return () => clearTimeout(timeout);
     }
@@ -119,7 +120,7 @@ export function ReplicadStudio() {
 
   return (
     <>
-      <div className="flex h-full w-full flex-row">
+      <div className="flex size-full flex-row">
         <div className="relative min-w-0 flex-1">
           <ReplicadViewer
             mesh={mesh}
@@ -128,6 +129,7 @@ export function ReplicadStudio() {
             enableGrid
             enableZoom
             enableAxesHelper
+            enableCameraControls
             ref={canvasReference}
             onCanvasReady={handleCanvasReady}
           />
@@ -149,11 +151,16 @@ export function ReplicadStudio() {
           </div>
         </div>
       </div>
-      <div className="absolute top-0 right-0 z-50 m-2 mr-12 flex flex-row justify-end gap-2">
+      <div
+        className={cn(
+          'absolute top-0 right-0 z-50 m-2 mr-12 flex flex-row justify-end gap-2 md:mr-22',
+          'group-data-[parameters-open=true]/chat-layout:mr-12',
+        )}
+      >
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              variant="outline"
+              variant="overlay"
               size="icon"
               onClick={handleUpdateThumbnail}
               className="group relative text-muted-foreground"
@@ -172,7 +179,7 @@ export function ReplicadStudio() {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              variant="outline"
+              variant="overlay"
               size="icon"
               onClick={copyToClipboard}
               className="group relative text-muted-foreground"
@@ -189,7 +196,7 @@ export function ReplicadStudio() {
         </Tooltip>
 
         <DownloadButton
-          variant="outline"
+          variant="overlay"
           size="icon"
           getBlob={downloadPNG}
           title={`${build?.name}.png`}
@@ -204,7 +211,7 @@ export function ReplicadStudio() {
           )}
         </DownloadButton>
         <DownloadButton
-          variant="outline"
+          variant="overlay"
           size="icon"
           getBlob={downloadSTL}
           title={`${build?.name}.stl`}

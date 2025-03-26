@@ -6,6 +6,7 @@ type ControlsProperties = {
   enableDamping: boolean;
   enableZoom: boolean;
   zoomSpeed?: number;
+  ref?: React.RefObject<React.ComponentRef<typeof OrbitControls> | null>;
 };
 
 export const Controls = React.memo(function Controls({
@@ -13,10 +14,17 @@ export const Controls = React.memo(function Controls({
   enableDamping,
   enableZoom,
   zoomSpeed = 0.4,
+  ref,
 }: ControlsProperties) {
   return (
     <>
-      <OrbitControls zoomSpeed={zoomSpeed} makeDefault enableDamping={enableDamping} enableZoom={enableZoom} />
+      <OrbitControls
+        zoomSpeed={zoomSpeed}
+        makeDefault
+        enableDamping={enableDamping}
+        enableZoom={enableZoom}
+        ref={ref}
+      />
       {enableGizmo && (
         <>
           {/* TODO: review use of Gizmo view cube */}

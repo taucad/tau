@@ -38,7 +38,7 @@ type InfiniteGridProperties = {
   lineOpacity?: number;
   /**
    * The distance falloff scale. This is used to control the distance at which the grid lines become more transparent.
-   * @default 200
+   * @default 800
    */
   distanceFalloffScale?: number;
 };
@@ -53,7 +53,7 @@ function infiniteGridMaterial({
   smallThickness = 1.25,
   largeThickness = 2,
   lineOpacity = 0.3,
-  distanceFalloffScale = 200,
+  distanceFalloffScale = 800,
 }: InfiniteGridProperties) {
   // Validate to ensure axes cannot be used to inject malicious code
   if (!['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'].includes(axes)) {

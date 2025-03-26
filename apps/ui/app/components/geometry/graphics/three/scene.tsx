@@ -11,6 +11,8 @@ type SceneProperties = {
   enableAxesHelper?: boolean;
   stageOptions: StageOptions;
   center?: boolean;
+  cameraMode?: 'perspective' | 'orthographic';
+  controlsRef?: React.RefObject<React.ComponentRef<typeof Controls> | null>;
 };
 
 export function Scene({
@@ -22,11 +24,19 @@ export function Scene({
   enableAxesHelper = false,
   stageOptions,
   center = true,
+  cameraMode = 'perspective',
+  controlsRef,
 }: SceneProperties) {
   return (
     <>
-      <Controls enableGizmo={enableGizmo} enableDamping={enableDamping} enableZoom={enableZoom} />
-      <Stage stageOptions={stageOptions} center={center} enableGrid={enableGrid} enableAxesHelper={enableAxesHelper}>
+      <Controls enableGizmo={enableGizmo} enableDamping={enableDamping} enableZoom={enableZoom} ref={controlsRef} />
+      <Stage
+        stageOptions={stageOptions}
+        center={center}
+        enableGrid={enableGrid}
+        enableAxesHelper={enableAxesHelper}
+        cameraMode={cameraMode}
+      >
         {children}
       </Stage>
     </>

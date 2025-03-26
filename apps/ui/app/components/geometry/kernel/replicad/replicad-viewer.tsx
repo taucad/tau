@@ -16,7 +16,7 @@ export type ReplicadViewerReference = ThreeCanvasReference;
 
 export function ReplicadViewer({ mesh, zoomLevel, ...properties }: ReplicadViewerProperties) {
   return (
-    <div className="h-full w-full">
+    <div className="size-full">
       {mesh ? (
         <ThreeProvider stageOptions={{ perspective: { zoomLevel } }} {...properties}>
           <ReplicadMesh {...mesh} />

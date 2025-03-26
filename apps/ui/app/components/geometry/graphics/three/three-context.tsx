@@ -6,6 +6,14 @@ import rotate3dBase64 from './rotate-3d.svg?base64';
 import { cn } from '@/utils/ui';
 import { useEffect, useState, useImperativeHandle, useRef } from 'react';
 import { ScreenshotCapture, ScreenshotCaptureHandle, ScreenshotOptions } from './screenshot-capture';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useCookie } from '@/utils/cookies';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Focus } from 'lucide-react';
+import { Controls } from './controls';
+
+const CAMERA_MODE_COOKIE_NAME = 'camera-mode';
 
 export type CadViewerProperties = {
   enableGizmo?: boolean;
@@ -13,10 +21,12 @@ export type CadViewerProperties = {
   enableAxesHelper?: boolean;
   enableZoom?: boolean;
   enableDamping?: boolean;
+  enableCameraControls?: boolean;
   className?: string;
   center?: boolean;
   stageOptions?: StageOptions;
   onCanvasReady?: (isReady: boolean) => void;
+  defaultCameraMode?: 'perspective' | 'orthographic';
 };
 
 export type ThreeContextProperties = CanvasProps & CadViewerProperties;
@@ -35,10 +45,12 @@ export const ThreeProvider = ({
   enableAxesHelper = false,
   enableZoom = false,
   enableDamping = false,
+  enableCameraControls = false,
   className,
   stageOptions = {},
   center = true,
   onCanvasReady,
+  defaultCameraMode = 'perspective',
   ...properties
 }: ThreeContextProperties & {
   ref?: React.RefObject<ThreeCanvasReference | null>;
@@ -48,6 +60,11 @@ export const ThreeProvider = ({
   const screenshotReference = useRef<ScreenshotCaptureHandle>(null);
   const canvasReference = useRef<HTMLCanvasElement & { captureScreenshot: (options?: ScreenshotOptions) => string }>(
     null,
+  );
+  const controlsReference = useRef<React.ComponentRef<typeof Controls>>(null);
+  const [cameraMode, setCameraMode] = useCookie<'perspective' | 'orthographic'>(
+    CAMERA_MODE_COOKIE_NAME,
+    defaultCameraMode,
   );
 
   useEffect(() => {
@@ -76,33 +93,66 @@ export const ThreeProvider = ({
   }, [canvasReference, screenshotReference]);
 
   return (
-    <Canvas
-      style={{
-        // 12 is half the size of the cursor image
-        cursor: `url(data:image/svg+xml;base64,${rotate3dBase64}) 13 13, auto`,
-      }}
-      dpr={dpr}
-      frameloop="demand"
-      className={cn('bg-background', className)}
-      ref={canvasReference}
-      onCreated={() => {
-        setIsCanvasReady(true);
-      }}
-      {...properties}
-    >
-      <Scene
-        enableGizmo={enableGizmo}
-        center={center}
-        enableDamping={enableDamping}
-        enableZoom={enableZoom}
-        enableGrid={enableGrid}
-        enableAxesHelper={enableAxesHelper}
-        stageOptions={stageOptions}
+    <div className="relative size-full">
+      <Canvas
+        style={{
+          // 13 is half the size of the cursor viewbox
+          cursor: `url(data:image/svg+xml;base64,${rotate3dBase64}) 13 13, auto`,
+        }}
+        dpr={dpr}
+        frameloop="demand"
+        className={cn('bg-background', className)}
+        ref={canvasReference}
+        onCreated={() => {
+          setIsCanvasReady(true);
+        }}
+        {...properties}
       >
-        {children}
-        <ScreenshotCapture ref={screenshotReference} />
-      </Scene>
-    </Canvas>
+        <Scene
+          enableGizmo={enableGizmo}
+          center={center}
+          enableDamping={enableDamping}
+          enableZoom={enableZoom}
+          enableGrid={enableGrid}
+          enableAxesHelper={enableAxesHelper}
+          stageOptions={stageOptions}
+          cameraMode={cameraMode}
+          controlsRef={controlsReference}
+        >
+          {children}
+          <ScreenshotCapture ref={screenshotReference} />
+        </Scene>
+      </Canvas>
+      {enableCameraControls && (
+        <div className="absolute bottom-0 left-0 z-10 m-2">
+          <div className="flex items-center gap-2">
+            <Tabs
+              value={cameraMode}
+              // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Tabs loses type inference
+              onValueChange={(value) => setCameraMode(value as 'perspective' | 'orthographic')}
+            >
+              <TabsList>
+                <TabsTrigger value="perspective">Perspective</TabsTrigger>
+                <TabsTrigger value="orthographic">Orthographic</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <Button variant="overlay" size="icon" className="flex-col gap-0 font-mono text-xs [&>span]:leading-none">
+              <span>1</span>
+              <span>mm</span>
+            </Button>
+            {/* TODO: implement camera reset */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="overlay" size="icon" onClick={() => controlsReference.current?.reset()}>
+                  <Focus />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Reset camera</TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 

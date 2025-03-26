@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Plane } from '@react-three/drei';
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useTheme } from 'remix-themes';
 
 type InfiniteGridProperties = {
@@ -25,7 +25,7 @@ type InfiniteGridProperties = {
   /**
    * The color of the grid.
    */
-  color: THREE.Color;
+  color?: THREE.Color;
   /**
    * The axes to use for the grid.
    * @default 'xyz'

@@ -43,7 +43,8 @@ type InfiniteGridProperties = {
   distanceFalloffScale?: number;
 };
 
-// Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
+// Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
+// Modified by @rifont to use varying thickness and enhanced distance falloff
 function infiniteGridMaterial({
   smallSize,
   largeSize,

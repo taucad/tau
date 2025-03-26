@@ -144,9 +144,9 @@ export function ReplicadStudio() {
               </div>
             </div>
           )}
-          <div className="absolute bottom-0 left-0">
+          <div className="absolute bottom-12 left-2">
             {status.error && (
-              <div className="rounded-tr-md bg-destructive/10 p-0.5 text-xs text-destructive">{status.error}</div>
+              <div className="rounded-md bg-destructive/10 px-3 py-0.5 text-xs text-destructive">{status.error}</div>
             )}
           </div>
         </div>

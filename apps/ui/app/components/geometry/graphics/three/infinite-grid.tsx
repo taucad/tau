@@ -68,27 +68,25 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
       uniform vec3 uColor;
       uniform float uDistance;
 
-      float getGrid(float size) {
+      float getGrid(float size, float thickness) {
         vec2 r = worldPosition.${planeAxes} / size;
         
-        
-        vec2 grid = abs(fract(r - 0.5) - 0.5) / fwidth(r);
+        vec2 grid = abs(fract(r - 0.5) - 0.5) / (fwidth(r) * thickness);
         float line = min(grid.x, grid.y);
         
-    
         return 1.0 - min(line, 1.0);
       }
       
       void main() {
         float d = 1.0 - min(distance(cameraPosition.${planeAxes}, worldPosition.${planeAxes}) / uDistance, 1.0);
       
-        float g1 = getGrid(uSize1);
-        float g2 = getGrid(uSize2);
+        float g1 = getGrid(uSize1, 1.0);
+        float g2 = getGrid(uSize2, 2.0);
         
+        float grid = max(g1, g2);
         
-        gl_FragColor = vec4(uColor.rgb, mix(g2, g1, g1) * pow(d, uDistance / 400.0));
-        gl_FragColor.a = mix(0.7 * gl_FragColor.a, gl_FragColor.a, g2);
-      
+        gl_FragColor = vec4(uColor.rgb, grid * pow(d, uDistance / 400.0) * 0.5);
+        
         if ( gl_FragColor.a <= 0.0 ) discard;
       }
       `,

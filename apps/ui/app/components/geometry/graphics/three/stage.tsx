@@ -2,7 +2,7 @@ import React from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { useMemo } from 'react';
-import { PerspectiveCamera } from '@react-three/drei';
+import { Html, PerspectiveCamera } from '@react-three/drei';
 import { InfiniteGrid } from './infinite-grid';
 import { AxesHelper } from './axes-helper';
 
@@ -119,6 +119,7 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
       const distance = controls.getDistance?.();
       if (distance && originalDistanceReference.current) {
         const zoom = originalDistanceReference.current / distance;
+        // Multiply by 10_000 to avoid floating point precision issues
         setCurrentZoom(Math.round(zoom * 10_000) / 10_000);
       }
     };
@@ -245,33 +246,47 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
 
   // Calculate grid sizes based on zoom and shape radius
   const gridSizes = useMemo(() => {
+    if (!properties.enableGrid) {
+      return {
+        smallSize: 0,
+        largeSize: 0,
+        effectiveSize: 0,
+      };
+    }
     const effectiveZoom = currentZoom * perspective.zoomLevel;
     const baseSize = shapeRadius * effectiveZoom;
-    const effectiveSize = (1 / baseSize) * 700;
+    const effectiveSize = (1 / baseSize) * 50e1;
 
     // Define grid size thresholds in millimeters
-    const sizes = [0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000];
+    const sizes = [
+      0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10_000, 50_000, 100_000, 500_000,
+      1_000_000,
+    ];
 
     // Find the appropriate size based on the current zoom level
-    let size2 = sizes[0]; // Start with smallest size as default
+    let largeSize = sizes[0]; // Start with smallest size as default
 
     // Look for larger sizes if needed
     for (const size of sizes) {
       // We want smaller grid sizes when baseSize is larger (when zoomed in)
       if (effectiveSize > size) {
-        size2 = size;
+        largeSize = size;
       } else {
         break;
       }
     }
 
-    return {
-      size1: size2 / 10, // Smaller grid is 1/10th of the larger grid
-      size2,
+    const value = {
+      smallSize: largeSize / 10, // Smaller grid is 1/10th of the larger grid
+      largeSize,
       effectiveSize,
+      baseSize,
     };
-  }, [currentZoom, perspective.zoomLevel, shapeRadius]);
-  console.log('camera', camera);
+
+    return value;
+  }, [currentZoom, perspective.zoomLevel, properties.enableGrid, shapeRadius]);
+
+  // console.log('camera', camera);
   // console.log('gridSizes', gridSizes);
   // console.log('currentZoom', currentZoom);
   // console.log('shapeRadius', shapeRadius);
@@ -280,11 +295,34 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
 
   return (
     <group {...properties}>
-      <PerspectiveCamera makeDefault zoom={perspective.zoomLevel} />
+      <PerspectiveCamera makeDefault />
       <group ref={outer}>
         {properties.enableAxesHelper && <AxesHelper />}
-        {properties.enableGrid && <InfiniteGrid size1={10} size2={100} />}
+        {properties.enableGrid && <InfiniteGrid smallSize={gridSizes.smallSize} largeSize={gridSizes.largeSize} />}
         <group ref={inner}>{children}</group>
+        <Html
+          // position={[0, 0, 0]}
+          style={{
+            position: 'absolute',
+            bottom: '20px',
+            left: '20px',
+            pointerEvents: 'none',
+            zIndex: 999,
+            width: '100%',
+            height: '100%',
+          }}
+          transform={false}
+          translate={'yes'}
+          // fullscreen
+          portal={{
+            current: document.body,
+          }}
+          distanceFactor={0}
+        >
+          <div className="w-32 rounded-md border bg-white p-1">
+            <span>Grid Size: {gridSizes.largeSize}mm</span>
+          </div>
+        </Html>
       </group>
     </group>
   );

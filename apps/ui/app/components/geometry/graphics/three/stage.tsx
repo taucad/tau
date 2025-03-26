@@ -264,6 +264,7 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
         camera.far = Math.abs(camera.near) * 2; // Make far plane even more generous
       } else {
         // Reset our base frustum size when switching away from orthographic
+        // eslint-disable-next-line unicorn/no-null -- null is required for React.useRef
         baseFrustumSize.current = null;
 
         const [x, y] = getPositionOnCircle(shapeRadius * perspective.offsetRatio, rotation.side);

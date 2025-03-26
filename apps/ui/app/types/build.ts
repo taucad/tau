@@ -27,7 +27,7 @@ export interface Build {
       files: Record<string, File>;
       main: string;
       language: CadProvider;
-      parameters: Record<string, any>;
+      parameters: Record<string, unknown>;
     };
   };
 }

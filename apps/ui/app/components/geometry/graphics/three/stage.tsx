@@ -56,6 +56,8 @@ export type StageOptions = {
   };
 };
 
+const SIGNIFICANT_RADIUS_CHANGE_RATIO = 0.4;
+
 // Default configuration constants
 export const DEFAULT_SCENE_OPTIONS = {
   perspective: {
@@ -99,12 +101,15 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls);
   const { invalidate } = useThree();
+  const size = useThree((state) => state.size); // Get the canvas size
   const outer = React.useRef<THREE.Group>(null);
   const inner = React.useRef<THREE.Group>(null);
 
   // Add state for tracking zoom
   const [currentZoom, setCurrentZoom] = React.useState<number>(1);
   const originalDistanceReference = React.useRef<number | null>(null);
+  // Store previous camera type to detect changes
+  const previousCameraType = React.useRef<string | null>(null);
 
   const [{ shapeRadius, sceneRadius, top }, set] = React.useState<{
     // The radius of the scene. Used to determine if the camera needs to be updated
@@ -198,15 +203,39 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
    * Position the camera based on the scene's bounding box.
    */
   React.useLayoutEffect(() => {
-    // If the scene radius is undefined, we need to initialize the camera, so we default to true.
-    const isSignificantChange = true;
+    // Check if camera type has changed
+    const hasCameraTypeChanged = previousCameraType.current !== null && previousCameraType.current !== camera.type;
 
-    if (isSignificantChange) {
-      if (camera.type === 'OrthographicCamera') {
+    // If the scene radius is undefined, we need to initialize the camera, so we default to true.
+    // Force update when camera type changes
+    const isSignificantChange =
+      sceneRadius === undefined
+        ? true
+        : Math.abs(shapeRadius - sceneRadius) / sceneRadius > SIGNIFICANT_RADIUS_CHANGE_RATIO;
+
+    // Update the previous camera type reference
+    previousCameraType.current = camera.type;
+
+    if (isSignificantChange || hasCameraTypeChanged) {
+      if (camera instanceof THREE.OrthographicCamera) {
         const [x, y] = getPositionOnCircle(shapeRadius, rotation.side);
         const [, z] = getPositionOnCircle(shapeRadius, rotation.vertical);
         camera.position.set(x, y, z);
-        camera.near = -Math.max(orthographic.minimumNearPlane, shapeRadius * orthographic.offsetRatio);
+
+        // Use the canvas dimensions from Three.js state
+        const aspect = size.width / size.height;
+
+        // Add these lines to set the orthographic camera frustum.
+        // 6 is a magic number that works to align the orthographic zoom to the perspective zoom.
+        const frustumSize = shapeRadius * 6;
+        camera.left = -frustumSize * aspect;
+        camera.right = frustumSize * aspect;
+        camera.top = frustumSize;
+        camera.bottom = -frustumSize;
+
+        // Adjust near and far planes to ensure the entire scene is visible
+        camera.near = -Math.max(orthographic.minimumNearPlane, shapeRadius * orthographic.offsetRatio * 2);
+        camera.far = Math.abs(camera.near); // Make far plane symmetric with near plane
 
         camera.zoom = orthographic.zoomLevel;
       } else {
@@ -250,6 +279,8 @@ export function Stage({ children, center = false, stageOptions, ...properties }:
     rotation.vertical,
     orthographic.minimumNearPlane,
     controls,
+    size.width,
+    size.height,
   ]);
 
   // Calculate grid sizes based on zoom and shape radius

@@ -15,7 +15,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useCookie } from '@/utils/cookies';
 import { type KeyCombination } from '@/utils/keys';
 
-export const SIDEBAR_COOKIE_NAME = 'tau-sidebar-open';
+export const SIDEBAR_COOKIE_NAME = 'sidebar-open';
 const SIDEBAR_DEFAULT_OPEN = false;
 const SIDEBAR_WIDTH = '14rem';
 const SIDEBAR_WIDTH_MOBILE = '18rem';
@@ -171,7 +171,7 @@ function Sidebar({
             <SheetTitle>Sidebar</SheetTitle>
             <SheetDescription>Displays the mobile sidebar.</SheetDescription>
           </SheetHeader>
-          <div className="flex h-full w-full flex-col">{children}</div>
+          <div className="flex size-full flex-col">{children}</div>
         </SheetContent>
       </Sheet>
     );
@@ -216,7 +216,7 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow-sm"
+          className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow-sm"
         >
           {children}
         </div>

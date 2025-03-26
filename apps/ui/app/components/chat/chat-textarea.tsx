@@ -256,7 +256,7 @@ export function ChatTextarea({
           focusInput();
         }}
         className={cn(
-          'flex h-full w-full cursor-text resize-none flex-col overflow-auto rounded-lg border shadow-md data-[state=active]:border-primary',
+          'flex size-full cursor-text resize-none flex-col overflow-auto rounded-lg border shadow-md data-[state=active]:border-primary',
           images.length > 0 && 'pt-10',
         )}
         onDragOver={handleDragOver}
@@ -271,7 +271,7 @@ export function ChatTextarea({
             setIsFocused(false);
           }}
           ref={textareaReference}
-          className="mb-8 h-full w-full resize-none border-none p-4 pt-3 pr-10 pb-0 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
+          className="mb-8 size-full resize-none border-none p-4 pt-3 pr-10 pb-0 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
           rows={3}
           value={inputText}
           onChange={(event) => setInputText(event.target.value)}

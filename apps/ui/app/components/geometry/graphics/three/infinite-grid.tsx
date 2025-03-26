@@ -4,26 +4,48 @@ import React from 'react';
 import { useTheme } from 'remix-themes';
 
 type InfiniteGridProperties = {
-  size1: number;
-  size2: number;
-  color?: THREE.Color;
+  /**
+   * The distance between the lines of the small grid.
+   */
+  smallSize: number;
+  /**
+   * The thickness of the lines of the small grid.
+   */
+  smallThickness?: number;
+  /**
+   * The distance between the lines of the large grid.
+   */
+  largeSize: number;
+  /**
+   * The thickness of the lines of the large grid.
+   */
+  largeThickness?: number;
+  /**
+   * The color of the grid.
+   */
+  color: THREE.Color;
+  /**
+   * The axes to use for the grid.
+   * @default 'xyz'
+   */
   axes?: 'xyz' | 'xzy' | 'yxz' | 'yzx' | 'zxy' | 'zyx';
-  showSize?: boolean;
 };
 
 // Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
-const infiniteGridMaterial = function InfiniteGridMaterial({
-  size1,
-  size2,
-  color = new THREE.Color('grey'),
+function infiniteGridMaterial({
+  smallSize,
+  largeSize,
+  color,
   axes = 'xyz',
+  smallThickness = 1,
+  largeThickness = 2,
 }: InfiniteGridProperties) {
   // Validate to ensure axes cannot be used to inject malicious code
   if (!['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'].includes(axes)) {
     throw new Error('Invalid axes parameter');
   }
 
-  const distance = size1 * 1000;
+  const distance = smallSize * 1000;
 
   const planeAxes = axes.slice(0, 2);
 
@@ -32,16 +54,22 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
 
     uniforms: {
       uSize1: {
-        value: size1,
+        value: smallSize,
       },
       uSize2: {
-        value: size2,
+        value: largeSize,
       },
       uColor: {
         value: color,
       },
       uDistance: {
         value: distance,
+      },
+      uSmallThickness: {
+        value: smallThickness,
+      },
+      uLargeThickness: {
+        value: largeThickness,
       },
     },
     transparent: true,
@@ -65,6 +93,8 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
       
       uniform float uSize1;
       uniform float uSize2;
+      uniform float uSmallThickness;
+      uniform float uLargeThickness;
       uniform vec3 uColor;
       uniform float uDistance;
 
@@ -80,8 +110,8 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
       void main() {
         float d = 1.0 - min(distance(cameraPosition.${planeAxes}, worldPosition.${planeAxes}) / uDistance, 1.0);
       
-        float g1 = getGrid(uSize1, 1.0);
-        float g2 = getGrid(uSize2, 2.0);
+        float g1 = getGrid(uSize1, uSmallThickness);
+        float g2 = getGrid(uSize2, uLargeThickness);
         
         float grid = max(g1, g2);
         
@@ -93,19 +123,25 @@ const infiniteGridMaterial = function InfiniteGridMaterial({
   });
 
   return material;
-};
+}
 
-export const InfiniteGrid = ({ size1, size2 }: InfiniteGridProperties) => {
+export const InfiniteGrid = ({ smallSize, largeSize }: InfiniteGridProperties) => {
   const [theme] = useTheme();
   const material = React.useMemo(
     () =>
       infiniteGridMaterial({
-        size1,
-        size2,
+        smallSize,
+        largeSize,
         color: theme === 'light' ? new THREE.Color('lightgrey') : new THREE.Color('grey'),
       }),
-    [size1, size2, theme],
+    [smallSize, largeSize, theme],
   );
 
-  return <Plane userData={{ isPreviewOnly: true }} material={material} />;
+  return (
+    <Plane
+      userData={{ isPreviewOnly: true }}
+      material={material}
+      renderOrder={9999} // Very high render order is used to force the grid to draw on top of other objects, ensuring it is always visible and void of blending issues like z-fighting
+    />
+  );
 };

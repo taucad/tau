@@ -1,3 +1,4 @@
+import { metaConfig } from '@/config';
 import { loader } from '@/root';
 import { useRouteLoaderData } from '@remix-run/react';
 
@@ -5,7 +6,7 @@ import { useState, useCallback } from 'react';
 
 const DEFAULT_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
-/* eslint-disable unicorn/no-document-cookie */
+/* eslint-disable unicorn/no-document-cookie -- this is the only allowable entry point for cookie management */
 export const setCookie = (name: string, value: string, maxAge: number) => {
   document.cookie = `${name}=${value}; path=/; max-age=${maxAge}`;
 };
@@ -38,9 +39,8 @@ export const useCookie = <T>(
     stringify?: (value: T) => string;
   } = {},
 ) => {
-  // We can safely assert the type here because we know the value is a string,
-  // which is the only type that can be stored in a cookie.
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+  const cookieName = `${metaConfig.cookiePrefix}${name}`;
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- We can safely assert the type here because we know the value is a string, which is the only type that can be stored in a cookie.
   const parser = options.parse ?? (JSON.parse as (value: string) => T);
   const stringifier = options.stringify ?? JSON.stringify;
 
@@ -49,7 +49,8 @@ export const useCookie = <T>(
 
   // If we're on the server, use the cookie from the route data
   // If we're on the client, use the cookie from the document
-  const extractedCookie = globalThis.document === undefined ? data?.cookies[name] : getCookie(document.cookie, name);
+  const extractedCookie =
+    globalThis.document === undefined ? data?.cookies[cookieName] : getCookie(document.cookie, cookieName);
   const cookieValue = extractedCookie ? parser(extractedCookie) : defaultValue;
 
   // Use the cookie value directly from route data instead of maintaining separate state
@@ -65,18 +66,19 @@ export const useCookie = <T>(
         // If oldValue is undefined, use the current value from cookie
         const currentValue = oldValue === undefined ? cookieValue : oldValue;
         const updatedValue =
-          // Since only a value or a function is passed, we can safely assert the type
-          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- only a value or a function is passed
           typeof valueOrUpdater === 'function' ? (valueOrUpdater as (value: T) => T)(currentValue) : valueOrUpdater;
 
         const stringifiedValue = stringifier(updatedValue);
-        setCookie(name, stringifiedValue, options.maxAge ?? DEFAULT_COOKIE_MAX_AGE);
+        setCookie(cookieName, stringifiedValue, options.maxAge ?? DEFAULT_COOKIE_MAX_AGE);
 
         return updatedValue;
       });
     },
-    [name, stringifier, options.maxAge, cookieValue],
+    [cookieName, stringifier, options.maxAge, cookieValue],
   );
 
   return [value, handleSetValue] as const;
 };
+
+/* eslint-enable unicorn/no-document-cookie -- renabling */

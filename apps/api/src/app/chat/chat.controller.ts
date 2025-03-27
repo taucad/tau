@@ -2,7 +2,7 @@ import { Body, Controller, Post, Logger, Sse } from '@nestjs/common';
 import { Observable } from 'rxjs';
 
 import { SearxngSearch } from '@langchain/community/tools/searxng_search';
-import { AIMessage, MessageContentComplex } from '@langchain/core/messages';
+import { AIMessageChunk, MessageContentComplex } from '@langchain/core/messages';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { StateGraph, MessagesAnnotation, END, START } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
@@ -115,8 +115,8 @@ export class ChatController {
     function shouldContinue({ messages }: typeof MessagesAnnotation.State) {
       const lastMessage = messages.at(-1);
 
-      if (!(lastMessage instanceof AIMessage)) {
-        throw new TypeError('Last message is not an AIMessage');
+      if (!(lastMessage instanceof AIMessageChunk)) {
+        throw new TypeError('Last message is not an AIMessageChunk');
       }
 
       // If the LLM makes a tool call, then we route to the ChatNode.Tools node

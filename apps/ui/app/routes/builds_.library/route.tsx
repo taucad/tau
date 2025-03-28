@@ -343,7 +343,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
                 event.preventDefault();
               }}
             >
-              <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={2} />
+              <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={1.3} />
             </div>
           )}
           <Button

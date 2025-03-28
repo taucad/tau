@@ -11,8 +11,14 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useCookie } from '@/utils/cookies';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Focus } from 'lucide-react';
+import { useKeydown } from '@/hooks/use-keydown';
+import { KeyCombination } from '@/utils/keys';
 
 const CAMERA_MODE_COOKIE_NAME = 'camera-mode';
+const toggleCameraKeyCombination = {
+  key: 'c',
+  ctrlKey: true,
+} as const satisfies KeyCombination;
 
 export type CadViewerProperties = {
   enableGizmo?: boolean;
@@ -65,6 +71,10 @@ export const ThreeProvider = ({
     CAMERA_MODE_COOKIE_NAME,
     defaultCameraMode,
   );
+
+  useKeydown(toggleCameraKeyCombination, () => {
+    setCameraMode(cameraMode === 'perspective' ? 'orthographic' : 'perspective');
+  });
 
   useEffect(() => {
     THREE.Object3D.DEFAULT_UP.set(0, 0, 1);

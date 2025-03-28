@@ -11,7 +11,7 @@ export interface ScreenshotOptions {
 
   /**
    * Zoom level multiplier (1.0 = no change, 2.0 = 2x zoom in, 0.5 = 2x zoom out)
-   * @default 1.6
+   * @default 1.25
    */
   zoomLevel?: number;
 
@@ -87,7 +87,7 @@ export function ScreenshotCapture({ ref: reference }: { ref: React.RefObject<Scr
         // Setup default options
         const defaultOptions = {
           aspectRatio: 16 / 9,
-          zoomLevel: 1.5,
+          zoomLevel: 1.25,
           quality: {
             supersamplingFactor: 1,
             antiAliasingSamples: 0,
@@ -182,7 +182,7 @@ export function ScreenshotCapture({ ref: reference }: { ref: React.RefObject<Scr
         gl.outputColorSpace = THREE.SRGBColorSpace;
 
         // Apply zoom level from config
-        camera.zoom = originalZoom * config.zoomLevel;
+        camera.zoom = config.zoomLevel;
 
         // Temporarily adjust camera to match the target aspect ratio
         if (camera instanceof THREE.PerspectiveCamera) {

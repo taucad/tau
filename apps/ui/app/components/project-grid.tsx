@@ -151,7 +151,7 @@ function ProjectCard({
         )}
         {replicadCode && (isVisible || showPreview) && (
           <div className="absolute inset-0">
-            <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={1.25} />
+            <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={1.3} />
           </div>
         )}
         {replicadCode && (

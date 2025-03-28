@@ -13,6 +13,7 @@ type SceneProperties = {
   center?: boolean;
   cameraMode?: 'perspective' | 'orthographic';
   controlsRef?: React.RefObject<React.ComponentRef<typeof Controls> | null>;
+  stageRef?: React.RefObject<React.ComponentRef<typeof Stage> | null>;
 };
 
 export function Scene({
@@ -26,6 +27,7 @@ export function Scene({
   center = true,
   cameraMode = 'perspective',
   controlsRef,
+  stageRef,
 }: SceneProperties) {
   return (
     <>
@@ -36,6 +38,7 @@ export function Scene({
         enableGrid={enableGrid}
         enableAxesHelper={enableAxesHelper}
         cameraMode={cameraMode}
+        ref={stageRef}
       >
         {children}
       </Stage>

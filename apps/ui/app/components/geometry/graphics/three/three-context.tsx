@@ -1,7 +1,7 @@
 import { Canvas, CanvasProps } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Scene } from './scene';
-import { StageOptions } from './stage';
+import { Stage, StageOptions } from './stage';
 import rotate3dBase64 from './rotate-3d.svg?base64';
 import { cn } from '@/utils/ui';
 import { useEffect, useState, useImperativeHandle, useRef } from 'react';
@@ -11,7 +11,6 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useCookie } from '@/utils/cookies';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Focus } from 'lucide-react';
-import { Controls } from './controls';
 
 const CAMERA_MODE_COOKIE_NAME = 'camera-mode';
 
@@ -61,7 +60,7 @@ export const ThreeProvider = ({
   const canvasReference = useRef<HTMLCanvasElement & { captureScreenshot: (options?: ScreenshotOptions) => string }>(
     null,
   );
-  const controlsReference = useRef<React.ComponentRef<typeof Controls>>(null);
+  const stageReference = useRef<React.ComponentRef<typeof Stage>>(null);
   const [cameraMode, setCameraMode] = useCookie<'perspective' | 'orthographic'>(
     CAMERA_MODE_COOKIE_NAME,
     defaultCameraMode,
@@ -117,7 +116,7 @@ export const ThreeProvider = ({
           enableAxesHelper={enableAxesHelper}
           stageOptions={stageOptions}
           cameraMode={cameraMode}
-          controlsRef={controlsReference}
+          stageRef={stageReference}
         >
           {children}
           <ScreenshotCapture ref={screenshotReference} />
@@ -143,7 +142,7 @@ export const ThreeProvider = ({
             {/* TODO: implement camera reset */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="overlay" size="icon" onClick={() => controlsReference.current?.reset()}>
+                <Button variant="overlay" size="icon" onClick={() => stageReference.current?.resetCamera()}>
                   <Focus />
                 </Button>
               </TooltipTrigger>

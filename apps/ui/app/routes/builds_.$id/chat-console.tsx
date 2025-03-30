@@ -17,13 +17,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useCookie } from '@/utils/cookies';
+import { COLLAPSED_CONSOLE_SIZE } from './chat-view-split';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onFilterChange?: (event: React.ChangeEvent<HTMLInputElement>) => void;
   keyCombination?: string;
   'data-view': 'tabs' | 'split';
-  'data-state'?: 'open' | 'closed';
 };
 
 // Cookie names for persisting console settings
@@ -219,11 +219,15 @@ export const ChatConsole = ({
             >
               <span className="hidden font-mono text-xs @xs/console:block">Console</span>
               <span className="relative flex size-4 flex-col gap-2 ease-in-out">
-                <span className="absolute inset-0 flex size-4 scale-100 flex-col gap-2 transition-transform duration-200 ease-in-out group-data-[state=open]/console:scale-0">
+                <span
+                  className={`absolute inset-0 flex size-4 scale-0 flex-col gap-2 transition-transform duration-200 ease-in-out group-data-[panel-size=${COLLAPSED_CONSOLE_SIZE}.0]/console-resizable:scale-100`}
+                >
                   <ChevronUp className="absolute -bottom-0.5 left-1/2 -translate-x-1/2" />
                   <ChevronUp className="absolute bottom-0.5 left-1/2 -translate-x-1/2" />
                 </span>
-                <span className="absolute inset-0 flex size-4 scale-0 rotate-180 flex-col gap-2 transition-transform duration-200 ease-in-out group-data-[state=open]/console:scale-100">
+                <span
+                  className={`absolute inset-0 flex size-4 scale-100 rotate-180 flex-col gap-2 transition-transform duration-200 ease-in-out group-data-[panel-size=${COLLAPSED_CONSOLE_SIZE}.0]/console-resizable:scale-0`}
+                >
                   <ChevronUp className="absolute -bottom-0.5 left-1/2 -translate-x-1/2" />
                   <ChevronUp className="absolute bottom-0.5 left-1/2 -translate-x-1/2" />
                 </span>

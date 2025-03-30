@@ -10,15 +10,15 @@ import { ChatViewer } from './chat-viewer';
 
 const CHAT_RESIZE_VIEWER_COOKIE_NAME = 'chat-resize-viewer';
 const CHAT_RESIZE_CODE_COOKIE_NAME = 'chat-resize-editor';
-const CONSOLE_OPEN_COOKIE_NAME = 'console-open';
 const toggleConsoleKeyCombination = {
   key: 'l',
   ctrlKey: true,
   requireAllModifiers: true,
 } satisfies KeyCombination;
 
+export const COLLAPSED_CONSOLE_SIZE = 4;
+
 export const ChatViewSplit = () => {
-  const [isConsoleOpen, setIsConsoleOpen] = useCookie(CONSOLE_OPEN_COOKIE_NAME, true);
   const [consoleSize, setConsoleSize] = useCookie(CHAT_RESIZE_CODE_COOKIE_NAME, [85, 15]);
   const [codeSize, setCodeSize] = useCookie(CHAT_RESIZE_VIEWER_COOKIE_NAME, [60, 40]);
 
@@ -28,15 +28,12 @@ export const ChatViewSplit = () => {
     const panel = consolePanelReference.current;
     if (panel) {
       if (panel.isCollapsed()) {
-        setIsConsoleOpen(true);
-
         panel.expand();
       } else {
-        setIsConsoleOpen(false);
         panel.collapse();
       }
     }
-  }, [consolePanelReference, setIsConsoleOpen]);
+  }, [consolePanelReference]);
 
   const { formattedKeyCombination: formattedToggleConsoleKeyCombination } = useKeydown(
     toggleConsoleKeyCombination,
@@ -63,11 +60,13 @@ export const ChatViewSplit = () => {
           <ResizablePanel
             order={2}
             defaultSize={consoleSize[1]}
-            minSize={10}
+            minSize={COLLAPSED_CONSOLE_SIZE}
+            collapsedSize={COLLAPSED_CONSOLE_SIZE}
             collapsible
-            collapsedSize={4}
             ref={consolePanelReference}
             id="chat-console"
+            // 10 is the height of the console buttons plus padding.
+            className="group/console-resizable min-h-10"
           >
             <ChatConsole
               onButtonClick={toggleConsolePanel}
@@ -76,11 +75,8 @@ export const ChatViewSplit = () => {
                 const panel = consolePanelReference.current;
                 if (event.target.value.length > 0) {
                   panel?.expand();
-                } else {
-                  panel?.collapse();
                 }
               }}
-              data-state={isConsoleOpen ? 'open' : 'closed'}
               data-view="split"
             />
           </ResizablePanel>

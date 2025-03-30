@@ -10,7 +10,7 @@ import './chat-config';
 import { cn } from '@/utils/ui';
 
 export const ChatEditor = ({ className }: { className?: string }) => {
-  const { setCode, code } = useBuild();
+  const { setCode, code, isLoading } = useBuild();
   const { log } = useConsole({ defaultOrigin: { component: 'Editor' } });
 
   const monaco = useMonaco();
@@ -78,6 +78,8 @@ export const ChatEditor = ({ className }: { className?: string }) => {
         />
       </div> */}
       <CodeEditor
+        // modify the key to force re-render when loading state changes to update the default value. Slightly hacky, but it's the most efficient way to do it.
+        key={isLoading ? 'loading' : 'ready'}
         loading={<LoaderPinwheel className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
         className={cn('bg-background text-xs', className)}
         defaultLanguage="typescript"

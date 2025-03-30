@@ -57,13 +57,13 @@ export const ChatViewSplit = () => {
       <ResizablePanel order={2} defaultSize={codeSize[1]} minSize={30} id="chat-editor-container">
         <ResizablePanelGroup direction="vertical" autoSaveId={CHAT_RESIZE_CODE_COOKIE_NAME} onLayout={setConsoleSize}>
           <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-editor" className="size-full pt-12">
-              <ChatEditor />
+            <ChatEditor />
           </ResizablePanel>
           <ResizableHandle />
           <ResizablePanel
             order={2}
             defaultSize={consoleSize[1]}
-            minSize={4}
+            minSize={10}
             collapsible
             collapsedSize={4}
             ref={consolePanelReference}

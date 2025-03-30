@@ -300,7 +300,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
       <Link to={`/builds/${project.id}`} className="block">
         <div className="flex items-center gap-4 rounded-lg border p-4 hover:bg-accent">
           <div className="flex-shrink-0">
-            <Avatar className="h-12 w-12">
+            <Avatar className="aspect-video w-12 scale-200">
               <AvatarImage src={project.thumbnail || project.author.avatar} alt={project.name} />
               <AvatarFallback>{project.name.charAt(0)}</AvatarFallback>
             </Avatar>

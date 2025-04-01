@@ -94,7 +94,7 @@ export default function AppWithProviders({ error }: { error?: ReactNode }) {
       <ThemeProvider specifiedTheme={data?.theme} themeAction="/action/set-theme">
         <ColorProvider>
           <TooltipProvider delayDuration={0}>
-            <App error={error} ssrTheme={data?.theme} />
+            <App error={error} ssrTheme={data?.theme} env={data?.env} />
           </TooltipProvider>
         </ColorProvider>
       </ThemeProvider>
@@ -102,11 +102,18 @@ export default function AppWithProviders({ error }: { error?: ReactNode }) {
   );
 }
 
-export function App({ error, ssrTheme }: { error?: ReactNode; ssrTheme: Theme | null }) {
+export function App({
+  error,
+  ssrTheme,
+  env,
+}: {
+  error?: ReactNode;
+  ssrTheme: Theme | null;
+  env: Record<string, string>;
+}) {
   const [theme] = useTheme();
   const color = useColor();
   const { setFaviconColor } = useFavicon();
-  const data = useLoaderData<typeof loader>();
 
   useEffect(() => {
     setFaviconColor(color.serialized.hex);
@@ -124,7 +131,7 @@ export function App({ error, ssrTheme }: { error?: ReactNode; ssrTheme: Theme | 
       <body>
         <script
           dangerouslySetInnerHTML={{
-            __html: `window.ENV = ${JSON.stringify(data.env)}`,
+            __html: `window.ENV = ${JSON.stringify(env)}`,
           }}
         />
         <Page error={error} />

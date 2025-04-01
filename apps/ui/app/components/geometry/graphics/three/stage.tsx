@@ -364,9 +364,9 @@ export function Stage({ children, center = false, stageOptions, ref, ...properti
 
     return value;
   }, [camera.type, currentZoom, properties.enableGrid, shapeRadius]);
-  console.log(camera);
-  console.log(controls);
-  console.log(gridSizes);
+  // console.log(camera);
+  // console.log(controls);
+  // console.log(gridSizes);
 
   return (
     <group {...properties}>

@@ -18,6 +18,8 @@ const CAMERA_MODE_COOKIE_NAME = 'camera-mode';
 const toggleCameraKeyCombination = {
   key: 'c',
   ctrlKey: true,
+  shiftKey: true,
+  requireAllModifiers: true,
 } as const satisfies KeyCombination;
 
 export type CadViewerProperties = {

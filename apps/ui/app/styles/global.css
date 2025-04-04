@@ -216,6 +216,17 @@
       animation-timing-function: cubic-bezier(0, 0, 0.2, 1); /* speed up on the way up */
     }
   }
+
+  @keyframes typewriter {
+    0% {
+      width: 0%;
+    }
+    100% {
+      width: 100%;
+    }
+  }
+}
+
 /* ANIMATION UTILITIES */
 /* Collapsible Animation */
 @layer utilities {

@@ -3,8 +3,7 @@ import { ThreeElements } from '@react-three/fiber';
 declare global {
   namespace React {
     namespace JSX {
-      // Support for Three.js
-      // eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/no-empty-interface
+      // eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/no-empty-interface -- This is a valid implementation for Three.js
       interface IntrinsicElements extends ThreeElements {}
     }
 

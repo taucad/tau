@@ -22,8 +22,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (url.pathname === '/builds') {
     return redirect('/');
   }
-  // `undefined` is not allowed in the loader
-  // eslint-disable-next-line unicorn/no-null
+
+  // eslint-disable-next-line unicorn/no-null -- undefined is not allowed in the loader
   return null;
 };
 

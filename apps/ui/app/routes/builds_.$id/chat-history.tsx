@@ -70,7 +70,7 @@ export const ChatHistory = () => {
               />
             ))}
           </div>
-          <ScrollDownButton containerRef={chatContainerReference} />
+          <ScrollDownButton containerRef={chatContainerReference} hasContent={messages.length > 0} />
         </div>
       </ResizablePanel>
       <ResizableHandle />

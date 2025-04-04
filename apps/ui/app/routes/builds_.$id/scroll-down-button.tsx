@@ -2,17 +2,21 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/utils/ui';
 import { ArrowDown } from 'lucide-react';
 import { useScroll } from '@/hooks/use-scroll';
-import { useRef, memo, useEffect, useCallback } from 'react';
+import { useRef, memo, useCallback } from 'react';
 
 interface ScrollDownButtonProperties {
   containerRef: React.RefObject<HTMLDivElement | null>;
+  hasContent: boolean;
 }
 
-export const ScrollDownButton = memo(({ containerRef }: ScrollDownButtonProperties) => {
+export const ScrollDownButton = memo(({ containerRef, hasContent }: ScrollDownButtonProperties) => {
   const chatEndReference = useRef<HTMLDivElement | null>(null);
-  const { isScrolledTo } = useScroll({
-    reference: chatEndReference,
-  });
+  const { isScrolledTo } = useScroll(
+    {
+      reference: chatEndReference,
+    },
+    [hasContent],
+  );
 
   // Custom scroll function that uses the container ref
   const handleScrollTo = useCallback(() => {
@@ -24,23 +28,6 @@ export const ScrollDownButton = memo(({ containerRef }: ScrollDownButtonProperti
     }
   }, [containerRef]);
 
-  // Auto-scroll to bottom when new messages are added
-  useEffect(() => {
-    // Small delay to ensure messages are rendered first
-    const timeout = setTimeout(() => {
-      if (containerRef.current) {
-        const { scrollHeight, clientHeight, scrollTop } = containerRef.current;
-        const isAlreadyAtBottom = Math.abs(scrollHeight - clientHeight - scrollTop) < 50;
-
-        if (isAlreadyAtBottom) {
-          handleScrollTo();
-        }
-      }
-    }, 100);
-
-    return () => clearTimeout(timeout);
-  }, [containerRef, handleScrollTo]);
-
   return (
     <>
       <Button
@@ -48,7 +35,7 @@ export const ScrollDownButton = memo(({ containerRef }: ScrollDownButtonProperti
         variant="overlay"
         className={cn(
           'sticky bottom-4 left-1/2 flex -translate-x-1/2 justify-center rounded-full',
-          isScrolledTo && 'pointer-events-none opacity-0 select-none',
+          (isScrolledTo || !hasContent) && 'pointer-events-none opacity-0 select-none',
           !isScrolledTo && 'animate-bounce-subtle',
         )}
         tabIndex={isScrolledTo ? -1 : 0}

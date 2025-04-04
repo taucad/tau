@@ -1,7 +1,11 @@
 import { ENV } from '@/config';
 import type { loader } from '@/root';
+import { useCookie } from '@/hooks/use-cookie';
 import { useRouteLoaderData } from '@remix-run/react';
 import { useQuery } from '@tanstack/react-query';
+
+const CHAT_MODEL_COOKIE_NAME = 'chat-model';
+const DEFAULT_CHAT_MODEL = 'anthropic-claude-3.7-sonnet-thinking';
 
 export type Model = {
   id: string;
@@ -30,6 +34,7 @@ export const getModels = async (): Promise<Model[]> => {
 
 export const useModels = () => {
   const loaderData = useRouteLoaderData<typeof loader>('root');
+  const [selectedModel, setSelectedModel] = useCookie(CHAT_MODEL_COOKIE_NAME, DEFAULT_CHAT_MODEL);
 
   const { data, isLoading } = useQuery({
     queryKey: ['models'],
@@ -37,5 +42,5 @@ export const useModels = () => {
     initialData: loaderData?.models,
   });
 
-  return { data, isLoading };
+  return { data, isLoading, selectedModel, setSelectedModel };
 };

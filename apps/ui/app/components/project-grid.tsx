@@ -64,8 +64,7 @@ function ProjectCard({
   tags,
   assets,
 }: CommunityBuildCardProperties) {
-  const [showPreview, setShowPreview] = useState(false);
-  const [isVisible, setIsVisible] = useState(false);
+  const [showPreview, setShowPreview] = useState(true);
   const cardReference = useRef<HTMLDivElement>(null);
   const { setCode, mesh } = useReplicad();
   const navigate = useNavigate();
@@ -80,36 +79,12 @@ function ProjectCard({
   const replicadAsset = Object.values(assets).find((asset) => asset.language === 'replicad');
   const replicadCode = replicadAsset?.files[replicadAsset.main]?.content;
 
-  // Set up intersection observer to detect when card is visible
-  useEffect(() => {
-    if (!cardReference.current) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          setIsVisible(entry.isIntersecting);
-        }
-      },
-      {
-        root: undefined,
-        rootMargin: '50px', // Start loading a bit before the card comes into view
-        threshold: 0.1,
-      },
-    );
-
-    observer.observe(cardReference.current);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
-
   // When card becomes visible or preview is manually toggled, compile the code
   useEffect(() => {
-    if ((isVisible || showPreview) && replicadCode) {
+    if (showPreview && replicadCode) {
       setCode(replicadCode);
     }
-  }, [isVisible, showPreview, replicadCode, setCode]);
+  }, [showPreview, replicadCode, setCode]);
 
   // eslint-disable-next-line unicorn/consistent-function-scoping -- This is a placeholder for future functionality
   const handleStar = () => {
@@ -141,7 +116,7 @@ function ProjectCard({
   return (
     <Card ref={cardReference} className="group relative flex flex-col overflow-hidden">
       <div className="relative aspect-video overflow-hidden bg-muted">
-        {!showPreview && !isVisible && (
+        {!showPreview && (
           <img
             src={thumbnail || '/placeholder.svg'}
             alt={name}
@@ -149,7 +124,7 @@ function ProjectCard({
             loading="lazy"
           />
         )}
-        {replicadCode && (isVisible || showPreview) && (
+        {replicadCode && showPreview && (
           <div className="absolute inset-0">
             <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={1.3} />
           </div>

@@ -27,9 +27,23 @@ export const ENV = (globalThis.window ? globalThis.window.ENV : process.env) as 
  * Meta config. Contains infrequently changing information about the app.
  */
 export const metaConfig = {
+  /**
+   * The name of the app. Used for SEO and other metadata such as PWA and app store naming.
+   */
   name: 'Tau',
+  /**
+   * The prefix for all cookies.
+   *
+   * WARNING: changing this value will cause existing cookies not to be read and result in poor UX.
+   */
   cookiePrefix: 'tau-',
+  /**
+   * The URL to the GitHub repository.
+   */
   githubUrl: 'https://github.com/opensrchq/tau',
+  /**
+   * The description of the app. Used for SEO and other metadata such as PWA and app store descriptions.
+   */
   description:
     'Your AI-powered workshop companion - a free, open-source CAD platform that works offline. Design anything from 3D prints to woodworking projects with intelligent assistance, right in your browser.',
 };

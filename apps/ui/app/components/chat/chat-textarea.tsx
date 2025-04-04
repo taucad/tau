@@ -17,6 +17,9 @@ import { useKeydown } from '@/hooks/use-keydown';
 import { KeyShortcut } from '@/components/ui/key-shortcut';
 import { KeyCombination } from '@/utils/keys';
 import { toast } from '@/components/ui/sonner';
+import { useCookie } from '@/hooks/use-cookie';
+
+const CHAT_SEARCHING_COOKIE_NAME = 'chat-searching';
 
 export interface ChatTextareaProperties {
   onSubmit: ({
@@ -66,13 +69,13 @@ export function ChatTextarea({
     return { initialInputText, initialImageUrls };
   }, [initialContent]);
   const [inputText, setInputText] = useState(initialInputText);
-  const [isSearching, setIsSearching] = useState(false);
+  const [isSearching, setIsSearching] = useCookie(CHAT_WEB_COOKIE_NAME, false);
   const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputReference = useRef<HTMLInputElement>(null);
   const textareaReference = useRef<HTMLTextAreaElement | null>(null);
-  const { selectedModel, setSelectedModel, cancelMessage, isStreaming } = useChat();
+  const { selectedModel, setSelectedModel } = useModels();
 
   const handleSubmit = async () => {
     // If there is no text or images, do not submit

@@ -16,7 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useCookie } from '@/utils/cookies';
+import { useCookie } from '@/hooks/use-cookie';
 import { COLLAPSED_CONSOLE_SIZE } from './chat-view-split';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {

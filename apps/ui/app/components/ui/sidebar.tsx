@@ -12,7 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useCookie } from '@/utils/cookies';
+import { useCookie } from '@/hooks/use-cookie';
 import { type KeyCombination } from '@/utils/keys';
 
 export const SIDEBAR_COOKIE_NAME = 'sidebar-open';

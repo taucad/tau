@@ -1,6 +1,6 @@
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { useKeydown } from '@/hooks/use-keydown';
-import { useCookie } from '@/utils/cookies';
+import { useCookie } from '@/hooks/use-cookie';
 import { KeyCombination } from '@/utils/keys';
 import { useRef, useCallback } from 'react';
 import { ImperativePanelHandle } from 'react-resizable-panels';

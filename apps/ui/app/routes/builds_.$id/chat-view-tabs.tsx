@@ -1,4 +1,4 @@
-import { useCookie } from '@/utils/cookies';
+import { useCookie } from '@/hooks/use-cookie';
 import { KeyCombination } from '@/utils/keys';
 import { cn } from '@/utils/ui';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';

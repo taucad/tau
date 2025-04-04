@@ -8,7 +8,7 @@ import { useEffect, useState, useImperativeHandle, useRef } from 'react';
 import { ScreenshotCapture, ScreenshotCaptureHandle, ScreenshotOptions } from './screenshot-capture';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useCookie } from '@/utils/cookies';
+import { useCookie } from '@/hooks/use-cookie';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Focus } from 'lucide-react';
 import { useKeydown } from '@/hooks/use-keydown';

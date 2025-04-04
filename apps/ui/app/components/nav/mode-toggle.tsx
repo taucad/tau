@@ -2,7 +2,7 @@ import { Laptop, Moon, Sun } from 'lucide-react';
 import { Theme, useTheme } from 'remix-themes';
 
 import { SidebarMenuButton } from '@/components/ui/sidebar';
-import { useCookie } from '@/utils/cookies';
+import { useCookie } from '@/hooks/use-cookie';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useKeydown } from '@/hooks/use-keydown';
 import { KeyShortcut } from '@/components/ui/key-shortcut';

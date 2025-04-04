@@ -4,7 +4,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/componen
 import { cn } from '@/utils/ui';
 import { ChatParameters } from '@/routes/builds_.$id/chat-parameters';
 
-import { useCookie } from '@/utils/cookies';
+import { useCookie } from '@/hooks/use-cookie';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useKeydown } from '@/hooks/use-keydown';
 import { Drawer, DrawerContent } from '@/components/ui/drawer';

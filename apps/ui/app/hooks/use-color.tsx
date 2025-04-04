@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
-import { useCookie } from '@/utils/cookies';
+import { useCookie } from '@/hooks/use-cookie';
 import { CSSProperties } from 'react';
 import {
   serializeHex,

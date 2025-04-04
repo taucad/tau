@@ -19,6 +19,7 @@ export function ComboBoxResponsive<T>({
   getValue,
   defaultValue,
   onSelect,
+  onClose,
   className,
   popoverContentClassName,
   placeholder = 'Set item',
@@ -32,6 +33,7 @@ export function ComboBoxResponsive<T>({
   getValue: (item: T) => string;
   defaultValue?: T;
   onSelect?: (value: string) => void;
+  onClose?: () => void;
   className?: string;
   popoverContentClassName?: string;
   placeholder?: string;
@@ -42,16 +44,32 @@ export function ComboBoxResponsive<T>({
   const [open, setOpen] = React.useState(false);
   const isMobile = useIsMobile();
   const [selectedItem, setSelectedItem] = React.useState<T | undefined>(defaultValue);
+  const selectionMadeReference = React.useRef(false);
 
   const handleSelect = (item: T) => {
     setSelectedItem(item);
+    selectionMadeReference.current = true;
     setOpen(false);
     onSelect?.(getValue(item));
   };
 
+  const handleOpenChange = (isOpen: boolean) => {
+    // If closing without making a selection, trigger onClose
+    if (!isOpen && !selectionMadeReference.current && open) {
+      onClose?.();
+    }
+
+    // Reset the selection flag when opening
+    if (isOpen) {
+      selectionMadeReference.current = false;
+    }
+
+    setOpen(isOpen);
+  };
+
   if (isMobile) {
     return (
-      <Drawer open={open} onOpenChange={setOpen}>
+      <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerTrigger asChild>
           <Button variant="ghost" className={cn('w-[150px] justify-start', className)}>
             {selectedItem ? renderButtonContents(selectedItem) : placeholder}
@@ -78,7 +96,7 @@ export function ComboBoxResponsive<T>({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button variant="ghost" className={cn('w-[150px] justify-start', className)}>
           {selectedItem ? renderButtonContents(selectedItem) : placeholder}

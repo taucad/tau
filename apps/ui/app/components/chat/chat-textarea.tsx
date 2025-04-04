@@ -411,6 +411,9 @@ export function ChatTextarea({
             setSelectedModel(model);
             focusInput();
           }}
+          onClose={() => {
+            focusInput();
+          }}
           placeholder="Select a model"
           defaultValue={models.find((model) => model.id === selectedModel)}
         />

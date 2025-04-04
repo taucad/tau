@@ -22,7 +22,7 @@ export default function ChatStart() {
         role: MessageRole.User,
         model,
         status: MessageStatus.Pending, // Set as pending
-        metadata: { systemHints: metadata?.systemHints ?? [] },
+        metadata: metadata ?? {},
         imageUrls,
       });
 

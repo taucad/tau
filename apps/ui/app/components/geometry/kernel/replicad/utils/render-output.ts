@@ -177,13 +177,12 @@ export class ShapeStandardizer {
   }
 
   standardizeShape<T extends { shape: unknown }>(shapes: T[]): Array<T & { shape: Meshable | SVGable }> {
-    // @ts-expect-error - We know that the shape is a Meshable or SVGable
     return shapes
       .map(({ shape, ...rest }) => ({
         shape: this.adaptShape(shape),
         ...rest,
       }))
-      .filter((element) => checkShapeConfigIsValid(element));
+      .filter((element): element is T & { shape: Meshable | SVGable } => checkShapeConfigIsValid(element));
   }
 }
 

@@ -420,9 +420,13 @@ export function ChatTextarea({
               size="xs"
               variant="ghost"
               className="group transition-transform duration-200 ease-in-out data-[state=active]:bg-neutral/20 data-[state=active]:text-primary data-[state=active]:shadow"
+              onMouseDown={(event) => {
+                // Prevent the button from being focused
+                event.stopPropagation();
+                event.preventDefault();
+              }}
               onClick={() => {
                 setIsSearching((previous) => !previous);
-                focusInput();
               }}
             >
               <span className="hidden text-xs @xs:block">Search</span>

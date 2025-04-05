@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-// TODO: fix typings
+/* eslint-disable @typescript-eslint/no-explicit-any -- TODO: fix typings */
 import { type Remote, wrap } from 'comlink';
 import { createContext, useContext, useReducer, ReactNode, useEffect, useRef, useMemo, useCallback } from 'react';
 import { BuilderWorkerInterface } from './replicad-builder.worker';
@@ -340,6 +339,7 @@ export function ReplicadProvider({
 
   return <ReplicadContext.Provider value={value}>{children}</ReplicadContext.Provider>;
 }
+/* eslint-enable @typescript-eslint/no-explicit-any -- TODO: fix typings */
 
 export function useReplicad() {
   const context = useContext(ReplicadContext);

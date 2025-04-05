@@ -19,7 +19,7 @@ import { KeyCombination } from '@/utils/keys';
 import { toast } from '@/components/ui/sonner';
 import { useCookie } from '@/hooks/use-cookie';
 
-const CHAT_SEARCHING_COOKIE_NAME = 'chat-searching';
+const CHAT_WEB_COOKIE_NAME = 'chat-searching';
 
 export interface ChatTextareaProperties {
   onSubmit: ({
@@ -69,7 +69,7 @@ export function ChatTextarea({
     return { initialInputText, initialImageUrls };
   }, [initialContent]);
   const [inputText, setInputText] = useState(initialInputText);
-  const [isSearching, setIsSearching] = useCookie(CHAT_WEB_COOKIE_NAME, false);
+  const [isSearching, setIsSearching] = useCookie(CHAT_WEB_COOKIE_NAME, true);
   const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);

@@ -17,7 +17,6 @@ import { themeSessionResolver } from '@/sessions.server';
 import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from 'remix-themes';
 import { cn } from '@/utils/ui';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { parseCookies } from '@/utils/cookies';
 import { markdownViewerLinks } from '@/components/markdown-viewer';
 import { QueryClient } from '@tanstack/react-query';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -52,8 +51,7 @@ export const meta: MetaFunction = () => [
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { getTheme } = await themeSessionResolver(request);
-  const cookieHeader = request.headers.get('Cookie');
-  const cookies = parseCookies(cookieHeader ?? '');
+  const cookie = request.headers.get('Cookie') ?? '';
 
   let models: Model[] = [];
   try {
@@ -65,7 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     theme: getTheme(),
-    cookies,
+    cookie,
     env: getEnvironment(),
     models,
   };

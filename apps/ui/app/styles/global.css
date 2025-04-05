@@ -228,6 +228,12 @@
 }
 
 /* ANIMATION UTILITIES */
+@utility animate-typewriter-* {
+  animation: typewriter 1s steps(--value(integer)) forwards;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 /* Collapsible Animation */
 @layer utilities {
 	[data-slot='collapsible-content'] {

@@ -46,4 +46,4 @@ export const metaConfig = {
    */
   description:
     'Your AI-powered workshop companion - a free, open-source CAD platform that works offline. Design anything from 3D prints to woodworking projects with intelligent assistance, right in your browser.',
-};
+} as const;

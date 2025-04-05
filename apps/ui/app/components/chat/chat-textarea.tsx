@@ -19,7 +19,7 @@ import { KeyCombination } from '@/utils/keys';
 import { toast } from '@/components/ui/sonner';
 import { useCookie } from '@/hooks/use-cookie';
 
-const CHAT_WEB_COOKIE_NAME = 'chat-searching';
+const CHAT_WEB_COOKIE_NAME = 'chat-web';
 
 export interface ChatTextareaProperties {
   onSubmit: ({

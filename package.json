@@ -52,6 +52,7 @@
     "comlink": "^4.4.2",
     "culori": "^4.0.1",
     "deepmerge": "^4.3.1",
+    "es-cookie": "^1.5.0",
     "express": "^4.21.2",
     "isbot": "^5.1.22",
     "katex": "^0.16.21",

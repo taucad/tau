@@ -398,6 +398,7 @@ export class ModelService implements OnModuleInit {
         },
         support: {
           tools: ollamaToolSupportFamilies.has(model.details.family),
+          toolChoice: false,
         },
         provider: 'ollama',
       }));

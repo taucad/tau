@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const ModelSupportSchema = z.object({
   tools: z.boolean().describe('Whether the model supports tools'),
+  toolChoice: z.boolean().describe('Whether the model supports tool choice'),
 });
 
 export const ModelConfigurationSchema = z.object({

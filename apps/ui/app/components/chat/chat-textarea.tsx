@@ -5,18 +5,20 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ComboBoxResponsive } from '@/components/ui/combobox-responsive';
-import { Model } from '@/hooks/use-models';
+import { Model, useModels } from '@/hooks/use-models';
 import { SvgIcon } from '@/components/icons/svg-icon';
 import { ModelProvider } from '@/types/cad';
 import { ComingSoon } from '../ui/coming-soon';
-import { useChat } from '@/contexts/use-chat';
 import { cn } from '@/utils/ui';
 import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '../ui/hover-card';
-import { MessageContent } from '@/types/chat';
+import { MessagePart } from '@/types/chat';
 import { useKeydown } from '@/hooks/use-keydown';
 import { KeyShortcut } from '@/components/ui/key-shortcut';
 import { KeyCombination } from '@/utils/keys';
 import { toast } from '@/components/ui/sonner';
+import { useChat } from '@ai-sdk/react';
+import { Attachment } from 'ai';
+import { USE_CHAT_CONSTANTS } from '@/contexts/use-chat';
 import { useCookie } from '@/hooks/use-cookie';
 
 const CHAT_WEB_COOKIE_NAME = 'chat-web';
@@ -30,14 +32,16 @@ export interface ChatTextareaProperties {
   }: {
     content: string;
     model: string;
-    metadata?: { systemHints?: string[] };
+    metadata?: { toolChoice?: 'web' | 'none' | 'auto' | 'any' };
     imageUrls?: string[];
   }) => Promise<void>;
   onEscapePressed?: () => void;
   models: Model[];
   defaultModel?: string;
   autoFocus?: boolean;
-  initialContent?: MessageContent[];
+  initialContent?: MessagePart[];
+  initialAttachments?: Attachment[];
+  conversationId?: string;
 }
 
 // Define the key combination for cancelling the stream
@@ -51,7 +55,9 @@ export function ChatTextarea({
   models,
   autoFocus = true,
   initialContent = [],
+  initialAttachments = [],
   onEscapePressed,
+  conversationId,
 }: ChatTextareaProperties) {
   const { initialInputText, initialImageUrls } = useMemo(() => {
     let initialInputText = '';
@@ -61,13 +67,17 @@ export function ChatTextarea({
       if (content.type === 'text') {
         initialInputText = content.text;
       }
-      if (content.type === 'image_url') {
-        initialImageUrls.push(content.image_url.url);
+      if (content.type === 'file') {
+        initialImageUrls.push(content.data);
       }
     }
 
+    for (const attachment of initialAttachments) {
+      initialImageUrls.push(attachment.url);
+    }
+
     return { initialInputText, initialImageUrls };
-  }, [initialContent]);
+  }, [initialContent, initialAttachments]);
   const [inputText, setInputText] = useState(initialInputText);
   const [isSearching, setIsSearching] = useCookie(CHAT_WEB_COOKIE_NAME, true);
   const [isFocused, setIsFocused] = useState(false);
@@ -76,6 +86,10 @@ export function ChatTextarea({
   const fileInputReference = useRef<HTMLInputElement>(null);
   const textareaReference = useRef<HTMLTextAreaElement | null>(null);
   const { selectedModel, setSelectedModel } = useModels();
+  const { stop, status } = useChat({
+    ...USE_CHAT_CONSTANTS,
+    id: conversationId,
+  });
 
   const handleSubmit = async () => {
     // If there is no text or images, do not submit
@@ -87,19 +101,21 @@ export function ChatTextarea({
     await onSubmit({
       content: inputText,
       model: selectedModel,
-      metadata: { systemHints: [...(isSearching ? ['search'] : [])] },
+      metadata: {
+        toolChoice: isSearching ? 'web' : 'auto',
+      },
       imageUrls: images,
     });
   };
 
   const handleCancelClick = () => {
-    cancelMessage();
+    stop();
   };
 
   // Register keyboard shortcut for cancellation
   const { formattedKeyCombination: formattedCancelKeyCombination } = useKeydown(cancelKeyCombination, () => {
-    if (isStreaming) {
-      cancelMessage();
+    if (status === 'streaming') {
+      stop();
     }
   });
 
@@ -259,7 +275,7 @@ export function ChatTextarea({
           focusInput();
         }}
         className={cn(
-          'flex size-full cursor-text resize-none flex-col overflow-auto rounded-lg border shadow-md data-[state=active]:border-primary',
+          'flex size-full cursor-text resize-none flex-col overflow-auto rounded-xl border shadow-md data-[state=active]:border-primary',
           images.length > 0 && 'pt-10',
         )}
         onDragOver={handleDragOver}
@@ -325,7 +341,7 @@ export function ChatTextarea({
       )}
 
       {/* Submit button */}
-      {isStreaming ? (
+      {status === 'streaming' ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

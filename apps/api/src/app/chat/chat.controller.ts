@@ -1,13 +1,17 @@
-import { Body, Controller, Post, Logger, Sse } from '@nestjs/common';
-import { Observable } from 'rxjs';
+import { Body, Controller, Post, Logger, Res } from '@nestjs/common';
 
 import { SearxngSearch } from '@langchain/community/tools/searxng_search';
-import { AIMessageChunk, MessageContentComplex } from '@langchain/core/messages';
+import { AIMessageChunk } from '@langchain/core/messages';
+import { openai } from '@ai-sdk/openai';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { StateGraph, MessagesAnnotation, END, START } from '@langchain/langgraph';
-import { randomUUID } from 'node:crypto';
 import { ModelService } from './model.service';
 import { ChatUsageCost, ChatUsageTokens } from './chat.schema';
+import { convertToCoreMessages, formatDataStreamPart, pipeDataStreamToResponse, streamText, UIMessage } from 'ai';
+import { nameGenerationSystemPrompt } from './chat-prompt-name';
+import { generatePrefixedId, PREFIX_TYPES } from '../utils/id';
+import { convertAiSdkMessagesToLangchainMessages } from '../utils/messages';
+import { Response } from 'express';
 
 enum ChatNode {
   Start = START,
@@ -22,68 +26,30 @@ enum ChatEvent {
   OnChatModelStream = 'on_chat_model_stream',
   OnToolStart = 'on_tool_start',
   OnToolEnd = 'on_tool_end',
+  OnChainStart = 'on_chain_start',
+  OnChainEnd = 'on_chain_end',
+  OnChainStream = 'on_chain_stream',
 }
 
-type ChatMessage = {
-  type: 'user' | 'assistant';
-  content: MessageContentComplex[];
-  metadata: {
-    systemHints: string[];
-  };
-};
+type ToolChoice = 'web' | 'none' | 'auto' | 'any';
 
 type CreateChatBody = {
-  messages: ChatMessage[];
-  model: string;
-};
-
-type BaseObservableEvent = {
-  id: string;
-  status: string;
-  timestamp: number;
-};
-
-type ChatModelStartObservableEvent = BaseObservableEvent & {
-  status: ChatEvent.OnChatModelStart;
-};
-
-type ChatModelEndObservableEvent = BaseObservableEvent & {
-  status: ChatEvent.OnChatModelEnd;
-  usage: ChatUsageTokens & ChatUsageCost;
-};
-type TextObservableEvent = BaseObservableEvent & {
-  status: ChatEvent.OnChatModelStream;
-  type: 'text';
-  content: string;
-};
-
-type ThinkingObservableEvent = BaseObservableEvent & {
-  status: ChatEvent.OnChatModelStream;
-  type: 'thinking';
-  content: string;
-};
-
-type ToolObservableEvent = BaseObservableEvent & {
-  status: ChatEvent.OnToolStart | ChatEvent.OnToolEnd;
-  content: {
-    description: string;
-    input: unknown;
-    output?: unknown;
-  };
-};
-
-type ObservableEvent = {
-  data:
-    | TextObservableEvent
-    | ThinkingObservableEvent
-    | ToolObservableEvent
-    | ChatModelStartObservableEvent
-    | ChatModelEndObservableEvent;
+  messages: (UIMessage & {
+    role: 'user';
+    model: string;
+    metadata: { toolChoice: ToolChoice };
+  })[];
 };
 
 const TEXT_FROM_HINT = {
-  search: "Search the web for information. Use the search results to answer the user's question directly.",
-  'no-search': 'Do not search the web for information. Do not use the search tool.',
+  web: SearxngSearch.prototype.name,
+  none: 'none',
+  auto: 'auto',
+  any: 'any',
+} as const;
+
+const TOOL_TYPE_FROM_TOOL_NAME = {
+  [SearxngSearch.name]: 'web',
 } as const;
 
 @Controller('chat')
@@ -91,8 +57,46 @@ export class ChatController {
   constructor(private readonly modelService: ModelService) {}
 
   @Post()
-  @Sse('sse')
-  async getData(@Body() body: CreateChatBody): Promise<Observable<ObservableEvent>> {
+  async getData(@Body() body: CreateChatBody, @Res() response: Response) {
+    // Logger.log(JSON.stringify(body.messages, null, 2));
+    const coreMessages = convertToCoreMessages(body.messages);
+    const lastBodyMessage = body.messages.at(-1);
+
+    let modelId: string;
+    let toolChoice: ToolChoice = 'auto';
+    if (lastBodyMessage?.role === 'user') {
+      modelId = lastBodyMessage.model;
+      if (lastBodyMessage.metadata.toolChoice) {
+        toolChoice = lastBodyMessage.metadata.toolChoice;
+      }
+    } else {
+      throw new Error('Last message is not a user message');
+    }
+    const resolvedToolChoice = TEXT_FROM_HINT[toolChoice];
+
+    if (modelId === 'name-generator') {
+      return pipeDataStreamToResponse(response, {
+        execute: async (dataStreamWriter) => {
+          const result = streamText({
+            model: openai('gpt-4o-mini'),
+            messages: coreMessages,
+            system: nameGenerationSystemPrompt,
+            // TODO: fix tool choice provision for AI SDK.
+            // toolChoice: resolvedToolChoice,
+          });
+
+          result.mergeIntoDataStream(dataStreamWriter);
+        },
+        onError: (error) => {
+          // Error messages are masked by default for security reasons.
+          // If you want to expose the error message to the client, you can do so here:
+          return error instanceof Error ? error.message : String(error);
+        },
+      });
+    }
+
+    const langchainMessages = convertAiSdkMessagesToLangchainMessages(body.messages, coreMessages);
+
     // Define the tools for the agent to use
     const tools = [
       // new TavilySearchResults({ maxResults: 3 }),
@@ -108,8 +112,13 @@ export class ChatController {
       }),
     ];
     const toolNode = new ToolNode(tools);
-    const { model: unboundModel, support } = this.modelService.buildModel(body.model);
-    const model = support?.tools === false ? unboundModel : (unboundModel.bindTools?.(tools) ?? unboundModel);
+    const { model: unboundModel, support } = this.modelService.buildModel(modelId);
+    const model =
+      support?.tools === false
+        ? unboundModel
+        : (unboundModel.bindTools?.(tools, {
+            ...(support?.toolChoice === false ? {} : { tool_choice: resolvedToolChoice }),
+          }) ?? unboundModel);
 
     // Define the function that det ermines whether to continue or not
     function shouldContinue({ messages }: typeof MessagesAnnotation.State) {
@@ -146,152 +155,231 @@ export class ChatController {
     // Finally, we compile it into a LangChain Runnable.
     const graph = workflow.compile();
 
-    const lastMessage = body.messages.at(-1);
-
-    let messagesWithHints = body.messages;
-
-    // Add hints to the last message
-    if (lastMessage && lastMessage.metadata?.systemHints?.length > 0) {
-      const hintText = lastMessage.metadata.systemHints
-        .filter((hint) => hint in TEXT_FROM_HINT)
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- we've already filtered the hints
-        .map((hint) => TEXT_FROM_HINT[hint as keyof typeof TEXT_FROM_HINT])
-        .join(' ');
-      messagesWithHints = [
-        ...body.messages.slice(0, -1),
-        {
-          ...lastMessage,
-          content: [...lastMessage.content, { type: 'text', text: hintText }],
-        },
-      ];
-    }
-
     const eventStream = graph.streamEvents(
       {
-        messages: messagesWithHints,
+        messages: langchainMessages,
       },
       {
         streamMode: 'values',
         version: 'v2',
+        runId: generatePrefixedId(PREFIX_TYPES.RUN),
       },
     );
 
-    return new Observable((observer) => {
-      const id = randomUUID();
+    response.setHeader('x-vercel-ai-data-stream', 'v1');
+    pipeDataStreamToResponse(response, {
+      execute: async (dataStream) => {
+        const id = generatePrefixedId(PREFIX_TYPES.MESSAGE);
 
-      // Keep thinking state in Observable scope (per-request)
-      let thinkingBuffer = '';
-      let isThinking = false;
+        // Keep reasoning state in per-request scope
+        let thinkingBuffer = '';
+        let isReasoning = false;
+        const totalUsageTokens = {
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedReadTokens: 0,
+          cachedWriteTokens: 0,
+        } satisfies ChatUsageTokens;
+        const totalUsageCost = {
+          inputTokensCost: 0,
+          outputTokensCost: 0,
+          cachedReadTokensCost: 0,
+          cachedWriteTokensCost: 0,
+          totalCost: 0,
+        } satisfies ChatUsageCost;
 
-      (async () => {
         for await (const streamEvent of eventStream) {
+          Logger.log(`processing event: ${streamEvent.event}`);
           switch (streamEvent.event) {
             case ChatEvent.OnChatModelStream: {
               if (streamEvent.data.chunk.content) {
                 const streamedContent = streamEvent.data.chunk.content;
-                let content: string | undefined;
-                let type: 'text' | 'thinking' = 'text';
 
                 if (typeof streamedContent === 'string') {
-                  // Process string content to detect thinking tags
-                  const processedContent = this.processThinkingTags(streamedContent, thinkingBuffer, isThinking);
-                  content = processedContent.content;
-                  type = processedContent.type;
+                  // Process string content to detect reasoning tags
+                  const processedContent = this.processContent(streamedContent, thinkingBuffer, isReasoning);
+                  const content = processedContent.content;
+                  const type = processedContent.type;
                   // Update state after processing
                   thinkingBuffer = processedContent.buffer;
-                  isThinking = processedContent.isThinking;
+                  isReasoning = processedContent.isReasoning;
+
+                  if (content) {
+                    dataStream.write(formatDataStreamPart(type, content));
+                  }
                 } else {
-                  // Handle anthropic streaming
+                  // Handle streaming for "complex" content types, such as Anthropic
                   if (streamedContent.length > 0) {
-                    // TODO: handle joining multiple chunks?
-                    type = streamedContent[0].type;
-                    if (type === 'text') {
-                      content = streamedContent[0].text;
-                    } else if (type === 'thinking') {
-                      content = streamedContent[0].thinking;
+                    for (const part of streamedContent) {
+                      const complexType = part.type;
+                      switch (complexType) {
+                        case 'text': {
+                          if (part.text === undefined) {
+                            throw new Error('Text not found in part: ' + JSON.stringify(part));
+                          } else {
+                            dataStream.write(formatDataStreamPart('text', part.text));
+                          }
+
+                          break;
+                        }
+                        case 'thinking': {
+                          if (part.thinking !== undefined) {
+                            dataStream.write(formatDataStreamPart('reasoning', part.thinking));
+                          } else if (part.signature === undefined) {
+                            throw new Error('Thinking not found in part: ' + JSON.stringify(part));
+                          } else {
+                            dataStream.write(
+                              formatDataStreamPart('reasoning_signature', { signature: part.signature }),
+                            );
+                          }
+
+                          break;
+                        }
+                        case 'redacted_thinking': {
+                          if (part.data === undefined) {
+                            throw new Error('Redacted thinking not found in part: ' + JSON.stringify(part));
+                          } else {
+                            dataStream.write(formatDataStreamPart('redacted_reasoning', { data: part.data }));
+                          }
+
+                          break;
+                        }
+                        case 'input_json_delta':
+                        case 'tool_use': {
+                          // no-op
+                          break;
+                        }
+                        default: {
+                          throw new Error(`Unknown part: ${JSON.stringify(part)}`);
+                        }
+                      }
                     }
                   }
-                }
-
-                if (content) {
-                  observer.next({
-                    data: {
-                      id,
-                      status: streamEvent.event,
-                      type,
-                      timestamp: Date.now(),
-                      content,
-                    },
-                  });
                 }
               }
 
               break;
             }
             case ChatEvent.OnChatModelStart: {
-              observer.next({ data: { id, status: streamEvent.event, timestamp: Date.now() } });
+              dataStream.write(
+                formatDataStreamPart('start_step', {
+                  messageId: id,
+                }),
+              );
 
               break;
             }
             case ChatEvent.OnChatModelEnd: {
-              const usageTokens = this.modelService.normalizeUsageTokens(body.model, {
+              const usageTokens = this.modelService.normalizeUsageTokens(modelId, {
                 inputTokens: streamEvent.data.output.usage_metadata.input_tokens,
                 outputTokens: streamEvent.data.output.usage_metadata.output_tokens,
                 cachedReadTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_read,
                 cachedWriteTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_creation,
               });
-              const usageCost = this.modelService.getModelCost(body.model, usageTokens);
 
-              observer.next({
-                data: {
-                  id,
-                  status: streamEvent.event,
-                  timestamp: Date.now(),
-                  usage: { ...usageTokens, ...usageCost },
-                },
-              });
+              totalUsageTokens.inputTokens += usageTokens.inputTokens;
+              totalUsageTokens.outputTokens += usageTokens.outputTokens;
+              totalUsageTokens.cachedReadTokens += usageTokens.cachedReadTokens;
+              totalUsageTokens.cachedWriteTokens += usageTokens.cachedWriteTokens;
+
+              const usageCost = this.modelService.getModelCost(modelId, usageTokens);
+
+              totalUsageCost.inputTokensCost += usageCost.inputTokensCost;
+              totalUsageCost.outputTokensCost += usageCost.outputTokensCost;
+              totalUsageCost.cachedReadTokensCost += usageCost.cachedReadTokensCost;
+              totalUsageCost.cachedWriteTokensCost += usageCost.cachedWriteTokensCost;
+              totalUsageCost.totalCost += usageCost.totalCost;
+              dataStream.write(
+                formatDataStreamPart('finish_step', {
+                  finishReason: 'stop',
+                  usage: { promptTokens: usageTokens.inputTokens, completionTokens: usageTokens.outputTokens },
+                  isContinued: false,
+                }),
+              );
 
               break;
             }
             case ChatEvent.OnToolStart: {
-              observer.next({
-                data: {
-                  id,
-                  status: streamEvent.event,
-                  timestamp: Date.now(),
-                  content: {
-                    description: 'Searching the web',
-                    input: streamEvent.data.input.input,
-                  },
-                },
-              });
+              // an ID unique to the tool call node. Replace `tools:` with known prefix to create a valid tool call ID.
+              const toolCallId = streamEvent.metadata.langgraph_checkpoint_ns
+                .replace('tools:', `${PREFIX_TYPES.TOOL_CALL}_`)
+                // Remove redundant dashes
+                .replaceAll('-', '');
+              dataStream.write(
+                formatDataStreamPart('tool_call', {
+                  toolCallId,
+                  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- all tools are defined in the TOOL_TYPE_FROM_TOOL_NAME object
+                  toolName: TOOL_TYPE_FROM_TOOL_NAME[streamEvent.name as keyof typeof TOOL_TYPE_FROM_TOOL_NAME],
+                  args: streamEvent.data.input,
+                }),
+              );
               break;
             }
             case ChatEvent.OnToolEnd: {
               // The searxng tool doesn't return the results in a fully structured format, so we need to wrap it in an array and parse it
               const results = JSON.parse(`[${streamEvent.data.output.content}]`);
-              observer.next({
-                data: {
-                  id,
-                  status: streamEvent.event,
-                  timestamp: Date.now(),
-                  content: {
-                    description: `Found ${results.length} results`,
-                    input: streamEvent.data.input.input,
-                    output: results,
-                  },
-                },
-              });
+
+              // an ID unique to the tool call node. Replace `tools:` with known prefix to create a valid tool call ID.
+              const toolCallId = streamEvent.metadata.langgraph_checkpoint_ns
+                .replace('tools:', `${PREFIX_TYPES.TOOL_CALL}_`)
+                // Remove redundant dashes
+                .replaceAll('-', '');
+
+              dataStream.write(
+                formatDataStreamPart('tool_result', {
+                  toolCallId,
+                  result: results,
+                }),
+              );
+              for (const result of results) {
+                dataStream.write(
+                  formatDataStreamPart('source', {
+                    title: result.title,
+                    url: result.link,
+                    sourceType: 'url',
+                    id: generatePrefixedId(PREFIX_TYPES.SOURCE),
+                    providerMetadata: {
+                      snippet: result.snippet,
+                    },
+                  }),
+                );
+              }
               break;
             }
-            default:
+            case ChatEvent.OnChainStart:
+            case ChatEvent.OnChainStream:
+            case ChatEvent.OnChainEnd: {
+              // These events are not supported by the AI SDK, so we don't need to handle them
+              break;
+            }
+            default: {
+              Logger.error(`Unknown event: ${streamEvent.event}`);
+            }
           }
         }
-        observer.complete();
-      })().catch((error) => {
+        dataStream.write(
+          formatDataStreamPart('message_annotations', [
+            {
+              type: 'usage',
+              usageCost: totalUsageCost,
+              usageTokens: totalUsageTokens,
+              model: modelId,
+            },
+          ]),
+        );
+
+        dataStream.write(
+          formatDataStreamPart('finish_message', {
+            finishReason: 'stop',
+            usage: { promptTokens: totalUsageTokens.inputTokens, completionTokens: totalUsageTokens.outputTokens },
+          }),
+        );
+      },
+      onError(error) {
+        // TODO: log request id
         Logger.error(error);
-        observer.error(error);
-      });
+        return 'An error occurred while processing the request';
+      },
     });
   }
 
@@ -299,18 +387,18 @@ export class ChatController {
    * Process streaming content to detect <think> and </think> tags.
    * @param chunk Current text chunk from the stream
    * @param buffer Current buffer state
-   * @param isThinking Current thinking mode state
+   * @param isReasoning Current reasoning mode state
    * @returns Processed content, type, and updated state
    */
-  private processThinkingTags(
+  private processContent(
     chunk: string,
     buffer: string,
-    isThinking: boolean,
+    isReasoning: boolean,
   ): {
     content: string;
-    type: 'text' | 'thinking';
+    type: 'text' | 'reasoning';
     buffer: string;
-    isThinking: boolean;
+    isReasoning: boolean;
   } {
     // Add the current chunk to the buffer
     let updatedBuffer = buffer + chunk;
@@ -320,7 +408,7 @@ export class ChatController {
     const closeTagIndex = updatedBuffer.indexOf('</think>');
 
     let resultContent = '';
-    let contentType: 'text' | 'thinking' = isThinking ? 'thinking' : 'text';
+    let contentType: 'text' | 'reasoning' = isReasoning ? 'reasoning' : 'text';
 
     // Process the buffer based on tag positions
     if (openTagIndex !== -1 && closeTagIndex !== -1) {
@@ -334,28 +422,28 @@ export class ChatController {
         } else {
           // Extract content between tags
           resultContent = updatedBuffer.slice(openTagIndex + 7, closeTagIndex);
-          contentType = 'thinking';
+          contentType = 'reasoning';
         }
 
         // Update buffer to content after the closing tag
         updatedBuffer = updatedBuffer.slice(closeTagIndex + 8);
-        isThinking = false;
+        isReasoning = false;
 
         // If there's remaining content, recursively process it
         if (updatedBuffer.length > 0) {
-          const nextProcess = this.processThinkingTags('', updatedBuffer, isThinking);
+          const nextProcess = this.processContent('', updatedBuffer, isReasoning);
           if (nextProcess.content) {
             // If the next chunk has content with a different type, we'll send separate chunks
             return {
               content: resultContent,
               type: contentType,
               buffer: nextProcess.buffer,
-              isThinking: nextProcess.isThinking,
+              isReasoning: nextProcess.isReasoning,
             };
           }
           // Update with the recursive call results
           updatedBuffer = nextProcess.buffer;
-          isThinking = nextProcess.isThinking;
+          isReasoning = nextProcess.isReasoning;
         }
       }
     } else if (openTagIndex !== -1) {
@@ -366,11 +454,11 @@ export class ChatController {
         updatedBuffer = updatedBuffer.slice(openTagIndex);
         contentType = 'text';
       } else {
-        // We're entering thinking mode
-        isThinking = true;
+        // We're entering reasoning mode
+        isReasoning = true;
         resultContent = updatedBuffer.slice(7); // Skip "<think>"
         updatedBuffer = '';
-        contentType = 'thinking';
+        contentType = 'reasoning';
       }
     } else if (closeTagIndex === -1) {
       // No tags found, return current chunk with current mode
@@ -380,23 +468,23 @@ export class ChatController {
       // Only closing tag found
       resultContent = updatedBuffer.slice(0, closeTagIndex);
       updatedBuffer = updatedBuffer.slice(closeTagIndex + 8);
-      isThinking = false;
-      contentType = 'thinking';
+      isReasoning = false;
+      contentType = 'reasoning';
 
       // If there's remaining content, process it
       if (updatedBuffer.length > 0) {
-        const nextProcess = this.processThinkingTags('', updatedBuffer, isThinking);
+        const nextProcess = this.processContent('', updatedBuffer, isReasoning);
         if (nextProcess.content) {
           return {
             content: resultContent,
             type: contentType,
             buffer: nextProcess.buffer,
-            isThinking: nextProcess.isThinking,
+            isReasoning: nextProcess.isReasoning,
           };
         }
         // Update with the recursive call results
         updatedBuffer = nextProcess.buffer;
-        isThinking = nextProcess.isThinking;
+        isReasoning = nextProcess.isReasoning;
       }
     }
 
@@ -404,7 +492,7 @@ export class ChatController {
       content: resultContent,
       type: contentType,
       buffer: updatedBuffer,
-      isThinking: isThinking,
+      isReasoning: isReasoning,
     };
   }
 }

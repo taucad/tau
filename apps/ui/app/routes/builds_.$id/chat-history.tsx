@@ -1,19 +1,21 @@
 import { ChatTextarea, ChatTextareaProperties } from '@/components/chat/chat-textarea';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { ChatMessage } from './chat-message';
-import { useRef } from 'react';
-import { createMessage, useChat } from '@/contexts/use-chat';
+import { useCallback, useRef } from 'react';
+import { createMessage, USE_CHAT_CONSTANTS } from '@/contexts/use-chat';
+import { Message, useChat } from '@ai-sdk/react';
 import { MessageRole, MessageStatus } from '@/types/chat';
 import { useBuild } from '@/hooks/use-build2';
-import { useCookie } from '@/utils/cookies';
+import { useCookie } from '@/hooks/use-cookie';
 import { useModels } from '@/hooks/use-models';
 import { ScrollDownButton } from './scroll-down-button';
+import { ChatError } from './chat-error';
 
 const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'chat-history-resize';
 
 export const ChatHistory = () => {
-  const { addMessage, messages, editMessage } = useChat();
-  const { setCode } = useBuild();
+  const { setCode, build } = useBuild();
+  const { append, messages, reload, setMessages } = useChat({ ...USE_CHAT_CONSTANTS, id: build?.id });
   const [chatResizeHistory, setChatResizeHistory] = useCookie(CHAT_RESIZE_COOKIE_NAME_HISTORY, [85, 15]);
   const { data: models } = useModels();
   const chatContainerReference = useRef<HTMLDivElement>(null);
@@ -23,12 +25,30 @@ export const ChatHistory = () => {
       content,
       role: MessageRole.User,
       status: MessageStatus.Pending,
-      metadata: metadata ?? { systemHints: [] },
+      metadata: metadata ?? {},
       model,
       imageUrls,
     });
-    addMessage(userMessage);
+    append(userMessage);
   };
+
+  const editMessage = useCallback(
+    (newMessage: Message) => {
+      setMessages((messages) => {
+        const currentMessages = messages;
+        const existingMessageIndex = currentMessages.findIndex((message) => message.id === newMessage.id);
+        if (existingMessageIndex === -1) {
+          throw new Error('Message not found');
+        }
+
+        const updatedMessages = [...currentMessages.slice(0, existingMessageIndex), newMessage];
+
+        return updatedMessages;
+      });
+      reload();
+    },
+    [setMessages, reload],
+  );
 
   const onEdit = async (
     { content, model, metadata, imageUrls }: Parameters<ChatTextareaProperties['onSubmit']>[0],
@@ -39,7 +59,7 @@ export const ChatHistory = () => {
       content,
       role: MessageRole.User,
       status: MessageStatus.Pending,
-      metadata: metadata ?? { systemHints: [] },
+      metadata: metadata ?? {},
       model,
       imageUrls,
     });
@@ -60,15 +80,17 @@ export const ChatHistory = () => {
       >
         <div className="h-full overflow-y-auto p-4 pb-0" ref={chatContainerReference}>
           <div className="space-y-4">
-            {messages.map((message, index) => (
+            {messages.map((message) => (
               <ChatMessage
                 message={message}
-                key={index}
+                key={message.id}
                 onEdit={(event) => onEdit(event, message.id)}
                 models={models ?? []}
                 onCodeApply={setCode}
+                conversationId={build?.id}
               />
             ))}
+            <ChatError id={build?.id} />
           </div>
           <ScrollDownButton containerRef={chatContainerReference} hasContent={messages.length > 0} />
         </div>
@@ -82,7 +104,7 @@ export const ChatHistory = () => {
         defaultSize={chatResizeHistory[1]}
         className="p-2"
       >
-        <ChatTextarea onSubmit={onSubmit} models={models ?? []} />
+        <ChatTextarea onSubmit={onSubmit} models={models ?? []} conversationId={build?.id} />
       </ResizablePanel>
     </ResizablePanelGroup>
   );

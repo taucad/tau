@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Link, useNavigate } from '@remix-run/react';
 import { storage } from '@/db/storage';
 import { MessageRole, MessageStatus } from '@/types/chat';
-import { ChatProvider, createMessage } from '@/contexts/use-chat';
+import { createMessage } from '@/contexts/use-chat';
 import { cubeCode } from '@/components/mock-code';
 import { CommunityBuildGrid } from '@/components/project-grid';
 import { sampleBuilds } from '@/components/mock-builds';
@@ -63,9 +63,7 @@ export default function ChatStart() {
           <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">What can I help you build?</h1>
         </div>
 
-        <ChatProvider>
-          <ChatTextarea onSubmit={onSubmit} models={models ?? []} />
-        </ChatProvider>
+        <ChatTextarea onSubmit={onSubmit} models={models ?? []} />
       </div>
       <div className="container mx-auto px-4 py-8">
         <div className="mb-2 flex flex-row items-center justify-between">

@@ -4,97 +4,66 @@ import { useParams } from '@remix-run/react';
 import { useEffect, useState } from 'react';
 import { BuildProvider, useBuild } from '@/hooks/use-build2';
 import { Button } from '@/components/ui/button';
-import { ChatProvider, useChat } from '@/contexts/use-chat';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { LogProvider } from '@/contexts/log-context';
-import { replicadSystemPrompt } from './chat-prompt-replicad';
-import { Message, MessageRole, MessageStatus } from '@/types/chat';
 import { DEFAULT_BUILD_NAME } from '@/constants/build.constants';
 import { Handle } from '@/types/matches';
-
-const nameGenerationSystemPrompt = `
-You are a helpful assistant that generates titles for AI chat conversations.
-
-The conversations primarily focus on designing and building 3D models,
-but can include other topics. When the conversation is about 3D models,
-the title should be a single sentence that describes the item being designed.
-Otherwise, the title should simply describe the conversation.
-
-The title should be 1-3 words, and should not include any special characters.
-Do NOT include redundant words like "Design" or "Model".
-
-You are not answering the prompt, you are generating the title for the conversation.
-You should ONLY respond with the title, and nothing else.
-`;
+import { Message, useChat } from '@ai-sdk/react';
+import { USE_CHAT_CONSTANTS } from '@/contexts/use-chat';
 
 const BuildNameEditor = () => {
   const { build, updateName, isLoading } = useBuild();
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState<string>();
   const [displayName, setDisplayName] = useState<string>(build?.name || '');
-  const { addMessage, messages, status } = useChat();
+  const { append } = useChat({
+    ...USE_CHAT_CONSTANTS,
+
+    onResponse(response) {
+      console.log('name generation response', response);
+    },
+    onFinish(message, options) {
+      console.log('name generation message', message, options);
+      const textPart = message.parts?.find((part) => part.type === 'text');
+      if (textPart) {
+        updateName(textPart.text);
+        setDisplayName(textPart.text);
+      }
+    },
+    onError(error) {
+      console.log('name generation error', error);
+    },
+  });
 
   // Set initial name and trigger generation if needed
   useEffect(() => {
+    console.log('evaluating build name', build?.name, isLoading);
     if (isLoading || !build) return;
 
     if (build.name === DEFAULT_BUILD_NAME && build.messages[0]) {
+      console.log('generating name');
       // Create and send message for name generation
       const message = {
         ...build.messages[0],
-        model: 'openai-gpt-4o',
+        model: 'name-generator',
         metadata: {
-          systemHints: ['no-search'],
+          toolChoice: 'none',
         },
       } as const satisfies Message;
-      addMessage(message);
+      append(message);
     } else if (!isLoading) {
+      console.log('setting name', build.name);
       setName(build.name);
       setDisplayName(build.name);
     }
   }, [build?.name, isLoading]);
 
-  // Update name as it streams in
-  useEffect(() => {
-    const lastMessage = messages.at(-1);
-
-    if (!lastMessage) return;
-
-    if (
-      lastMessage.role === MessageRole.Assistant &&
-      lastMessage.content[0].type === 'text' &&
-      lastMessage.content[0].text
-    ) {
-      setName(lastMessage.content[0].text);
-      if (lastMessage.status === MessageStatus.Success) {
-        updateName(lastMessage.content[0].text);
-      }
-    }
-  }, [messages, status]);
-
-  // Typewriter effect
-  useEffect(() => {
-    // Don't show the typewriter effect if the name is being edited, if the name is not loaded, or if the name is the same as the build name
-    if (!name || name === build?.name || isEditing) return;
-
-    let currentIndex = 0;
-    const interval = setInterval(() => {
-      if (currentIndex <= name.length) {
-        setDisplayName(name.slice(0, currentIndex));
-        currentIndex++;
-      } else {
-        clearInterval(interval);
-      }
-    }, 50); // Adjust speed by changing this value (milliseconds)
-
-    return () => clearInterval(interval);
-  }, [name]);
-
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     if (name) {
       updateName(name);
+      setDisplayName(name);
       setIsEditing(false);
     }
   };
@@ -102,8 +71,13 @@ const BuildNameEditor = () => {
   return (
     <Popover open={isEditing} onOpenChange={setIsEditing}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" className="p-2">
-          {displayName}
+        <Button variant="ghost" className="justify-start p-2">
+          <span
+            data-animate={displayName.length > 0 && !(!name || name === build?.name || isEditing)}
+            className="data-[animate=true]:animate-typewriter-20"
+          >
+            {displayName}
+          </span>
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 -translate-x-2 p-1">
@@ -134,9 +108,7 @@ export const handle: Handle = {
 
     return (
       <BuildProvider buildId={id}>
-        <ChatProvider systemMessageText={nameGenerationSystemPrompt}>
-          <BuildNameEditor />
-        </ChatProvider>
+        <BuildNameEditor />
       </BuildProvider>
     );
   },
@@ -146,7 +118,10 @@ const Chat = () => {
   const { id } = useParams();
   const { build, isLoading, setMessages: setBuildMessages } = useBuild();
   const { setCode, setParameters } = useReplicad();
-  const { setMessages, messages } = useChat();
+  const { setMessages, messages, reload, status } = useChat({
+    ...USE_CHAT_CONSTANTS,
+    id,
+  });
 
   // Load and respond to build changes
   useEffect(() => {
@@ -162,14 +137,30 @@ const Chat = () => {
   useEffect(() => {
     // Set initial messages
     if (!build || isLoading) return;
+    console.log('setting2 initial messages', build.messages);
     setMessages(build.messages);
+
+    // Reload when the last message is not an assistant message.
+    // This can happen when the user is offline when sending the initial message.
+    if (build.messages.length > 0 && build.messages.at(-1)?.role !== 'assistant') {
+      console.log('status2 reloading');
+      reload();
+    }
   }, [id, isLoading]);
 
-  // Handle message changes
   useEffect(() => {
-    if (!build || isLoading) return;
-    setBuildMessages(messages);
-  }, [messages]);
+    console.log('status2', status, 'messages', messages);
+    if (status === 'submitted') {
+      // A message just got submitted, set the build messages to include the new message.
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK doesn't support generics.
+      setBuildMessages(messages as Message[]);
+    } else if (status === 'ready' && messages.length > 0) {
+      // The chat became ready again, set the build messages to include the new messages.
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK doesn't support generics.
+      setBuildMessages(messages as Message[]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- we don't want to trigger the effect for all message changes.
+  }, [status, setBuildMessages]);
 
   return <ChatInterface />;
 };
@@ -185,11 +176,9 @@ export default function ChatRoute() {
     <LogProvider>
       <BuildProvider buildId={id}>
         <ReplicadProvider withExceptions evaluateDebounceTime={300}>
-          <ChatProvider systemMessageText={replicadSystemPrompt}>
-            <div className="flex h-full">
-              <Chat />
-            </div>
-          </ChatProvider>
+          <div className="flex h-full">
+            <Chat />
+          </div>
         </ReplicadProvider>
       </BuildProvider>
     </LogProvider>

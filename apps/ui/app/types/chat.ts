@@ -1,6 +1,4 @@
-export type ChatInterfaceProperties = {
-  chatId: string;
-};
+import { UIMessage } from 'ai';
 
 export enum MessageRole {
   User = 'user',
@@ -16,59 +14,50 @@ export enum MessageStatus {
 
 export type SourceOrigin = 'web' | 'notion' | 'history' | 'projects';
 
-// Define content types using discriminated union
-export type TextContent = {
-  type: 'text';
-  text: string;
-};
+export type MessagePart = UIMessage['parts'][number];
 
-export type ImageContent = {
-  type: 'image_url';
-  image_url: {
-    url: string;
-  };
-};
-
-export type MessageContent =
-  | {
-      type: 'text';
-      text: string;
-      cache_control?: {
-        type: 'ephemeral';
-      };
-    }
-  | {
-      type: 'image_url';
-      image_url: {
-        url: string;
-      };
-    };
-
-// Update Message interface to use the discriminated union
-export interface Message {
-  id: string;
-  threadId?: string;
-  role: MessageRole;
+export type MessageAnnotation = {
+  type: 'usage';
+  usageTokens: ChatUsageTokens;
+  usageCost: ChatUsageCost;
   model: string;
-  content: MessageContent[];
-  thinking?: string;
-  status: MessageStatus;
-  metadata?: {
-    systemHints?: string[];
-  };
-  toolCalls?: {
-    origin: SourceOrigin;
-    input: string;
-    output: {
-      title: string;
-      link: string;
-      snippet: string;
-    }[];
-    description: string;
-  }[];
-  usage?: ChatUsageTokens & ChatUsageCost;
-  createdAt: number;
-  updatedAt: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This is a workaround to allow any key-value pairs
+  [key: string]: any;
+};
+
+declare module '@ai-sdk/react' {
+  interface Message {
+    /**
+     * The model that should be used to generate the message.
+     */
+    model: string;
+    /**
+     * The status of the message.
+     */
+    status: MessageStatus;
+    /**
+     * The metadata of the message.
+     */
+    metadata?: {
+      /**
+       * The tools that should be used to generate the message.
+       *
+       * - `web`: Use the web tool.
+       * - `none`: Forcibly not use any tools.
+       * - `auto`: Use the best tool available.
+       * - `any`: Forcibly use any tool available.
+       *
+       * @default 'auto'
+       */
+      toolChoice?: 'web' | 'none' | 'auto' | 'any';
+    };
+    /**
+     * The annotations of the message.
+     */
+    // The AI SDK doesn't have valid support for module augmentation of MessageAnnotation.
+    // @ts-expect-error -- Subsequent property declarations must have the same type.  Property 'annotations' must be of type 'JSONValue[] | undefined', but here has type 'MessageAnnotation[] | undefined'.
+    annotations?: MessageAnnotation[];
+  }
 }
 
 export interface ChatUsageTokens {

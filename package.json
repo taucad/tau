@@ -62,7 +62,6 @@
     "katex": "^0.16.21",
     "lucide-react": "^0.475.0",
     "monaco-editor": "^0.52.2",
-    "nanoid": "^5.1.0",
     "ollama": "^0.5.12",
     "openai": "^4.82.0",
     "react": "^19.0.0",

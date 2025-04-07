@@ -1,4 +1,4 @@
-import { customAlphabet } from 'nanoid';
+import { generateId } from 'ai';
 
 export const PREFIX_TYPES = {
   /**
@@ -26,27 +26,12 @@ export const PREFIX_TYPES = {
 export type PrefixType = (typeof PREFIX_TYPES)[keyof typeof PREFIX_TYPES];
 
 /**
- * The alphabet to use for the nanoid. Hyphens and underscores are
- * excluded to avoid confusion with the prefix separator.
- */
-const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-
-/**
- * The nanoid generator.
- *
- * Generates a 21 character ID using the alphabet, in addition to
- * the 3 prefix characters and the underscore separator, for a
- * total of 25 characters.
- */
-const nanoid = customAlphabet(alphabet, 21);
-
-/**
- * Generates a prefixed ID using nanoid
+ * Generates a prefixed ID
  * @param prefix - The prefix to use for the ID
- * @returns A string in the format "prefix_<nanoid>"
+ * @returns A string in the format "prefix_<id>"
  */
 export function generatePrefixedId(prefix: PrefixType): string {
-  return `${prefix}_${nanoid()}`;
+  return `${prefix}_${generateId(21)}`;
 }
 
 /**

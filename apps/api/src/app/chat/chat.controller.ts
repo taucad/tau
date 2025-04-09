@@ -1,10 +1,9 @@
 import { Body, Controller, Post, Logger, Res } from '@nestjs/common';
 
 import { SearxngSearch } from '@langchain/community/tools/searxng_search';
-import { AIMessageChunk } from '@langchain/core/messages';
 import { openai } from '@ai-sdk/openai';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
-import { StateGraph, MessagesAnnotation, END, START } from '@langchain/langgraph';
+import { StateGraph, MessagesAnnotation, END, START, Command } from '@langchain/langgraph';
 import { ModelService } from './model.service';
 import { ChatUsageCost, ChatUsageTokens } from './chat.schema';
 import { convertToCoreMessages, formatDataStreamPart, pipeDataStreamToResponse, streamText, UIMessage } from 'ai';
@@ -120,37 +119,30 @@ export class ChatController {
             ...(support?.toolChoice === false ? {} : { tool_choice: resolvedToolChoice }),
           }) ?? unboundModel);
 
-    // Define the function that det ermines whether to continue or not
-    function shouldContinue({ messages }: typeof MessagesAnnotation.State) {
-      const lastMessage = messages.at(-1);
-
-      if (!(lastMessage instanceof AIMessageChunk)) {
-        throw new TypeError('Last message is not an AIMessageChunk');
-      }
-
-      // If the LLM makes a tool call, then we route to the ChatNode.Tools node
-      if (lastMessage.tool_calls && lastMessage.tool_calls.length > 0) {
-        return ChatNode.Tools;
-      }
-      // Otherwise, we stop (reply to the user) using the special "__end__" node
-      return ChatNode.End;
-    }
-
     // Define the function that calls the model
-    async function callModel(state: typeof MessagesAnnotation.State) {
-      const response = await model.invoke(state.messages);
+    async function agent(state: typeof MessagesAnnotation.State) {
+      const message = await model.invoke(state.messages);
 
-      // We return a list, because this will get added to the existing list
-      return { messages: [response] };
+      let gotoNode: ChatNode;
+
+      // If the LLM makes a tool call, then we route to the Tools node
+      // eslint-disable-next-line unicorn/prefer-ternary -- easier to read this way.
+      if (message.tool_calls && message.tool_calls.length > 0) {
+        gotoNode = ChatNode.Tools;
+      } else {
+        gotoNode = ChatNode.End;
+      }
+
+      // Add the message to the state and go to the next node
+      return new Command({ update: { messages: [message] }, goto: gotoNode });
     }
 
     // Define a new graph
     const workflow = new StateGraph(MessagesAnnotation)
-      .addNode(ChatNode.Agent, callModel)
-      .addEdge(ChatNode.Start, ChatNode.Agent)
+      .addNode(ChatNode.Agent, agent, { ends: [ChatNode.Tools, ChatNode.End] })
       .addNode(ChatNode.Tools, toolNode)
       .addEdge(ChatNode.Tools, ChatNode.Agent)
-      .addConditionalEdges(ChatNode.Agent, shouldContinue);
+      .addEdge(ChatNode.Start, ChatNode.Agent);
 
     // Finally, we compile it into a LangChain Runnable.
     const graph = workflow.compile();

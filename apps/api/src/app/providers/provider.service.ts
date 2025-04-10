@@ -24,7 +24,9 @@ export const PROVIDERS: {
 } = {
   openai: {
     provider: 'openai',
-    configuration: {},
+    configuration: {
+      apiKey: process.env.OPENAI_API_KEY,
+    },
     inputTokensIncludesCachedReadTokens: true,
     createClass: (options) => new ChatOpenAI(options),
   },
@@ -54,7 +56,6 @@ export const PROVIDERS: {
     createClass: (options) =>
       new ChatAnthropic({
         ...options,
-        anthropicApiKey: process.env.ANTHROPIC_API_KEY,
         maxRetries: 2,
       }),
   },

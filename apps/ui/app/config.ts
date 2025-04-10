@@ -3,7 +3,7 @@
  *
  * Uses Zod for validation
  */
-import { z, infer as ZodInfer } from 'zod';
+import { z } from 'zod';
 
 // Define the schema for environment variables
 const environmentSchema = z.object({
@@ -12,14 +12,7 @@ const environmentSchema = z.object({
 });
 
 export const getEnvironment = () => {
-  const environment = {
-    TAU_API_URL: process.env.TAU_API_URL,
-    NODE_ENV: process.env.NODE_ENV,
-    // Add any other environment variables you need
-  };
-
-  // Validate the environment variables
-  const result = environmentSchema.safeParse(environment);
+  const result = environmentSchema.safeParse(process.env);
 
   if (!result.success) {
     const formattedError = result.error.flatten().fieldErrors;
@@ -31,7 +24,7 @@ export const getEnvironment = () => {
   return result.data;
 };
 
-export type Environment = ZodInfer<typeof environmentSchema>;
+export type Environment = z.infer<typeof environmentSchema>;
 
 export const ENV = globalThis.window ? globalThis.window.ENV : process.env;
 

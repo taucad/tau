@@ -213,7 +213,7 @@ export class ChatController {
           ]);
         },
         onError: (error) => {
-          Logger.error('Error in chat stream:', error);
+          Logger.error('Error in chat stream:', JSON.stringify(error, undefined, 2));
           return 'An error occurred while processing the request';
         },
       },

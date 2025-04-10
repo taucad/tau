@@ -1,4 +1,4 @@
-import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { type LinksFunction, type LoaderFunctionArgs, type MetaFunction } from '@remix-run/node';
 import {
   isRouteErrorResponse,
   Links,
@@ -10,24 +10,24 @@ import {
   useLoaderData,
 } from '@remix-run/react';
 
+import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from 'remix-themes';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ReactNode, useEffect, useState } from 'react';
 import stylesUrl from './styles/global.css?url';
 
+import { getEnvironment, metaConfig } from './config';
+import { buttonVariants } from './components/ui/button';
 import { Page } from '@/components/page';
 import { themeSessionResolver } from '@/sessions.server';
-import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from 'remix-themes';
 import { cn } from '@/utils/ui';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { markdownViewerLinks } from '@/components/markdown-viewer';
-import { QueryClient } from '@tanstack/react-query';
-import { QueryClientProvider } from '@tanstack/react-query';
-import { ReactNode, useEffect, useState } from 'react';
-import { getEnvironment, metaConfig } from './config';
 import { useServiceWorker } from '@/hooks/use-service-worker';
 import { Toaster } from '@/components/ui/sonner';
 import { webManifestLinks } from '@/routes/manifest[.webmanifest]';
 import { getModels, Model } from '@/hooks/use-models';
-import { buttonVariants } from './components/ui/button';
 import { ColorProvider, useColor } from '@/hooks/use-color';
+// eslint-disable-next-line import/max-dependencies -- Permitted for the app entry point.
 import { useFavicon } from '@/hooks/use-favicon';
 
 export const links: LinksFunction = () => [
@@ -72,6 +72,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // Wrap your app with ThemeProvider.
 // `specifiedTheme` is the stored theme in the session storage.
 // `themeAction` is the action name that's used to change the theme in the session storage.
+// eslint-disable-next-line import/no-default-export -- Remix requires a default export for pages.
 export default function AppWithProviders({ error }: { error?: ReactNode }) {
   const data = useLoaderData<typeof loader>();
   const [queryClient] = useState(

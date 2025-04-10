@@ -195,6 +195,7 @@ export class LangGraphAdapter {
 
     response.setHeader('x-vercel-ai-data-stream', 'v1');
     pipeDataStreamToResponse(response, {
+      // eslint-disable-next-line sonarjs/cognitive-complexity -- acceptable to keep the function contained.
       execute: async (rawDataStream) => {
         // Create enhanced data stream
         const dataStream = this.createDataStreamWriter(rawDataStream);

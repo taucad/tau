@@ -89,6 +89,10 @@ export default [
       'import/order': 'error',
       'import/prefer-default-export': 'off', // We prefer named exports.
       /* END IMPORT RULES */
+
+      /* SONAR fix/to-do rules - will be addressed before release */
+      'sonarjs/fixme-tag': 'off',
+      'sonarjs/todo-tag': 'off',
     },
     linterOptions: {
       reportUnusedDisableDirectives: 'error',

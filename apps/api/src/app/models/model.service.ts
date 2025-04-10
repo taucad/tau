@@ -2,10 +2,12 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 
 import ollama from 'ollama';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { ChatUsageCost, ChatUsageTokens } from '../chat/chat.schema';
+import { ProviderId } from '../providers/provider.schema';
+import { ProviderService } from '../providers/provider.service';
 import { Model, ModelSupport } from './model.schema';
-import { ChatUsageCost, ChatUsageTokens } from './chat.schema';
-import { ProviderId } from './provider.schema';
-import { ProviderService } from './provider.service';
+
+type StaticProviderId = Exclude<ProviderId, 'ollama'>;
 
 const MODELS = {
   anthropic: {
@@ -239,7 +241,7 @@ const MODELS = {
       },
     },
   },
-} as const satisfies Record<ProviderId, Record<string, Model>>;
+} as const satisfies Record<StaticProviderId, Record<string, Model>>;
 
 @Injectable()
 export class ModelService implements OnModuleInit {

@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 
+import { ModelModule } from '../models/model.module';
 import { ChatController } from './chat.controller';
-import { ModelModule } from './model.module';
 
 @Module({
   imports: [ModelModule],

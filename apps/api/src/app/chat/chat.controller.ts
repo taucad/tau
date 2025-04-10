@@ -6,10 +6,11 @@ import { StateGraph, MessagesAnnotation, END, START, Command } from '@langchain/
 import { convertToCoreMessages, pipeDataStreamToResponse, streamText, UIMessage } from 'ai';
 import { Response } from 'express';
 import { generatePrefixedId, PREFIX_TYPES } from '../utils/id';
-import { convertAiSdkMessagesToLangchainMessages } from '../utils/messages';
-import { ModelService } from './model.service';
-import { nameGenerationSystemPrompt } from './chat-prompt-name';
-import { LangGraphAdapter } from './langgraph-adapter';
+import { ModelService } from '../models/model.service';
+import { convertAiSdkMessagesToLangchainMessages } from './utils/convert-messages';
+import { nameGenerationSystemPrompt } from './prompts/chat-prompt-name';
+// eslint-disable-next-line import/max-dependencies -- // TODO: refactor to be a smaller file
+import { LangGraphAdapter } from './utils/langgraph-adapter';
 
 enum ChatNode {
   Start = START,

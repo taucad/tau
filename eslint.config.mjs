@@ -33,6 +33,7 @@ export default [
           ],
         },
       ],
+      /* TYPESCRIPT RULES */
       // Unused variables result in poor code hygiene and should be removed.
       'no-unused-vars': 'off', // Note: we disable the base rule as it can conflict with the typescript rule.
       '@typescript-eslint/no-unused-vars': 'error',
@@ -42,6 +43,9 @@ export default [
       '@typescript-eslint/no-explicit-any': 'error',
       // Require a description for each ESLint rule comment. This informs co-authors about the rule and why it is being applied.
       '@eslint-community/eslint-comments/require-description': ['error', { ignore: [] }],
+      // Enforce explicit accessibility modifiers for class members to improve readability and maintainability.
+      '@typescript-eslint/explicit-member-accessibility': 'error',
+      /* END TYPESCRIPT RULES */
 
       /* IMPORT RULES */
       // Helpful Warnings

@@ -1,5 +1,11 @@
 import { generateId } from 'ai';
 
+const ID_LENGTH = 21;
+
+function hexToBase64(hex: string, length: number): string {
+  return Buffer.from(hex, 'hex').toString('base64').slice(0, length);
+}
+
 export const PREFIX_TYPES = {
   /**
    * An LLM chat message ID.
@@ -24,8 +30,6 @@ export const PREFIX_TYPES = {
 } as const;
 
 export type PrefixType = (typeof PREFIX_TYPES)[keyof typeof PREFIX_TYPES];
-
-const ID_LENGTH = 21;
 
 /**
  * Generates a base64 encoded prefixed ID
@@ -56,8 +60,4 @@ export function isValidPrefixedId(id: string): boolean {
   if (!id) return false;
   const parts = id.split('_');
   return parts.length === 2 && parts[1].length > 0;
-}
-
-function hexToBase64(hex: string, length: number): string {
-  return Buffer.from(hex, 'hex').toString('base64').slice(0, length);
 }

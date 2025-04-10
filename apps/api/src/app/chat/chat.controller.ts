@@ -1,15 +1,14 @@
 import { Body, Controller, Post, Logger, Res } from '@nestjs/common';
-
 import { SearxngSearch } from '@langchain/community/tools/searxng_search';
 import { openai } from '@ai-sdk/openai';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { StateGraph, MessagesAnnotation, END, START, Command } from '@langchain/langgraph';
-import { ModelService } from './model.service';
 import { convertToCoreMessages, pipeDataStreamToResponse, streamText, UIMessage } from 'ai';
-import { nameGenerationSystemPrompt } from './chat-prompt-name';
+import { Response } from 'express';
 import { generatePrefixedId, PREFIX_TYPES } from '../utils/id';
 import { convertAiSdkMessagesToLangchainMessages } from '../utils/messages';
-import { Response } from 'express';
+import { ModelService } from './model.service';
+import { nameGenerationSystemPrompt } from './chat-prompt-name';
 import { LangGraphAdapter } from './langgraph-adapter';
 
 enum ChatNode {

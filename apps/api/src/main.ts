@@ -8,7 +8,6 @@ import { NestFactory } from '@nestjs/core';
 
 import { urlencoded, json } from 'express';
 import { AppModule } from './app/app.module';
-import { urlencoded, json } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -22,5 +21,4 @@ async function bootstrap() {
   Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`);
 }
 
-// eslint-disable-next-line unicorn/prefer-top-level-await
-bootstrap();
+await bootstrap();

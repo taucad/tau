@@ -25,13 +25,17 @@ export const PREFIX_TYPES = {
 
 export type PrefixType = (typeof PREFIX_TYPES)[keyof typeof PREFIX_TYPES];
 
+const ID_LENGTH = 21;
+
 /**
- * Generates a prefixed ID
+ * Generates a base64 encoded prefixed ID
  * @param prefix - The prefix to use for the ID
  * @returns A string in the format "prefix_<id>"
  */
-export function generatePrefixedId(prefix: PrefixType): string {
-  return `${prefix}_${generateId(21)}`;
+export function generatePrefixedId(prefix: PrefixType, seed?: string): string {
+  // If seed is provided, use it to generate a prefixed ID
+  const idPart = seed ? hexToBase64(seed, ID_LENGTH) : generateId(ID_LENGTH);
+  return `${prefix}_${idPart}`;
 }
 
 /**
@@ -52,4 +56,8 @@ export function isValidPrefixedId(id: string): boolean {
   if (!id) return false;
   const parts = id.split('_');
   return parts.length === 2 && parts[1].length > 0;
+}
+
+function hexToBase64(hex: string, length: number): string {
+  return Buffer.from(hex, 'hex').toString('base64').slice(0, length);
 }

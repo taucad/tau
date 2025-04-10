@@ -5,13 +5,12 @@ import { openai } from '@ai-sdk/openai';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { StateGraph, MessagesAnnotation, END, START, Command } from '@langchain/langgraph';
 import { ModelService } from './model.service';
-import { ChatUsageCost, ChatUsageTokens } from './chat.schema';
-import { convertToCoreMessages, formatDataStreamPart, pipeDataStreamToResponse, streamText, UIMessage } from 'ai';
+import { convertToCoreMessages, pipeDataStreamToResponse, streamText, UIMessage } from 'ai';
 import { nameGenerationSystemPrompt } from './chat-prompt-name';
 import { generatePrefixedId, PREFIX_TYPES } from '../utils/id';
 import { convertAiSdkMessagesToLangchainMessages } from '../utils/messages';
 import { Response } from 'express';
-import { processContent } from './chat.utils';
+import { LangGraphAdapter } from './langgraph-adapter';
 
 enum ChatNode {
   Start = START,
@@ -20,16 +19,11 @@ enum ChatNode {
   Tools = 'tools',
 }
 
-enum ChatEvent {
-  OnChatModelStart = 'on_chat_model_start',
-  OnChatModelEnd = 'on_chat_model_end',
-  OnChatModelStream = 'on_chat_model_stream',
-  OnToolStart = 'on_tool_start',
-  OnToolEnd = 'on_tool_end',
-  OnChainStart = 'on_chain_start',
-  OnChainEnd = 'on_chain_end',
-  OnChainStream = 'on_chain_stream',
-}
+type SearchResult = {
+  title: string;
+  link: string;
+  snippet: string;
+};
 
 type ToolChoice = 'web' | 'none' | 'auto' | 'any';
 
@@ -158,219 +152,70 @@ export class ChatController {
       },
     );
 
-    response.setHeader('x-vercel-ai-data-stream', 'v1');
-    pipeDataStreamToResponse(response, {
-      execute: async (dataStream) => {
-        const id = generatePrefixedId(PREFIX_TYPES.MESSAGE);
-
-        // Keep reasoning state in per-request scope
-        let thinkingBuffer = '';
-        let isReasoning = false;
-        const totalUsageTokens = {
-          inputTokens: 0,
-          outputTokens: 0,
-          cachedReadTokens: 0,
-          cachedWriteTokens: 0,
-        } satisfies ChatUsageTokens;
-        const totalUsageCost = {
-          inputTokensCost: 0,
-          outputTokensCost: 0,
-          cachedReadTokensCost: 0,
-          cachedWriteTokensCost: 0,
-          totalCost: 0,
-        } satisfies ChatUsageCost;
-
-        for await (const streamEvent of eventStream) {
-          Logger.log(`processing event: ${streamEvent.event}`);
-          switch (streamEvent.event) {
-            case ChatEvent.OnChatModelStream: {
-              if (streamEvent.data.chunk.content) {
-                const streamedContent = streamEvent.data.chunk.content;
-
-                if (typeof streamedContent === 'string') {
-                  // Process string content to detect reasoning tags
-                  const processedContent = processContent(streamedContent, thinkingBuffer, isReasoning);
-                  const content = processedContent.content;
-                  const type = processedContent.type;
-                  // Update state after processing
-                  thinkingBuffer = processedContent.buffer;
-                  isReasoning = processedContent.isReasoning;
-
-                  if (content) {
-                    dataStream.write(formatDataStreamPart(type, content));
-                  }
-                } else {
-                  // Handle streaming for "complex" content types, such as Anthropic
-                  if (streamedContent.length > 0) {
-                    for (const part of streamedContent) {
-                      const complexType = part.type;
-                      switch (complexType) {
-                        case 'text': {
-                          if (part.text === undefined) {
-                            throw new Error('Text not found in part: ' + JSON.stringify(part));
-                          } else {
-                            dataStream.write(formatDataStreamPart('text', part.text));
-                          }
-
-                          break;
-                        }
-                        case 'thinking': {
-                          if (part.thinking !== undefined) {
-                            dataStream.write(formatDataStreamPart('reasoning', part.thinking));
-                          } else if (part.signature === undefined) {
-                            throw new Error('Thinking not found in part: ' + JSON.stringify(part));
-                          } else {
-                            dataStream.write(
-                              formatDataStreamPart('reasoning_signature', { signature: part.signature }),
-                            );
-                          }
-
-                          break;
-                        }
-                        case 'redacted_thinking': {
-                          if (part.data === undefined) {
-                            throw new Error('Redacted thinking not found in part: ' + JSON.stringify(part));
-                          } else {
-                            dataStream.write(formatDataStreamPart('redacted_reasoning', { data: part.data }));
-                          }
-
-                          break;
-                        }
-                        case 'input_json_delta':
-                        case 'tool_use': {
-                          // no-op
-                          break;
-                        }
-                        default: {
-                          throw new Error(`Unknown part: ${JSON.stringify(part)}`);
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-
-              break;
+    // Use the LangGraphAdapter to handle the response
+    LangGraphAdapter.toDataStreamResponse(eventStream, {
+      response,
+      modelId,
+      toolTypeMap: TOOL_TYPE_FROM_TOOL_NAME,
+      parseToolResults: {
+        web: (content) => {
+          try {
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Searxng returns a JSON array of search results
+            const results = JSON.parse(`[${content}]`) as SearchResult[];
+            if (!Array.isArray(results)) {
+              Logger.warn('Expected search results to be an array');
+              return [];
             }
-            case ChatEvent.OnChatModelStart: {
-              dataStream.write(
-                formatDataStreamPart('start_step', {
-                  messageId: id,
-                }),
-              );
-
-              break;
-            }
-            case ChatEvent.OnChatModelEnd: {
-              const usageTokens = this.modelService.normalizeUsageTokens(modelId, {
-                inputTokens: streamEvent.data.output.usage_metadata.input_tokens,
-                outputTokens: streamEvent.data.output.usage_metadata.output_tokens,
-                cachedReadTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_read,
-                cachedWriteTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_creation,
-              });
-
-              totalUsageTokens.inputTokens += usageTokens.inputTokens;
-              totalUsageTokens.outputTokens += usageTokens.outputTokens;
-              totalUsageTokens.cachedReadTokens += usageTokens.cachedReadTokens;
-              totalUsageTokens.cachedWriteTokens += usageTokens.cachedWriteTokens;
-
-              const usageCost = this.modelService.getModelCost(modelId, usageTokens);
-
-              totalUsageCost.inputTokensCost += usageCost.inputTokensCost;
-              totalUsageCost.outputTokensCost += usageCost.outputTokensCost;
-              totalUsageCost.cachedReadTokensCost += usageCost.cachedReadTokensCost;
-              totalUsageCost.cachedWriteTokensCost += usageCost.cachedWriteTokensCost;
-              totalUsageCost.totalCost += usageCost.totalCost;
-              dataStream.write(
-                formatDataStreamPart('finish_step', {
-                  finishReason: 'stop',
-                  usage: { promptTokens: usageTokens.inputTokens, completionTokens: usageTokens.outputTokens },
-                  isContinued: false,
-                }),
-              );
-
-              break;
-            }
-            case ChatEvent.OnToolStart: {
-              // an ID unique to the tool call node. Replace `tools:` with known prefix to create a valid tool call ID.
-              const toolCallId = streamEvent.metadata.langgraph_checkpoint_ns
-                .replace('tools:', `${PREFIX_TYPES.TOOL_CALL}_`)
-                // Remove redundant dashes
-                .replaceAll('-', '');
-              dataStream.write(
-                formatDataStreamPart('tool_call', {
-                  toolCallId,
-                  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- all tools are defined in the TOOL_TYPE_FROM_TOOL_NAME object
-                  toolName: TOOL_TYPE_FROM_TOOL_NAME[streamEvent.name as keyof typeof TOOL_TYPE_FROM_TOOL_NAME],
-                  args: streamEvent.data.input,
-                }),
-              );
-              break;
-            }
-            case ChatEvent.OnToolEnd: {
-              // The searxng tool doesn't return the results in a fully structured format, so we need to wrap it in an array and parse it
-              const results = JSON.parse(`[${streamEvent.data.output.content}]`);
-
-              // an ID unique to the tool call node. Replace `tools:` with known prefix to create a valid tool call ID.
-              const toolCallId = streamEvent.metadata.langgraph_checkpoint_ns
-                .replace('tools:', `${PREFIX_TYPES.TOOL_CALL}_`)
-                // Remove redundant dashes
-                .replaceAll('-', '');
-
-              dataStream.write(
-                formatDataStreamPart('tool_result', {
-                  toolCallId,
-                  result: results,
-                }),
-              );
-              for (const result of results) {
-                dataStream.write(
-                  formatDataStreamPart('source', {
-                    title: result.title,
-                    url: result.link,
-                    sourceType: 'url',
-                    id: generatePrefixedId(PREFIX_TYPES.SOURCE),
-                    providerMetadata: {
-                      snippet: result.snippet,
-                    },
-                  }),
-                );
-              }
-              break;
-            }
-            case ChatEvent.OnChainStart:
-            case ChatEvent.OnChainStream:
-            case ChatEvent.OnChainEnd: {
-              // These events are not supported by the AI SDK, so we don't need to handle them
-              break;
-            }
-            default: {
-              Logger.error(`Unknown event: ${streamEvent.event}`);
-            }
+            return results;
+          } catch (error) {
+            Logger.error('Failed to parse search results', error);
+            return [];
           }
-        }
-        dataStream.write(
-          formatDataStreamPart('message_annotations', [
+        },
+      },
+      callbacks: {
+        // onToolEnd: (dataStream, toolCallId, toolName, results) => {
+        //   // Generate sources from the results
+        //   const searchResults = results as SearchResult[];
+        //   for (const result of searchResults) {
+        //     // Type check for required properties
+        //     if (!result.title || !result.link || !result.snippet) {
+        //       Logger.warn('Incomplete search result detected:', result);
+        //       continue;
+        //     }
+
+        //     dataStream.writePart('source', {
+        //       title: result.title,
+        //       url: result.link,
+        //       sourceType: 'url',
+        //       id: generatePrefixedId(PREFIX_TYPES.SOURCE),
+        //       providerMetadata: {
+        //         snippet: result.snippet,
+        //       },
+        //     });
+        //   }
+        // },
+        onMessageComplete: ({ dataStream, modelId, usageTokens }) => {
+          // Normalize the usage tokens
+          const normalizedUsageTokens = this.modelService.normalizeUsageTokens(modelId, usageTokens);
+
+          // Get the cost
+          const usageCost = this.modelService.getModelCost(modelId, normalizedUsageTokens);
+
+          // Write message annotations with usage and cost information
+          dataStream.writePart('message_annotations', [
             {
               type: 'usage',
-              usageCost: totalUsageCost,
-              usageTokens: totalUsageTokens,
+              usageCost,
+              usageTokens: normalizedUsageTokens,
               model: modelId,
             },
-          ]),
-        );
-
-        dataStream.write(
-          formatDataStreamPart('finish_message', {
-            finishReason: 'stop',
-            usage: { promptTokens: totalUsageTokens.inputTokens, completionTokens: totalUsageTokens.outputTokens },
-          }),
-        );
-      },
-      onError(error) {
-        // TODO: log request id
-        Logger.error(error);
-        return 'An error occurred while processing the request';
+          ]);
+        },
+        onError: (error) => {
+          Logger.error('Error in chat stream:', error);
+          return 'An error occurred while processing the request';
+        },
       },
     });
   }

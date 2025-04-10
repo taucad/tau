@@ -62,11 +62,11 @@ export const PROVIDERS: {
 
 @Injectable()
 export class ProviderService {
-  getProvider(providerId: ProviderId): Provider {
+  public getProvider(providerId: ProviderId): Provider {
     return PROVIDERS[providerId];
   }
 
-  createModelClass<T extends ProviderId>(providerId: T, options: ProviderOptionsMap[T]): BaseChatModel {
+  public createModelClass<T extends ProviderId>(providerId: T, options: ProviderOptionsMap[T]): BaseChatModel {
     const provider = PROVIDERS[providerId];
     return provider.createClass(options);
   }

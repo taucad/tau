@@ -281,8 +281,6 @@ const PROVIDERS = {
   },
 } as const satisfies Record<string, ModelProvider & { createClass: (options: never) => BaseChatModel }>;
 
-const ollamaToolSupportFamilies = new Set(['llama']);
-
 type ProviderId = keyof typeof PROVIDERS;
 
 @Injectable()
@@ -369,39 +367,45 @@ export class ModelService implements OnModuleInit {
   private async getOllamaModels(): Promise<Model[]> {
     try {
       const ollamaModels = await ollama.list();
-      const ollamaModelList: Model[] = ollamaModels.models.map((model) => ({
-        id: model.name,
-        name: model.name,
-        model: model.name,
-        modifiedAt: String(model.modified_at),
-        size: model.size,
-        digest: model.digest,
-        details: {
-          parentModel: model.details.parent_model,
-          format: model.details.format,
-          family: model.details.family,
-          families: model.details.families,
-          parameterSize: model.details.parameter_size,
-          quantizationLevel: model.details.quantization_level,
-          contextWindow: 200_000,
-          maxTokens: 100_000,
-          cost: {
-            inputTokens: 0,
-            outputTokens: 0,
-            cachedReadTokens: 0,
-            cachedWriteTokens: 0,
-          },
-        },
-        configuration: {
-          streaming: true,
-          temperature: 0,
-        },
-        support: {
-          tools: ollamaToolSupportFamilies.has(model.details.family),
-          toolChoice: false,
-        },
-        provider: 'ollama',
-      }));
+      const ollamaModelList: Model[] = await Promise.all(
+        ollamaModels.models.map(async (model) => {
+          const fullModel = await ollama.show({ model: model.model });
+          return {
+            id: model.name,
+            name: model.name,
+            model: model.name,
+            modifiedAt: String(model.modified_at),
+            size: model.size,
+            digest: model.digest,
+            details: {
+              parentModel: model.details.parent_model,
+              format: model.details.format,
+              family: model.details.family,
+              families: model.details.families,
+              parameterSize: model.details.parameter_size,
+              quantizationLevel: model.details.quantization_level,
+              contextWindow: 200_000,
+              maxTokens: 100_000,
+              cost: {
+                inputTokens: 0,
+                outputTokens: 0,
+                cachedReadTokens: 0,
+                cachedWriteTokens: 0,
+              },
+            },
+            configuration: {
+              streaming: true,
+              temperature: 0,
+            },
+            support: {
+              // Rudimentary tool support detection until Ollama exposes a better API
+              tools: fullModel.template.includes('.Tools'),
+              toolChoice: false,
+            },
+            provider: 'ollama',
+          };
+        }),
+      );
 
       return ollamaModelList;
     } catch (error) {

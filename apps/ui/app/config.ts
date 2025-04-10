@@ -1,27 +1,39 @@
 /**
  * Environment variable loader for the server.
  *
- * TODO: add validation
+ * Uses Zod for validation
  */
+import { z, infer as ZodInfer } from 'zod';
+
+// Define the schema for environment variables
+const environmentSchema = z.object({
+  TAU_API_URL: z.string().url(),
+  NODE_ENV: z.enum(['development', 'production', 'test']),
+});
+
 export const getEnvironment = () => {
-  return {
+  const environment = {
     TAU_API_URL: process.env.TAU_API_URL,
     NODE_ENV: process.env.NODE_ENV,
     // Add any other environment variables you need
-  } as const;
+  };
+
+  // Validate the environment variables
+  const result = environmentSchema.safeParse(environment);
+
+  if (!result.success) {
+    const formattedError = result.error.flatten().fieldErrors;
+    const errorMessage = `Invalid environment configuration: ${JSON.stringify(formattedError)}`;
+    console.error(errorMessage);
+    throw new Error(errorMessage);
+  }
+
+  return result.data;
 };
 
-type Environment = ReturnType<typeof getEnvironment>;
+export type Environment = ZodInfer<typeof environmentSchema>;
 
-// Extend the global Window interface
-declare global {
-  interface Window {
-    ENV: Environment;
-  }
-}
-
-// eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- The env is always injected via root.tsx
-export const ENV = (globalThis.window ? globalThis.window.ENV : process.env) as Environment;
+export const ENV = globalThis.window ? globalThis.window.ENV : process.env;
 
 /**
  * Meta config. Contains infrequently changing information about the app.

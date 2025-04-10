@@ -1,12 +1,11 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 
-import { Model, ModelProvider, ModelSupport } from './model.schema';
-import { ChatOllama, ChatOllamaInput } from '@langchain/ollama';
-import { ChatOpenAI, ChatOpenAIFields } from '@langchain/openai';
-import { ChatAnthropic, type ChatAnthropicCallOptions } from '@langchain/anthropic';
 import ollama from 'ollama';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { Model, ModelSupport } from './model.schema';
 import { ChatUsageCost, ChatUsageTokens } from './chat.schema';
+import { ProviderId } from './provider.schema';
+import { ProviderService } from './provider.service';
 
 const MODELS = {
   anthropic: {
@@ -240,52 +239,13 @@ const MODELS = {
       },
     },
   },
-} as const satisfies Record<string, Record<string, Model>>;
-
-const PROVIDERS = {
-  openai: {
-    provider: 'openai',
-    configuration: {},
-    inputTokensIncludesCachedReadTokens: true,
-    createClass: (options: ChatOpenAIFields) => new ChatOpenAI(options),
-  },
-  ollama: {
-    provider: 'ollama',
-    configuration: {
-      baseURL: 'http://localhost:11434',
-    },
-    inputTokensIncludesCachedReadTokens: false,
-    createClass: (options: ChatOllamaInput) => new ChatOllama(options),
-  },
-  sambanova: {
-    provider: 'sambanova',
-    configuration: {
-      apiKey: process.env.SAMBA_API_KEY as string,
-      baseURL: 'https://api.sambanova.ai/v1',
-    },
-    inputTokensIncludesCachedReadTokens: false,
-    createClass: (options: ChatOpenAIFields) => new ChatOpenAI(options),
-  },
-  anthropic: {
-    provider: 'anthropic',
-    configuration: {
-      apiKey: process.env.ANTHROPIC_API_KEY as string,
-    },
-    inputTokensIncludesCachedReadTokens: false,
-    createClass: (options: ChatAnthropicCallOptions) =>
-      new ChatAnthropic({
-        ...options,
-        anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-        maxRetries: 2,
-      }),
-  },
-} as const satisfies Record<string, ModelProvider & { createClass: (options: never) => BaseChatModel }>;
-
-type ProviderId = keyof typeof PROVIDERS;
+} as const satisfies Record<ProviderId, Record<string, Model>>;
 
 @Injectable()
 export class ModelService implements OnModuleInit {
   public models: Model[] = [];
+
+  constructor(private readonly providerService: ProviderService) {}
 
   async onModuleInit() {
     await this.getModels();
@@ -305,9 +265,9 @@ export class ModelService implements OnModuleInit {
 
     if (!modelConfig) throw new Error(`Could not find model ${modelId}`);
 
-    const provider = PROVIDERS[modelConfig.provider as ProviderId];
+    const provider = this.providerService.getProvider(modelConfig.provider);
 
-    const modelClass = provider.createClass({
+    const modelClass = this.providerService.createModelClass(modelConfig.provider, {
       model: modelConfig.model,
       ...modelConfig.configuration,
       configuration: provider.configuration,
@@ -323,13 +283,12 @@ export class ModelService implements OnModuleInit {
     const modelConfig = this.models.find((model) => model.id === modelId);
     if (!modelConfig) throw new Error(`Could not find model ${modelId}`);
 
-    const providerConfig = PROVIDERS[modelConfig.provider as ProviderId];
+    const provider = this.providerService.getProvider(modelConfig.provider);
 
     return {
       // Some providers include cached read tokens in the input tokens,
       // so we need to subtract them if necessary.
-      inputTokens:
-        usage.inputTokens - (providerConfig.inputTokensIncludesCachedReadTokens ? usage.cachedReadTokens : 0),
+      inputTokens: usage.inputTokens - (provider.inputTokensIncludesCachedReadTokens ? usage.cachedReadTokens : 0),
       outputTokens: usage.outputTokens,
       cachedReadTokens: usage.cachedReadTokens ?? 0,
       cachedWriteTokens: usage.cachedWriteTokens ?? 0,

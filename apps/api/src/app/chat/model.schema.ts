@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { providerIdSchema } from './provider.schema';
 
 export const ModelSupportSchema = z.object({
   tools: z.boolean().describe('Whether the model supports tools'),
@@ -41,24 +42,12 @@ export const ModelSchema = z.object({
   modifiedAt: z.string().describe('The modified at of the model').optional(),
   size: z.number().describe('The size of the model in bytes').optional(),
   digest: z.string().describe('The digest hash of the model').optional(),
-  provider: z.string().describe('The provider of the model'),
+  provider: providerIdSchema,
   details: ModelDetailsSchema,
   configuration: ModelConfigurationSchema,
   support: ModelSupportSchema.optional(),
 });
 
-export const ModelProviderSchema = z.object({
-  provider: z.string().describe('The provider of the model'),
-  inputTokensIncludesCachedReadTokens: z.boolean().describe('Whether the input tokens include cached read tokens'),
-  configuration: z
-    .object({
-      apiKey: z.string().describe('The API key of the provider').optional(),
-      baseURL: z.string().describe('The base URL of the provider').optional(),
-    })
-    .describe('The configuration of the provider'),
-});
-
 export type Model = z.infer<typeof ModelSchema>;
 export type ModelDetails = z.infer<typeof ModelDetailsSchema>;
-export type ModelProvider = z.infer<typeof ModelProviderSchema>;
 export type ModelSupport = z.infer<typeof ModelSupportSchema>;

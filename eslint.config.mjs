@@ -1,7 +1,7 @@
 import nx from '@nx/eslint-plugin';
 import eslintPluginUnicorn from 'eslint-plugin-unicorn';
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
-import eslintComments from '@eslint-community/eslint-plugin-eslint-comments/configs';
+import eslintPluginComments from '@eslint-community/eslint-plugin-eslint-comments/configs';
 
 export default [
   ...nx.configs['flat/base'],
@@ -9,7 +9,7 @@ export default [
   ...nx.configs['flat/javascript'],
   ...nx.configs['flat/react'],
   eslintPluginUnicorn.configs['flat/all'],
-  eslintComments.recommended,
+  eslintPluginComments.recommended,
   eslintPluginPrettierRecommended,
   {
     ignores: ['**/dist'],

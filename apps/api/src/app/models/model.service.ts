@@ -247,9 +247,9 @@ const MODELS = {
 export class ModelService implements OnModuleInit {
   public models: Model[] = [];
 
-  constructor(private readonly providerService: ProviderService) {}
+  public constructor(private readonly providerService: ProviderService) {}
 
-  async onModuleInit() {
+  public async onModuleInit() {
     await this.getModels();
     Logger.log(`Loaded ${this.models.length} models`);
   }

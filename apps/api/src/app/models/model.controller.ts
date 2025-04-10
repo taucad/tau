@@ -3,7 +3,7 @@ import { ModelService } from './model.service';
 
 @Controller('models')
 export class ModelController {
-  constructor(private readonly modelService: ModelService) {}
+  public constructor(private readonly modelService: ModelService) {}
 
   @Get()
   public async getModels() {

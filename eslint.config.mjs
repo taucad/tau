@@ -58,6 +58,8 @@ export default [
       // This ensures that the compiler receives a hint to discard type values when they are present in export statements,
       // alongside explicit, uniform export styles.
       '@typescript-eslint/consistent-type-exports': ['error', { fixMixedExportsWithInlineTypeSpecifier: true }],
+      // Enforce types to appear on the constructor of a class.
+      '@typescript-eslint/consistent-generic-constructors': ['error', 'constructor'],
       /* END TYPESCRIPT RULES */
 
       /* IMPORT RULES */

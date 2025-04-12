@@ -2,6 +2,18 @@
   "mcpServers": {
     "nx-mcp": {
       "url": "http://localhost:9953/sse"
+    },
+    "langgraph-docs-mcp": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mcpdoc",
+        "mcpdoc",
+        "--urls",
+        "LangGraph:https://langchain-ai.github.io/langgraphjs/llms.txt LangChain:https://js.langchain.com/llms.txt",
+        "--transport",
+        "stdio"
+      ]
     }
   }
 }

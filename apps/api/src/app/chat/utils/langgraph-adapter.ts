@@ -150,15 +150,28 @@ export interface LangGraphAdapterCallbacks {
  * Options for the LangGraphAdapter.
  */
 export interface LangGraphAdapterOptions {
-  /** The server response object to write to. */
+  /**
+   * The server response object to write to.
+   */
   response: ServerResponse;
   /** The ID of the model being used. */
   modelId: string;
-  /** Optional callbacks for different events. */
+  /**
+   * Optional callbacks for different events.
+   *
+   * The callbacks are called when the corresponding event is emitted by LangGraph.
+   */
   callbacks?: LangGraphAdapterCallbacks;
-  /** Optional mapping of tool names to display names. */
+  /**
+   * Optional mapping of LangChain tool names to display names.
+   *
+   * The display names are shown in the UI instead of the tool names.
+   */
   toolTypeMap?: Record<string, string>;
-  /** Optional parsers for tool results by tool name. */
+  /**
+   * Optional parsers for tool results by tool name. This can be helpful
+   * when the tool results are not in the expected format.
+   */
   parseToolResults?: Partial<Record<string, (content: string) => unknown[]>>;
 }
 

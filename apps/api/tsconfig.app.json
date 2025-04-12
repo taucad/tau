@@ -4,7 +4,6 @@
     "outDir": "../../dist/out-tsc",
     "module": "ESNext",
     "types": ["node"],
-    "emitDecoratorMetadata": true,
     "target": "ESNext"
   },
   "include": ["src/**/*.ts"],

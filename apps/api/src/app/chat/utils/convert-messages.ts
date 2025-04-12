@@ -38,7 +38,8 @@ export const convertAiSdkMessagesToLangchainMessages: (
         throw new TypeError('Core message content is not an array');
       }
 
-      return new HumanMessage({
+      return [
+        new HumanMessage({
         content: [
           // Map attachments to images.
           // Images always come first as the LLM is more performant when receiving images first.
@@ -49,7 +50,8 @@ export const convertAiSdkMessagesToLangchainMessages: (
           // Remove all the images from the core message content.
           ...coreMessageContent.filter((part) => part.type !== 'image'),
         ],
-      });
+        }),
+      ];
     }
 
     // Handle tool messages which contain array `content`, the `content` must instead be a string.
@@ -73,7 +75,8 @@ export const convertAiSdkMessagesToLangchainMessages: (
       // Langchain handles tool calls on a separate property.
       const toolCalls = coreMessage.content.filter((part) => part.type === 'tool-call');
 
-      return new AIMessage({
+      return [
+        new AIMessage({
         // Tool calls need to be handled on a separate property alongside the content.
         // This is a necessary duplication of data as required by Langchain.
         tool_calls: toolCalls.flatMap((part) => ({
@@ -132,13 +135,16 @@ export const convertAiSdkMessagesToLangchainMessages: (
           const exhaustiveCheck: never = part;
           throw new Error(`Unknown part type: ${exhaustiveCheck}`);
         }),
-      });
+        }),
+      ];
     }
 
     if (coreMessage.role === 'system') {
-      return new SystemMessage({
+      return [
+        new SystemMessage({
         content: coreMessage.content,
-      });
+        }),
+      ];
     }
 
     const exhaustiveCheck: never = coreMessage;

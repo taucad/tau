@@ -4,6 +4,9 @@ import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
 import eslintPluginSonarjs from 'eslint-plugin-sonarjs';
 import eslintPluginComments from '@eslint-community/eslint-plugin-eslint-comments/configs';
 
+/**
+ * @type {import('eslint').Linter.Config[]}
+ */
 export default [
   ...nx.configs['flat/base'],
   ...nx.configs['flat/typescript'],

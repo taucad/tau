@@ -60,6 +60,9 @@ export default [
       '@typescript-eslint/consistent-type-exports': ['error', { fixMixedExportsWithInlineTypeSpecifier: true }],
       // Enforce types to appear on the constructor of a class.
       '@typescript-eslint/consistent-generic-constructors': ['error', 'constructor'],
+      // Enforce that arrays always use `Array<T>` syntax. This is more readable in human voice as "array of T".
+      // The exception is when types which are just primitive names or type references are used.
+      '@typescript-eslint/array-type': ['error', { default: 'array-simple' }],
       /* END TYPESCRIPT RULES */
 
       /* IMPORT RULES */

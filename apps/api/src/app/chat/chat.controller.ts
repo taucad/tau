@@ -4,7 +4,7 @@ import { Response } from 'express';
 import { generatePrefixedId, PREFIX_TYPES } from '../utils/id';
 import { convertAiSdkMessagesToLangchainMessages } from './utils/convert-messages';
 import { LangGraphAdapter } from './utils/langgraph-adapter';
-import { ChatService, CreateChatBody, ToolChoice, TOOL_TYPE_FROM_TOOL_NAME } from './chat.service';
+import { ChatService, CreateChatBody, ToolChoice, TOOL_CHOICE_FROM_TOOL_NAME, TOOL_CHOICE } from './chat.service';
 
 @Controller('chat')
 export class ChatController {
@@ -56,9 +56,9 @@ export class ChatController {
     LangGraphAdapter.toDataStreamResponse(eventStream, {
       response,
       modelId,
-      toolTypeMap: TOOL_TYPE_FROM_TOOL_NAME,
+      toolTypeMap: TOOL_CHOICE_FROM_TOOL_NAME,
       parseToolResults: {
-        web: (content) => this.chatService.parseWebResults(content),
+        [TOOL_CHOICE.WEB]: (content) => this.chatService.parseWebResults(content),
       },
       callbacks: this.chatService.getCallbacks(modelId),
     });

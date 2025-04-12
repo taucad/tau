@@ -21,14 +21,21 @@ type WebResult = {
   snippet: string;
 };
 
-const TEXT_FROM_HINT = {
-  web: SearxngSearch.prototype.name,
-  none: 'none',
-  auto: 'auto',
-  any: 'any',
-} as const;
+export const TOOL_CHOICE = {
+  WEB: 'web',
+  NONE: 'none',
+  AUTO: 'auto',
+  ANY: 'any',
+} as const satisfies Record<string, string>;
 
-export type ToolChoice = 'web' | 'none' | 'auto' | 'any';
+export type ToolChoice = (typeof TOOL_CHOICE)[keyof typeof TOOL_CHOICE];
+
+export const TOOL_NAME_FROM_TOOL_CHOICE = {
+  [TOOL_CHOICE.WEB]: SearxngSearch.name,
+  [TOOL_CHOICE.NONE]: 'none',
+  [TOOL_CHOICE.AUTO]: 'auto',
+  [TOOL_CHOICE.ANY]: 'any',
+} as const satisfies Record<ToolChoice, string>;
 
 export type CreateChatBody = {
   messages: (UIMessage & {
@@ -38,9 +45,9 @@ export type CreateChatBody = {
   })[];
 };
 
-export const TOOL_TYPE_FROM_TOOL_NAME = {
-  [SearxngSearch.name]: 'web',
-} as const;
+export const TOOL_CHOICE_FROM_TOOL_NAME = {
+  [SearxngSearch.name]: TOOL_CHOICE.WEB,
+} as const satisfies Record<string, ToolChoice>;
 
 @Injectable()
 export class ChatService {
@@ -55,7 +62,12 @@ export class ChatService {
   }
 
   public createGraph(modelId: string, toolChoice: ToolChoice) {
-    const resolvedToolChoice = TEXT_FROM_HINT[toolChoice];
+    const resolvedToolChoice = TOOL_NAME_FROM_TOOL_CHOICE[toolChoice];
+
+    Logger.log({
+      prototypeName: SearxngSearch.prototype.name,
+      name: SearxngSearch.name,
+    });
 
     // Define the tools for the agent to use
     const tools = [
@@ -83,6 +95,8 @@ export class ChatService {
     async function agent(state: typeof MessagesAnnotation.State) {
       const message = await model.invoke(state.messages);
 
+      // If the message has tool calls, go to the tools node
+      // Otherwise go to the end node
       const gotoNode = message.tool_calls && message.tool_calls.length > 0 ? ChatNode.Tools : ChatNode.End;
 
       return new Command({ update: { messages: [message] }, goto: gotoNode });

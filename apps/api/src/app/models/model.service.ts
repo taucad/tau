@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleInit } from '@nestjs/common';
 import ollama from 'ollama';
-import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
 import type { ChatUsageCost, ChatUsageTokens } from '../chat/chat.schema';
 import type { ProviderId } from '../providers/provider.schema';

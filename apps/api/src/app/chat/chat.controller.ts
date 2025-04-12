@@ -58,7 +58,7 @@ export class ChatController {
       modelId,
       toolTypeMap: TOOL_TYPE_FROM_TOOL_NAME,
       parseToolResults: {
-        web: (content) => this.chatService.parseSearchResults(content),
+        web: (content) => this.chatService.parseWebResults(content),
       },
       callbacks: this.chatService.getCallbacks(modelId),
     });

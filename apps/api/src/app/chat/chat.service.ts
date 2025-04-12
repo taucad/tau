@@ -15,7 +15,7 @@ enum ChatNode {
   Tools = 'tools',
 }
 
-type SearchResult = {
+type WebResult = {
   title: string;
   link: string;
   snippet: string;
@@ -98,17 +98,16 @@ export class ChatService {
     return workflow.compile();
   }
 
-  public parseSearchResults(content: string): SearchResult[] {
+  public parseWebResults(content: string): WebResult[] {
     try {
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- safe to assert
-      const results = JSON.parse(`[${content}]`) as SearchResult[];
+      const results = JSON.parse(`[${content}]`);
       if (!Array.isArray(results)) {
-        Logger.warn('Expected search results to be an array');
+        Logger.warn('Expected web results to be an array');
         return [];
       }
       return results;
     } catch (error) {
-      Logger.error('Failed to parse search results', error);
+      Logger.error('Failed to parse web results', error);
       return [];
     }
   }

@@ -1,5 +1,5 @@
 import { generateId } from 'ai';
-import { PrefixType } from './constants';
+import type { PrefixType } from './constants';
 
 /**
  * Generates a prefixed ID

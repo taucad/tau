@@ -45,6 +45,19 @@ export default [
       '@eslint-community/eslint-comments/require-description': ['error', { ignore: [] }],
       // Enforce explicit accessibility modifiers for class members to improve readability and maintainability.
       '@typescript-eslint/explicit-member-accessibility': 'error',
+      // Enforce that the `type` keyword is used when importing types, e.g. `import { type Foo } from './foo'`.
+      // This ensures the compiler receives a hint to discard type values when they are present in import statements,
+      // alongside explicit, uniform import styles.
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
+      ],
+      // Ensure that import type side effects are prevented when using `verbatimModuleSyntax: true`.
+      '@typescript-eslint/no-import-type-side-effects': 'error',
+      // Ensure that `type` exports are used when exporting types, e.g. `export type { Foo } from './foo'`.
+      // This ensures that the compiler receives a hint to discard type values when they are present in export statements,
+      // alongside explicit, uniform export styles.
+      '@typescript-eslint/consistent-type-exports': ['error', { fixMixedExportsWithInlineTypeSpecifier: true }],
       /* END TYPESCRIPT RULES */
 
       /* IMPORT RULES */
@@ -75,7 +88,7 @@ export default [
       'import/no-useless-path-segments': 'error',
       'import/no-webpack-loader-syntax': 'off', // Disabled as we don't use webpack.
       // Style
-      'import/consistent-type-specifier-style': ['error', 'prefer-inline'],
+      'import/consistent-type-specifier-style': ['error', 'prefer-top-level'],
       'import/dynamic-import-chunkname': 'off', // Disabled as we don't use dynamic imports.
       'import/exports-last': 'error',
       'import/extensions': 'off', // This rule is difficult to configure correctly given the vast number of extensions. Reconsider later.
@@ -99,7 +112,14 @@ export default [
       'sonarjs/todo-tag': 'off',
     },
     linterOptions: {
+      // Ensure that unused eslint-disable directives are reported as errors so they can be removed.
       reportUnusedDisableDirectives: 'error',
+    },
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
   },
   {

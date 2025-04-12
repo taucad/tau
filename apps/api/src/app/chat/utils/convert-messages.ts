@@ -1,5 +1,6 @@
-import { AIMessage, BaseMessageLike, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
-import { CoreMessage, Message } from 'ai';
+import type { BaseMessageLike } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
+import type { CoreMessage, Message } from 'ai';
 
 /**
  * Convert a list of UI messages to a list of Langchain messages.
@@ -40,16 +41,16 @@ export const convertAiSdkMessagesToLangchainMessages: (
 
       return [
         new HumanMessage({
-        content: [
-          // Map attachments to images.
-          // Images always come first as the LLM is more performant when receiving images first.
-          ...(correspondingUiMessage.experimental_attachments?.map((attachment) => ({
-            type: 'image_url',
-            image_url: { url: attachment.url },
-          })) ?? []),
-          // Remove all the images from the core message content.
-          ...coreMessageContent.filter((part) => part.type !== 'image'),
-        ],
+          content: [
+            // Map attachments to images.
+            // Images always come first as the LLM is more performant when receiving images first.
+            ...(correspondingUiMessage.experimental_attachments?.map((attachment) => ({
+              type: 'image_url',
+              image_url: { url: attachment.url },
+            })) ?? []),
+            // Remove all the images from the core message content.
+            ...coreMessageContent.filter((part) => part.type !== 'image'),
+          ],
         }),
       ];
     }
@@ -77,64 +78,64 @@ export const convertAiSdkMessagesToLangchainMessages: (
 
       return [
         new AIMessage({
-        // Tool calls need to be handled on a separate property alongside the content.
-        // This is a necessary duplication of data as required by Langchain.
-        tool_calls: toolCalls.flatMap((part) => ({
-          name: part.toolName,
-          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- part.args should be typed as a Record.
-          args: part.args as Record<string, unknown>,
-          id: part.toolCallId,
-          type: 'tool_call',
-        })),
-        content: coreMessage.content.map((part) => {
-          if (part.type === 'text') {
-            return {
-              type: 'text',
-              text: part.text,
-              ...part.providerOptions,
-            };
-          }
+          // Tool calls need to be handled on a separate property alongside the content.
+          // This is a necessary duplication of data as required by Langchain.
+          tool_calls: toolCalls.flatMap((part) => ({
+            name: part.toolName,
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- part.args should be typed as a Record.
+            args: part.args as Record<string, unknown>,
+            id: part.toolCallId,
+            type: 'tool_call',
+          })),
+          content: coreMessage.content.map((part) => {
+            if (part.type === 'text') {
+              return {
+                type: 'text',
+                text: part.text,
+                ...part.providerOptions,
+              };
+            }
 
-          if (part.type === 'reasoning') {
-            // Many LLMs do not support a `thinking` type, but we still want to preserve the previous thinking for better context.
-            // For simplicity, we wrap it in a <thinking> tag instead and use the `text` type.
-            return {
-              type: 'text',
-              text: `<thinking>${part.text}</thinking>`,
-              ...part.providerOptions,
-            };
-          }
+            if (part.type === 'reasoning') {
+              // Many LLMs do not support a `thinking` type, but we still want to preserve the previous thinking for better context.
+              // For simplicity, we wrap it in a <thinking> tag instead and use the `text` type.
+              return {
+                type: 'text',
+                text: `<thinking>${part.text}</thinking>`,
+                ...part.providerOptions,
+              };
+            }
 
-          if (part.type === 'redacted-reasoning') {
-            // Similar to the `reasoning type`, redacted reasoning is not supported by many LLMs.
-            // To preserve the previous thinking for better context, we wrap it in a <redacted-thinking> tag instead and use the `text` type.
-            return {
-              type: 'text',
-              text: `<redacted-thinking>${part.data}</redacted-thinking>`,
-              ...part.providerOptions,
-            };
-          }
+            if (part.type === 'redacted-reasoning') {
+              // Similar to the `reasoning type`, redacted reasoning is not supported by many LLMs.
+              // To preserve the previous thinking for better context, we wrap it in a <redacted-thinking> tag instead and use the `text` type.
+              return {
+                type: 'text',
+                text: `<redacted-thinking>${part.data}</redacted-thinking>`,
+                ...part.providerOptions,
+              };
+            }
 
-          if (part.type === 'file') {
-            return {
-              type: 'document',
-              source: part.data,
-              ...part.providerOptions,
-            };
-          }
+            if (part.type === 'file') {
+              return {
+                type: 'document',
+                source: part.data,
+                ...part.providerOptions,
+              };
+            }
 
-          if (part.type === 'tool-call') {
-            return {
-              type: 'tool_use',
-              name: part.toolName,
-              id: part.toolCallId,
-              input: JSON.stringify(part.args),
-            };
-          }
+            if (part.type === 'tool-call') {
+              return {
+                type: 'tool_use',
+                name: part.toolName,
+                id: part.toolCallId,
+                input: JSON.stringify(part.args),
+              };
+            }
 
-          const exhaustiveCheck: never = part;
-          throw new Error(`Unknown part type: ${exhaustiveCheck}`);
-        }),
+            const exhaustiveCheck: never = part;
+            throw new Error(`Unknown part type: ${exhaustiveCheck}`);
+          }),
         }),
       ];
     }
@@ -142,7 +143,7 @@ export const convertAiSdkMessagesToLangchainMessages: (
     if (coreMessage.role === 'system') {
       return [
         new SystemMessage({
-        content: coreMessage.content,
+          content: coreMessage.content,
         }),
       ];
     }

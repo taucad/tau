@@ -3,17 +3,18 @@ import { SearxngSearch } from '@langchain/community/tools/searxng_search';
 import { openai } from '@ai-sdk/openai';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { StateGraph, MessagesAnnotation, END, START, Command } from '@langchain/langgraph';
-import { CoreMessage, streamText, UIMessage } from 'ai';
+import { streamText } from 'ai';
+import type { CoreMessage, UIMessage } from 'ai';
 import { ModelService } from '../models/model.service';
 import { nameGenerationSystemPrompt } from './prompts/chat-prompt-name';
-import { LangGraphAdapterCallbacks } from './utils/langgraph-adapter';
+import type { LangGraphAdapterCallbacks } from './utils/langgraph-adapter';
 
-enum ChatNode {
-  Start = START,
-  End = END,
-  Agent = 'agent',
-  Tools = 'tools',
-}
+const CHAT_NODE = {
+  Start: START,
+  End: END,
+  Agent: 'agent',
+  Tools: 'tools',
+} as const satisfies Record<string, string>;
 
 type WebResult = {
   title: string;
@@ -97,17 +98,17 @@ export class ChatService {
 
       // If the message has tool calls, go to the tools node
       // Otherwise go to the end node
-      const gotoNode = message.tool_calls && message.tool_calls.length > 0 ? ChatNode.Tools : ChatNode.End;
+      const gotoNode = message.tool_calls && message.tool_calls.length > 0 ? CHAT_NODE.Tools : CHAT_NODE.End;
 
       return new Command({ update: { messages: [message] }, goto: gotoNode });
     }
 
     // Define a new graph
     const workflow = new StateGraph(MessagesAnnotation)
-      .addNode(ChatNode.Agent, agent, { ends: [ChatNode.Tools, ChatNode.End] })
-      .addNode(ChatNode.Tools, toolNode)
-      .addEdge(ChatNode.Tools, ChatNode.Agent)
-      .addEdge(ChatNode.Start, ChatNode.Agent);
+      .addNode(CHAT_NODE.Agent, agent, { ends: [CHAT_NODE.Tools, CHAT_NODE.End] })
+      .addNode(CHAT_NODE.Tools, toolNode)
+      .addEdge(CHAT_NODE.Tools, CHAT_NODE.Agent)
+      .addEdge(CHAT_NODE.Start, CHAT_NODE.Agent);
 
     return workflow.compile();
   }

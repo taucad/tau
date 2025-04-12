@@ -1,11 +1,13 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-
+import { Injectable, Logger } from '@nestjs/common';
+import type { OnModuleInit } from '@nestjs/common';
 import ollama from 'ollama';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { ChatUsageCost, ChatUsageTokens } from '../chat/chat.schema';
-import { ProviderId } from '../providers/provider.schema';
+
+import type { ChatUsageCost, ChatUsageTokens } from '../chat/chat.schema';
+import type { ProviderId } from '../providers/provider.schema';
 import { ProviderService } from '../providers/provider.service';
-import { Model, ModelSupport } from './model.schema';
+
+import type { Model, ModelSupport } from './model.schema';
 
 type StaticProviderId = Exclude<ProviderId, 'ollama'>;
 

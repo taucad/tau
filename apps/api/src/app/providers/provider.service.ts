@@ -1,9 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { ChatOpenAI, ChatOpenAIFields } from '@langchain/openai';
-import { ChatOllama, ChatOllamaInput } from '@langchain/ollama';
-import { ChatAnthropic, type ChatAnthropicCallOptions } from '@langchain/anthropic';
+import { ChatOpenAI } from '@langchain/openai';
+import type { ChatOpenAIFields } from '@langchain/openai';
+import { ChatOllama } from '@langchain/ollama';
+import type { ChatOllamaInput } from '@langchain/ollama';
+import { ChatAnthropic } from '@langchain/anthropic';
+import type { ChatAnthropicCallOptions } from '@langchain/anthropic';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { ProviderId, Provider } from './provider.schema';
+import type { ProviderId, Provider } from './provider.schema';
 
 // Type for mapping provider IDs to their option types
 type ProviderOptionsMap = {

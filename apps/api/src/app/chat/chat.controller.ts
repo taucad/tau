@@ -1,10 +1,11 @@
 import { Body, Controller, Post, Res } from '@nestjs/common';
 import { convertToCoreMessages, pipeDataStreamToResponse } from 'ai';
-import { Response } from 'express';
+import type { Response } from 'express';
 import { generatePrefixedId, ID_PREFIX } from '../utils/id';
 import { convertAiSdkMessagesToLangchainMessages } from './utils/convert-messages';
 import { LangGraphAdapter } from './utils/langgraph-adapter';
-import { ChatService, CreateChatBody, ToolChoice, TOOL_CHOICE_FROM_TOOL_NAME, TOOL_CHOICE } from './chat.service';
+import { ChatService, TOOL_CHOICE_FROM_TOOL_NAME, TOOL_CHOICE } from './chat.service';
+import type { CreateChatBody, ToolChoice } from './chat.service';
 
 @Controller('chat')
 export class ChatController {

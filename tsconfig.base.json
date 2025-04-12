@@ -9,6 +9,7 @@
     "experimentalDecorators": true,
     "verbatimModuleSyntax": true,
     "importHelpers": true,
+    "noFallthroughCasesInSwitch": true,
     "target": "ESNext",
     "module": "esnext",
     "lib": ["ESNext", "dom"],

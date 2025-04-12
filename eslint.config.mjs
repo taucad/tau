@@ -33,16 +33,19 @@ export default [
           ],
         },
       ],
+      // Require a description for each ESLint rule comment. This informs co-authors about the rule and why it is being applied.
+      '@eslint-community/eslint-comments/require-description': ['error', { ignore: [] }],
+
       /* TYPESCRIPT RULES */
       // Unused variables result in poor code hygiene and should be removed.
       'no-unused-vars': 'off', // Note: we disable the base rule as it can conflict with the typescript rule.
       '@typescript-eslint/no-unused-vars': 'error',
-      // Disable type assertions by default as they are typically used to suppress type errors, which is a code smell. Disable and add a comment when necessary.
+      // Disable type assertions by default as they are typically used to suppress type errors, which is a code smell.
+      // In most cases, a type guard should be used instead.
+      // If you are sure that the type assertion is necessary, disable and add a comment.
       '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }],
       // Usage of `any` is discouraged as it almost always leads to type errors.
       '@typescript-eslint/no-explicit-any': 'error',
-      // Require a description for each ESLint rule comment. This informs co-authors about the rule and why it is being applied.
-      '@eslint-community/eslint-comments/require-description': ['error', { ignore: [] }],
       // Enforce explicit accessibility modifiers for class members to improve readability and maintainability.
       '@typescript-eslint/explicit-member-accessibility': 'error',
       // Enforce that the `type` keyword is used when importing types, e.g. `import { type Foo } from './foo'`.

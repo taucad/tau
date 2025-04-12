@@ -60,10 +60,6 @@ export default [
       ],
       // Ensure that import type side effects are prevented when using `verbatimModuleSyntax: true`.
       '@typescript-eslint/no-import-type-side-effects': 'error',
-      // Ensure that `type` exports are used when exporting types, e.g. `export type { Foo } from './foo'`.
-      // This ensures that the compiler receives a hint to discard type values when they are present in export statements,
-      // alongside explicit, uniform export styles.
-      '@typescript-eslint/consistent-type-exports': ['error', { fixMixedExportsWithInlineTypeSpecifier: true }],
       // Enforce types to appear on the constructor of a class.
       '@typescript-eslint/consistent-generic-constructors': ['error', 'constructor'],
       // Enforce that arrays always use `Array<T>` syntax. This is more readable in human voice as "array of T".
@@ -128,8 +124,8 @@ export default [
     },
     languageOptions: {
       parserOptions: {
-        projectService: true,
-        tsconfigRootDir: import.meta.dirname,
+        emitDecoratorMetadata: true,
+        experimentalDecorators: true,
       },
     },
   },

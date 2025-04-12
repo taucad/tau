@@ -1,7 +1,7 @@
 import { Body, Controller, Post, Res } from '@nestjs/common';
 import { convertToCoreMessages, pipeDataStreamToResponse } from 'ai';
 import { Response } from 'express';
-import { generatePrefixedId, PREFIX_TYPES } from '../utils/id';
+import { generatePrefixedId, ID_PREFIX } from '../utils/id';
 import { convertAiSdkMessagesToLangchainMessages } from './utils/convert-messages';
 import { LangGraphAdapter } from './utils/langgraph-adapter';
 import { ChatService, CreateChatBody, ToolChoice, TOOL_CHOICE_FROM_TOOL_NAME, TOOL_CHOICE } from './chat.service';
@@ -48,7 +48,7 @@ export class ChatController {
       {
         streamMode: 'values',
         version: 'v2',
-        runId: generatePrefixedId(PREFIX_TYPES.RUN),
+        runId: generatePrefixedId(ID_PREFIX.RUN),
       },
     );
 

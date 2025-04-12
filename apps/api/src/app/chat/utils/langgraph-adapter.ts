@@ -2,7 +2,7 @@ import { ServerResponse } from 'node:http';
 import { StreamEvent } from '@langchain/core/dist/tracers/event_stream';
 import { IterableReadableStream } from '@langchain/core/dist/utils/stream';
 import { formatDataStreamPart, DataStreamWriter, pipeDataStreamToResponse } from 'ai';
-import { generatePrefixedId, PREFIX_TYPES } from '../../utils/id';
+import { generatePrefixedId, ID_PREFIX } from '../../utils/id';
 import { ChatUsageTokens } from '../chat.schema';
 import { processContent } from './process-content';
 
@@ -213,7 +213,7 @@ export class LangGraphAdapter {
         // Create enhanced data stream
         const dataStream = this.createDataStreamWriter(rawDataStream);
 
-        const id = generatePrefixedId(PREFIX_TYPES.MESSAGE);
+        const id = generatePrefixedId(ID_PREFIX.MESSAGE);
 
         // Keep reasoning state internally
         let thinkingBuffer = '';
@@ -369,7 +369,7 @@ export class LangGraphAdapter {
                 // Remove redundant dashes
                 .replaceAll('-', '');
 
-              const toolCallId = generatePrefixedId(PREFIX_TYPES.TOOL_CALL, rawId);
+              const toolCallId = generatePrefixedId(ID_PREFIX.TOOL_CALL, rawId);
 
               // Get tool name from map or use raw name
               const toolName = toolTypeMap[streamEvent.name] || streamEvent.name;
@@ -404,7 +404,7 @@ export class LangGraphAdapter {
                 .replace('tools:', '')
                 // Remove redundant dashes
                 .replaceAll('-', '');
-              const toolCallId = generatePrefixedId(PREFIX_TYPES.TOOL_CALL, rawId);
+              const toolCallId = generatePrefixedId(ID_PREFIX.TOOL_CALL, rawId);
 
               dataStream.writePart('tool_result', {
                 toolCallId,

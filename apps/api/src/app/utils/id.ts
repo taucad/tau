@@ -6,7 +6,7 @@ function hexToBase64(hex: string, length: number): string {
   return Buffer.from(hex, 'hex').toString('base64').slice(0, length);
 }
 
-export const PREFIX_TYPES = {
+export const ID_PREFIX = {
   /**
    * An LLM chat message ID.
    */
@@ -29,14 +29,14 @@ export const PREFIX_TYPES = {
   RUN: 'run',
 } as const;
 
-export type PrefixType = (typeof PREFIX_TYPES)[keyof typeof PREFIX_TYPES];
+export type IdPrefix = (typeof ID_PREFIX)[keyof typeof ID_PREFIX];
 
 /**
  * Generates a base64 encoded prefixed ID
  * @param prefix - The prefix to use for the ID
  * @returns A string in the format "prefix_<id>"
  */
-export function generatePrefixedId(prefix: PrefixType, seed?: string): string {
+export function generatePrefixedId(prefix: IdPrefix, seed?: string): string {
   // If seed is provided, use it to generate a prefixed ID
   const idPart = seed ? hexToBase64(seed, ID_LENGTH) : generateId(ID_LENGTH);
   return `${prefix}_${idPart}`;

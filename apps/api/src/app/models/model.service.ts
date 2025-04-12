@@ -34,7 +34,7 @@ const MODELS = {
       configuration: {
         streaming: true,
         maxTokens: 20_000,
-        // @ts-expect-error - FIXME
+        // @ts-expect-error: FIXME - some models use camelCase
         max_tokens: 20_000,
         thinking: {
           type: 'enabled',

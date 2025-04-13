@@ -19,7 +19,7 @@ import { useKeydown } from '@/hooks/use-keydown.js';
 import { KeyShortcut } from '@/components/ui/key-shortcut.js';
 import type { KeyCombination } from '@/utils/keys.js';
 import { toast } from '@/components/ui/sonner.js';
-import { USE_CHAT_CONSTANTS } from '@/contexts/use-chat.js';
+import { useChatConstants } from '@/contexts/use-chat.js';
 import { useCookie } from '@/hooks/use-cookie.js';
 
 export type ChatTextareaProperties = {
@@ -89,7 +89,7 @@ export function ChatTextarea({
   const textareaReference = useRef<HTMLTextAreaElement>(null);
   const { selectedModel, setSelectedModel } = useModels();
   const { stop, status } = useChat({
-    ...USE_CHAT_CONSTANTS,
+    ...useChatConstants,
     id: conversationId,
   });
 

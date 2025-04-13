@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { useChat } from '@ai-sdk/react';
-import { USE_CHAT_CONSTANTS } from '@/contexts/use-chat';
+import { useChatConstants } from '@/contexts/use-chat';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/sonner';
 
@@ -10,7 +10,7 @@ type ChatErrorProperties = {
 
 export const ChatError = memo(({ id }: ChatErrorProperties) => {
   const { reload, error } = useChat({
-    ...USE_CHAT_CONSTANTS,
+    ...useChatConstants,
     id,
     onError() {
       toast.error('Unable to send the message');

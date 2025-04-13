@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input.js';
 import { LogProvider } from '@/contexts/log-context.js';
 import { defaultBuildName } from '@/constants/build-constants.js';
 import type { Handle } from '@/types/matches.js';
-import { USE_CHAT_CONSTANTS } from '@/contexts/use-chat.js';
+import { useChatConstants } from '@/contexts/use-chat.js';
 
 function BuildNameEditor() {
   const { build, updateName, isLoading } = useBuild();
@@ -19,27 +19,18 @@ function BuildNameEditor() {
   const [name, setName] = useState<string>();
   const [displayName, setDisplayName] = useState<string>(build?.name ?? '');
   const { append } = useChat({
-    ...USE_CHAT_CONSTANTS,
-
-    onResponse(response) {
-      console.log('name generation response', response);
-    },
+    ...useChatConstants,
     onFinish(message, options) {
-      console.log('name generation message', message, options);
       const textPart = message.parts?.find((part) => part.type === 'text');
       if (textPart) {
         updateName(textPart.text);
         setDisplayName(textPart.text);
       }
     },
-    onError(error) {
-      console.log('name generation error', error);
-    },
   });
 
   // Set initial name and trigger generation if needed
   useEffect(() => {
-    console.log('evaluating build name', build?.name, isLoading);
     if (isLoading || !build) return;
 
     if (build.name === defaultBuildName && build.messages[0]) {
@@ -53,7 +44,6 @@ function BuildNameEditor() {
       } as const satisfies Message;
       void append(message);
     } else if (!isLoading) {
-      console.log('setting name', build.name);
       setName(build.name);
       setDisplayName(build.name);
     }
@@ -123,7 +113,7 @@ function Chat() {
   const { build, isLoading, setMessages: setBuildMessages } = useBuild();
   const { setCode, setParameters } = useReplicad();
   const { setMessages, messages, reload, status } = useChat({
-    ...USE_CHAT_CONSTANTS,
+    ...useChatConstants,
     id,
   });
 
@@ -141,7 +131,6 @@ function Chat() {
   useEffect(() => {
     // Set initial messages
     if (!build || isLoading) return;
-    console.log('setting2 initial messages', build.messages);
     setMessages(build.messages);
 
     // Reload when the last message is not an assistant message.
@@ -152,7 +141,6 @@ function Chat() {
   }, [id, isLoading]);
 
   useEffect(() => {
-    console.log('status2', status, 'messages', messages);
     if (status === 'submitted') {
       // A message just got submitted, set the build messages to include the new message.
 

@@ -1,10 +1,10 @@
 import type { Message, useChat } from '@ai-sdk/react';
-import type { MessageRole, MessageStatus } from '@/types/chat';
-import { generatePrefixedId } from '@/utils/id';
-import { idPrefix } from '@/utils/constants';
-import { ENV } from '@/config';
+import type { MessageRole, MessageStatus } from '@/types/chat.js';
+import { generatePrefixedId } from '@/utils/id.js';
+import { idPrefix } from '@/utils/constants.js';
+import { ENV } from '@/config.js';
 
-export const USE_CHAT_CONSTANTS = {
+export const useChatConstants = {
   api: `${ENV.TAU_API_URL}/v1/chat`,
   sendExtraMessageFields: true,
 } as const satisfies Parameters<typeof useChat>[0];
@@ -57,9 +57,10 @@ export function createMessage({
   }));
 
   return {
-    id: id ?? generatePrefixedId(idPrefix.MESSAGE),
+    id: id ?? generatePrefixedId(idPrefix.message),
     content: '',
     role,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- experimental properties use experimental_ prefix
     experimental_attachments: attachments,
     parts,
     status,

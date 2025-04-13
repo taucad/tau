@@ -7,7 +7,7 @@ import { ChatError } from './chat-error';
 import type { ChatTextareaProperties } from '@/components/chat/chat-textarea';
 import { ChatTextarea } from '@/components/chat/chat-textarea';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
-import { createMessage, USE_CHAT_CONSTANTS } from '@/contexts/use-chat';
+import { createMessage, useChatConstants } from '@/contexts/use-chat';
 import { MessageRole, MessageStatus } from '@/types/chat';
 import { useBuild } from '@/hooks/use-build2';
 import { useCookie } from '@/hooks/use-cookie';
@@ -17,7 +17,7 @@ const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'chat-history-resize';
 
 export function ChatHistory() {
   const { setCode, build } = useBuild();
-  const { append, messages, reload, setMessages } = useChat({ ...USE_CHAT_CONSTANTS, id: build?.id });
+  const { append, messages, reload, setMessages } = useChat({ ...useChatConstants, id: build?.id });
   const [chatResizeHistory, setChatResizeHistory] = useCookie(CHAT_RESIZE_COOKIE_NAME_HISTORY, [85, 15]);
   const { data: models } = useModels();
   const chatContainerReference = useRef<HTMLDivElement>(null);

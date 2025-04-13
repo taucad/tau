@@ -5,15 +5,15 @@ import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { StateGraph, MessagesAnnotation, END, START, Command } from '@langchain/langgraph';
 import { streamText } from 'ai';
 import type { CoreMessage, UIMessage } from 'ai';
-import { ModelService } from '../models/model.service';
-import { nameGenerationSystemPrompt } from './prompts/chat-prompt-name';
-import type { LangGraphAdapterCallbacks } from './utils/langgraph-adapter';
+import { ModelService } from '../models/model-service.js';
+import { nameGenerationSystemPrompt } from './prompts/chat-prompt-name.js';
+import type { LangGraphAdapterCallbacks } from './utils/langgraph-adapter.js';
 
-const CHAT_NODE = {
-  Start: START,
-  End: END,
-  Agent: 'agent',
-  Tools: 'tools',
+const chatNode = {
+  start: START,
+  end: END,
+  agent: 'agent',
+  tools: 'tools',
 } as const satisfies Record<string, string>;
 
 type WebResult = {
@@ -22,32 +22,34 @@ type WebResult = {
   snippet: string;
 };
 
-export const TOOL_CHOICE = {
-  WEB: 'web',
-  NONE: 'none',
-  AUTO: 'auto',
-  ANY: 'any',
+export const toolChoice = {
+  web: 'web',
+  none: 'none',
+  auto: 'auto',
+  any: 'any',
 } as const satisfies Record<string, string>;
 
-export type ToolChoice = (typeof TOOL_CHOICE)[keyof typeof TOOL_CHOICE];
+export type ToolChoice = (typeof toolChoice)[keyof typeof toolChoice];
 
-export const TOOL_NAME_FROM_TOOL_CHOICE = {
-  [TOOL_CHOICE.WEB]: SearxngSearch.name,
-  [TOOL_CHOICE.NONE]: 'none',
-  [TOOL_CHOICE.AUTO]: 'auto',
-  [TOOL_CHOICE.ANY]: 'any',
+export const toolNameFromToolChoice = {
+  [toolChoice.web]: SearxngSearch.prototype.name,
+  [toolChoice.none]: 'none',
+  [toolChoice.auto]: 'auto',
+  [toolChoice.any]: 'any',
 } as const satisfies Record<ToolChoice, string>;
 
 export type CreateChatBody = {
-  messages: (UIMessage & {
-    role: 'user';
-    model: string;
-    metadata: { toolChoice: ToolChoice };
-  })[];
+  messages: Array<
+    UIMessage & {
+      role: 'user';
+      model: string;
+      metadata: { toolChoice: ToolChoice };
+    }
+  >;
 };
 
-export const TOOL_CHOICE_FROM_TOOL_NAME = {
-  [SearxngSearch.name]: TOOL_CHOICE.WEB,
+export const toolChoiceFromToolName = {
+  [SearxngSearch.name]: toolChoice.web,
 } as const satisfies Record<string, ToolChoice>;
 
 @Injectable()
@@ -63,7 +65,7 @@ export class ChatService {
   }
 
   public createGraph(modelId: string, toolChoice: ToolChoice) {
-    const resolvedToolChoice = TOOL_NAME_FROM_TOOL_CHOICE[toolChoice];
+    const resolvedToolChoice = toolNameFromToolChoice[toolChoice];
 
     Logger.log({
       prototypeName: SearxngSearch.prototype.name,
@@ -89,6 +91,7 @@ export class ChatService {
       support?.tools === false
         ? unboundModel
         : (unboundModel.bindTools?.(tools, {
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case
             ...(support?.toolChoice === false ? {} : { tool_choice: resolvedToolChoice }),
           }) ?? unboundModel);
 
@@ -98,28 +101,29 @@ export class ChatService {
 
       // If the message has tool calls, go to the tools node
       // Otherwise go to the end node
-      const gotoNode = message.tool_calls && message.tool_calls.length > 0 ? CHAT_NODE.Tools : CHAT_NODE.End;
+      const gotoNode = message.tool_calls && message.tool_calls.length > 0 ? chatNode.tools : chatNode.end;
 
       return new Command({ update: { messages: [message] }, goto: gotoNode });
     }
 
     // Define a new graph
     const workflow = new StateGraph(MessagesAnnotation)
-      .addNode(CHAT_NODE.Agent, agent, { ends: [CHAT_NODE.Tools, CHAT_NODE.End] })
-      .addNode(CHAT_NODE.Tools, toolNode)
-      .addEdge(CHAT_NODE.Tools, CHAT_NODE.Agent)
-      .addEdge(CHAT_NODE.Start, CHAT_NODE.Agent);
+      .addNode(chatNode.agent, agent, { ends: [chatNode.tools, chatNode.end] })
+      .addNode(chatNode.tools, toolNode)
+      .addEdge(chatNode.tools, chatNode.agent)
+      .addEdge(chatNode.start, chatNode.agent);
 
     return workflow.compile();
   }
 
   public parseWebResults(content: string): WebResult[] {
     try {
-      const results = JSON.parse(`[${content}]`);
+      const results = JSON.parse(`[${content}]`) as WebResult;
       if (!Array.isArray(results)) {
         Logger.warn('Expected web results to be an array');
         return [];
       }
+
       return results;
     } catch (error) {
       Logger.error('Failed to parse web results', error);
@@ -142,7 +146,7 @@ export class ChatService {
           },
         ]);
       },
-      onError: (error) => {
+      onError(error) {
         Logger.error('Error in chat stream:', JSON.stringify(error, undefined, 2));
         return 'An error occurred while processing the request';
       },

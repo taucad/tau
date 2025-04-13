@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
-
-import { ProviderService } from './provider.service';
+import { ProviderService } from './provider-service.js';
 
 @Module({
   imports: [],

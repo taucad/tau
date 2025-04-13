@@ -3,31 +3,33 @@ import type { StreamEvent } from '@langchain/core/dist/tracers/event_stream';
 import type { IterableReadableStream } from '@langchain/core/dist/utils/stream';
 import { formatDataStreamPart, pipeDataStreamToResponse } from 'ai';
 import type { DataStreamWriter } from 'ai';
-import { generatePrefixedId, ID_PREFIX } from '../../utils/id';
-import type { ChatUsageTokens } from '../chat.schema';
-import { processContent } from './process-content';
+import { generatePrefixedId, idPrefix } from '../../utils/id.js';
+import type { ChatUsageTokens } from '../chat-schema.js';
+import { processContent } from './process-content.js';
 
 /**
  * Events emitted during a chat session with LangGraph.
  */
-export enum ChatEvent {
+export const chatEvent = {
   /** Emitted when a chat model starts generating content */
-  OnChatModelStart = 'on_chat_model_start',
+  onChatModelStart: 'on_chat_model_start',
   /** Emitted when a chat model finishes generating content */
-  OnChatModelEnd = 'on_chat_model_end',
+  onChatModelEnd: 'on_chat_model_end',
   /** Emitted when a chat model streams a chunk of content */
-  OnChatModelStream = 'on_chat_model_stream',
+  onChatModelStream: 'on_chat_model_stream',
   /** Emitted when a tool starts executing */
-  OnToolStart = 'on_tool_start',
+  onToolStart: 'on_tool_start',
   /** Emitted when a tool finishes executing */
-  OnToolEnd = 'on_tool_end',
+  onToolEnd: 'on_tool_end',
   /** Emitted when a chain starts executing */
-  OnChainStart = 'on_chain_start',
+  onChainStart: 'on_chain_start',
   /** Emitted when a chain finishes executing */
-  OnChainEnd = 'on_chain_end',
+  onChainEnd: 'on_chain_end',
   /** Emitted when a chain streams content */
-  OnChainStream = 'on_chain_stream',
-}
+  onChainStream: 'on_chain_stream',
+} as const satisfies Record<string, string>;
+
+type ChatEvent = (typeof chatEvent)[keyof typeof chatEvent];
 
 /**
  * Enhanced DataStream with a convenient write method for streaming content.
@@ -44,7 +46,7 @@ export type EnhancedDataStreamWriter = DataStreamWriter & {
 /**
  * Callbacks for the LangGraphAdapter to handle different events.
  */
-export interface LangGraphAdapterCallbacks {
+export type LangGraphAdapterCallbacks = {
   /**
    * Called when a chat model streams content.
    * @param parameters - The parameters for the callback.
@@ -145,12 +147,12 @@ export interface LangGraphAdapterCallbacks {
    * @param parameters.data - The data associated with the event.
    */
   onEvent?: (parameters: { event: ChatEvent; data: unknown }) => void;
-}
+};
 
 /**
  * Options for the LangGraphAdapter.
  */
-export interface LangGraphAdapterOptions {
+export type LangGraphAdapterOptions = {
   /**
    * The server response object to write to.
    */
@@ -174,28 +176,12 @@ export interface LangGraphAdapterOptions {
    * when the tool results are not in the expected format.
    */
   parseToolResults?: Partial<Record<string, (content: string) => unknown[]>>;
-}
+};
 
 /**
  * Adapter for LangGraph to handle streaming responses.
  */
 export class LangGraphAdapter {
-  /**
-   * Creates an enhanced data stream writer.
-   * @param dataStream - The data stream to enhance.
-   * @returns An enhanced data stream writer.
-   */
-  private static createDataStreamWriter(dataStream: DataStreamWriter): EnhancedDataStreamWriter {
-    return Object.assign(dataStream, {
-      writePart: (...arguments_: Parameters<typeof formatDataStreamPart>) => {
-        const part = formatDataStreamPart(...arguments_);
-        dataStream.write(part);
-
-        return part;
-      },
-    });
-  }
-
   /**
    * Pipes a LangGraph stream to a data stream response.
    * @param stream - The LangGraph stream.
@@ -209,12 +195,12 @@ export class LangGraphAdapter {
 
     response.setHeader('x-vercel-ai-data-stream', 'v1');
     pipeDataStreamToResponse(response, {
-      // eslint-disable-next-line sonarjs/cognitive-complexity -- acceptable to keep the function contained.
+      // eslint-disable-next-line complexity -- acceptable to keep the function contained.
       execute: async (rawDataStream) => {
         // Create enhanced data stream
         const dataStream = this.createDataStreamWriter(rawDataStream);
 
-        const id = generatePrefixedId(ID_PREFIX.MESSAGE);
+        const id = generatePrefixedId(idPrefix.message);
 
         // Keep reasoning state internally
         let thinkingBuffer = '';
@@ -229,20 +215,19 @@ export class LangGraphAdapter {
 
         for await (const streamEvent of stream) {
           if (callbacks.onEvent) {
-            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- safe to assert
             callbacks.onEvent({ event: streamEvent.event as ChatEvent, data: streamEvent.data });
           }
 
           switch (streamEvent.event) {
-            case ChatEvent.OnChatModelStream: {
+            case chatEvent.onChatModelStream: {
               if (streamEvent.data.chunk.content) {
                 const streamedContent = streamEvent.data.chunk.content;
 
                 if (typeof streamedContent === 'string') {
                   // Process string content to detect reasoning tags
                   const processedContent = processContent(streamedContent, thinkingBuffer, isReasoning);
-                  const content = processedContent.content;
-                  const type = processedContent.type;
+                  const { content } = processedContent;
+                  const { type } = processedContent;
 
                   // Update state after processing
                   thinkingBuffer = processedContent.buffer;
@@ -272,8 +257,10 @@ export class LangGraphAdapter {
                               callbacks.onChatModelStream({ dataStream, content: part.text, type: 'text' });
                             }
                           }
+
                           break;
                         }
+
                         case 'thinking': {
                           if (part.thinking !== undefined) {
                             dataStream.writePart('reasoning', part.thinking);
@@ -292,8 +279,10 @@ export class LangGraphAdapter {
                               });
                             }
                           }
+
                           break;
                         }
+
                         case 'redacted_thinking': {
                           if (part.data === undefined) {
                             throw new Error('Redacted thinking not found in part: ' + JSON.stringify(part));
@@ -307,13 +296,16 @@ export class LangGraphAdapter {
                               });
                             }
                           }
+
                           break;
                         }
+
                         case 'input_json_delta':
                         case 'tool_use': {
-                          // no-op
+                          // No-op
                           break;
                         }
+
                         default: {
                           throw new Error(`Unknown part type: ${complexType}`);
                         }
@@ -322,9 +314,11 @@ export class LangGraphAdapter {
                   }
                 }
               }
+
               break;
             }
-            case ChatEvent.OnChatModelStart: {
+
+            case chatEvent.onChatModelStart: {
               dataStream.writePart('start_step', {
                 messageId: id,
               });
@@ -332,9 +326,11 @@ export class LangGraphAdapter {
               if (callbacks.onChatModelStart) {
                 callbacks.onChatModelStart({ dataStream, messageId: id });
               }
+
               break;
             }
-            case ChatEvent.OnChatModelEnd: {
+
+            case chatEvent.onChatModelEnd: {
               const usageTokens = {
                 inputTokens: streamEvent.data.output.usage_metadata.input_tokens || 0,
                 outputTokens: streamEvent.data.output.usage_metadata.output_tokens || 0,
@@ -361,16 +357,18 @@ export class LangGraphAdapter {
               if (callbacks.onUsageUpdate) {
                 callbacks.onUsageUpdate({ modelId, usageTokens });
               }
+
               break;
             }
-            case ChatEvent.OnToolStart: {
-              // an ID unique to the tool call node. Replace `tools:` with known prefix to create a valid tool call ID.
+
+            case chatEvent.onToolStart: {
+              // An ID unique to the tool call node. Replace `tools:` with known prefix to create a valid tool call ID.
               const rawId = streamEvent.metadata.langgraph_checkpoint_ns
                 .replace('tools:', '')
                 // Remove redundant dashes
                 .replaceAll('-', '');
 
-              const toolCallId = generatePrefixedId(ID_PREFIX.TOOL_CALL, rawId);
+              const toolCallId = generatePrefixedId(idPrefix.toolCall, rawId);
 
               // Get tool name from map or use raw name
               const toolName = toolTypeMap[streamEvent.name] || streamEvent.name;
@@ -384,9 +382,11 @@ export class LangGraphAdapter {
               if (callbacks.onToolStart) {
                 callbacks.onToolStart({ dataStream, toolCallId, toolName, args: streamEvent.data.input });
               }
+
               break;
             }
-            case ChatEvent.OnToolEnd: {
+
+            case chatEvent.onToolEnd: {
               // Get tool name from map or use raw name
               const toolName = toolTypeMap[streamEvent.name] || streamEvent.name;
 
@@ -405,7 +405,7 @@ export class LangGraphAdapter {
                 .replace('tools:', '')
                 // Remove redundant dashes
                 .replaceAll('-', '');
-              const toolCallId = generatePrefixedId(ID_PREFIX.TOOL_CALL, rawId);
+              const toolCallId = generatePrefixedId(idPrefix.toolCall, rawId);
 
               dataStream.writePart('tool_result', {
                 toolCallId,
@@ -415,14 +415,17 @@ export class LangGraphAdapter {
               if (callbacks.onToolEnd) {
                 callbacks.onToolEnd({ dataStream, toolCallId, toolName, results });
               }
+
               break;
             }
-            case ChatEvent.OnChainStart:
-            case ChatEvent.OnChainStream:
-            case ChatEvent.OnChainEnd: {
+
+            case chatEvent.onChainStart:
+            case chatEvent.onChainStream:
+            case chatEvent.onChainEnd: {
               // These events are not supported by the AI SDK, so we just ignore them
               break;
             }
+
             default: {
               throw new Error(`Unknown event: ${streamEvent.event}`);
             }
@@ -445,6 +448,22 @@ export class LangGraphAdapter {
       },
       onError(error) {
         return callbacks.onError ? callbacks.onError({ error }) : 'An error occurred while processing the request';
+      },
+    });
+  }
+
+  /**
+   * Creates an enhanced data stream writer.
+   * @param dataStream - The data stream to enhance.
+   * @returns An enhanced data stream writer.
+   */
+  private static createDataStreamWriter(dataStream: DataStreamWriter): EnhancedDataStreamWriter {
+    return Object.assign(dataStream, {
+      writePart(...arguments_: Parameters<typeof formatDataStreamPart>) {
+        const part = formatDataStreamPart(...arguments_);
+        dataStream.write(part);
+
+        return part;
       },
     });
   }

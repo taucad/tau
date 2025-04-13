@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { Injectable } from '@nestjs/common';
 import { ChatOpenAI } from '@langchain/openai';
 import type { ChatOpenAIFields } from '@langchain/openai';
@@ -6,7 +7,7 @@ import type { ChatOllamaInput } from '@langchain/ollama';
 import { ChatAnthropic } from '@langchain/anthropic';
 import type { ChatAnthropicCallOptions } from '@langchain/anthropic';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import type { ProviderId, Provider } from './provider.schema';
+import type { ProviderId, Provider } from './provider.schema.js';
 
 // Type for mapping provider IDs to their option types
 type ProviderOptionsMap = {
@@ -22,7 +23,7 @@ type ProviderType<T extends ProviderId> = Provider & {
 };
 
 // Define providers with specific types to avoid type assertions
-export const PROVIDERS: {
+export const providers: {
   [K in ProviderId]: ProviderType<K>;
 } = {
   openai: {
@@ -36,6 +37,7 @@ export const PROVIDERS: {
   ollama: {
     provider: 'ollama',
     configuration: {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses this format
       baseURL: 'http://localhost:11434',
     },
     inputTokensIncludesCachedReadTokens: false,
@@ -45,6 +47,7 @@ export const PROVIDERS: {
     provider: 'sambanova',
     configuration: {
       apiKey: process.env.SAMBA_API_KEY,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses this format
       baseURL: 'https://api.sambanova.ai/v1',
     },
     inputTokensIncludesCachedReadTokens: false,
@@ -67,11 +70,11 @@ export const PROVIDERS: {
 @Injectable()
 export class ProviderService {
   public getProvider(providerId: ProviderId): Provider {
-    return PROVIDERS[providerId];
+    return providers[providerId];
   }
 
   public createModelClass<T extends ProviderId>(providerId: T, options: ProviderOptionsMap[T]): BaseChatModel {
-    const provider = PROVIDERS[providerId];
+    const provider = providers[providerId];
     return provider.createClass(options);
   }
 }

@@ -56,6 +56,7 @@ export function processContent(
             isReasoning: nextProcess.isReasoning,
           };
         }
+
         // Update with the recursive call results
         updatedBuffer = nextProcess.buffer;
         isReasoning = nextProcess.isReasoning;
@@ -97,6 +98,7 @@ export function processContent(
           isReasoning: nextProcess.isReasoning,
         };
       }
+
       // Update with the recursive call results
       updatedBuffer = nextProcess.buffer;
       isReasoning = nextProcess.isReasoning;
@@ -107,6 +109,6 @@ export function processContent(
     content: resultContent,
     type: contentType,
     buffer: updatedBuffer,
-    isReasoning: isReasoning,
+    isReasoning,
   };
 }

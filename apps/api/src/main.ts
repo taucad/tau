@@ -3,9 +3,9 @@
  * This is only a minimal backend to get started.
  */
 
+import process from 'node:process';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-
 import { urlencoded, json } from 'express';
 import { AppModule } from './app/app.module';
 

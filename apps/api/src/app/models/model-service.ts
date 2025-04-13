@@ -2,16 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleInit } from '@nestjs/common';
 import ollama from 'ollama';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-
-import type { ChatUsageCost, ChatUsageTokens } from '../chat/chat.schema';
-import type { ProviderId } from '../providers/provider.schema';
-import { ProviderService } from '../providers/provider.service';
-
-import type { Model, ModelSupport } from './model.schema';
+import type { ChatUsageCost, ChatUsageTokens } from '../chat/chat-schema.js';
+import type { ProviderId } from '../providers/provider.schema.js';
+import { ProviderService } from '../providers/provider-service.js';
+import type { Model, ModelSupport } from './model-schema.js';
 
 type StaticProviderId = Exclude<ProviderId, 'ollama'>;
 
-const MODELS = {
+const modelList: Record<StaticProviderId, Record<string, Model>> = {
   anthropic: {
     'claude-3.7-sonnet-thinking': {
       id: 'anthropic-claude-3.7-sonnet-thinking',
@@ -35,9 +33,11 @@ const MODELS = {
         streaming: true,
         maxTokens: 20_000,
         // @ts-expect-error: FIXME - some models use camelCase
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
         max_tokens: 20_000,
         thinking: {
           type: 'enabled',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
           budget_tokens: 5000,
         },
       },
@@ -110,7 +110,7 @@ const MODELS = {
     },
   },
   sambanova: {
-    'llama3.3': {
+    'llama-3.3': {
       id: 'sambanova-llama3.3',
       name: 'Llama 3.3',
       provider: 'sambanova',
@@ -243,7 +243,7 @@ const MODELS = {
       },
     },
   },
-} as const satisfies Record<StaticProviderId, Record<string, Model>>;
+} as const;
 
 @Injectable()
 export class ModelService implements OnModuleInit {
@@ -258,7 +258,7 @@ export class ModelService implements OnModuleInit {
 
   public async getModels(): Promise<Model[]> {
     const ollamaModels = await this.getOllamaModels();
-    const models = Object.values(MODELS).flatMap((model) => Object.values(model));
+    const models = Object.values(modelList).flatMap((model) => Object.values(model));
     const combinedModels = [...models, ...ollamaModels];
     this.models = combinedModels;
     return combinedModels;

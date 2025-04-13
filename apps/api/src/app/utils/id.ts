@@ -1,35 +1,36 @@
+import { Buffer } from 'node:buffer';
 import { generateId } from 'ai';
 
-const ID_LENGTH = 21;
+const idLength = 21;
 
 function hexToBase64(hex: string, length: number): string {
   return Buffer.from(hex, 'hex').toString('base64').slice(0, length);
 }
 
-export const ID_PREFIX = {
+export const idPrefix = {
   /**
    * An LLM chat message ID.
    */
-  MESSAGE: 'msg',
+  message: 'msg',
   /**
    * An LLM chat ID.
    */
-  CHAT: 'chat',
+  chat: 'chat',
   /**
    * An LLM chat tool call ID.
    */
-  TOOL_CALL: 'tool',
+  toolCall: 'tool',
   /**
    * An LLM chat source ID.
    */
-  SOURCE: 'src',
+  source: 'src',
   /**
    * An LLM chat run ID.
    */
-  RUN: 'run',
-} as const;
+  run: 'run',
+} as const satisfies Record<string, string>;
 
-export type IdPrefix = (typeof ID_PREFIX)[keyof typeof ID_PREFIX];
+export type IdPrefix = (typeof idPrefix)[keyof typeof idPrefix];
 
 /**
  * Generates a base64 encoded prefixed ID
@@ -38,7 +39,7 @@ export type IdPrefix = (typeof ID_PREFIX)[keyof typeof ID_PREFIX];
  */
 export function generatePrefixedId(prefix: IdPrefix, seed?: string): string {
   // If seed is provided, use it to generate a prefixed ID
-  const idPart = seed ? hexToBase64(seed, ID_LENGTH) : generateId(ID_LENGTH);
+  const idPart = seed ? hexToBase64(seed, idLength) : generateId(idLength);
   return `${prefix}_${idPart}`;
 }
 

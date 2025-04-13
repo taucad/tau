@@ -46,6 +46,7 @@ export const convertAiSdkMessagesToLangchainMessages: (
             // Images always come first as the LLM is more performant when receiving images first.
             ...(correspondingUiMessage.experimental_attachments?.map((attachment) => ({
               type: 'image_url',
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
               image_url: { url: attachment.url },
             })) ?? []),
             // Remove all the images from the core message content.
@@ -61,6 +62,7 @@ export const convertAiSdkMessagesToLangchainMessages: (
         (part) =>
           new ToolMessage({
             content: JSON.stringify(part.result),
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
             tool_call_id: part.toolCallId,
             name: part.toolName,
           }),
@@ -80,9 +82,10 @@ export const convertAiSdkMessagesToLangchainMessages: (
         new AIMessage({
           // Tool calls need to be handled on a separate property alongside the content.
           // This is a necessary duplication of data as required by Langchain.
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
           tool_calls: toolCalls.flatMap((part) => ({
             name: part.toolName,
-            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- part.args should be typed as a Record.
+
             args: part.args as Record<string, unknown>,
             id: part.toolCallId,
             type: 'tool_call',
@@ -134,7 +137,7 @@ export const convertAiSdkMessagesToLangchainMessages: (
             }
 
             const exhaustiveCheck: never = part;
-            throw new Error(`Unknown part type: ${exhaustiveCheck}`);
+            throw new Error(`Unknown part type: ${String(exhaustiveCheck)}`);
           }),
         }),
       ];
@@ -149,7 +152,7 @@ export const convertAiSdkMessagesToLangchainMessages: (
     }
 
     const exhaustiveCheck: never = coreMessage;
-    throw new Error(`Unknown message role: ${exhaustiveCheck}`);
+    throw new Error(`Unknown message role: ${String(exhaustiveCheck)}`);
   });
 
   return langchainMessages;

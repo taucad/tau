@@ -1,9 +1,18 @@
 const { NxAppWebpackPlugin } = require('@nx/webpack/app-plugin');
 const { join } = require('path');
 
+/**
+ * @type {import('webpack').Configuration}
+ */
 module.exports = {
   output: {
     path: join(__dirname, '../../dist/apps/api'),
+  },
+  resolve: {
+    extensions: ['.ts', '.js', '.json'],
+    extensionAlias: {
+      '.js': ['.ts', '.js']
+    }
   },
   plugins: [
     new NxAppWebpackPlugin({

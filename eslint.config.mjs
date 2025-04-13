@@ -48,6 +48,7 @@ const config = [
       // Enforce that `any` is not used.
       '@typescript-eslint/no-explicit-any': 'error',
     },
+    // Configure Typescript support
     languageOptions: {
       parserOptions: {
         projectService: true,

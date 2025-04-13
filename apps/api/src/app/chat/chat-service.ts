@@ -131,7 +131,7 @@ export class ChatService {
     }
   }
 
-  public getCallbacks(modelId: string): LangGraphAdapterCallbacks {
+  public getCallbacks(): LangGraphAdapterCallbacks {
     return {
       onMessageComplete: ({ dataStream, modelId: id, usageTokens }) => {
         const normalizedUsageTokens = this.modelService.normalizeUsageTokens(id, usageTokens);

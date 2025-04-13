@@ -19,9 +19,10 @@
     "paths": {},
     "strict": true,
     "allowJs": false,
-    "strictNullChecks": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
   },
   "exclude": ["node_modules", "tmp"]
 }

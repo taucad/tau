@@ -62,7 +62,7 @@ export class ChatController {
       parseToolResults: {
         [toolChoice.web]: (content) => this.chatService.parseWebResults(content),
       },
-      callbacks: this.chatService.getCallbacks(modelId),
+      callbacks: this.chatService.getCallbacks(),
     });
   }
 }

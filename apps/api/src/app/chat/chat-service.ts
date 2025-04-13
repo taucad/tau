@@ -1,31 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { openai } from '@ai-sdk/openai';
-import { ToolNode } from '@langchain/langgraph/prebuilt';
-import { StateGraph, MessagesAnnotation, END, START, Command } from '@langchain/langgraph';
+import { createReactAgent, ToolNode } from '@langchain/langgraph/prebuilt';
+import { createSupervisor } from '@langchain/langgraph-supervisor';
 import { streamText } from 'ai';
-import type { CoreMessage, UIMessage } from 'ai';
+import type { CoreMessage } from 'ai';
 import { ModelService } from '../models/model-service.js';
-import { ToolService } from '../tools/tool-service.js';
 import type { ToolChoiceWithCategory } from '../tools/tool-service.js';
+import { ToolService } from '../tools/tool-service.js';
 import { nameGenerationSystemPrompt } from './prompts/chat-prompt-name.js';
 import type { LangGraphAdapterCallbacks } from './utils/langgraph-adapter.js';
-
-const chatNode = {
-  start: START,
-  end: END,
-  agent: 'agent',
-  tools: 'tools',
-} as const satisfies Record<string, string>;
-
-export type CreateChatBody = {
-  messages: Array<
-    UIMessage & {
-      role: 'user';
-      model: string;
-      metadata: { toolChoice: ToolChoiceWithCategory };
-    }
-  >;
-};
 
 @Injectable()
 export class ChatService {
@@ -49,25 +32,37 @@ export class ChatService {
     const { model: unboundModel, support } = this.modelService.buildModel(modelId);
     const model = support?.tools === false ? unboundModel : (unboundModel.bindTools?.(tools) ?? unboundModel);
 
-    // Define the function that calls the model
-    async function agent(state: typeof MessagesAnnotation.State) {
-      const message = await model.invoke(state.messages);
+    // Create specialized agents for tool usage
+    const toolAgent = createReactAgent({
+      llm: model,
+      tools: toolNode,
+      name: 'research_expert',
+      prompt:
+        'You are a research expert that can use specialized tools to accomplish tasks. Always use tools when appropriate.',
+    });
 
-      // If the message has tool calls, go to the tools node
-      // Otherwise go to the end node
-      const gotoNode = message.tool_calls && message.tool_calls.length > 0 ? chatNode.tools : chatNode.end;
+    // Create a general agent for handling direct responses
+    const directResponseAgent = createReactAgent({
+      llm: unboundModel,
+      tools: [], // No tools for direct responses
+      name: 'Conversational Expert',
+      prompt:
+        'You are a conversational expert who responds directly to user queries. You provide thoughtful, helpful responses without using tools.',
+    });
 
-      return new Command({ update: { messages: [message] }, goto: gotoNode });
-    }
+    // Create a supervisor to orchestrate these agents
+    const supervisor = createSupervisor({
+      agents: [toolAgent, directResponseAgent],
+      llm: unboundModel,
+      prompt:
+        'You are a team supervisor managing a research expert and a conversational expert. ' +
+        'For queries that need external information or specific tool operations, use research_expert. ' +
+        "For general questions and conversations that don't require tools, use conversational_expert." +
+        'When you receive a transfer back, be concise and end the conversation.',
+      outputMode: 'full_history', // Include full agent message history
+    }).compile();
 
-    // Define a new graph
-    const workflow = new StateGraph(MessagesAnnotation)
-      .addNode(chatNode.agent, agent, { ends: [chatNode.tools, chatNode.end] })
-      .addNode(chatNode.tools, toolNode)
-      .addEdge(chatNode.tools, chatNode.agent)
-      .addEdge(chatNode.start, chatNode.agent);
-
-    return workflow.compile();
+    return supervisor;
   }
 
   public getCallbacks(): LangGraphAdapterCallbacks {

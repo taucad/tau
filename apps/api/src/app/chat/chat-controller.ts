@@ -1,13 +1,23 @@
 import { Body, Controller, Post, Res } from '@nestjs/common';
 import { convertToCoreMessages, pipeDataStreamToResponse } from 'ai';
+import type { UIMessage } from 'ai';
 import type { Response } from 'express';
 import { generatePrefixedId, idPrefix } from '../utils/id.js';
 import { ToolService, toolChoiceFromToolName } from '../tools/tool-service.js';
 import type { ToolChoiceWithCategory } from '../tools/tool-service.js';
 import { ChatService } from './chat-service.js';
-import type { CreateChatBody } from './chat-service.js';
 import { LangGraphAdapter } from './utils/langgraph-adapter.js';
 import { convertAiSdkMessagesToLangchainMessages } from './utils/convert-messages.js';
+
+export type CreateChatBody = {
+  messages: Array<
+    UIMessage & {
+      role: 'user';
+      model: string;
+      metadata: { toolChoice: ToolChoiceWithCategory };
+    }
+  >;
+};
 
 @Controller('chat')
 export class ChatController {

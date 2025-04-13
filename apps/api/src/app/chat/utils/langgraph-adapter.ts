@@ -102,13 +102,13 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.dataStream - The enhanced data stream writer.
    * @param parameters.toolCallId - The ID of the tool call.
    * @param parameters.toolName - The name of the tool that was called.
-   * @param parameters.results - The results returned by the tool.
+   * @param parameters.result - The result returned by the tool.
    */
   onToolEnd?: (parameters: {
     dataStream: EnhancedDataStreamWriter;
     toolCallId: string;
     toolName: string;
-    results: unknown[];
+    result: unknown;
   }) => void;
 
   /**
@@ -181,6 +181,7 @@ export type LangGraphAdapterOptions = {
 /**
  * Adapter for LangGraph to handle streaming responses.
  */
+// eslint-disable-next-line @typescript-eslint/no-extraneous-class -- acceptable to keep the class contained.
 export class LangGraphAdapter {
   /**
    * Pipes a LangGraph stream to a data stream response.
@@ -332,10 +333,12 @@ export class LangGraphAdapter {
 
             case chatEvent.onChatModelEnd: {
               const usageTokens = {
-                inputTokens: streamEvent.data.output.usage_metadata.input_tokens || 0,
-                outputTokens: streamEvent.data.output.usage_metadata.output_tokens || 0,
-                cachedReadTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_read || 0,
-                cachedWriteTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_creation || 0,
+                inputTokens: (streamEvent.data.output.usage_metadata.input_tokens as number) || 0,
+                outputTokens: (streamEvent.data.output.usage_metadata.output_tokens as number) || 0,
+                cachedReadTokens:
+                  (streamEvent.data.output.usage_metadata.input_token_details?.cache_read as number) || 0,
+                cachedWriteTokens:
+                  (streamEvent.data.output.usage_metadata.input_token_details?.cache_creation as number) || 0,
               } satisfies ChatUsageTokens;
 
               // Update totals
@@ -362,12 +365,9 @@ export class LangGraphAdapter {
             }
 
             case chatEvent.onToolStart: {
-              // An ID unique to the tool call node. Replace `tools:` with known prefix to create a valid tool call ID.
-              const rawId = streamEvent.metadata.langgraph_checkpoint_ns
-                .replace('tools:', '')
-                // Remove redundant dashes
-                .replaceAll('-', '');
-
+              // A LangGraph UUID for the tool call.
+              // remove redundant dashes and use it as the seed for a new ID, preserving entropy.
+              const rawId = (streamEvent.metadata.__pregel_task_id as string).replaceAll('-', '');
               const toolCallId = generatePrefixedId(idPrefix.toolCall, rawId);
 
               // Get tool name from map or use raw name
@@ -397,23 +397,20 @@ export class LangGraphAdapter {
                 ? toolParser(streamEvent.data.output.content)
                 : streamEvent.data.output.content;
 
-              // A LangGraph UUID for the tool call, of shape:
-              // `tools:00000000-0000-0000-0000-000000000000`
-              // We replace `tools:` with a known prefix to create a consistent tool call ID,
-              // remove redundant dashes, and convert the UUID characters to base64.
-              const rawId = streamEvent.metadata.langgraph_checkpoint_ns
-                .replace('tools:', '')
-                // Remove redundant dashes
-                .replaceAll('-', '');
+              // A LangGraph UUID for the tool call.
+              // remove redundant dashes and use it as the seed for a new ID, preserving entropy.
+              const rawId = (streamEvent.metadata.__pregel_task_id as string).replaceAll('-', '');
               const toolCallId = generatePrefixedId(idPrefix.toolCall, rawId);
+
+              const result = results ?? '';
 
               dataStream.writePart('tool_result', {
                 toolCallId,
-                result: results,
+                result,
               });
 
               if (callbacks.onToolEnd) {
-                callbacks.onToolEnd({ dataStream, toolCallId, toolName, results });
+                callbacks.onToolEnd({ dataStream, toolCallId, toolName, result });
               }
 
               break;

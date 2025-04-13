@@ -365,10 +365,7 @@ export class LangGraphAdapter {
             }
 
             case chatEvent.onToolStart: {
-              // A LangGraph UUID for the tool call.
-              // remove redundant dashes and use it as the seed for a new ID, preserving entropy.
-              const rawId = (streamEvent.metadata.__pregel_task_id as string).replaceAll('-', '');
-              const toolCallId = generatePrefixedId(idPrefix.toolCall, rawId);
+              const toolCallId = this.extractToolCallId(streamEvent);
 
               // Get tool name from map or use raw name
               const toolName = toolTypeMap[streamEvent.name] || streamEvent.name;
@@ -398,9 +395,11 @@ export class LangGraphAdapter {
                 : streamEvent.data.output.content;
 
               // A LangGraph UUID for the tool call.
-              // remove redundant dashes and use it as the seed for a new ID, preserving entropy.
-              const rawId = (streamEvent.metadata.__pregel_task_id as string).replaceAll('-', '');
-              const toolCallId = generatePrefixedId(idPrefix.toolCall, rawId);
+              // Can take the following format:
+              // - 'tools:900ad182-0310-5937-82e6-c927691bcd81'
+              // - 'research_expert:5cd6c905-9671-5bb3-8581-227ef80bbb48|tools:900ad182-0310-5937-82e6-c927691bcd81'
+              // The unique part that joins the tool call and result is the last part after the final colon, so we extract that.
+              const toolCallId = this.extractToolCallId(streamEvent);
 
               const result = results ?? '';
 
@@ -447,6 +446,22 @@ export class LangGraphAdapter {
         return callbacks.onError ? callbacks.onError({ error }) : 'An error occurred while processing the request';
       },
     });
+  }
+
+  private static extractToolCallId(streamEvent: StreamEvent): string {
+    // A LangGraph UUID for the tool call.
+    // Can take the following format:
+    // - 'tools:900ad182-0310-5937-82e6-c927691bcd81'
+    // - 'runnable_name:5cd6c905-9671-5bb3-8581-227ef80bbb48|tools:900ad182-0310-5937-82e6-c927691bcd81'
+    // The unique part that joins the tool call and result is the last part after the final colon, so we extract that.
+    // We remove redundant dashes and use it as the seed for a new ID, preserving entropy.
+    const checkpointNs = streamEvent.metadata.langgraph_checkpoint_ns as string;
+    const rawId = checkpointNs.split(':').at(-1)?.replaceAll('-', '');
+    if (rawId === undefined) {
+      throw new Error('Tool call ID not found in stream event: ' + JSON.stringify(streamEvent));
+    }
+
+    return generatePrefixedId(idPrefix.toolCall, rawId);
   }
 
   /**

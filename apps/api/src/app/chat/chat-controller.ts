@@ -2,14 +2,19 @@ import { Body, Controller, Post, Res } from '@nestjs/common';
 import { convertToCoreMessages, pipeDataStreamToResponse } from 'ai';
 import type { Response } from 'express';
 import { generatePrefixedId, idPrefix } from '../utils/id.js';
+import { ToolService, toolChoiceFromToolName } from '../tools/tool-service.js';
+import type { ToolChoiceWithCategory } from '../tools/tool-service.js';
+import { ChatService } from './chat-service.js';
+import type { CreateChatBody } from './chat-service.js';
 import { LangGraphAdapter } from './utils/langgraph-adapter.js';
-import { ChatService, toolChoiceFromToolName, toolChoice } from './chat-service.js';
-import type { CreateChatBody, ToolChoice } from './chat-service.js';
 import { convertAiSdkMessagesToLangchainMessages } from './utils/convert-messages.js';
 
 @Controller('chat')
 export class ChatController {
-  public constructor(private readonly chatService: ChatService) {}
+  public constructor(
+    private readonly chatService: ChatService,
+    private readonly toolService: ToolService,
+  ) {}
 
   @Post()
   public async getData(@Body() body: CreateChatBody, @Res() response: Response) {
@@ -17,7 +22,7 @@ export class ChatController {
     const lastBodyMessage = body.messages.at(-1);
 
     let modelId: string;
-    let selectedToolChoice: ToolChoice = 'auto';
+    let selectedToolChoice: ToolChoiceWithCategory = 'auto';
     if (lastBodyMessage?.role === 'user') {
       modelId = lastBodyMessage.model;
       if (lastBodyMessage.metadata.toolChoice) {
@@ -59,9 +64,7 @@ export class ChatController {
       response,
       modelId,
       toolTypeMap: toolChoiceFromToolName,
-      parseToolResults: {
-        [toolChoice.web]: (content) => this.chatService.parseWebResults(content),
-      },
+      parseToolResults: this.toolService.getToolParsers(),
       callbacks: this.chatService.getCallbacks(),
     });
   }

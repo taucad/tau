@@ -104,7 +104,12 @@ export function ThreeProvider({
     }
 
     canvas.captureScreenshot = (options?: ScreenshotOptions) => {
-      return screenshotReference.current?.captureScreenshot(options) ?? '';
+      return (
+        screenshotReference.current?.captureScreenshot({
+          ...options,
+          zoomLevel: cameraMode === 'perspective' ? 1.25 : 4.75,
+        }) ?? ''
+      );
     };
 
     return canvas;

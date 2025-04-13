@@ -1,6 +1,7 @@
-import { cn } from '@/utils/ui';
-import { VariantProps, cva } from 'class-variance-authority';
-import { Badge } from './badge';
+import type { VariantProps } from 'class-variance-authority';
+import { cva } from 'class-variance-authority';
+import { Badge } from '@/components/ui/badge.js';
+import { cn } from '@/utils/ui.js';
 
 const comingSoonVariants = cva(
   // Font
@@ -23,19 +24,23 @@ const comingSoonVariants = cva(
   },
 );
 
-export interface ComingSoonProperties
-  extends React.HTMLAttributes<HTMLSpanElement>,
-    VariantProps<typeof comingSoonVariants> {
-  asChild?: boolean;
-}
+export type ComingSoonProperties = {
+  readonly asChild?: boolean;
+} & React.HTMLAttributes<HTMLSpanElement> &
+  VariantProps<typeof comingSoonVariants>;
 
 /**
  * Renders a key combination with proper styling
  */
-export const ComingSoon = ({ className = '', variant = 'default', size = 'default' }: ComingSoonProperties) => {
+export function ComingSoon({
+  className = '',
+  variant = 'default',
+  size = 'default',
+  asChild = false,
+}: ComingSoonProperties) {
   return (
-    <Badge variant="outline" className={cn(comingSoonVariants({ variant, size, className }))}>
+    <Badge asChild={asChild} variant="outline" className={cn(comingSoonVariants({ variant, size, className }))}>
       coming soon
     </Badge>
   );
-};
+}

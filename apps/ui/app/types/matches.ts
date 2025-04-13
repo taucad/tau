@@ -1,16 +1,17 @@
-import { UIMatch, useMatches } from '@remix-run/react';
+import type { UIMatch } from '@remix-run/react';
+import { useMatches } from '@remix-run/react';
+import type { ReactNode } from 'react';
 
 export type Handle = {
-  breadcrumb?: (match: UIMatch) => React.ReactNode;
+  breadcrumb?: (match: UIMatch) => ReactNode;
 };
 
-type TypedUIMatch = UIMatch & {
+type TypedUiMatch = UIMatch & {
   handle: Handle;
 };
 
 export const useTypedMatches = () => {
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `useMatches` does not support generic typing
-  const matches = useMatches() as TypedUIMatch[];
+  const matches = useMatches() as TypedUiMatch[];
 
   return matches;
 };

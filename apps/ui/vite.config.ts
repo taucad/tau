@@ -1,14 +1,14 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { vitePlugin as remix } from '@remix-run/dev';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { remixPWA } from '@remix-pwa/dev';
 import tailwindcss from '@tailwindcss/vite';
-import ViteSvgSpriteWrapper from 'vite-svg-sprite-wrapper';
-import { defineConfig, type Plugin } from 'vite';
-import fs from 'node:fs';
-
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import viteSvgSpriteWrapper from 'vite-svg-sprite-wrapper';
+import { defineConfig } from 'vite';
+import type { Plugin } from 'vite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,7 +21,7 @@ const base64Loader: Plugin = {
   name: 'base64-loader',
   transform(_, id) {
     const [path, query] = id.split('?');
-    if (query != 'base64') return;
+    if (query !== 'base64') return;
 
     const data = fs.readFileSync(path);
     const base64 = data.toString('base64');
@@ -37,6 +37,7 @@ export default defineConfig({
     base64Loader,
     remix({
       future: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- this is the correct name
         v3_relativeSplatPath: true,
       },
     }),
@@ -44,7 +45,7 @@ export default defineConfig({
     tsconfigPaths(),
     remixPWA(),
     tailwindcss(),
-    ViteSvgSpriteWrapper({
+    viteSvgSpriteWrapper({
       icons: path.resolve(__dirname, './app/components/icons/raw/**/*.svg'),
       outputDir: path.resolve(__dirname, './app/components/icons/generated'),
       generateType: true,
@@ -60,7 +61,7 @@ export default defineConfig({
     allowedHosts: true,
   },
   build: {
-    assetsInlineLimit: (file) => {
+    assetsInlineLimit(file) {
       // Don't inline SVGs
       return !file.endsWith('.svg');
     },

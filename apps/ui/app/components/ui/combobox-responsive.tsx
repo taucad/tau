@@ -1,11 +1,18 @@
-import * as React from 'react';
-
-import { useIsMobile } from '@/hooks/use-mobile';
-import { Button } from '@/components/ui/button';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from '@/components/ui/drawer';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { cn } from '@/utils/ui';
+import type { ReactNode } from 'react';
+import React from 'react';
+import { useIsMobile } from '@/hooks/use-mobile.js';
+import { Button } from '@/components/ui/button.js';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command.js';
+import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from '@/components/ui/drawer.js';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.js';
+import { cn } from '@/utils/ui.js';
 
 type GroupedItems<T> = {
   name: string;
@@ -24,22 +31,22 @@ export function ComboBoxResponsive<T>({
   popoverContentClassName,
   placeholder = 'Set item',
   searchPlaceHolder = 'Filter items...',
-  labelAsChild = false,
+  asChildLabel = false,
   labelClassName,
 }: {
-  groupedItems: GroupedItems<T>[];
-  renderLabel: (item: T) => React.ReactNode;
-  renderButtonContents: (item: T) => React.ReactNode;
-  getValue: (item: T) => string;
-  defaultValue?: T;
-  onSelect?: (value: string) => void;
-  onClose?: () => void;
-  className?: string;
-  popoverContentClassName?: string;
-  placeholder?: string;
-  searchPlaceHolder?: string;
-  labelAsChild?: boolean;
-  labelClassName?: string;
+  readonly groupedItems: Array<GroupedItems<T>>;
+  readonly renderLabel: (item: T) => ReactNode;
+  readonly renderButtonContents: (item: T) => ReactNode;
+  readonly getValue: (item: T) => string;
+  readonly defaultValue?: T;
+  readonly onSelect?: (value: string) => void;
+  readonly onClose?: () => void;
+  readonly className?: string;
+  readonly popoverContentClassName?: string;
+  readonly placeholder?: string;
+  readonly searchPlaceHolder?: string;
+  readonly asChildLabel?: boolean;
+  readonly labelClassName?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const isMobile = useIsMobile();
@@ -86,7 +93,7 @@ export function ComboBoxResponsive<T>({
               renderLabel={renderLabel}
               getValue={getValue}
               searchPlaceHolder={searchPlaceHolder}
-              labelAsChild={labelAsChild}
+              asChildLabel={asChildLabel}
               labelClassName={labelClassName}
             />
           </div>
@@ -109,7 +116,7 @@ export function ComboBoxResponsive<T>({
           renderLabel={renderLabel}
           getValue={getValue}
           searchPlaceHolder={searchPlaceHolder}
-          labelAsChild={labelAsChild}
+          asChildLabel={asChildLabel}
           labelClassName={labelClassName}
         />
       </PopoverContent>
@@ -123,16 +130,16 @@ function ItemList<T>({
   renderLabel,
   getValue,
   searchPlaceHolder,
-  labelAsChild,
+  asChildLabel: labelAsChild,
   labelClassName,
 }: {
-  groupedItems: GroupedItems<T>[];
-  setSelectedItem: (item: T) => void;
-  renderLabel: (item: T) => React.ReactNode;
-  getValue: (item: T) => string;
-  searchPlaceHolder: string;
-  labelAsChild?: boolean;
-  labelClassName?: string;
+  readonly groupedItems: Array<GroupedItems<T>>;
+  readonly setSelectedItem: (item: T) => void;
+  readonly renderLabel: (item: T) => ReactNode;
+  readonly getValue: (item: T) => string;
+  readonly searchPlaceHolder: string;
+  readonly asChildLabel?: boolean;
+  readonly labelClassName?: string;
 }) {
   return (
     <Command>
@@ -145,14 +152,14 @@ function ItemList<T>({
               const value = getValue(item);
               return (
                 <CommandItem
-                  asChild={labelAsChild}
                   key={value}
+                  asChild={labelAsChild}
                   value={value}
                   keywords={[group.name]}
+                  className={cn('cursor-pointer', labelClassName)}
                   onSelect={() => {
                     setSelectedItem(item);
                   }}
-                  className={cn('cursor-pointer', labelClassName)}
                 >
                   {renderLabel(item)}
                 </CommandItem>

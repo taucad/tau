@@ -1,16 +1,23 @@
-import { Button } from '@/components/ui/button';
-import { SidebarMenuButton } from '@/components/ui/sidebar';
 import { Pipette } from 'lucide-react';
-import { ColorPicker } from '../ui/color-picker';
-import { cn } from '@/utils/ui';
-import { useColor } from '@/hooks/use-color';
+import { ColorPicker } from '@/components/ui/color-picker.js';
+import { Button } from '@/components/ui/button.js';
+import { SidebarMenuButton } from '@/components/ui/sidebar.js';
+import { cn } from '@/utils/ui.js';
+import { useColor } from '@/hooks/use-color.js';
 
-export const ColorToggle = () => {
+export function ColorToggle() {
   const { hue, setHue, resetHue } = useColor();
 
   return (
     <SidebarMenuButton asChild>
-      <ColorPicker asChild value={{ h: hue, s: 100, l: 75 }} onChange={(value) => setHue(value.h)} onReset={resetHue}>
+      <ColorPicker
+        asChild
+        value={{ h: hue, s: 100, l: 75 }}
+        onChange={(value) => {
+          setHue(value.h);
+        }}
+        onReset={resetHue}
+      >
         <Button
           variant="ghost"
           size="icon"
@@ -27,4 +34,4 @@ export const ColorToggle = () => {
       </ColorPicker>
     </SidebarMenuButton>
   );
-};
+}

@@ -1,6 +1,5 @@
 import * as React from 'react';
 import { ChevronsUpDown, Plus } from 'lucide-react';
-
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,18 +8,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from '@/components/ui/sidebar';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+} from '@/components/ui/dropdown-menu.js';
+import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from '@/components/ui/sidebar.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 
 export function TeamSwitcher({
   teams,
 }: {
-  teams: {
+  readonly teams: Array<{
     name: string;
     logo: React.ComponentType<{ className: string }>;
     plan: string;
-  }[];
+  }>;
 }) {
   const { isMobile } = useSidebar();
   const [activeTeam, setActiveTeam] = React.useState(teams[0]);
@@ -59,7 +58,13 @@ export function TeamSwitcher({
           >
             <DropdownMenuLabel className="text-xs text-muted-foreground">Teams</DropdownMenuLabel>
             {teams.map((team, index) => (
-              <DropdownMenuItem key={team.name} onClick={() => setActiveTeam(team)} className="gap-2 p-2">
+              <DropdownMenuItem
+                key={team.name}
+                className="gap-2 p-2"
+                onClick={() => {
+                  setActiveTeam(team);
+                }}
+              >
                 <div className="flex size-6 items-center justify-center rounded-sm border">
                   <team.logo className="size-4 shrink-0" />
                 </div>

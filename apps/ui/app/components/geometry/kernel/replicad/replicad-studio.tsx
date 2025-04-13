@@ -1,17 +1,18 @@
-import { ReplicadViewer, type ReplicadViewerReference } from './replicad-viewer';
-import { DownloadButton } from '@/components/download-button';
 import { LoaderPinwheel, ImageDown, GalleryThumbnails, Clipboard } from 'lucide-react';
-import { useReplicad } from './replicad-context';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BoxDown } from '@/components/icons/box-down';
-import { Button } from '@/components/ui/button';
-import { useBuild } from '@/hooks/use-build2';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { toast } from '@/components/ui/sonner';
-import { cn } from '@/utils/ui';
+import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
+import type { ReplicadViewerReference } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
+import { useReplicad } from '@/components/geometry/kernel/replicad/replicad-context.js';
+import { DownloadButton } from '@/components/download-button.js';
+import { BoxDown } from '@/components/icons/box-down.js';
+import { Button } from '@/components/ui/button.js';
+import { useBuild } from '@/hooks/use-build2.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { toast } from '@/components/ui/sonner.js';
+import { cn } from '@/utils/ui.js';
 
 export function ReplicadStudio() {
-  const { status, downloadSTL, mesh } = useReplicad();
+  const { status, downloadStl, mesh } = useReplicad();
   const { updateThumbnail, build } = useBuild();
   const canvasReference = useRef<ReplicadViewerReference>(null);
   const [isScreenshotReady, setIsScreenshotReady] = useState(false);
@@ -21,13 +22,13 @@ export function ReplicadStudio() {
     setIsScreenshotReady(ready);
   };
 
-  const downloadPNG = async () => {
+  const downloadPng = async () => {
     if (!canvasReference.current || !isScreenshotReady) {
       throw new Error('Screenshot attempted before renderer was ready');
     }
 
     // Use the captureScreenshot method to render the scene on demand and capture it
-    const dataURL = canvasReference.current.captureScreenshot({
+    const dataUrl = canvasReference.current.captureScreenshot({
       output: {
         format: 'image/png',
         quality: 0.92,
@@ -35,7 +36,7 @@ export function ReplicadStudio() {
     });
 
     // Convert dataURL to Blob
-    const response = await fetch(dataURL);
+    const response = await fetch(dataUrl);
     const blob = await response.blob();
 
     return blob;
@@ -46,14 +47,14 @@ export function ReplicadStudio() {
       throw new Error('Screenshot attempted before renderer was ready');
     }
 
-    const dataURL = canvasReference.current.captureScreenshot({
+    const dataUrl = canvasReference.current.captureScreenshot({
       output: {
         format: 'image/webp',
         quality: 0.92,
       },
     });
 
-    updateThumbnail(dataURL);
+    updateThumbnail(dataUrl);
   }, [isScreenshotReady]);
 
   const handleUpdateThumbnail = async () => {
@@ -69,7 +70,9 @@ export function ReplicadStudio() {
         updateThumbnailScreenshot();
       }, 500);
 
-      return () => clearTimeout(timeout);
+      return () => {
+        clearTimeout(timeout);
+      };
     }
   }, [mesh, isScreenshotReady, status.isComputing]);
 
@@ -80,7 +83,7 @@ export function ReplicadStudio() {
 
     try {
       // Get the screenshot as a blob
-      const dataURL = canvasReference.current.captureScreenshot({
+      const dataUrl = canvasReference.current.captureScreenshot({
         output: {
           format: 'image/png',
           quality: 0.92,
@@ -89,7 +92,7 @@ export function ReplicadStudio() {
       });
 
       // Convert dataURL to Blob
-      const response = await fetch(dataURL);
+      const response = await fetch(dataUrl);
       const blob = await response.blob();
 
       // Copy to clipboard
@@ -123,18 +126,18 @@ export function ReplicadStudio() {
       <div className="flex size-full flex-row">
         <div className="relative min-w-0 flex-1">
           <ReplicadViewer
-            mesh={mesh}
-            zoomLevel={1.25}
+            ref={canvasReference}
             enableGizmo
             enableGrid
             enableZoom
             enableAxesHelper
             enableCameraControls
-            ref={canvasReference}
+            mesh={mesh}
+            zoomLevel={1.25}
             onCanvasReady={handleCanvasReady}
           />
           {/* Loading state, only show when mesh is loaded and computing */}
-          {mesh && (status.isComputing || status.isBuffering) && (
+          {mesh && (status.isComputing || status.isBuffering) ? (
             <div className="absolute top-[90%] left-[50%] -translate-x-[50%] -translate-y-[90%]">
               <div className="border-neutral-200 m-auto flex items-center gap-2 rounded-md border bg-background/70 p-2 backdrop-blur-sm">
                 <span className="font-mono text-sm text-muted-foreground">
@@ -143,11 +146,11 @@ export function ReplicadStudio() {
                 <LoaderPinwheel className="h-6 w-6 animate-spin text-primary ease-in-out" />
               </div>
             </div>
-          )}
+          ) : null}
           <div className="absolute bottom-12 left-2">
-            {status.error && (
+            {status.error ? (
               <div className="rounded-md bg-destructive/10 px-3 py-0.5 text-xs text-destructive">{status.error}</div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -162,9 +165,9 @@ export function ReplicadStudio() {
             <Button
               variant="overlay"
               size="icon"
-              onClick={handleUpdateThumbnail}
               className="group relative text-muted-foreground"
               disabled={!isScreenshotReady}
+              onClick={handleUpdateThumbnail}
             >
               {isScreenshotReady ? (
                 <GalleryThumbnails className="size-4" />
@@ -181,9 +184,9 @@ export function ReplicadStudio() {
             <Button
               variant="overlay"
               size="icon"
-              onClick={copyToClipboard}
               className="group relative text-muted-foreground"
               disabled={!isScreenshotReady}
+              onClick={copyToClipboard}
             >
               {isScreenshotReady ? (
                 <Clipboard className="size-4" />
@@ -198,7 +201,7 @@ export function ReplicadStudio() {
         <DownloadButton
           variant="overlay"
           size="icon"
-          getBlob={downloadPNG}
+          getBlob={downloadPng}
           title={`${build?.name}.png`}
           className="text-muted-foreground"
           tooltip={isScreenshotReady ? 'Download PNG' : 'Preparing renderer...'}
@@ -213,7 +216,7 @@ export function ReplicadStudio() {
         <DownloadButton
           variant="overlay"
           size="icon"
-          getBlob={downloadSTL}
+          getBlob={downloadStl}
           title={`${build?.name}.stl`}
           className="group text-muted-foreground"
           disabled={!mesh}

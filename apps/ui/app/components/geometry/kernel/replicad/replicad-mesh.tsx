@@ -1,9 +1,10 @@
 import React, { useRef, useLayoutEffect, useCallback } from 'react';
-import { useThree, type ThreeEvent } from '@react-three/fiber';
+import { useThree } from '@react-three/fiber';
+import type { ThreeEvent } from '@react-three/fiber';
 import { BufferGeometry } from 'three';
 import * as r3js from 'replicad-threejs-helper';
-import { MatcapMaterial } from '@/components/geometry/graphics/three/matcap-material';
-import { useColor } from '@/hooks/use-color';
+import { MatcapMaterial } from '@/components/geometry/graphics/three/matcap-material.js';
+import { useColor } from '@/hooks/use-color.js';
 
 export const useApplyHighlights = (geometry: BufferGeometry, highlight: number | number[]) => {
   const { invalidate } = useThree();
@@ -32,17 +33,17 @@ export const useFaceEvent = (onEvent: (event: ThreeEvent<MouseEvent>, faceIndex:
   }, []);
 };
 
-interface ReplicadMeshProperties {
-  faces?: any; // Using any for now since we don't have the replicad types
-  edges?: any; // Using any for now since we don't have the replicad types
-  onFaceClick?: (event: ThreeEvent<MouseEvent>, faceIndex: number) => void;
-  selected?: number;
-  faceHover?: boolean;
-  color?: string;
-  opacity?: number;
-}
+type ReplicadMeshProperties = {
+  readonly faces?: any; // Using any for now since we don't have the replicad types
+  readonly edges?: any; // Using any for now since we don't have the replicad types
+  readonly onFaceClick?: (event: ThreeEvent<MouseEvent>, faceIndex: number) => void;
+  readonly selected?: number;
+  readonly faceHover?: boolean;
+  readonly color?: string;
+  readonly opacity?: number;
+};
 
-export const ReplicadMesh = React.memo(function ShapeMeshes({
+export const ReplicadMesh = React.memo(function ({
   faces,
   edges,
   color,
@@ -108,10 +109,10 @@ export const ReplicadMesh = React.memo(function ShapeMeshes({
         onPointerLeave={onHover}
       >
         <MatcapMaterial
+          polygonOffset
           color={color ?? colors.serialized.hex}
           opacity={opacity ?? 1}
           transparent={opacity !== 1}
-          polygonOffset
           polygonOffsetFactor={2}
           polygonOffsetUnits={1}
         />

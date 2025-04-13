@@ -10,6 +10,7 @@ export type KeyCombination = Pick<KeyboardEvent, 'key'> &
  * Formats special keys into symbols or readable names
  */
 const formatKey = (key: KeyCombination['key']): string => {
+  /* eslint-disable @typescript-eslint/naming-convention -- these are the key codes from the KeyboardEvent interface */
   const specialKeys: Record<string, string> = {
     ArrowUp: '↑',
     ArrowDown: '↓',
@@ -21,6 +22,7 @@ const formatKey = (key: KeyCombination['key']): string => {
     Delete: 'Del',
     ' ': 'Space',
   };
+  /* eslint-enable @typescript-eslint/naming-convention -- these are the key codes from the KeyboardEvent interface */
 
   const specialKey = specialKeys[key];
 

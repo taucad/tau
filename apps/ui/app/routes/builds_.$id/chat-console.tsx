@@ -1,12 +1,14 @@
+import { ChevronUp, Filter, Settings, Trash } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { COLLAPSED_CONSOLE_SIZE } from './chat-view-split';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { ChevronUp, Filter, Settings, Trash } from 'lucide-react';
 import { KeyShortcut } from '@/components/ui/key-shortcut';
-import { cn } from '@/utils/ui';
+import { cn } from '@/utils/ui.js';
 import { useConsole } from '@/hooks/use-console';
-import { useState, useCallback } from 'react';
-import { LogLevel, LOG_LEVELS, LogOrigin } from '@/types/console';
+import type { LogLevel, LogOrigin } from '@/types/console';
+import { logLevels } from '@/types/console';
 import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
@@ -17,13 +19,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useCookie } from '@/hooks/use-cookie';
-import { COLLAPSED_CONSOLE_SIZE } from './chat-view-split';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
-  onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
-  onFilterChange?: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  keyCombination?: string;
-  'data-view': 'tabs' | 'split';
+  readonly onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  readonly onFilterChange?: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  readonly keyCombination?: string;
+  readonly 'data-view': 'tabs' | 'split';
 };
 
 // Cookie names for persisting console settings
@@ -64,7 +65,7 @@ const getComponentColor = (component: string | undefined): string => {
 };
 
 // Component badge renderer
-const ComponentBadge = ({ origin }: { origin?: LogOrigin }) => {
+function ComponentBadge({ origin }: { readonly origin?: LogOrigin }) {
   if (!origin?.component) return;
 
   const bgColor = getComponentColor(origin.component);
@@ -79,27 +80,32 @@ const ComponentBadge = ({ origin }: { origin?: LogOrigin }) => {
       <span className="inline-block whitespace-nowrap">{origin.component}</span>
     </Badge>
   );
-};
+}
 
 // Verbosity level badge renderer
-const VerbosityBadge = ({ level }: { level: LogLevel }) => {
+function VerbosityBadge({ level }: { readonly level: LogLevel }) {
   const getBadgeColor = () => {
     switch (level) {
-      case LOG_LEVELS.ERROR: {
+      case logLevels.error: {
         return 'bg-destructive';
       }
-      case LOG_LEVELS.WARN: {
+
+      case logLevels.warn: {
         return 'bg-warning';
       }
-      case LOG_LEVELS.INFO: {
+
+      case logLevels.info: {
         return 'bg-information';
       }
-      case LOG_LEVELS.DEBUG: {
+
+      case logLevels.debug: {
         return 'bg-stable';
       }
-      case LOG_LEVELS.TRACE: {
+
+      case logLevels.trace: {
         return 'bg-feature';
       }
+
       default: {
         return 'bg-[grey]';
       }
@@ -118,7 +124,7 @@ const VerbosityBadge = ({ level }: { level: LogLevel }) => {
       {level}
     </Badge>
   );
-};
+}
 
 // Format timestamp with seconds
 const formatTimestamp = (timestamp: number): string => {
@@ -129,13 +135,13 @@ const formatTimestamp = (timestamp: number): string => {
   });
 };
 
-export const ChatConsole = ({
+export function ChatConsole({
   onButtonClick,
   keyCombination,
   onFilterChange,
   className,
   ...properties
-}: ChatConsoleProperties) => {
+}: ChatConsoleProperties) {
   const log = useConsole({ defaultOrigin: { component: 'ChatConsole' } });
   const [filter, setFilter] = useState('');
 
@@ -235,19 +241,19 @@ export const ChatConsole = ({
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            Toggle console{``}
-            {keyCombination && (
+            Toggle console
+            {keyCombination ? (
               <KeyShortcut variant="tooltip" className="ml-1">
                 {keyCombination}
               </KeyShortcut>
-            )}
+            ) : null}
           </TooltipContent>
         </Tooltip>
         <Input
           className="h-6 w-full group-data-[view=tabs]/console:h-8"
           placeholder="Filter..."
-          onChange={handleFilterChange}
           value={filter}
+          onChange={handleFilterChange}
         />
 
         <div className="flex flex-row gap-2">
@@ -274,12 +280,16 @@ export const ChatConsole = ({
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Log Levels</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {Object.values(LOG_LEVELS).map((level) => (
+              {Object.values(logLevels).map((level) => (
                 <DropdownMenuCheckboxItem
                   key={level}
                   checked={enabledLevels[level]}
-                  onSelect={(event) => event.preventDefault()}
-                  onCheckedChange={(checked) => toggleLevel(level, checked)}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                  }}
+                  onCheckedChange={(checked) => {
+                    toggleLevel(level, checked);
+                  }}
                 >
                   <VerbosityBadge level={level} />
                 </DropdownMenuCheckboxItem>
@@ -310,19 +320,20 @@ export const ChatConsole = ({
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>Display Options</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {
-                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys() loses type information
-                (Object.keys(DEFAULT_DISPLAY_CONFIG) as (keyof typeof DEFAULT_DISPLAY_CONFIG)[]).map((key) => (
-                  <DropdownMenuCheckboxItem
-                    key={key}
-                    checked={displayConfig[key]}
-                    onSelect={(event) => event.preventDefault()}
-                    onCheckedChange={(checked) => toggleDisplayConfig(key, checked)}
-                  >
-                    {key.replaceAll(/([A-Z])/g, ' $1').replace(/^./, (string_) => string_.toUpperCase())}
-                  </DropdownMenuCheckboxItem>
-                ))
-              }
+              {(Object.keys(DEFAULT_DISPLAY_CONFIG) as Array<keyof typeof DEFAULT_DISPLAY_CONFIG>).map((key) => (
+                <DropdownMenuCheckboxItem
+                  key={key}
+                  checked={displayConfig[key]}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                  }}
+                  onCheckedChange={(checked) => {
+                    toggleDisplayConfig(key, checked);
+                  }}
+                >
+                  {key.replaceAll(/([A-Z])/g, ' $1').replace(/^./, (string_) => string_.toUpperCase())}
+                </DropdownMenuCheckboxItem>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -354,23 +365,25 @@ export const ChatConsole = ({
                 'group/log cursor-default border-primary hover:bg-muted/20',
                 'flex-shrink-0 overflow-x-auto',
                 {
-                  'border-destructive': log.level === LOG_LEVELS.ERROR,
-                  'border-warning': log.level === LOG_LEVELS.WARN,
-                  'border-information': log.level === LOG_LEVELS.INFO,
-                  'border-stable': log.level === LOG_LEVELS.DEBUG,
-                  'border-feature': log.level === LOG_LEVELS.TRACE,
+                  'border-destructive': log.level === logLevels.error,
+                  'border-warning': log.level === logLevels.warn,
+                  'border-information': log.level === logLevels.info,
+                  'border-stable': log.level === logLevels.debug,
+                  'border-feature': log.level === logLevels.trace,
                 },
               )}
             >
               <div className="flex flex-wrap items-baseline gap-2">
-                {displayConfig.showTimestamp && (
+                {displayConfig.showTimestamp ? (
                   <span className="shrink-0 opacity-60">[{formatTimestamp(log.timestamp)}]</span>
-                )}
-                {displayConfig.showVerbosity && <VerbosityBadge level={log.level} />}
-                {displayConfig.showComponent && <ComponentBadge origin={log.origin} />}
+                ) : null}
+                {displayConfig.showVerbosity ? <VerbosityBadge level={log.level} /> : null}
+                {displayConfig.showComponent ? <ComponentBadge origin={log.origin} /> : null}
                 <span className="mr-auto">{log.message}</span>
               </div>
-              {log.data !== undefined && displayConfig.showData && <div>{JSON.stringify(log.data, undefined, 2)}</div>}
+              {log.data !== undefined && displayConfig.showData ? (
+                <div>{JSON.stringify(log.data, undefined, 2)}</div>
+              ) : null}
             </pre>
           ))
         ) : (
@@ -381,4 +394,4 @@ export const ChatConsole = ({
       </div>
     </div>
   );
-};
+}

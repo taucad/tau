@@ -1,27 +1,27 @@
 import * as React from 'react';
 import { Slot } from '@radix-ui/react-slot';
-import { VariantProps, cva } from 'class-variance-authority';
+import type { VariantProps } from 'class-variance-authority';
+import { cva } from 'class-variance-authority';
 import { PanelLeftIcon } from 'lucide-react';
+import { useIsMobile } from '@/hooks/use-mobile.js';
+import { useKeydown } from '@/hooks/use-keydown.js';
+import { cn } from '@/utils/ui.js';
+import { Button } from '@/components/ui/button.js';
+import { Input } from '@/components/ui/input.js';
+import { Separator } from '@/components/ui/separator.js';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet.js';
+import { Skeleton } from '@/components/ui/skeleton.js';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { useCookie } from '@/hooks/use-cookie.js';
+import type { KeyCombination } from '@/utils/keys.js';
 
-import { useIsMobile } from '@/hooks/use-mobile';
-import { useKeydown } from '@/hooks/use-keydown';
-import { cn } from '@/utils/ui';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Separator } from '@/components/ui/separator';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useCookie } from '@/hooks/use-cookie';
-import { type KeyCombination } from '@/utils/keys';
+export const sidebarCookieName = 'sidebar-open';
+const sidebarDefaultOpen = false;
+const sidebarWidth = '14rem';
+const sidebarWidthMobile = '18rem';
+const sidebarWidthIcon = '3rem';
 
-export const SIDEBAR_COOKIE_NAME = 'sidebar-open';
-const SIDEBAR_DEFAULT_OPEN = false;
-const SIDEBAR_WIDTH = '14rem';
-const SIDEBAR_WIDTH_MOBILE = '18rem';
-const SIDEBAR_WIDTH_ICON = '3rem';
-
-export const SIDEBAR_TOGGLE_KEY_COMBO = {
+export const sidebarToggleKeyCombo = {
   key: 'b',
   metaKey: true,
 } as const satisfies KeyCombination;
@@ -48,25 +48,21 @@ function useSidebar() {
 }
 
 function SidebarProvider({
-  defaultOpen = true,
-  open: openProperty,
   onOpenChange: setOpenProperty,
   className,
   style,
   children,
   ...properties
 }: React.ComponentProps<'div'> & {
-  defaultOpen?: boolean;
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
+  readonly onOpenChange?: (open: boolean) => void;
 }) {
   const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
-  const [_open, _setOpen] = useCookie(SIDEBAR_COOKIE_NAME, SIDEBAR_DEFAULT_OPEN);
+  const [_open, _setOpen] = useCookie(sidebarCookieName, sidebarDefaultOpen);
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
-  const open = openProperty ?? _open;
+  const open = _open;
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
       const openState = typeof value === 'function' ? value(open) : value;
@@ -81,10 +77,14 @@ function SidebarProvider({
 
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
-    return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open);
+    if (isMobile) {
+      setOpenMobile((open) => !open);
+    } else {
+      setOpen((open) => !open);
+    }
   }, [isMobile, setOpen, setOpenMobile]);
 
-  useKeydown(SIDEBAR_TOGGLE_KEY_COMBO, toggleSidebar, {
+  useKeydown(sidebarToggleKeyCombo, toggleSidebar, {
     preventDefault: true,
     stopPropagation: true,
   });
@@ -112,9 +112,9 @@ function SidebarProvider({
         <div
           data-slot="sidebar-wrapper"
           style={{
-            '--sidebar-width': SIDEBAR_WIDTH,
-            '--sidebar-width-icon': SIDEBAR_WIDTH_ICON,
-            '--sidebar-width-current': isMobile ? SIDEBAR_WIDTH_MOBILE : open ? SIDEBAR_WIDTH : SIDEBAR_WIDTH_ICON,
+            '--sidebar-width': sidebarWidth,
+            '--sidebar-width-icon': sidebarWidthIcon,
+            '--sidebar-width-current': isMobile ? sidebarWidthMobile : open ? sidebarWidth : sidebarWidthIcon,
             ...style,
           }}
           className={cn('group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar', className)}
@@ -126,6 +126,7 @@ function SidebarProvider({
     </SidebarContext.Provider>
   );
 }
+
 SidebarProvider.displayName = 'SidebarProvider';
 
 function Sidebar({
@@ -136,9 +137,9 @@ function Sidebar({
   children,
   ...properties
 }: React.ComponentProps<'div'> & {
-  side?: 'left' | 'right';
-  variant?: 'sidebar' | 'floating' | 'inset';
-  collapsible?: 'offcanvas' | 'icon' | 'none';
+  readonly side?: 'left' | 'right';
+  readonly variant?: 'sidebar' | 'floating' | 'inset';
+  readonly collapsible?: 'offcanvas' | 'icon' | 'none';
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
 
@@ -163,7 +164,7 @@ function Sidebar({
           data-mobile="true"
           className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
           style={{
-            '--sidebar-width': SIDEBAR_WIDTH_MOBILE,
+            '--sidebar-width': sidebarWidthMobile,
           }}
           side={side}
         >
@@ -252,11 +253,11 @@ function SidebarRail({ className, ...properties }: React.ComponentProps<'button'
 
   return (
     <button
+      type="button"
       data-sidebar="rail"
       data-slot="sidebar-rail"
       aria-label="Toggle Sidebar"
       tabIndex={-1}
-      onClick={toggleSidebar}
       title="Toggle Sidebar"
       className={cn(
         'absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-[width] ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-border after:transition-[width] after:duration-200 after:ease-in-out hover:after:w-[3px] hover:after:transition-all active:after:w-[3px] active:after:bg-neutral/50 sm:flex',
@@ -267,6 +268,7 @@ function SidebarRail({ className, ...properties }: React.ComponentProps<'button'
         '[[data-side=right][data-collapsible=offcanvas]_&]:-left-2',
         className,
       )}
+      onClick={toggleSidebar}
       {...properties}
     />
   );
@@ -359,7 +361,7 @@ function SidebarGroupLabel({
   className,
   asChild = false,
   ...properties
-}: React.ComponentProps<'div'> & { asChild?: boolean }) {
+}: React.ComponentProps<'div'> & { readonly asChild?: boolean }) {
   const Comp = asChild ? Slot : 'div';
 
   return (
@@ -380,7 +382,7 @@ function SidebarGroupAction({
   className,
   asChild = false,
   ...properties
-}: React.ComponentProps<'button'> & { asChild?: boolean }) {
+}: React.ComponentProps<'button'> & { readonly asChild?: boolean }) {
   const Comp = asChild ? Slot : 'button';
 
   return (
@@ -462,13 +464,13 @@ function SidebarMenuButton({
   tooltip,
   className,
   onClick,
-  disableAutoClose = false,
+  shouldAutoClose = false,
   ...properties
 }: React.ComponentProps<'button'> & {
-  asChild?: boolean;
-  isActive?: boolean;
-  tooltip?: string | React.ComponentProps<typeof TooltipContent>;
-  disableAutoClose?: boolean;
+  readonly asChild?: boolean;
+  readonly isActive?: boolean;
+  readonly tooltip?: string | React.ComponentProps<typeof TooltipContent>;
+  readonly shouldAutoClose?: boolean;
 } & VariantProps<typeof sidebarMenuButtonVariants>) {
   const Comp = asChild ? Slot : 'button';
   const { isMobile, state, toggleSidebar } = useSidebar();
@@ -476,12 +478,13 @@ function SidebarMenuButton({
   // Auto-close the sidebar when clicking on a button in mobile mode.
   const handleClick = React.useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
-      if (isMobile && state === 'expanded' && !disableAutoClose) {
+      if (isMobile && state === 'expanded' && !shouldAutoClose) {
         toggleSidebar();
       }
+
       onClick?.(event);
     },
-    [disableAutoClose, isMobile, onClick, state, toggleSidebar],
+    [shouldAutoClose, isMobile, onClick, state, toggleSidebar],
   );
 
   const button = (
@@ -517,11 +520,11 @@ function SidebarMenuButton({
 function SidebarMenuAction({
   className,
   asChild = false,
-  showOnHover = false,
+  shouldShowOnHover = false,
   ...properties
 }: React.ComponentProps<'button'> & {
-  asChild?: boolean;
-  showOnHover?: boolean;
+  readonly asChild?: boolean;
+  readonly shouldShowOnHover?: boolean;
 }) {
   const Comp = asChild ? Slot : 'button';
 
@@ -537,7 +540,7 @@ function SidebarMenuAction({
         'peer-data-[size=default]/menu-button:top-1.5',
         'peer-data-[size=lg]/menu-button:top-2.5',
         'group-data-[collapsible=icon]:hidden',
-        showOnHover &&
+        shouldShowOnHover &&
           'group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 peer-data-[active=true]/menu-button:text-sidebar-accent-foreground data-[state=open]:opacity-100 md:opacity-0',
         className,
       )}
@@ -567,10 +570,10 @@ function SidebarMenuBadge({ className, ...properties }: React.ComponentProps<'di
 
 function SidebarMenuSkeleton({
   className,
-  showIcon = false,
+  hasIcon = false,
   ...properties
 }: React.ComponentProps<'div'> & {
-  showIcon?: boolean;
+  readonly hasIcon?: boolean;
 }) {
   // Random width between 50 to 90%.
   const width = React.useMemo(() => {
@@ -584,7 +587,7 @@ function SidebarMenuSkeleton({
       className={cn('flex h-8 items-center gap-2 rounded-md px-2', className)}
       {...properties}
     >
-      {showIcon && <Skeleton className="size-4 rounded-md" data-sidebar="menu-skeleton-icon" />}
+      {hasIcon ? <Skeleton className="size-4 rounded-md" data-sidebar="menu-skeleton-icon" /> : null}
       <Skeleton
         className="h-4 max-w-(--skeleton-width) flex-1"
         data-sidebar="menu-skeleton-text"
@@ -629,9 +632,9 @@ function SidebarMenuSubButton({
   className,
   ...properties
 }: React.ComponentProps<'a'> & {
-  asChild?: boolean;
-  size?: 'sm' | 'md';
-  isActive?: boolean;
+  readonly asChild?: boolean;
+  readonly size?: 'sm' | 'md';
+  readonly isActive?: boolean;
 }) {
   const Comp = asChild ? Slot : 'a';
 

@@ -2,26 +2,25 @@ import * as React from 'react';
 import * as NavigationMenuPrimitive from '@radix-ui/react-navigation-menu';
 import { cva } from 'class-variance-authority';
 import { ChevronDownIcon } from 'lucide-react';
-
-import { cn } from '@/utils/ui';
+import { cn } from '@/utils/ui.js';
 
 function NavigationMenu({
   className,
   children,
-  viewport = true,
+  hasViewport = true,
   ...properties
 }: React.ComponentProps<typeof NavigationMenuPrimitive.Root> & {
-  viewport?: boolean;
+  readonly hasViewport?: boolean;
 }) {
   return (
     <NavigationMenuPrimitive.Root
       data-slot="navigation-menu"
-      data-viewport={viewport}
+      data-viewport={hasViewport}
       className={cn('group/navigation-menu relative flex max-w-max flex-1 items-center justify-center', className)}
       {...properties}
     >
       {children}
-      {viewport && <NavigationMenuViewport />}
+      {hasViewport ? <NavigationMenuViewport /> : null}
     </NavigationMenuPrimitive.Root>
   );
 }

@@ -1,8 +1,7 @@
 import * as React from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { useEffect, useRef, useState } from 'react';
-
-import { cn } from '@/utils/ui';
+import { cn } from '@/utils/ui.js';
 
 function Tabs({ className, ...properties }: React.ComponentProps<typeof TabsPrimitive.Root>) {
   return <TabsPrimitive.Root data-slot="tabs" className={cn('flex flex-col gap-2', className)} {...properties} />;
@@ -16,6 +15,7 @@ function TabsList({ className, ...properties }: React.ComponentProps<typeof Tabs
     height: 0,
   });
 
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
   const tabsListReference = useRef<HTMLDivElement | null>(null);
 
   const updateIndicator = React.useCallback(() => {
@@ -62,7 +62,7 @@ function TabsList({ className, ...properties }: React.ComponentProps<typeof Tabs
   }, [updateIndicator]);
 
   return (
-    <div className="relative" ref={tabsListReference}>
+    <div ref={tabsListReference} className="relative">
       <TabsPrimitive.List
         data-slot="tabs-list"
         className={cn(

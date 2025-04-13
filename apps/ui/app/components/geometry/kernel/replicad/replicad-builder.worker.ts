@@ -1,19 +1,17 @@
 import { expose } from 'comlink';
 import * as replicad from 'replicad';
-import { OpenCascadeInstance } from 'replicad-opencascadejs/src/replicad_with_exceptions.js';
-
-import { initOpenCascade, initOpenCascadeWithExceptions } from './init-open-cascade';
-import { StudioHelper } from './utils/studio-helper';
-import { runInContext, buildModuleEvaluator } from './vm';
-
-import { renderOutput, ShapeStandardizer } from './utils/render-output';
+import type { OpenCascadeInstance } from 'replicad-opencascadejs/src/replicad_with_exceptions.js';
+import { initOpenCascade, initOpenCascadeWithExceptions } from './init-open-cascade.js';
+import { StudioHelper } from './utils/studio-helper.js';
+import { runInContext, buildModuleEvaluator } from './vm.js';
+import { renderOutput, ShapeStandardizer } from './utils/render-output.js';
 
 // Track whether we've already set OC in replicad to avoid repeated calls
-let replicadHasOC = false;
+let replicadHasOc = false;
 
 // Make replicad available in the global scope.
 // Eslint overrides are permissible as replicad needs to be global for the vm to work.
-// eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+
 (globalThis as any).replicad = replicad;
 
 /**
@@ -22,7 +20,7 @@ let replicadHasOC = false;
  * @param context
  * @returns the result of the code
  */
-export function runInContextAsOC(code: string, context: Record<string, unknown> = {}): any {
+export function runInContextAsOc(code: string, context: Record<string, unknown> = {}): any {
   const editedText = `
 ${code}
 let dp = {}
@@ -37,7 +35,7 @@ return main(replicad, __inputParams || dp)
 
 async function runAsFunction(code: string, parameters: Record<string, unknown>): Promise<any> {
   const oc = await OC;
-  return runInContextAsOC(code, {
+  return runInContextAsOc(code, {
     oc,
     replicad,
     __inputParams: parameters,
@@ -78,10 +76,10 @@ const runCode = async (code: string, parameters: Record<string, unknown>): Promi
   return result;
 };
 
-const extractDefaultParametersFromCode = async (code: string): Promise<any> => {
+const extractDefaultParametersFromCode = async (code: string): Promise<Record<string, unknown>> => {
   if (/^\s*export\s+/m.test(code)) {
     const module = await buildModuleEvaluator(code);
-    return module.defaultParams || undefined;
+    return module.defaultParams ?? {};
   }
 
   const editedText = `
@@ -117,12 +115,10 @@ try {
 
   try {
     return runInContext(editedText, {});
-  } catch {
-    return;
-  }
+  } catch {}
 };
 
-const SHAPES_MEMORY: Record<string, { shape: any; name: string }[]> = {};
+const shapesMemory: Record<string, Array<{ shape: any; name: string }>> = {};
 
 const ocVersions: {
   withExceptions: Promise<OpenCascadeInstance> | undefined;
@@ -150,6 +146,7 @@ async function initializeOpenCascadeInstance(withExceptions: boolean): Promise<O
     if (!OC) {
       throw new Error('OpenCascade initialization in progress but OC is undefined');
     }
+
     return OC;
   }
 
@@ -166,12 +163,14 @@ async function initializeOpenCascadeInstance(withExceptions: boolean): Promise<O
         console.log('Initializing OpenCascade with exceptions');
         ocVersions.withExceptions = initOpenCascadeWithExceptions();
       }
+
       OC = ocVersions.withExceptions;
     } else {
       if (!ocVersions.single) {
         console.log('Initializing OpenCascade without exceptions');
         ocVersions.single = initOpenCascade();
       }
+
       OC = ocVersions.single;
     }
 
@@ -187,12 +186,12 @@ async function initializeOpenCascadeInstance(withExceptions: boolean): Promise<O
   }
 }
 
-function enableExceptions() {
+async function enableExceptions() {
   ocVersions.current = 'withExceptions';
   return initializeOpenCascadeInstance(true);
 }
 
-function disableExceptions() {
+async function disableExceptions() {
   ocVersions.current = 'single';
   return initializeOpenCascadeInstance(false);
 }
@@ -267,7 +266,7 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
       standardizer,
       (shapesArray) => {
         const editedShapes = helper.apply(shapesArray);
-        SHAPES_MEMORY['defaultShape'] = shapesArray;
+        shapesMemory.defaultShape = shapesArray;
         return editedShapes;
       },
       defaultName,
@@ -285,7 +284,7 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
   }
 };
 
-const DEFAULT_EXPORT_MESH_CONFIG = { tolerance: 0.01, angularTolerance: 30 };
+const defaultExportMeshConfig = { tolerance: 0.01, angularTolerance: 30 };
 
 const buildBlob = (shape: any, fileType: string, meshConfig: { tolerance: number; angularTolerance: number }): Blob => {
   if (fileType === 'stl') return shape.blobSTL(meshConfig);
@@ -297,25 +296,26 @@ const buildBlob = (shape: any, fileType: string, meshConfig: { tolerance: number
 const exportShape = async (
   fileType: 'stl' | 'stl-binary' | 'step' | 'step-assembly' = 'stl',
   shapeId = 'defaultShape',
-  meshConfig = DEFAULT_EXPORT_MESH_CONFIG,
-): Promise<{ blob: Blob; name: string }[]> => {
-  if (!SHAPES_MEMORY[shapeId]) throw new Error(`Shape ${shapeId} not computed yet`);
+  meshConfig = defaultExportMeshConfig,
+): Promise<Array<{ blob: Blob; name: string }>> => {
+  if (!shapesMemory[shapeId]) throw new Error(`Shape ${shapeId} not computed yet`);
   if (fileType === 'step-assembly') {
     return [
       {
-        blob: replicad.exportSTEP(SHAPES_MEMORY[shapeId]),
+        blob: replicad.exportSTEP(shapesMemory[shapeId]),
         name: shapeId,
       },
     ];
   }
-  return SHAPES_MEMORY[shapeId].map(({ shape, name }) => ({
+
+  return shapesMemory[shapeId].map(({ shape, name }) => ({
     blob: buildBlob(shape, fileType, meshConfig),
     name,
   }));
 };
 
 const faceInfo = (subshapeIndex: number, faceIndex: number, shapeId = 'defaultShape'): any | undefined => {
-  const face = SHAPES_MEMORY[shapeId]?.[subshapeIndex]?.shape.faces[faceIndex];
+  const face = shapesMemory[shapeId]?.[subshapeIndex]?.shape.faces[faceIndex];
   if (!face) return undefined;
   return {
     type: face.geomType,
@@ -325,7 +325,7 @@ const faceInfo = (subshapeIndex: number, faceIndex: number, shapeId = 'defaultSh
 };
 
 const edgeInfo = (subshapeIndex: number, edgeIndex: number, shapeId = 'defaultShape'): any | undefined => {
-  const edge = SHAPES_MEMORY[shapeId]?.[subshapeIndex]?.shape.edges[edgeIndex];
+  const edge = shapesMemory[shapeId]?.[subshapeIndex]?.shape.edges[edgeIndex];
   if (!edge) return undefined;
   return {
     type: edge.geomType,
@@ -343,15 +343,15 @@ const initialize = async (withExceptions: boolean): Promise<void> => {
   console.log(`OpenCascade initialization took ${ocEndTime - startTime}ms`);
 
   // Set replicad OC once we have it
-  if (!replicadHasOC) {
+  if (!replicadHasOc) {
     console.log('Setting OC in replicad');
     replicad.setOC(oc);
-    replicadHasOC = true;
+    replicadHasOc = true;
   }
 };
 
 const service = {
-  ready: async (): Promise<boolean> => {
+  async ready(): Promise<boolean> {
     try {
       // Check that OC is initialized
       await OC;

@@ -1,27 +1,26 @@
 import { Outlet } from '@remix-run/react';
-import { AppSidebar } from '@/components/app-sidebar';
+import { Fragment } from 'react/jsx-runtime';
+import type { ReactNode } from 'react';
+import { AppSidebar } from '@/components/app-sidebar.js';
 import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb';
-import { Separator } from '@/components/ui/separator';
-import { SIDEBAR_TOGGLE_KEY_COMBO, SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+} from '@/components/ui/breadcrumb.js';
+import { Separator } from '@/components/ui/separator.js';
+import { sidebarToggleKeyCombo, SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { Badge } from '@/components/ui/badge.js';
+import { useNetworkConnectivity } from '@/hooks/use-network-connectivity.js';
+import { KeyShortcut } from '@/components/ui/key-shortcut.js';
+import { formatKeyCombination } from '@/utils/keys.js';
+import { useTypedMatches } from '@/types/matches.js';
 
-import { Badge } from '@/components/ui/badge';
-import { useNetworkConnectivity } from '@/hooks/use-network-connectivity';
-import { Fragment } from 'react/jsx-runtime';
-import { ReactNode } from 'react';
-import { KeyShortcut } from '@/components/ui/key-shortcut';
-import { formatKeyCombination } from '@/utils/keys';
-import { useTypedMatches } from '@/types/matches';
+export const headerHeight = '3rem';
 
-export const HEADER_HEIGHT = '3rem';
-
-export function Page({ error }: { error?: ReactNode }) {
+export function Page({ error }: { readonly error?: ReactNode }) {
   const matches = useTypedMatches();
 
   const isOnline = useNetworkConnectivity();
@@ -33,7 +32,7 @@ export function Page({ error }: { error?: ReactNode }) {
       <AppSidebar />
       <SidebarInset
         className="w-[calc(100dvw-var(--sidebar-width-current)-1px)]"
-        style={{ '--header-height': HEADER_HEIGHT }}
+        style={{ '--header-height': headerHeight }}
       >
         <header className="flex h-[var(--header-height)] shrink-0 items-center justify-between gap-2 border-b-[1px] border-border transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
           <div className="flex items-center gap-1 px-4">
@@ -43,7 +42,7 @@ export function Page({ error }: { error?: ReactNode }) {
               </TooltipTrigger>
               <TooltipContent>
                 Toggle sidebar{' '}
-                <KeyShortcut variant="tooltip">{formatKeyCombination(SIDEBAR_TOGGLE_KEY_COMBO)}</KeyShortcut>
+                <KeyShortcut variant="tooltip">{formatKeyCombination(sidebarToggleKeyCombo)}</KeyShortcut>
               </TooltipContent>
             </Tooltip>
             {breadcrumbItems.length > 0 && (
@@ -69,7 +68,7 @@ export function Page({ error }: { error?: ReactNode }) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span>
-                    <Badge className="font-mono font-normal" variant={'outline'}>
+                    <Badge className="font-mono font-normal" variant="outline">
                       OFFLINE
                     </Badge>
                   </span>

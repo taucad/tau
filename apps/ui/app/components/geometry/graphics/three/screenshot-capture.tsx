@@ -1,8 +1,9 @@
 import { useImperativeHandle } from 'react';
+import type { RefObject } from 'react';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
-export interface ScreenshotOptions {
+export type ScreenshotOptions = {
   /**
    * Aspect ratio of the screenshot (width/height)
    * @default 16/9
@@ -66,20 +67,25 @@ export interface ScreenshotOptions {
      */
     isPreview?: boolean;
   };
-}
+};
 
-export interface ScreenshotCaptureHandle {
+export type ScreenshotCaptureHandle = {
   captureScreenshot: (options?: ScreenshotOptions) => string;
-}
+};
 
 // Component to capture screenshots
-export function ScreenshotCapture({ ref: reference }: { ref: React.RefObject<ScreenshotCaptureHandle | null> }) {
+export function ScreenshotCapture({
+  ref: reference,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
+  readonly ref: RefObject<ScreenshotCaptureHandle | null>;
+}) {
   const { gl, scene, camera } = useThree();
 
   useImperativeHandle(
     reference,
     () => ({
-      captureScreenshot: (options?: ScreenshotOptions) => {
+      captureScreenshot(options?: ScreenshotOptions) {
         if (!gl.domElement) {
           throw new Error('Screenshot attempted before renderer was ready');
         }
@@ -156,7 +162,7 @@ export function ScreenshotCapture({ ref: reference }: { ref: React.RefObject<Scr
         const targetAspect = config.aspectRatio;
 
         // Use super-sampling for higher quality
-        const supersamplingFactor = config.quality.supersamplingFactor;
+        const { supersamplingFactor } = config.quality;
         const width = Math.round(originalHeight * targetAspect) * supersamplingFactor;
         const height = originalHeight * supersamplingFactor;
 
@@ -213,6 +219,7 @@ export function ScreenshotCapture({ ref: reference }: { ref: React.RefObject<Scr
               if (object.material.linewidth !== undefined) {
                 object.material.linewidth = Math.max(originalLineWidth, lineWidthEnhancement);
               }
+
               // Restore after rendering
               setTimeout(() => {
                 if (object.material.linewidth !== undefined) {
@@ -339,6 +346,5 @@ export function ScreenshotCapture({ ref: reference }: { ref: React.RefObject<Scr
     [gl, scene, camera],
   );
 
-  // eslint-disable-next-line unicorn/no-null -- Required by React
   return null;
 }

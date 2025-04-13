@@ -1,12 +1,8 @@
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference -- there is currently no way to do this without a triple slash
 /// <reference lib="WebWorker" />
 
-import {
-  EnhancedCache,
-  isDocumentRequest,
-  isLoaderRequest,
-  NavigationHandler,
-  type DefaultFetchHandler,
-} from '@remix-pwa/sw';
+import { EnhancedCache, isDocumentRequest, isLoaderRequest, NavigationHandler } from '@remix-pwa/sw';
+import type { DefaultFetchHandler } from '@remix-pwa/sw';
 
 declare let self: ServiceWorkerGlobalScope;
 
@@ -24,11 +20,11 @@ self.addEventListener('activate', (event) => {
 
 const version = 'v1';
 
-const DOCUMENT_CACHE_NAME = `document-cache`;
-const ASSET_CACHE_NAME = `asset-cache`;
-const DATA_CACHE_NAME = `data-cache`;
+const documentCacheName = `document-cache`;
+const assetCacheName = `asset-cache`;
+const dataCacheName = `data-cache`;
 
-const documentCache = new EnhancedCache(DOCUMENT_CACHE_NAME, {
+const documentCache = new EnhancedCache(documentCacheName, {
   version,
   strategy: 'NetworkFirst',
   strategyOptions: {
@@ -36,7 +32,7 @@ const documentCache = new EnhancedCache(DOCUMENT_CACHE_NAME, {
   },
 });
 
-const assetCache = new EnhancedCache(ASSET_CACHE_NAME, {
+const assetCache = new EnhancedCache(assetCacheName, {
   version,
   strategy: 'NetworkFirst',
   strategyOptions: {
@@ -45,7 +41,7 @@ const assetCache = new EnhancedCache(ASSET_CACHE_NAME, {
   },
 });
 
-const dataCache = new EnhancedCache(DATA_CACHE_NAME, {
+const dataCache = new EnhancedCache(dataCacheName, {
   version,
   strategy: 'NetworkFirst',
   strategyOptions: {
@@ -55,7 +51,7 @@ const dataCache = new EnhancedCache(DATA_CACHE_NAME, {
 });
 
 export const defaultFetchHandler: DefaultFetchHandler = async ({ context }) => {
-  const request = context.event.request;
+  const { request } = context.event;
   const url = new URL(request.url);
 
   if (isDocumentRequest(request)) {

@@ -1,12 +1,12 @@
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
-import { useKeydown } from '@/hooks/use-keydown';
-import { useCookie } from '@/hooks/use-cookie';
-import { KeyCombination } from '@/utils/keys';
 import { useRef, useCallback } from 'react';
-import { ImperativePanelHandle } from 'react-resizable-panels';
+import type { ImperativePanelHandle } from 'react-resizable-panels';
 import { ChatConsole } from './chat-console';
 import { ChatEditor } from './chat-editor';
 import { ChatViewer } from './chat-viewer';
+import type { KeyCombination } from '@/utils/keys';
+import { useCookie } from '@/hooks/use-cookie';
+import { useKeydown } from '@/hooks/use-keydown';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 
 const CHAT_RESIZE_VIEWER_COOKIE_NAME = 'chat-resize-viewer';
 const CHAT_RESIZE_CODE_COOKIE_NAME = 'chat-resize-editor';
@@ -18,7 +18,7 @@ const toggleConsoleKeyCombination = {
 
 export const COLLAPSED_CONSOLE_SIZE = 4;
 
-export const ChatViewSplit = () => {
+export function ChatViewSplit() {
   const [consoleSize, setConsoleSize] = useCookie(CHAT_RESIZE_CODE_COOKIE_NAME, [85, 15]);
   const [codeSize, setCodeSize] = useCookie(CHAT_RESIZE_VIEWER_COOKIE_NAME, [60, 40]);
 
@@ -58,30 +58,30 @@ export const ChatViewSplit = () => {
           </ResizablePanel>
           <ResizableHandle />
           <ResizablePanel
+            ref={consolePanelReference}
+            collapsible
             order={2}
             defaultSize={consoleSize[1]}
             minSize={COLLAPSED_CONSOLE_SIZE}
             collapsedSize={COLLAPSED_CONSOLE_SIZE}
-            collapsible
-            ref={consolePanelReference}
             id="chat-console"
             // 10 is the height of the console buttons plus padding.
             className="group/console-resizable min-h-10"
           >
             <ChatConsole
-              onButtonClick={toggleConsolePanel}
               keyCombination={formattedToggleConsoleKeyCombination}
+              data-view="split"
+              onButtonClick={toggleConsolePanel}
               onFilterChange={(event) => {
                 const panel = consolePanelReference.current;
                 if (event.target.value.length > 0) {
                   panel?.expand();
                 }
               }}
-              data-view="split"
             />
           </ResizablePanel>
         </ResizablePanelGroup>
       </ResizablePanel>
     </ResizablePanelGroup>
   );
-};
+}

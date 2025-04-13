@@ -1,5 +1,8 @@
-import { Prism as SyntaxHighlighter, SyntaxHighlighterProps } from 'react-syntax-highlighter';
-import { cn } from '@/utils/ui';
+import type { SyntaxHighlighterProps } from 'react-syntax-highlighter';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import type { RefObject } from 'react';
+import React from 'react';
+import { cn } from '@/utils/ui.js';
 
 const displayLanguageFromOriginalLanguage = {
   kcl: 'typescript',
@@ -13,13 +16,13 @@ export function CodeViewer({
   showLineNumbers,
   language,
   ...rest
-}: SyntaxHighlighterProps & { className?: string; ref?: React.RefObject<SyntaxHighlighter> }) {
+}: SyntaxHighlighterProps & { readonly className?: string; readonly ref?: RefObject<SyntaxHighlighter> }) {
   return (
     <div className="relative w-full max-w-full overflow-hidden">
       <div className="w-full max-w-full overflow-x-auto">
         <SyntaxHighlighter
           {...rest}
-          showLineNumbers={showLineNumbers}
+          ref={ref}
           customStyle={{
             backgroundColor: 'transparent',
             color: 'var(--foreground)',
@@ -29,7 +32,7 @@ export function CodeViewer({
             minWidth: '100%', // Ensure it fills container
             ...(showLineNumbers ? { paddingLeft: '3.8em', paddingTop: '0.5em', paddingBottom: '0.5em' } : {}),
           }}
-          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Allow to attempt retrieving the language from the displayLanguageFromOriginalLanguage object.
+          showLineNumbers={showLineNumbers}
           language={language ? displayLanguageFromOriginalLanguage[language as MappedLanguage] || language : undefined}
           codeTagProps={{
             className: cn(
@@ -42,7 +45,6 @@ export function CodeViewer({
               '[&_*]:!bg-transparent',
             ),
           }}
-          ref={ref}
           PreTag="pre"
         />
       </div>

@@ -18,7 +18,7 @@ import { ModeToggle } from '@/components/nav/mode-toggle';
 import { ColorToggle } from './nav/color-toggle';
 import { NavHistory } from './nav/nav-history';
 import { Link } from '@remix-run/react';
-import { HEADER_HEIGHT } from './page';
+import { headerHeight } from './page';
 
 // This is sample data.
 const data = {
@@ -111,7 +111,7 @@ const data = {
 export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar collapsible="icon" {...properties}>
-      <SidebarHeader style={{ height: HEADER_HEIGHT }} className="border-b border-border">
+      <SidebarHeader style={{ height: headerHeight }} className="border-b border-border">
         <Link to="/" tabIndex={-1}>
           <SidebarMenuButton tooltip="Home" className="p-0! group-data-[collapsible=icon]:p-0! [&>svg]:size-8">
             <Tau className="overflow-clip rounded-md bg-primary text-primary" />

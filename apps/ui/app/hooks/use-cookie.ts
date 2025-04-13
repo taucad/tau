@@ -1,14 +1,13 @@
 import { useSyncExternalStore, useMemo } from 'react';
 import * as Cookies from 'es-cookie';
-import { loader } from '@/root';
 import { useRouteLoaderData } from '@remix-run/react';
-import { metaConfig } from '@/config';
-import { isFunction } from '@/utils/functions';
+import type { loader } from '@/root.js';
+import { metaConfig } from '@/config.js';
+import { isFunction } from '@/utils/functions.js';
 
 type Listener = () => void;
 
 const cookieStore = () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- cookie value is always a string
   const cache = new Map<string, any>();
   const listenerMap = new Map<string, Set<Listener>>();
 
@@ -16,6 +15,7 @@ const cookieStore = () => {
     if (!listenerMap.has(cookieName)) {
       listenerMap.set(cookieName, new Set());
     }
+
     listenerMap.get(cookieName)?.add(listener);
     return () => listenerMap.get(cookieName)?.delete(listener);
   };
@@ -33,7 +33,6 @@ const cookieStore = () => {
     const cookieValue = Cookies.get(cookieName);
     if (!cookieValue) return;
 
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- cookie value is always a string
     const cachedValue = JSON.parse(cookieValue) as T;
     cache.set(cookieName, cachedValue);
     return cachedValue;
@@ -76,6 +75,7 @@ export const useCookie = <T>(name: string, defaultValue: T) => {
             // If the cookie value is undefined, return the default value
             return defaultValue;
           }
+
           return cookieValue;
         }
 
@@ -94,7 +94,9 @@ export const useCookie = <T>(name: string, defaultValue: T) => {
         const updateValue: T = isFunction(valueOrFunction) ? valueOrFunction(currentValue) : valueOrFunction;
         store.update<T>(cookieName, updateValue);
       },
-      () => store.remove(cookieName),
+      () => {
+        store.remove(cookieName);
+      },
     ],
     [cookieName, data?.cookie, defaultValue],
   );

@@ -1,8 +1,7 @@
 import * as React from 'react';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from 'lucide-react';
-
-import { cn } from '@/utils/ui';
+import { cn } from '@/utils/ui.js';
 
 function Select({ ...properties }: React.ComponentProps<typeof SelectPrimitive.Root>) {
   return <SelectPrimitive.Root data-slot="select" {...properties} />;
@@ -22,7 +21,7 @@ function SelectTrigger({
   children,
   ...properties
 }: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
-  size?: 'sm' | 'default';
+  readonly size?: 'sm' | 'default';
 }) {
   return (
     <SelectPrimitive.Trigger

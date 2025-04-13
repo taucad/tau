@@ -1,10 +1,10 @@
-import { SidebarMenuButton } from '@/components/ui/sidebar';
 import { Plus } from 'lucide-react';
-import { SidebarGroup } from '../ui/sidebar';
 import { NavLink, useMatch, useNavigate } from '@remix-run/react';
-import { useKeydown } from '@/hooks/use-keydown';
-import { KeyShortcut } from '../ui/key-shortcut';
-export const NavChat = () => {
+import { SidebarGroup, SidebarMenuButton } from '@/components/ui/sidebar.js';
+import { KeyShortcut } from '@/components/ui/key-shortcut.js';
+import { useKeydown } from '@/hooks/use-keydown.js';
+
+export function NavChat() {
   const navigate = useNavigate();
   const isMatch = useMatch('/');
   const { formattedKeyCombination } = useKeydown(
@@ -36,7 +36,7 @@ export const NavChat = () => {
               ),
             }}
             variant="outline"
-            // this padding hack is to ensure the icon is centered correctly when the sidebar is collapsed
+            // This padding hack is to ensure the icon is centered correctly when the sidebar is collapsed
             className="pl-[7px]! whitespace-nowrap group-data-[collapsible=icon]:pl-[7px]!"
           >
             <Plus className="size-4 shrink-0" />
@@ -47,4 +47,4 @@ export const NavChat = () => {
       </NavLink>
     </SidebarGroup>
   );
-};
+}

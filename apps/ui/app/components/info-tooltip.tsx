@@ -1,7 +1,7 @@
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { Info } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 
-export const InfoTooltip = ({ tooltip }: { tooltip: string }) => {
+export function InfoTooltip({ tooltip }: { readonly tooltip: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -12,4 +12,4 @@ export const InfoTooltip = ({ tooltip }: { tooltip: string }) => {
       <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
   );
-};
+}

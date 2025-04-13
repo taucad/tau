@@ -1,11 +1,11 @@
-import { useCookie } from '@/hooks/use-cookie';
-import { KeyCombination } from '@/utils/keys';
-import { cn } from '@/utils/ui';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Eye, Code, Terminal } from 'lucide-react';
 import { ChatConsole } from './chat-console';
 import { ChatEditor } from './chat-editor';
 import { ChatViewer } from './chat-viewer';
+import { useCookie } from '@/hooks/use-cookie';
+import type { KeyCombination } from '@/utils/keys';
+import { cn } from '@/utils/ui.js';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 const CHAT_TAB_COOKIE_NAME = 'chat-tab';
 type ChatTabs = (typeof tabs)[number]['value'];
@@ -51,14 +51,13 @@ const tabs = [
   },
 ] as const;
 
-export const ChatViewTabs = () => {
+export function ChatViewTabs() {
   const [chatTab, setChatTab] = useCookie<ChatTabs>(CHAT_TAB_COOKIE_NAME, 'preview');
   return (
     <Tabs
       defaultValue={chatTab}
       className={cn('size-full flex-1 gap-0')}
       onValueChange={(value) => {
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Tabs doesn't preserve the type
         setChatTab(value as ChatTabs);
       }}
     >
@@ -84,4 +83,4 @@ export const ChatViewTabs = () => {
       </TabsContent>
     </Tabs>
   );
-};
+}

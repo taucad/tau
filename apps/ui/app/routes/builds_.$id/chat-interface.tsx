@@ -1,20 +1,19 @@
 import { MessageCircle, Settings2, LayoutGrid, Rows } from 'lucide-react';
+import { useCallback } from 'react';
+import { ChatHistory } from './chat-history';
+import { ChatViewTabs } from './chat-view-tabs';
+import { ChatViewSplit } from './chat-view-split';
 import { Button } from '@/components/ui/button';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
-import { cn } from '@/utils/ui';
+import { cn } from '@/utils/ui.js';
 import { ChatParameters } from '@/routes/builds_.$id/chat-parameters';
-
 import { useCookie } from '@/hooks/use-cookie';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useKeydown } from '@/hooks/use-keydown';
 import { Drawer, DrawerContent } from '@/components/ui/drawer';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { KeyShortcut } from '@/components/ui/key-shortcut';
-import { KeyCombination } from '@/utils/keys';
-import { ChatHistory } from './chat-history';
-import { ChatViewTabs } from './chat-view-tabs';
-import { ChatViewSplit } from './chat-view-split';
-import { useCallback } from 'react';
+import type { KeyCombination } from '@/utils/keys';
 
 export const CHAT_HISTORY_OPEN_COOKIE_NAME = 'chat-history-open';
 export const CHAT_PARAMETERS_OPEN_COOKIE_NAME = 'chat-parameters-open';
@@ -37,7 +36,7 @@ const toggleViewModeKeyCombination = {
   ctrlKey: true,
 } satisfies KeyCombination;
 
-export const ChatInterface = () => {
+export function ChatInterface() {
   const [isChatOpen, setIsChatOpen] = useCookie(CHAT_HISTORY_OPEN_COOKIE_NAME, true);
   const [isParametersOpen, setIsParametersOpen] = useCookie(CHAT_PARAMETERS_OPEN_COOKIE_NAME, true);
   const [chatResizeMain, setChatResizeMain] = useCookie(CHAT_RESIZE_MAIN_COOKIE_NAME, [25, 60, 15]);
@@ -73,19 +72,19 @@ export const ChatInterface = () => {
     <ResizablePanelGroup
       direction="horizontal"
       className="group/chat-layout relative flex flex-1 bg-background"
-      onLayout={setChatResizeMain}
       autoSaveId={CHAT_RESIZE_MAIN_COOKIE_NAME}
       data-chat-open={isChatOpen}
       data-parameters-open={isParametersOpen}
       data-view-mode={viewMode}
+      onLayout={setChatResizeMain}
     >
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            size={'icon'}
+            size="icon"
             variant="overlay"
-            onClick={toggleChatOpen}
             className="absolute top-0 left-0 z-30 m-2 text-muted-foreground"
+            onClick={toggleChatOpen}
           >
             <MessageCircle
               className={cn(
@@ -140,7 +139,9 @@ export const ChatInterface = () => {
                 // Shift the view mode button to the left when the parameters are closed
                 'group-data-[parameters-open=false]/chat-layout:mr-12',
               )}
-              onClick={() => setViewMode(viewMode === 'tabs' ? 'split' : 'tabs')}
+              onClick={() => {
+                setViewMode(viewMode === 'tabs' ? 'split' : 'tabs');
+              }}
             >
               <span className="relative size-4">
                 <Rows className="absolute scale-0 rotate-90 transition-transform duration-200 ease-in-out group-data-[view-mode=tabs]/chat-layout:scale-100" />
@@ -162,14 +163,14 @@ export const ChatInterface = () => {
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            size={'icon'}
+            size="icon"
             variant="overlay"
-            onClick={toggleParametersOpen}
             className={cn(
               'absolute top-0 right-0 z-30 m-2 flex text-muted-foreground',
               // Hide on mobile when chat is open
               'group-data-[chat-open=true]/chat-layout:max-md:hidden',
             )}
+            onClick={toggleParametersOpen}
           >
             <span className="size-4">
               <Settings2
@@ -208,7 +209,7 @@ export const ChatInterface = () => {
       </ResizablePanel>
 
       {/* TODO: revisit if a drawer is the best UX here. */}
-      {isMobile && !isChatOpen && (
+      {isMobile && !isChatOpen ? (
         <Drawer open={isParametersOpen} onOpenChange={setIsParametersOpen}>
           <DrawerContent className={cn('flex flex-col justify-between gap-2 text-sm', 'md:hidden')}>
             <span className="px-4 text-lg font-bold">Parameters</span>
@@ -217,7 +218,7 @@ export const ChatInterface = () => {
             </div>
           </DrawerContent>
         </Drawer>
-      )}
+      ) : null}
     </ResizablePanelGroup>
   );
-};
+}

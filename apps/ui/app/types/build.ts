@@ -1,11 +1,11 @@
-import type { CadProvider, Category } from './cad';
-import type { Message } from './chat';
+import type { Message } from '@ai-sdk/react';
+import type { CadProvider, Category } from './cad.js';
 
 type File = {
   content: string;
 };
 
-export interface Build {
+export type Build = {
   id: string;
   name: string;
   description: string;
@@ -21,13 +21,16 @@ export interface Build {
   createdAt: number;
   updatedAt: number;
   forkedFrom?: string;
-  // status: 'draft' | 'review' | 'published' | 'completed' | 'archived';
-  assets: {
-    [key in Category]?: {
-      files: Record<string, File>;
-      main: string;
-      language: CadProvider;
-      parameters: Record<string, unknown>;
-    };
-  };
-}
+  // Status: 'draft' | 'review' | 'published' | 'completed' | 'archived';
+  assets: Partial<
+    Record<
+      Category,
+      {
+        files: Record<string, File>;
+        main: string;
+        language: CadProvider;
+        parameters: Record<string, unknown>;
+      }
+    >
+  >;
+};

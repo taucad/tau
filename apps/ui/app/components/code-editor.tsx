@@ -1,4 +1,4 @@
-import { cn } from '@/utils/ui';
+import { cn } from '@/utils/ui.js';
 import { Editor, type EditorProps } from '@monaco-editor/react';
 import { useTheme } from 'remix-themes';
 

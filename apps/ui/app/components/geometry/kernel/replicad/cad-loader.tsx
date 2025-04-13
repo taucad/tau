@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { useGLTF, useAnimations, useTexture } from '@react-three/drei';
-import { Group, Mesh, MeshMatcapMaterial } from 'three';
+import type { Group } from 'three';
+import { Mesh, MeshMatcapMaterial, LoopRepeat } from 'three';
 import { useFrame } from '@react-three/fiber';
-import { LoopRepeat } from 'three';
-import { useColor } from '@/hooks/use-color';
+import { useColor } from '@/hooks/use-color.js';
 
 type Action =
   | 'Dance'
@@ -22,7 +22,7 @@ type Action =
   | 'Yes';
 
 type CadLoaderProperties = {
-  action?: Action;
+  readonly action?: Action;
 };
 
 export function CadLoader({ action = 'Idle' }: CadLoaderProperties) {
@@ -58,7 +58,7 @@ export function CadLoader({ action = 'Idle' }: CadLoaderProperties) {
           color: originalMaterial.color.clone(), // Clone the color to prevent reference issues
           name: originalMaterial.name,
           // Map specific colors for different parts
-          ...(originalMaterial.name.includes('Main') && { color: color.serialized.hex }), // main parts
+          ...(originalMaterial.name.includes('Main') && { color: color.serialized.hex }), // Main parts
           // ...(originalMaterial.name.includes('Black') && { color: color.serialized.hex }), // black parts
           // ...(originalMaterial.name.includes('Grey') && { color: color.serialized.hex }), // grey parts
         });

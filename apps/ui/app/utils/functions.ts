@@ -1,13 +1,13 @@
 /**
  * Options for debounce function.
  */
-interface Options {
+type DebounceOptions = {
   /**
    * Call the function on the leading edge of the timeout. Meaning immediately, instead of waiting for wait milliseconds.
    * @default false
    */
   readonly before?: boolean;
-}
+};
 
 /**
  * Debounce a function execution.
@@ -22,13 +22,13 @@ interface Options {
 export const debounce = <ArgumentsType extends unknown[], U>(
   function_: (...arguments_: ArgumentsType) => PromiseLike<U> | U,
   waitFor: number,
-  options: Options = {},
+  options: DebounceOptions = {},
 ): ((...arguments_: ArgumentsType) => Promise<U>) => {
   let leadingValue: U | PromiseLike<U>;
   let timeout: ReturnType<typeof setTimeout> | undefined;
-  let resolveList: ((value: U | PromiseLike<U>) => void)[] = [];
+  let resolveList: Array<(value: U | PromiseLike<U>) => void> = [];
 
-  return function (this: unknown, ...arguments_: ArgumentsType): Promise<U> {
+  return async function (this: unknown, ...arguments_: ArgumentsType): Promise<U> {
     return new Promise((resolve) => {
       const shouldCallNow = options.before && !timeout;
 
@@ -65,7 +65,7 @@ export const debounce = <ArgumentsType extends unknown[], U>(
  * @param functionToCheck - The value to check.
  * @returns `true` if the value is a function, `false` otherwise.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- `any` is necessary to ensure that the checked function needs no further argument checks, assuming it's already fully typed.
+
 export function isFunction(functionToCheck: any): functionToCheck is (...arguments_: any[]) => any {
-  return !!(functionToCheck && functionToCheck.constructor && functionToCheck.call && functionToCheck.apply);
+  return Boolean(functionToCheck?.constructor && functionToCheck.call && functionToCheck.apply);
 }

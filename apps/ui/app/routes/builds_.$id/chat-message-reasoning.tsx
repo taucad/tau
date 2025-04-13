@@ -1,22 +1,22 @@
-import { Button } from '@/components/ui/button';
-import { cn } from '@/utils/ui';
-import { ReasoningUIPart } from '@ai-sdk/ui-utils';
+import type { ReasoningUIPart } from '@ai-sdk/ui-utils';
 import { ChevronRight } from 'lucide-react';
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/utils/ui.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useKeydown } from '@/hooks/use-keydown';
-import { useState } from 'react';
 
 type ChatMessageReasoningProperties = {
-  part: ReasoningUIPart;
+  readonly part: ReasoningUIPart;
   /**
    * Whether the message has content.
    *
    * This is used to determine if the reasoning content should be initially visible.
    */
-  hasContent: boolean;
+  readonly hasContent: boolean;
 };
 
-export const ChatMessageReasoning = ({ part, hasContent }: ChatMessageReasoningProperties) => {
+export function ChatMessageReasoning({ part, hasContent }: ChatMessageReasoningProperties) {
   const [isOpen, setIsOpen] = useState<true | undefined>();
 
   // These combinations provide the most natural experience for the user.
@@ -70,4 +70,4 @@ export const ChatMessageReasoning = ({ part, hasContent }: ChatMessageReasoningP
       )}
     </>
   );
-};
+}

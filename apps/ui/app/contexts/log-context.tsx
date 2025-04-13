@@ -1,9 +1,12 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { LogEntry, LOG_LEVELS, LogOptions } from '@/types/console';
-import { generatePrefixedId } from '@/utils/id';
+import type { ReactNode } from 'react';
+import type { LogEntry, LogOptions } from '@/types/console.js';
+import { logLevels } from '@/types/console.js';
+import { generatePrefixedId } from '@/utils/id.js';
+import { idPrefix } from '@/utils/constants.js';
 
 // Moved from types/console.ts
-export interface LogContextType {
+export type LogContextType = {
   logs: LogEntry[];
   setLogs: (logs: LogEntry[]) => void;
   addLog: (message: string, options?: LogOptions) => void;
@@ -11,25 +14,30 @@ export interface LogContextType {
   clearLogs: () => void;
   filterLogs: (predicate: (log: LogEntry) => boolean) => LogEntry[];
   maxLogs?: number;
-}
+};
 
-const DEFAULT_MAX_LOGS = 1000;
+const defaultMaxLogs = 1000;
+const defaultInitialLogs: LogEntry[] = [];
 
 // Create the context with a default value
 const LogContext = createContext<LogContextType | undefined>(undefined);
 
-interface LogProviderProperties {
-  children: React.ReactNode;
-  initialLogs?: LogEntry[];
-  maxLogs?: number;
-}
+type LogProviderProperties = {
+  readonly children: ReactNode;
+  readonly initialLogs?: LogEntry[];
+  readonly maxLogs?: number;
+};
 
-export const LogProvider = ({ children, initialLogs = [], maxLogs = DEFAULT_MAX_LOGS }: LogProviderProperties) => {
-  const [logs, setLogsState] = useState<LogEntry[]>(initialLogs);
+export function LogProvider({
+  children,
+  initialLogs = defaultInitialLogs,
+  maxLogs = defaultMaxLogs,
+}: LogProviderProperties) {
+  const [logs, setLogs] = useState<LogEntry[]>(initialLogs);
 
   // Set logs - used for initialization or complete replacement
-  const setLogs = useCallback((newLogs: LogEntry[]) => {
-    setLogsState(newLogs);
+  const _setLogs = useCallback((newLogs: LogEntry[]) => {
+    setLogs(newLogs);
   }, []);
 
   // Add a single log entry
@@ -38,13 +46,13 @@ export const LogProvider = ({ children, initialLogs = [], maxLogs = DEFAULT_MAX_
       const newLog: LogEntry = {
         id: generatePrefixedId('log'),
         timestamp: Date.now(),
-        level: options?.level ?? LOG_LEVELS.INFO,
+        level: options?.level ?? logLevels.info,
         message,
         origin: options?.origin,
         data: options?.data,
       };
 
-      setLogsState((previousLogs) => {
+      setLogs((previousLogs) => {
         const updatedLogs = [newLog, ...previousLogs];
         // Enforce max logs limit
         return updatedLogs.slice(0, maxLogs);
@@ -57,15 +65,15 @@ export const LogProvider = ({ children, initialLogs = [], maxLogs = DEFAULT_MAX_
   const addLogs = useCallback(
     (entries: Array<{ message: string; options?: LogOptions }>) => {
       const newLogs = entries.map((entry) => ({
-        id: generatePrefixedId('log'),
+        id: generatePrefixedId(idPrefix.log),
         timestamp: Date.now(),
-        level: entry.options?.level ?? LOG_LEVELS.INFO,
+        level: entry.options?.level ?? logLevels.info,
         message: entry.message,
         origin: entry.options?.origin,
         data: entry.options?.data,
       }));
 
-      setLogsState((previousLogs) => {
+      setLogs((previousLogs) => {
         const updatedLogs = [...newLogs, ...previousLogs];
         // Enforce max logs limit
         return updatedLogs.slice(0, maxLogs);
@@ -76,7 +84,7 @@ export const LogProvider = ({ children, initialLogs = [], maxLogs = DEFAULT_MAX_
 
   // Clear all logs
   const clearLogs = useCallback(() => {
-    setLogsState([]);
+    setLogs([]);
   }, []);
 
   // Filter logs based on a predicate
@@ -92,18 +100,18 @@ export const LogProvider = ({ children, initialLogs = [], maxLogs = DEFAULT_MAX_
   const contextValue = useMemo(
     () => ({
       logs,
-      setLogs,
+      setLogs: _setLogs,
       addLog,
       addLogs,
       clearLogs,
       filterLogs,
       maxLogs,
     }),
-    [logs, setLogs, addLog, addLogs, clearLogs, filterLogs, maxLogs],
+    [logs, _setLogs, addLog, addLogs, clearLogs, filterLogs, maxLogs],
   );
 
   return <LogContext.Provider value={contextValue}>{children}</LogContext.Provider>;
-};
+}
 
 // Custom hook to use the log context
 export const useLogContext = (): LogContextType => {
@@ -113,16 +121,16 @@ export const useLogContext = (): LogContextType => {
     // Provide a mock context when used outside of provider
     return {
       logs: [],
-      // eslint-disable-next-line @typescript-eslint/no-empty-function
-      setLogs: () => {},
-      // eslint-disable-next-line @typescript-eslint/no-empty-function
-      addLog: () => {},
-      // eslint-disable-next-line @typescript-eslint/no-empty-function
-      addLogs: () => {},
-      // eslint-disable-next-line @typescript-eslint/no-empty-function
-      clearLogs: () => {},
+      // eslint-disable-next-line @typescript-eslint/no-empty-function -- Mock implementation
+      setLogs() {},
+      // eslint-disable-next-line @typescript-eslint/no-empty-function -- Mock implementation
+      addLog() {},
+      // eslint-disable-next-line @typescript-eslint/no-empty-function -- Mock implementation
+      addLogs() {},
+      // eslint-disable-next-line @typescript-eslint/no-empty-function -- Mock implementation
+      clearLogs() {},
       filterLogs: () => [],
-      maxLogs: DEFAULT_MAX_LOGS,
+      maxLogs: defaultMaxLogs,
     };
   }
 

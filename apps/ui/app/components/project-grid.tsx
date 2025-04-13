@@ -1,21 +1,22 @@
 import type { ComponentType } from 'react';
 import { Star, GitFork, Eye } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
-import { SvgIcon } from '@/components/icons/svg-icon';
-import { Build } from '@/types/build';
-import { CadProvider, CATEGORIES, Category } from '@/types/cad';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
-import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
-import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer';
 import { useState, useEffect, useRef } from 'react';
-import { storage } from '@/db/storage';
 import { useNavigate } from '@remix-run/react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { Button } from '@/components/ui/button.js';
+import { Badge } from '@/components/ui/badge.js';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar.js';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card.js';
+import { SvgIcon } from '@/components/icons/svg-icon.js';
+import type { Build } from '@/types/build.js';
+import type { CadProvider, Category } from '@/types/cad.js';
+import { categories } from '@/types/cad.js';
+import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context.js';
+import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
+import { storage } from '@/db/storage.js';
 
 // Placeholder for language icons
-const LANGUAGE_ICONS: Record<CadProvider, ComponentType<{ className?: string }>> = {
+const languageIcons: Record<CadProvider, ComponentType<{ className?: string }>> = {
   replicad: ({ className }) => <SvgIcon id="replicad" className={className} />,
   openscad: ({ className }) => <SvgIcon id="openscad" className={className} />,
   kicad: ({ className }) => <SvgIcon id="kicad" className={className} />,
@@ -25,11 +26,11 @@ const LANGUAGE_ICONS: Record<CadProvider, ComponentType<{ className?: string }>>
 
 type CommunityBuildCardProperties = Build;
 
-export interface CommunityBuildGridProperties {
-  builds: Build[];
-  hasMore?: boolean;
-  onLoadMore?: () => void;
-}
+export type CommunityBuildGridProperties = {
+  readonly builds: Build[];
+  readonly hasMore?: boolean;
+  readonly onLoadMore?: () => void;
+};
 
 export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBuildGridProperties) {
   return (
@@ -42,13 +43,13 @@ export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBui
         ))}
       </div>
 
-      {hasMore && (
+      {hasMore ? (
         <div className="mt-8 text-center">
-          <Button onClick={onLoadMore} variant="outline">
+          <Button variant="outline" onClick={onLoadMore}>
             Load More Projects
           </Button>
         </div>
-      )}
+      ) : null}
     </>
   );
 }
@@ -71,7 +72,7 @@ function ProjectCard({
   const LanguageIcon = Object.values(assets)
     .map((asset) => asset.language)
     .map((language) => ({
-      Icon: LANGUAGE_ICONS[language],
+      Icon: languageIcons[language],
       language,
     }));
 
@@ -86,7 +87,6 @@ function ProjectCard({
     }
   }, [showPreview, replicadCode, setCode]);
 
-  // eslint-disable-next-line unicorn/consistent-function-scoping -- This is a placeholder for future functionality
   const handleStar = () => {
     // TODO: Implement star functionality
   };
@@ -124,12 +124,12 @@ function ProjectCard({
             loading="lazy"
           />
         )}
-        {replicadCode && showPreview && (
+        {replicadCode && showPreview ? (
           <div className="absolute inset-0">
             <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={1.3} />
           </div>
-        )}
-        {replicadCode && (
+        ) : null}
+        {replicadCode ? (
           <Button
             variant="overlay"
             size="icon"
@@ -141,7 +141,7 @@ function ProjectCard({
           >
             <Eye className={showPreview ? 'size-4 text-primary' : 'size-4'} />
           </Button>
-        )}
+        ) : null}
       </div>
       <CardHeader>
         <div className="flex items-center justify-between">
@@ -166,8 +166,7 @@ function ProjectCard({
       <CardContent className="flex-grow">
         <div className="mb-2 flex flex-wrap gap-2">
           {Object.keys(assets).map((category) => {
-            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys() returns a string array.
-            const { icon: Icon, color } = CATEGORIES[category as Category];
+            const { icon: Icon, color } = categories[category as Category];
             return (
               <span key={category} className={`flex items-center gap-1 text-sm ${color}`}>
                 <Icon className="size-4" />
@@ -194,6 +193,7 @@ function ProjectCard({
         </div>
         <div className="flex items-center gap-4">
           <button
+            type="button"
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-yellow"
             onClick={handleStar}
           >
@@ -201,6 +201,7 @@ function ProjectCard({
             {stars}
           </button>
           <button
+            type="button"
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-blue"
             onClick={handleFork}
           >

@@ -1,6 +1,6 @@
-import { Build } from '@/types/build';
-import { storage } from '@/db/storage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { Build } from '@/types/build.js';
+import { storage } from '@/db/storage.js';
 
 // Function to fetch builds
 export const fetchBuilds = async (): Promise<Build[]> => {
@@ -8,6 +8,7 @@ export const fetchBuilds = async (): Promise<Build[]> => {
   if (!clientBuilds) {
     throw new Error('Builds not found');
   }
+
   return clientBuilds;
 };
 
@@ -24,15 +25,15 @@ export function useBuilds() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (buildId: string) => storage.deleteBuild(buildId),
-    onSuccess: () => {
+    mutationFn: async (buildId: string) => storage.deleteBuild(buildId),
+    async onSuccess() {
       // Invalidate and refetch builds after deletion
-      queryClient.invalidateQueries({ queryKey: ['builds'] });
+      void queryClient.invalidateQueries({ queryKey: ['builds'] });
     },
   });
 
   const duplicateMutation = useMutation({
-    mutationFn: async (buildId: string) => {
+    async mutationFn(buildId: string) {
       const sourceBuild = storage.getBuild(buildId);
       if (!sourceBuild) {
         throw new Error('Build not found');
@@ -50,11 +51,11 @@ export function useBuilds() {
         messages: sourceBuild.messages || [],
       });
     },
-    onSuccess: (createdBuild) => {
-      queryClient.invalidateQueries({ queryKey: ['builds'] });
+    onSuccess(createdBuild) {
+      void queryClient.invalidateQueries({ queryKey: ['builds'] });
       return createdBuild;
     },
-    onError: (error) => {
+    onError(error) {
       console.error('Failed to duplicate build:', error);
       throw error;
     },

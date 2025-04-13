@@ -1,32 +1,30 @@
 import { Laptop, Moon, Sun } from 'lucide-react';
 import { Theme, useTheme } from 'remix-themes';
+import { SidebarMenuButton } from '@/components/ui/sidebar.js';
+import { useCookie } from '@/hooks/use-cookie.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { useKeydown } from '@/hooks/use-keydown.js';
+import { KeyShortcut } from '@/components/ui/key-shortcut.js';
 
-import { SidebarMenuButton } from '@/components/ui/sidebar';
-import { useCookie } from '@/hooks/use-cookie';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useKeydown } from '@/hooks/use-keydown';
-import { KeyShortcut } from '@/components/ui/key-shortcut';
-
-const THEME_COOKIE_NAME = 'theme-mode';
-
-// null is used to represent the system theme
+// Null is used to represent the system theme
+// eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is used to represent the system theme, as it's serializable in JSON
 type ThemeWithSystem = Theme | null;
 
 export function ModeToggle() {
   const [, setTheme] = useTheme();
-  // eslint-disable-next-line unicorn/no-null -- null is used as the system theme, undefined can't be stored in local storage.
-  const [theme, setThemeCookie] = useCookie<ThemeWithSystem>(THEME_COOKIE_NAME, null);
+
+  const [theme, setThemeCookie] = useCookie<ThemeWithSystem>('theme-mode', null);
 
   const cycleTheme = () => {
     let newTheme;
     if (theme === Theme.LIGHT) {
       newTheme = Theme.DARK;
     } else if (theme === Theme.DARK) {
-      // eslint-disable-next-line unicorn/no-null -- null is used as the system theme, undefined can't be stored in local storage.
       newTheme = null;
     } else {
       newTheme = Theme.LIGHT;
     }
+
     setTheme(newTheme);
     setThemeCookie(newTheme);
   };
@@ -43,9 +41,9 @@ export function ModeToggle() {
     <Tooltip>
       <TooltipTrigger asChild>
         <SidebarMenuButton
-          onClick={cycleTheme}
           className="group relative w-auto overflow-hidden"
           data-theme={theme ?? 'system'}
+          onClick={cycleTheme}
         >
           <Sun className="h-[1.2rem] w-[1.2rem] origin-right -translate-x-[400%] rotate-[-180deg] transition-transform duration-500 group-data-[theme=light]:translate-x-0 group-data-[theme=light]:rotate-0" />
           <Moon className="absolute h-[1.2rem] w-[1.2rem] origin-left translate-x-[400%] rotate-[180deg] transition-transform duration-500 group-data-[theme=dark]:translate-x-0 group-data-[theme=dark]:rotate-0" />

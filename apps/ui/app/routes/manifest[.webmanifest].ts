@@ -1,6 +1,7 @@
-import { metaConfig } from '@/config';
 import type { WebAppManifest } from '@remix-pwa/dev';
-import { json, LinkDescriptor } from '@remix-run/node';
+import type { LinkDescriptor } from '@remix-run/node';
+import { json } from '@remix-run/node';
+import { metaConfig } from '@/config';
 
 export const webManifestLinks: LinkDescriptor[] = [{ rel: 'manifest', href: '/manifest.webmanifest' }];
 

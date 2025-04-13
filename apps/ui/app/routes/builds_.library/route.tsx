@@ -16,29 +16,30 @@ import {
   Copy,
 } from 'lucide-react';
 import { Link, useNavigate } from '@remix-run/react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button.js';
+import { Input } from '@/components/ui/input.js';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar.js';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { cn } from '@/utils/ui';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Category, CATEGORIES } from '@/types/cad';
-import { Build } from '@/types/build';
-import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
-import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer';
-import { useBuilds } from '@/hooks/use-builds';
-import { toast } from '@/components/ui/sonner';
-import { Handle } from '@/types/matches';
+} from '@/components/ui/dropdown-menu.js';
+import { cn } from '@/utils/ui.js';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.js';
+import type { Category } from '@/types/cad.js';
+import { categories } from '@/types/cad.js';
+import type { Build } from '@/types/build.js';
+import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context.js';
+import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
+import { useBuilds } from '@/hooks/use-builds.js';
+import { toast } from '@/components/ui/sonner.js';
+import type { Handle } from '@/types/matches.js';
 
 export const handle: Handle = {
-  breadcrumb: () => {
+  breadcrumb() {
     return (
       <Link to="/builds/library" tabIndex={-1}>
         <Button variant="ghost" className="p-2">
@@ -49,14 +50,14 @@ export const handle: Handle = {
   },
 };
 
-const ITEMS_PER_PAGE = 12;
+const itemsPerPage = 12;
 
 export default function PersonalCadProjects() {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [sortBy, setSortBy] = useState<'lastOpened' | 'createdAt' | 'name' | 'updatedAt'>('updatedAt');
-  const [visibleProjects, setVisibleProjects] = useState(ITEMS_PER_PAGE);
+  const [visibleProjects, setVisibleProjects] = useState(itemsPerPage);
   const { builds } = useBuilds();
 
   const filteredProjects = builds
@@ -75,9 +76,8 @@ export default function PersonalCadProjects() {
           : a.name.localeCompare(b.name);
     });
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- TODO: add load more
   const loadMore = useCallback(() => {
-    setVisibleProjects((previous) => Math.min(previous + ITEMS_PER_PAGE, filteredProjects.length));
+    setVisibleProjects((previous) => Math.min(previous + itemsPerPage, filteredProjects.length));
   }, [filteredProjects.length]);
 
   return (
@@ -97,20 +97,27 @@ export default function PersonalCadProjects() {
             className="pl-10"
             placeholder="Search builds..."
             value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
+            onChange={(event) => {
+              setSearchTerm(event.target.value);
+            }}
           />
         </div>
       </div>
 
-      {/* eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `Tabs` loses type information */}
-      <Tabs value={activeFilter} onValueChange={(value) => setActiveFilter(value as 'all' | Category)}>
+      {}
+      <Tabs
+        value={activeFilter}
+        onValueChange={(value) => {
+          setActiveFilter(value as 'all' | Category);
+        }}
+      >
         <div className="mb-8 flex flex-wrap items-center justify-between gap-2">
           <TabsList className="">
             <TabsTrigger value="all" className="flex items-center gap-2">
               <Layout className="size-4" />
               <span className="hidden sm:inline">all</span>
             </TabsTrigger>
-            {Object.entries(CATEGORIES).map(([key, { icon: Icon, color }]) => (
+            {Object.entries(categories).map(([key, { icon: Icon, color }]) => (
               <TabsTrigger key={key} value={key} className="flex items-center gap-2">
                 <Icon className={`size-4 ${color}`} />
                 <span className="hidden sm:inline">{key}</span>
@@ -120,7 +127,9 @@ export default function PersonalCadProjects() {
           <div className="flex items-center gap-2">
             <Select
               value={sortBy}
-              onValueChange={(value: 'lastOpened' | 'createdAt' | 'updatedAt' | 'name') => setSortBy(value)}
+              onValueChange={(value: 'lastOpened' | 'createdAt' | 'updatedAt' | 'name') => {
+                setSortBy(value);
+              }}
             >
               <SelectTrigger size="sm" className="w-[180px]">
                 <SelectValue placeholder="Sort by" />
@@ -139,11 +148,19 @@ export default function PersonalCadProjects() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setViewMode('grid')}>
+                <DropdownMenuItem
+                  onClick={() => {
+                    setViewMode('grid');
+                  }}
+                >
                   <Grid className="mr-2 size-4" />
                   <span>Grid</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setViewMode('list')}>
+                <DropdownMenuItem
+                  onClick={() => {
+                    setViewMode('list');
+                  }}
+                >
                   <List className="mr-2 size-4" />
                   <span>List</span>
                 </DropdownMenuItem>
@@ -185,9 +202,9 @@ function LibraryBuildGrid({
   visibleProjects,
   viewMode,
 }: {
-  projects: Build[];
-  visibleProjects: number;
-  viewMode: 'grid' | 'list';
+  readonly projects: Build[];
+  readonly visibleProjects: number;
+  readonly viewMode: 'grid' | 'list';
 }) {
   return (
     <div className={viewMode === 'grid' ? 'grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'space-y-4'}>
@@ -200,7 +217,7 @@ function LibraryBuildGrid({
   );
 }
 
-function CategoryBadge({ category }: { category: Category }) {
+function CategoryBadge({ category }: { readonly category: Category }) {
   const icons = {
     mechanical: <Cog className="size-4" />,
     electrical: <Zap className="size-4" />,
@@ -252,7 +269,7 @@ function CategoryBadge({ category }: { category: Category }) {
 //   );
 // }
 
-function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'grid' | 'list' }) {
+function BuildLibraryCard({ project, viewMode }: { readonly project: Build; readonly viewMode: 'grid' | 'list' }) {
   const { setCode, setParameters, mesh } = useReplicad();
   const { deleteBuild, duplicateBuild } = useBuilds();
   const code = project.assets.mechanical?.files[project.assets.mechanical?.main]?.content;
@@ -267,6 +284,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
       if (code) {
         setCode(code);
       }
+
       if (parameters) {
         setParameters(parameters);
       }
@@ -284,7 +302,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
       toast.success(`Duplicated ${project.name}`, {
         action: {
           label: 'Open',
-          onClick: () => {
+          onClick() {
             navigate(`/builds/${project.id}`);
           },
         },
@@ -312,7 +330,6 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
           <div className="flex items-center gap-4">
             <div className="flex gap-2">
               {Object.keys(project.assets).map((cat) => (
-                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `Object.keys` loses type information
                 <CategoryBadge key={cat} category={cat as Category} />
               ))}
             </div>
@@ -335,7 +352,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
               loading="lazy"
             />
           )}
-          {showPreview && (
+          {showPreview ? (
             <div
               className="absolute inset-0"
               onClick={(event) => {
@@ -345,7 +362,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
             >
               <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={1.3} />
             </div>
-          )}
+          ) : null}
           <Button
             variant="outline"
             size="icon"
@@ -369,7 +386,6 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap gap-2">
               {Object.keys(project.assets).map((cat) => (
-                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- `Object.keys` loses type information
                 <CategoryBadge key={cat} category={cat as Category} />
               ))}
             </div>
@@ -388,11 +404,11 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
+              align="end"
               onClick={(event) => {
                 event.stopPropagation();
                 event.preventDefault();
               }}
-              align="end"
             >
               <DropdownMenuItem onClick={handleDuplicate}>
                 <Copy className="mr-2 size-4" />
@@ -402,7 +418,7 @@ function BuildLibraryCard({ project, viewMode }: { project: Build; viewMode: 'gr
                 <Star className="mr-2 size-4" />
                 <span>Favorite</span>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleDelete} variant="destructive">
+              <DropdownMenuItem variant="destructive" onClick={handleDelete}>
                 <Trash className="mr-2 size-4" />
                 <span>Delete</span>
               </DropdownMenuItem>

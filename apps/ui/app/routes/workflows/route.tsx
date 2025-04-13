@@ -1,10 +1,10 @@
-import { Button } from '@/components/ui/button';
 import { Link } from '@remix-run/react';
-import { ComingSoon } from '@/components/ui/coming-soon';
-import { Handle } from '@/types/matches';
+import { Button } from '@/components/ui/button.js';
+import { ComingSoon } from '@/components/ui/coming-soon.js';
+import type { Handle } from '@/types/matches.js';
 
 export const handle: Handle = {
-  breadcrumb: () => {
+  breadcrumb() {
     return (
       <Link to="/workflows" tabIndex={-1}>
         <Button variant="ghost" className="p-2">

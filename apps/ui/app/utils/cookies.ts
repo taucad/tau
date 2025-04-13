@@ -1,10 +1,9 @@
-/* eslint-disable unicorn/no-document-cookie -- this is the only allowable entry point for cookie management */
 export const setCookie = (name: string, value: string, maxAge: number) => {
   document.cookie = `${name}=${value}; path=/; max-age=${maxAge}`;
 };
 
 export const getCookie = (cookie: string, name: string): string | undefined => {
-  const match = cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+  const match = new RegExp('(^| )' + name + '=([^;]+)').exec(cookie);
   return match ? match[2] : undefined;
 };
 
@@ -19,7 +18,6 @@ export const parseCookies = (cookie: string) => {
     const [key, value] = cookie.split('=');
     parsedCookies[key] = value;
   }
+
   return parsedCookies;
 };
-
-/* eslint-enable unicorn/no-document-cookie -- renabling */

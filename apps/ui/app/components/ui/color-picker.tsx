@@ -1,30 +1,38 @@
-import { useState } from 'react';
-import { HslColor } from 'react-colorful';
-import { cn } from '@/utils/ui';
-import { Button } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import React, { useState } from 'react';
+import type { ComponentProps, RefObject } from 'react';
+import type { HslColor } from 'react-colorful';
 import { RotateCcw } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipTrigger } from './tooltip';
-import { Slider } from './slider';
-import { useKeydown } from '@/hooks/use-keydown';
-import { KeyShortcut } from './key-shortcut';
-import { ThreeProvider } from '../geometry/graphics/three/three-context';
-import { CadLoader } from '../geometry/kernel/replicad/cad-loader';
+import { ThreeProvider } from '@/components/geometry/graphics/three/three-context.js';
+import { CadLoader } from '@/components/geometry/kernel/replicad/cad-loader.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { Slider } from '@/components/ui/slider.js';
+import { KeyShortcut } from '@/components/ui/key-shortcut.js';
+import { cn } from '@/utils/ui.js';
+import { Button } from '@/components/ui/button.js';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.js';
+import { useKeydown } from '@/hooks/use-keydown.js';
 
 export type ColorPickerValue = HslColor;
 
-interface ColorPickerProperties
-  extends Omit<React.ComponentProps<typeof Button>, 'value' | 'onChange' | 'onBlur' | 'ref'> {
-  value: ColorPickerValue;
-  onChange: (value: ColorPickerValue) => void;
-  onBlur?: () => void;
-  onReset?: () => void;
-  ref?: React.RefObject<typeof Slider>;
-}
+type ColorPickerProperties = {
+  readonly value: ColorPickerValue;
+  readonly onChange: (value: ColorPickerValue) => void;
+  readonly onBlur?: () => void;
+  readonly onReset?: () => void;
+  readonly ref?: RefObject<typeof Slider>;
+} & Omit<ComponentProps<typeof Button>, 'value' | 'onChange' | 'onBlur' | 'ref'>;
 
-const ColorPicker: React.FC<
-  Omit<React.ComponentProps<typeof Button>, 'value' | 'onChange' | 'onBlur'> & ColorPickerProperties
-> = ({ disabled, value, onChange, onBlur, name, className, onReset, ref, ...properties }) => {
+function ColorPicker({
+  disabled,
+  value,
+  onChange,
+  onBlur,
+  name,
+  className,
+  onReset,
+  ref,
+  ...properties
+}: Omit<React.ComponentProps<typeof Button>, 'value' | 'onChange' | 'onBlur'> & ColorPickerProperties) {
   const [open, setOpen] = useState(false);
 
   const handleChange = (value: HslColor) => {
@@ -36,10 +44,12 @@ const ColorPicker: React.FC<
       key: 'i',
       metaKey: true,
     },
-    () => setOpen((previous) => !previous),
+    () => {
+      setOpen((previous) => !previous);
+    },
   );
   return (
-    <Popover onOpenChange={setOpen} open={open}>
+    <Popover open={open} onOpenChange={setOpen}>
       <Tooltip>
         <PopoverTrigger asChild disabled={disabled} onBlur={onBlur}>
           <TooltipTrigger asChild>
@@ -47,14 +57,14 @@ const ColorPicker: React.FC<
               {...properties}
               className={cn('block', className)}
               name={name}
-              onClick={() => {
-                setOpen(true);
-              }}
               size="icon"
               data-color-h={value.h}
               data-color-s={value.s}
               data-color-l={value.l}
               variant="outline"
+              onClick={() => {
+                setOpen(true);
+              }}
             />
           </TooltipTrigger>
         </PopoverTrigger>
@@ -83,10 +93,10 @@ const ColorPicker: React.FC<
         </ThreeProvider>
         <div className="flex w-full flex-row gap-2">
           <Slider
+            ref={ref}
             min={0}
             max={360}
             value={[value.h]}
-            onValueChange={([h]) => handleChange({ h, s: 50, l: 50 })}
             className={cn(
               '[&_[data-slot="slider-range"]]:bg-transparent',
               '[&_[data-slot="slider-track"]]:bg-[linear-gradient(_to_right,_oklch(var(--l-primary)_var(--c-primary)_0),_oklch(var(--l-primary)_var(--c-primary)_120),_oklch(var(--l-primary)_var(--c-primary)_240),_oklch(var(--l-primary)_var(--c-primary)_360)_)]',
@@ -99,7 +109,9 @@ const ColorPicker: React.FC<
               '[&_[data-slot="slider-thumb"]]:border-border',
               '[&_[data-slot="slider-thumb"]]:border-2',
             )}
-            ref={ref}
+            onValueChange={([h]) => {
+              handleChange({ h, s: 50, l: 50 });
+            }}
           />
           <Tooltip>
             <TooltipTrigger asChild>
@@ -113,7 +125,8 @@ const ColorPicker: React.FC<
       </PopoverContent>
     </Popover>
   );
-};
+}
+
 ColorPicker.displayName = 'ColorPicker';
 
 export { ColorPicker };

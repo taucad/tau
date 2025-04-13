@@ -7,9 +7,9 @@ import { useMonaco } from '@monaco-editor/react';
 import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
 import { useConsole } from '@/hooks/use-console';
 import './chat-config';
-import { cn } from '@/utils/ui';
+import { cn } from '@/utils/ui.js';
 
-export const ChatEditor = ({ className }: { className?: string }) => {
+export function ChatEditor({ className }: { readonly className?: string }) {
   const { setCode, code, isLoading } = useBuild();
   const { log } = useConsole({ defaultOrigin: { component: 'Editor' } });
 
@@ -78,7 +78,7 @@ export const ChatEditor = ({ className }: { className?: string }) => {
         />
       </div> */}
       <CodeEditor
-        // modify the key to force re-render when loading state changes to update the default value. Slightly hacky, but it's the most efficient way to do it.
+        // Modify the key to force re-render when loading state changes to update the default value. Slightly hacky, but it's the most efficient way to do it.
         key={isLoading ? 'loading' : 'ready'}
         loading={<LoaderPinwheel className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
         className={cn('bg-background text-xs', className)}
@@ -89,4 +89,4 @@ export const ChatEditor = ({ className }: { className?: string }) => {
       />
     </>
   );
-};
+}

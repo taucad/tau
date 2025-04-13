@@ -1,23 +1,23 @@
 import { History, MoreHorizontal } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { type Build } from '@/types/build';
 import { NavLink, useMatch, useNavigate } from '@remix-run/react';
+import type { Build } from '@/types/build.js';
 import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from '@/components/ui/sidebar';
-import { useKeydown } from '@/hooks/use-keydown';
-import { KeyShortcut } from '@/components/ui/key-shortcut';
-import { useBuilds } from '@/hooks/use-builds';
+} from '@/components/ui/sidebar.js';
+import { useKeydown } from '@/hooks/use-keydown.js';
+import { KeyShortcut } from '@/components/ui/key-shortcut.js';
+import { useBuilds } from '@/hooks/use-builds.js';
 
-const BUILDS_PER_PAGE = 5;
-const MAX_SHORTCUT_LENGTH = 9;
+const buildsPerPage = 5;
+const maxShortcutLength = 9;
 
 export function NavHistory() {
-  const [visibleCount, setVisibleCount] = useState(BUILDS_PER_PAGE);
+  const [visibleCount, setVisibleCount] = useState(buildsPerPage);
   const { builds } = useBuilds();
 
   const visibleBuilds = useMemo(() => {
@@ -26,7 +26,7 @@ export function NavHistory() {
   }, [builds, visibleCount]);
 
   const handleLoadMore = () => {
-    setVisibleCount((previous) => previous + BUILDS_PER_PAGE);
+    setVisibleCount((previous) => previous + buildsPerPage);
   };
 
   if (visibleBuilds.length === 0) {
@@ -42,7 +42,7 @@ export function NavHistory() {
         ))}
         {builds.length > visibleCount && (
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={handleLoadMore} disableAutoClose className="text-sidebar-foreground/70">
+            <SidebarMenuButton shouldAutoClose className="text-sidebar-foreground/70" onClick={handleLoadMore}>
               <MoreHorizontal className="size-4" />
               <span>Load More</span>
             </SidebarMenuButton>
@@ -53,7 +53,7 @@ export function NavHistory() {
   );
 }
 
-const NavHistoryItem = ({ build, index }: { build: Build; index: number }) => {
+function NavHistoryItem({ build, index }: { readonly build: Build; readonly index: number }) {
   const isMatch = useMatch(`/builds/${build.id}`);
   const navigate = useNavigate();
   const { formattedKeyCombination } = useKeydown(
@@ -73,7 +73,7 @@ const NavHistoryItem = ({ build, index }: { build: Build; index: number }) => {
           <SidebarMenuButton isActive={isActive}>
             <History className="size-4 shrink-0" />
             <span className="flex-1 truncate">{build.name}</span>
-            {index < MAX_SHORTCUT_LENGTH && (
+            {index < maxShortcutLength && (
               <KeyShortcut className="ml-2 shrink-0">{formattedKeyCombination}</KeyShortcut>
             )}
           </SidebarMenuButton>
@@ -81,4 +81,4 @@ const NavHistoryItem = ({ build, index }: { build: Build; index: number }) => {
       </NavLink>
     </SidebarMenuItem>
   );
-};
+}

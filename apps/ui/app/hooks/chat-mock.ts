@@ -1,4 +1,4 @@
-export const MOCK_CHAT_MESSAGES = [
+export const mockChatMessages = [
   { id: '1', content: 'Render gltf in React', role: 'user', status: 'success' },
   {
     id: '2',
@@ -9,7 +9,7 @@ export const MOCK_CHAT_MESSAGES = [
   },
 ];
 
-export const MOCK_KCL_MESSAGES = [
+export const mockKclMessages = [
   {
     content: 'Generate a KittyCAD KCL file',
     role: 'user',
@@ -45,7 +45,7 @@ export const MOCK_KCL_MESSAGES = [
   },
 ];
 
-export const MOCK_MATH_MESSAGES = [
+export const mockMathMessages = [
   {
     content: 'Render Einsteins equations with math symbols, wrapping all symbols with a single dollar sign ($)',
     role: 'user',
@@ -59,7 +59,7 @@ export const MOCK_MATH_MESSAGES = [
   },
 ];
 
-export const MOCK_TOOL_MESSAGES = [
+export const mockToolMessages = [
   {
     content: 'How does the sun produce energy? Search web',
     role: 'user',

@@ -1,7 +1,7 @@
-import { MessageRole, MessageStatus } from '@/types/chat';
+import type { Message, useChat } from '@ai-sdk/react';
+import type { MessageRole, MessageStatus } from '@/types/chat';
 import { generatePrefixedId } from '@/utils/id';
-import { PREFIX_TYPES } from '@/utils/constants';
-import { Message, useChat } from '@ai-sdk/react';
+import { idPrefix } from '@/utils/constants';
 import { ENV } from '@/config';
 
 export const USE_CHAT_CONSTANTS = {
@@ -57,7 +57,7 @@ export function createMessage({
   }));
 
   return {
-    id: id ?? generatePrefixedId(PREFIX_TYPES.MESSAGE),
+    id: id ?? generatePrefixedId(idPrefix.MESSAGE),
     content: '',
     role,
     experimental_attachments: attachments,

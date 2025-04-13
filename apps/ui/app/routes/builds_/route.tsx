@@ -1,12 +1,11 @@
-import { Button } from '@/components/ui/button';
-import { Link, Outlet, redirect, useLocation } from '@remix-run/react';
+import { Link, Outlet, redirect, useLocation, useNavigate } from '@remix-run/react';
 import { useEffect } from 'react';
-import { useNavigate } from '@remix-run/react';
-import { LoaderFunctionArgs } from '@remix-run/node';
-import { Handle } from '@/types/matches';
+import type { LoaderFunctionArgs } from '@remix-run/node';
+import { Button } from '@/components/ui/button.js';
+import type { Handle } from '@/types/matches.js';
 
 export const handle: Handle = {
-  breadcrumb: () => {
+  breadcrumb() {
     return (
       <Link to="/builds/library" tabIndex={-1}>
         <Button variant="ghost" className="p-2">
@@ -23,7 +22,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return redirect('/');
   }
 
-  // eslint-disable-next-line unicorn/no-null -- undefined is not allowed in the loader
   return null;
 };
 

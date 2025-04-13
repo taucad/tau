@@ -1,11 +1,10 @@
-import { ENV } from '@/config';
-import type { loader } from '@/root';
-import { useCookie } from '@/hooks/use-cookie';
 import { useRouteLoaderData } from '@remix-run/react';
 import { useQuery } from '@tanstack/react-query';
+import { ENV } from '@/config.js';
+import type { loader } from '@/root.js';
+import { useCookie } from '@/hooks/use-cookie.js';
 
-const CHAT_MODEL_COOKIE_NAME = 'chat-model';
-const DEFAULT_CHAT_MODEL = 'anthropic-claude-3.7-sonnet-thinking';
+const defaultChatModel = 'anthropic-claude-3.7-sonnet-thinking';
 
 export type Model = {
   id: string;
@@ -24,8 +23,10 @@ export const getModels = async (): Promise<Model[]> => {
         'ngrok-skip-browser-warning': 'true',
       },
     });
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- TODO: replace with SDK fetcher
     const data = await response.json();
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- TODO: replace with SDK fetcher
     return data;
   } catch {
     return [];
@@ -34,11 +35,11 @@ export const getModels = async (): Promise<Model[]> => {
 
 export const useModels = () => {
   const loaderData = useRouteLoaderData<typeof loader>('root');
-  const [selectedModel, setSelectedModel] = useCookie(CHAT_MODEL_COOKIE_NAME, DEFAULT_CHAT_MODEL);
+  const [selectedModel, setSelectedModel] = useCookie('chat-model', defaultChatModel);
 
   const { data, isLoading } = useQuery({
     queryKey: ['models'],
-    queryFn: () => getModels(),
+    queryFn: async () => getModels(),
     initialData: loaderData?.models,
   });
 

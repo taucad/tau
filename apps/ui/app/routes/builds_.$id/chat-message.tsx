@@ -1,26 +1,27 @@
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Edit } from 'lucide-react';
-import { CopyButton } from '@/components/copy-button';
-import { Button } from '@/components/ui/button';
-import { MessageAnnotation, MessageRole } from '@/types/chat';
-import { cn } from '@/utils/ui';
-import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
 import { useState } from 'react';
-import { When } from '@/components/ui/utils/when';
-import { ChatTextarea, ChatTextareaProperties } from '@/components/chat/chat-textarea';
-import { Model } from '@/hooks/use-models';
-import { ChatMessageReasoning } from './chat-message-reasoning';
-import { ChatMessageTool } from './chat-message-tool';
-import { ChatMessageAnnotation } from './chat-message-annotation';
-import { ChatMessageText } from './chat-message-text';
-import { Message } from '@ai-sdk/react';
+import type { Message } from '@ai-sdk/react';
+import { ChatMessageReasoning } from './chat-message-reasoning.js';
+import { ChatMessageTool } from './chat-message-tool.js';
+import { ChatMessageAnnotation } from './chat-message-annotation.js';
+import { ChatMessageText } from './chat-message-text.js';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip.js';
+import { CopyButton } from '@/components/copy-button.js';
+import { Button } from '@/components/ui/button.js';
+import { MessageRole } from '@/types/chat.js';
+import { cn } from '@/utils/ui.js';
+import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card.js';
+import { When } from '@/components/ui/utils/when.js';
+import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
+import { ChatTextarea } from '@/components/chat/chat-textarea.js';
+import type { Model } from '@/hooks/use-models.js';
 
 type ChatMessageProperties = {
-  message: Message;
-  onEdit: ChatTextareaProperties['onSubmit'];
-  models: Model[];
-  onCodeApply?: (code: string) => void;
-  conversationId?: string;
+  readonly message: Message;
+  readonly onEdit: ChatTextareaProperties['onSubmit'];
+  readonly models: Model[];
+  readonly onCodeApply?: (code: string) => void;
+  readonly conversationId?: string;
 };
 
 export function ChatMessage({ message, onEdit, models, onCodeApply, conversationId }: ChatMessageProperties) {
@@ -44,26 +45,26 @@ export function ChatMessage({ message, onEdit, models, onCodeApply, conversation
         )}
       >
         <div className={cn(isUser ? 'rounded-xl bg-neutral/20' : 'pt-[6px]')}>
-          <When condition={isUser && isEditing}>
+          <When shouldRender={isUser ? isEditing : false}>
             <ChatTextarea
               initialContent={message.parts}
               initialAttachments={message.experimental_attachments}
+              models={models}
+              conversationId={conversationId}
               onSubmit={async (event) => {
-                onEdit(event);
+                void onEdit(event);
                 setIsEditing(false);
               }}
               onEscapePressed={() => {
                 setIsEditing(false);
               }}
-              models={models}
-              conversationId={conversationId}
             />
           </When>
-          <When condition={!isEditing}>
+          <When shouldRender={!isEditing}>
             <div className={cn('flex flex-col gap-2', isUser && 'p-2')}>
               {message.experimental_attachments?.map((attachment, index) => {
                 return (
-                  <HoverCard openDelay={100} closeDelay={100} key={`${message.id}-attachment-${index}`}>
+                  <HoverCard key={`${message.id}-attachment-${index}`} openDelay={100} closeDelay={100}>
                     <HoverCardTrigger asChild>
                       <img
                         src={attachment.url}
@@ -101,13 +102,13 @@ export function ChatMessage({ message, onEdit, models, onCodeApply, conversation
 
                 if (part.type === 'source') {
                   // TODO: add source rendering to the message
-                  // eslint-disable-next-line unicorn/no-null -- null is required by React
+
                   return null;
                 }
 
                 if (part.type === 'step-start') {
                   // We are not rendering step-start parts.
-                  // eslint-disable-next-line unicorn/no-null -- null is required by React
+
                   return null;
                 }
 
@@ -119,15 +120,14 @@ export function ChatMessage({ message, onEdit, models, onCodeApply, conversation
                 const exhaustiveCheck: never = part;
                 throw new Error(`Unknown part: ${JSON.stringify(exhaustiveCheck)}`);
               })}
-              <When condition={!isUser}>
+              <When shouldRender={!isUser}>
                 <div className="mt-2 flex flex-row items-center justify-start gap-2 text-foreground/50">
                   <CopyButton size="xs" text={message.content} tooltip="Copy message" />
                   {message.annotations?.map((annotation, index) => {
                     return (
                       <ChatMessageAnnotation
                         key={`${message.id}-message-annotation-${index}`}
-                        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- TODO: fix module augmentation for MessageAnnotation
-                        annotation={annotation as MessageAnnotation}
+                        annotation={annotation}
                       />
                     );
                   })}
@@ -138,7 +138,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply, conversation
         </div>
       </div>
       <div className="mt-auto">
-        {isUser && (
+        {isUser ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -156,7 +156,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply, conversation
               <p>{isEditing ? 'Stop editing' : 'Edit message'}</p>
             </TooltipContent>
           </Tooltip>
-        )}
+        ) : null}
       </div>
     </article>
   );

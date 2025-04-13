@@ -1,4 +1,4 @@
-import { type LinksFunction, type LoaderFunctionArgs, type MetaFunction } from '@remix-run/node';
+import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import {
   isRouteErrorResponse,
   Links,
@@ -9,26 +9,26 @@ import {
   useNavigate,
   useLoaderData,
 } from '@remix-run/react';
-
-import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from 'remix-themes';
+import type { Theme } from 'remix-themes';
+import { PreventFlashOnWrongTheme, ThemeProvider, useTheme } from 'remix-themes';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ReactNode, useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import stylesUrl from './styles/global.css?url';
-
-import { getEnvironment, metaConfig } from './config';
-import { buttonVariants } from './components/ui/button';
-import { Page } from '@/components/page';
-import { themeSessionResolver } from '@/sessions.server';
-import { cn } from '@/utils/ui';
-import { TooltipProvider } from '@/components/ui/tooltip';
-import { markdownViewerLinks } from '@/components/markdown-viewer';
-import { useServiceWorker } from '@/hooks/use-service-worker';
-import { Toaster } from '@/components/ui/sonner';
-import { webManifestLinks } from '@/routes/manifest[.webmanifest]';
-import { getModels, Model } from '@/hooks/use-models';
-import { ColorProvider, useColor } from '@/hooks/use-color';
-// eslint-disable-next-line import/max-dependencies -- Permitted for the app entry point.
-import { useFavicon } from '@/hooks/use-favicon';
+import { getEnvironment, metaConfig } from './config.js';
+import { buttonVariants } from './components/ui/button.js';
+import { Page } from '@/components/page.js';
+import { themeSessionResolver } from '@/sessions.server.js';
+import { cn } from '@/utils/ui.js';
+import { TooltipProvider } from '@/components/ui/tooltip.js';
+import { markdownViewerLinks } from '@/components/markdown-viewer.js';
+import { useServiceWorker } from '@/hooks/use-service-worker.js';
+import { Toaster } from '@/components/ui/sonner.js';
+import { webManifestLinks } from '@/routes/manifest[.webmanifest].js';
+import type { Model } from '@/hooks/use-models.js';
+import { getModels } from '@/hooks/use-models.js';
+import { ColorProvider, useColor } from '@/hooks/use-color.js';
+import { useFavicon } from '@/hooks/use-favicon.js';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesUrl },
@@ -64,7 +64,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     theme: getTheme(),
     cookie,
-    env: getEnvironment(),
+    env: await getEnvironment(),
     models,
   };
 }
@@ -72,10 +72,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // Wrap your app with ThemeProvider.
 // `specifiedTheme` is the stored theme in the session storage.
 // `themeAction` is the action name that's used to change the theme in the session storage.
-// eslint-disable-next-line import/no-default-export -- Remix requires a default export for pages.
-export default function AppWithProviders({ error }: { error?: ReactNode }) {
+export default function AppWithProviders({ error }: { readonly error?: ReactNode }) {
   const data = useLoaderData<typeof loader>();
-  const [queryClient] = useState(
+  const queryClient = useMemo(
     () =>
       new QueryClient({
         defaultOptions: {
@@ -83,6 +82,7 @@ export default function AppWithProviders({ error }: { error?: ReactNode }) {
           mutations: { networkMode: 'offlineFirst' },
         },
       }),
+    [],
   );
 
   // Setup the service worker
@@ -106,9 +106,10 @@ export function App({
   ssrTheme,
   env,
 }: {
-  error?: ReactNode;
-  ssrTheme: Theme | null;
-  env: Record<string, string>;
+  readonly error?: ReactNode;
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is used for system theme
+  readonly ssrTheme: Theme | null;
+  readonly env: Record<string, string>;
 }) {
   const [theme] = useTheme();
   const color = useColor();
@@ -129,6 +130,7 @@ export function App({
       </head>
       <body>
         <script
+          // eslint-disable-next-line react/no-danger -- safe for environment injection as recommended by Remix
           dangerouslySetInnerHTML={{
             __html: `window.ENV = ${JSON.stringify(env)}`,
           }}
@@ -165,8 +167,9 @@ export function AppError() {
         <p>
           Please try again later,{' '}
           <button
-            onClick={goBack}
+            type="button"
             className={cn(buttonVariants({ variant: 'link' }), 'h-auto cursor-pointer p-0 text-base underline')}
+            onClick={goBack}
           >
             head back
           </button>
@@ -175,7 +178,9 @@ export function AppError() {
         </p>
       </div>
     );
-  } else if (error instanceof Error) {
+  }
+
+  if (error instanceof Error) {
     return (
       <div className="flex flex-col gap-4 p-2">
         <h1 className="text-xl">Error</h1>
@@ -184,7 +189,7 @@ export function AppError() {
         <pre>{error.stack}</pre>
       </div>
     );
-  } else {
-    return <h1>Unknown Error</h1>;
   }
+
+  return <h1>Unknown Error</h1>;
 }

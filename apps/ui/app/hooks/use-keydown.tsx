@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useMemo } from 'react';
-import { formatKeyCombination, type KeyCombination } from '@/utils/keys';
+import { formatKeyCombination } from '@/utils/keys.js';
+import type { KeyCombination } from '@/utils/keys.js';
 
 type KeydownOptions = {
   preventDefault?: boolean;
@@ -32,10 +33,10 @@ export const useKeydown = (
 
       const matches =
         event.key.toLowerCase() === combo.key.toLowerCase() &&
-        !!event.metaKey === !!combo.metaKey &&
-        !!event.ctrlKey === !!combo.ctrlKey &&
-        !!event.altKey === !!combo.altKey &&
-        !!event.shiftKey === !!combo.shiftKey;
+        Boolean(event.metaKey) === Boolean(combo.metaKey) &&
+        Boolean(event.ctrlKey) === Boolean(combo.ctrlKey) &&
+        Boolean(event.altKey) === Boolean(combo.altKey) &&
+        Boolean(event.shiftKey) === Boolean(combo.shiftKey);
 
       if (matches) {
         if (preventDefault) event.preventDefault();
@@ -48,7 +49,9 @@ export const useKeydown = (
 
   useEffect(() => {
     globalThis.addEventListener('keydown', handler);
-    return () => globalThis.removeEventListener('keydown', handler);
+    return () => {
+      globalThis.removeEventListener('keydown', handler);
+    };
   }, [handler]);
 
   const formattedKeyCombination = useMemo(() => formatKeyCombination(combo), [combo]);

@@ -1,46 +1,47 @@
 import * as THREE from 'three';
 import { Plane } from '@react-three/drei';
 import React from 'react';
-import { useTheme } from 'remix-themes';
+import { Theme, useTheme } from 'remix-themes';
 
 type InfiniteGridProperties = {
   /**
    * The distance between the lines of the small grid.
    */
-  smallSize: number;
+  readonly smallSize: number;
   /**
    * The thickness of the lines of the small grid.
    * @default 1.25
    */
-  smallThickness?: number;
+  readonly smallThickness: number;
   /**
    * The distance between the lines of the large grid.
    */
-  largeSize: number;
+  readonly largeSize: number;
   /**
    * The thickness of the lines of the large grid.
    * @default 2
    */
-  largeThickness?: number;
+  readonly largeThickness: number;
   /**
    * The color of the grid.
    */
-  color?: THREE.Color;
+  // eslint-disable-next-line react/no-unused-prop-types -- This is used in the shader
+  readonly color: THREE.Color;
   /**
    * The axes to use for the grid.
    * @default 'xyz'
    */
-  axes?: 'xyz' | 'xzy' | 'yxz' | 'yzx' | 'zxy' | 'zyx';
+  readonly axes: 'xyz' | 'xzy' | 'yxz' | 'yzx' | 'zxy' | 'zyx';
   /**
    * The opacity of the lines of the grid.
    * @default 0.3
    */
-  lineOpacity?: number;
+  readonly lineOpacity: number;
   /**
    * The distance falloff scale. This is used to control the distance at which the grid lines become more transparent.
    * @default 800
    */
-  distanceFalloffScale?: number;
+  readonly distanceFalloffScale: number;
 };
 
 // Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
@@ -49,11 +50,11 @@ function infiniteGridMaterial({
   smallSize,
   largeSize,
   color,
-  axes = 'xyz',
-  smallThickness = 1.25,
-  largeThickness = 2,
-  lineOpacity = 0.3,
-  distanceFalloffScale = 800,
+  axes,
+  smallThickness,
+  largeThickness,
+  lineOpacity,
+  distanceFalloffScale,
 }: InfiniteGridProperties) {
   // Validate to ensure axes cannot be used to inject malicious code
   if (!['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'].includes(axes)) {
@@ -148,16 +149,29 @@ function infiniteGridMaterial({
   return material;
 }
 
-export const InfiniteGrid = ({ smallSize, largeSize }: InfiniteGridProperties) => {
+export function InfiniteGrid({
+  smallSize,
+  largeSize,
+  smallThickness = 1.25,
+  largeThickness = 2,
+  axes = 'xyz',
+  lineOpacity = 0.3,
+  distanceFalloffScale = 800,
+}: InfiniteGridProperties) {
   const [theme] = useTheme();
   const material = React.useMemo(
     () =>
       infiniteGridMaterial({
         smallSize,
         largeSize,
-        color: theme === 'light' ? new THREE.Color('lightgrey') : new THREE.Color('grey'),
+        smallThickness,
+        largeThickness,
+        color: theme === Theme.LIGHT ? new THREE.Color('lightgrey') : new THREE.Color('grey'),
+        axes,
+        lineOpacity,
+        distanceFalloffScale,
       }),
-    [smallSize, largeSize, theme],
+    [smallSize, largeSize, smallThickness, largeThickness, theme, axes, lineOpacity, distanceFalloffScale],
   );
 
   return (
@@ -167,4 +181,4 @@ export const InfiniteGrid = ({ smallSize, largeSize }: InfiniteGridProperties) =
       renderOrder={9999} // Very high render order is used to force the grid to draw on top of other objects, ensuring it is always visible and void of blending issues like z-fighting
     />
   );
-};
+}

@@ -1,16 +1,17 @@
 import { useCallback, useMemo } from 'react';
-import { useLogContext } from '@/contexts/log-context';
-import { LogLevel, LOG_LEVELS, LogOptions, LogOrigin } from '@/types/console';
+import { useLogContext } from '@/contexts/log-context.js';
+import type { LogLevel, LogOptions, LogOrigin } from '@/types/console.js';
+import { logLevels } from '@/types/console.js';
 
 /**
  * Options for the useConsole hook
  */
-interface UseConsoleOptions {
+type UseConsoleOptions = {
   /**
    * Default origin for all logs created by this console instance
    */
   defaultOrigin?: LogOrigin;
-}
+};
 
 /**
  * A hook that provides console logging functionality
@@ -24,8 +25,8 @@ export const useConsole = (options: UseConsoleOptions = {}) => {
     (message: string, options?: Omit<LogOptions, 'level'>) => {
       addLog(message, {
         ...options,
-        level: LOG_LEVELS.ERROR,
-        origin: options?.origin || defaultOrigin,
+        level: logLevels.error,
+        origin: options?.origin ?? defaultOrigin,
       });
     },
     [addLog, defaultOrigin],
@@ -36,8 +37,8 @@ export const useConsole = (options: UseConsoleOptions = {}) => {
     (message: string, options?: Omit<LogOptions, 'level'>) => {
       addLog(message, {
         ...options,
-        level: LOG_LEVELS.WARN,
-        origin: options?.origin || defaultOrigin,
+        level: logLevels.warn,
+        origin: options?.origin ?? defaultOrigin,
       });
     },
     [addLog, defaultOrigin],
@@ -48,8 +49,8 @@ export const useConsole = (options: UseConsoleOptions = {}) => {
     (message: string, options?: Omit<LogOptions, 'level'>) => {
       addLog(message, {
         ...options,
-        level: LOG_LEVELS.INFO,
-        origin: options?.origin || defaultOrigin,
+        level: logLevels.info,
+        origin: options?.origin ?? defaultOrigin,
       });
     },
     [addLog, defaultOrigin],
@@ -60,8 +61,8 @@ export const useConsole = (options: UseConsoleOptions = {}) => {
     (message: string, options?: Omit<LogOptions, 'level'>) => {
       addLog(message, {
         ...options,
-        level: LOG_LEVELS.DEBUG,
-        origin: options?.origin || defaultOrigin,
+        level: logLevels.debug,
+        origin: options?.origin ?? defaultOrigin,
       });
     },
     [addLog, defaultOrigin],
@@ -72,8 +73,8 @@ export const useConsole = (options: UseConsoleOptions = {}) => {
     (message: string, options?: Omit<LogOptions, 'level'>) => {
       addLog(message, {
         ...options,
-        level: LOG_LEVELS.TRACE,
-        origin: options?.origin || defaultOrigin,
+        level: logLevels.trace,
+        origin: options?.origin ?? defaultOrigin,
       });
     },
     [addLog, defaultOrigin],

@@ -1,8 +1,7 @@
 import * as React from 'react';
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
 import { CheckIcon, ChevronRightIcon, CircleIcon } from 'lucide-react';
-
-import { cn } from '@/utils/ui';
+import { cn } from '@/utils/ui.js';
 
 function DropdownMenu({ ...properties }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
   return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...properties} />;
@@ -42,17 +41,17 @@ function DropdownMenuGroup({ ...properties }: React.ComponentProps<typeof Dropdo
 
 function DropdownMenuItem({
   className,
-  inset,
+  isInset,
   variant = 'default',
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Item> & {
-  inset?: boolean;
-  variant?: 'default' | 'destructive';
+  readonly isInset?: boolean;
+  readonly variant?: 'default' | 'destructive';
 }) {
   return (
     <DropdownMenuPrimitive.Item
       data-slot="dropdown-menu-item"
-      data-inset={inset}
+      data-inset={isInset}
       data-variant={variant}
       className={cn(
         "focus:text-accent-foreground relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground data-[variant=destructive]:*:[svg]:!text-destructive",
@@ -119,15 +118,15 @@ function DropdownMenuRadioItem({
 
 function DropdownMenuLabel({
   className,
-  inset,
+  isInset,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Label> & {
-  inset?: boolean;
+  readonly isInset?: boolean;
 }) {
   return (
     <DropdownMenuPrimitive.Label
       data-slot="dropdown-menu-label"
-      data-inset={inset}
+      data-inset={isInset}
       className={cn('px-2 py-1.5 text-sm font-medium data-[inset]:pl-8', className)}
       {...properties}
     />
@@ -163,16 +162,16 @@ function DropdownMenuSub({ ...properties }: React.ComponentProps<typeof Dropdown
 
 function DropdownMenuSubTrigger({
   className,
-  inset,
+  isInset,
   children,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubTrigger> & {
-  inset?: boolean;
+  readonly isInset?: boolean;
 }) {
   return (
     <DropdownMenuPrimitive.SubTrigger
       data-slot="dropdown-menu-sub-trigger"
-      data-inset={inset}
+      data-inset={isInset}
       className={cn(
         'focus:text-accent-foreground data-[state=open]:text-accent-foreground flex cursor-default items-center rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:bg-accent data-[inset]:pl-8 data-[state=open]:bg-accent',
         className,

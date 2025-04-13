@@ -1,11 +1,12 @@
-import { Build } from '@/types/build';
-import { mockModels } from './mock-code';
+import { mockModels } from '@/components/mock-code.js';
+import type { Build } from '@/types/build.js';
 
 // Sample data
 export const sampleBuilds: Build[] = mockModels.map((model) => ({
   id: model.id,
   assets: {
     mechanical: {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
       files: { 'model.ts': { content: model.code } },
       main: 'model.ts',
       language: 'replicad' as const,
@@ -29,7 +30,7 @@ export const sampleBuilds: Build[] = mockModels.map((model) => ({
   messages: [],
 }));
 
-// export const mockBuilds: Build[] = [
+// Export const mockBuilds: Build[] = [
 //   {
 //     id: '1',
 //     name: 'Parametric Gear Generator',

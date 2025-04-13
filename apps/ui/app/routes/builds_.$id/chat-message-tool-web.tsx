@@ -1,21 +1,21 @@
-import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { ChevronRight } from 'lucide-react';
+import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
+import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { ComingSoon } from '@/components/ui/coming-soon';
-import { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
 
-// const SOURCE_TOOLS = [
+// Const SOURCE_TOOLS = [
 //   { icon: Globe2, key: 'web' },
 //   { icon: NotebookIcon, key: 'notion' },
 //   { icon: History, key: 'history' },
 //   { icon: Projector, key: 'projects' },
 // ] as const satisfies { icon: React.ElementType; key: SourceOrigin }[];
 
-export function ChatMessageToolWeb({ part }: { part: ToolInvocationUIPart }) {
+export function ChatMessageToolWeb({ part }: { readonly part: ToolInvocationUIPart }) {
   switch (part.toolInvocation.state) {
     case 'call': {
       return (
@@ -25,14 +25,15 @@ export function ChatMessageToolWeb({ part }: { part: ToolInvocationUIPart }) {
         </div>
       );
     }
+
     case 'result': {
-      // const [activeSources, setActiveSources] = useState<SourceOrigin[]>(['web']);
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- TODO: add typings for source
-      const relevantSources = part.toolInvocation.result as {
+      // Const [activeSources, setActiveSources] = useState<SourceOrigin[]>(['web']);
+
+      const relevantSources = part.toolInvocation.result as Array<{
         title: string;
         link: string;
         snippet: string;
-      }[];
+      }>;
       return (
         <>
           <div className="flex flex-col">
@@ -42,7 +43,7 @@ export function ChatMessageToolWeb({ part }: { part: ToolInvocationUIPart }) {
                 <Tooltip>
                   <TooltipTrigger>
                     <Badge
-                      variant={'outline'}
+                      variant="outline"
                       className="flex cursor-pointer flex-row items-center gap-1 rounded-full transition-transform duration-200 ease-in-out select-none hover:bg-neutral/10 data-[active=true]:bg-neutral/20 data-[active=true]:hover:bg-neutral/30"
                     >
                       <p className="text-xs">+</p>
@@ -100,7 +101,7 @@ export function ChatMessageToolWeb({ part }: { part: ToolInvocationUIPart }) {
               sourceFaviconUrl.searchParams.set('url', source.link);
 
               return (
-                <HoverCard openDelay={100} closeDelay={100} key={source.title}>
+                <HoverCard key={source.title} openDelay={100} closeDelay={100}>
                   <HoverCardTrigger asChild>
                     <a href={source.link} target="_blank" rel="noreferrer">
                       <div
@@ -172,7 +173,7 @@ export function ChatMessageToolWeb({ part }: { part: ToolInvocationUIPart }) {
                         );
                         sourceFaviconUrl.searchParams.set('url', source.link);
                         return (
-                          <a href={source.link} target="_blank" key={source.link} className="w-full" rel="noreferrer">
+                          <a key={source.link} href={source.link} target="_blank" className="w-full" rel="noreferrer">
                             <div
                               key={source.title}
                               className="flex w-full flex-col space-y-2 rounded-md bg-neutral/5 p-2 hover:bg-neutral/10"
@@ -197,9 +198,11 @@ export function ChatMessageToolWeb({ part }: { part: ToolInvocationUIPart }) {
         </>
       );
     }
+
     case 'partial-call': {
       return <p>Partial call</p>;
     }
+
     default: {
       throw new Error(`Unknown tool invocation: ${part.toolInvocation}`);
     }

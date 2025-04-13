@@ -1,21 +1,18 @@
 import opencascade from 'replicad-opencascadejs/src/replicad_single.js';
 import opencascadeWasm from 'replicad-opencascadejs/src/replicad_single.wasm?url';
-
 import opencascadeWithExceptions from 'replicad-opencascadejs/src/replicad_with_exceptions.js';
 import opencascadeWithExceptionsWasm from 'replicad-opencascadejs/src/replicad_with_exceptions.wasm?url';
 
 // Types for OpenCascade modules
-interface OpenCascadeModule {
-  (options?: OpenCascadeOptions): Promise<any>;
-}
+type OpenCascadeModule = (options?: OpenCascadeOptions) => Promise<any>;
 
-interface OpenCascadeOptions {
+type OpenCascadeOptions = {
+  [key: string]: any;
   locateFile?: (path: string) => string;
   TOTAL_MEMORY?: number;
   cache?: boolean;
   instantiateWasm?: (imports: WebAssembly.Imports, successCallback: (instance: WebAssembly.Instance) => void) => {};
-  [key: string]: any;
-}
+};
 
 // Cache for initialized modules
 let singleModuleCache: any;
@@ -51,7 +48,7 @@ export async function initOpenCascade() {
       // Set cache settings to help with browser caching
       cache: true,
       // Let the browser optimize WebAssembly compilation
-      instantiateWasm: (imports: WebAssembly.Imports, successCallback: (instance: WebAssembly.Instance) => void) => {
+      instantiateWasm(imports: WebAssembly.Imports, successCallback: (instance: WebAssembly.Instance) => void) {
         console.log('Using optimized WebAssembly instantiation');
         if (typeof fetch === 'undefined') {
           return {}; // Skip streaming in environments without fetch
@@ -65,8 +62,8 @@ export async function initOpenCascade() {
             console.error('Streaming instantiation failed, falling back to ArrayBuffer', error);
             // Fallback to traditional approach
             fetch(opencascadeWasm, { cache: 'force-cache' })
-              .then((response) => response.arrayBuffer())
-              .then((buffer) => WebAssembly.instantiate(buffer, imports))
+              .then(async (response) => response.arrayBuffer())
+              .then(async (buffer) => WebAssembly.instantiate(buffer, imports))
               .then((output) => {
                 successCallback(output.instance);
               });
@@ -123,7 +120,7 @@ export async function initOpenCascadeWithExceptions() {
       // Set cache settings to help with browser caching
       cache: true,
       // Let the browser optimize WebAssembly compilation
-      instantiateWasm: (imports: WebAssembly.Imports, successCallback: (instance: WebAssembly.Instance) => void) => {
+      instantiateWasm(imports: WebAssembly.Imports, successCallback: (instance: WebAssembly.Instance) => void) {
         console.log('Using optimized WebAssembly instantiation');
         if (typeof fetch === 'undefined') {
           return {}; // Skip streaming in environments without fetch
@@ -137,8 +134,8 @@ export async function initOpenCascadeWithExceptions() {
             console.error('Streaming instantiation failed, falling back to ArrayBuffer', error);
             // Fallback to traditional approach
             fetch(opencascadeWithExceptionsWasm, { cache: 'force-cache' })
-              .then((response) => response.arrayBuffer())
-              .then((buffer) => WebAssembly.instantiate(buffer, imports))
+              .then(async (response) => response.arrayBuffer())
+              .then(async (buffer) => WebAssembly.instantiate(buffer, imports))
               .then((output) => {
                 successCallback(output.instance);
               });

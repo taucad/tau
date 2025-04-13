@@ -1,12 +1,12 @@
 import { generateId } from 'ai';
-import type { PrefixType } from './constants';
+import type { IdPrefix } from './constants.js';
 
 /**
  * Generates a prefixed ID
  * @param prefix - The prefix to use for the ID
  * @returns A string in the format "prefix_<id>"
  */
-export function generatePrefixedId(prefix: PrefixType): string {
+export function generatePrefixedId(prefix: IdPrefix): string {
   return `${prefix}_${generateId(21)}`;
 }
 

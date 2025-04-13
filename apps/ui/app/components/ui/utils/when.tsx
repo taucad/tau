@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 /**
  * Conditional rendering for React.
  *
@@ -5,7 +7,7 @@
  * @param children - The children to render if the condition is true.
  * @returns The children if the condition is true, otherwise null.
  */
-export const When = ({ condition, children }: { condition: boolean; children: React.ReactNode }) => {
-  // eslint-disable-next-line unicorn/no-null -- null is required by React
-  return condition ? children : null;
-};
+// eslint-disable-next-line @typescript-eslint/promise-function-async -- TODO: revisit this
+export function When({ shouldRender, children }: { readonly shouldRender: boolean; readonly children: ReactNode }) {
+  return shouldRender ? children : null;
+}

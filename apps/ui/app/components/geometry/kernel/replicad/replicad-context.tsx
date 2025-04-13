@@ -1,13 +1,14 @@
-/* eslint-disable @typescript-eslint/no-explicit-any -- TODO: fix typings */
-import { type Remote, wrap } from 'comlink';
-import { createContext, useContext, useReducer, ReactNode, useEffect, useRef, useMemo, useCallback } from 'react';
-import { BuilderWorkerInterface } from './replicad-builder.worker';
+import { wrap } from 'comlink';
+import type { Remote } from 'comlink';
+import type { ReactNode } from 'react';
+import { createContext, useContext, useReducer, useEffect, useRef, useMemo, useCallback } from 'react';
+import type { BuilderWorkerInterface } from './replicad-builder.worker';
 import BuilderWorker from './replicad-builder.worker?worker';
-import { debounce } from '@/utils/functions';
-import { useConsole } from '@/hooks/use-console';
+import { debounce } from '@/utils/functions.js';
+import { useConsole } from '@/hooks/use-console.js';
 
 // Combine related state
-interface ReplicadState {
+type ReplicadState = {
   code: string;
   parameters: Record<string, any>;
   defaultParameters: Record<string, any> | undefined;
@@ -20,7 +21,7 @@ interface ReplicadState {
     color?: string;
     opacity?: number;
   };
-}
+};
 
 type ReplicadAction =
   | { type: 'SET_CODE'; payload: string }
@@ -60,11 +61,11 @@ function useReplicadWorker() {
         if (readyResult) {
           // Worker is responsive and ready
           return wrappedWorkerReference.current;
-        } else {
-          // Worker ready check failed - terminate and recreate
-          log.debug('Worker responded but not ready, recreating worker');
-          terminateWorker();
         }
+
+        // Worker ready check failed - terminate and recreate
+        log.debug('Worker responded but not ready, recreating worker');
+        terminateWorker();
       } catch (error) {
         // Worker is unresponsive or threw an error - terminate and recreate
         log.debug('Worker unresponsive during ready check, recreating worker', {
@@ -127,20 +128,21 @@ function replicadReducer(state: ReplicadState, action: ReplicadAction): Replicad
     case 'SET_CODE': {
       return { ...state, code: action.payload };
     }
+
     case 'SET_PARAMETERS': {
       return { ...state, parameters: action.payload };
     }
+
     case 'SET_DEFAULT_PARAMETERS': {
       return { ...state, defaultParameters: action.payload };
     }
+
     case 'SET_STATUS': {
       return { ...state, ...action.payload };
     }
+
     case 'SET_MESH': {
       return { ...state, mesh: action.payload };
-    }
-    default: {
-      return state;
     }
   }
 }
@@ -153,7 +155,7 @@ const ReplicadContext = createContext<
         isBuffering: boolean;
         error?: string;
       };
-      downloadSTL: () => Promise<Blob>;
+      downloadStl: () => Promise<Blob>;
       setCode: (code: string) => void;
       setParameters: (parameters: Record<string, any>) => void;
       defaultParameters: Record<string, any>;
@@ -172,9 +174,9 @@ export function ReplicadProvider({
   withExceptions = false,
   evaluateDebounceTime = 0,
 }: {
-  children: ReactNode;
-  withExceptions?: boolean;
-  evaluateDebounceTime?: number;
+  readonly children: ReactNode;
+  readonly withExceptions?: boolean;
+  readonly evaluateDebounceTime?: number;
 }) {
   const [state, dispatch] = useReducer(replicadReducer, initialState);
   const { initWorker, terminateWorker } = useReplicadWorker();
@@ -210,6 +212,7 @@ export function ReplicadProvider({
       if (workerInitializationPromise.current === initPromise) {
         workerInitializationPromise.current = undefined;
       }
+
       throw error;
     }
   }, [initWorker, withExceptions]);
@@ -294,7 +297,7 @@ export function ReplicadProvider({
 
         log.debug('Evaluating code after debounce');
 
-        evaluateCode(code, parameters);
+        void evaluateCode(code, parameters);
       }, evaluateDebounceTime),
     [evaluateCode],
   );
@@ -304,7 +307,7 @@ export function ReplicadProvider({
     const debounceStartTime = performance.now();
     log.debug(`Starting debounce at ${debounceStartTime}ms`);
     dispatch({ type: 'SET_STATUS', payload: { isBuffering: true } });
-    debouncedEvaluate(state.code, state.parameters);
+    void debouncedEvaluate(state.code, state.parameters);
   }, [state.code, state.parameters, debouncedEvaluate]);
 
   // Cleanup worker on unmount
@@ -324,14 +327,18 @@ export function ReplicadProvider({
         isBuffering: state.isBuffering,
         error: state.error,
       },
-      downloadSTL: async () => {
+      async downloadStl() {
         const worker = await getOrInitWorker();
         if (!worker) throw new Error('Worker not found');
         const result = await worker.exportShape('stl');
         return result[0].blob;
       },
-      setCode: (code: string) => dispatch({ type: 'SET_CODE', payload: code }),
-      setParameters: (parameters: Record<string, any>) => dispatch({ type: 'SET_PARAMETERS', payload: parameters }),
+      setCode(code: string) {
+        dispatch({ type: 'SET_CODE', payload: code });
+      },
+      setParameters(parameters: Record<string, any>) {
+        dispatch({ type: 'SET_PARAMETERS', payload: parameters });
+      },
       defaultParameters: state.defaultParameters ?? {},
     }),
     [state.mesh, state.isComputing, state.isBuffering, state.error, state.defaultParameters, getOrInitWorker],
@@ -339,12 +346,12 @@ export function ReplicadProvider({
 
   return <ReplicadContext.Provider value={value}>{children}</ReplicadContext.Provider>;
 }
-/* eslint-enable @typescript-eslint/no-explicit-any -- TODO: fix typings */
 
 export function useReplicad() {
   const context = useContext(ReplicadContext);
   if (!context) {
     throw new Error('useReplicad must be used within a ReplicadProvider');
   }
+
   return context;
 }

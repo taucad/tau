@@ -1,15 +1,14 @@
-import {
-  ThreeProvider,
-  ThreeCanvasReference,
-  CadViewerProperties,
-} from '@/components/geometry/graphics/three/three-context';
-import { ReplicadMesh } from './replicad-mesh';
 import { LoaderPinwheel } from 'lucide-react';
+import type { RefObject } from 'react';
+import { ReplicadMesh } from '@/components/geometry/kernel/replicad/replicad-mesh.js';
+import { ThreeProvider } from '@/components/geometry/graphics/three/three-context.js';
+import type { ThreeCanvasReference, CadViewerProperties } from '@/components/geometry/graphics/three/three-context.js';
 
 type ReplicadViewerProperties = CadViewerProperties & {
-  mesh: any;
-  zoomLevel: number;
-  ref?: React.RefObject<ReplicadViewerReference | null>;
+  readonly mesh: any;
+  readonly zoomLevel: number;
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
+  readonly ref?: RefObject<ReplicadViewerReference | null>;
 };
 
 export type ReplicadViewerReference = ThreeCanvasReference;

@@ -1,10 +1,11 @@
-import type { Build } from '@/types/build';
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
-import { generatePrefixedId } from '@/utils/id';
-import { PREFIX_TYPES } from '@/utils/constants';
-import { metaConfig } from '@/config';
-export interface StorageProvider {
+import type { Build } from '@/types/build.js';
+import { generatePrefixedId } from '@/utils/id.js';
+import { idPrefix } from '@/utils/constants.js';
+import { metaConfig } from '@/config.js';
+
+export type StorageProvider = {
   // Build operations
   createBuild(build: Build): Promise<Build>;
   updateBuild(
@@ -14,22 +15,13 @@ export interface StorageProvider {
   ): Promise<Build | undefined>;
   getBuilds(): Build[];
   getBuild(buildId: string): Build | undefined;
-}
+};
 
 export class LocalStorageProvider implements StorageProvider {
-  private readonly BUILDS_KEY = `${metaConfig.cookiePrefix}builds`;
+  private readonly buildsKey = `${metaConfig.cookiePrefix}builds`;
 
-  private getBuildsInternal(): Build[] {
-    const data = localStorage.getItem(this.BUILDS_KEY);
-    return data ? JSON.parse(data) : [];
-  }
-
-  private saveBuilds(builds: Build[]): void {
-    localStorage.setItem(this.BUILDS_KEY, JSON.stringify(builds));
-  }
-
-  async createBuild(build: Omit<Build, 'id' | 'createdAt' | 'updatedAt'>): Promise<Build> {
-    const id = generatePrefixedId(PREFIX_TYPES.BUILD);
+  public async createBuild(build: Omit<Build, 'id' | 'createdAt' | 'updatedAt'>): Promise<Build> {
+    const id = generatePrefixedId(idPrefix.build);
     const timestamp = Date.now();
     const buildWithId = {
       ...build,
@@ -43,7 +35,7 @@ export class LocalStorageProvider implements StorageProvider {
     return buildWithId;
   }
 
-  async updateBuild(
+  public async updateBuild(
     buildId: string,
     update: PartialDeep<Build>,
     options?: {
@@ -61,15 +53,15 @@ export class LocalStorageProvider implements StorageProvider {
     }
 
     // Custom merge function that doesn't merge leaf nodes for 'files' and 'parameters'
-    const mergeIgnoreKeys = new Set(options?.ignoreKeys || []);
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- This is safe because the build is already a Build
+    const mergeIgnoreKeys = new Set(options?.ignoreKeys ?? []);
+
     const updatedBuild = deepmerge(
       builds[index],
       { ...update, updatedAt: Date.now() },
       {
-        customMerge: (key) => {
+        customMerge(key) {
           if (mergeIgnoreKeys.has(key)) {
-            return (source, target) => target;
+            return (source: unknown, target: unknown) => target;
           }
         },
       },
@@ -79,22 +71,31 @@ export class LocalStorageProvider implements StorageProvider {
     return updatedBuild;
   }
 
-  getBuilds(): Build[] {
+  public getBuilds(): Build[] {
     return this.getBuildsInternal();
   }
 
-  getBuild(buildId: string): Build | undefined {
+  public getBuild(buildId: string): Build | undefined {
     const builds = this.getBuilds();
     return builds.find((b) => b.id === buildId);
   }
 
-  async deleteBuild(buildId: string): Promise<void> {
+  public async deleteBuild(buildId: string): Promise<void> {
     const builds = this.getBuilds();
     const index = builds.findIndex((b) => b.id === buildId);
     if (index !== -1) {
       builds.splice(index, 1);
       this.saveBuilds(builds);
     }
+  }
+
+  private getBuildsInternal(): Build[] {
+    const data = localStorage.getItem(this.buildsKey);
+    return data ? (JSON.parse(data) as Build[]) : [];
+  }
+
+  private saveBuilds(builds: Build[]): void {
+    localStorage.setItem(this.buildsKey, JSON.stringify(builds));
   }
 }
 

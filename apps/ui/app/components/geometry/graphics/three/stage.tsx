@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useMemo } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
-import { useMemo } from 'react';
 import { OrthographicCamera, PerspectiveCamera } from '@react-three/drei';
-import { InfiniteGrid } from './infinite-grid';
-import { AxesHelper } from './axes-helper';
+import { InfiniteGrid } from '@/components/geometry/graphics/three/infinite-grid.js';
+import { AxesHelper } from '@/components/geometry/graphics/three/axes-helper.js';
 
 export type StageOptions = {
   perspective?: {
@@ -56,10 +56,10 @@ export type StageOptions = {
   };
 };
 
-const SIGNIFICANT_RADIUS_CHANGE_RATIO = 0.4;
+const significantRadiusChangeRatio = 0.4;
 
 // Default configuration constants
-export const DEFAULT_SCENE_OPTIONS = {
+export const defaultStageOptions = {
   perspective: {
     offsetRatio: 3,
     nearPlane: 0.2,
@@ -89,18 +89,28 @@ function getPositionOnCircle(radius: number, angleInRadians: number): [number, n
 }
 
 type StageProperties = {
-  children: React.ReactNode;
-  center?: boolean;
-  stageOptions: StageOptions;
-  enableGrid?: boolean;
-  enableAxesHelper?: boolean;
-  cameraMode?: 'perspective' | 'orthographic';
-  ref?: React.RefObject<{
-    resetCamera: () => void;
-  } | null>;
+  readonly children: ReactNode;
+  readonly isCentered?: boolean;
+  readonly stageOptions?: StageOptions;
+  readonly hasGrid?: boolean;
+  readonly hasAxesHelper?: boolean;
+  readonly cameraMode?: 'perspective' | 'orthographic';
+  readonly ref?: RefObject<
+    | {
+        resetCamera: () => void;
+      }
+    // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
+    | null
+  >;
 } & Omit<React.HTMLAttributes<HTMLDivElement>, 'id'>;
 
-export function Stage({ children, center = false, stageOptions, ref, ...properties }: StageProperties) {
+export function Stage({
+  children,
+  isCentered = false,
+  stageOptions = defaultStageOptions,
+  ref,
+  ...properties
+}: StageProperties) {
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls);
   const { invalidate } = useThree();
@@ -110,9 +120,9 @@ export function Stage({ children, center = false, stageOptions, ref, ...properti
 
   // Add state for tracking zoom
   const [currentZoom, setCurrentZoom] = React.useState<number>(1);
-  const originalDistanceReference = React.useRef<number | null>(null);
+  const originalDistanceReference = React.useRef<number | undefined>(null);
   // Store previous camera type to detect changes
-  const previousCameraType = React.useRef<string | null>(null);
+  const previousCameraType = React.useRef<string | undefined>(null);
 
   const [{ shapeRadius, sceneRadius }, set] = React.useState<{
     // The radius of the scene. Used to determine if the camera needs to be updated
@@ -129,16 +139,17 @@ export function Stage({ children, center = false, stageOptions, ref, ...properti
 
   const { perspective, orthographic, rotation } = useMemo(() => {
     return {
-      perspective: { ...DEFAULT_SCENE_OPTIONS.perspective, ...stageOptions.perspective },
-      orthographic: { ...DEFAULT_SCENE_OPTIONS.orthographic, ...stageOptions.orthographic },
-      rotation: { ...DEFAULT_SCENE_OPTIONS.rotation, ...stageOptions.rotation },
+      perspective: { ...defaultStageOptions.perspective, ...stageOptions.perspective },
+      orthographic: { ...defaultStageOptions.orthographic, ...stageOptions.orthographic },
+      rotation: { ...defaultStageOptions.rotation, ...stageOptions.rotation },
     };
   }, [stageOptions]);
 
   // Track previous size for orthographic camera adjustments
-  const previousSize = React.useRef<{ width: number; height: number } | null>(null);
+  const previousSize = React.useRef<{ width: number; height: number } | undefined>(null);
 
   // Add a ref to store the base frustum size for orthographic camera
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
   const baseFrustumSize = React.useRef<number | null>(null);
 
   /**
@@ -155,7 +166,7 @@ export function Stage({ children, center = false, stageOptions, ref, ...properti
 
     const box3 = new THREE.Box3().setFromObject(inner.current);
 
-    if (center) {
+    if (isCentered) {
       const centerPoint = new THREE.Vector3();
       box3.getCenter(centerPoint);
       if (outer.current) {
@@ -173,7 +184,7 @@ export function Stage({ children, center = false, stageOptions, ref, ...properti
     set((previous) => {
       return { shapeRadius: sphere.radius, sceneRadius: previous.sceneRadius, top: box3.max.z };
     });
-  }, [center, children]);
+  }, [isCentered, children]);
 
   // Add effect to track zoom changes
   React.useEffect(() => {
@@ -181,7 +192,7 @@ export function Stage({ children, center = false, stageOptions, ref, ...properti
 
     const handleControlsChange = () => {
       if (camera.type === 'OrthographicCamera') {
-        const zoom = camera.zoom;
+        const { zoom } = camera;
         setCurrentZoom(zoom);
       } else {
         if (originalDistanceReference.current === null) {
@@ -214,7 +225,6 @@ export function Stage({ children, center = false, stageOptions, ref, ...properti
     // Reset zoom tracking state using the appropriate configured zoom level
     setCurrentZoom(camera instanceof THREE.OrthographicCamera ? orthographic.zoomLevel : perspective.zoomLevel);
 
-    // eslint-disable-next-line unicorn/no-null -- null is required for React.useRef
     originalDistanceReference.current = null;
 
     if (camera instanceof THREE.OrthographicCamera) {
@@ -251,7 +261,7 @@ export function Stage({ children, center = false, stageOptions, ref, ...properti
       camera.far = Math.abs(camera.near) * 2; // Make far plane even more generous
     } else {
       // Reset our base frustum size when switching away from orthographic
-      // eslint-disable-next-line unicorn/no-null -- null is required for React.useRef
+
       baseFrustumSize.current = null;
 
       const [x, y] = getPositionOnCircle(shapeRadius * perspective.offsetRatio, rotation.side);
@@ -313,7 +323,7 @@ export function Stage({ children, center = false, stageOptions, ref, ...properti
     const isSignificantChange =
       sceneRadius === undefined
         ? true
-        : Math.abs(shapeRadius - sceneRadius) / sceneRadius > SIGNIFICANT_RADIUS_CHANGE_RATIO;
+        : Math.abs(shapeRadius - sceneRadius) / sceneRadius > significantRadiusChangeRatio;
 
     // Update the previous camera type reference
     previousCameraType.current = camera.type;
@@ -325,13 +335,14 @@ export function Stage({ children, center = false, stageOptions, ref, ...properti
 
   // Calculate grid sizes based on zoom and shape radius
   const gridSizes = useMemo(() => {
-    if (!properties.enableGrid) {
+    if (!properties.hasGrid) {
       return {
         smallSize: 0,
         largeSize: 0,
         effectiveSize: 0,
       };
     }
+
     let effectiveZoom;
     // eslint-disable-next-line unicorn/prefer-ternary -- the math is easier to read this way
     if (camera.type === 'OrthographicCamera') {
@@ -339,20 +350,21 @@ export function Stage({ children, center = false, stageOptions, ref, ...properti
     } else {
       effectiveZoom = currentZoom;
     }
+
     const baseSize = shapeRadius * effectiveZoom;
     const effectiveSize = (1 / baseSize) * 50;
 
     // Calculate the appropriate grid size using logarithms
     // This finds the nearest power of 10 multiplied by either 1 or 5
     const exponent = Math.floor(Math.log10(effectiveSize));
-    const mantissa = effectiveSize / Math.pow(10, exponent);
+    const mantissa = effectiveSize / 10 ** exponent;
 
     let largeSize;
     // eslint-disable-next-line unicorn/prefer-ternary -- the math is easier to read this way
     if (mantissa < 2.5) {
-      largeSize = Math.pow(10, exponent);
+      largeSize = 10 ** exponent;
     } else {
-      largeSize = 5 * Math.pow(10, exponent);
+      largeSize = 5 * 10 ** exponent;
     }
 
     const value = {
@@ -363,8 +375,8 @@ export function Stage({ children, center = false, stageOptions, ref, ...properti
     };
 
     return value;
-  }, [camera.type, currentZoom, properties.enableGrid, shapeRadius]);
-  // console.log(camera);
+  }, [camera.type, currentZoom, properties.hasGrid, shapeRadius]);
+  // Console.log(camera);
   // console.log(controls);
   // console.log(gridSizes);
 
@@ -373,8 +385,8 @@ export function Stage({ children, center = false, stageOptions, ref, ...properti
       {properties.cameraMode === 'perspective' && <PerspectiveCamera makeDefault />}
       {properties.cameraMode === 'orthographic' && <OrthographicCamera makeDefault />}
       <group ref={outer}>
-        {properties.enableAxesHelper && <AxesHelper />}
-        {properties.enableGrid && <InfiniteGrid smallSize={10} largeSize={100} />}
+        {properties.hasAxesHelper ? <AxesHelper /> : null}
+        {properties.hasGrid ? <InfiniteGrid smallSize={10} largeSize={100} /> : null}
         <group ref={inner}>{children}</group>
         {/* <Html position={[0, 0, 10]}>
           <div className="rounded-md border bg-background p-1 text-xs">

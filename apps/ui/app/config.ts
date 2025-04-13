@@ -3,15 +3,18 @@
  *
  * Uses Zod for validation
  */
+import process from 'node:process';
 import { z } from 'zod';
 
 // Define the schema for environment variables
 const environmentSchema = z.object({
+  /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
   TAU_API_URL: z.string().url(),
   NODE_ENV: z.enum(['development', 'production', 'test']),
+  /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
 });
 
-export const getEnvironment = () => {
+export const getEnvironment = async () => {
   const result = environmentSchema.safeParse(process.env);
 
   if (!result.success) {
@@ -26,6 +29,7 @@ export const getEnvironment = () => {
 
 export type Environment = z.infer<typeof environmentSchema>;
 
+// eslint-disable-next-line @typescript-eslint/naming-convention -- easier to distinguish this constant with UPPER_CASE.
 export const ENV = globalThis.window ? globalThis.window.ENV : process.env;
 
 /**

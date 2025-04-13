@@ -1,8 +1,9 @@
-import { useEffect, useState, RefObject, useCallback } from 'react';
+import type { RefObject } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 
 export type ScrollToProperties = {
   behavior?: ScrollBehavior;
-  reference: RefObject<HTMLDivElement | null>;
+  reference: RefObject<HTMLDivElement | undefined>;
 };
 
 /**
@@ -40,6 +41,7 @@ export function useScroll({ behavior, reference }: ScrollToProperties, dependenc
     if (reference.current) {
       // Find the scrollable parent container by traversing up and checking the
       // computed styles for overflow
+      // eslint-disable-next-line @typescript-eslint/no-restricted-types -- the parent element can be null
       let element: HTMLElement | null = reference.current;
       let scrollContainer: HTMLElement | undefined;
 
@@ -48,13 +50,14 @@ export function useScroll({ behavior, reference }: ScrollToProperties, dependenc
         if (['auto', 'scroll'].includes(style.overflowY)) {
           scrollContainer = element;
         }
+
         element = element.parentElement;
       }
 
       if (scrollContainer) {
         scrollContainer.scrollTo({
           top: scrollContainer.scrollHeight,
-          behavior: behavior || 'smooth',
+          behavior: behavior ?? 'smooth',
         });
       }
     }

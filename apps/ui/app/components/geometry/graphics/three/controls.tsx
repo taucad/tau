@@ -1,15 +1,17 @@
 import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import React from 'react';
+import type { ComponentRef, RefObject } from 'react';
 
 type ControlsProperties = {
-  enableGizmo: boolean;
-  enableDamping: boolean;
-  enableZoom: boolean;
-  zoomSpeed?: number;
-  ref?: React.RefObject<React.ComponentRef<typeof OrbitControls> | null>;
+  readonly enableGizmo: boolean;
+  readonly enableDamping: boolean;
+  readonly enableZoom: boolean;
+  readonly zoomSpeed: number;
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
+  readonly ref: RefObject<ComponentRef<typeof OrbitControls> | null>;
 };
 
-export const Controls = React.memo(function Controls({
+export const Controls = React.memo(function ({
   enableGizmo,
   enableDamping,
   enableZoom,
@@ -19,13 +21,13 @@ export const Controls = React.memo(function Controls({
   return (
     <>
       <OrbitControls
-        zoomSpeed={zoomSpeed}
+        ref={ref}
         makeDefault
+        zoomSpeed={zoomSpeed}
         enableDamping={enableDamping}
         enableZoom={enableZoom}
-        ref={ref}
       />
-      {enableGizmo && (
+      {enableGizmo ? (
         <>
           {/* TODO: review use of Gizmo view cube */}
           {/* <GizmoHelper
@@ -49,7 +51,7 @@ export const Controls = React.memo(function Controls({
             <GizmoViewport />
           </GizmoHelper>
         </>
-      )}
+      ) : null}
     </>
   );
 });

@@ -1,19 +1,17 @@
 import { PassThrough } from 'node:stream';
-
 import type { AppLoadContext, EntryContext } from '@remix-run/node';
 import { createReadableStreamFromReadable } from '@remix-run/node';
 import { RemixServer } from '@remix-run/react';
 import * as isbotModule from 'isbot';
 import { renderToPipeableStream } from 'react-dom/server';
 
-const ABORT_DELAY = 5000;
+const abortDelay = 5000;
 
-export default function handleRequest(
+export default async function handleRequest(
   request: Request,
   responseStatusCode: number,
   responseHeaders: Headers,
   remixContext: EntryContext,
-  loadContext: AppLoadContext,
 ) {
   const prohibitOutOfOrderStreaming = isBotRequest(request.headers.get('user-agent')) || remixContext.isSpaMode;
 
@@ -25,12 +23,13 @@ export default function handleRequest(
 // We have some Remix apps in the wild already running with isbot@3 so we need
 // to maintain backwards compatibility even though we want new apps to use
 // isbot@4.  That way, we can ship this as a minor Semver update to @remix-run/dev.
+// eslint-disable-next-line @typescript-eslint/no-restricted-types -- the header can be null
 function isBotRequest(userAgent: string | null) {
   if (!userAgent) {
     return false;
   }
 
-  // isbot >= 3.8.0, >4
+  // Isbot >= 3.8.0, >4
   if ('isbot' in isbotModule && typeof isbotModule.isbot === 'function') {
     return isbotModule.isbot(userAgent);
   }
@@ -38,7 +37,7 @@ function isBotRequest(userAgent: string | null) {
   return false;
 }
 
-function handleBotRequest(
+async function handleBotRequest(
   request: Request,
   responseStatusCode: number,
   responseHeaders: Headers,
@@ -47,7 +46,7 @@ function handleBotRequest(
   return new Promise((resolve, reject) => {
     let shellRendered = false;
     const { pipe, abort } = renderToPipeableStream(
-      <RemixServer context={remixContext} url={request.url} abortDelay={ABORT_DELAY} />,
+      <RemixServer context={remixContext} url={request.url} abortDelay={abortDelay} />,
       {
         onAllReady() {
           shellRendered = true;
@@ -66,7 +65,7 @@ function handleBotRequest(
           pipe(body);
         },
         onShellError(error: unknown) {
-          reject(error);
+          reject(error instanceof Error ? error : new Error(String(error)));
         },
         onError(error: unknown) {
           responseStatusCode = 500;
@@ -80,11 +79,11 @@ function handleBotRequest(
       },
     );
 
-    setTimeout(abort, ABORT_DELAY);
+    setTimeout(abort, abortDelay);
   });
 }
 
-function handleBrowserRequest(
+async function handleBrowserRequest(
   request: Request,
   responseStatusCode: number,
   responseHeaders: Headers,
@@ -93,7 +92,7 @@ function handleBrowserRequest(
   return new Promise((resolve, reject) => {
     let shellRendered = false;
     const { pipe, abort } = renderToPipeableStream(
-      <RemixServer context={remixContext} url={request.url} abortDelay={ABORT_DELAY} />,
+      <RemixServer context={remixContext} url={request.url} abortDelay={abortDelay} />,
       {
         onShellReady() {
           shellRendered = true;
@@ -112,7 +111,7 @@ function handleBrowserRequest(
           pipe(body);
         },
         onShellError(error: unknown) {
-          reject(error);
+          reject(error instanceof Error ? error : new Error(String(error)));
         },
         onError(error: unknown) {
           responseStatusCode = 500;
@@ -126,6 +125,6 @@ function handleBrowserRequest(
       },
     );
 
-    setTimeout(abort, ABORT_DELAY);
+    setTimeout(abort, abortDelay);
   });
 }

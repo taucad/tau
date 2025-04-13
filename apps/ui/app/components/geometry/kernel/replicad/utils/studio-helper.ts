@@ -7,44 +7,44 @@ const shapeOrSketch = (shape: any) => {
 };
 
 export class StudioHelper {
-  _shapes: any[] = [];
-  _faceFinder: any;
-  _edgeFinder: any;
+  public _shapes: any[] = [];
+  public _faceFinder: any;
+  public _edgeFinder: any;
 
-  constructor() {
+  public constructor() {
     this._shapes = [];
     this._faceFinder = null;
     this._edgeFinder = null;
   }
 
-  debug(shape) {
+  public debug(shape: any) {
     this._shapes.push(shape);
     return shape;
   }
 
-  d(shape) {
+  public d(shape: any) {
     return this.debug(shape);
   }
 
-  highlightFace(faceFinder) {
+  public highlightFace(faceFinder: any) {
     this._faceFinder = faceFinder;
     return faceFinder;
   }
 
-  hf(faceFinder) {
+  public hf(faceFinder: any) {
     return this.highlightFace(faceFinder);
   }
 
-  highlightEdge(edgeFinder) {
+  public highlightEdge(edgeFinder: any) {
     this._edgeFinder = edgeFinder;
     return edgeFinder;
   }
 
-  he(edgeFinder) {
+  public he(edgeFinder: any) {
     return this.highlightEdge(edgeFinder);
   }
 
-  apply(config: any) {
+  public apply(config: any) {
     const config_ = [
       ...config,
       ...this._shapes.map((s, index) => ({
@@ -56,10 +56,12 @@ export class StudioHelper {
       if (this._edgeFinder && !shape.highlightEdge) {
         shape.highlightEdge = this._edgeFinder;
       }
+
       if (this._faceFinder && !shape.highlightFace) {
         shape.highlightFace = this._faceFinder;
       }
     }
+
     return config_;
   }
 }

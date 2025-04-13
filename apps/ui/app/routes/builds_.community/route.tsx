@@ -1,22 +1,23 @@
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
 import { Link } from '@remix-run/react';
 import { Search, Code2, SlidersHorizontal } from 'lucide-react';
-import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button.js';
+import { Input } from '@/components/ui/input.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { CAD_PROVIDERS, CadProvider } from '@/types/cad';
-import { sampleBuilds } from '@/components/mock-builds';
-import { CommunityBuildGrid } from '@/components/project-grid';
-import { Handle } from '@/types/matches';
+} from '@/components/ui/dropdown-menu.js';
+import type { CadProvider } from '@/types/cad.js';
+import { cadProviders } from '@/types/cad.js';
+import { sampleBuilds } from '@/components/mock-builds.js';
+import { CommunityBuildGrid } from '@/components/project-grid.js';
+import type { Handle } from '@/types/matches.js';
 
 export const handle: Handle = {
-  breadcrumb: () => {
+  breadcrumb() {
     return (
       <Link to="/builds/community" tabIndex={-1}>
         <Button variant="ghost" className="p-2">
@@ -27,14 +28,14 @@ export const handle: Handle = {
   },
 };
 
-const ITEMS_PER_PAGE = 9;
+const itemsPerPage = 9;
 type SortOption = 'newest' | 'oldest' | 'stars' | 'forks';
 
 export default function CadCommunity() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState<CadProvider | 'all'>('all');
   const [sortOption, setSortOption] = useState<SortOption>('newest');
-  const [visibleProjects, setVisibleProjects] = useState(ITEMS_PER_PAGE);
+  const [visibleProjects, setVisibleProjects] = useState(itemsPerPage);
 
   // Filter projects based on search term and selected language
   const filteredProjects = sampleBuilds.filter((project) => {
@@ -56,23 +57,29 @@ export default function CadCommunity() {
       case 'newest': {
         return b.createdAt - a.createdAt;
       }
+
       case 'oldest': {
         return a.createdAt - b.createdAt;
       }
+
       case 'stars': {
         return b.stars - a.stars;
       }
+
       case 'forks': {
         return b.forks - a.forks;
       }
+
+      // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check
       default: {
-        return 0;
+        const exhaustiveCheck: never = sortOption;
+        throw new Error(`Invalid sort option: ${String(exhaustiveCheck)}`);
       }
     }
   });
 
   const handleLoadMore = () => {
-    setVisibleProjects((previous) => Math.min(previous + ITEMS_PER_PAGE, sortedProjects.length));
+    setVisibleProjects((previous) => Math.min(previous + itemsPerPage, sortedProjects.length));
   };
 
   return (
@@ -94,8 +101,10 @@ export default function CadCommunity() {
             <Input
               placeholder="Search projects..."
               value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
               className="pl-10"
+              onChange={(event) => {
+                setSearchTerm(event.target.value);
+              }}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -108,9 +117,20 @@ export default function CadCommunity() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-[180px]">
                 <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={() => setSelectedLanguage('all')}>All Languages</DropdownMenuItem>
-                  {CAD_PROVIDERS.map((key) => (
-                    <DropdownMenuItem key={key} onClick={() => setSelectedLanguage(key)}>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSelectedLanguage('all');
+                    }}
+                  >
+                    All Languages
+                  </DropdownMenuItem>
+                  {cadProviders.map((key) => (
+                    <DropdownMenuItem
+                      key={key}
+                      onClick={() => {
+                        setSelectedLanguage(key);
+                      }}
+                    >
                       {key}
                     </DropdownMenuItem>
                   ))}
@@ -126,10 +146,34 @@ export default function CadCommunity() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-[180px]">
                 <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={() => setSortOption('newest')}>Newest</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSortOption('oldest')}>Oldest</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSortOption('stars')}>Most Stars</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setSortOption('forks')}>Most Forks</DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortOption('newest');
+                    }}
+                  >
+                    Newest
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortOption('oldest');
+                    }}
+                  >
+                    Oldest
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortOption('stars');
+                    }}
+                  >
+                    Most Stars
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortOption('forks');
+                    }}
+                  >
+                    Most Forks
+                  </DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>

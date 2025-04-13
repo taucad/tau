@@ -1,17 +1,15 @@
+import type { CSSProperties, ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
-import { useCookie } from '@/hooks/use-cookie';
-import { CSSProperties } from 'react';
+import type { Hsl, Rgb, Oklch } from 'culori/fn';
 import {
   serializeHex,
   serializeRgb,
-  Hsl,
   serializeHsl,
-  Rgb,
-  Oklch,
   convertOklabToRgb,
   convertLchToLab,
   convertRgbToHsl,
 } from 'culori/fn';
+import { useCookie } from '@/hooks/use-cookie';
 
 /**
  * Colors are defined in OKLCH space.
@@ -34,7 +32,7 @@ const getRootColorStyle = (hue: number) => {
   return { [HUE_CSS_VAR]: `${hue}deg` };
 };
 
-interface ColorContextType {
+type ColorContextType = {
   serialized: {
     hex: string;
     rgb: string;
@@ -49,11 +47,11 @@ interface ColorContextType {
   setHue: (hue: number) => void;
   resetHue: () => void;
   rootStyles: CSSProperties;
-}
+};
 
 const ColorContext = createContext<ColorContextType | undefined>(undefined);
 
-export function ColorProvider({ children }: { children: React.ReactNode }) {
+export function ColorProvider({ children }: { readonly children: ReactNode }) {
   const [hue, setHue] = useCookie(COLOR_COOKIE_NAME, DEFAULT_HUE);
 
   // Update styles whenever the colorCookie changes
@@ -67,7 +65,7 @@ export function ColorProvider({ children }: { children: React.ReactNode }) {
   }, [setHue]);
 
   const colors = useMemo(() => {
-    // const computedHue = computeHue(hue);
+    // Const computedHue = computeHue(hue);
     const oklch = {
       l: DEFAULT_LIGHTNESS,
       c: DEFAULT_CHROMA,
@@ -85,12 +83,11 @@ export function ColorProvider({ children }: { children: React.ReactNode }) {
     };
 
     const serialized = {
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- rgb is always defined
-      hex: serializeHex(rgb) as string,
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- rgb is always defined
-      rgb: serializeRgb(rgb) as string,
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- hsl is always defined
-      hsl: serializeHsl(hsl) as string,
+      hex: serializeHex(rgb),
+
+      rgb: serializeRgb(rgb)!,
+
+      hsl: serializeHsl(hsl)!,
       oklch: `oklch(${oklch.l} ${oklch.c} ${oklch.h})`,
     };
 
@@ -120,5 +117,6 @@ export function useColor() {
   if (!context) {
     throw new Error('useColor must be used within a ColorProvider');
   }
+
   return context;
 }

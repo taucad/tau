@@ -1,22 +1,23 @@
-import { ChatInterface } from '@/routes/builds_.$id/chat-interface';
-import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
 import { useParams } from '@remix-run/react';
 import { useEffect, useState } from 'react';
-import { BuildProvider, useBuild } from '@/hooks/use-build2';
-import { Button } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Input } from '@/components/ui/input';
-import { LogProvider } from '@/contexts/log-context';
-import { DEFAULT_BUILD_NAME } from '@/constants/build.constants';
-import { Handle } from '@/types/matches';
-import { Message, useChat } from '@ai-sdk/react';
-import { USE_CHAT_CONSTANTS } from '@/contexts/use-chat';
+import type { Message } from '@ai-sdk/react';
+import { useChat } from '@ai-sdk/react';
+import { ChatInterface } from '@/routes/builds_.$id/chat-interface.js';
+import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context.js';
+import { BuildProvider, useBuild } from '@/hooks/use-build2.js';
+import { Button } from '@/components/ui/button.js';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.js';
+import { Input } from '@/components/ui/input.js';
+import { LogProvider } from '@/contexts/log-context.js';
+import { defaultBuildName } from '@/constants/build-constants.js';
+import type { Handle } from '@/types/matches.js';
+import { USE_CHAT_CONSTANTS } from '@/contexts/use-chat.js';
 
-const BuildNameEditor = () => {
+function BuildNameEditor() {
   const { build, updateName, isLoading } = useBuild();
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState<string>();
-  const [displayName, setDisplayName] = useState<string>(build?.name || '');
+  const [displayName, setDisplayName] = useState<string>(build?.name ?? '');
   const { append } = useChat({
     ...USE_CHAT_CONSTANTS,
 
@@ -41,8 +42,7 @@ const BuildNameEditor = () => {
     console.log('evaluating build name', build?.name, isLoading);
     if (isLoading || !build) return;
 
-    if (build.name === DEFAULT_BUILD_NAME && build.messages[0]) {
-      console.log('generating name');
+    if (build.name === defaultBuildName && build.messages[0]) {
       // Create and send message for name generation
       const message = {
         ...build.messages[0],
@@ -51,7 +51,7 @@ const BuildNameEditor = () => {
           toolChoice: 'none',
         },
       } as const satisfies Message;
-      append(message);
+      void append(message);
     } else if (!isLoading) {
       console.log('setting name', build.name);
       setName(build.name);
@@ -81,13 +81,17 @@ const BuildNameEditor = () => {
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 -translate-x-2 p-1">
-        <form onSubmit={handleSubmit} className="flex items-center gap-2 align-middle">
+        <form className="flex items-center gap-2 align-middle" onSubmit={handleSubmit}>
           <Input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
             autoFocus
-            onFocus={(event) => event.target.select()}
+            value={name}
             className="h-8"
+            onChange={(event) => {
+              setName(event.target.value);
+            }}
+            onFocus={(event) => {
+              event.target.select();
+            }}
           />
           <Button type="submit" size="sm">
             Save
@@ -96,10 +100,10 @@ const BuildNameEditor = () => {
       </PopoverContent>
     </Popover>
   );
-};
+}
 
 export const handle: Handle = {
-  breadcrumb: (match) => {
+  breadcrumb(match) {
     const { id } = match.params;
 
     if (!id) {
@@ -114,7 +118,7 @@ export const handle: Handle = {
   },
 };
 
-const Chat = () => {
+function Chat() {
   const { id } = useParams();
   const { build, isLoading, setMessages: setBuildMessages } = useBuild();
   const { setCode, setParameters } = useReplicad();
@@ -127,11 +131,11 @@ const Chat = () => {
   useEffect(() => {
     if (!build || isLoading) return;
     // Set code
-    setCode(build.assets.mechanical?.files[build.assets.mechanical.main]?.content || '');
+    setCode(build.assets.mechanical?.files[build.assets.mechanical.main]?.content ?? '');
 
     // Set parameters
     const parameters = build.assets.mechanical?.parameters;
-    setParameters(parameters || {});
+    setParameters(parameters ?? {});
   }, [id, build, isLoading]);
 
   useEffect(() => {
@@ -143,8 +147,7 @@ const Chat = () => {
     // Reload when the last message is not an assistant message.
     // This can happen when the user is offline when sending the initial message.
     if (build.messages.length > 0 && build.messages.at(-1)?.role !== 'assistant') {
-      console.log('status2 reloading');
-      reload();
+      void reload();
     }
   }, [id, isLoading]);
 
@@ -152,18 +155,18 @@ const Chat = () => {
     console.log('status2', status, 'messages', messages);
     if (status === 'submitted') {
       // A message just got submitted, set the build messages to include the new message.
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK doesn't support generics.
+
       setBuildMessages(messages as Message[]);
     } else if (status === 'ready' && messages.length > 0) {
       // The chat became ready again, set the build messages to include the new messages.
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK doesn't support generics.
+
       setBuildMessages(messages as Message[]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- we don't want to trigger the effect for all message changes.
   }, [status, setBuildMessages]);
 
   return <ChatInterface />;
-};
+}
 
 export default function ChatRoute() {
   const { id } = useParams();

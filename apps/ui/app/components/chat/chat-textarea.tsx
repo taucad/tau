@@ -1,30 +1,29 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Globe, ArrowRight, ChevronDown, CircuitBoard, AudioLines, Image, X, OctagonX } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { ComboBoxResponsive } from '@/components/ui/combobox-responsive';
-import { Model, useModels } from '@/hooks/use-models';
-import { SvgIcon } from '@/components/icons/svg-icon';
-import { ModelProvider } from '@/types/cad';
-import { ComingSoon } from '../ui/coming-soon';
-import { cn } from '@/utils/ui';
-import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '../ui/hover-card';
-import { MessagePart } from '@/types/chat';
-import { useKeydown } from '@/hooks/use-keydown';
-import { KeyShortcut } from '@/components/ui/key-shortcut';
-import { KeyCombination } from '@/utils/keys';
-import { toast } from '@/components/ui/sonner';
 import { useChat } from '@ai-sdk/react';
-import { Attachment } from 'ai';
-import { USE_CHAT_CONSTANTS } from '@/contexts/use-chat';
-import { useCookie } from '@/hooks/use-cookie';
+import type { Attachment } from 'ai';
+import { ComingSoon } from '@/components/ui/coming-soon.js';
+import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '@/components/ui/hover-card.js';
+import { Button } from '@/components/ui/button.js';
+import { Textarea } from '@/components/ui/textarea.js';
+import { Badge } from '@/components/ui/badge.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { ComboBoxResponsive } from '@/components/ui/combobox-responsive.js';
+import type { Model } from '@/hooks/use-models.js';
+import { useModels } from '@/hooks/use-models.js';
+import { SvgIcon } from '@/components/icons/svg-icon.js';
+import type { ModelProvider } from '@/types/cad.js';
+import { cn } from '@/utils/ui.js';
+import type { MessagePart } from '@/types/chat.js';
+import { useKeydown } from '@/hooks/use-keydown.js';
+import { KeyShortcut } from '@/components/ui/key-shortcut.js';
+import type { KeyCombination } from '@/utils/keys.js';
+import { toast } from '@/components/ui/sonner.js';
+import { USE_CHAT_CONSTANTS } from '@/contexts/use-chat.js';
+import { useCookie } from '@/hooks/use-cookie.js';
 
-const CHAT_WEB_COOKIE_NAME = 'chat-web';
-
-export interface ChatTextareaProperties {
-  onSubmit: ({
+export type ChatTextareaProperties = {
+  readonly onSubmit: ({
     content,
     model,
     metadata,
@@ -35,14 +34,16 @@ export interface ChatTextareaProperties {
     metadata?: { toolChoice?: 'web' | 'none' | 'auto' | 'any' };
     imageUrls?: string[];
   }) => Promise<void>;
-  onEscapePressed?: () => void;
-  models: Model[];
-  defaultModel?: string;
-  autoFocus?: boolean;
-  initialContent?: MessagePart[];
-  initialAttachments?: Attachment[];
-  conversationId?: string;
-}
+  readonly onEscapePressed?: () => void;
+  readonly models: Model[];
+  readonly shouldAutoFocus?: boolean;
+  readonly initialContent?: MessagePart[];
+  readonly initialAttachments?: Attachment[];
+  readonly conversationId?: string;
+};
+
+const defaultContent: MessagePart[] = [];
+const defaultAttachments: Attachment[] = [];
 
 // Define the key combination for cancelling the stream
 const cancelKeyCombination = {
@@ -53,9 +54,9 @@ const cancelKeyCombination = {
 export function ChatTextarea({
   onSubmit,
   models,
-  autoFocus = true,
-  initialContent = [],
-  initialAttachments = [],
+  shouldAutoFocus: autoFocus = true,
+  initialContent = defaultContent,
+  initialAttachments = defaultAttachments,
   onEscapePressed,
   conversationId,
 }: ChatTextareaProperties) {
@@ -67,6 +68,7 @@ export function ChatTextarea({
       if (content.type === 'text') {
         initialInputText = content.text;
       }
+
       if (content.type === 'file') {
         initialImageUrls.push(content.data);
       }
@@ -79,12 +81,12 @@ export function ChatTextarea({
     return { initialInputText, initialImageUrls };
   }, [initialContent, initialAttachments]);
   const [inputText, setInputText] = useState(initialInputText);
-  const [isSearching, setIsSearching] = useCookie(CHAT_WEB_COOKIE_NAME, true);
+  const [isSearching, setIsSearching] = useCookie('chat-web', true);
   const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputReference = useRef<HTMLInputElement>(null);
-  const textareaReference = useRef<HTMLTextAreaElement | null>(null);
+  const textareaReference = useRef<HTMLTextAreaElement>(null);
   const { selectedModel, setSelectedModel } = useModels();
   const { stop, status } = useChat({
     ...USE_CHAT_CONSTANTS,
@@ -122,7 +124,7 @@ export function ChatTextarea({
   const handleTextareaKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      handleSubmit();
+      void handleSubmit();
     } else if (
       event.key === 'Backspace' &&
       textareaReference.current?.selectionStart === 0 &&
@@ -161,8 +163,10 @@ export function ChatTextarea({
                 setImages((previous) => [...previous, result]);
               }
             }
+
             reader.removeEventListener('load', handleLoad);
           };
+
           reader.addEventListener('load', handleLoad);
           reader.readAsDataURL(file);
         } else {
@@ -188,12 +192,15 @@ export function ChatTextarea({
                 setImages((previous) => [...previous, result]);
               }
             }
+
             reader.removeEventListener('load', handleLoad);
           };
+
           reader.addEventListener('load', handleLoad);
           reader.readAsDataURL(file);
         }
       }
+
       // Clear the input so the same file can be selected again
       event.target.value = '';
     }
@@ -208,6 +215,7 @@ export function ChatTextarea({
     if (!providerModelsMap.has(model.provider)) {
       providerModelsMap.set(model.provider, []);
     }
+
     providerModelsMap.get(model.provider)?.push(model);
   }
 
@@ -241,8 +249,10 @@ export function ChatTextarea({
                 setImages((previous) => [...previous, result]);
               }
             }
+
             reader.removeEventListener('load', handleLoad);
           };
+
           reader.addEventListener('load', handleLoad);
           reader.readAsDataURL(file);
         }
@@ -271,31 +281,33 @@ export function ChatTextarea({
       {/* Textarea */}
       <div
         data-state={isFocused ? 'active' : 'inactive'}
-        onClick={() => {
-          focusInput();
-        }}
         className={cn(
           'flex size-full cursor-text resize-none flex-col overflow-auto rounded-xl border shadow-md data-[state=active]:border-primary',
           images.length > 0 && 'pt-10',
         )}
+        onClick={() => {
+          focusInput();
+        }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
         <Textarea
+          ref={textareaReference}
+          className="mb-8 size-full resize-none border-none p-4 pt-3 pr-10 pb-0 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
+          rows={3}
+          value={inputText}
+          placeholder="Ask Tau a question..."
           onFocus={() => {
             setIsFocused(true);
           }}
           onBlur={() => {
             setIsFocused(false);
           }}
-          ref={textareaReference}
-          className="mb-8 size-full resize-none border-none p-4 pt-3 pr-10 pb-0 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
-          rows={3}
-          value={inputText}
-          onChange={(event) => setInputText(event.target.value)}
+          onChange={(event) => {
+            setInputText(event.target.value);
+          }}
           onKeyDown={handleTextareaKeyDown}
-          placeholder="Ask Tau a question..."
         />
       </div>
 
@@ -303,7 +315,7 @@ export function ChatTextarea({
       {images.length > 0 && (
         <div className="absolute top-0 left-0 m-4 flex flex-wrap gap-2">
           {images.map((image, index) => (
-            <div key={index} className="relative">
+            <div key={image} className="relative">
               <HoverCard openDelay={100} closeDelay={100}>
                 <HoverCardTrigger asChild>
                   <img
@@ -321,10 +333,12 @@ export function ChatTextarea({
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => removeImage(index)}
                 className="absolute -top-2 -right-2 size-4 rounded-full border-[1px] bg-background text-foreground"
                 aria-label="Remove image"
                 type="button"
+                onClick={() => {
+                  removeImage(index);
+                }}
               >
                 <X className="!size-3 stroke-2" />
               </Button>
@@ -334,11 +348,11 @@ export function ChatTextarea({
       )}
 
       {/* Drag and drop feedback */}
-      {isDragging && (
+      {isDragging ? (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-primary/10 backdrop-blur-xs">
           <p className="rounded-md bg-background/50 px-2 font-medium text-primary">Drop images here</p>
         </div>
-      )}
+      ) : null}
 
       {/* Submit button */}
       {status === 'streaming' ? (
@@ -367,8 +381,8 @@ export function ChatTextarea({
               size="icon"
               variant="ghost"
               className="absolute top-2 right-2"
-              onClick={handleSubmit}
               disabled={inputText.length === 0}
+              onClick={handleSubmit}
             >
               <ArrowRight className="size-4" />
             </Button>
@@ -392,15 +406,15 @@ export function ChatTextarea({
           renderLabel={(item) => (
             <span className="flex w-full items-center justify-between text-xs">
               <div className="flex items-center gap-2">
-                {/* eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- item.provider is not typed as ModelProvider, but it is */}
+                {}
                 <SvgIcon id={item.provider as ModelProvider} />
                 <span className="font-mono">{item.name}</span>
               </div>
-              {item.details.parameterSize && (
+              {item.details.parameterSize ? (
                 <Badge variant="outline" className="bg-background">
                   {item.details.parameterSize}
                 </Badge>
-              )}
+              ) : null}
             </span>
           )}
           renderButtonContents={(item) => (
@@ -423,6 +437,8 @@ export function ChatTextarea({
             </Tooltip>
           )}
           getValue={(item) => item.id}
+          placeholder="Select a model"
+          defaultValue={models.find((model) => model.id === selectedModel)}
           onSelect={(model) => {
             setSelectedModel(model);
             focusInput();
@@ -430,8 +446,6 @@ export function ChatTextarea({
           onClose={() => {
             focusInput();
           }}
-          placeholder="Select a model"
-          defaultValue={models.find((model) => model.id === selectedModel)}
         />
 
         {/* Search button */}
@@ -464,7 +478,7 @@ export function ChatTextarea({
         <div className="flex flex-row items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="xs" onClick={handleFileSelect} title="Add image" type="button">
+              <Button variant="ghost" size="xs" title="Add image" type="button" onClick={handleFileSelect}>
                 <span className="hidden text-xs @xs:block">Upload</span>
                 <Image />
               </Button>
@@ -475,12 +489,12 @@ export function ChatTextarea({
           </Tooltip>
 
           <input
-            type="file"
             ref={fileInputReference}
-            onChange={handleFileChange}
+            multiple
+            type="file"
             accept="image/*"
             className="hidden"
-            multiple
+            onChange={handleFileChange}
           />
         </div>
       </div>

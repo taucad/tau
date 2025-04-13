@@ -1,4 +1,4 @@
-import { UIMessage } from 'ai';
+import type { UIMessage } from 'ai';
 
 export enum MessageRole {
   User = 'user',
@@ -17,15 +17,15 @@ export type SourceOrigin = 'web' | 'notion' | 'history' | 'projects';
 export type MessagePart = UIMessage['parts'][number];
 
 export type MessageAnnotation = {
+  [key: string]: any;
   type: 'usage';
   usageTokens: ChatUsageTokens;
   usageCost: ChatUsageCost;
   model: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This is a workaround to allow any key-value pairs
-  [key: string]: any;
 };
 
 declare module '@ai-sdk/react' {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- interface is necessary to augment the Message type
   interface Message {
     /**
      * The model that should be used to generate the message.
@@ -60,17 +60,17 @@ declare module '@ai-sdk/react' {
   }
 }
 
-export interface ChatUsageTokens {
+export type ChatUsageTokens = {
   inputTokens: number;
   outputTokens: number;
   cachedReadTokens: number;
   cachedWriteTokens: number;
-}
+};
 
-export interface ChatUsageCost {
+export type ChatUsageCost = {
   inputTokensCost: number;
   outputTokensCost: number;
   cachedReadTokensCost: number;
   cachedWriteTokensCost: number;
   totalCost: number;
-}
+};

@@ -1,6 +1,8 @@
-import { ChevronRight, type LucideIcon } from 'lucide-react';
-
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ChevronRight } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { NavLink, useMatch, useNavigate } from '@remix-run/react';
+import { KeyShortcut } from '@/components/ui/key-shortcut.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible.js';
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -10,26 +12,25 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-} from '@/components/ui/sidebar';
-import { NavLink, useMatch, useNavigate } from '@remix-run/react';
-import { formatKeyCombination, KeyCombination } from '@/utils/keys';
-import { useKeydown } from '@/hooks/use-keydown';
-import { KeyShortcut } from '../ui/key-shortcut';
+} from '@/components/ui/sidebar.js';
+import type { KeyCombination } from '@/utils/keys.js';
+import { formatKeyCombination } from '@/utils/keys.js';
+import { useKeydown } from '@/hooks/use-keydown.js';
 
 export function NavMain({
   items,
 }: {
-  items: {
+  readonly items: Array<{
     title: string;
     url: string;
     icon?: LucideIcon;
     isActive?: boolean;
-    items?: {
+    items?: Array<{
       title: string;
       url: string;
-    }[];
+    }>;
     keyCombination?: KeyCombination;
-  }[];
+  }>;
 }) {
   return (
     <SidebarGroup>
@@ -46,43 +47,45 @@ export function NavMain({
                       <SidebarMenuButton
                         isActive={isActive}
                         tooltip={
-                          item.keyCombination && {
-                            children: (
-                              <>
-                                {item.title}
-                                {` `}
-                                <KeyShortcut variant="tooltip" className="ml-1">
-                                  {formatKeyCombination(item.keyCombination)}
-                                </KeyShortcut>
-                              </>
-                            ),
-                          }
+                          item.keyCombination
+                            ? {
+                                children: (
+                                  <>
+                                    {item.title}
+                                    {` `}
+                                    <KeyShortcut variant="tooltip" className="ml-1">
+                                      {formatKeyCombination(item.keyCombination)}
+                                    </KeyShortcut>
+                                  </>
+                                ),
+                              }
+                            : undefined
                         }
                       >
-                        {item.icon && <item.icon className="size-4 shrink-0" />}
+                        {item.icon ? <item.icon className="size-4 shrink-0" /> : null}
                         <span className="flex-1">{item.title}</span>
-                        {hasItems && (
+                        {hasItems ? (
                           <ChevronRight className="ml-2 shrink-0 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                        )}
-                        {item.keyCombination && (
+                        ) : null}
+                        {item.keyCombination ? (
                           <NavKeyboardShortcut
                             className="ml-2 shrink-0"
                             keyCombination={item.keyCombination}
                             url={item.url}
                           />
-                        )}
+                        ) : null}
                       </SidebarMenuButton>
                     </CollapsibleTrigger>
                   )}
                 </NavLink>
-                {hasItems && (
+                {hasItems ? (
                   <CollapsibleContent asChild>
                     <SidebarMenuSub>
                       {item.items?.map((subItem) => (
                         <SidebarMenuSubItem key={subItem.title}>
                           <NavLink to={subItem.url} tabIndex={-1}>
                             {({ isActive }) => (
-                              <SidebarMenuSubButton isActive={isActive} asChild>
+                              <SidebarMenuSubButton asChild isActive={isActive}>
                                 <span className="flex-1">{subItem.title}</span>
                               </SidebarMenuSubButton>
                             )}
@@ -91,7 +94,7 @@ export function NavMain({
                       ))}
                     </SidebarMenuSub>
                   </CollapsibleContent>
-                )}
+                ) : null}
               </SidebarMenuItem>
             </Collapsible>
           );
@@ -101,15 +104,15 @@ export function NavMain({
   );
 }
 
-const NavKeyboardShortcut = ({
+function NavKeyboardShortcut({
   keyCombination,
   url,
   className,
 }: {
-  keyCombination: KeyCombination;
-  url: string;
-  className: string;
-}) => {
+  readonly keyCombination: KeyCombination;
+  readonly url: string;
+  readonly className: string;
+}) {
   const isMatch = useMatch(url);
   const navigate = useNavigate();
   const { formattedKeyCombination } = useKeydown(keyCombination, () => {
@@ -117,4 +120,4 @@ const NavKeyboardShortcut = ({
     navigate(url);
   });
   return <KeyShortcut className={className}>{formattedKeyCombination}</KeyShortcut>;
-};
+}

@@ -1,45 +1,47 @@
 import { useSWEffect } from '@remix-pwa/sw';
-import { toast } from '@/components/ui/sonner';
-import { useNetworkConnectivity } from './use-network-connectivity';
 import { useEffect, useRef } from 'react';
+import { useNetworkConnectivity } from './use-network-connectivity.js';
+import { toast } from '@/components/ui/sonner.js';
 
-const NETWORK_STATUS_COOKIE = 'network-status';
-const NETWORK_STATUS_TOAST_ID = 'network-connectivity';
+const networkStatusCookie = 'network-status';
+const networkStatusToastId = 'network-connectivity';
 
 export const useServiceWorker = () => {
   // Configure the service worker for PWA
   useSWEffect();
 
   // Debounce the network status to avoid spamming toast notifications
-  const previousStatus = useRef<boolean | null>(null);
+  const previousStatus = useRef<boolean | undefined>(null);
 
   useEffect(() => {
     // Initialize previousStatus from localStorage
-    const storedStatus = localStorage.getItem(NETWORK_STATUS_COOKIE);
+    const storedStatus = localStorage.getItem(networkStatusCookie);
     previousStatus.current = storedStatus === 'true';
   }, []);
 
   const isOnline = useNetworkConnectivity({
-    onOnline: () => {
+    onOnline() {
       if (previousStatus.current !== true) {
         const title = 'You are back online';
         const description = 'Seemed your network went for a nap, glad to have you back!';
 
-        toast.success(title, { id: NETWORK_STATUS_TOAST_ID, description });
+        toast.success(title, { id: networkStatusToastId, description });
       }
+
       previousStatus.current = true;
-      localStorage.setItem(NETWORK_STATUS_COOKIE, 'true');
+      localStorage.setItem(networkStatusCookie, 'true');
     },
 
-    onOffline: () => {
+    onOffline() {
       if (previousStatus.current !== false) {
         const title = 'You are offline';
         const description = 'Seems like you are offline, check your network connection';
 
-        toast.warning(title, { id: NETWORK_STATUS_TOAST_ID, description });
+        toast.warning(title, { id: networkStatusToastId, description });
       }
+
       previousStatus.current = false;
-      localStorage.setItem(NETWORK_STATUS_COOKIE, 'false');
+      localStorage.setItem(networkStatusCookie, 'false');
     },
   });
 

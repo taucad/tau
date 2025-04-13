@@ -1,8 +1,9 @@
-import { storage } from '@/db/storage';
-import type { Build } from '@/types/build';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { createContext, useContext, ReactNode } from 'react';
-import { Message } from '@/types/chat';
+import type { ReactNode } from 'react';
+import { createContext, useContext, useMemo } from 'react';
+import type { Message } from '@ai-sdk/react';
+import { storage } from '@/db/storage.js';
+import type { Build } from '@/types/build.js';
 
 // Function to fetch builds
 const fetchBuild = async (buildId: string): Promise<Build> => {
@@ -10,15 +11,15 @@ const fetchBuild = async (buildId: string): Promise<Build> => {
 
   if (clientBuild) {
     return clientBuild;
-  } else {
-    throw new Error('Build not found');
   }
+
+  throw new Error('Build not found');
 };
 
-interface BuildContextType {
+type BuildContextType = {
   build: Build | undefined;
   isLoading: boolean;
-  error: Error | null;
+  error: Error | undefined;
   code: string;
   parameters: Record<string, unknown>;
   setCode: (code: string) => void;
@@ -26,26 +27,27 @@ interface BuildContextType {
   setMessages: (messages: Message[]) => void;
   updateName: (name: string) => void;
   updateThumbnail: (thumbnail: string) => void;
-}
+};
 
 const BuildContext = createContext<BuildContextType | undefined>(undefined);
 
-export function BuildProvider({ children, buildId }: { children: ReactNode; buildId: string }) {
+export function BuildProvider({ children, buildId }: { readonly children: ReactNode; readonly buildId: string }) {
   const queryClient = useQueryClient();
 
   // Query for fetching build data
   const buildQuery = useQuery({
     queryKey: ['build', buildId],
-    queryFn: () => fetchBuild(buildId),
+    queryFn: async () => fetchBuild(buildId),
   });
 
   // Mutation for updating code
   const codeUpdate = useMutation({
-    mutationFn: (code: string) =>
+    mutationFn: async (code: string) =>
       storage.updateBuild(buildId, {
         assets: {
           mechanical: {
             files: {
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
               'model.ts': {
                 content: code,
               },
@@ -53,14 +55,14 @@ export function BuildProvider({ children, buildId }: { children: ReactNode; buil
           },
         },
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['build', buildId] });
+    onSuccess() {
+      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
     },
   });
 
   // Mutation for updating parameters
   const parameterUpdate = useMutation({
-    mutationFn: (parameters: Record<string, unknown>) => {
+    async mutationFn(parameters: Record<string, unknown>) {
       return storage.updateBuild(
         buildId,
         {
@@ -73,14 +75,14 @@ export function BuildProvider({ children, buildId }: { children: ReactNode; buil
         { ignoreKeys: ['parameters'] },
       );
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['build', buildId] });
+    onSuccess() {
+      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
     },
   });
 
   // Mutation for updating messages
   const messageUpdate = useMutation({
-    mutationFn: (messages: Message[]) => {
+    async mutationFn(messages: Message[]) {
       return storage.updateBuild(
         buildId,
         {
@@ -89,48 +91,58 @@ export function BuildProvider({ children, buildId }: { children: ReactNode; buil
         { ignoreKeys: ['messages'] },
       );
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['build', buildId] });
+    onSuccess() {
+      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
     },
   });
 
   // Mutation for updating name
   const nameUpdate = useMutation({
-    mutationFn: (name: string) => {
+    async mutationFn(name: string) {
       return storage.updateBuild(buildId, { name });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['build', buildId] });
-      queryClient.invalidateQueries({ queryKey: ['builds'] });
+    onSuccess() {
+      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
+      void queryClient.invalidateQueries({ queryKey: ['builds'] });
     },
   });
 
   // Mutation for updating thumbnail
   const thumbnailUpdate = useMutation({
-    mutationFn: (thumbnail: string) => {
+    async mutationFn(thumbnail: string) {
       return storage.updateBuild(buildId, { thumbnail });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['build', buildId] });
+    onSuccess() {
+      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
     },
   });
 
   const build = buildQuery.data;
-  const code = build?.assets.mechanical?.files[build.assets.mechanical.main]?.content || '';
-  const parameters = build?.assets.mechanical?.parameters || {};
 
-  const value = {
-    build,
-    isLoading: buildQuery.isLoading,
-    error: buildQuery.error as Error | null,
-    code,
-    parameters,
-    setCode: codeUpdate.mutate,
-    setParameters: parameterUpdate.mutate,
-    setMessages: messageUpdate.mutate,
-    updateName: nameUpdate.mutate,
-    updateThumbnail: thumbnailUpdate.mutate,
-  };
+  const value = useMemo(
+    () => ({
+      build,
+      isLoading: buildQuery.isLoading,
+      error: buildQuery.error as Error | undefined,
+      code: build?.assets.mechanical?.files[build.assets.mechanical.main]?.content ?? '',
+      parameters: build?.assets.mechanical?.parameters ?? {},
+      setCode: codeUpdate.mutate,
+      setParameters: parameterUpdate.mutate,
+      setMessages: messageUpdate.mutate,
+      updateName: nameUpdate.mutate,
+      updateThumbnail: thumbnailUpdate.mutate,
+    }),
+    [
+      build,
+      buildQuery.isLoading,
+      buildQuery.error,
+      codeUpdate.mutate,
+      parameterUpdate.mutate,
+      messageUpdate.mutate,
+      nameUpdate.mutate,
+      thumbnailUpdate.mutate,
+    ],
+  );
 
   return <BuildContext.Provider value={value}>{children}</BuildContext.Provider>;
 }
@@ -140,5 +152,6 @@ export function useBuild() {
   if (context === undefined) {
     throw new Error('useBuild must be used within a BuildProvider');
   }
+
   return context;
 }

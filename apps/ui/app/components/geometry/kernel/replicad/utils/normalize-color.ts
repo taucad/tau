@@ -1,4 +1,3 @@
-// import parse from 'parse-css-color';
 import { converter, serializeHex } from 'culori';
 
 const rgb = converter('rgb');

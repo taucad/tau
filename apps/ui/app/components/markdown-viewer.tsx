@@ -2,25 +2,24 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { cn } from '@/utils/ui';
-import { CopyButton } from '@/components/copy-button';
-import { CodeViewer } from '@/components/code-viewer';
-
 import katexUrl from 'katex/dist/katex.min.css?url';
 import type { LinkDescriptor } from '@remix-run/node';
-import { Button } from './ui/button';
 import { Play } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { Button } from '@/components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { CodeViewer } from '@/components/code-viewer.js';
+import { CopyButton } from '@/components/copy-button.js';
+import { cn } from '@/utils/ui.js';
 
 export const markdownViewerLinks: LinkDescriptor[] = [{ rel: 'stylesheet', href: katexUrl }];
 
-export const MarkdownViewer = ({
+export function MarkdownViewer({
   children,
   onCodeApply,
 }: {
-  children: string;
-  onCodeApply?: (code: string) => void;
-}) => {
+  readonly children: string;
+  readonly onCodeApply?: (code: string) => void;
+}) {
   return (
     <Markdown
       className={cn(
@@ -40,7 +39,7 @@ export const MarkdownViewer = ({
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex]}
       components={{
-        a: (properties) => {
+        a(properties) {
           const { children, ...rest } = properties;
           return (
             <a {...rest} target="_blank" rel="noopener noreferrer">
@@ -48,11 +47,12 @@ export const MarkdownViewer = ({
             </a>
           );
         },
-        code: (properties) => {
+        code(properties) {
           const { children, className, ref, node, style, ...rest } = properties;
-          const match = /language-(\w+)/.exec(className || '');
+          const match = /language-(\w+)/.exec(className ?? '');
           const language = match ? match[1] : 'text';
 
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string -- TODO: revisit this
           const text = String(children).replace(/\n$/, '');
 
           return match ? (
@@ -65,22 +65,31 @@ export const MarkdownViewer = ({
                     className="[&_[data-slot=label]]:hidden @xs/code:[&_[data-slot=label]]:flex"
                     text={text}
                   />
-                  {onCodeApply && (
+                  {onCodeApply ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Button size="xs" variant="ghost" className="flex" onClick={() => onCodeApply(text)}>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          className="flex"
+                          onClick={() => {
+                            onCodeApply(text);
+                          }}
+                        >
                           <span className="hidden @xs/code:block">Apply</span>
                           <Play />
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>Apply code</TooltipContent>
                     </Tooltip>
-                  )}
+                  ) : null}
                 </div>
               </div>
               {/* <div className={cn('relative max-h-64', isExpanded ? 'max-h-none' : 'overflow-y-auto')}> */}
               <div>
-                <CodeViewer {...rest} children={text} language={language} />
+                <CodeViewer {...rest} language={language}>
+                  {text}
+                </CodeViewer>
 
                 {/* FIXME: ensure the code viewer doesn't auto-collapse during scrolling */}
                 {/* <Button
@@ -110,4 +119,4 @@ export const MarkdownViewer = ({
       {children}
     </Markdown>
   );
-};
+}

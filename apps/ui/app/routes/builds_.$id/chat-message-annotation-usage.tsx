@@ -4,12 +4,12 @@ import { Badge } from '@/components/ui/badge';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter, Table } from '@/components/ui/table';
 import { useModels } from '@/hooks/use-models';
-import { ModelProvider } from '@/types/cad';
-import { MessageAnnotation } from '@/types/chat';
+import type { ModelProvider } from '@/types/cad';
+import type { MessageAnnotation } from '@/types/chat';
 import { formatCurrency } from '@/utils/currency';
 import { formatNumber } from '@/utils/number';
 
-export function ChatMessageAnnotationUsage({ annotation }: { annotation: MessageAnnotation }) {
+export function ChatMessageAnnotationUsage({ annotation }: { readonly annotation: MessageAnnotation }) {
   const { data: models } = useModels();
 
   switch (annotation.type) {
@@ -26,16 +26,15 @@ export function ChatMessageAnnotationUsage({ annotation }: { annotation: Message
             <div className="flex flex-col space-y-1">
               <div className="flex flex-row items-baseline justify-between gap-4 p-2 pb-0">
                 <h4 className="font-medium">Usage Details</h4>
-                {model && (
+                {model ? (
                   <div className="flex items-baseline gap-2 text-xs">
                     <SvgIcon
-                      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- model.provider is always defined
                       id={model.provider as ModelProvider}
                       className="size-4 translate-y-[0.25em] text-muted-foreground"
                     />
                     <span className="font-mono">{model.name}</span>
                   </div>
-                )}
+                ) : null}
               </div>
               <Table className="overflow-clip rounded-md">
                 <TableHeader>
@@ -103,6 +102,7 @@ export function ChatMessageAnnotationUsage({ annotation }: { annotation: Message
         </HoverCard>
       );
     }
+
     default: {
       throw new Error(`Unknown annotation type: ${annotation.type}`);
     }

@@ -1,6 +1,4 @@
-import { SVGProps } from 'react';
-
-export const Tau = (properties: SVGProps<SVGSVGElement>) => {
+export function Tau(properties: React.SVGProps<SVGSVGElement>) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" {...properties}>
       <rect width="512" height="512" fill="currentColor" rx="20%" ry="20%" />
@@ -10,4 +8,4 @@ export const Tau = (properties: SVGProps<SVGSVGElement>) => {
       />
     </svg>
   );
-};
+}

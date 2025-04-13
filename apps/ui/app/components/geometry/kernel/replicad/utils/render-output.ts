@@ -9,17 +9,17 @@ import {
   Sketches,
   CompoundSketch,
 } from 'replicad';
-import { normalizeColor } from './normalize-color';
+import { normalizeColor } from './normalize-color.js';
 
-interface Meshable {
+type Meshable = {
   mesh: (config: { tolerance: number; angularTolerance: number }) => any;
   meshEdges: (config: { keepMesh: boolean }) => any;
-}
+};
 
-interface SVGable {
-  toSVGPaths: () => any;
-  toSVGViewBox: () => any;
-}
+type Svgable = {
+  toSvgPaths: () => any;
+  toSvgViewBox: () => any;
+};
 
 type InputShape = {
   shape: unknown;
@@ -34,16 +34,16 @@ type InputShape = {
 
 type CleanConfig = {
   name: string;
-  shape: Meshable | SVGable;
+  shape: Meshable | Svgable;
   color?: string;
   opacity?: number;
   highlight?: any;
   strokeType?: string;
 };
 
-type SVGShapeConfiguration = {
+type SvgShapeConfiguration = {
   name: string;
-  shape: SVGable;
+  shape: Svgable;
   color?: string;
   opacity?: number;
   strokeType?: string;
@@ -57,18 +57,18 @@ type MeshableConfiguration = {
   highlight?: any;
 };
 
-const isSVGable = (shape: any): shape is SVGable => {
+const isSvgable = (shape: any): shape is Svgable => {
   return (
     shape instanceof Blueprint ||
     shape instanceof Blueprints ||
     shape instanceof CompoundBlueprint ||
     shape instanceof Drawing ||
-    (shape.toSVGPaths && shape.toSVGViewBox)
+    (shape.toSvgPaths && shape.toSvgViewBox)
   );
 };
 
 const isMeshable = (shape: any): shape is Meshable => {
-  return !!(shape.mesh && shape.meshEdges);
+  return Boolean(shape.mesh && shape.meshEdges);
 };
 
 function createBasicShapeConfig(
@@ -90,6 +90,7 @@ function createBasicShapeConfig(
           shape: inputShape,
         };
       }
+
       return inputShape;
     })
     .map((inputShape, index_) => {
@@ -126,9 +127,9 @@ function normalizeHighlight<T extends Record<string, any>>(config: T) {
   const { highlight: inputHighlight, highlightEdge, highlightFace, ...rest } = config;
 
   const highlight: { find: (s: any) => any } =
-    (inputHighlight && typeof inputHighlight.find == 'function') ||
-    (highlightEdge && highlightEdge(new EdgeFinder())) ||
-    (highlightFace && highlightFace(new FaceFinder()));
+    (inputHighlight && typeof inputHighlight.find === 'function') ||
+    highlightEdge?.(new EdgeFinder()) ||
+    highlightFace?.(new FaceFinder());
 
   return {
     ...rest,
@@ -138,8 +139,8 @@ function normalizeHighlight<T extends Record<string, any>>(config: T) {
 
 function checkShapeConfigIsValid<T extends Record<string, any> & { shape: unknown }>(
   shape: T,
-): shape is T & { shape: Meshable | SVGable } {
-  return isSVGable(shape.shape) || isMeshable(shape.shape);
+): shape is T & { shape: Meshable | Svgable } {
+  return isSvgable(shape.shape) || isMeshable(shape.shape);
 }
 
 const adaptSketch = (shape: any) => {
@@ -158,35 +159,36 @@ const adaptSketches = (shape: any) => {
 export class ShapeStandardizer {
   private shapeAdapters: Record<string, (shape: any) => any>;
 
-  constructor() {
+  public constructor() {
     this.shapeAdapters = {
       sketch: adaptSketch,
       sketches: adaptSketches,
     };
   }
 
-  registerAdapter(name: string, adapter: (shape: any) => any) {
+  public registerAdapter(name: string, adapter: (shape: any) => any) {
     this.shapeAdapters[name] = adapter;
   }
 
-  adaptShape(shape: any) {
+  public adaptShape(shape: any) {
     for (const adaptor of Object.values(this.shapeAdapters)) {
       shape = adaptor(shape);
     }
+
     return shape;
   }
 
-  standardizeShape<T extends { shape: unknown }>(shapes: T[]): Array<T & { shape: Meshable | SVGable }> {
+  public standardizeShape<T extends { shape: unknown }>(shapes: T[]): Array<T & { shape: Meshable | Svgable }> {
     return shapes
       .map(({ shape, ...rest }) => ({
         shape: this.adaptShape(shape),
         ...rest,
       }))
-      .filter((element): element is T & { shape: Meshable | SVGable } => checkShapeConfigIsValid(element));
+      .filter((element): element is T & { shape: Meshable | Svgable } => checkShapeConfigIsValid(element));
   }
 }
 
-function renderSVG(shapeConfig: SVGShapeConfiguration) {
+function renderSvg(shapeConfig: SvgShapeConfiguration) {
   const { name, shape, color, strokeType, opacity } = shapeConfig;
   return {
     name,
@@ -194,8 +196,8 @@ function renderSVG(shapeConfig: SVGShapeConfiguration) {
     strokeType,
     opacity,
     format: 'svg',
-    paths: shape.toSVGPaths(),
-    viewbox: shape.toSVGViewBox(),
+    paths: shape.toSvgPaths(),
+    viewbox: shape.toSvgViewBox(),
   };
 }
 
@@ -235,9 +237,9 @@ function renderMesh(shapeConfig: MeshableConfiguration) {
   return shapeInfo;
 }
 
-export function render(shapes: Array<CleanConfig>) {
+export function render(shapes: CleanConfig[]) {
   return shapes.map((shapeConfig: CleanConfig) => {
-    if (isSVGable(shapeConfig.shape)) return renderSVG(shapeConfig as SVGShapeConfiguration);
+    if (isSvgable(shapeConfig.shape)) return renderSvg(shapeConfig as SvgShapeConfiguration);
     return renderMesh(shapeConfig as MeshableConfiguration);
   });
 }

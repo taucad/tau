@@ -44,6 +44,9 @@ const config = [
 
       // Enforce explicit accessibility modifiers for class members to improve readability, maintainability and explicitness.
       '@typescript-eslint/explicit-member-accessibility': 'error',
+
+      // Enforce that `any` is not used.
+      '@typescript-eslint/no-explicit-any': 'error',
     },
     languageOptions: {
       parserOptions: {

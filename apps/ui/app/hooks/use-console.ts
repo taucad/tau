@@ -32,7 +32,7 @@ export const useConsole = (options: UseConsoleOptions = {}) => {
     [addLog, defaultOrigin],
   );
 
-  // Log messages with WARN level
+  // Log messages with warn level
   const warn = useCallback(
     (message: string, options?: Omit<LogOptions, 'level'>) => {
       addLog(message, {
@@ -44,7 +44,7 @@ export const useConsole = (options: UseConsoleOptions = {}) => {
     [addLog, defaultOrigin],
   );
 
-  // Log messages with INFO level
+  // Log messages with info level
   const info = useCallback(
     (message: string, options?: Omit<LogOptions, 'level'>) => {
       addLog(message, {
@@ -56,7 +56,7 @@ export const useConsole = (options: UseConsoleOptions = {}) => {
     [addLog, defaultOrigin],
   );
 
-  // Log messages with DEBUG level
+  // Log messages with debug level
   const debug = useCallback(
     (message: string, options?: Omit<LogOptions, 'level'>) => {
       addLog(message, {
@@ -68,7 +68,7 @@ export const useConsole = (options: UseConsoleOptions = {}) => {
     [addLog, defaultOrigin],
   );
 
-  // Log messages with TRACE level
+  // Log messages with trace level
   const trace = useCallback(
     (message: string, options?: Omit<LogOptions, 'level'>) => {
       addLog(message, {

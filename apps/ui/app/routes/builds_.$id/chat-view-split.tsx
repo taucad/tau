@@ -1,26 +1,26 @@
 import { useRef, useCallback } from 'react';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
-import { ChatConsole } from './chat-console';
-import { ChatEditor } from './chat-editor';
-import { ChatViewer } from './chat-viewer';
-import type { KeyCombination } from '@/utils/keys';
-import { useCookie } from '@/hooks/use-cookie';
-import { useKeydown } from '@/hooks/use-keydown';
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { ChatConsole } from './chat-console.js';
+import { ChatEditor } from './chat-editor.js';
+import { ChatViewer } from './chat-viewer.js';
+import type { KeyCombination } from '@/utils/keys.js';
+import { useCookie } from '@/hooks/use-cookie.js';
+import { useKeydown } from '@/hooks/use-keydown.js';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable.js';
 
-const CHAT_RESIZE_VIEWER_COOKIE_NAME = 'chat-resize-viewer';
-const CHAT_RESIZE_CODE_COOKIE_NAME = 'chat-resize-editor';
+const chatResizeViewerCookieName = 'chat-resize-viewer';
+const chatResizeCodeCookieName = 'chat-resize-editor';
 const toggleConsoleKeyCombination = {
   key: 'l',
   ctrlKey: true,
   requireAllModifiers: true,
 } satisfies KeyCombination;
 
-export const COLLAPSED_CONSOLE_SIZE = 4;
+export const collapsedConsoleSize = 4;
 
 export function ChatViewSplit() {
-  const [consoleSize, setConsoleSize] = useCookie(CHAT_RESIZE_CODE_COOKIE_NAME, [85, 15]);
-  const [codeSize, setCodeSize] = useCookie(CHAT_RESIZE_VIEWER_COOKIE_NAME, [60, 40]);
+  const [consoleSize, setConsoleSize] = useCookie(chatResizeCodeCookieName, [85, 15]);
+  const [codeSize, setCodeSize] = useCookie(chatResizeViewerCookieName, [60, 40]);
 
   const consolePanelReference = useRef<ImperativePanelHandle>(null);
 
@@ -42,7 +42,7 @@ export function ChatViewSplit() {
 
   return (
     <ResizablePanelGroup
-      autoSaveId={CHAT_RESIZE_VIEWER_COOKIE_NAME}
+      autoSaveId={chatResizeViewerCookieName}
       direction="horizontal"
       className="h-full"
       onLayout={setCodeSize}
@@ -52,7 +52,7 @@ export function ChatViewSplit() {
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel order={2} defaultSize={codeSize[1]} minSize={30} id="chat-editor-container">
-        <ResizablePanelGroup direction="vertical" autoSaveId={CHAT_RESIZE_CODE_COOKIE_NAME} onLayout={setConsoleSize}>
+        <ResizablePanelGroup direction="vertical" autoSaveId={chatResizeCodeCookieName} onLayout={setConsoleSize}>
           <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-editor" className="size-full pt-12">
             <ChatEditor />
           </ResizablePanel>
@@ -62,8 +62,8 @@ export function ChatViewSplit() {
             collapsible
             order={2}
             defaultSize={consoleSize[1]}
-            minSize={COLLAPSED_CONSOLE_SIZE}
-            collapsedSize={COLLAPSED_CONSOLE_SIZE}
+            minSize={collapsedConsoleSize}
+            collapsedSize={collapsedConsoleSize}
             id="chat-console"
             // 10 is the height of the console buttons plus padding.
             className="group/console-resizable min-h-10"

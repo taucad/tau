@@ -1,15 +1,15 @@
 import { ChevronUp, Filter, Settings, Trash } from 'lucide-react';
 import { useState, useCallback } from 'react';
-import { COLLAPSED_CONSOLE_SIZE } from './chat-view-split';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { KeyShortcut } from '@/components/ui/key-shortcut';
+import { collapsedConsoleSize } from './chat-view-split.js';
+import { Button } from '@/components/ui/button.js';
+import { Input } from '@/components/ui/input.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { KeyShortcut } from '@/components/ui/key-shortcut.js';
 import { cn } from '@/utils/ui.js';
-import { useConsole } from '@/hooks/use-console';
-import type { LogLevel, LogOrigin } from '@/types/console';
-import { logLevels } from '@/types/console';
-import { Badge } from '@/components/ui/badge';
+import { useConsole } from '@/hooks/use-console.js';
+import type { LogLevel, LogOrigin } from '@/types/console.js';
+import { logLevels } from '@/types/console.js';
+import { Badge } from '@/components/ui/badge.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,8 +17,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { useCookie } from '@/hooks/use-cookie';
+} from '@/components/ui/dropdown-menu.js';
+import { useCookie } from '@/hooks/use-cookie.js';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   readonly onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -28,20 +28,20 @@ type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
 };
 
 // Cookie names for persisting console settings
-const CONSOLE_LOG_LEVELS_COOKIE_NAME = 'console-log-levels';
-const CONSOLE_DISPLAY_CONFIG_COOKIE_NAME = 'console-display-config';
+const consoleLogLevelsCookieName = 'console-log-levels';
+const consoleDisplayConfigCookieName = 'console-display-config';
 
 // Default values for enabled log levels
-const DEFAULT_LOG_LEVELS: Record<LogLevel, boolean> = {
-  ERROR: true,
-  WARN: true,
-  INFO: true,
-  DEBUG: true,
-  TRACE: true,
+const defaultLogLevels: Record<LogLevel, boolean> = {
+  error: true,
+  warn: true,
+  info: true,
+  debug: true,
+  trace: true,
 };
 
 // Default values for display configuration
-const DEFAULT_DISPLAY_CONFIG = {
+const defaultDisplayConfig = {
   showTimestamp: true,
   showComponent: true,
   showVerbosity: true,
@@ -55,7 +55,8 @@ const getComponentColor = (component: string | undefined): string => {
   // Simple hash function
   let hash = 0;
   for (let index = 0; index < component.length; index++) {
-    const charPoint = component.codePointAt(index) || 0;
+    const charPoint = component.codePointAt(index) ?? 0;
+    // eslint-disable-next-line no-bitwise -- this is a hash function
     hash = charPoint + ((hash << 5) - hash);
   }
 
@@ -106,6 +107,7 @@ function VerbosityBadge({ level }: { readonly level: LogLevel }) {
         return 'bg-feature';
       }
 
+      // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check
       default: {
         return 'bg-[grey]';
       }
@@ -146,8 +148,8 @@ export function ChatConsole({
   const [filter, setFilter] = useState('');
 
   // Cookie-persisted state for log levels
-  const [enabledLevels, setEnabledLevels] = useCookie(CONSOLE_LOG_LEVELS_COOKIE_NAME, DEFAULT_LOG_LEVELS);
-  const [displayConfig, setDisplayConfig] = useCookie(CONSOLE_DISPLAY_CONFIG_COOKIE_NAME, DEFAULT_DISPLAY_CONFIG);
+  const [enabledLevels, setEnabledLevels] = useCookie(consoleLogLevelsCookieName, defaultLogLevels);
+  const [displayConfig, setDisplayConfig] = useCookie(consoleDisplayConfigCookieName, defaultDisplayConfig);
 
   // Handle filter changes
   const handleFilterChange = useCallback(
@@ -178,8 +180,8 @@ export function ChatConsole({
 
   // Toggle display configuration
   const toggleDisplayConfig = useCallback(
-    (key: keyof typeof DEFAULT_DISPLAY_CONFIG, value: boolean) => {
-      setDisplayConfig((previous: typeof DEFAULT_DISPLAY_CONFIG) => ({
+    (key: keyof typeof defaultDisplayConfig, value: boolean) => {
+      setDisplayConfig((previous: typeof defaultDisplayConfig) => ({
         ...previous,
         [key]: value,
       }));
@@ -226,13 +228,13 @@ export function ChatConsole({
               <span className="hidden font-mono text-xs @xs/console:block">Console</span>
               <span className="relative flex size-4 flex-col gap-2 ease-in-out">
                 <span
-                  className={`absolute inset-0 flex size-4 scale-0 flex-col gap-2 transition-transform duration-200 ease-in-out group-data-[panel-size=${COLLAPSED_CONSOLE_SIZE}.0]/console-resizable:scale-100`}
+                  className={`absolute inset-0 flex size-4 scale-0 flex-col gap-2 transition-transform duration-200 ease-in-out group-data-[panel-size=${collapsedConsoleSize}.0]/console-resizable:scale-100`}
                 >
                   <ChevronUp className="absolute -bottom-0.5 left-1/2 -translate-x-1/2" />
                   <ChevronUp className="absolute bottom-0.5 left-1/2 -translate-x-1/2" />
                 </span>
                 <span
-                  className={`absolute inset-0 flex size-4 scale-100 rotate-180 flex-col gap-2 transition-transform duration-200 ease-in-out group-data-[panel-size=${COLLAPSED_CONSOLE_SIZE}.0]/console-resizable:scale-0`}
+                  className={`absolute inset-0 flex size-4 scale-100 rotate-180 flex-col gap-2 transition-transform duration-200 ease-in-out group-data-[panel-size=${collapsedConsoleSize}.0]/console-resizable:scale-0`}
                 >
                   <ChevronUp className="absolute -bottom-0.5 left-1/2 -translate-x-1/2" />
                   <ChevronUp className="absolute bottom-0.5 left-1/2 -translate-x-1/2" />
@@ -320,7 +322,7 @@ export function ChatConsole({
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>Display Options</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {(Object.keys(DEFAULT_DISPLAY_CONFIG) as Array<keyof typeof DEFAULT_DISPLAY_CONFIG>).map((key) => (
+              {(Object.keys(defaultDisplayConfig) as Array<keyof typeof defaultDisplayConfig>).map((key) => (
                 <DropdownMenuCheckboxItem
                   key={key}
                   checked={displayConfig[key]}

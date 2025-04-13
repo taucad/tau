@@ -1,13 +1,13 @@
-import { SvgIcon } from '@/components/icons/svg-icon';
-import { InfoTooltip } from '@/components/info-tooltip';
-import { Badge } from '@/components/ui/badge';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
-import { TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter, Table } from '@/components/ui/table';
-import { useModels } from '@/hooks/use-models';
-import type { ModelProvider } from '@/types/cad';
-import type { MessageAnnotation } from '@/types/chat';
-import { formatCurrency } from '@/utils/currency';
-import { formatNumber } from '@/utils/number';
+import { SvgIcon } from '@/components/icons/svg-icon.js';
+import { InfoTooltip } from '@/components/info-tooltip.js';
+import { Badge } from '@/components/ui/badge.js';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card.js';
+import { TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter, Table } from '@/components/ui/table.js';
+import { useModels } from '@/hooks/use-models.js';
+import type { ModelProvider } from '@/types/cad.js';
+import type { MessageAnnotation } from '@/types/chat.js';
+import { formatCurrency } from '@/utils/currency.js';
+import { formatNumber } from '@/utils/number.js';
 
 export function ChatMessageAnnotationUsage({ annotation }: { readonly annotation: MessageAnnotation }) {
   const { data: models } = useModels();
@@ -103,8 +103,10 @@ export function ChatMessageAnnotationUsage({ annotation }: { readonly annotation
       );
     }
 
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check
     default: {
-      throw new Error(`Unknown annotation type: ${annotation.type}`);
+      const exhaustiveCheck: never = annotation.type;
+      throw new Error(`Unknown annotation type: ${String(exhaustiveCheck)}`);
     }
   }
 }

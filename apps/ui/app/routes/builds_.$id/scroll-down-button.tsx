@@ -1,17 +1,19 @@
 import { ArrowDown } from 'lucide-react';
 import { useRef, memo, useCallback } from 'react';
 import type { RefObject } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ui/button.js';
 import { cn } from '@/utils/ui.js';
-import { useScroll } from '@/hooks/use-scroll';
+import { useScroll } from '@/hooks/use-scroll.js';
 
 type ScrollDownButtonProperties = {
-  readonly containerRef: RefObject<HTMLDivElement | undefined>;
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- required by React
+  readonly containerRef: RefObject<HTMLDivElement | null>;
   readonly hasContent: boolean;
 };
 
 export const ScrollDownButton = memo(({ containerRef, hasContent }: ScrollDownButtonProperties) => {
-  const chatEndReference = useRef<HTMLDivElement | undefined>(null);
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- required by React
+  const chatEndReference = useRef<HTMLDivElement | null>(null);
   const { isScrolledTo } = useScroll(
     {
       reference: chatEndReference,

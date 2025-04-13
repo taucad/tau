@@ -1,11 +1,11 @@
 import { memo } from 'react';
 import { useChat } from '@ai-sdk/react';
-import { useChatConstants } from '@/contexts/use-chat';
-import { Button } from '@/components/ui/button';
-import { toast } from '@/components/ui/sonner';
+import { useChatConstants } from '@/contexts/use-chat.js';
+import { Button } from '@/components/ui/button.js';
+import { toast } from '@/components/ui/sonner.js';
 
 type ChatErrorProperties = {
-  readonly id?: string;
+  readonly id: string;
 };
 
 export const ChatError = memo(({ id }: ChatErrorProperties) => {

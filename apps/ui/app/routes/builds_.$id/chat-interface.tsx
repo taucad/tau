@@ -1,24 +1,24 @@
 import { MessageCircle, Settings2, LayoutGrid, Rows } from 'lucide-react';
 import { useCallback } from 'react';
-import { ChatHistory } from './chat-history';
-import { ChatViewTabs } from './chat-view-tabs';
-import { ChatViewSplit } from './chat-view-split';
-import { Button } from '@/components/ui/button';
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
+import { ChatHistory } from './chat-history.js';
+import { ChatViewTabs } from './chat-view-tabs.js';
+import { ChatViewSplit } from './chat-view-split.js';
+import { Button } from '@/components/ui/button.js';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable.js';
 import { cn } from '@/utils/ui.js';
-import { ChatParameters } from '@/routes/builds_.$id/chat-parameters';
-import { useCookie } from '@/hooks/use-cookie';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useKeydown } from '@/hooks/use-keydown';
-import { Drawer, DrawerContent } from '@/components/ui/drawer';
-import { useIsMobile } from '@/hooks/use-mobile';
-import { KeyShortcut } from '@/components/ui/key-shortcut';
-import type { KeyCombination } from '@/utils/keys';
+import { ChatParameters } from '@/routes/builds_.$id/chat-parameters.js';
+import { useCookie } from '@/hooks/use-cookie.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { useKeydown } from '@/hooks/use-keydown.js';
+import { Drawer, DrawerContent } from '@/components/ui/drawer.js';
+import { useIsMobile } from '@/hooks/use-mobile.js';
+import { KeyShortcut } from '@/components/ui/key-shortcut.js';
+import type { KeyCombination } from '@/utils/keys.js';
 
-export const CHAT_HISTORY_OPEN_COOKIE_NAME = 'chat-history-open';
-export const CHAT_PARAMETERS_OPEN_COOKIE_NAME = 'chat-parameters-open';
-export const CHAT_RESIZE_MAIN_COOKIE_NAME = 'chat-resize-main';
-export const CHAT_VIEW_MODE_COOKIE_NAME = 'chat-view-mode';
+export const chatHistoryOpenCookieName = 'chat-history-open';
+export const chatParametersOpenCookieName = 'chat-parameters-open';
+export const chatResizeMainCookieName = 'chat-resize-main';
+export const chatViewModeCookieName = 'chat-view-mode';
 type ViewMode = 'tabs' | 'split';
 
 const toggleChatKeyCombination = {
@@ -37,10 +37,10 @@ const toggleViewModeKeyCombination = {
 } satisfies KeyCombination;
 
 export function ChatInterface() {
-  const [isChatOpen, setIsChatOpen] = useCookie(CHAT_HISTORY_OPEN_COOKIE_NAME, true);
-  const [isParametersOpen, setIsParametersOpen] = useCookie(CHAT_PARAMETERS_OPEN_COOKIE_NAME, true);
-  const [chatResizeMain, setChatResizeMain] = useCookie(CHAT_RESIZE_MAIN_COOKIE_NAME, [25, 60, 15]);
-  const [viewMode, setViewMode] = useCookie<ViewMode>(CHAT_VIEW_MODE_COOKIE_NAME, 'tabs');
+  const [isChatOpen, setIsChatOpen] = useCookie(chatHistoryOpenCookieName, true);
+  const [isParametersOpen, setIsParametersOpen] = useCookie(chatParametersOpenCookieName, true);
+  const [chatResizeMain, setChatResizeMain] = useCookie(chatResizeMainCookieName, [25, 60, 15]);
+  const [viewMode, setViewMode] = useCookie<ViewMode>(chatViewModeCookieName, 'tabs');
 
   const toggleChatOpen = useCallback(() => {
     setIsChatOpen((previous) => !previous);
@@ -72,7 +72,7 @@ export function ChatInterface() {
     <ResizablePanelGroup
       direction="horizontal"
       className="group/chat-layout relative flex flex-1 bg-background"
-      autoSaveId={CHAT_RESIZE_MAIN_COOKIE_NAME}
+      autoSaveId={chatResizeMainCookieName}
       data-chat-open={isChatOpen}
       data-parameters-open={isParametersOpen}
       data-view-mode={viewMode}

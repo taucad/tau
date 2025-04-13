@@ -1,24 +1,24 @@
 import { useCallback, useRef } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
-import { ChatMessage } from './chat-message';
-import { ScrollDownButton } from './scroll-down-button';
-import { ChatError } from './chat-error';
-import type { ChatTextareaProperties } from '@/components/chat/chat-textarea';
-import { ChatTextarea } from '@/components/chat/chat-textarea';
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
-import { createMessage, useChatConstants } from '@/contexts/use-chat';
-import { MessageRole, MessageStatus } from '@/types/chat';
-import { useBuild } from '@/hooks/use-build2';
-import { useCookie } from '@/hooks/use-cookie';
-import { useModels } from '@/hooks/use-models';
+import { ChatMessage } from './chat-message.js';
+import { ScrollDownButton } from './scroll-down-button.js';
+import { ChatError } from './chat-error.js';
+import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
+import { ChatTextarea } from '@/components/chat/chat-textarea.js';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable.js';
+import { createMessage, useChatConstants } from '@/contexts/use-chat.js';
+import { MessageRole, MessageStatus } from '@/types/chat.js';
+import { useBuild } from '@/hooks/use-build2.js';
+import { useCookie } from '@/hooks/use-cookie.js';
+import { useModels } from '@/hooks/use-models.js';
 
-const CHAT_RESIZE_COOKIE_NAME_HISTORY = 'chat-history-resize';
+const chatResizeCookieNameHistory = 'chat-history-resize';
 
 export function ChatHistory() {
   const { setCode, build } = useBuild();
   const { append, messages, reload, setMessages } = useChat({ ...useChatConstants, id: build?.id });
-  const [chatResizeHistory, setChatResizeHistory] = useCookie(CHAT_RESIZE_COOKIE_NAME_HISTORY, [85, 15]);
+  const [chatResizeHistory, setChatResizeHistory] = useCookie(chatResizeCookieNameHistory, [85, 15]);
   const { data: models } = useModels();
   const chatContainerReference = useRef<HTMLDivElement>(null);
 
@@ -31,7 +31,7 @@ export function ChatHistory() {
       model,
       imageUrls,
     });
-    append(userMessage);
+    void append(userMessage);
   };
 
   const editMessage = useCallback(
@@ -47,7 +47,7 @@ export function ChatHistory() {
 
         return updatedMessages;
       });
-      reload();
+      void reload();
     },
     [setMessages, reload],
   );
@@ -69,11 +69,7 @@ export function ChatHistory() {
   };
 
   return (
-    <ResizablePanelGroup
-      direction="vertical"
-      autoSaveId={CHAT_RESIZE_COOKIE_NAME_HISTORY}
-      onLayout={setChatResizeHistory}
-    >
+    <ResizablePanelGroup direction="vertical" autoSaveId={chatResizeCookieNameHistory} onLayout={setChatResizeHistory}>
       <ResizablePanel
         order={1}
         id="chat-history-content"

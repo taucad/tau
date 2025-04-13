@@ -1,12 +1,12 @@
-import { CodeEditor } from '@/components/code-editor';
-import { useBuild } from '@/hooks/use-build2';
 import { LoaderPinwheel } from 'lucide-react';
 import { useCallback, useEffect } from 'react';
 import { useMonaco } from '@monaco-editor/react';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- TODO: find a better way to import Replicad types
 import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
-import { useConsole } from '@/hooks/use-console';
-import './chat-config';
+// eslint-disable-next-line import-x/no-unassigned-import -- setting up the Monaco editor web workers
+import './chat-config.js';
+import { useBuild } from '@/hooks/use-build2.js';
+import { CodeEditor } from '@/components/code-editor.js';
+import { useConsole } from '@/hooks/use-console.js';
 import { cn } from '@/utils/ui.js';
 
 export function ChatEditor({ className }: { readonly className?: string }) {
@@ -50,6 +50,7 @@ export function ChatEditor({ className }: { readonly className?: string }) {
       for (const error of errors) {
         const lineInfo = `${error.startLineNumber.toString().padStart(2)}:${error.startColumn.toString().padEnd(2)}`;
 
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- unable to use MarkerSeverity due to monaco-editor using CJS
         if (error.severity === 1) {
           log.warn(`${lineInfo}: ${error.message}`);
         } else {

@@ -1,10 +1,10 @@
 // Log level constants
 export const logLevels = {
-  error: 'ERROR',
-  warn: 'WARN',
-  info: 'INFO',
-  debug: 'DEBUG',
-  trace: 'TRACE',
+  error: 'error',
+  warn: 'warn',
+  info: 'info',
+  debug: 'debug',
+  trace: 'trace',
 } as const satisfies Record<string, string>;
 
 // Define log levels as string literals instead of enum

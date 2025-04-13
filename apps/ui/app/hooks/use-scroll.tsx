@@ -3,7 +3,8 @@ import { useEffect, useState, useCallback } from 'react';
 
 export type ScrollToProperties = {
   behavior?: ScrollBehavior;
-  reference: RefObject<HTMLDivElement | undefined>;
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- required by React
+  reference: RefObject<HTMLDivElement | null>;
 };
 
 /**

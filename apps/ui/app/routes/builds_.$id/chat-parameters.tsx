@@ -1,13 +1,13 @@
 import { RefreshCcw, RefreshCcwDot } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
-import { pascalCaseToWords } from '@/utils/string';
-import { Slider } from '@/components/ui/slider';
-import { Switch } from '@/components/ui/switch';
-import { Input } from '@/components/ui/input';
-import { useBuild } from '@/hooks/use-build2';
-import { Button } from '@/components/ui/button';
-import { useReplicad } from '@/components/geometry/kernel/replicad/replicad-context';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { pascalCaseToWords } from '@/utils/string.js';
+import { Slider } from '@/components/ui/slider.js';
+import { Switch } from '@/components/ui/switch.js';
+import { Input } from '@/components/ui/input.js';
+import { useBuild } from '@/hooks/use-build2.js';
+import { Button } from '@/components/ui/button.js';
+import { useReplicad } from '@/components/geometry/kernel/replicad/replicad-context.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import { cn } from '@/utils/ui.js';
 
 /**
@@ -100,7 +100,7 @@ export function ChatParameters() {
                           <RefreshCcwDot />
                         </Button>
                       </TooltipTrigger>
-                      <TooltipContent>Reset "{prettyKey}"</TooltipContent>
+                      <TooltipContent>Reset &quot;{prettyKey}&quot;</TooltipContent>
                     </Tooltip>
                   )}
                 </div>

@@ -1,13 +1,13 @@
 import { Eye, Code, Terminal } from 'lucide-react';
-import { ChatConsole } from './chat-console';
-import { ChatEditor } from './chat-editor';
-import { ChatViewer } from './chat-viewer';
-import { useCookie } from '@/hooks/use-cookie';
-import type { KeyCombination } from '@/utils/keys';
+import { ChatConsole } from './chat-console.js';
+import { ChatEditor } from './chat-editor.js';
+import { ChatViewer } from './chat-viewer.js';
+import { useCookie } from '@/hooks/use-cookie.js';
+import type { KeyCombination } from '@/utils/keys.js';
 import { cn } from '@/utils/ui.js';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.js';
 
-const CHAT_TAB_COOKIE_NAME = 'chat-tab';
+const chatTabCookieName = 'chat-tab';
 type ChatTabs = (typeof tabs)[number]['value'];
 
 const openPreviewKeyCombination = {
@@ -52,7 +52,7 @@ const tabs = [
 ] as const;
 
 export function ChatViewTabs() {
-  const [chatTab, setChatTab] = useCookie<ChatTabs>(CHAT_TAB_COOKIE_NAME, 'preview');
+  const [chatTab, setChatTab] = useCookie<ChatTabs>(chatTabCookieName, 'preview');
   return (
     <Tabs
       defaultValue={chatTab}

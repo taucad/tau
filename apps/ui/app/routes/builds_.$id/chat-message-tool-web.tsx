@@ -1,12 +1,12 @@
 import { ChevronRight } from 'lucide-react';
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
-import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
-import { Badge } from '@/components/ui/badge';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
-import { ComingSoon } from '@/components/ui/coming-soon';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Button } from '@/components/ui/button';
+import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet.js';
+import { Badge } from '@/components/ui/badge.js';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip.js';
+import { ComingSoon } from '@/components/ui/coming-soon.js';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible.js';
+import { Button } from '@/components/ui/button.js';
 
 // Const SOURCE_TOOLS = [
 //   { icon: Globe2, key: 'web' },
@@ -203,8 +203,9 @@ export function ChatMessageToolWeb({ part }: { readonly part: ToolInvocationUIPa
       return <p>Partial call</p>;
     }
 
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check
     default: {
-      throw new Error(`Unknown tool invocation: ${part.toolInvocation}`);
+      throw new Error(`Unknown tool invocation: ${String(part.toolInvocation)}`);
     }
   }
 }

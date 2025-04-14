@@ -1,35 +1,21 @@
+/* eslint-disable max-depth -- TODO: fix this */
 import type { ServerResponse } from 'node:http';
-import type { StreamEvent } from '@langchain/core/dist/tracers/event_stream';
 import type { IterableReadableStream } from '@langchain/core/dist/utils/stream';
 import { formatDataStreamPart, pipeDataStreamToResponse } from 'ai';
 import type { DataStreamWriter } from 'ai';
+import type { StreamEvent } from '@langchain/core/tracers/log_stream.js';
 import { generatePrefixedId, idPrefix } from '../../utils/id.js';
 import type { ChatUsageTokens } from '../chat-schema.js';
 import { processContent } from './process-content.js';
-
-/**
- * Events emitted during a chat session with LangGraph.
- */
-export const chatEvent = {
-  /** Emitted when a chat model starts generating content */
-  onChatModelStart: 'on_chat_model_start',
-  /** Emitted when a chat model finishes generating content */
-  onChatModelEnd: 'on_chat_model_end',
-  /** Emitted when a chat model streams a chunk of content */
-  onChatModelStream: 'on_chat_model_stream',
-  /** Emitted when a tool starts executing */
-  onToolStart: 'on_tool_start',
-  /** Emitted when a tool finishes executing */
-  onToolEnd: 'on_tool_end',
-  /** Emitted when a chain starts executing */
-  onChainStart: 'on_chain_start',
-  /** Emitted when a chain finishes executing */
-  onChainEnd: 'on_chain_end',
-  /** Emitted when a chain streams content */
-  onChainStream: 'on_chain_stream',
-} as const satisfies Record<string, string>;
-
-type ChatEvent = (typeof chatEvent)[keyof typeof chatEvent];
+import type {
+  ChatEvent,
+  TypedStreamEvent,
+  ChatModelStreamEvent,
+  ChatModelEndEvent,
+  ToolStartEvent,
+  ToolEndEvent,
+} from './langgraph-types.js';
+import { chatEvent, contentPartType } from './langgraph-types.js';
 
 /**
  * Enhanced DataStream with a convenient write method for streaming content.
@@ -189,23 +175,25 @@ export class LangGraphAdapter {
    * @param options - Options for the adapter.
    */
   public static toDataStreamResponse(
-    stream: IterableReadableStream<StreamEvent>,
+    untypedStream: IterableReadableStream<StreamEvent>,
     options: LangGraphAdapterOptions,
   ): void {
+    const stream = untypedStream as IterableReadableStream<TypedStreamEvent>;
     const { response, modelId, callbacks = {}, toolTypeMap = {}, parseToolResults } = options;
 
     response.setHeader('x-vercel-ai-data-stream', 'v1');
     pipeDataStreamToResponse(response, {
-      // eslint-disable-next-line complexity -- acceptable to keep the function contained.
       execute: async (rawDataStream) => {
         // Create enhanced data stream
         const dataStream = this.createDataStreamWriter(rawDataStream);
 
         const id = generatePrefixedId(idPrefix.message);
 
-        // Keep reasoning state internally
-        let thinkingBuffer = '';
-        let isReasoning = false;
+        // Keep reasoning state in a mutable object to avoid closure issues
+        const reasoningState = {
+          thinkingBuffer: '',
+          isReasoning: false,
+        };
 
         const totalUsageTokens = {
           inputTokens: 0,
@@ -219,218 +207,72 @@ export class LangGraphAdapter {
             callbacks.onEvent({ event: streamEvent.event as ChatEvent, data: streamEvent.data });
           }
 
+          // Since we're using TypedStreamEvent, we can directly check the event type
           switch (streamEvent.event) {
             case chatEvent.onChatModelStream: {
-              if (streamEvent.data.chunk.content) {
-                const streamedContent = streamEvent.data.chunk.content;
-
-                if (typeof streamedContent === 'string') {
-                  // Process string content to detect reasoning tags
-                  const processedContent = processContent(streamedContent, thinkingBuffer, isReasoning);
-                  const { content } = processedContent;
-                  const { type } = processedContent;
-
-                  // Update state after processing
-                  thinkingBuffer = processedContent.buffer;
-                  isReasoning = processedContent.isReasoning;
-
-                  if (content) {
-                    // Write to data stream
-                    dataStream.writePart(type, content);
-
-                    // Call callback if provided
-                    if (callbacks.onChatModelStream) {
-                      callbacks.onChatModelStream({ dataStream, content, type });
-                    }
-                  }
-                } else {
-                  // Handle streaming for "complex" content types, such as Anthropic
-                  if (streamedContent.length > 0) {
-                    for (const part of streamedContent) {
-                      const complexType = part.type;
-                      switch (complexType) {
-                        case 'text': {
-                          if (part.text === undefined) {
-                            throw new Error('Text not found in part: ' + JSON.stringify(part));
-                          } else {
-                            dataStream.writePart('text', part.text);
-                            if (callbacks.onChatModelStream) {
-                              callbacks.onChatModelStream({ dataStream, content: part.text, type: 'text' });
-                            }
-                          }
-
-                          break;
-                        }
-
-                        case 'thinking': {
-                          if (part.thinking !== undefined) {
-                            dataStream.writePart('reasoning', part.thinking);
-                            if (callbacks.onChatModelStream) {
-                              callbacks.onChatModelStream({ dataStream, content: part.thinking, type: 'reasoning' });
-                            }
-                          } else if (part.signature === undefined) {
-                            throw new Error('Thinking not found in part: ' + JSON.stringify(part));
-                          } else {
-                            dataStream.writePart('reasoning_signature', { signature: part.signature });
-                            if (callbacks.onChatModelStream) {
-                              callbacks.onChatModelStream({
-                                dataStream,
-                                content: [{ signature: part.signature }],
-                                type: 'reasoning_signature',
-                              });
-                            }
-                          }
-
-                          break;
-                        }
-
-                        case 'redacted_thinking': {
-                          if (part.data === undefined) {
-                            throw new Error('Redacted thinking not found in part: ' + JSON.stringify(part));
-                          } else {
-                            dataStream.writePart('redacted_reasoning', { data: part.data });
-                            if (callbacks.onChatModelStream) {
-                              callbacks.onChatModelStream({
-                                dataStream,
-                                content: [{ data: part.data }],
-                                type: 'redacted_reasoning',
-                              });
-                            }
-                          }
-
-                          break;
-                        }
-
-                        case 'input_json_delta':
-                        case 'tool_use': {
-                          // No-op
-                          break;
-                        }
-
-                        default: {
-                          throw new Error(`Unknown part type: ${complexType}`);
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-
+              this.handleChatModelStream({
+                streamEvent,
+                dataStream,
+                callbacks,
+                reasoningState,
+              });
               break;
             }
 
             case chatEvent.onChatModelStart: {
-              dataStream.writePart('start_step', {
+              this.handleChatModelStart({
                 messageId: id,
+                dataStream,
+                callbacks,
               });
-
-              if (callbacks.onChatModelStart) {
-                callbacks.onChatModelStart({ dataStream, messageId: id });
-              }
-
               break;
             }
 
             case chatEvent.onChatModelEnd: {
-              const usageTokens = {
-                inputTokens: (streamEvent.data.output.usage_metadata.input_tokens as number) || 0,
-                outputTokens: (streamEvent.data.output.usage_metadata.output_tokens as number) || 0,
-                cachedReadTokens:
-                  (streamEvent.data.output.usage_metadata.input_token_details?.cache_read as number) || 0,
-                cachedWriteTokens:
-                  (streamEvent.data.output.usage_metadata.input_token_details?.cache_creation as number) || 0,
-              } satisfies ChatUsageTokens;
-
-              // Update totals
-              totalUsageTokens.inputTokens += usageTokens.inputTokens;
-              totalUsageTokens.outputTokens += usageTokens.outputTokens;
-              totalUsageTokens.cachedReadTokens += usageTokens.cachedReadTokens;
-              totalUsageTokens.cachedWriteTokens += usageTokens.cachedWriteTokens;
-
-              dataStream.writePart('finish_step', {
-                finishReason: 'stop',
-                usage: { promptTokens: usageTokens.inputTokens, completionTokens: usageTokens.outputTokens },
-                isContinued: false,
+              this.handleChatModelEnd({
+                streamEvent,
+                dataStream,
+                callbacks,
+                modelId,
+                totalUsageTokens,
               });
-
-              if (callbacks.onChatModelEnd) {
-                callbacks.onChatModelEnd({ dataStream, modelId, usageTokens });
-              }
-
-              if (callbacks.onUsageUpdate) {
-                callbacks.onUsageUpdate({ modelId, usageTokens });
-              }
-
               break;
             }
 
             case chatEvent.onToolStart: {
-              const toolCallId = this.extractToolCallId(streamEvent);
-
-              // Get tool name from map or use raw name
-              const toolName = toolTypeMap[streamEvent.name] || streamEvent.name;
-
-              dataStream.writePart('tool_call', {
-                toolCallId,
-                toolName,
-                args: streamEvent.data.input,
+              this.handleToolStart({
+                streamEvent,
+                dataStream,
+                callbacks,
+                toolTypeMap,
               });
-
-              if (callbacks.onToolStart) {
-                callbacks.onToolStart({ dataStream, toolCallId, toolName, args: streamEvent.data.input });
-              }
-
               break;
             }
 
             case chatEvent.onToolEnd: {
-              // Get tool name from map or use raw name
-              const toolName = toolTypeMap[streamEvent.name] || streamEvent.name;
-
-              // Parse tool results using the configurable parser with tool name.
-              // If no parser is configured, use the content as is.
-              const toolParser = parseToolResults?.[toolName];
-              const results = toolParser
-                ? toolParser(streamEvent.data.output.content)
-                : streamEvent.data.output.content;
-
-              // A LangGraph UUID for the tool call.
-              // Can take the following format:
-              // - 'tools:900ad182-0310-5937-82e6-c927691bcd81'
-              // - 'research_expert:5cd6c905-9671-5bb3-8581-227ef80bbb48|tools:900ad182-0310-5937-82e6-c927691bcd81'
-              // The unique part that joins the tool call and result is the last part after the final colon, so we extract that.
-              const toolCallId = this.extractToolCallId(streamEvent);
-
-              const result = results ?? '';
-
-              dataStream.writePart('tool_result', {
-                toolCallId,
-                result,
+              this.handleToolEnd({
+                streamEvent,
+                dataStream,
+                callbacks,
+                toolTypeMap,
+                parseToolResults,
               });
-
-              if (callbacks.onToolEnd) {
-                callbacks.onToolEnd({ dataStream, toolCallId, toolName, result });
-              }
-
               break;
             }
 
             case chatEvent.onChainStart:
             case chatEvent.onChainStream:
             case chatEvent.onChainEnd: {
-              // These events are not supported by the AI SDK, so we just ignore them
+              // No-op: These events are not supported by the AI SDK
               break;
             }
 
+            // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check for all event types
             default: {
-              throw new Error(`Unknown event: ${streamEvent.event}`);
+              const unknownEvent: never = streamEvent;
+              throw new Error(`Unknown event: ${String(unknownEvent)}`);
             }
           }
-        }
-
-        // Call onMessageComplete for final annotations and cleanup
-        if (callbacks.onMessageComplete) {
-          callbacks.onMessageComplete({ dataStream, modelId, usageTokens: totalUsageTokens });
         }
 
         // Write finish message
@@ -448,14 +290,246 @@ export class LangGraphAdapter {
     });
   }
 
-  private static extractToolCallId(streamEvent: StreamEvent): string {
+  /**
+   * Handles the 'onChatModelStream' event from LangGraph.
+   */
+
+  // eslint-disable-next-line complexity -- acceptable to keep the function contained.
+  private static handleChatModelStream(parameters: {
+    streamEvent: ChatModelStreamEvent;
+    dataStream: EnhancedDataStreamWriter;
+    callbacks: LangGraphAdapterCallbacks;
+    reasoningState: { thinkingBuffer: string; isReasoning: boolean };
+  }): void {
+    const { streamEvent, dataStream, callbacks, reasoningState } = parameters;
+
+    if (streamEvent.data.chunk.content) {
+      const streamedContent = streamEvent.data.chunk.content;
+
+      if (typeof streamedContent === 'string') {
+        // Process string content to detect reasoning tags
+        const processedContent = processContent(
+          streamedContent,
+          reasoningState.thinkingBuffer,
+          reasoningState.isReasoning,
+        );
+        const { content } = processedContent;
+        const { type } = processedContent;
+
+        // Update state after processing
+        reasoningState.thinkingBuffer = processedContent.buffer;
+        reasoningState.isReasoning = processedContent.isReasoning;
+
+        // Empty content can sometimes be present, so we check for it and only write if it's present
+        // to avoid writing empty parts to the data stream.
+        if (content) {
+          // Write to data stream
+          dataStream.writePart(type, content);
+
+          // Call callback if provided
+          callbacks.onChatModelStream?.({ dataStream, content, type });
+        }
+      } else if (Array.isArray(streamedContent) && streamedContent.length > 0) {
+        // Handle streaming for "complex" content types, such as Anthropic
+        for (const part of streamedContent) {
+          const complexType = part.type;
+
+          switch (complexType) {
+            case contentPartType.text: {
+              const textPart = part;
+              if (textPart.text === undefined) {
+                throw new Error('Text not found in part: ' + JSON.stringify(part));
+              } else {
+                dataStream.writePart('text', textPart.text);
+                callbacks.onChatModelStream?.({ dataStream, content: textPart.text, type: 'text' });
+              }
+
+              break;
+            }
+
+            case contentPartType.thinking: {
+              if (part.thinking !== undefined) {
+                dataStream.writePart('reasoning', part.thinking);
+                callbacks.onChatModelStream?.({ dataStream, content: part.thinking, type: 'reasoning' });
+              } else if (part.signature === undefined) {
+                throw new Error('Thinking not found in part: ' + JSON.stringify(part));
+              } else {
+                dataStream.writePart('reasoning_signature', { signature: part.signature });
+                callbacks.onChatModelStream?.({
+                  dataStream,
+                  content: [{ signature: part.signature }],
+                  type: 'reasoning_signature',
+                });
+              }
+
+              break;
+            }
+
+            case contentPartType.redactedThinking: {
+              if (part.data === undefined) {
+                throw new Error('Redacted thinking not found in part: ' + JSON.stringify(part));
+              } else {
+                dataStream.writePart('redacted_reasoning', { data: part.data });
+                callbacks.onChatModelStream?.({
+                  dataStream,
+                  content: [{ data: part.data }],
+                  type: 'redacted_reasoning',
+                });
+              }
+
+              break;
+            }
+
+            case contentPartType.inputJsonDelta:
+            case contentPartType.toolUse: {
+              // No-op
+              break;
+            }
+
+            // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check for all part types
+            default: {
+              const unknownPart: never = part;
+              throw new Error(`Unknown part type: ${String(unknownPart)}`);
+            }
+          }
+        }
+      } else if (Array.isArray(streamedContent) && streamedContent.length === 0) {
+        // No-op, sometimes empty arrays are present
+      } else {
+        throw new Error('Unknown content type: ' + JSON.stringify(streamedContent));
+      }
+    }
+  }
+
+  /**
+   * Handles the 'onChatModelStart' event from LangGraph.
+   */
+  private static handleChatModelStart(parameters: {
+    messageId: string;
+    dataStream: EnhancedDataStreamWriter;
+    callbacks: LangGraphAdapterCallbacks;
+  }): void {
+    const { messageId, dataStream, callbacks } = parameters;
+
+    dataStream.writePart('start_step', {
+      messageId,
+    });
+
+    callbacks.onChatModelStart?.({ dataStream, messageId });
+  }
+
+  /**
+   * Handles the 'onChatModelEnd' event from LangGraph.
+   */
+  private static handleChatModelEnd(parameters: {
+    streamEvent: ChatModelEndEvent;
+    dataStream: EnhancedDataStreamWriter;
+    callbacks: LangGraphAdapterCallbacks;
+    modelId: string;
+    totalUsageTokens: ChatUsageTokens;
+  }): void {
+    const { streamEvent, dataStream, callbacks, modelId, totalUsageTokens } = parameters;
+
+    const usageTokens = {
+      inputTokens: streamEvent.data.output.usage_metadata.input_tokens ?? 0,
+      outputTokens: streamEvent.data.output.usage_metadata.output_tokens ?? 0,
+      cachedReadTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_read ?? 0,
+      cachedWriteTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_creation ?? 0,
+    } satisfies ChatUsageTokens;
+
+    // Update totals
+    totalUsageTokens.inputTokens += usageTokens.inputTokens;
+    totalUsageTokens.outputTokens += usageTokens.outputTokens;
+    totalUsageTokens.cachedReadTokens += usageTokens.cachedReadTokens;
+    totalUsageTokens.cachedWriteTokens += usageTokens.cachedWriteTokens;
+
+    dataStream.writePart('finish_step', {
+      finishReason: 'stop',
+      usage: { promptTokens: usageTokens.inputTokens, completionTokens: usageTokens.outputTokens },
+      isContinued: false,
+    });
+
+    callbacks.onChatModelEnd?.({ dataStream, modelId, usageTokens });
+    callbacks.onUsageUpdate?.({ modelId, usageTokens });
+  }
+
+  /**
+   * Handles the 'onToolStart' event from LangGraph.
+   */
+  private static handleToolStart(parameters: {
+    streamEvent: ToolStartEvent;
+    dataStream: EnhancedDataStreamWriter;
+    callbacks: LangGraphAdapterCallbacks;
+    toolTypeMap: Record<string, string>;
+  }): void {
+    const { streamEvent, dataStream, callbacks, toolTypeMap } = parameters;
+
+    const toolCallId = this.extractToolCallId(streamEvent);
+
+    // Get tool name from map or use raw name
+    const toolName = toolTypeMap[streamEvent.name] ?? streamEvent.name;
+    const args = streamEvent.data.input;
+
+    dataStream.writePart('tool_call', {
+      toolCallId,
+      toolName,
+      args,
+    });
+
+    callbacks.onToolStart?.({ dataStream, toolCallId, toolName, args });
+  }
+
+  /**
+   * Handles the 'onToolEnd' event from LangGraph.
+   */
+  private static handleToolEnd(parameters: {
+    streamEvent: ToolEndEvent;
+    dataStream: EnhancedDataStreamWriter;
+    callbacks: LangGraphAdapterCallbacks;
+    toolTypeMap: Record<string, string>;
+    parseToolResults?: Partial<Record<string, (content: string) => unknown[]>>;
+  }): void {
+    const { streamEvent, dataStream, callbacks, toolTypeMap, parseToolResults } = parameters;
+
+    // Get tool name from map or use raw name
+    const toolName = toolTypeMap[streamEvent.name] ?? streamEvent.name;
+    const { content } = streamEvent.data.output;
+
+    // Parse tool results using the configurable parser with tool name.
+    // If no parser is configured, use the content as is.
+    const toolParser = parseToolResults?.[toolName];
+    const results = toolParser ? toolParser(content) : content;
+
+    const toolCallId = this.extractToolCallId(streamEvent);
+
+    // Convert any result to a serializable value
+    // If it's null, undefined, or an empty object, convert to empty string
+    let result: unknown = results;
+    if (result === null || result === undefined) {
+      result = '';
+    } else if (typeof result === 'object' && Object.keys(result).length === 0) {
+      result = '';
+    }
+
+    dataStream.writePart('tool_result', {
+      toolCallId,
+      result,
+    });
+
+    callbacks.onToolEnd?.({ dataStream, toolCallId, toolName, result });
+  }
+
+  /**
+   * Extracts a tool call ID from a stream event.
+   */
+  private static extractToolCallId(streamEvent: ToolStartEvent | ToolEndEvent): string {
     // A LangGraph UUID for the tool call.
     // Can take the following format:
     // - 'tools:900ad182-0310-5937-82e6-c927691bcd81'
-    // - 'runnable_name:5cd6c905-9671-5bb3-8581-227ef80bbb48|tools:900ad182-0310-5937-82e6-c927691bcd81'
+    // - 'research_expert:5cd6c905-9671-5bb3-8581-227ef80bbb48|tools:900ad182-0310-5937-82e6-c927691bcd81'
     // The unique part that joins the tool call and result is the last part after the final colon, so we extract that.
     // We remove redundant dashes and use it as the seed for a new ID, preserving entropy.
-    const checkpointNs = streamEvent.metadata.langgraph_checkpoint_ns as string;
+    const checkpointNs = streamEvent.metadata.langgraph_checkpoint_ns;
     const rawId = checkpointNs.split(':').at(-1)?.replaceAll('-', '');
     if (rawId === undefined) {
       throw new Error('Tool call ID not found in stream event: ' + JSON.stringify(streamEvent));
@@ -466,8 +540,6 @@ export class LangGraphAdapter {
 
   /**
    * Creates an enhanced data stream writer.
-   * @param dataStream - The data stream to enhance.
-   * @returns An enhanced data stream writer.
    */
   private static createDataStreamWriter(dataStream: DataStreamWriter): EnhancedDataStreamWriter {
     return Object.assign(dataStream, {

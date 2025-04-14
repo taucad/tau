@@ -27,7 +27,7 @@ export class ChatController {
   ) {}
 
   @Post()
-  public async getData(@Body() body: CreateChatBody, @Res() response: Response) {
+  public async getData(@Body() body: CreateChatBody, @Res() response: Response): Promise<void> {
     const coreMessages = convertToCoreMessages(body.messages);
     const lastBodyMessage = body.messages.at(-1);
 

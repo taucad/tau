@@ -17,7 +17,7 @@ export class ChatService {
     private readonly toolService: ToolService,
   ) {}
 
-  public getNameGenerator(coreMessages: CoreMessage[]) {
+  public getNameGenerator(coreMessages: CoreMessage[]): ReturnType<typeof streamText> {
     return streamText({
       model: openai('gpt-4o-mini'),
       messages: coreMessages,
@@ -25,6 +25,7 @@ export class ChatService {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- This is a complex generic that can be left inferred.
   public createGraph(modelId: string, selectedToolChoice: ToolChoiceWithCategory) {
     const { tools } = this.toolService.getTools(selectedToolChoice);
 
@@ -81,7 +82,8 @@ export class ChatService {
         ]);
       },
       onError(error) {
-        Logger.error('Error in chat stream:', JSON.stringify(error, undefined, 2));
+        Logger.error('Error in chat stream follows:');
+        Logger.error(error);
         return 'An error occurred while processing the request';
       },
     };

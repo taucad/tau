@@ -34,7 +34,7 @@ export class ChatService {
     const model = support?.tools === false ? unboundModel : (unboundModel.bindTools?.(tools) ?? unboundModel);
 
     // Create specialized agents for tool usage
-    const toolAgent = createReactAgent({
+    const researchAgent = createReactAgent({
       llm: model,
       tools: toolNode,
       name: 'research_expert',
@@ -53,7 +53,7 @@ export class ChatService {
 
     // Create a supervisor to orchestrate these agents
     const supervisor = createSupervisor({
-      agents: [toolAgent, directResponseAgent],
+      agents: [researchAgent, directResponseAgent],
       llm: unboundModel,
       prompt:
         'You are a team supervisor managing a research expert and a conversational expert. ' +

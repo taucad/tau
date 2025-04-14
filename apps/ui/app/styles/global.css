@@ -183,6 +183,7 @@
   --animate-pulse-subtle: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-gradient: gradient 5s ease infinite;
   --animate-bounce-subtle: gentle-bounce 2s infinite;
+  --animate-shiny-text: shiny-text 3s infinite;
 
   @keyframes gradient {
     0%,
@@ -205,7 +206,7 @@
       opacity: 0.85;
     }
   }
-  
+
   @keyframes gentle-bounce {
     0%, 100% {
       transform: translateY(0);
@@ -223,6 +224,14 @@
     }
     100% {
       width: 100%;
+    }
+  }
+  @keyframes shiny-text {
+  0% {
+    background-position: calc(0% - var(--shiny-width)) 0;
+    }
+  100% {
+    background-position: calc(100% + var(--shiny-width)) 0;
     }
   }
 }
@@ -319,7 +328,6 @@
     overflow: hidden;
   }
 }
-
 
 /* START SCROLLBAR STYLES */
 @plugin 'tailwind-scrollbar' {

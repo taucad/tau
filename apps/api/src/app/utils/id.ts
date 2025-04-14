@@ -1,10 +1,14 @@
 import { Buffer } from 'node:buffer';
 import { generateId } from 'ai';
+import { encodeBytes } from './base62.js';
 
 const idLength = 21;
 
-function hexToBase64(hex: string, length: number): string {
-  return Buffer.from(hex, 'hex').toString('base64').slice(0, length);
+/**
+ * Converts a hex string to base62 encoding, preserving full entropy
+ */
+function hexToBase62(hex: string): string {
+  return encodeBytes(Buffer.from(hex, 'hex'));
 }
 
 export const idPrefix = {
@@ -33,13 +37,13 @@ export const idPrefix = {
 export type IdPrefix = (typeof idPrefix)[keyof typeof idPrefix];
 
 /**
- * Generates a base64 encoded prefixed ID
+ * Generates a base62 encoded prefixed ID
  * @param prefix - The prefix to use for the ID
  * @returns A string in the format "prefix_<id>"
  */
 export function generatePrefixedId(prefix: IdPrefix, seed?: string): string {
-  // If seed is provided, use it to generate a prefixed ID
-  const idPart = seed ? hexToBase64(seed, idLength) : generateId(idLength);
+  // If seed is provided, use it to generate a prefixed ID with base62 encoding
+  const idPart = seed ? hexToBase62(seed) : generateId(idLength);
   return `${prefix}_${idPart}`;
 }
 

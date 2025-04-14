@@ -7,6 +7,7 @@ import { ComingSoon } from '@/components/ui/coming-soon.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible.js';
 import { Button } from '@/components/ui/button.js';
+import { extractDomainFromUrl, createFaviconUrl } from '@/utils/url.js';
 
 // Const SOURCE_TOOLS = [
 //   { icon: Globe2, key: 'web' },
@@ -93,12 +94,8 @@ export function ChatMessageToolWeb({ part }: { readonly part: ToolInvocationUIPa
       </When> */}
           <div className="grid grid-cols-4 gap-2">
             {relevantSources.slice(0, 3).map((source) => {
-              const sourceUrl = new URL(source.link);
-              const sourceDomain = sourceUrl.hostname.replace('www.', '').split('.').slice(0, -1).join('.');
-              const sourceFaviconUrl = new URL(
-                'https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&size=128',
-              );
-              sourceFaviconUrl.searchParams.set('url', source.link);
+              const sourceDomain = extractDomainFromUrl(source.link);
+              const sourceFaviconUrl = createFaviconUrl(source.link);
 
               return (
                 <HoverCard key={source.title} openDelay={100} closeDelay={100}>
@@ -110,7 +107,7 @@ export function ChatMessageToolWeb({ part }: { readonly part: ToolInvocationUIPa
                       >
                         <p className="line-clamp-3 text-xs font-medium">{source.title}</p>
                         <div className="flex flex-row items-center gap-2">
-                          <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
+                          <img src={sourceFaviconUrl} alt={sourceDomain} className="size-4 rounded-full" />
                           <p className="truncate text-xs font-medium text-foreground/50">{sourceDomain}</p>
                         </div>
                       </div>
@@ -118,7 +115,7 @@ export function ChatMessageToolWeb({ part }: { readonly part: ToolInvocationUIPa
                   </HoverCardTrigger>
                   <HoverCardContent className="flex flex-col space-y-2">
                     <div className="flex flex-row items-center gap-2">
-                      <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
+                      <img src={sourceFaviconUrl} alt={sourceDomain} className="size-4 rounded-full" />
                       <p className="text-sm text-foreground/50">{sourceDomain}</p>
                     </div>
                     <p className="text-sm font-medium">{source.title}</p>
@@ -132,17 +129,13 @@ export function ChatMessageToolWeb({ part }: { readonly part: ToolInvocationUIPa
                 <SheetTrigger className="flex h-24 flex-col justify-between rounded-md bg-neutral/5 p-2 hover:bg-neutral/10">
                   <div className="flex flex-row flex-wrap items-center gap-px">
                     {relevantSources.slice(3, 9).map((source) => {
-                      const sourceUrl = new URL(source.link);
-                      const sourceDomain = sourceUrl.hostname.replace('www.', '').split('.').slice(0, -1).join('.');
-                      const sourceFaviconUrl = new URL(
-                        'https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&size=128',
-                      );
-                      sourceFaviconUrl.searchParams.set('url', source.link);
+                      const sourceDomain = extractDomainFromUrl(source.link);
+                      const sourceFaviconUrl = createFaviconUrl(source.link);
 
                       return (
                         <img
                           key={source.title}
-                          src={sourceFaviconUrl.href}
+                          src={sourceFaviconUrl}
                           alt={sourceDomain}
                           className="size-4 rounded-full sm:h-5 sm:w-5"
                         />
@@ -166,12 +159,9 @@ export function ChatMessageToolWeb({ part }: { readonly part: ToolInvocationUIPa
                   <SheetDescription asChild>
                     <div className="grid grid-cols-1 flex-wrap items-center gap-2 overflow-y-scroll p-4 pt-0">
                       {relevantSources.map((source) => {
-                        const sourceUrl = new URL(source.link);
-                        const sourceDomain = sourceUrl.hostname.replace('www.', '').split('.').slice(0, -1).join('.');
-                        const sourceFaviconUrl = new URL(
-                          'https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&size=128',
-                        );
-                        sourceFaviconUrl.searchParams.set('url', source.link);
+                        const sourceDomain = extractDomainFromUrl(source.link);
+                        const sourceFaviconUrl = createFaviconUrl(source.link);
+
                         return (
                           <a key={source.link} href={source.link} target="_blank" className="w-full" rel="noreferrer">
                             <div
@@ -180,7 +170,7 @@ export function ChatMessageToolWeb({ part }: { readonly part: ToolInvocationUIPa
                             >
                               <p className="text-sm font-medium text-foreground">{source.title}</p>
                               <div className="flex flex-row items-center gap-2">
-                                <img src={sourceFaviconUrl.href} alt={sourceDomain} className="size-4 rounded-full" />
+                                <img src={sourceFaviconUrl} alt={sourceDomain} className="size-4 rounded-full" />
                                 <p className="text-xs font-medium text-foreground/50">{sourceDomain}</p>
                               </div>
                               <p className="text-xs text-foreground">{source.snippet}</p>
@@ -200,12 +190,7 @@ export function ChatMessageToolWeb({ part }: { readonly part: ToolInvocationUIPa
     }
 
     case 'partial-call': {
-      return <p>Partial call</p>;
-    }
-
-    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check
-    default: {
-      throw new Error(`Unknown tool invocation: ${String(part.toolInvocation)}`);
+      throw new Error('Unexpected partial call for web tool');
     }
   }
 }

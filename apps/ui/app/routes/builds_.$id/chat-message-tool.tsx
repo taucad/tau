@@ -1,11 +1,16 @@
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
 import { ChatMessageToolWeb } from './chat-message-tool-web.js';
 import { ChatMessageToolTransfer, transferToStartingWith } from './chat-message-tool-transfer.js';
+import { ChatMessageToolWebBrowser } from './chat-message-tool-web-browser.js';
 
 export function ChatMessageTool({ part }: { readonly part: ToolInvocationUIPart }) {
   switch (part.toolInvocation.toolName) {
     case 'web': {
       return <ChatMessageToolWeb part={part} />;
+    }
+
+    case 'web-browser': {
+      return <ChatMessageToolWebBrowser part={part} />;
     }
 
     default: {

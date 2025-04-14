@@ -53,16 +53,6 @@ const config = [
           ignoreRestArgs: true
         }
       ],
-
-      // Require explicit return and argument types on exported functions' and classes' public class methods.
-      '@typescript-eslint/explicit-module-boundary-types': [
-        'error',
-        {
-          allowTypedFunctionExpressions: true,
-          allowHigherOrderFunctions: true,
-          allowDirectConstAssertionInArrowFunctions: true,
-        }
-      ],
     },
     // Configure Typescript support
     languageOptions: {
@@ -97,6 +87,16 @@ const config = [
             'Req',
           ],
         },
+      ],
+
+      // Require explicit return and argument types on exported functions' and classes' public class methods.
+      '@typescript-eslint/explicit-module-boundary-types': [
+        'error',
+        {
+          allowTypedFunctionExpressions: true,
+          allowHigherOrderFunctions: true,
+          allowDirectConstAssertionInArrowFunctions: true,
+        }
       ],
     },
   },

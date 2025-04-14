@@ -1,9 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SearxngSearch } from '@langchain/community/tools/searxng_search';
-import type { Tool } from '@langchain/core/tools.js';
+import type { DynamicStructuredTool, Tool } from '@langchain/core/tools.js';
+import { OpenAI, OpenAIEmbeddings } from '@langchain/openai';
+import { createWebBrowserTool } from './tools/tool-web-browser.js';
 
 export const toolCategory = {
   web: 'web',
+  webBrowser: 'web_browser',
 } as const satisfies Record<string, string>;
 
 export const toolChoice = {
@@ -29,11 +32,13 @@ type WebResult = {
 @Injectable()
 export class ToolService {
   public getTools(selectedToolChoice: ToolChoiceWithCategory): {
-    tools: Tool[];
+    tools: Array<Tool | DynamicStructuredTool>;
     resolvedToolChoice: string;
   } {
+    const model = new OpenAI({ temperature: 0 });
+    const embeddings = new OpenAIEmbeddings();
     // Define the tools for the agent to use
-    const toolCategoryToTool: Record<ToolCategory, Tool> = {
+    const toolCategoryToTool: Record<ToolCategory, Tool | DynamicStructuredTool> = {
       [toolCategory.web]: new SearxngSearch({
         params: {
           format: 'json',
@@ -43,10 +48,20 @@ export class ToolService {
         apiBase: 'http://localhost:42114',
         headers: {},
       }),
+      [toolCategory.webBrowser]: createWebBrowserTool({
+        model,
+        embeddings,
+        chunkSize: 2000,
+        chunkOverlap: 200,
+        maxChunks: 4,
+        maxResults: 4,
+        forceSummary: false,
+      }),
     };
 
     const toolNameFromToolCategory: Record<ToolCategory, string> = {
       [toolCategory.web]: toolCategoryToTool[toolCategory.web].name,
+      [toolCategory.webBrowser]: toolCategoryToTool[toolCategory.webBrowser].name,
     };
 
     const toolNameFromToolChoice = {

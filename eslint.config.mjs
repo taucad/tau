@@ -12,7 +12,7 @@ const config = [
       // Require a description for each ESLint rule comment. This informs co-authors about the rule and why it is being applied.
       '@eslint-community/eslint-comments/require-description': ['error', { ignore: [] }],
 
-      // Enforce that the `type` keyword is used when importing types, e.g. `import { type Foo } from './foo'`.
+      // Enforce that the `type` keyword is used when importing types, e.g. `import type { Foo } from './foo'`.
       // This ensures the compiler receives a hint to discard type values when they are present in import statements,
       // alongside explicit, uniform import styles.
       '@typescript-eslint/consistent-type-imports': [

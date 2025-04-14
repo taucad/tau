@@ -4,7 +4,6 @@ import type { IterableReadableStream } from '@langchain/core/dist/utils/stream';
 import { formatDataStreamPart, pipeDataStreamToResponse } from 'ai';
 import type { DataStreamWriter } from 'ai';
 import type { StreamEvent } from '@langchain/core/tracers/log_stream.js';
-import { Logger } from '@nestjs/common';
 import { generatePrefixedId, idPrefix } from '../../utils/id.js';
 import type { ChatUsageTokens } from '../chat-schema.js';
 import { processContent } from './process-content.js';

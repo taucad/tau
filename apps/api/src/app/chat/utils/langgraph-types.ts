@@ -1,85 +1,45 @@
 /**
- * Missing types for LangGraph, enhanced with a discriminated union of all stream events.
+ * Type definitions for LangGraph events and content parts
  */
-import type { StreamEvent } from '@langchain/core/dist/tracers/event_stream';
+import type { StreamEvent, StreamEventData } from '@langchain/core/dist/tracers/event_stream';
+
+// ============================================================================
+// Content Part Types
+// ============================================================================
 
 /**
- * Events emitted during a chat session with LangGraph.
+ * All possible content part types
  */
-export const chatEvent = {
-  /** Emitted when a chat model starts generating content */
-  onChatModelStart: 'on_chat_model_start',
-  /** Emitted when a chat model finishes generating content */
-  onChatModelEnd: 'on_chat_model_end',
-  /** Emitted when a chat model streams a chunk of content */
-  onChatModelStream: 'on_chat_model_stream',
-  /** Emitted when a tool starts executing */
-  onToolStart: 'on_tool_start',
-  /** Emitted when a tool finishes executing */
-  onToolEnd: 'on_tool_end',
-  /** Emitted when a chain starts executing */
-  onChainStart: 'on_chain_start',
-  /** Emitted when a chain finishes executing */
-  onChainEnd: 'on_chain_end',
-  /** Emitted when a chain streams content */
-  onChainStream: 'on_chain_stream',
-} as const satisfies Record<string, string>;
-
-export type ChatEvent = (typeof chatEvent)[keyof typeof chatEvent];
-
-export const contentPartType = {
-  text: 'text',
-  thinking: 'thinking',
-  redactedThinking: 'redacted_thinking',
-  toolUse: 'tool_use',
-  inputJsonDelta: 'input_json_delta',
-} as const satisfies Record<string, string>;
-
-export type ContentPartType = (typeof contentPartType)[keyof typeof contentPartType];
+export type ContentPartType = 'text' | 'thinking' | 'redacted_thinking' | 'tool_use' | 'input_json_delta';
 
 /**
- * Interface for the shape of a content part with data
+ * Base interface for all content parts
  */
-export type RedactedThinkingPart = {
-  type: 'redacted_thinking';
-  data: string;
-};
+type BaseContentPart<Type extends ContentPartType, Data extends Record<string, unknown>> = {
+  type: Type;
+} & Data;
 
 /**
- * Interface for the shape of a content part with text
+ * Content part interfaces
  */
-export type TextPart = {
-  type: 'text';
-  text: string;
-};
+export type TextPart = BaseContentPart<'text', { text: string }>;
+export type ThinkingPart = BaseContentPart<'thinking', { thinking: string; signature: string }>;
+export type RedactedThinkingPart = BaseContentPart<'redacted_thinking', { data: string }>;
+export type ToolUsePart = BaseContentPart<'tool_use', { data: string }>;
+export type InputJsonDeltaPart = BaseContentPart<'input_json_delta', { data: string }>;
 
 /**
- * Interface for the shape of a content part with thinking
- */
-export type ThinkingPart = {
-  type: 'thinking';
-  thinking?: string;
-  signature?: string;
-};
-
-/**
- * Type for tool use part
- */
-export type ToolUsePart = {
-  type: 'tool_use';
-};
-
-/**
- * Type for input json delta part
- */
-export type InputJsonDeltaPart = {
-  type: 'input_json_delta';
-};
-
-/**
- * Union type for all content parts
+ * Union of all possible content parts
  */
 export type ContentPart = TextPart | ThinkingPart | RedactedThinkingPart | ToolUsePart | InputJsonDeltaPart;
+
+// ============================================================================
+// Event Types
+// ============================================================================
+
+type LangchainRunnable = 'llm' | 'chat_model' | 'prompt' | 'tool' | 'chain' | 'parser';
+type LangchainEvent = 'start' | 'stream' | 'end';
+export type LangGraphEventName = `on_${LangchainRunnable}_${LangchainEvent}`;
 
 /**
  * Base metadata type that all events share
@@ -90,147 +50,74 @@ export type LangGraphMetadata = {
 };
 
 /**
- * Type for ChatModelStream event data
+ * Base type for all LangGraph events
  */
-export type ChatModelStreamData = {
-  chunk: {
-    content: string | ContentPart[];
-  };
-};
+type BaseLangGraphEvent<EventType extends LangGraphEventName, DataType extends StreamEventData> = {
+  event: EventType;
+  data: DataType;
+  metadata: LangGraphMetadata;
+} & Omit<StreamEvent, 'event' | 'data' | 'metadata'>;
 
 /**
- * Type for ChatModelStart event data
+ * Event type definitions
  */
-export type ChatModelStartData = Record<string, unknown>;
-
-/**
- * Type for ChatModelEnd event data
- */
-export type ChatModelEndData = {
-  output: {
-    usage_metadata: {
-      input_tokens: number;
-      output_tokens: number;
-      input_token_details?: {
-        cache_read?: number;
-        cache_creation?: number;
+export type ChatModelStreamEvent = BaseLangGraphEvent<
+  'on_chat_model_stream',
+  {
+    chunk: {
+      content: string | ContentPart[];
+    };
+  }
+>;
+export type ChatModelStartEvent = BaseLangGraphEvent<'on_chat_model_start', StreamEventData>;
+export type ChatModelEndEvent = BaseLangGraphEvent<
+  'on_chat_model_end',
+  {
+    output: {
+      usage_metadata: {
+        input_tokens: number;
+        output_tokens: number;
+        input_token_details?: {
+          cache_read?: number;
+          cache_creation?: number;
+        };
       };
     };
-  };
+  }
+>;
+export type ToolStartEvent = BaseLangGraphEvent<
+  'on_tool_start',
+  {
+    input: Record<string, unknown>;
+  }
+>;
+export type ToolEndEvent = BaseLangGraphEvent<
+  'on_tool_end',
+  {
+    output: {
+      content: string;
+    };
+  }
+>;
+
+/**
+ * Maps event names to their corresponding data types.
+ *
+ * Only known event data types are included.
+ */
+type EventTypeMapping = {
+  on_chat_model_stream: ChatModelStreamEvent;
+  on_chat_model_start: ChatModelStartEvent;
+  on_chat_model_end: ChatModelEndEvent;
+  on_tool_start: ToolStartEvent;
+  on_tool_end: ToolEndEvent;
 };
 
-/**
- * Type for ToolStart event data
- */
-export type ToolStartData = {
-  input: Record<string, unknown>;
-};
+type EventTypeMap<T extends LangGraphEventName> = T extends keyof EventTypeMapping
+  ? EventTypeMapping[T]
+  : BaseLangGraphEvent<T, StreamEventData>;
 
 /**
- * Type for ToolEnd event data
+ * Union of all possible stream events, ensuring coverage of all LangGraphEventName combinations
  */
-export type ToolEndData = {
-  output: {
-    content: string;
-  };
-};
-
-/**
- * Type for ChainStart event data
- */
-export type ChainStartData = Record<string, unknown>;
-
-/**
- * Type for ChainEnd event data
- */
-export type ChainEndData = Record<string, unknown>;
-
-/**
- * Type for ChainStream event data
- */
-export type ChainStreamData = Record<string, unknown>;
-
-/**
- * Discriminated union of all stream events
- */
-export type TypedStreamEvent =
-  | ChatModelStreamEvent
-  | ChatModelStartEvent
-  | ChatModelEndEvent
-  | ToolStartEvent
-  | ToolEndEvent
-  | ChainStartEvent
-  | ChainEndEvent
-  | ChainStreamEvent;
-
-/**
- * ChatModelStream event
- */
-export type ChatModelStreamEvent = {
-  event: typeof chatEvent.onChatModelStream;
-  data: ChatModelStreamData;
-  metadata: LangGraphMetadata;
-} & Omit<StreamEvent, 'event' | 'data' | 'metadata'>;
-
-/**
- * ChatModelStart event
- */
-export type ChatModelStartEvent = {
-  event: typeof chatEvent.onChatModelStart;
-  data: ChatModelStartData;
-  metadata: LangGraphMetadata;
-} & Omit<StreamEvent, 'event' | 'data' | 'metadata'>;
-
-/**
- * ChatModelEnd event
- */
-export type ChatModelEndEvent = {
-  event: typeof chatEvent.onChatModelEnd;
-  data: ChatModelEndData;
-  metadata: LangGraphMetadata;
-} & Omit<StreamEvent, 'event' | 'data' | 'metadata'>;
-
-/**
- * ToolStart event
- */
-export type ToolStartEvent = {
-  event: typeof chatEvent.onToolStart;
-  data: ToolStartData;
-  metadata: LangGraphMetadata;
-} & Omit<StreamEvent, 'event' | 'data' | 'metadata'>;
-
-/**
- * ToolEnd event
- */
-export type ToolEndEvent = {
-  event: typeof chatEvent.onToolEnd;
-  data: ToolEndData;
-  metadata: LangGraphMetadata;
-} & Omit<StreamEvent, 'event' | 'data' | 'metadata'>;
-
-/**
- * ChainStart event
- */
-export type ChainStartEvent = {
-  event: typeof chatEvent.onChainStart;
-  data: ChainStartData;
-  metadata: LangGraphMetadata;
-} & Omit<StreamEvent, 'event' | 'data' | 'metadata'>;
-
-/**
- * ChainEnd event
- */
-export type ChainEndEvent = {
-  event: typeof chatEvent.onChainEnd;
-  data: ChainEndData;
-  metadata: LangGraphMetadata;
-} & Omit<StreamEvent, 'event' | 'data' | 'metadata'>;
-
-/**
- * ChainStream event
- */
-export type ChainStreamEvent = {
-  event: typeof chatEvent.onChainStream;
-  data: ChainStreamData;
-  metadata: LangGraphMetadata;
-} & Omit<StreamEvent, 'event' | 'data' | 'metadata'>;
+export type TypedStreamEvent = EventTypeMap<LangGraphEventName>;

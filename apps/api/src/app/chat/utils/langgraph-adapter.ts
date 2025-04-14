@@ -4,18 +4,18 @@ import type { IterableReadableStream } from '@langchain/core/dist/utils/stream';
 import { formatDataStreamPart, pipeDataStreamToResponse } from 'ai';
 import type { DataStreamWriter } from 'ai';
 import type { StreamEvent } from '@langchain/core/tracers/log_stream.js';
+import { Logger } from '@nestjs/common';
 import { generatePrefixedId, idPrefix } from '../../utils/id.js';
 import type { ChatUsageTokens } from '../chat-schema.js';
 import { processContent } from './process-content.js';
 import type {
-  ChatEvent,
+  LangGraphEventName,
   TypedStreamEvent,
   ChatModelStreamEvent,
   ChatModelEndEvent,
   ToolStartEvent,
   ToolEndEvent,
 } from './langgraph-types.js';
-import { chatEvent, contentPartType } from './langgraph-types.js';
 
 /**
  * Enhanced DataStream with a convenient write method for streaming content.
@@ -132,7 +132,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.event - The event that occurred.
    * @param parameters.data - The data associated with the event.
    */
-  onEvent?: (parameters: { event: ChatEvent; data: unknown }) => void;
+  onEvent?: (parameters: { event: LangGraphEventName; data: unknown }) => void;
 };
 
 /**
@@ -183,6 +183,7 @@ export class LangGraphAdapter {
 
     response.setHeader('x-vercel-ai-data-stream', 'v1');
     pipeDataStreamToResponse(response, {
+      // eslint-disable-next-line complexity -- acceptable to keep the function contained.
       execute: async (rawDataStream) => {
         // Create enhanced data stream
         const dataStream = this.createDataStreamWriter(rawDataStream);
@@ -204,12 +205,12 @@ export class LangGraphAdapter {
 
         for await (const streamEvent of stream) {
           if (callbacks.onEvent) {
-            callbacks.onEvent({ event: streamEvent.event as ChatEvent, data: streamEvent.data });
+            callbacks.onEvent({ event: streamEvent.event, data: streamEvent.data });
           }
 
           // Since we're using TypedStreamEvent, we can directly check the event type
           switch (streamEvent.event) {
-            case chatEvent.onChatModelStream: {
+            case 'on_chat_model_stream': {
               this.handleChatModelStream({
                 streamEvent,
                 dataStream,
@@ -219,7 +220,7 @@ export class LangGraphAdapter {
               break;
             }
 
-            case chatEvent.onChatModelStart: {
+            case 'on_chat_model_start': {
               this.handleChatModelStart({
                 messageId: id,
                 dataStream,
@@ -228,7 +229,7 @@ export class LangGraphAdapter {
               break;
             }
 
-            case chatEvent.onChatModelEnd: {
+            case 'on_chat_model_end': {
               this.handleChatModelEnd({
                 streamEvent,
                 dataStream,
@@ -239,7 +240,7 @@ export class LangGraphAdapter {
               break;
             }
 
-            case chatEvent.onToolStart: {
+            case 'on_tool_start': {
               this.handleToolStart({
                 streamEvent,
                 dataStream,
@@ -249,7 +250,7 @@ export class LangGraphAdapter {
               break;
             }
 
-            case chatEvent.onToolEnd: {
+            case 'on_tool_end': {
               this.handleToolEnd({
                 streamEvent,
                 dataStream,
@@ -260,17 +261,46 @@ export class LangGraphAdapter {
               break;
             }
 
-            case chatEvent.onChainStart:
-            case chatEvent.onChainStream:
-            case chatEvent.onChainEnd: {
+            case 'on_tool_stream': {
+              // TODO: Implement tool streaming
+              break;
+            }
+
+            case 'on_chain_start':
+            case 'on_chain_stream':
+            case 'on_chain_end': {
               // No-op: These events are not supported by the AI SDK
+              break;
+            }
+
+            case 'on_llm_start':
+            case 'on_llm_stream':
+            case 'on_llm_end': {
+              // No-op: These events are not supported by the AI SDK
+              Logger.warn(`${streamEvent.event} event not supported`, { streamEvent: JSON.stringify(streamEvent) });
+              break;
+            }
+
+            case 'on_prompt_start':
+            case 'on_prompt_stream':
+            case 'on_prompt_end': {
+              // No-op: These events are not supported by the AI SDK
+              Logger.warn(`${streamEvent.event} event not supported`, { streamEvent: JSON.stringify(streamEvent) });
+              break;
+            }
+
+            case 'on_parser_start':
+            case 'on_parser_stream':
+            case 'on_parser_end': {
+              // No-op: These events are not supported by the AI SDK
+              Logger.warn(`${streamEvent.event} event not supported`, { streamEvent: JSON.stringify(streamEvent) });
               break;
             }
 
             // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check for all event types
             default: {
               const unknownEvent: never = streamEvent;
-              throw new Error(`Unknown event: ${String(unknownEvent)}`);
+              throw new Error(`Unknown event: ${JSON.stringify(unknownEvent)}`);
             }
           }
         }
@@ -335,10 +365,13 @@ export class LangGraphAdapter {
           const complexType = part.type;
 
           switch (complexType) {
-            case contentPartType.text: {
+            case 'text': {
               const textPart = part;
               if (textPart.text === undefined) {
                 throw new Error('Text not found in part: ' + JSON.stringify(part));
+              } else if (textPart.text === '') {
+                // No-op: Sometimes empty strings are present
+                // We don't need to write them to the data stream.
               } else {
                 dataStream.writePart('text', textPart.text);
                 callbacks.onChatModelStream?.({ dataStream, content: textPart.text, type: 'text' });
@@ -347,8 +380,11 @@ export class LangGraphAdapter {
               break;
             }
 
-            case contentPartType.thinking: {
-              if (part.thinking !== undefined) {
+            case 'thinking': {
+              if (part.thinking === '') {
+                // No-op: Sometimes empty strings are present
+                // We don't need to write them to the data stream.
+              } else if (part.thinking !== undefined) {
                 dataStream.writePart('reasoning', part.thinking);
                 callbacks.onChatModelStream?.({ dataStream, content: part.thinking, type: 'reasoning' });
               } else if (part.signature === undefined) {
@@ -365,7 +401,7 @@ export class LangGraphAdapter {
               break;
             }
 
-            case contentPartType.redactedThinking: {
+            case 'redacted_thinking': {
               if (part.data === undefined) {
                 throw new Error('Redacted thinking not found in part: ' + JSON.stringify(part));
               } else {
@@ -380,8 +416,8 @@ export class LangGraphAdapter {
               break;
             }
 
-            case contentPartType.inputJsonDelta:
-            case contentPartType.toolUse: {
+            case 'input_json_delta':
+            case 'tool_use': {
               // No-op
               break;
             }

@@ -88,7 +88,9 @@ export type ChatModelEndEvent = BaseLangGraphEvent<
 export type ToolStartEvent = BaseLangGraphEvent<
   'on_tool_start',
   {
-    input: Record<string, unknown>;
+    input: {
+      input: unknown;
+    };
   }
 >;
 export type ToolEndEvent = BaseLangGraphEvent<

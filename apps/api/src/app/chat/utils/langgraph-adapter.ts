@@ -277,7 +277,6 @@ export class LangGraphAdapter {
             case 'on_llm_stream':
             case 'on_llm_end': {
               // No-op: These events are not supported by the AI SDK
-              Logger.warn(`${streamEvent.event} event not supported`, { streamEvent: JSON.stringify(streamEvent) });
               break;
             }
 
@@ -285,7 +284,6 @@ export class LangGraphAdapter {
             case 'on_prompt_stream':
             case 'on_prompt_end': {
               // No-op: These events are not supported by the AI SDK
-              Logger.warn(`${streamEvent.event} event not supported`, { streamEvent: JSON.stringify(streamEvent) });
               break;
             }
 
@@ -293,7 +291,6 @@ export class LangGraphAdapter {
             case 'on_parser_stream':
             case 'on_parser_end': {
               // No-op: These events are not supported by the AI SDK
-              Logger.warn(`${streamEvent.event} event not supported`, { streamEvent: JSON.stringify(streamEvent) });
               break;
             }
 
@@ -304,6 +301,8 @@ export class LangGraphAdapter {
             }
           }
         }
+
+        callbacks.onMessageComplete?.({ dataStream, modelId, usageTokens: totalUsageTokens });
 
         // Write finish message
         dataStream.writePart('finish_message', {
@@ -504,7 +503,19 @@ export class LangGraphAdapter {
 
     // Get tool name from map or use raw name
     const toolName = toolTypeMap[streamEvent.name] ?? streamEvent.name;
-    const args = streamEvent.data.input;
+    const { input } = streamEvent.data.input;
+
+    let args: unknown;
+    try {
+      // Langchain always outputs the `input` as an object containing a string under the `input` key.
+      // Attempt to parse the args as JSON if they're a string.
+      // This ensures the AI SDK client can always access the input as a JSON object.
+      args = JSON.parse(input as string);
+    } catch {
+      // The args were a non-complex JSON value.
+      // AI SDK requires the args to be a JSON object, so we add a simple wrapper.
+      args = { input };
+    }
 
     dataStream.writePart('tool_call', {
       toolCallId,

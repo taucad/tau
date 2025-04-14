@@ -37,7 +37,7 @@ export class ToolService {
       [toolCategory.web]: new SearxngSearch({
         params: {
           format: 'json',
-          engines: 'google,bing,duckduckgo,wikipedia,youtube',
+          engines: 'google,bing,duckduckgo,wikipedia',
           numResults: 10,
         },
         apiBase: 'http://localhost:42114',
@@ -62,13 +62,16 @@ export class ToolService {
 
   public getToolParsers(): Record<string, (content: string) => unknown[]> {
     return {
-      [toolCategory.web]: this.parseWebResults,
+      [toolCategory.web]: this.parseSearxngResults,
     };
   }
 
-  private parseWebResults(content: string): WebResult[] {
+  private parseSearxngResults(content: string): WebResult[] {
     try {
-      const results = JSON.parse(`[${content}]`) as WebResult;
+      // Searxng returns a strange array of JSON results looking like:
+      // `{"json": "..."},{"json": "..."}`
+      // So we need to parse it as an array of JSON objects.
+      const results = JSON.parse(`[${content}]`) as WebResult[];
       if (!Array.isArray(results)) {
         Logger.warn('Expected web results to be an array');
         return [];

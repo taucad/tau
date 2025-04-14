@@ -46,7 +46,23 @@ const config = [
       '@typescript-eslint/explicit-member-accessibility': 'error',
 
       // Enforce that `any` is not used.
-      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-explicit-any': [
+        'error',
+        {
+          fixToUnknown: true,
+          ignoreRestArgs: true
+        }
+      ],
+
+      // Require explicit return and argument types on exported functions' and classes' public class methods.
+      '@typescript-eslint/explicit-module-boundary-types': [
+        'error',
+        {
+          allowTypedFunctionExpressions: true,
+          allowHigherOrderFunctions: true,
+          allowDirectConstAssertionInArrowFunctions: true,
+        }
+      ],
     },
     // Configure Typescript support
     languageOptions: {

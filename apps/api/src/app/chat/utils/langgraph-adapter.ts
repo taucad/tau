@@ -1,7 +1,6 @@
 /* eslint-disable max-depth -- TODO: fix this */
-import type { ServerResponse } from 'node:http';
 import type { IterableReadableStream } from '@langchain/core/dist/utils/stream';
-import { formatDataStreamPart, pipeDataStreamToResponse } from 'ai';
+import { formatDataStreamPart, createDataStream } from 'ai';
 import type { DataStreamWriter } from 'ai';
 import type { StreamEvent } from '@langchain/core/tracers/log_stream.js';
 import { generatePrefixedId, idPrefix } from '../../utils/id.js';
@@ -138,10 +137,6 @@ export type LangGraphAdapterCallbacks = {
  * Options for the LangGraphAdapter.
  */
 export type LangGraphAdapterOptions = {
-  /**
-   * The server response object to write to.
-   */
-  response: ServerResponse;
   /** The ID of the model being used. */
   modelId: string;
   /**
@@ -169,19 +164,16 @@ export type LangGraphAdapterOptions = {
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- acceptable to keep the class contained.
 export class LangGraphAdapter {
   /**
-   * Pipes a LangGraph stream to a data stream response.
+   * Pipes a LangGraph stream to a data stream.
    * @param stream - The LangGraph stream.
    * @param options - Options for the adapter.
    */
-  public static toDataStreamResponse(
-    untypedStream: IterableReadableStream<StreamEvent>,
-    options: LangGraphAdapterOptions,
-  ): void {
-    const stream = untypedStream as IterableReadableStream<TypedStreamEvent>;
-    const { response, modelId, callbacks = {}, toolTypeMap = {}, parseToolResults } = options;
+  // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- the response is a complex type so we'll just infer it.
+  public static toDataStream(stream: IterableReadableStream<StreamEvent>, options: LangGraphAdapterOptions) {
+    const typedStream = stream as IterableReadableStream<TypedStreamEvent>;
+    const { modelId, callbacks = {}, toolTypeMap = {}, parseToolResults } = options;
 
-    response.setHeader('x-vercel-ai-data-stream', 'v1');
-    pipeDataStreamToResponse(response, {
+    const dataStream = createDataStream({
       // eslint-disable-next-line complexity -- acceptable to keep the function contained.
       execute: async (rawDataStream) => {
         // Create enhanced data stream
@@ -202,7 +194,7 @@ export class LangGraphAdapter {
           cachedWriteTokens: 0,
         } satisfies ChatUsageTokens;
 
-        for await (const streamEvent of stream) {
+        for await (const streamEvent of typedStream) {
           if (callbacks.onEvent) {
             callbacks.onEvent({ event: streamEvent.event, data: streamEvent.data });
           }
@@ -316,6 +308,8 @@ export class LangGraphAdapter {
         return callbacks.onError ? callbacks.onError({ error }) : 'An error occurred while processing the request';
       },
     });
+
+    return dataStream;
   }
 
   /**

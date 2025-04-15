@@ -6,18 +6,24 @@
 import process from 'node:process';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { urlencoded, json } from 'express';
+import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { AppModule } from './app/app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // Create Fastify adapter with custom options for body size limits
+  const fastifyAdapter = new FastifyAdapter({
+    bodyLimit: 50 * 1024 * 1024, // 50MB in bytes
+  });
+
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, fastifyAdapter);
+
   const globalPrefix = 'v1';
   app.setGlobalPrefix(globalPrefix);
   app.enableCors();
-  app.use(json({ limit: '50mb' }));
-  app.use(urlencoded({ extended: true, limit: '50mb' }));
+
   const port = process.env.PORT;
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0'); // Listen on all network interfaces
   Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`);
 }
 

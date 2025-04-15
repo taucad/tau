@@ -1,7 +1,7 @@
 import { Body, Controller, Post, Res } from '@nestjs/common';
-import { convertToCoreMessages, pipeDataStreamToResponse } from 'ai';
+import { convertToCoreMessages } from 'ai';
 import type { UIMessage } from 'ai';
-import type { Response } from 'express';
+import type { FastifyReply } from 'fastify';
 import { generatePrefixedId, idPrefix } from '../utils/id.js';
 import { ToolService, toolChoiceFromToolName } from '../tools/tool-service.js';
 import type { ToolChoiceWithCategory } from '../tools/tool-service.js';
@@ -27,7 +27,7 @@ export class ChatController {
   ) {}
 
   @Post()
-  public async getData(@Body() body: CreateChatBody, @Res() response: Response): Promise<void> {
+  public async getData(@Body() body: CreateChatBody, @Res() response: FastifyReply): Promise<void> {
     const coreMessages = convertToCoreMessages(body.messages);
     const lastBodyMessage = body.messages.at(-1);
 
@@ -43,16 +43,13 @@ export class ChatController {
     }
 
     if (modelId === 'name-generator') {
-      pipeDataStreamToResponse(response, {
-        execute: async (dataStreamWriter) => {
-          const result = this.chatService.getNameGenerator(coreMessages);
-          result.mergeIntoDataStream(dataStreamWriter);
-        },
-        onError(error) {
-          return error instanceof Error ? error.message : String(error);
-        },
-      });
-      return;
+      const result = this.chatService.getNameGenerator(coreMessages);
+
+      // Mark the response as a v1 data stream:
+      void response.header('X-Vercel-AI-Data-Stream', 'v1');
+      void response.header('Content-Type', 'text/plain; charset=utf-8');
+
+      return response.send(result.fullStream);
     }
 
     const langchainMessages = convertAiSdkMessagesToLangchainMessages(body.messages, coreMessages);
@@ -70,12 +67,16 @@ export class ChatController {
     );
 
     // Use the LangGraphAdapter to handle the response
-    LangGraphAdapter.toDataStreamResponse(eventStream, {
-      response,
+    const result = LangGraphAdapter.toDataStream(eventStream, {
       modelId,
       toolTypeMap: toolChoiceFromToolName,
       parseToolResults: this.toolService.getToolParsers(),
       callbacks: this.chatService.getCallbacks(),
     });
+
+    void response.header('X-Vercel-AI-Data-Stream', 'v1');
+    void response.header('Content-Type', 'text/plain; charset=utf-8');
+
+    return response.send(result);
   }
 }

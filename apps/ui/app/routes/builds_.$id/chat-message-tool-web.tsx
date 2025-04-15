@@ -93,12 +93,13 @@ export function ChatMessageToolWeb({ part }: { readonly part: ToolInvocationUIPa
         <p className="text-sm text-foreground/50 italic">No sources, expand your search</p>
       </When> */}
           <div className="grid grid-cols-4 gap-2">
-            {relevantSources.slice(0, 3).map((source) => {
+            {relevantSources.slice(0, 3).map((source, index) => {
               const sourceDomain = extractDomainFromUrl(source.link);
               const sourceFaviconUrl = createFaviconUrl(source.link);
 
               return (
-                <HoverCard key={source.title} openDelay={100} closeDelay={100}>
+                // eslint-disable-next-line react/no-array-index-key -- the array order is stable so using the index is safe
+                <HoverCard key={`${source.title}-${index}`} openDelay={100} closeDelay={100}>
                   <HoverCardTrigger asChild>
                     <a href={source.link} target="_blank" rel="noreferrer">
                       <div

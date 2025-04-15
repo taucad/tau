@@ -46,7 +46,7 @@ export class ChatService {
     const directResponseAgent = createReactAgent({
       llm: unboundModel,
       tools: [], // No tools for direct responses
-      name: 'Conversational Expert',
+      name: 'conversational_expert',
       prompt:
         'You are a conversational expert who responds directly to user queries. You provide thoughtful, helpful responses without using tools.',
     });
@@ -80,6 +80,9 @@ export class ChatService {
             model: id,
           },
         ]);
+      },
+      onEvent(parameters) {
+        console.log('onEvent', parameters);
       },
       onError(error) {
         Logger.error('Error in chat stream follows:');

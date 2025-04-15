@@ -183,7 +183,7 @@
   --animate-pulse-subtle: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-gradient: gradient 5s ease infinite;
   --animate-bounce-subtle: gentle-bounce 2s infinite;
-  --animate-shiny-text: shiny-text 3s infinite;
+  --animate-shiny-text: shiny-text 1.5s linear infinite;
 
   @keyframes gradient {
     0%,
@@ -226,12 +226,14 @@
       width: 100%;
     }
   }
+
   @keyframes shiny-text {
-  0% {
-    background-position: calc(0% - var(--shiny-width)) 0;
+    0% {
+      background-position: 75% 0;
     }
-  100% {
-    background-position: calc(100% + var(--shiny-width)) 0;
+
+    100% {
+      background-position: -175% 0;
     }
   }
 }

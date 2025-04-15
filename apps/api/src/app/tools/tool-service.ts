@@ -83,7 +83,7 @@ export class ToolService {
 
   private parseSearxngResults(content: string): WebResult[] {
     try {
-      // Searxng returns a strange array of JSON results looking like:
+      // Searxng returns a comma-separated list of JSON objects, e.g.:
       // `{"json": "..."},{"json": "..."}`
       // So we need to parse it as an array of JSON objects.
       const results = JSON.parse(`[${content}]`) as WebResult[];

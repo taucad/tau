@@ -49,7 +49,7 @@ export class ChatController {
       void response.header('X-Vercel-AI-Data-Stream', 'v1');
       void response.header('Content-Type', 'text/plain; charset=utf-8');
 
-      return response.send(result.fullStream);
+      return response.send(result.toDataStream());
     }
 
     const langchainMessages = convertAiSdkMessagesToLangchainMessages(body.messages, coreMessages);

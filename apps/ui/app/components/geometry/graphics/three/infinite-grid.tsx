@@ -25,7 +25,6 @@ type InfiniteGridProperties = {
   /**
    * The color of the grid.
    */
-  // eslint-disable-next-line react/no-unused-prop-types -- This is used in the shader
   readonly color: THREE.Color;
   /**
    * The axes to use for the grid.
@@ -157,7 +156,7 @@ export function InfiniteGrid({
   axes = 'xyz',
   lineOpacity = 0.3,
   distanceFalloffScale = 800,
-}: InfiniteGridProperties) {
+}: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>) {
   const [theme] = useTheme();
   const material = React.useMemo(
     () =>

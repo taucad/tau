@@ -21,11 +21,11 @@ type SceneProperties = {
 
 export function Scene({
   children,
-  hasGizmo: enableGizmo = false,
-  hasDamping: enableDamping = false,
-  hasZoom: enableZoom = false,
-  hasGrid: enableGrid = false,
-  hasAxesHelper: enableAxesHelper = false,
+  hasGizmo = false,
+  hasDamping = false,
+  hasZoom = false,
+  hasGrid = false,
+  hasAxesHelper = false,
   stageOptions,
   isCentered = true,
   cameraMode = 'perspective',
@@ -34,13 +34,13 @@ export function Scene({
 }: SceneProperties) {
   return (
     <>
-      <Controls ref={controlsRef} enableGizmo={enableGizmo} enableDamping={enableDamping} enableZoom={enableZoom} />
+      <Controls ref={controlsRef} enableGizmo={hasGizmo} enableDamping={hasDamping} enableZoom={hasZoom} />
       <Stage
         ref={stageRef}
         stageOptions={stageOptions}
         isCentered={isCentered}
-        hasGrid={enableGrid}
-        hasAxesHelper={enableAxesHelper}
+        hasGrid={hasGrid}
+        hasAxesHelper={hasAxesHelper}
         cameraMode={cameraMode}
       >
         {children}

@@ -251,7 +251,7 @@ export class ModelService implements OnModuleInit {
 
   public constructor(private readonly providerService: ProviderService) {}
 
-  public async onModuleInit() {
+  public async onModuleInit(): Promise<void> {
     await this.getModels();
     Logger.log(`Loaded ${this.models.length} models`);
   }

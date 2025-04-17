@@ -135,19 +135,19 @@ const modelList: Record<StaticProviderId, Record<string, Model>> = {
     },
   },
   openai: {
-    'gpt-4.5-preview': {
-      id: 'openai-gpt-4.5-preview',
-      name: 'GPT-4.5 Preview',
+    'gpt-4.1': {
+      id: 'openai-gpt-4.1',
+      name: 'GPT-4.1',
       provider: 'openai',
-      model: 'gpt-4.5-preview-2025-02-27',
+      model: 'gpt-4.1',
       details: {
-        family: 'GPT-4.5',
-        families: ['GPT-4.5'],
-        contextWindow: 128_000,
-        maxTokens: 16_384,
+        family: 'GPT-4.1',
+        families: ['GPT-4.1'],
+        contextWindow: 1_047_576,
+        maxTokens: 32_768,
         cost: {
-          inputTokens: 75,
-          outputTokens: 150,
+          inputTokens: 2,
+          outputTokens: 8,
           cachedReadTokens: 37.5,
           cachedWriteTokens: 0,
         },
@@ -170,6 +170,27 @@ const modelList: Record<StaticProviderId, Record<string, Model>> = {
           inputTokens: 15,
           outputTokens: 60,
           cachedReadTokens: 7.5,
+          cachedWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+      },
+    },
+    'gpt-o4-mini': {
+      id: 'openai-gpt-o4-mini',
+      name: 'GPT-o4 Mini',
+      provider: 'openai',
+      model: 'o4-mini',
+      details: {
+        family: 'GPT-O4',
+        families: ['GPT-O4'],
+        contextWindow: 200_000,
+        maxTokens: 100_000,
+        cost: {
+          inputTokens: 1.1,
+          outputTokens: 4.4,
+          cachedReadTokens: 0.55,
           cachedWriteTokens: 0,
         },
       },

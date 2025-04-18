@@ -3,6 +3,7 @@ import { Plane } from '@react-three/drei';
 import React from 'react';
 import type { JSX } from 'react';
 import { Theme, useTheme } from 'remix-themes';
+import { useFrame } from '@react-three/fiber';
 
 type InfiniteGridProperties = {
   /**
@@ -42,6 +43,21 @@ type InfiniteGridProperties = {
    * @default 800
    */
   readonly distanceFalloffScale: number;
+  /**
+   * Whether to make the distance falloff scale dynamic based on zoom.
+   * @default true
+   */
+  readonly hasDynamicDistanceFalloff: boolean;
+  /**
+   * The minimum distance falloff scale.
+   * @default 800
+   */
+  readonly minDistanceFalloffScale: number;
+  /**
+   * The maximum distance falloff scale.
+   * @default 10000
+   */
+  readonly maxDistanceFalloffScale: number;
 };
 
 // Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
@@ -157,8 +173,13 @@ export function InfiniteGrid({
   axes = 'xyz',
   lineOpacity = 0.3,
   distanceFalloffScale = 800,
+  hasDynamicDistanceFalloff = true,
+  minDistanceFalloffScale = 800,
+  maxDistanceFalloffScale = 10_000,
 }: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
   const [theme] = useTheme();
+  const materialRef = React.useRef<THREE.ShaderMaterial | undefined>(null);
+
   const material = React.useMemo(
     () =>
       infiniteGridMaterial({
@@ -170,9 +191,45 @@ export function InfiniteGrid({
         axes,
         lineOpacity,
         distanceFalloffScale,
+        hasDynamicDistanceFalloff,
+        minDistanceFalloffScale,
+        maxDistanceFalloffScale,
       }),
-    [smallSize, largeSize, smallThickness, largeThickness, theme, axes, lineOpacity, distanceFalloffScale],
+    [
+      smallSize,
+      largeSize,
+      smallThickness,
+      largeThickness,
+      theme,
+      axes,
+      lineOpacity,
+      distanceFalloffScale,
+      hasDynamicDistanceFalloff,
+      minDistanceFalloffScale,
+      maxDistanceFalloffScale,
+    ],
   );
+
+  React.useEffect(() => {
+    materialRef.current = material;
+  }, [material]);
+
+  // Update distanceFalloffScale based on camera position only if dynamic falloff is enabled
+  useFrame(({ camera }) => {
+    if (!materialRef.current || !hasDynamicDistanceFalloff) return;
+
+    // Get camera distance from origin (or any reference point)
+    const cameraDistance = camera.position.length();
+
+    // Adjust distanceFalloffScale based on distance
+    // This is a simple linear mapping - adjust the formula as needed
+    const dynamicFalloffScale = Math.max(
+      minDistanceFalloffScale,
+      Math.min(maxDistanceFalloffScale, distanceFalloffScale * (1 + cameraDistance / 1000)),
+    );
+
+    materialRef.current.uniforms.uDistanceFalloffScale.value = dynamicFalloffScale;
+  });
 
   return (
     <Plane

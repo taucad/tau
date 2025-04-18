@@ -162,8 +162,6 @@ export function ThreeProvider({
               defaultAngle={cameraAngle}
               className="w-40"
               onChange={(angle) => {
-                // Just update the angle - no need to switch camera types
-                console.log('Camera angle changed in ThreeProvider:', angle);
                 setCameraAngle(angle);
               }}
             />

@@ -1,0 +1,14 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Package Installation
+Always use PNPM for installing packages with format pnpm install <package> (-d)
+e.g.: 
+- Production package: `pnpm install react`
+- Development package: `pnpm install -d eslint`
+
+# Package executables
+- Run all applications in dev mode: `pnpm start`
+- Test all applications: `pnpm test`

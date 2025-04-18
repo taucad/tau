@@ -3,7 +3,7 @@ import type { Remote } from 'comlink';
 import type { JSX, ReactNode } from 'react';
 import { createContext, useContext, useReducer, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { BuilderWorkerInterface } from './replicad/replicad-builder.worker';
-import BuilderWorker from './replicad-builder.worker?worker';
+import BuilderWorker from './replicad/replicad-builder.worker?worker';
 import { debounce } from '@/utils/functions.js';
 import { useConsole } from '@/hooks/use-console.js';
 

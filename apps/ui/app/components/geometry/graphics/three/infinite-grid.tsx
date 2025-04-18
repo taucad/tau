@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Plane } from '@react-three/drei';
 import React from 'react';
+import type { JSX } from 'react';
 import { Theme, useTheme } from 'remix-themes';
 
 type InfiniteGridProperties = {
@@ -156,7 +157,7 @@ export function InfiniteGrid({
   axes = 'xyz',
   lineOpacity = 0.3,
   distanceFalloffScale = 800,
-}: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>) {
+}: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
   const [theme] = useTheme();
   const material = React.useMemo(
     () =>

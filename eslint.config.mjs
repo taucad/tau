@@ -53,6 +53,20 @@ const config = [
           ignoreRestArgs: true
         }
       ],
+
+      // Require explicit return and argument types on exported functions' and classes' public class methods.
+      // Note: This may feel cumbersome at first, especially for React components, but it is a good practice to enforce
+      // type safety and readability, especially when dealing with downstream consumers who are sensitive to type changes.
+      // Furthmore this rule does not expose an ignore option.
+      // @see https://github.com/typescript-eslint/typescript-eslint/issues/4208
+      '@typescript-eslint/explicit-module-boundary-types': [
+        'error',
+        {
+          allowTypedFunctionExpressions: true,
+          allowHigherOrderFunctions: true,
+          allowDirectConstAssertionInArrowFunctions: true,
+        }
+      ],
     },
     // Configure Typescript support
     languageOptions: {
@@ -87,16 +101,6 @@ const config = [
             'Req',
           ],
         },
-      ],
-
-      // Require explicit return and argument types on exported functions' and classes' public class methods.
-      '@typescript-eslint/explicit-module-boundary-types': [
-        'error',
-        {
-          allowTypedFunctionExpressions: true,
-          allowHigherOrderFunctions: true,
-          allowDirectConstAssertionInArrowFunctions: true,
-        }
       ],
     },
   },

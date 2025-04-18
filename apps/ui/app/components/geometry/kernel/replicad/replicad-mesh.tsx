@@ -102,6 +102,7 @@ export const ReplicadMesh = React.memo(function ({
   return (
     <group>
       <mesh
+        // eslint-disable-next-line react/no-unknown-property -- TODO: make Three.js type available for linter
         geometry={body.current}
         onClick={onClick}
         onPointerOver={onHover}
@@ -113,10 +114,12 @@ export const ReplicadMesh = React.memo(function ({
           color={color ?? colors.serialized.hex}
           opacity={opacity ?? 1}
           transparent={opacity !== 1}
+          // The offsets are here to avoid z fighting between the mesh and the lines
           polygonOffsetFactor={2}
           polygonOffsetUnits={1}
         />
       </mesh>
+      {/* eslint-disable-next-line react/no-unknown-property -- TODO: make Three.js type available for linter */}
       <lineSegments geometry={lines.current}>
         <lineBasicMaterial color="#244224" />
       </lineSegments>

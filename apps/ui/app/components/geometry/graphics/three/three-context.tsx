@@ -113,7 +113,7 @@ export function ThreeProvider({
     };
 
     return canvas;
-  }, [canvasReference, screenshotReference]);
+  }, [canvasReference, screenshotReference, cameraMode]);
 
   return (
     <div className="relative size-full">

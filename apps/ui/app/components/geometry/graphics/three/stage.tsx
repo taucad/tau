@@ -3,7 +3,7 @@ import type { JSX, ReactNode, RefObject } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
-import { Html, OrthographicCamera, PerspectiveCamera } from '@react-three/drei';
+import { PerspectiveCamera } from '@react-three/drei';
 import { InfiniteGrid } from '@/components/geometry/graphics/three/infinite-grid.js';
 import { AxesHelper } from '@/components/geometry/graphics/three/axes-helper.js';
 
@@ -30,20 +30,6 @@ export type StageOptions = {
      */
     zoomLevel?: number;
   };
-  orthographic?: {
-    /**
-     * The ratio of the scene's radius to offset the camera from the center. Adjusting this value will change the applied perspective of the scene.
-     */
-    offsetRatio?: number;
-    /**
-     * The zoom level of the camera.
-     */
-    zoomLevel?: number;
-    /**
-     * The minimum near plane of the camera.
-     */
-    minimumNearPlane?: number;
-  };
   rotation?: {
     /**
      * The initial z-axis rotation of the camera in radians.
@@ -67,11 +53,6 @@ export const defaultStageOptions = {
     minimumFarPlane: 1_000_000,
     farPlaneRadiusMultiplier: 5,
     zoomLevel: 1.25,
-  },
-  orthographic: {
-    offsetRatio: 3,
-    zoomLevel: 5,
-    minimumNearPlane: 1,
   },
   rotation: {
     side: -Math.PI / 4, // Default rotation is 45 degrees counter-clockwise
@@ -106,6 +87,9 @@ function getPositionOnCircle(radius: number, angleInRadians: number): [number, n
 export type GridSizes = {
   smallSize: number;
   largeSize: number;
+  effectiveSize?: number;
+  baseSize?: number;
+  zoomFactor?: number;
 };
 
 type StageProperties = {
@@ -114,7 +98,6 @@ type StageProperties = {
   readonly stageOptions?: StageOptions;
   readonly hasGrid?: boolean;
   readonly hasAxesHelper?: boolean;
-  readonly cameraMode?: 'perspective' | 'orthographic';
   readonly onGridChange?: (gridSizes: GridSizes) => void;
   /**
    * The base distance falloff scale for the grid.
@@ -169,15 +152,12 @@ export function Stage({
     getDistance: () => number;
   };
   const { invalidate } = useThree();
-  const size = useThree((state) => state.size); // Get the canvas size
   const outer = React.useRef<THREE.Group>(null);
   const inner = React.useRef<THREE.Group>(null);
 
   // Add state for tracking zoom
   const [currentZoom, setCurrentZoom] = React.useState<number>(1);
   const originalDistanceReference = React.useRef<number | undefined>(null);
-  // Store previous camera type to detect changes
-  const previousCameraType = React.useRef<string | undefined>(null);
 
   const [{ shapeRadius, sceneRadius }, set] = React.useState<{
     // The radius of the scene. Used to determine if the camera needs to be updated
@@ -192,20 +172,12 @@ export function Stage({
     top: 0,
   });
 
-  const { perspective, orthographic, rotation } = useMemo(() => {
+  const { perspective, rotation } = useMemo(() => {
     return {
       perspective: { ...defaultStageOptions.perspective, ...stageOptions.perspective },
-      orthographic: { ...defaultStageOptions.orthographic, ...stageOptions.orthographic },
       rotation: { ...defaultStageOptions.rotation, ...stageOptions.rotation },
     };
   }, [stageOptions]);
-
-  // Track previous size for orthographic camera adjustments
-  const previousSize = React.useRef<{ width: number; height: number } | undefined>(null);
-
-  // Add a ref to store the base frustum size for orthographic camera
-  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
-  const baseFrustumSize = React.useRef<number | null>(null);
 
   /**
    * Position the scene.
@@ -246,19 +218,14 @@ export function Stage({
     if (!controls) return;
 
     const handleControlsChange = () => {
-      if (camera.type === 'OrthographicCamera') {
-        setCurrentZoom(camera.zoom);
-      } else {
-        if (originalDistanceReference.current === null) {
-          originalDistanceReference.current = controls.getDistance?.();
-        }
+      if (originalDistanceReference.current === null) {
+        originalDistanceReference.current = controls.getDistance?.();
+      }
 
-        const distance = controls.getDistance?.();
-        if (distance && originalDistanceReference.current) {
-          const zoom = originalDistanceReference.current / distance;
-          // Multiply by 10_000 to avoid floating point precision issues
-          setCurrentZoom(Math.round(zoom * 10_000) / 10_000);
-        }
+      const distance = controls.getDistance?.();
+      if (distance && originalDistanceReference.current) {
+        const zoom = originalDistanceReference.current / distance;
+        setCurrentZoom(zoom);
       }
     };
 
@@ -272,58 +239,17 @@ export function Stage({
   }, [camera.type, camera.zoom, controls]);
 
   const resetCamera = React.useCallback(() => {
-    const hasCameraTypeChanged = previousCameraType.current !== null && previousCameraType.current !== camera.type;
-
     // Reset zoom tracking state using the appropriate configured zoom level
-    setCurrentZoom(camera instanceof THREE.OrthographicCamera ? orthographic.zoomLevel : perspective.zoomLevel);
+    setCurrentZoom(perspective.zoomLevel);
 
     originalDistanceReference.current = null;
 
-    if (camera instanceof THREE.OrthographicCamera) {
-      const [x, y] = getPositionOnCircle(shapeRadius, rotation.side);
-      const [, z] = getPositionOnCircle(shapeRadius, rotation.vertical);
-      camera.position.set(x, y, z);
-
-      // Store current size to detect changes
-      previousSize.current = { width: size.width, height: size.height };
-
-      // Get aspect ratio
-      const aspect = size.width / size.height;
-
-      // On first setup or camera type change, initialize the base frustum size
-      if (baseFrustumSize.current === null || hasCameraTypeChanged) {
-        baseFrustumSize.current = shapeRadius * 100;
-      }
-
-      // Reset zoom to initial value
-      camera.zoom = orthographic.zoomLevel;
-
-      // Use the stored base frustum size and apply current zoom
-      const frustumHeight = baseFrustumSize.current / camera.zoom;
-      const frustumWidth = frustumHeight * aspect;
-
-      // Add a buffer factor to ensure content stays in view when zooming out
-      const bufferFactor = 1.5;
-      camera.left = (-frustumWidth / 2) * bufferFactor;
-      camera.right = (frustumWidth / 2) * bufferFactor;
-      camera.top = (frustumHeight / 2) * bufferFactor;
-      camera.bottom = (-frustumHeight / 2) * bufferFactor;
-
-      // Make near and far planes even more generous
-      camera.near = -Math.max(orthographic.minimumNearPlane, shapeRadius * orthographic.offsetRatio * 10);
-      camera.far = Math.abs(camera.near) * 4;
-    } else {
-      // Reset our base frustum size when switching away from orthographic
-
-      baseFrustumSize.current = null;
-
-      const [x, y] = getPositionOnCircle(shapeRadius * perspective.offsetRatio, rotation.side);
-      const [, z] = getPositionOnCircle(shapeRadius * perspective.offsetRatio, rotation.vertical);
-      camera.position.set(x, y, z);
-      camera.zoom = perspective.zoomLevel;
-      camera.near = perspective.nearPlane;
-      camera.far = Math.max(perspective.minimumFarPlane, shapeRadius * perspective.farPlaneRadiusMultiplier);
-    }
+    const [x, y] = getPositionOnCircle(shapeRadius * perspective.offsetRatio, rotation.side);
+    const [, z] = getPositionOnCircle(shapeRadius * perspective.offsetRatio, rotation.vertical);
+    camera.position.set(x, y, z);
+    camera.zoom = perspective.zoomLevel;
+    camera.near = perspective.nearPlane;
+    camera.far = Math.max(perspective.minimumFarPlane, shapeRadius * perspective.farPlaneRadiusMultiplier);
 
     // Aim the camera at the center of the scene
     camera.lookAt(0, 0, 0);
@@ -342,11 +268,6 @@ export function Stage({
     shapeRadius,
     rotation.side,
     rotation.vertical,
-    size.width,
-    size.height,
-    orthographic.minimumNearPlane,
-    orthographic.offsetRatio,
-    orthographic.zoomLevel,
     perspective.offsetRatio,
     perspective.zoomLevel,
     perspective.nearPlane,
@@ -362,15 +283,6 @@ export function Stage({
    * Position the camera based on the scene's bounding box.
    */
   React.useLayoutEffect(() => {
-    // Check if camera type has changed
-    const hasCameraTypeChanged = previousCameraType.current !== null && previousCameraType.current !== camera.type;
-
-    // Check if window size has changed for orthographic camera
-    const hasSizeChanged =
-      camera instanceof THREE.OrthographicCamera &&
-      previousSize.current &&
-      (previousSize.current.width !== size.width || previousSize.current.height !== size.height);
-
     // If the scene radius is undefined, we need to initialize the camera, so we default to true.
     // Force update when camera type changes
     const isSignificantChange =
@@ -378,13 +290,10 @@ export function Stage({
         ? true
         : Math.abs(shapeRadius - sceneRadius) / sceneRadius > significantRadiusChangeRatio;
 
-    // Update the previous camera type reference
-    previousCameraType.current = camera.type;
-
-    if (isSignificantChange || hasCameraTypeChanged || hasSizeChanged) {
+    if (isSignificantChange) {
       resetCamera();
     }
-  }, [camera, resetCamera, sceneRadius, shapeRadius, size.height, size.width]);
+  }, [camera, resetCamera, sceneRadius, shapeRadius]);
 
   // Calculate grid sizes based on zoom and shape radius
   const gridSizes = useMemo(() => {
@@ -396,58 +305,32 @@ export function Stage({
       };
     }
 
-    if (camera.type === 'OrthographicCamera') {
-      // Orthographic camera grid calculation
-      // Base factor - how much we scale the grid based on shape size
-      // Use a more aggressive logarithmic scale for better scaling with object size
-      const baseFactor = Math.max(1, Math.log10(shapeRadius) * gridSizeConstants.shapeRadiusLogFactor);
+    // Base factor - how much we scale the grid based on shape size
+    const baseFactor = Math.max(1, Math.log10(shapeRadius) * gridSizeConstants.shapeRadiusLogFactor);
 
-      // Calculate effective zoom - inversely proportional to zoom value
-      // Lower camera zoom means we're more zoomed out, so grid should be larger
-      const inverseZoom = 1 / currentZoom;
+    const inverseZoom = 1 / currentZoom;
 
-      // Calculate grid size using logarithmic scale that grows as we zoom out
-      // Adjust coefficients for better scaling
-      const baseGridSize = Math.max(
-        gridSizeConstants.minimumBaseGridSize,
-        inverseZoom * baseFactor * gridSizeConstants.baseGridSizeCoefficient,
-      );
+    // Calculate grid size using logarithmic scale that grows as we zoom out
+    const baseGridSize = Math.max(
+      gridSizeConstants.minimumBaseGridSize,
+      inverseZoom * baseFactor * gridSizeConstants.baseGridSizeCoefficient,
+    );
 
-      // Find appropriate power of 10
-      const exponent = Math.floor(Math.log10(baseGridSize));
-      const mantissa = baseGridSize / 10 ** exponent;
+    // Find appropriate power of 10
+    const exponent = Math.floor(Math.log10(baseGridSize));
+    const mantissa = baseGridSize / 10 ** exponent;
 
-      // Round to either 1 or 5 times a power of 10, eliminating the 2x option
-      const largeSize = mantissa < gridSizeConstants.roundingThreshold ? 10 ** exponent : 5 * 10 ** exponent;
-
-      return {
-        smallSize: largeSize / 10,
-        largeSize,
-        effectiveSize: baseGridSize,
-        baseSize: shapeRadius * inverseZoom,
-        zoomFactor: inverseZoom,
-      };
-    }
-
-    // Perspective camera calculation (unchanged)
-    const effectiveZoom = currentZoom;
-    const baseSize = shapeRadius * effectiveZoom;
-    const effectiveSize = (1 / baseSize) * gridSizeConstants.perspectiveEffectiveSizeFactor;
-
-    // Calculate the appropriate grid size using logarithms
-    // This finds the nearest power of 10 multiplied by either 1 or 5
-    const exponent = Math.floor(Math.log10(effectiveSize));
-    const mantissa = effectiveSize / 10 ** exponent;
-
+    // Round to either 1 or 5 times a power of 10
     const largeSize = mantissa < gridSizeConstants.roundingThreshold ? 10 ** exponent : 5 * 10 ** exponent;
 
     return {
       smallSize: largeSize / 10, // Smaller grid is 1/10th of the larger grid
       largeSize,
-      effectiveSize,
-      baseSize,
+      effectiveSize: baseGridSize,
+      baseSize: shapeRadius * inverseZoom,
+      zoomFactor: inverseZoom,
     };
-  }, [camera.type, currentZoom, properties.hasGrid, shapeRadius]);
+  }, [currentZoom, properties.hasGrid, shapeRadius]);
 
   // Calculate dynamic falloff scale based on zoom
   const dynamicFalloffScale = useMemo(() => {
@@ -479,7 +362,6 @@ export function Stage({
 
   return (
     <group {...properties}>
-      {/* Always use PerspectiveCamera regardless of cameraMode */}
       <PerspectiveCamera makeDefault />
       <group ref={outer}>
         {properties.hasAxesHelper ? <AxesHelper /> : null}
@@ -491,28 +373,6 @@ export function Stage({
           />
         ) : null}
         <group ref={inner}>{children}</group>
-        <Html position={[0, 0, 10]}>
-          <div className="rounded-md border bg-background p-1 text-xs">
-            {Object.entries(gridSizes).map(([key, value]) => (
-              <div key={key}>
-                <span className="whitespace-nowrap">
-                  {key}: {value}
-                </span>
-              </div>
-            ))}
-            <div>
-              <span className="whitespace-nowrap">shapeRadius: {shapeRadius}</span>
-            </div>
-            <div>
-              <span className="whitespace-nowrap">zoom: {currentZoom}</span>
-            </div>
-            <div>
-              <span className="whitespace-nowrap">
-                distance to origin camera: {camera.position.distanceTo(new THREE.Vector3(0, 0, 0))}
-              </span>
-            </div>
-          </div>
-        </Html>
       </group>
     </group>
   );

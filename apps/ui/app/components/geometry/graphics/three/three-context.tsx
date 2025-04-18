@@ -150,13 +150,37 @@ export function ThreeProvider({
           zoomSpeed={zoomSpeed}
           onGridChange={handleGridChange}
         >
-          <CameraHandler key={`camera-handler-${cameraAngle}`} angle={Number(cameraAngle)} />
+          <CameraHandler angle={Number(cameraAngle)} />
           {children}
           <ScreenshotCapture ref={screenshotReference} />
         </Scene>
       </Canvas>
       {enableCameraControls ? (
         <div className="absolute bottom-0 left-0 z-10 m-2">
+          {enableGrid ? (
+            <div className="mb-4">
+              <div className="rounded-md border bg-background p-1 text-xs">
+                {Object.entries(gridSizes).map(([key, value]) => (
+                  <div key={key}>
+                    <span className="whitespace-nowrap">
+                      {key}: {value}
+                    </span>
+                  </div>
+                ))}
+                {/* <div>
+                  <span className="whitespace-nowrap">shapeRadius: {gridSizes.shapeRadius}</span>
+                </div>
+                <div>
+                  <span className="whitespace-nowrap">zoom: {gridSizes.currentZoom}</span>
+                </div>
+                <div>
+                  <span className="whitespace-nowrap">
+                    distance to origin camera: {camera.position.distanceTo(new THREE.Vector3(0, 0, 0))}
+                  </span>
+                </div> */}
+              </div>
+            </div>
+          ) : null}
           <div className="flex items-center gap-2">
             <CameraControl
               defaultAngle={cameraAngle}

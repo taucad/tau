@@ -114,6 +114,8 @@ const config = [
       // React is a global variable in the UI
       'react/react-in-jsx-scope': 'off',
       'react/boolean-prop-naming': ['error', { rule: '^(is|has|as|should)[A-Z]([A-Za-z0-9]?)+$', validateNested: true }],
+      // defaultProps is deprecated and irrelevant when using functional components.
+      'react/require-default-props': 'off',
     },
   },
 ];

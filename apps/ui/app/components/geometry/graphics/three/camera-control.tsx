@@ -35,14 +35,6 @@ export function CameraHandler({ angle }: CameraHandlerProps): JSX.Element {
   const camera = useThree((state) => state.camera);
   const { invalidate } = useThree();
 
-  // Track angle changes for debugging
-  const angleRef = useRef(angle);
-
-  // Log when angle changes
-  useEffect(() => {
-    angleRef.current = angle;
-  }, [angle]);
-
   // Store original camera settings to maintain consistent view
   const cameraState = useRef({
     initialized: false,

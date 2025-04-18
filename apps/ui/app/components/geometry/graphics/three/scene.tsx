@@ -15,6 +15,10 @@ type SceneProperties = {
   readonly cameraMode?: 'perspective' | 'orthographic';
   readonly onGridChange?: (gridSizes: GridSizes) => void;
   readonly zoomSpeed: number;
+  readonly distanceFalloffScale?: number;
+  readonly hasDynamicDistanceFalloff?: boolean;
+  readonly minDistanceFalloffScale?: number;
+  readonly maxDistanceFalloffScale?: number;
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
   readonly controlsRef?: RefObject<ComponentRef<typeof Controls> | null>;
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
@@ -35,6 +39,10 @@ export function Scene({
   stageRef,
   onGridChange,
   zoomSpeed,
+  distanceFalloffScale,
+  hasDynamicDistanceFalloff,
+  minDistanceFalloffScale,
+  maxDistanceFalloffScale,
 }: SceneProperties): JSX.Element {
   return (
     <>
@@ -52,6 +60,10 @@ export function Scene({
         hasGrid={hasGrid}
         hasAxesHelper={hasAxesHelper}
         cameraMode={cameraMode}
+        distanceFalloffScale={distanceFalloffScale}
+        hasDynamicDistanceFalloff={hasDynamicDistanceFalloff}
+        minDistanceFalloffScale={minDistanceFalloffScale}
+        maxDistanceFalloffScale={maxDistanceFalloffScale}
         onGridChange={onGridChange}
       >
         {children}

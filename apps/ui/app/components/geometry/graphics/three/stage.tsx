@@ -116,6 +116,26 @@ type StageProperties = {
   readonly hasAxesHelper?: boolean;
   readonly cameraMode?: 'perspective' | 'orthographic';
   readonly onGridChange?: (gridSizes: GridSizes) => void;
+  /**
+   * The base distance falloff scale for the grid.
+   * @default 800
+   */
+  readonly distanceFalloffScale?: number;
+  /**
+   * Whether to make the distance falloff scale dynamic based on zoom.
+   * @default true
+   */
+  readonly hasDynamicDistanceFalloff?: boolean;
+  /**
+   * The minimum distance falloff scale.
+   * @default 800
+   */
+  readonly minDistanceFalloffScale?: number;
+  /**
+   * The maximum distance falloff scale.
+   * @default 10000
+   */
+  readonly maxDistanceFalloffScale?: number;
   readonly ref?: RefObject<
     | {
         resetCamera: () => void;
@@ -131,6 +151,10 @@ export function Stage({
   stageOptions = defaultStageOptions,
   ref,
   onGridChange,
+  distanceFalloffScale = 800,
+  hasDynamicDistanceFalloff = true,
+  minDistanceFalloffScale = 800,
+  maxDistanceFalloffScale = 100_000_000,
   ...properties
 }: StageProperties): JSX.Element {
   const camera = useThree((state) => state.camera);
@@ -424,6 +448,29 @@ export function Stage({
     };
   }, [camera.type, currentZoom, properties.hasGrid, shapeRadius]);
 
+  // Calculate dynamic falloff scale based on zoom
+  const dynamicFalloffScale = useMemo(() => {
+    if (!hasDynamicDistanceFalloff) {
+      return distanceFalloffScale;
+    }
+
+    // Calculate scaling factor based on camera distance/zoom
+    const cameraDistance = camera.position.distanceTo(new THREE.Vector3(0, 0, 0));
+
+    // Apply a more aggressive scaling formula that increases distanceFalloffScale as we zoom out
+    // Using a higher multiplier (2 + cameraDistance / 500) for stronger scaling at far distances
+    return Math.max(
+      minDistanceFalloffScale,
+      Math.min(maxDistanceFalloffScale, distanceFalloffScale * (2 + cameraDistance / 500)),
+    );
+  }, [
+    camera.position,
+    distanceFalloffScale,
+    hasDynamicDistanceFalloff,
+    minDistanceFalloffScale,
+    maxDistanceFalloffScale,
+  ]);
+
   // Call onGridChange when gridSizes change
   React.useEffect(() => {
     onGridChange?.(gridSizes);
@@ -435,7 +482,13 @@ export function Stage({
       {properties.cameraMode === 'orthographic' && <OrthographicCamera makeDefault />}
       <group ref={outer}>
         {properties.hasAxesHelper ? <AxesHelper /> : null}
-        {properties.hasGrid ? <InfiniteGrid smallSize={gridSizes.smallSize} largeSize={gridSizes.largeSize} /> : null}
+        {properties.hasGrid ? (
+          <InfiniteGrid
+            smallSize={gridSizes.smallSize}
+            largeSize={gridSizes.largeSize}
+            distanceFalloffScale={dynamicFalloffScale}
+          />
+        ) : null}
         <group ref={inner}>{children}</group>
         <Html position={[0, 0, 10]}>
           <div className="rounded-md border bg-background p-1 text-xs">

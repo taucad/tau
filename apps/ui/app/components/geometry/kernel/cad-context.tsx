@@ -1,23 +1,23 @@
 import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
-import type { ReactNode } from 'react';
+import type { JSX, ReactNode } from 'react';
 import { createContext, useContext, useReducer, useEffect, useRef, useMemo, useCallback } from 'react';
-import type { BuilderWorkerInterface } from './replicad-builder.worker';
+import type { BuilderWorkerInterface } from './replicad/replicad-builder.worker';
 import BuilderWorker from './replicad-builder.worker?worker';
 import { debounce } from '@/utils/functions.js';
 import { useConsole } from '@/hooks/use-console.js';
 
 // Combine related state
-type ReplicadState = {
+type CadState = {
   code: string;
-  parameters: Record<string, any>;
-  defaultParameters: Record<string, any> | undefined;
+  parameters: Record<string, unknown>;
+  defaultParameters: Record<string, unknown> | undefined;
   error?: string;
   isComputing: boolean;
   isBuffering: boolean;
   mesh?: {
-    edges: any;
-    faces: any;
+    edges: unknown;
+    faces: unknown;
     color?: string;
     opacity?: number;
   };
@@ -25,12 +25,12 @@ type ReplicadState = {
 
 type ReplicadAction =
   | { type: 'SET_CODE'; payload: string }
-  | { type: 'SET_PARAMETERS'; payload: Record<string, any> }
-  | { type: 'SET_DEFAULT_PARAMETERS'; payload: Record<string, any> }
+  | { type: 'SET_PARAMETERS'; payload: Record<string, unknown> }
+  | { type: 'SET_DEFAULT_PARAMETERS'; payload: Record<string, unknown> }
   | { type: 'SET_STATUS'; payload: { error?: string; isComputing?: boolean; isBuffering?: boolean } }
-  | { type: 'SET_MESH'; payload: ReplicadState['mesh'] };
+  | { type: 'SET_MESH'; payload: CadState['mesh'] };
 
-const initialState: ReplicadState = {
+const initialState: CadState = {
   code: '',
   parameters: {},
   defaultParameters: undefined,
@@ -123,7 +123,7 @@ function useReplicadWorker() {
   return { initWorker, terminateWorker };
 }
 
-function replicadReducer(state: ReplicadState, action: ReplicadAction): ReplicadState {
+function cadReducer(state: CadState, action: ReplicadAction): CadState {
   switch (action.type) {
     case 'SET_CODE': {
       return { ...state, code: action.payload };
@@ -147,9 +147,9 @@ function replicadReducer(state: ReplicadState, action: ReplicadAction): Replicad
   }
 }
 
-const ReplicadContext = createContext<
+const CadContext = createContext<
   | {
-      mesh: { edges: any; faces: any; color?: string } | undefined;
+      mesh: { edges: unknown; faces: unknown; color?: string } | undefined;
       status: {
         isComputing: boolean;
         isBuffering: boolean;
@@ -157,19 +157,19 @@ const ReplicadContext = createContext<
       };
       downloadStl: () => Promise<Blob>;
       setCode: (code: string) => void;
-      setParameters: (parameters: Record<string, any>) => void;
-      defaultParameters: Record<string, any>;
+      setParameters: (parameters: Record<string, unknown>) => void;
+      defaultParameters: Record<string, unknown>;
     }
   | undefined
 >(undefined);
 
 /**
- * Provider component for Replicad functionality
+ * Provider component for CAD functionality
  * @param children - React children
  * @param withExceptions - Whether to initialize OpenCascade with exceptions mode (default: false)
  * @param evaluateDebounceTime - The debounce time for the evaluation function (default: 0)
  */
-export function ReplicadProvider({
+export function CadProvider({
   children,
   withExceptions = false,
   evaluateDebounceTime = 0,
@@ -177,8 +177,8 @@ export function ReplicadProvider({
   readonly children: ReactNode;
   readonly withExceptions?: boolean;
   readonly evaluateDebounceTime?: number;
-}) {
-  const [state, dispatch] = useReducer(replicadReducer, initialState);
+}): JSX.Element {
+  const [state, dispatch] = useReducer(cadReducer, initialState);
   const { initWorker, terminateWorker } = useReplicadWorker();
   const { log } = useConsole({ defaultOrigin: { component: 'CAD' } });
   const workerInitializationPromise = useRef<Promise<Remote<BuilderWorkerInterface> | undefined> | undefined>(
@@ -219,7 +219,7 @@ export function ReplicadProvider({
 
   // Memoize the evaluation function
   const evaluateCode = useCallback(
-    async (code: string, parameters: Record<string, any>) => {
+    async (code: string, parameters: Record<string, unknown>) => {
       const evalStartTime = performance.now();
       const worker = await getOrInitWorker();
       const workerInitTime = performance.now();
@@ -292,7 +292,7 @@ export function ReplicadProvider({
   // Create stable debounced evaluation function
   const debouncedEvaluate = useMemo(
     () =>
-      debounce((code: string, parameters: Record<string, any>) => {
+      debounce((code: string, parameters: Record<string, unknown>) => {
         dispatch({ type: 'SET_STATUS', payload: { isBuffering: false } });
 
         log.debug('Evaluating code after debounce');
@@ -336,7 +336,7 @@ export function ReplicadProvider({
       setCode(code: string) {
         dispatch({ type: 'SET_CODE', payload: code });
       },
-      setParameters(parameters: Record<string, any>) {
+      setParameters(parameters: Record<string, unknown>) {
         dispatch({ type: 'SET_PARAMETERS', payload: parameters });
       },
       defaultParameters: state.defaultParameters ?? {},
@@ -344,11 +344,11 @@ export function ReplicadProvider({
     [state.mesh, state.isComputing, state.isBuffering, state.error, state.defaultParameters, getOrInitWorker],
   );
 
-  return <ReplicadContext.Provider value={value}>{children}</ReplicadContext.Provider>;
+  return <CadContext.Provider value={value}>{children}</CadContext.Provider>;
 }
 
 export function useReplicad() {
-  const context = useContext(ReplicadContext);
+  const context = useContext(CadContext);
   if (!context) {
     throw new Error('useReplicad must be used within a ReplicadProvider');
   }

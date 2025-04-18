@@ -1,9 +1,10 @@
 import { useParams } from '@remix-run/react';
 import { useEffect, useState } from 'react';
+import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
 import { ChatInterface } from '@/routes/builds_.$id/chat-interface.js';
-import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context.js';
+import { CadProvider, useReplicad } from '@/components/geometry/kernel/cad-context.js';
 import { BuildProvider, useBuild } from '@/hooks/use-build2.js';
 import { Button } from '@/components/ui/button.js';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.js';
@@ -20,7 +21,7 @@ function BuildNameEditor() {
   const [displayName, setDisplayName] = useState<string>(build?.name ?? '');
   const { append } = useChat({
     ...useChatConstants,
-    onFinish(message, options) {
+    onFinish(message) {
       const textPart = message.parts?.find((part) => part.type === 'text');
       if (textPart) {
         updateName(textPart.text);
@@ -156,7 +157,7 @@ function Chat() {
   return <ChatInterface />;
 }
 
-export default function ChatRoute() {
+export default function ChatRoute(): JSX.Element {
   const { id } = useParams();
 
   if (!id) {
@@ -166,11 +167,11 @@ export default function ChatRoute() {
   return (
     <LogProvider>
       <BuildProvider buildId={id}>
-        <ReplicadProvider withExceptions evaluateDebounceTime={300}>
+        <CadProvider withExceptions evaluateDebounceTime={300}>
           <div className="flex h-full">
             <Chat />
           </div>
-        </ReplicadProvider>
+        </CadProvider>
       </BuildProvider>
     </LogProvider>
   );

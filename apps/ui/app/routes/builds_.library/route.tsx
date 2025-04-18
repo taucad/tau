@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import type { JSX } from 'react';
 import {
   Search,
   Filter,
@@ -32,7 +33,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.j
 import type { Category } from '@/types/cad.js';
 import { categories } from '@/types/cad.js';
 import type { Build } from '@/types/build.js';
-import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context.js';
+import { CadProvider, useReplicad } from '@/components/geometry/kernel/cad-context.js';
 import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
 import { useBuilds } from '@/hooks/use-builds.js';
 import { toast } from '@/components/ui/sonner.js';
@@ -52,7 +53,7 @@ export const handle: Handle = {
 
 const itemsPerPage = 12;
 
-export default function PersonalCadProjects() {
+export default function PersonalCadProjects(): JSX.Element {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -209,9 +210,9 @@ function LibraryBuildGrid({
   return (
     <div className={viewMode === 'grid' ? 'grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'space-y-4'}>
       {projects.slice(0, visibleProjects).map((project) => (
-        <ReplicadProvider key={project.id}>
+        <CadProvider key={project.id}>
           <BuildLibraryCard project={project} viewMode={viewMode} />
-        </ReplicadProvider>
+        </CadProvider>
       ))}
     </div>
   );

@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import type { ComponentType, JSX } from 'react';
 import { Star, GitFork, Eye } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from '@remix-run/react';
@@ -9,14 +9,14 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card.js';
 import { SvgIcon } from '@/components/icons/svg-icon.js';
 import type { Build } from '@/types/build.js';
-import type { CadProvider, Category } from '@/types/cad.js';
+import type { CadKernelProvider, Category } from '@/types/cad.js';
 import { categories } from '@/types/cad.js';
-import { ReplicadProvider, useReplicad } from '@/components/geometry/kernel/replicad/replicad-context.js';
+import { CadProvider, useReplicad } from '@/components/geometry/kernel/cad-context.js';
 import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
 import { storage } from '@/db/storage.js';
 
 // Placeholder for language icons
-const languageIcons: Record<CadProvider, ComponentType<{ className?: string }>> = {
+const languageIcons: Record<CadKernelProvider, ComponentType<{ className?: string }>> = {
   replicad: ({ className }) => <SvgIcon id="replicad" className={className} />,
   openscad: ({ className }) => <SvgIcon id="openscad" className={className} />,
   kicad: ({ className }) => <SvgIcon id="kicad" className={className} />,
@@ -32,14 +32,14 @@ export type CommunityBuildGridProperties = {
   readonly onLoadMore?: () => void;
 };
 
-export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBuildGridProperties) {
+export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBuildGridProperties): JSX.Element {
   return (
     <>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {builds.map((build) => (
-          <ReplicadProvider key={build.id}>
+          <CadProvider key={build.id}>
             <ProjectCard {...build} />
-          </ReplicadProvider>
+          </CadProvider>
         ))}
       </div>
 

@@ -1,12 +1,13 @@
 import { RefreshCcw, RefreshCcwDot } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
+import type { JSX } from 'react';
 import { pascalCaseToWords } from '@/utils/string.js';
 import { Slider } from '@/components/ui/slider.js';
 import { Switch } from '@/components/ui/switch.js';
 import { Input } from '@/components/ui/input.js';
 import { useBuild } from '@/hooks/use-build2.js';
 import { Button } from '@/components/ui/button.js';
-import { useReplicad } from '@/components/geometry/kernel/replicad/replicad-context.js';
+import { useReplicad } from '@/components/geometry/kernel/cad-context.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import { cn } from '@/utils/ui.js';
 
@@ -17,12 +18,12 @@ import { cn } from '@/utils/ui.js';
  * @param defaultParameters - The default parameters
  * @returns The validated parameters
  */
-export const validateParameters = (parameters: Record<string, unknown>, defaultParameters: Record<string, unknown>) => {
+const validateParameters = (parameters: Record<string, unknown>, defaultParameters: Record<string, unknown>) => {
   const allowedParameters = Object.keys(defaultParameters || {});
   return Object.fromEntries(Object.entries(parameters).filter(([key]) => allowedParameters.includes(key)));
 };
 
-export function ChatParameters() {
+export function ChatParameters(): JSX.Element {
   const { setParameters, parameters } = useBuild();
   const { defaultParameters } = useReplicad();
 
@@ -109,7 +110,7 @@ export function ChatParameters() {
                     <Slider
                       value={[value]}
                       min={0}
-                      max={defaultParameters[key] * 4}
+                      max={(defaultParameters[key] as number) * 4}
                       step={1}
                       className={cn(
                         //

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { JSX } from 'react';
 import { Link } from '@remix-run/react';
 import { Search, Code2, SlidersHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button.js';
@@ -10,8 +11,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu.js';
-import type { CadProvider } from '@/types/cad.js';
-import { cadProviders } from '@/types/cad.js';
+import type { CadKernelProvider } from '@/types/cad.js';
+import { cadKernelProviders } from '@/types/cad.js';
 import { sampleBuilds } from '@/components/mock-builds.js';
 import { CommunityBuildGrid } from '@/components/project-grid.js';
 import type { Handle } from '@/types/matches.js';
@@ -31,9 +32,9 @@ export const handle: Handle = {
 const itemsPerPage = 9;
 type SortOption = 'newest' | 'oldest' | 'stars' | 'forks';
 
-export default function CadCommunity() {
+export default function CadCommunity(): JSX.Element {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedLanguage, setSelectedLanguage] = useState<CadProvider | 'all'>('all');
+  const [selectedLanguage, setSelectedLanguage] = useState<CadKernelProvider | 'all'>('all');
   const [sortOption, setSortOption] = useState<SortOption>('newest');
   const [visibleProjects, setVisibleProjects] = useState(itemsPerPage);
 
@@ -124,7 +125,7 @@ export default function CadCommunity() {
                   >
                     All Languages
                   </DropdownMenuItem>
-                  {cadProviders.map((key) => (
+                  {cadKernelProviders.map((key) => (
                     <DropdownMenuItem
                       key={key}
                       onClick={() => {

@@ -1,5 +1,5 @@
 import type { Message } from '@ai-sdk/react';
-import type { CadProvider, Category } from './cad.js';
+import type { CadKernelProvider, Category } from './cad.js';
 
 type File = {
   content: string;
@@ -28,7 +28,7 @@ export type Build = {
       {
         files: Record<string, File>;
         main: string;
-        language: CadProvider;
+        language: CadKernelProvider;
         parameters: Record<string, unknown>;
       }
     >

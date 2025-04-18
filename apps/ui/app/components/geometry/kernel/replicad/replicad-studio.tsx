@@ -2,7 +2,7 @@ import { LoaderPinwheel, ImageDown, GalleryThumbnails, Clipboard } from 'lucide-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
 import type { ReplicadViewerReference } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
-import { useReplicad } from '@/components/geometry/kernel/replicad/replicad-context.js';
+import { useReplicad } from '@/components/geometry/kernel/cad-context.js';
 import { DownloadButton } from '@/components/download-button.js';
 import { BoxDown } from '@/components/icons/box-down.js';
 import { Button } from '@/components/ui/button.js';

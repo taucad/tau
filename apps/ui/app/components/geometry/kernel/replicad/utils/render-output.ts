@@ -215,7 +215,7 @@ function renderMesh(shapeConfig: MeshableConfiguration) {
 
   try {
     shapeInfo.mesh = shape.mesh({
-      tolerance: 0.1,
+      tolerance: 0.01,
       angularTolerance: 30,
     });
     shapeInfo.edges = shape.meshEdges({ keepMesh: true });

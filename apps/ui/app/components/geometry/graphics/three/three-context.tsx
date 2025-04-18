@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { useEffect, useState, useImperativeHandle, useRef } from 'react';
 import type { RefObject, ComponentRef, JSX } from 'react';
 import { Focus } from 'lucide-react';
+import { CameraControl, CameraHandler } from './camera-control.js';
 import { Scene } from '@/components/geometry/graphics/three/scene.js';
 import type { Stage, StageOptions, GridSizes } from '@/components/geometry/graphics/three/stage.js';
 import rotateIconBase64 from '@/components/geometry/graphics/three/rotate-icon.svg?base64';
@@ -14,20 +15,11 @@ import type {
 import { ScreenshotCapture } from '@/components/geometry/graphics/three/screenshot-capture.js';
 import { cn } from '@/utils/ui.js';
 import { Button } from '@/components/ui/button.js';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs.js';
 import { useCookie } from '@/hooks/use-cookie.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { useKeydown } from '@/hooks/use-keydown.js';
 import { useThreeCursor } from '@/hooks/use-three-cursor.js';
-import type { KeyCombination } from '@/utils/keys.js';
 
-const cameraModeCookieName = 'camera-mode';
-const toggleCameraKeyCombination = {
-  key: 'c',
-  ctrlKey: true,
-  shiftKey: true,
-  requireAllModifiers: true,
-} as const satisfies KeyCombination;
+const cameraAngleCookieName = 'camera-angle';
 
 export type CadViewerProperties = {
   readonly enableGizmo?: boolean;
@@ -40,7 +32,7 @@ export type CadViewerProperties = {
   readonly center?: boolean;
   readonly stageOptions?: StageOptions;
   readonly onCanvasReady?: (isReady: boolean) => void;
-  readonly defaultCameraMode?: 'perspective' | 'orthographic';
+  readonly defaultCameraAngle?: number;
   readonly zoomSpeed?: number;
 };
 
@@ -65,7 +57,7 @@ export function ThreeProvider({
   stageOptions,
   center = true,
   onCanvasReady,
-  defaultCameraMode = 'perspective',
+  defaultCameraAngle = 60,
   zoomSpeed = 0.4,
   ...properties
 }: ThreeContextProperties & {
@@ -84,18 +76,13 @@ export function ThreeProvider({
     null,
   );
   const stageReference = useRef<ComponentRef<typeof Stage>>(null);
-  const [cameraMode, setCameraMode] = useCookie<'perspective' | 'orthographic'>(
-    cameraModeCookieName,
-    defaultCameraMode,
-  );
+
+  // Use React's useState instead of cookies for immediate response
+  const [cameraAngle, setCameraAngle] = useCookie<number>(cameraAngleCookieName, defaultCameraAngle);
 
   // Use the cursor hook for mouse and keyboard interactions
   const { cursor, handleMouseDown, handleMouseUp, handleContextMenu } = useThreeCursor({
     rotateIconBase64,
-  });
-
-  useKeydown(toggleCameraKeyCombination, () => {
-    setCameraMode(cameraMode === 'perspective' ? 'orthographic' : 'perspective');
   });
 
   useEffect(() => {
@@ -120,13 +107,14 @@ export function ThreeProvider({
       return (
         screenshotReference.current?.captureScreenshot({
           ...options,
-          zoomLevel: cameraMode === 'perspective' ? 1.25 : 4.75,
+          // Adjust zoom based on the camera angle
+          zoomLevel: 1.25 + (4.75 - 1.25) * (1 - cameraAngle / 90),
         }) ?? ''
       );
     };
 
     return canvas;
-  }, [canvasReference, screenshotReference, cameraMode]);
+  }, [canvasReference, screenshotReference, cameraAngle]);
 
   const handleGridChange = (newGridSizes: GridSizes) => {
     setGridSizes(newGridSizes);
@@ -158,11 +146,11 @@ export function ThreeProvider({
           hasGrid={enableGrid}
           hasAxesHelper={enableAxesHelper}
           stageOptions={stageOptions}
-          cameraMode={cameraMode}
           stageRef={stageReference}
           zoomSpeed={zoomSpeed}
           onGridChange={handleGridChange}
         >
+          <CameraHandler key={`camera-handler-${cameraAngle}`} angle={Number(cameraAngle)} />
           {children}
           <ScreenshotCapture ref={screenshotReference} />
         </Scene>
@@ -170,17 +158,15 @@ export function ThreeProvider({
       {enableCameraControls ? (
         <div className="absolute bottom-0 left-0 z-10 m-2">
           <div className="flex items-center gap-2">
-            <Tabs
-              value={cameraMode}
-              onValueChange={(value) => {
-                setCameraMode(value as 'perspective' | 'orthographic');
+            <CameraControl
+              defaultAngle={cameraAngle}
+              className="w-40"
+              onChange={(angle) => {
+                // Just update the angle - no need to switch camera types
+                console.log('Camera angle changed in ThreeProvider:', angle);
+                setCameraAngle(angle);
               }}
-            >
-              <TabsList>
-                <TabsTrigger value="perspective">Perspective</TabsTrigger>
-                <TabsTrigger value="orthographic">Orthographic</TabsTrigger>
-              </TabsList>
-            </Tabs>
+            />
             {enableGrid ? (
               <Button variant="overlay" size="icon" className="flex-col gap-0 font-mono text-xs [&>span]:leading-none">
                 {gridSizes ? (

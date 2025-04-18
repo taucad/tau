@@ -12,7 +12,6 @@ type SceneProperties = {
   readonly hasAxesHelper?: boolean;
   readonly stageOptions?: StageOptions;
   readonly isCentered?: boolean;
-  readonly cameraMode?: 'perspective' | 'orthographic';
   readonly onGridChange?: (gridSizes: GridSizes) => void;
   readonly zoomSpeed: number;
   readonly distanceFalloffScale?: number;
@@ -34,7 +33,6 @@ export function Scene({
   hasAxesHelper = false,
   stageOptions,
   isCentered = true,
-  cameraMode = 'perspective',
   controlsRef,
   stageRef,
   onGridChange,
@@ -59,7 +57,6 @@ export function Scene({
         isCentered={isCentered}
         hasGrid={hasGrid}
         hasAxesHelper={hasAxesHelper}
-        cameraMode={cameraMode}
         distanceFalloffScale={distanceFalloffScale}
         hasDynamicDistanceFalloff={hasDynamicDistanceFalloff}
         minDistanceFalloffScale={minDistanceFalloffScale}

@@ -292,7 +292,7 @@ export function Stage({
 
       // On first setup or camera type change, initialize the base frustum size
       if (baseFrustumSize.current === null || hasCameraTypeChanged) {
-        baseFrustumSize.current = shapeRadius * 70;
+        baseFrustumSize.current = shapeRadius * 100;
       }
 
       // Reset zoom to initial value
@@ -302,15 +302,16 @@ export function Stage({
       const frustumHeight = baseFrustumSize.current / camera.zoom;
       const frustumWidth = frustumHeight * aspect;
 
-      // Set camera frustum
-      camera.left = -frustumWidth / 2;
-      camera.right = frustumWidth / 2;
-      camera.top = frustumHeight / 2;
-      camera.bottom = -frustumHeight / 2;
+      // Add a buffer factor to ensure content stays in view when zooming out
+      const bufferFactor = 1.5;
+      camera.left = (-frustumWidth / 2) * bufferFactor;
+      camera.right = (frustumWidth / 2) * bufferFactor;
+      camera.top = (frustumHeight / 2) * bufferFactor;
+      camera.bottom = (-frustumHeight / 2) * bufferFactor;
 
-      // Adjust near and far planes to accommodate the much larger view
-      camera.near = -Math.max(orthographic.minimumNearPlane, shapeRadius * orthographic.offsetRatio * 5);
-      camera.far = Math.abs(camera.near) * 2; // Make far plane even more generous
+      // Make near and far planes even more generous
+      camera.near = -Math.max(orthographic.minimumNearPlane, shapeRadius * orthographic.offsetRatio * 10);
+      camera.far = Math.abs(camera.near) * 4;
     } else {
       // Reset our base frustum size when switching away from orthographic
 
@@ -478,8 +479,8 @@ export function Stage({
 
   return (
     <group {...properties}>
-      {properties.cameraMode === 'perspective' && <PerspectiveCamera makeDefault />}
-      {properties.cameraMode === 'orthographic' && <OrthographicCamera makeDefault />}
+      {/* Always use PerspectiveCamera regardless of cameraMode */}
+      <PerspectiveCamera makeDefault />
       <group ref={outer}>
         {properties.hasAxesHelper ? <AxesHelper /> : null}
         {properties.hasGrid ? (

@@ -5,7 +5,7 @@ import { useEffect, useState, useImperativeHandle, useRef } from 'react';
 import type { RefObject, ComponentRef, JSX } from 'react';
 import { Focus } from 'lucide-react';
 import { Scene } from '@/components/geometry/graphics/three/scene.js';
-import type { Stage, StageOptions } from '@/components/geometry/graphics/three/stage.js';
+import type { Stage, StageOptions, GridSizes } from '@/components/geometry/graphics/three/stage.js';
 import rotateIconBase64 from '@/components/geometry/graphics/three/rotate-icon.svg?base64';
 import type {
   ScreenshotCaptureHandle,
@@ -41,6 +41,7 @@ export type CadViewerProperties = {
   readonly stageOptions?: StageOptions;
   readonly onCanvasReady?: (isReady: boolean) => void;
   readonly defaultCameraMode?: 'perspective' | 'orthographic';
+  readonly zoomSpeed?: number;
 };
 
 export type ThreeContextProperties = CanvasProps & CadViewerProperties;
@@ -65,6 +66,7 @@ export function ThreeProvider({
   center = true,
   onCanvasReady,
   defaultCameraMode = 'perspective',
+  zoomSpeed = 0.4,
   ...properties
 }: ThreeContextProperties & {
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
@@ -72,6 +74,10 @@ export function ThreeProvider({
 }): JSX.Element {
   const dpr = Math.min(globalThis.devicePixelRatio, 2);
   const [isCanvasReady, setIsCanvasReady] = useState(false);
+  const [gridSizes, setGridSizes] = useState<GridSizes>({
+    smallSize: 1,
+    largeSize: 10,
+  });
 
   const screenshotReference = useRef<ScreenshotCaptureHandle>(null);
   const canvasReference = useRef<HTMLCanvasElement & { captureScreenshot: (options?: ScreenshotOptions) => string }>(
@@ -122,6 +128,10 @@ export function ThreeProvider({
     return canvas;
   }, [canvasReference, screenshotReference, cameraMode]);
 
+  const handleGridChange = (newGridSizes: GridSizes) => {
+    setGridSizes(newGridSizes);
+  };
+
   return (
     <div className="relative size-full">
       <Canvas
@@ -150,6 +160,8 @@ export function ThreeProvider({
           stageOptions={stageOptions}
           cameraMode={cameraMode}
           stageRef={stageReference}
+          zoomSpeed={zoomSpeed}
+          onGridChange={handleGridChange}
         >
           {children}
           <ScreenshotCapture ref={screenshotReference} />
@@ -169,10 +181,16 @@ export function ThreeProvider({
                 <TabsTrigger value="orthographic">Orthographic</TabsTrigger>
               </TabsList>
             </Tabs>
-            <Button variant="overlay" size="icon" className="flex-col gap-0 font-mono text-xs [&>span]:leading-none">
-              <span>1</span>
-              <span>mm</span>
-            </Button>
+            {enableGrid ? (
+              <Button variant="overlay" size="icon" className="flex-col gap-0 font-mono text-xs [&>span]:leading-none">
+                {gridSizes ? (
+                  <>
+                    <span>{gridSizes?.smallSize}</span>
+                    <span>mm</span>
+                  </>
+                ) : null}
+              </Button>
+            ) : null}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="overlay" size="icon" onClick={() => stageReference.current?.resetCamera()}>

@@ -1,5 +1,5 @@
-import type { ComponentRef, ReactNode, RefObject } from 'react';
-import type { StageOptions } from '@/components/geometry/graphics/three/stage.js';
+import type { ComponentRef, ReactNode, RefObject, JSX } from 'react';
+import type { StageOptions, GridSizes } from '@/components/geometry/graphics/three/stage.js';
 import { Stage } from '@/components/geometry/graphics/three/stage.js';
 import { Controls } from '@/components/geometry/graphics/three/controls.js';
 
@@ -13,6 +13,8 @@ type SceneProperties = {
   readonly stageOptions?: StageOptions;
   readonly isCentered?: boolean;
   readonly cameraMode?: 'perspective' | 'orthographic';
+  readonly onGridChange?: (gridSizes: GridSizes) => void;
+  readonly zoomSpeed: number;
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
   readonly controlsRef?: RefObject<ComponentRef<typeof Controls> | null>;
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
@@ -31,10 +33,18 @@ export function Scene({
   cameraMode = 'perspective',
   controlsRef,
   stageRef,
-}: SceneProperties) {
+  onGridChange,
+  zoomSpeed,
+}: SceneProperties): JSX.Element {
   return (
     <>
-      <Controls ref={controlsRef} enableGizmo={hasGizmo} enableDamping={hasDamping} enableZoom={hasZoom} />
+      <Controls
+        ref={controlsRef}
+        enableGizmo={hasGizmo}
+        enableDamping={hasDamping}
+        enableZoom={hasZoom}
+        zoomSpeed={zoomSpeed}
+      />
       <Stage
         ref={stageRef}
         stageOptions={stageOptions}
@@ -42,6 +52,7 @@ export function Scene({
         hasGrid={hasGrid}
         hasAxesHelper={hasAxesHelper}
         cameraMode={cameraMode}
+        onGridChange={onGridChange}
       >
         {children}
       </Stage>

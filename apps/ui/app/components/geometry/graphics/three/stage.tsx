@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
-import type { ReactNode, RefObject } from 'react';
+import type { JSX, ReactNode, RefObject } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
-import { OrthographicCamera, PerspectiveCamera } from '@react-three/drei';
+import type { RootState } from '@react-three/fiber';
+import { Html, OrthographicCamera, PerspectiveCamera } from '@react-three/drei';
 import { InfiniteGrid } from '@/components/geometry/graphics/three/infinite-grid.js';
 import { AxesHelper } from '@/components/geometry/graphics/three/axes-helper.js';
 
@@ -78,6 +79,20 @@ export const defaultStageOptions = {
   },
 } as const satisfies StageOptions;
 
+// Grid size calculation constants
+export const gridSizeConstants = {
+  // How aggressively the grid size scales with object size (higher = more aggressive)
+  shapeRadiusLogFactor: 2.5,
+  // Coefficient for the grid size calculation to fine-tune the result
+  baseGridSizeCoefficient: 20,
+  // Minimum base grid size to prevent too small grids, in mm
+  minimumBaseGridSize: 0.1,
+  // Threshold for rounding to 1× or 5× powers of 10
+  roundingThreshold: 2.5,
+  // For perspective mode - multiplier for the effectiveSize calculation
+  perspectiveEffectiveSizeFactor: 50,
+} as const;
+
 /**
  * Get the position on the circumference of a circle given the radius and angle in radians.
  * @param radius - The radius of the circle.
@@ -88,6 +103,11 @@ function getPositionOnCircle(radius: number, angleInRadians: number): [number, n
   return [radius * Math.cos(angleInRadians), radius * Math.sin(angleInRadians)];
 }
 
+export type GridSizes = {
+  smallSize: number;
+  largeSize: number;
+};
+
 type StageProperties = {
   readonly children: ReactNode;
   readonly isCentered?: boolean;
@@ -95,6 +115,7 @@ type StageProperties = {
   readonly hasGrid?: boolean;
   readonly hasAxesHelper?: boolean;
   readonly cameraMode?: 'perspective' | 'orthographic';
+  readonly onGridChange?: (gridSizes: GridSizes) => void;
   readonly ref?: RefObject<
     | {
         resetCamera: () => void;
@@ -109,10 +130,20 @@ export function Stage({
   isCentered = false,
   stageOptions = defaultStageOptions,
   ref,
+  onGridChange,
   ...properties
-}: StageProperties) {
+}: StageProperties): JSX.Element {
   const camera = useThree((state) => state.camera);
-  const controls = useThree((state) => state.controls);
+  const controls = useThree((state) => state.controls) as RootState['controls'] & {
+    /**
+     * Get the distance between the camera and the target.
+     *
+     * @returns The distance between the camera and the target.
+     *
+     * @note this does exist, it's just not typed
+     */
+    getDistance: () => number;
+  };
   const { invalidate } = useThree();
   const size = useThree((state) => state.size); // Get the canvas size
   const outer = React.useRef<THREE.Group>(null);
@@ -192,15 +223,12 @@ export function Stage({
 
     const handleControlsChange = () => {
       if (camera.type === 'OrthographicCamera') {
-        const { zoom } = camera;
-        setCurrentZoom(zoom);
+        setCurrentZoom(camera.zoom);
       } else {
         if (originalDistanceReference.current === null) {
-          // @ts-expect-error getDistance exists on OrbitControls
           originalDistanceReference.current = controls.getDistance?.();
         }
 
-        // @ts-expect-error getDistance exists on OrbitControls
         const distance = controls.getDistance?.();
         if (distance && originalDistanceReference.current) {
           const zoom = originalDistanceReference.current / distance;
@@ -343,42 +371,63 @@ export function Stage({
       };
     }
 
-    let effectiveZoom;
-    // eslint-disable-next-line unicorn/prefer-ternary -- the math is easier to read this way
     if (camera.type === 'OrthographicCamera') {
-      effectiveZoom = currentZoom / 28;
-    } else {
-      effectiveZoom = currentZoom;
+      // Orthographic camera grid calculation
+      // Base factor - how much we scale the grid based on shape size
+      // Use a more aggressive logarithmic scale for better scaling with object size
+      const baseFactor = Math.max(1, Math.log10(shapeRadius) * gridSizeConstants.shapeRadiusLogFactor);
+
+      // Calculate effective zoom - inversely proportional to zoom value
+      // Lower camera zoom means we're more zoomed out, so grid should be larger
+      const inverseZoom = 1 / currentZoom;
+
+      // Calculate grid size using logarithmic scale that grows as we zoom out
+      // Adjust coefficients for better scaling
+      const baseGridSize = Math.max(
+        gridSizeConstants.minimumBaseGridSize,
+        inverseZoom * baseFactor * gridSizeConstants.baseGridSizeCoefficient,
+      );
+
+      // Find appropriate power of 10
+      const exponent = Math.floor(Math.log10(baseGridSize));
+      const mantissa = baseGridSize / 10 ** exponent;
+
+      // Round to either 1 or 5 times a power of 10, eliminating the 2x option
+      const largeSize = mantissa < gridSizeConstants.roundingThreshold ? 10 ** exponent : 5 * 10 ** exponent;
+
+      return {
+        smallSize: largeSize / 10,
+        largeSize,
+        effectiveSize: baseGridSize,
+        baseSize: shapeRadius * inverseZoom,
+        zoomFactor: inverseZoom,
+      };
     }
 
+    // Perspective camera calculation (unchanged)
+    const effectiveZoom = currentZoom;
     const baseSize = shapeRadius * effectiveZoom;
-    const effectiveSize = (1 / baseSize) * 50;
+    const effectiveSize = (1 / baseSize) * gridSizeConstants.perspectiveEffectiveSizeFactor;
 
     // Calculate the appropriate grid size using logarithms
     // This finds the nearest power of 10 multiplied by either 1 or 5
     const exponent = Math.floor(Math.log10(effectiveSize));
     const mantissa = effectiveSize / 10 ** exponent;
 
-    let largeSize;
-    // eslint-disable-next-line unicorn/prefer-ternary -- the math is easier to read this way
-    if (mantissa < 2.5) {
-      largeSize = 10 ** exponent;
-    } else {
-      largeSize = 5 * 10 ** exponent;
-    }
+    const largeSize = mantissa < gridSizeConstants.roundingThreshold ? 10 ** exponent : 5 * 10 ** exponent;
 
-    const value = {
+    return {
       smallSize: largeSize / 10, // Smaller grid is 1/10th of the larger grid
       largeSize,
       effectiveSize,
       baseSize,
     };
-
-    return value;
   }, [camera.type, currentZoom, properties.hasGrid, shapeRadius]);
-  // Console.log(camera);
-  // console.log(controls);
-  // console.log(gridSizes);
+
+  // Call onGridChange when gridSizes change
+  React.useEffect(() => {
+    onGridChange?.(gridSizes);
+  }, [gridSizes, onGridChange]);
 
   return (
     <group {...properties}>
@@ -386,9 +435,9 @@ export function Stage({
       {properties.cameraMode === 'orthographic' && <OrthographicCamera makeDefault />}
       <group ref={outer}>
         {properties.hasAxesHelper ? <AxesHelper /> : null}
-        {properties.hasGrid ? <InfiniteGrid smallSize={10} largeSize={100} /> : null}
+        {properties.hasGrid ? <InfiniteGrid smallSize={gridSizes.smallSize} largeSize={gridSizes.largeSize} /> : null}
         <group ref={inner}>{children}</group>
-        {/* <Html position={[0, 0, 10]}>
+        <Html position={[0, 0, 10]}>
           <div className="rounded-md border bg-background p-1 text-xs">
             {Object.entries(gridSizes).map(([key, value]) => (
               <div key={key}>
@@ -409,7 +458,7 @@ export function Stage({
               </span>
             </div>
           </div>
-        </Html> */}
+        </Html>
       </group>
     </group>
   );

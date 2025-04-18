@@ -8,7 +8,7 @@ type ControlsProperties = {
   readonly enableZoom: boolean;
   readonly zoomSpeed: number;
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
-  readonly ref: RefObject<ComponentRef<typeof OrbitControls> | null>;
+  readonly ref?: RefObject<ComponentRef<typeof OrbitControls> | null>;
 };
 
 export const Controls = React.memo(function ({

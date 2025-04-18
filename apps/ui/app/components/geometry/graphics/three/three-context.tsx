@@ -2,11 +2,11 @@ import type { CanvasProps } from '@react-three/fiber';
 import { Canvas } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useEffect, useState, useImperativeHandle, useRef } from 'react';
-import type { RefObject, ComponentRef } from 'react';
+import type { RefObject, ComponentRef, JSX } from 'react';
 import { Focus } from 'lucide-react';
 import { Scene } from '@/components/geometry/graphics/three/scene.js';
 import type { Stage, StageOptions } from '@/components/geometry/graphics/three/stage.js';
-import rotate3dBase64 from '@/components/geometry/graphics/three/rotate-3d.svg?base64';
+import rotateIconBase64 from '@/components/geometry/graphics/three/rotate-icon.svg?base64';
 import type {
   ScreenshotCaptureHandle,
   ScreenshotOptions,
@@ -18,6 +18,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs.js';
 import { useCookie } from '@/hooks/use-cookie.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import { useKeydown } from '@/hooks/use-keydown.js';
+import { useThreeCursor } from '@/hooks/use-three-cursor.js';
 import type { KeyCombination } from '@/utils/keys.js';
 
 const cameraModeCookieName = 'camera-mode';
@@ -68,9 +69,10 @@ export function ThreeProvider({
 }: ThreeContextProperties & {
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
   readonly ref?: RefObject<ThreeCanvasReference | null>;
-}) {
-  const dpr = Math.min(window.devicePixelRatio, 2);
+}): JSX.Element {
+  const dpr = Math.min(globalThis.devicePixelRatio, 2);
   const [isCanvasReady, setIsCanvasReady] = useState(false);
+
   const screenshotReference = useRef<ScreenshotCaptureHandle>(null);
   const canvasReference = useRef<HTMLCanvasElement & { captureScreenshot: (options?: ScreenshotOptions) => string }>(
     null,
@@ -80,6 +82,11 @@ export function ThreeProvider({
     cameraModeCookieName,
     defaultCameraMode,
   );
+
+  // Use the cursor hook for mouse and keyboard interactions
+  const { cursor, handleMouseDown, handleMouseUp, handleContextMenu } = useThreeCursor({
+    rotateIconBase64,
+  });
 
   useKeydown(toggleCameraKeyCombination, () => {
     setCameraMode(cameraMode === 'perspective' ? 'orthographic' : 'perspective');
@@ -120,8 +127,7 @@ export function ThreeProvider({
       <Canvas
         ref={canvasReference}
         style={{
-          // 13 is half the size of the cursor viewbox
-          cursor: `url(data:image/svg+xml;base64,${rotate3dBase64}) 13 13, auto`,
+          cursor,
         }}
         dpr={dpr}
         frameloop="demand"
@@ -129,6 +135,9 @@ export function ThreeProvider({
         onCreated={() => {
           setIsCanvasReady(true);
         }}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
+        onContextMenu={handleContextMenu}
         {...properties}
       >
         <Scene

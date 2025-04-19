@@ -175,7 +175,7 @@ export function InfiniteGrid({
   distanceFalloffScale = 800,
   hasDynamicDistanceFalloff = true,
   minDistanceFalloffScale = 800,
-  maxDistanceFalloffScale = 10_000,
+  maxDistanceFalloffScale = 100_000,
 }: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
   const [theme] = useTheme();
   const materialRef = React.useRef<THREE.ShaderMaterial | undefined>(null);

@@ -3,7 +3,6 @@ import { Plane } from '@react-three/drei';
 import React from 'react';
 import type { JSX } from 'react';
 import { Theme, useTheme } from 'remix-themes';
-import { useFrame } from '@react-three/fiber';
 
 type InfiniteGridProperties = {
   /**
@@ -44,20 +43,9 @@ type InfiniteGridProperties = {
    */
   readonly distanceFalloffScale: number;
   /**
-   * Whether to make the distance falloff scale dynamic based on zoom.
-   * @default true
+   * The overall distance for which the grid will be rendered. Higher values show grid further away.
    */
-  readonly hasDynamicDistanceFalloff: boolean;
-  /**
-   * The minimum distance falloff scale.
-   * @default 800
-   */
-  readonly minDistanceFalloffScale: number;
-  /**
-   * The maximum distance falloff scale.
-   * @default 10000
-   */
-  readonly maxDistanceFalloffScale: number;
+  readonly distance?: number;
 };
 
 // Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
@@ -71,15 +59,18 @@ function infiniteGridMaterial({
   largeThickness,
   lineOpacity,
   distanceFalloffScale,
+  distance,
 }: InfiniteGridProperties) {
   // Validate to ensure axes cannot be used to inject malicious code
   if (!['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'].includes(axes)) {
     throw new Error('Invalid axes parameter');
   }
 
-  const distance = smallSize * 1000;
+  // If no distance is provided, calculate based on grid size
+  const actualDistance = distance ?? smallSize * 1000;
 
   const planeAxes = axes.slice(0, 2);
+  const normalAxis = axes[2]; // The normal axis to the grid (usually 'z')
 
   const material = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
@@ -95,7 +86,7 @@ function infiniteGridMaterial({
         value: color,
       },
       uDistance: {
-        value: distance,
+        value: actualDistance,
       },
       uSmallThickness: {
         value: smallThickness,
@@ -113,6 +104,7 @@ function infiniteGridMaterial({
     transparent: true,
     vertexShader: `
       varying vec3 worldPosition;
+      varying vec3 viewVector;
   
       uniform float uDistance;
       
@@ -122,12 +114,16 @@ function infiniteGridMaterial({
         
         worldPosition = pos;
         
+        // Calculate view vector from camera to this vertex
+        viewVector = normalize(cameraPosition - pos);
+        
         gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
       }
       `,
 
     fragmentShader: `
       varying vec3 worldPosition;
+      varying vec3 viewVector;
       
       uniform float uSize1;
       uniform float uSize2;
@@ -148,16 +144,40 @@ function infiniteGridMaterial({
       }
       
       void main() {
-        float d = 1.0 - min(distance(cameraPosition.${planeAxes}, worldPosition.${planeAxes}) / uDistance, 1.0);
-      
+        // Calculate planar distance - distance in the grid plane
+        float planarDistance = distance(cameraPosition.${planeAxes}, worldPosition.${planeAxes});
+        
+        // Calculate view angle factor - dot product of view vector and grid normal
+        float viewAngleFactor = abs(viewVector.${normalAxis});
+        
+        // Create a much more forgiving distance adjustment for shallow viewing angles
+        // This ensures grid remains visible even at extreme angles
+        float adjustedDistance = planarDistance * pow(viewAngleFactor, 0.3);
+        
+        // Calculate fade factor with a softer transition
+        float d = 1.0 - min(adjustedDistance / uDistance, 1.0);
+        
+        // Calculate a viewing-angle aware falloff exponent
+        // This makes the falloff much gentler at shallow viewing angles
+        float falloffBase = max(0.5, viewAngleFactor);
+        float falloffExponent = uDistance / (uDistanceFalloffScale * falloffBase);
+        
+        // Apply power function with a minimum to prevent complete fade at distance
+        float fadeFactor = max(0.2, pow(d, falloffExponent));
+        
+        // Apply different opacity based on viewing angle
+        // Higher opacity at shallow angles to compensate for stretching
+        float angleAdjustedOpacity = uLineOpacity * (1.0 + (1.0 - viewAngleFactor));
+        
         float gridSmall = getGrid(uSize1, uSmallThickness);
         float gridLarge = getGrid(uSize2, uLargeThickness);
         
         float grid = max(gridSmall, gridLarge);
         
-        gl_FragColor = vec4(uColor.rgb, grid * pow(d, uDistance / uDistanceFalloffScale) * uLineOpacity);
+        // Apply enhanced fade that maintains visibility at all angles
+        gl_FragColor = vec4(uColor.rgb, grid * fadeFactor * angleAdjustedOpacity);
         
-        if ( gl_FragColor.a <= 0.0 ) discard;
+        if (gl_FragColor.a <= 0.0) discard;
       }
       `,
   });
@@ -173,13 +193,12 @@ export function InfiniteGrid({
   axes = 'xyz',
   lineOpacity = 0.3,
   distanceFalloffScale = 800,
-  hasDynamicDistanceFalloff = true,
-  minDistanceFalloffScale = 800,
-  maxDistanceFalloffScale = 100_000,
+  distance,
 }: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
   const [theme] = useTheme();
   const materialRef = React.useRef<THREE.ShaderMaterial | undefined>(null);
 
+  // Create material with initial properties
   const material = React.useMemo(
     () =>
       infiniteGridMaterial({
@@ -191,45 +210,20 @@ export function InfiniteGrid({
         axes,
         lineOpacity,
         distanceFalloffScale,
-        hasDynamicDistanceFalloff,
-        minDistanceFalloffScale,
-        maxDistanceFalloffScale,
+        distance,
       }),
-    [
-      smallSize,
-      largeSize,
-      smallThickness,
-      largeThickness,
-      theme,
-      axes,
-      lineOpacity,
-      distanceFalloffScale,
-      hasDynamicDistanceFalloff,
-      minDistanceFalloffScale,
-      maxDistanceFalloffScale,
-    ],
+    [smallSize, largeSize, smallThickness, largeThickness, theme, axes, lineOpacity, distanceFalloffScale, distance],
   );
 
   React.useEffect(() => {
     materialRef.current = material;
   }, [material]);
 
-  // Update distanceFalloffScale based on camera position only if dynamic falloff is enabled
-  useFrame(({ camera }) => {
-    if (!materialRef.current || !hasDynamicDistanceFalloff) return;
-
-    // Get camera distance from origin (or any reference point)
-    const cameraDistance = camera.position.length();
-
-    // Adjust distanceFalloffScale based on distance
-    // This is a simple linear mapping - adjust the formula as needed
-    const dynamicFalloffScale = Math.max(
-      minDistanceFalloffScale,
-      Math.min(maxDistanceFalloffScale, distanceFalloffScale * (1 + cameraDistance / 1000)),
-    );
-
-    materialRef.current.uniforms.uDistanceFalloffScale.value = dynamicFalloffScale;
-  });
+  // Update distanceFalloffScale immediately when it changes from props
+  React.useEffect(() => {
+    if (!materialRef.current) return;
+    materialRef.current.uniforms.uDistanceFalloffScale.value = distanceFalloffScale;
+  }, [distanceFalloffScale]);
 
   return (
     <Plane

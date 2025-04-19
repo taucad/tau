@@ -62,10 +62,8 @@ export const defaultStageOptions = {
 
 // Grid size calculation constants
 export const gridSizeConstants = {
-  // How aggressively the grid size scales with object size (higher = more aggressive)
-  shapeRadiusLogFactor: 2.5,
-  // Coefficient for the grid size calculation to fine-tune the result (lower = more aggressive)
-  baseGridSizeCoefficient: 20,
+  // Coefficient for the grid size calculation to fine-tune the result (lower = larger grid)
+  baseGridSizeCoefficient: 10,
   // Minimum base grid size to prevent too small grids, in mm
   minimumBaseGridSize: 0.1,
   // Threshold for rounding to 1× or 5× powers of 10
@@ -295,7 +293,7 @@ export function Stage({
     }
   }, [camera, resetCamera, sceneRadius, shapeRadius]);
 
-  // Calculate grid sizes based on zoom and shape radius
+  // Calculate grid sizes based solely on camera properties
   const gridSizes = useMemo(() => {
     if (!properties.hasGrid) {
       return {
@@ -305,32 +303,42 @@ export function Stage({
       };
     }
 
-    // Base factor - how much we scale the grid based on shape size
-    const baseFactor = Math.max(1, Math.log10(shapeRadius) * gridSizeConstants.shapeRadiusLogFactor);
+    // Get current camera distance
+    const cameraDistance = camera.position.length();
 
-    const inverseZoom = 1 / currentZoom;
+    // Get current FOV
+    const { fov } = camera as THREE.PerspectiveCamera;
 
-    // Calculate grid size using logarithmic scale that grows as we zoom out
-    const baseGridSize = Math.max(
-      gridSizeConstants.minimumBaseGridSize,
-      inverseZoom * baseFactor * gridSizeConstants.baseGridSizeCoefficient,
-    );
+    // Calculate the visible width at the center of the view
+    // This is the key formula: 2 * distance * tan(fov/2)
+    const visibleWidthAtDistance = 2 * cameraDistance * Math.tan(THREE.MathUtils.degToRad(fov / 2));
 
-    // Find appropriate power of 10
+    // Set base grid size as fraction of visible width (e.g. 1/20th)
+    // This ensures grid size is proportional to what's visible in the viewport
+    const baseGridSize = visibleWidthAtDistance / gridSizeConstants.baseGridSizeCoefficient;
+
+    // Find appropriate power of 10 for clean grid intervals
     const exponent = Math.floor(Math.log10(baseGridSize));
     const mantissa = baseGridSize / 10 ** exponent;
 
-    // Round to either 1 or 5 times a power of 10
-    const largeSize = mantissa < gridSizeConstants.roundingThreshold ? 10 ** exponent : 5 * 10 ** exponent;
+    // Round to nice numbers (1, 2, or 5 times power of 10)
+    let largeSize;
+    if (mantissa < 1.5) {
+      largeSize = 10 ** exponent;
+    } else if (mantissa < 3.5) {
+      largeSize = 2 * 10 ** exponent;
+    } else {
+      largeSize = 5 * 10 ** exponent;
+    }
 
     return {
-      smallSize: largeSize / 10, // Smaller grid is 1/10th of the larger grid
+      smallSize: largeSize / 10,
       largeSize,
       effectiveSize: baseGridSize,
-      baseSize: shapeRadius * inverseZoom,
-      zoomFactor: inverseZoom,
+      baseSize: cameraDistance,
+      zoomFactor: 1 / currentZoom,
     };
-  }, [currentZoom, properties.hasGrid, shapeRadius]);
+  }, [camera, currentZoom, properties.hasGrid]);
 
   // Calculate dynamic falloff scale based on zoom
   const dynamicFalloffScale = useMemo(() => {

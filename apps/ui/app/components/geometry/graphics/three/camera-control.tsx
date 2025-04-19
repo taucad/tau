@@ -51,9 +51,8 @@ export function CameraHandler({ angle }: CameraHandlerProps): JSX.Element {
     (camera: THREE.PerspectiveCamera, newAngle: number) => {
       if (!cameraState.current.initialized) return;
 
-      // SIMPLIFY: Just apply a very obvious FOV change based on angle
-      // This should be visible regardless of other settings
-      const minFov = 5; // Very narrow FOV at 0 degrees (nearly orthographic)
+      // Apply a FOV change based on angle
+      const minFov = 1; // Very narrow FOV at 0 degrees (nearly orthographic)
       const maxFov = 120; // Very wide FOV at 90 degrees (extreme perspective)
 
       // Calculate new FOV with dramatic change
@@ -65,9 +64,6 @@ export function CameraHandler({ angle }: CameraHandlerProps): JSX.Element {
 
       // Force a re-render
       invalidate();
-
-      // Update last processed angle
-      cameraState.current.lastAngle = newAngle;
     },
     [invalidate],
   );

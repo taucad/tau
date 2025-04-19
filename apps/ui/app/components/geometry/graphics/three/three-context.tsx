@@ -77,7 +77,6 @@ export function ThreeProvider({
   );
   const stageReference = useRef<ComponentRef<typeof Stage>>(null);
 
-  // Use React's useState instead of cookies for immediate response
   const [cameraAngle, setCameraAngle] = useCookie<number>(cameraAngleCookieName, defaultCameraAngle);
 
   // Use the cursor hook for mouse and keyboard interactions
@@ -108,7 +107,7 @@ export function ThreeProvider({
         screenshotReference.current?.captureScreenshot({
           ...options,
           // Adjust zoom based on the camera angle
-          zoomLevel: 1.25 + (4.75 - 1.25) * (1 - cameraAngle / 90),
+          zoomLevel: 1.25 + 1 * (1 - cameraAngle / 90),
         }) ?? ''
       );
     };
@@ -124,6 +123,11 @@ export function ThreeProvider({
     <div className="relative size-full">
       <Canvas
         ref={canvasReference}
+        gl={{
+          // Enable logarithmic depth buffer for better precision at low field of view,
+          // eliminating visual artifacts on the object.
+          logarithmicDepthBuffer: true,
+        }}
         style={{
           cursor,
         }}

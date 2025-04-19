@@ -49,7 +49,7 @@ const significantRadiusChangeRatio = 0.4;
 export const defaultStageOptions = {
   perspective: {
     offsetRatio: 3,
-    nearPlane: 0.2,
+    nearPlane: 1,
     minimumFarPlane: 1_000_000,
     farPlaneRadiusMultiplier: 5,
     zoomLevel: 1.25,
@@ -64,7 +64,7 @@ export const defaultStageOptions = {
 export const gridSizeConstants = {
   // How aggressively the grid size scales with object size (higher = more aggressive)
   shapeRadiusLogFactor: 2.5,
-  // Coefficient for the grid size calculation to fine-tune the result
+  // Coefficient for the grid size calculation to fine-tune the result (lower = more aggressive)
   baseGridSizeCoefficient: 20,
   // Minimum base grid size to prevent too small grids, in mm
   minimumBaseGridSize: 0.1,

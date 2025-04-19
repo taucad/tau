@@ -41,8 +41,7 @@ export function CameraHandler({ angle }: CameraHandlerProps): JSX.Element {
     originalFov: 50, // Default FOV if not set
     originalPosition: new THREE.Vector3(),
     originalZoom: 1,
-    targetDistance: 10,
-    lastAngle: -1,
+    targetDistance: 10_000,
     target: new THREE.Vector3(0, 0, 0),
   });
 
@@ -55,14 +54,37 @@ export function CameraHandler({ angle }: CameraHandlerProps): JSX.Element {
       const minFov = 1; // Very narrow FOV at 0 degrees (nearly orthographic)
       const maxFov = 120; // Very wide FOV at 90 degrees (extreme perspective)
 
+      // Store old FOV before changing
+      const oldFov = camera.fov;
+
       // Calculate new FOV with dramatic change
       const newFov = minFov + (maxFov - minFov) * (newAngle / 90);
 
-      // Apply the change directly to the camera
+      // Apply the FOV change to the camera
       camera.fov = newFov;
-      camera.updateProjectionMatrix();
 
-      // Force a re-render
+      // Adjust camera distance to maintain perceived size
+      // The formula is: d2 = d1 * (tan(fov1/2) / tan(fov2/2))
+      // This keeps objects the same apparent size when FOV changes
+      const oldHalfFovRad = THREE.MathUtils.degToRad(oldFov / 2);
+      const newHalfFovRad = THREE.MathUtils.degToRad(newFov / 2);
+
+      if (oldHalfFovRad !== 0 && newHalfFovRad !== 0) {
+        // Direction from camera to target
+        const direction = camera.position.clone().normalize();
+
+        // Calculate the adjustment ratio - inverse of what we had before
+        // When FOV decreases, we need to move camera farther away
+        const distanceRatio = Math.tan(oldHalfFovRad) / Math.tan(newHalfFovRad);
+
+        // Apply distance adjustment preserving direction
+        const currentDistance = camera.position.length();
+        const newDistance = currentDistance * distanceRatio;
+
+        camera.position.copy(direction.multiplyScalar(newDistance));
+      }
+
+      camera.updateProjectionMatrix();
       invalidate();
     },
     [invalidate],

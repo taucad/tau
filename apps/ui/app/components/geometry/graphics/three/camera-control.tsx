@@ -3,6 +3,9 @@ import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Slider } from '@/components/ui/slider.js';
+import { buttonVariants } from '@/components/ui/button.js';
+import { cn } from '@/utils/ui.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 
 type CameraControlProps = {
   /**
@@ -222,23 +225,45 @@ export function CameraControl({ defaultAngle = 90, onChange, className }: Camera
   }, [angle, onChange]);
 
   return (
-    <div className={className}>
-      <div className="flex flex-col space-y-2">
-        <div className="flex justify-between text-xs">
-          <span className="font-bold">Orthographic</span>
-          <div className="text-center text-xs font-bold text-primary">{angle.toFixed(1)}°</div>
-          <span className="font-bold">Perspective</span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          className={cn(
+            buttonVariants({
+              variant: 'overlay',
+              size: 'sm',
+            }),
+            className,
+            'group relative w-50 overflow-hidden p-1',
+            'flex items-center',
+            'hover:cursor-pointer',
+          )}
+        >
+          {/* Text labels that will move up on hover */}
+          <div className="flex w-full justify-between text-xs leading-none transition-all duration-300 group-hover:-translate-y-1.5">
+            <span>Orthographic</span>
+            <div className="font-bold text-primary">{angle}°</div>
+            <span>Perspective</span>
         </div>
+
+          {/* Slider container that slides up from bottom */}
         <Slider
           min={0}
           max={90}
           step={1}
           value={[angle]}
+            className="absolute right-0 bottom-0 left-0 px-1 opacity-0 transition-all duration-300 group-hover:-translate-y-1 group-hover:opacity-100"
           onValueChange={(value) => {
             setAngle(value[0]);
           }}
         />
       </div>
-    </div>
+      </TooltipTrigger>
+      <TooltipContent>
+        <span>Adjust camera angle</span>
+        <br />
+        <span className="text-foreground/50">Tip: Set to 0° for orthographic view</span>
+      </TooltipContent>
+    </Tooltip>
   );
 }

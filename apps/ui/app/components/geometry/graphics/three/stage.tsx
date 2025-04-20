@@ -354,8 +354,6 @@ export function Stage({
             largeSize={gridSizes.largeSize}
             baseFalloffScale={distanceFalloffScale}
             useDynamicFalloff={hasDynamicDistanceFalloff}
-            visibleWidthMultiplier={10}
-            angleAdjustmentStrength={100}
           />
         ) : null}
         <group ref={inner}>{children}</group>

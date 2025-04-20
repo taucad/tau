@@ -63,7 +63,7 @@ export const defaultStageOptions = {
 // Grid size calculation constants
 export const gridSizeConstants = {
   // Coefficient for the grid size calculation to fine-tune the result (lower = larger grid)
-  baseGridSizeCoefficient: 10,
+  baseGridSizeCoefficient: 5,
   // Minimum base grid size to prevent too small grids, in mm
   minimumBaseGridSize: 0.1,
   // Threshold for rounding to 1× or 5× powers of 10
@@ -320,10 +320,10 @@ export function Stage({
 
     // Round to nice numbers (1, 2, or 5 times power of 10)
     let largeSize;
-    if (mantissa < 1.5) {
+    // eslint-disable-next-line unicorn/prefer-ternary -- this is more readable
+    if (mantissa < Math.sqrt(5)) {
+      // ≈ 2.236
       largeSize = 10 ** exponent;
-    } else if (mantissa < 3.5) {
-      largeSize = 2 * 10 ** exponent;
     } else {
       largeSize = 5 * 10 ** exponent;
     }
@@ -334,56 +334,9 @@ export function Stage({
       effectiveSize: baseGridSize,
       baseSize: cameraDistance,
       zoomFactor: 1 / currentZoom,
+      fov,
     };
   }, [camera, currentZoom, properties.hasGrid]);
-
-  // Calculate dynamic grid distance based on FOV, camera distance and viewing angle
-  const gridDistance = useMemo(() => {
-    if (!properties.hasGrid) return 0;
-
-    // Get current camera distance
-    const cameraDistance = camera.position.length();
-
-    // Get current FOV
-    const { fov } = camera as THREE.PerspectiveCamera;
-
-    // Calculate visible width at distance
-    const visibleWidthAtDistance = 2 * cameraDistance * Math.tan(THREE.MathUtils.degToRad(fov / 2));
-
-    // Compute a dynamic angle compensation factor based on FOV
-    // Lower FOV needs more compensation when viewing from shallow angles
-    const fovFactor = Math.max(1, 90 / fov); // Increases as FOV decreases
-
-    // Compute a FOV-aware grid distance
-    return Math.max(visibleWidthAtDistance * 10, gridSizes.largeSize * 1000 * fovFactor);
-  }, [camera, gridSizes.largeSize, properties.hasGrid]);
-
-  // Calculate dynamic falloff scale based on zoom, FOV and viewing angle
-  const dynamicFalloffScale = useMemo(() => {
-    if (!hasDynamicDistanceFalloff) {
-      return distanceFalloffScale;
-    }
-
-    // Get camera properties
-    const cameraDistance = camera.position.length();
-    const { fov } = camera as THREE.PerspectiveCamera;
-
-    // Calculate visible width (same as for grid size)
-    const visibleWidthAtDistance = 2 * cameraDistance * Math.tan(THREE.MathUtils.degToRad(fov / 2));
-
-    // Calculate viewing angle factor (0-1)
-    const cameraDirection = camera.getWorldDirection(new THREE.Vector3());
-    const upVector = new THREE.Vector3(0, 0, 1);
-    const angleFactor = Math.abs(cameraDirection.dot(upVector));
-
-    // Make falloff scale proportional to visible width, but with angle compensation
-    // This ensures consistent grid visibility at different view angles and FOVs
-    const fovFactor = 90 / fov;
-    const angleAdjustment = 1 + (1 - angleFactor) * fovFactor * 4;
-
-    // Combine all factors for the final scale
-    return visibleWidthAtDistance * 10 * angleAdjustment;
-  }, [camera, distanceFalloffScale, hasDynamicDistanceFalloff]);
 
   // Call onGridChange when gridSizes change
   React.useEffect(() => {
@@ -399,8 +352,10 @@ export function Stage({
           <InfiniteGrid
             smallSize={gridSizes.smallSize}
             largeSize={gridSizes.largeSize}
-            distanceFalloffScale={dynamicFalloffScale}
-            distance={gridDistance}
+            baseFalloffScale={distanceFalloffScale}
+            useDynamicFalloff={hasDynamicDistanceFalloff}
+            visibleWidthMultiplier={10}
+            angleAdjustmentStrength={100}
           />
         ) : null}
         <group ref={inner}>{children}</group>

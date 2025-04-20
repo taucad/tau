@@ -768,8 +768,8 @@ export function InfiniteGrid({
   falloffBaseMin = 0.05,
   falloffBaseMax = 0.5,
   minFadeFactor = 0.05,
-  opacityAdjustmentSteep = 0.2,
-  opacityAdjustmentShallow = 0.2,
+  opacityAdjustmentSteep = 0.05,
+  opacityAdjustmentShallow = 0.05,
   alphaThreshold = 0.01,
 }: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
   const [theme] = useTheme();

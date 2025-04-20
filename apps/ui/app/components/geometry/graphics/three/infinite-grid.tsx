@@ -8,19 +8,25 @@ import { useThree, useFrame } from '@react-three/fiber';
 type InfiniteGridProperties = {
   /**
    * The distance between the lines of the small grid.
+   * Increasing this value makes the small grid lines more sparse/farther apart.
+   * Decreasing creates a denser grid with closer lines.
    */
   readonly smallSize: number;
   /**
    * The thickness of the lines of the small grid.
+   * Increasing this value makes the small grid lines thicker/more prominent.
    * @default 1.25
    */
   readonly smallThickness: number;
   /**
    * The distance between the lines of the large grid.
+   * Increasing this value makes the large grid lines more sparse/farther apart.
+   * Decreasing creates a denser grid with closer major lines.
    */
   readonly largeSize: number;
   /**
    * The thickness of the lines of the large grid.
+   * Increasing this value makes the large grid lines thicker/more prominent.
    * @default 2
    */
   readonly largeThickness: number;
@@ -30,56 +36,78 @@ type InfiniteGridProperties = {
   readonly color: THREE.Color;
   /**
    * The axes to use for the grid.
+   * Defines the plane and orientation of the grid.
+   * First two letters determine the grid plane axes, third letter is the normal axis.
    * @default 'xyz'
    */
   readonly axes: 'xyz' | 'xzy' | 'yxz' | 'yzx' | 'zxy' | 'zyx';
   /**
    * The opacity of the lines of the grid.
+   * Increasing this value makes the grid more visible/opaque.
+   * Decreasing makes it more transparent.
    * @default 0.3
    */
   readonly lineOpacity: number;
   /**
-   * The base distance falloff scale for the grid. This value will be adjusted dynamically in the shader.
+   * The base distance falloff scale for the grid.
+   * Increasing this value makes the grid visible from farther away.
+   * Decreasing causes the grid to fade out at shorter distances.
    * @default 800
    */
   readonly baseFalloffScale: number;
   /**
-   * The visible width multiplier for distance calculation. Controls how far the grid extends.
+   * The visible width multiplier for distance calculation.
+   * Increasing this value extends the grid farther from the camera.
+   * Decreasing shrinks the visible area of the grid.
    * @default 10
    */
   readonly visibleWidthMultiplier: number;
   /**
    * FOV reference value for normalization in shader calculations.
+   * Used as baseline for FOV adjustments. Matching your camera's FOV
+   * will provide more consistent grid appearance across different views.
    * @default 90
    */
   readonly referenceFov: number;
   /**
-   * Angle adjustment strength. Controls how much the grid visibility is adjusted at shallow viewing angles.
+   * Angle adjustment strength for grid visibility at shallow viewing angles.
+   * Increasing this value improves grid visibility when viewed at glancing angles.
+   * Decreasing reduces the angle-based visibility adjustments.
    * @default 100
    */
   readonly angleAdjustmentStrength: number;
   /**
-   * View angle power factor. Controls how aggressively the view angle affects visibility.
+   * View angle power factor for visibility calculations.
+   * Increasing this value makes the view angle effect more aggressive.
+   * Decreasing softens the effect of viewing angle on grid visibility.
    * @default 0.3
    */
   readonly viewAnglePowerFactor: number;
   /**
-   * Minimum falloff base value. Controls the lower limit of the falloff calculations.
+   * Minimum falloff base value for distance calculations.
+   * Increasing this value strengthens the minimum opacity at distance.
+   * Decreasing allows the grid to fade more completely at far distances.
    * @default 0.5
    */
   readonly minFalloffBase: number;
   /**
-   * Minimum fade factor. Prevents grid from completely disappearing at distance.
+   * Minimum fade factor to prevent grid from completely disappearing.
+   * Increasing this value maintains higher visibility at distances.
+   * Decreasing allows more complete fading when far away.
    * @default 0.2
    */
   readonly minFadeFactor: number;
   /**
-   * The minimum value for the FOV factor calculation, ensures reasonable values at extreme FOVs.
+   * The minimum value for the FOV factor calculation.
+   * Increasing this value maintains grid visibility at extreme FOVs.
+   * Decreasing allows more aggressive fading at non-standard FOVs.
    * @default 1
    */
   readonly minFovFactor: number;
   /**
-   * Whether to use dynamic falloff scale calculation. When false, uses baseFalloffScale directly.
+   * Whether to use dynamic falloff scale calculation.
+   * When true, the grid adapts its appearance based on camera position and FOV.
+   * When false, uses baseFalloffScale directly for more static appearance.
    * @default true
    */
   readonly useDynamicFalloff: boolean;
@@ -397,7 +425,7 @@ export function InfiniteGrid({
   smallThickness = 1.25,
   largeThickness = 2,
   axes = 'xyz',
-  lineOpacity = 0.3,
+  lineOpacity = 0.2,
   baseFalloffScale = 800,
   visibleWidthMultiplier = 10,
   referenceFov = 90,

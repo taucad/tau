@@ -348,14 +348,7 @@ export function Stage({
       <PerspectiveCamera makeDefault />
       <group ref={outer}>
         {properties.hasAxesHelper ? <AxesHelper /> : null}
-        {properties.hasGrid ? (
-          <InfiniteGrid
-            smallSize={gridSizes.smallSize}
-            largeSize={gridSizes.largeSize}
-            baseFalloffScale={distanceFalloffScale}
-            useDynamicFalloff={hasDynamicDistanceFalloff}
-          />
-        ) : null}
+        {properties.hasGrid ? <InfiniteGrid smallSize={gridSizes.smallSize} largeSize={gridSizes.largeSize} /> : null}
         <group ref={inner}>{children}</group>
       </group>
     </group>

@@ -6,6 +6,7 @@ import type { RootState } from '@react-three/fiber';
 import { PerspectiveCamera } from '@react-three/drei';
 import { InfiniteGrid } from '@/components/geometry/graphics/three/infinite-grid.js';
 import { AxesHelper } from '@/components/geometry/graphics/three/axes-helper.js';
+import { resetCamera as resetCameraFn } from '@/components/geometry/graphics/three/camera-control.js';
 
 export type StageOptions = {
   perspective?: {
@@ -69,16 +70,6 @@ export const gridSizeConstants = {
   // Threshold for rounding to 1× or 5× powers of 10
   roundingThreshold: 2.5,
 } as const;
-
-/**
- * Get the position on the circumference of a circle given the radius and angle in radians.
- * @param radius - The radius of the circle.
- * @param angleInRadians - The angle in radians.
- * @returns The position on the circle.
- */
-function getPositionOnCircle(radius: number, angleInRadians: number): [number, number] {
-  return [radius * Math.cos(angleInRadians), radius * Math.sin(angleInRadians)];
-}
 
 export type GridSizes = {
   smallSize: number;
@@ -234,41 +225,24 @@ export function Stage({
   }, [camera.type, camera.zoom, controls]);
 
   const resetCamera = React.useCallback(() => {
-    // Reset zoom tracking state using the appropriate configured zoom level
-    setCurrentZoom(perspective.zoomLevel);
-
     originalDistanceReference.current = null;
 
-    const [x, y] = getPositionOnCircle(shapeRadius * perspective.offsetRatio, rotation.side);
-    const [, z] = getPositionOnCircle(shapeRadius * perspective.offsetRatio, rotation.vertical);
-    camera.position.set(x, y, z);
-    camera.zoom = perspective.zoomLevel;
-    camera.near = perspective.nearPlane;
-    camera.far = Math.max(perspective.minimumFarPlane, shapeRadius * perspective.farPlaneRadiusMultiplier);
-
-    // Aim the camera at the center of the scene
-    camera.lookAt(0, 0, 0);
-    // Update the radius
-    set((previous) => {
-      return {
-        ...previous,
-        sceneRadius: shapeRadius,
-      };
+    // Use the shared resetCamera function from camera-control.tsx
+    resetCameraFn({
+      camera,
+      shapeRadius,
+      rotation,
+      perspective,
+      setCurrentZoom,
+      setSceneRadius(radius) {
+        set((previous) => ({
+          ...previous,
+          sceneRadius: radius,
+        }));
+      },
+      invalidate,
     });
-    camera.updateProjectionMatrix();
-    invalidate();
-  }, [
-    camera,
-    invalidate,
-    shapeRadius,
-    rotation.side,
-    rotation.vertical,
-    perspective.offsetRatio,
-    perspective.zoomLevel,
-    perspective.nearPlane,
-    perspective.minimumFarPlane,
-    perspective.farPlaneRadiusMultiplier,
-  ]);
+  }, [camera, invalidate, shapeRadius, rotation, perspective, setCurrentZoom]);
 
   React.useImperativeHandle(ref, () => ({
     resetCamera,

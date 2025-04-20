@@ -244,20 +244,20 @@ export function CameraControl({ defaultAngle = 90, onChange, className }: Camera
             <span>Orthographic</span>
             <div className="font-bold text-primary">{angle}°</div>
             <span>Perspective</span>
-        </div>
+          </div>
 
           {/* Slider container that slides up from bottom */}
-        <Slider
-          min={0}
-          max={90}
-          step={1}
-          value={[angle]}
+          <Slider
+            min={0}
+            max={90}
+            step={1}
+            value={[angle]}
             className="absolute right-0 bottom-0 left-0 px-1 opacity-0 transition-all duration-300 group-hover:-translate-y-1 group-hover:opacity-100"
-          onValueChange={(value) => {
-            setAngle(value[0]);
-          }}
-        />
-      </div>
+            onValueChange={(value) => {
+              setAngle(value[0]);
+            }}
+          />
+        </div>
       </TooltipTrigger>
       <TooltipContent>
         <span>Adjust camera angle</span>

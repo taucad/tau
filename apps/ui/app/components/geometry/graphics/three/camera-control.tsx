@@ -234,13 +234,13 @@ export function CameraControl({ defaultAngle = 90, onChange, className }: Camera
               size: 'sm',
             }),
             className,
-            'group relative w-50 overflow-hidden p-1',
+            'group relative w-50 gap-0 overflow-hidden p-1',
             'flex items-center',
             'hover:cursor-pointer',
           )}
         >
           {/* Text labels that will move up on hover */}
-          <div className="flex w-full justify-between text-xs leading-none transition-all duration-300 group-hover:-translate-y-1.5">
+          <div className="flex w-full justify-between text-xs leading-none transition-all duration-300 group-hover:-translate-y-1.5 max-md:-translate-y-1.5">
             <span>Orthographic</span>
             <div className="font-bold text-primary">{angle}°</div>
             <span>Perspective</span>
@@ -252,7 +252,7 @@ export function CameraControl({ defaultAngle = 90, onChange, className }: Camera
             max={90}
             step={1}
             value={[angle]}
-            className="absolute right-0 bottom-0 left-0 px-1 opacity-0 transition-all duration-300 group-hover:-translate-y-1 group-hover:opacity-100"
+            className="absolute right-0 bottom-0 left-0 px-1 opacity-0 transition-all duration-300 group-hover:-translate-y-1 group-hover:opacity-100 max-md:-translate-y-1 max-md:opacity-100 [&_[data-slot='slider-track']]:bg-primary"
             onValueChange={(value) => {
               setAngle(value[0]);
             }}

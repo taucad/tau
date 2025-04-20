@@ -733,7 +733,7 @@ export function InfiniteGrid({
   smallThickness = 1.25,
   largeThickness = 2,
   axes = 'xyz',
-  lineOpacity = 0.2,
+  lineOpacity = 0.3,
   visibleWidthMultiplier = 10,
   minAngle = 0.0001,
   tanBlendThreshold = 0.2,

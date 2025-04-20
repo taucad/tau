@@ -49,13 +49,6 @@ type InfiniteGridProperties = {
    */
   readonly lineOpacity: number;
   /**
-   * The base distance falloff scale for the grid.
-   * Increasing this value makes the grid visible from farther away.
-   * Decreasing causes the grid to fade out at shorter distances.
-   * @default 800
-   */
-  readonly baseFalloffScale: number;
-  /**
    * The visible width multiplier for distance calculation.
    * Increasing this value extends the grid farther from the camera.
    * Decreasing shrinks the visible area of the grid.
@@ -93,7 +86,6 @@ type InfiniteGridProperties = {
   /**
    * Whether to use dynamic falloff scale calculation.
    * When true, the grid adapts its appearance based on camera position and FOV.
-   * When false, uses baseFalloffScale directly for more static appearance.
    * @default true
    */
   readonly useDynamicFalloff: boolean;
@@ -111,7 +103,6 @@ function infiniteGridMaterial({
   smallThickness,
   largeThickness,
   lineOpacity,
-  baseFalloffScale,
   visibleWidthMultiplier,
   viewAnglePowerFactor,
   minFalloffBase,
@@ -148,9 +139,6 @@ function infiniteGridMaterial({
       },
       uLineOpacity: {
         value: lineOpacity,
-      },
-      uBaseFalloffScale: {
-        value: baseFalloffScale,
       },
       uVisibleWidthMultiplier: {
         value: visibleWidthMultiplier,
@@ -279,7 +267,6 @@ function infiniteGridMaterial({
       uniform float uLargeThickness;
       uniform vec3 uColor;
       uniform float uLineOpacity;
-      uniform float uBaseFalloffScale;
       uniform float uCameraFov;
       uniform float uViewAnglePowerFactor;
       uniform float uMinFalloffBase;
@@ -402,7 +389,6 @@ export function InfiniteGrid({
   largeThickness = 2,
   axes = 'xyz',
   lineOpacity = 0.2,
-  baseFalloffScale = 800,
   visibleWidthMultiplier = 10,
   viewAnglePowerFactor = 0.3,
   minFalloffBase = 0.5,
@@ -425,7 +411,6 @@ export function InfiniteGrid({
         color: theme === Theme.LIGHT ? new THREE.Color('lightgrey') : new THREE.Color('grey'),
         axes,
         lineOpacity,
-        baseFalloffScale,
         visibleWidthMultiplier,
         viewAnglePowerFactor,
         minFalloffBase,
@@ -441,7 +426,6 @@ export function InfiniteGrid({
       theme,
       axes,
       lineOpacity,
-      baseFalloffScale,
       visibleWidthMultiplier,
       viewAnglePowerFactor,
       minFalloffBase,
@@ -465,22 +449,13 @@ export function InfiniteGrid({
   // Update properties when they change
   React.useEffect(() => {
     if (!materialRef.current) return;
-    materialRef.current.uniforms.uBaseFalloffScale.value = baseFalloffScale;
     materialRef.current.uniforms.uVisibleWidthMultiplier.value = visibleWidthMultiplier;
     materialRef.current.uniforms.uViewAnglePowerFactor.value = viewAnglePowerFactor;
     materialRef.current.uniforms.uMinFalloffBase.value = minFalloffBase;
     materialRef.current.uniforms.uMinFadeFactor.value = minFadeFactor;
     materialRef.current.uniforms.uMinFovFactor.value = minFovFactor;
     materialRef.current.uniforms.uUseDynamicFalloff.value = useDynamicFalloff ? 1 : 0;
-  }, [
-    baseFalloffScale,
-    visibleWidthMultiplier,
-    viewAnglePowerFactor,
-    minFalloffBase,
-    minFadeFactor,
-    minFovFactor,
-    useDynamicFalloff,
-  ]);
+  }, [visibleWidthMultiplier, viewAnglePowerFactor, minFalloffBase, minFadeFactor, minFovFactor, useDynamicFalloff]);
 
   return (
     <Plane

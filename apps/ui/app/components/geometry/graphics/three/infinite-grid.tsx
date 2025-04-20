@@ -271,6 +271,11 @@ type InfiniteGridProperties = {
    * @default 0.01
    */
   readonly alphaThreshold: number;
+  /**
+   * The distance falloff ratio between 0 and 1. Lower values make the grid fade faster with distance.
+   * @default 0.7
+   */
+  readonly distanceFalloffRatio?: number;
 };
 
 // Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
@@ -322,6 +327,7 @@ function infiniteGridMaterial({
   opacityAdjustmentSteep,
   opacityAdjustmentShallow,
   alphaThreshold,
+  distanceFalloffRatio,
 }: InfiniteGridProperties) {
   // Validate to ensure axes cannot be used to inject malicious code
   if (!['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'].includes(axes)) {
@@ -466,6 +472,9 @@ function infiniteGridMaterial({
       },
       uAlphaThreshold: {
         value: alphaThreshold,
+      },
+      uDistanceFalloffRatio: {
+        value: distanceFalloffRatio,
       },
     },
     transparent: true,
@@ -617,6 +626,7 @@ function infiniteGridMaterial({
       uniform float uOpacityAdjustmentSteep;
       uniform float uOpacityAdjustmentShallow;
       uniform float uAlphaThreshold;
+      uniform float uDistanceFalloffRatio;
 
       // Highly accurate tangent approximation that works well for all angles
       float stableTan(float angle) {
@@ -702,6 +712,14 @@ function infiniteGridMaterial({
         // Apply fade factor with angle-adaptive exponent
         float fadeFactor = pow(d, falloffExponent);
         
+        // Apply simple distance falloff based on the ratio
+        float distanceRatioSimple = min(planarDistance / gridDistance, 1.0);
+        float simpleFalloff = 1.0 - distanceRatioSimple;
+        float simpleDistanceFade = pow(simpleFalloff, (1.0 - uDistanceFalloffRatio) * 10.0);
+        
+        // Combine the current fade with simple distance falloff
+        fadeFactor = fadeFactor * simpleDistanceFade;
+        
         // Add minimal base opacity for stability across all angles and FOVs
         fadeFactor = max(fadeFactor, uMinFadeFactor);
         
@@ -734,6 +752,7 @@ export function InfiniteGrid({
   largeThickness = 2,
   axes = 'xyz',
   lineOpacity = 0.3,
+  distanceFalloffRatio = 0.7,
   visibleWidthMultiplier = 10,
   minAngle = 0.0001,
   tanBlendThreshold = 0.2,
@@ -824,6 +843,7 @@ export function InfiniteGrid({
         opacityAdjustmentSteep,
         opacityAdjustmentShallow,
         alphaThreshold,
+        distanceFalloffRatio,
       }),
     [
       smallSize,
@@ -870,6 +890,7 @@ export function InfiniteGrid({
       opacityAdjustmentSteep,
       opacityAdjustmentShallow,
       alphaThreshold,
+      distanceFalloffRatio,
     ],
   );
 

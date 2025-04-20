@@ -86,7 +86,9 @@ type InfiniteGridProperties = {
 };
 
 // Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
-// Modified by @rifont to use varying thickness and enhanced distance falloff
+// Modified by @rifont to:
+// - use varying thickness and enhanced distance falloff
+// - use a Taylor series approximation for the tangent function to avoid discontinuities at 90 degrees
 function infiniteGridMaterial({
   smallSize,
   largeSize,
@@ -398,12 +400,12 @@ export function InfiniteGrid({
   lineOpacity = 0.3,
   baseFalloffScale = 800,
   visibleWidthMultiplier = 10,
-  referenceFov = 150,
+  referenceFov = 90,
   angleAdjustmentStrength = 100,
-  viewAnglePowerFactor = 0.6,
+  viewAnglePowerFactor = 0.3,
   minFalloffBase = 0.5,
   minFadeFactor = 0.2,
-  minFovFactor = 0.01,
+  minFovFactor = 1,
   useDynamicFalloff = true,
 }: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
   const [theme] = useTheme();
@@ -490,7 +492,7 @@ export function InfiniteGrid({
     <Plane
       userData={{ isPreviewOnly: true }}
       material={material}
-      renderOrder={0} // Very high render order is used to force the grid to draw on top of other objects, ensuring it is always visible and void of blending issues like z-fighting
+      renderOrder={9999} // Very high render order is used to force the grid to draw on top of other objects, ensuring it is always visible and void of blending issues like z-fighting
     />
   );
 }

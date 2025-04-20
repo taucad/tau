@@ -89,10 +89,10 @@ function infiniteGridMaterial({
     side: THREE.DoubleSide,
 
     uniforms: {
-      uSize1: {
+      uSmallSize: {
         value: smallSize,
       },
-      uSize2: {
+      uLargeSize: {
         value: largeSize,
       },
       uColor: {
@@ -213,8 +213,8 @@ function infiniteGridMaterial({
       varying vec3 worldPosition;
       varying vec3 viewVector;
       
-      uniform float uSize1;
-      uniform float uSize2;
+      uniform float uSmallSize;
+      uniform float uLargeSize;
       uniform float uSmallThickness;
       uniform float uLargeThickness;
       uniform vec3 uColor;
@@ -313,8 +313,8 @@ function infiniteGridMaterial({
         float opacityFactor = 1.0 + steepAngleBoost * 0.2 + shallowAngleBoost * 0.2;
         float angleAdjustedOpacity = uLineOpacity * opacityFactor;
         
-        float gridSmall = getGrid(uSize1, uSmallThickness);
-        float gridLarge = getGrid(uSize2, uLargeThickness);
+        float gridSmall = getGrid(uSmallSize, uSmallThickness);
+        float gridLarge = getGrid(uLargeSize, uLargeThickness);
         
         float grid = max(gridSmall, gridLarge);
         

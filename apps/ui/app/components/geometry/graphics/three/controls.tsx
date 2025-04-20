@@ -15,7 +15,7 @@ export const Controls = React.memo(function ({
   enableGizmo,
   enableDamping,
   enableZoom,
-  zoomSpeed = 0.4,
+  zoomSpeed,
   ref,
 }: ControlsProperties) {
   return (

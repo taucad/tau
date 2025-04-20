@@ -58,7 +58,7 @@ export function ThreeProvider({
   center = true,
   onCanvasReady,
   defaultCameraAngle = 60,
-  zoomSpeed = 0.4,
+  zoomSpeed = 1,
   ...properties
 }: ThreeContextProperties & {
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React

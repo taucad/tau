@@ -8,27 +8,23 @@ import { useThree, useFrame } from '@react-three/fiber';
 type InfiniteGridProperties = {
   /**
    * The distance between the lines of the small grid.
-   * Increasing: Makes small grid lines more sparse/farther apart.
-   * Decreasing: Creates a denser grid with closer lines.
+   * Increasing makes the small grid lines more sparse/farther apart.
    */
   readonly smallSize: number;
   /**
    * The thickness of the lines of the small grid.
-   * Increasing: Makes small grid lines thicker and more prominent.
-   * Decreasing: Creates thinner, more subtle small grid lines.
+   * Increasing makes small grid lines thicker and more prominent.
    * @default 1.25
    */
   readonly smallThickness: number;
   /**
    * The distance between the lines of the large grid.
-   * Increasing: Makes large grid lines more sparse/farther apart.
-   * Decreasing: Creates a denser grid with closer major lines.
+   * Increasing makes large grid lines more sparse/farther apart.
    */
   readonly largeSize: number;
   /**
    * The thickness of the lines of the large grid.
-   * Increasing: Makes large grid lines thicker and more prominent.
-   * Decreasing: Creates thinner, more subtle large grid lines.
+   * Increasing makes large grid lines thicker and more prominent.
    * @default 2
    */
   readonly largeThickness: number;
@@ -44,273 +40,234 @@ type InfiniteGridProperties = {
    * First two letters determine the grid plane axes, third letter is the normal axis.
    * 'xyz': Grid on XY plane with Z as normal (standard top-down view)
    * 'xzy': Grid on XZ plane with Y as normal (standard front view)
-   * etc.
    * @default 'xyz'
    */
   readonly axes: 'xyz' | 'xzy' | 'yxz' | 'yzx' | 'zxy' | 'zyx';
   /**
    * The base opacity of the grid lines.
-   * Increasing: Makes the entire grid more visible/opaque.
-   * Decreasing: Makes the entire grid more transparent/subtle.
+   * Increasing makes the entire grid more visible/opaque.
    * @default 0.3
    */
   readonly lineOpacity: number;
   /**
    * Controls how far the grid extends from the camera.
-   * Increasing: Extends the grid farther from the camera, creating a larger visible area.
-   * Decreasing: Shrinks the visible area of the grid, making it more concentrated.
+   * Increasing extends the grid farther from the camera, creating a larger visible area.
    * @default 10
    */
   readonly visibleWidthMultiplier: number;
   /**
    * Minimum angle value used in tangent approximation to prevent division by zero.
-   * Increasing: Reduces precision for very small angles but improves stability.
-   * Decreasing: Improves precision for small angles but may cause instability.
+   * Increasing reduces precision for very small angles but improves stability.
    * @default 0.0001
    */
   readonly minAngle: number;
   /**
    * Controls blending transition between different tangent calculation methods.
-   * Increasing: Makes the transition between calculation methods more gradual.
-   * Decreasing: Makes the transition between calculation methods more abrupt.
+   * Increasing makes the transition between calculation methods more gradual.
    * @default 0.2
    */
   readonly tanBlendThreshold: number;
   /**
    * Minimum FOV bias to ensure stability at extreme camera settings.
-   * Increasing: Improves stability at very low FOVs but reduces accuracy.
-   * Decreasing: Improves accuracy at low FOVs but may cause instability.
+   * Increasing improves stability at very low FOVs but reduces accuracy.
    * @default 0.1
    */
   readonly minFovBias: number;
   /**
    * Reference FOV value used for normalization calculations.
-   * Increasing: Calibrates grid for wider FOV cameras.
-   * Decreasing: Calibrates grid for narrower FOV cameras.
+   * Increasing calibrates grid for wider FOV cameras.
    * @default 90.0
    */
   readonly referenceFov: number;
   /**
    * Controls how much to boost the grid at low FOV values.
-   * Increasing: Improves grid visibility at narrow FOVs.
-   * Decreasing: Reduces compensation at narrow FOVs for more natural scaling.
+   * Increasing improves grid visibility at narrow FOVs.
    * @default 30.0
    */
   readonly fovExtensionFactor: number;
   /**
    * Bias value for FOV extension calculations.
-   * Increasing: Makes FOV extension effect more gradual.
-   * Decreasing: Makes FOV extension effect more aggressive.
+   * Increasing makes FOV extension effect more gradual.
    * @default 5.0
    */
   readonly fovExtensionBias: number;
   /**
    * Start threshold for steep angle adaptation (0.0-1.0).
-   * Increasing: Delays steep angle adaptation until more perpendicular views.
-   * Decreasing: Applies steep angle adaptation at more oblique angles.
+   * Increasing delays steep angle adaptation until more perpendicular views.
    * @default 0.7
    */
   readonly steepAngleThresholdStart: number;
   /**
    * End threshold for steep angle adaptation (0.0-1.0).
-   * Increasing: Cannot exceed 1.0; keeps maximum at perpendicular view.
-   * Decreasing: Completes steep angle adaptation before reaching perpendicular view.
+   * Increasing cannot exceed 1.0; keeps maximum at perpendicular view.
    * @default 1.0
    */
   readonly steepAngleThresholdEnd: number;
   /**
    * Multiplier for grid extension at steep viewing angles.
-   * Increasing: Makes grid more visible when viewed from above/perpendicular.
-   * Decreasing: Reduces grid extension at steep/perpendicular angles.
+   * Increasing makes grid more visible when viewed from above/perpendicular.
    * @default 2.0
    */
   readonly steepAngleBoostMultiplier: number;
   /**
    * Multiplier for grid extension at shallow viewing angles.
-   * Increasing: Makes grid more visible when viewed at glancing/oblique angles.
-   * Decreasing: Reduces grid extension at shallow/oblique angles.
+   * Increasing makes grid more visible when viewed at glancing/oblique angles.
    * @default 10.0
    */
   readonly shallowAngleBoostMultiplier: number;
   /**
    * Factor for logarithmic distance scaling.
-   * Increasing: Makes distance adaptation more sensitive at closer ranges.
-   * Decreasing: Makes distance adaptation more gradual across all distances.
+   * Increasing makes distance adaptation more sensitive at closer ranges.
    * @default 0.01
    */
   readonly distanceNormalizationFactor: number;
   /**
    * Scale factor for distance-based grid size calculations.
-   * Increasing: Makes the grid grow more aggressively with distance.
-   * Decreasing: Reduces the growth rate of the grid with distance.
+   * Increasing makes the grid grow more aggressively with distance.
    * @default 100.0
    */
   readonly distanceFactorMultiplier: number;
   /**
    * Minimum grid distance to ensure visibility.
-   * Increasing: Ensures grid is always drawn at least this far from camera.
-   * Decreasing: Allows grid to be drawn closer to camera.
+   * Increasing ensures grid is always drawn at least this far from camera.
    * @default 1000.0
    */
   readonly minGridDistance: number;
   /**
    * Maximum factor for camera-relative positioning (when viewed at shallow angles).
-   * Increasing: Increases camera-following behavior at shallow angles.
-   * Decreasing: Reduces camera-following behavior at shallow angles.
+   * Increasing strengthens camera-following behavior at shallow angles.
    * @default 0.8
    */
   readonly positionFactorMax: number;
   /**
    * Minimum factor for camera-relative positioning (when viewed from above).
-   * Increasing: Increases camera-following behavior when viewed from above.
-   * Decreasing: Reduces camera-following behavior when viewed from above.
+   * Increasing strengthens camera-following behavior when viewed from above.
    * @default 0.5
    */
   readonly positionFactorMin: number;
   /**
    * Threshold for angle-based position factor adjustment.
-   * Increasing: Delays transition to minimum position factor until more perpendicular views.
-   * Decreasing: Transitions to minimum position factor at more oblique angles.
+   * Increasing delays transition to minimum position factor until more perpendicular views.
    * @default 0.7
    */
   readonly positionFactorThreshold: number;
   /**
    * Fragment shader boost multiplier for steep viewing angles.
-   * Increasing: Enhances grid visibility at perpendicular viewing angles.
-   * Decreasing: Reduces grid visibility enhancement at perpendicular angles.
+   * Increasing enhances grid visibility at perpendicular viewing angles.
    * @default 5.0
    */
   readonly fragmentSteepAngleBoostMultiplier: number;
   /**
    * Fragment shader boost multiplier for shallow viewing angles.
-   * Increasing: Enhances grid visibility at oblique/glancing viewing angles.
-   * Decreasing: Reduces grid visibility enhancement at oblique angles.
+   * Increasing enhances grid visibility at oblique/glancing viewing angles.
    * @default 10.0
    */
   readonly fragmentShallowAngleBoostMultiplier: number;
   /**
    * Power factor for shallow angle boost calculation.
-   * Increasing: Makes shallow angle visibility boost more aggressive.
-   * Decreasing: Makes shallow angle visibility boost more subtle.
+   * Increasing makes shallow angle visibility boost more aggressive.
    * @default 3.0
    */
   readonly shallowAnglePowerFactor: number;
   /**
    * Maximum threshold for FOV compensation smoothstep.
-   * Increasing: Makes FOV compensation more gradual.
-   * Decreasing: Makes FOV compensation more abrupt.
+   * Increasing makes FOV compensation more gradual.
    * @default 3.0
    */
   readonly fovCompThresholdMax: number;
   /**
    * FOV compensation multiplier for visibility adjustments.
-   * Increasing: Strengthens FOV-based visibility adjustments.
-   * Decreasing: Weakens FOV-based visibility adjustments.
+   * Increasing strengthens FOV-based visibility adjustments.
    * @default 2.0
    */
   readonly fovCompMultiplier: number;
   /**
    * Minimum value for angle-based distance adjustment.
-   * Increasing: Increases minimum grid visibility at shallow angles.
-   * Decreasing: Allows grid to fade more at shallow angles.
+   * Increasing increases minimum grid visibility at shallow angles.
    * @default 0.2
    */
   readonly viewAngleAdjustmentMin: number;
   /**
    * Maximum value for angle-based distance adjustment.
-   * Increasing: Cannot exceed 1.0; maintains full adjustment at perpendicular views.
-   * Decreasing: Reduces adjustment effect even at perpendicular viewing angles.
+   * Increasing cannot exceed 1.0; maintains full adjustment at perpendicular views.
    * @default 1.0
    */
   readonly viewAngleAdjustmentMax: number;
   /**
    * Base value for FOV-based grid scaling.
-   * Increasing: Makes the grid adapt more aggressively to FOV changes.
-   * Decreasing: Makes the grid less sensitive to FOV changes.
+   * Increasing makes the grid adapt more aggressively to FOV changes.
    * @default 10.0
    */
   readonly fovScalingBase: number;
   /**
    * Multiplier for grid distance calculation.
-   * Increasing: Extends the grid farther from camera.
-   * Decreasing: Shrinks grid visibility range.
+   * Increasing extends the grid farther from camera.
    * @default 10.0
    */
   readonly gridDistanceMultiplier: number;
   /**
    * Maximum value for sigmoid center calculation (for shallow angles).
-   * Increasing: Shifts fade-out point farther from camera at shallow angles.
-   * Decreasing: Starts fade-out closer to camera at shallow angles.
+   * Increasing shifts fade-out point farther from camera at shallow angles.
    * @default 0.7
    */
   readonly sigmoidCenterMax: number;
   /**
    * Minimum value for sigmoid center calculation (for steep angles).
-   * Increasing: Shifts fade-out point farther from camera at steep angles.
-   * Decreasing: Starts fade-out closer to camera at steep angles.
+   * Increasing shifts fade-out point farther from camera at steep angles.
    * @default 0.4
    */
   readonly sigmoidCenterMin: number;
   /**
    * FOV adjustment factor for sigmoid center calculation.
-   * Increasing: Makes fade center more responsive to FOV changes.
-   * Decreasing: Makes fade center less sensitive to FOV changes.
+   * Increasing makes fade center more responsive to FOV changes.
    * @default 0.5
    */
   readonly sigmoidCenterFovFactor: number;
   /**
    * Minimum sigmoid sharpness value (for shallow angles).
-   * Increasing: Creates more abrupt fade-out transition at shallow angles.
-   * Decreasing: Creates more gradual fade-out transition at shallow angles.
+   * Increasing creates more abrupt fade-out transition at shallow angles.
    * @default 3.0
    */
   readonly sigmoidSharpnessMin: number;
   /**
    * Maximum sigmoid sharpness value (for steep angles).
-   * Increasing: Creates more abrupt fade-out transition at steep angles.
-   * Decreasing: Creates more gradual fade-out transition at steep angles.
+   * Increasing creates more abrupt fade-out transition at steep angles.
    * @default 8.0
    */
   readonly sigmoidSharpnessMax: number;
   /**
    * Minimum falloff base value for mixing operation.
-   * Increasing: Strengthens minimum opacity at oblique viewing angles.
-   * Decreasing: Allows more complete fade-out at oblique viewing angles.
+   * Increasing strengthens minimum opacity at oblique viewing angles.
    * @default 0.05
    */
   readonly falloffBaseMin: number;
   /**
    * Maximum falloff base value for mixing operation.
-   * Increasing: Strengthens minimum opacity at perpendicular viewing angles.
-   * Decreasing: Allows more complete fade-out at perpendicular viewing angles.
+   * Increasing strengthens minimum opacity at perpendicular viewing angles.
    * @default 0.5
    */
   readonly falloffBaseMax: number;
   /**
    * Absolute minimum fade factor to prevent complete disappearance.
-   * Increasing: Maintains higher minimum visibility at all distances and angles.
-   * Decreasing: Allows grid to become more transparent at distances and extreme angles.
+   * Increasing maintains higher minimum visibility at all distances and angles.
    * @default 0.05
    */
   readonly minFadeFactor: number;
   /**
    * Opacity adjustment multiplier for steep angles.
-   * Increasing: Boosts grid opacity when viewed from perpendicular angles.
-   * Decreasing: Reduces the opacity boost at perpendicular viewing angles.
+   * Increasing boosts grid opacity when viewed from perpendicular angles.
    * @default 0.2
    */
   readonly opacityAdjustmentSteep: number;
   /**
    * Opacity adjustment multiplier for shallow angles.
-   * Increasing: Boosts grid opacity when viewed from oblique/glancing angles.
-   * Decreasing: Reduces the opacity boost at oblique viewing angles.
+   * Increasing boosts grid opacity when viewed from oblique/glancing angles.
    * @default 0.2
    */
   readonly opacityAdjustmentShallow: number;
   /**
    * Alpha threshold for fragment discard (transparency cutoff).
-   * Increasing: Makes semi-transparent areas of the grid fully transparent.
-   * Decreasing: Preserves subtle transparency in grid fade areas.
+   * Increasing makes semi-transparent areas of the grid fully transparent.
    * @default 0.01
    */
   readonly alphaThreshold: number;

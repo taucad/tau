@@ -86,26 +86,6 @@ type StageProperties = {
   readonly hasGrid?: boolean;
   readonly hasAxesHelper?: boolean;
   readonly onGridChange?: (gridSizes: GridSizes) => void;
-  /**
-   * The base distance falloff scale for the grid.
-   * @default 800
-   */
-  readonly distanceFalloffScale?: number;
-  /**
-   * Whether to make the distance falloff scale dynamic based on zoom.
-   * @default true
-   */
-  readonly hasDynamicDistanceFalloff?: boolean;
-  /**
-   * The minimum distance falloff scale.
-   * @default 800
-   */
-  readonly minDistanceFalloffScale?: number;
-  /**
-   * The maximum distance falloff scale.
-   * @default 10000
-   */
-  readonly maxDistanceFalloffScale?: number;
   readonly ref?: RefObject<
     | {
         resetCamera: () => void;
@@ -121,9 +101,6 @@ export function Stage({
   stageOptions = defaultStageOptions,
   ref,
   onGridChange,
-  distanceFalloffScale = 800,
-  hasDynamicDistanceFalloff = true,
-  maxDistanceFalloffScale = 100_000_000_000_000,
   ...properties
 }: StageProperties): JSX.Element {
   const camera = useThree((state) => state.camera);

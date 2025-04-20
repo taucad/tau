@@ -161,7 +161,7 @@ export function ThreeProvider({
       </Canvas>
       {enableCameraControls ? (
         <div className="absolute bottom-0 left-0 z-10 m-2">
-          {enableGrid ? (
+          {/* {enableGrid ? (
             <div className="mb-4">
               <div className="rounded-md border bg-background p-1 text-xs">
                 {Object.entries(gridSizes).map(([key, value]) => (
@@ -171,24 +171,13 @@ export function ThreeProvider({
                     </span>
                   </div>
                 ))}
-                {/* <div>
-                  <span className="whitespace-nowrap">shapeRadius: {gridSizes.shapeRadius}</span>
-                </div>
-                <div>
-                  <span className="whitespace-nowrap">zoom: {gridSizes.currentZoom}</span>
-                </div>
-                <div>
-                  <span className="whitespace-nowrap">
-                    distance to origin camera: {camera.position.distanceTo(new THREE.Vector3(0, 0, 0))}
-                  </span>
-                </div> */}
               </div>
             </div>
-          ) : null}
+          ) : null} */}
           <div className="flex items-center gap-2">
             <CameraControl
               defaultAngle={cameraAngle}
-              className="w-40"
+              className="w-60"
               onChange={(angle) => {
                 setCameraAngle(angle);
               }}

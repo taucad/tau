@@ -149,8 +149,9 @@ export function CameraControl({ defaultAngle = 90, onChange, className }: Camera
     <div className={className}>
       <div className="flex flex-col space-y-2">
         <div className="flex justify-between text-xs">
-          <span>Orthographic</span>
-          <span>Perspective</span>
+          <span className="font-bold">Orthographic</span>
+          <div className="text-center text-xs text-primary">{angle.toFixed(1)}°</div>
+          <span className="font-bold">Perspective</span>
         </div>
         <Slider
           min={0}

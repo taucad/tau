@@ -76,6 +76,7 @@ export function AxesHelper({
   );
 
   return (
+    // eslint-disable-next-line react/no-unknown-property -- TODO: add typings for Three.js
     <group userData={{ isPreviewOnly: true }}>
       {axes.map((axis) => (
         <Line

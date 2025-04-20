@@ -63,13 +63,6 @@ type InfiniteGridProperties = {
    */
   readonly visibleWidthMultiplier: number;
   /**
-   * Angle adjustment strength for grid visibility at shallow viewing angles.
-   * Increasing this value improves grid visibility when viewed at glancing angles.
-   * Decreasing reduces the angle-based visibility adjustments.
-   * @default 100
-   */
-  readonly angleAdjustmentStrength: number;
-  /**
    * View angle power factor for visibility calculations.
    * Increasing this value makes the view angle effect more aggressive.
    * Decreasing softens the effect of viewing angle on grid visibility.
@@ -120,7 +113,6 @@ function infiniteGridMaterial({
   lineOpacity,
   baseFalloffScale,
   visibleWidthMultiplier,
-  angleAdjustmentStrength,
   viewAnglePowerFactor,
   minFalloffBase,
   minFadeFactor,
@@ -165,9 +157,6 @@ function infiniteGridMaterial({
       },
       uCameraFov: {
         value: 60, // Default value, will be updated by component
-      },
-      uAngleAdjustmentStrength: {
-        value: angleAdjustmentStrength,
       },
       uViewAnglePowerFactor: {
         value: viewAnglePowerFactor,
@@ -292,7 +281,6 @@ function infiniteGridMaterial({
       uniform float uLineOpacity;
       uniform float uBaseFalloffScale;
       uniform float uCameraFov;
-      uniform float uAngleAdjustmentStrength;
       uniform float uViewAnglePowerFactor;
       uniform float uMinFalloffBase;
       uniform float uMinFadeFactor;
@@ -416,7 +404,6 @@ export function InfiniteGrid({
   lineOpacity = 0.2,
   baseFalloffScale = 800,
   visibleWidthMultiplier = 10,
-  angleAdjustmentStrength = 100,
   viewAnglePowerFactor = 0.3,
   minFalloffBase = 0.5,
   minFadeFactor = 0.2,
@@ -440,7 +427,6 @@ export function InfiniteGrid({
         lineOpacity,
         baseFalloffScale,
         visibleWidthMultiplier,
-        angleAdjustmentStrength,
         viewAnglePowerFactor,
         minFalloffBase,
         minFadeFactor,
@@ -457,7 +443,6 @@ export function InfiniteGrid({
       lineOpacity,
       baseFalloffScale,
       visibleWidthMultiplier,
-      angleAdjustmentStrength,
       viewAnglePowerFactor,
       minFalloffBase,
       minFadeFactor,
@@ -482,7 +467,6 @@ export function InfiniteGrid({
     if (!materialRef.current) return;
     materialRef.current.uniforms.uBaseFalloffScale.value = baseFalloffScale;
     materialRef.current.uniforms.uVisibleWidthMultiplier.value = visibleWidthMultiplier;
-    materialRef.current.uniforms.uAngleAdjustmentStrength.value = angleAdjustmentStrength;
     materialRef.current.uniforms.uViewAnglePowerFactor.value = viewAnglePowerFactor;
     materialRef.current.uniforms.uMinFalloffBase.value = minFalloffBase;
     materialRef.current.uniforms.uMinFadeFactor.value = minFadeFactor;
@@ -491,7 +475,6 @@ export function InfiniteGrid({
   }, [
     baseFalloffScale,
     visibleWidthMultiplier,
-    angleAdjustmentStrength,
     viewAnglePowerFactor,
     minFalloffBase,
     minFadeFactor,

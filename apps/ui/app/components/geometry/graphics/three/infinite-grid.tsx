@@ -76,19 +76,6 @@ type InfiniteGridProperties = {
    * @default 0.2
    */
   readonly minFadeFactor: number;
-  /**
-   * The minimum value for the FOV factor calculation.
-   * Increasing this value maintains grid visibility at extreme FOVs.
-   * Decreasing allows more aggressive fading at non-standard FOVs.
-   * @default 1
-   */
-  readonly minFovFactor: number;
-  /**
-   * Whether to use dynamic falloff scale calculation.
-   * When true, the grid adapts its appearance based on camera position and FOV.
-   * @default true
-   */
-  readonly useDynamicFalloff: boolean;
 };
 
 // Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
@@ -107,8 +94,6 @@ function infiniteGridMaterial({
   viewAnglePowerFactor,
   minFalloffBase,
   minFadeFactor,
-  minFovFactor,
-  useDynamicFalloff,
 }: InfiniteGridProperties) {
   // Validate to ensure axes cannot be used to inject malicious code
   if (!['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'].includes(axes)) {
@@ -154,12 +139,6 @@ function infiniteGridMaterial({
       },
       uMinFadeFactor: {
         value: minFadeFactor,
-      },
-      uMinFovFactor: {
-        value: minFovFactor,
-      },
-      uUseDynamicFalloff: {
-        value: useDynamicFalloff ? 1 : 0,
       },
     },
     transparent: true,
@@ -271,8 +250,6 @@ function infiniteGridMaterial({
       uniform float uViewAnglePowerFactor;
       uniform float uMinFalloffBase;
       uniform float uMinFadeFactor;
-      uniform float uMinFovFactor;
-      uniform float uUseDynamicFalloff;
 
       // Highly accurate tangent approximation that works well for all angles
       float stableTan(float angle) {
@@ -393,8 +370,6 @@ export function InfiniteGrid({
   viewAnglePowerFactor = 0.3,
   minFalloffBase = 0.5,
   minFadeFactor = 0.2,
-  minFovFactor = 1,
-  useDynamicFalloff = true,
 }: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
   const [theme] = useTheme();
   const materialRef = React.useRef<THREE.ShaderMaterial | undefined>(null);
@@ -415,8 +390,6 @@ export function InfiniteGrid({
         viewAnglePowerFactor,
         minFalloffBase,
         minFadeFactor,
-        minFovFactor,
-        useDynamicFalloff,
       }),
     [
       smallSize,
@@ -430,8 +403,6 @@ export function InfiniteGrid({
       viewAnglePowerFactor,
       minFalloffBase,
       minFadeFactor,
-      minFovFactor,
-      useDynamicFalloff,
     ],
   );
 
@@ -453,9 +424,7 @@ export function InfiniteGrid({
     materialRef.current.uniforms.uViewAnglePowerFactor.value = viewAnglePowerFactor;
     materialRef.current.uniforms.uMinFalloffBase.value = minFalloffBase;
     materialRef.current.uniforms.uMinFadeFactor.value = minFadeFactor;
-    materialRef.current.uniforms.uMinFovFactor.value = minFovFactor;
-    materialRef.current.uniforms.uUseDynamicFalloff.value = useDynamicFalloff ? 1 : 0;
-  }, [visibleWidthMultiplier, viewAnglePowerFactor, minFalloffBase, minFadeFactor, minFovFactor, useDynamicFalloff]);
+  }, [visibleWidthMultiplier, viewAnglePowerFactor, minFalloffBase, minFadeFactor]);
 
   return (
     <Plane

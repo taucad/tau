@@ -56,26 +56,11 @@ type InfiniteGridProperties = {
    */
   readonly visibleWidthMultiplier: number;
   /**
-   * View angle power factor for visibility calculations.
-   * Increasing this value makes the view angle effect more aggressive.
-   * Decreasing softens the effect of viewing angle on grid visibility.
-   * @default 0.3
-   */
-  readonly viewAnglePowerFactor: number;
-  /**
    * Minimum falloff base value for distance calculations.
    * Increasing this value strengthens the minimum opacity at distance.
    * Decreasing allows the grid to fade more completely at far distances.
    * @default 0.5
    */
-  readonly minFalloffBase: number;
-  /**
-   * Minimum fade factor to prevent grid from completely disappearing.
-   * Increasing this value maintains higher visibility at distances.
-   * Decreasing allows more complete fading when far away.
-   * @default 0.2
-   */
-  readonly minFadeFactor: number;
 };
 
 // Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
@@ -91,9 +76,6 @@ function infiniteGridMaterial({
   largeThickness,
   lineOpacity,
   visibleWidthMultiplier,
-  viewAnglePowerFactor,
-  minFalloffBase,
-  minFadeFactor,
 }: InfiniteGridProperties) {
   // Validate to ensure axes cannot be used to inject malicious code
   if (!['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'].includes(axes)) {
@@ -130,15 +112,6 @@ function infiniteGridMaterial({
       },
       uCameraFov: {
         value: 60, // Default value, will be updated by component
-      },
-      uViewAnglePowerFactor: {
-        value: viewAnglePowerFactor,
-      },
-      uMinFalloffBase: {
-        value: minFalloffBase,
-      },
-      uMinFadeFactor: {
-        value: minFadeFactor,
       },
     },
     transparent: true,
@@ -248,8 +221,6 @@ function infiniteGridMaterial({
       uniform float uLineOpacity;
       uniform float uCameraFov;
       uniform float uViewAnglePowerFactor;
-      uniform float uMinFalloffBase;
-      uniform float uMinFadeFactor;
 
       // Highly accurate tangent approximation that works well for all angles
       float stableTan(float angle) {
@@ -367,9 +338,6 @@ export function InfiniteGrid({
   axes = 'xyz',
   lineOpacity = 0.2,
   visibleWidthMultiplier = 10,
-  viewAnglePowerFactor = 0.3,
-  minFalloffBase = 0.5,
-  minFadeFactor = 0.2,
 }: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
   const [theme] = useTheme();
   const materialRef = React.useRef<THREE.ShaderMaterial | undefined>(null);
@@ -387,23 +355,8 @@ export function InfiniteGrid({
         axes,
         lineOpacity,
         visibleWidthMultiplier,
-        viewAnglePowerFactor,
-        minFalloffBase,
-        minFadeFactor,
       }),
-    [
-      smallSize,
-      largeSize,
-      smallThickness,
-      largeThickness,
-      theme,
-      axes,
-      lineOpacity,
-      visibleWidthMultiplier,
-      viewAnglePowerFactor,
-      minFalloffBase,
-      minFadeFactor,
-    ],
+    [smallSize, largeSize, smallThickness, largeThickness, theme, axes, lineOpacity, visibleWidthMultiplier],
   );
 
   React.useEffect(() => {
@@ -421,11 +374,7 @@ export function InfiniteGrid({
   React.useEffect(() => {
     if (!materialRef.current) return;
     materialRef.current.uniforms.uVisibleWidthMultiplier.value = visibleWidthMultiplier;
-    materialRef.current.uniforms.uViewAnglePowerFactor.value = viewAnglePowerFactor;
-    materialRef.current.uniforms.uMinFalloffBase.value = minFalloffBase;
-    materialRef.current.uniforms.uMinFadeFactor.value = minFadeFactor;
-  }, [visibleWidthMultiplier, viewAnglePowerFactor, minFalloffBase, minFadeFactor]);
-
+  }, [visibleWidthMultiplier]);
   return (
     <Plane
       userData={{ isPreviewOnly: true }}

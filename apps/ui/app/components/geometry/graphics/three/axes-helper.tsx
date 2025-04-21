@@ -36,7 +36,7 @@ export function AxesHelper({
   xAxisColor = 'rgb(125, 56, 50)',
   yAxisColor = 'rgb(64, 115, 63)',
   zAxisColor = 'rgb(37, 78, 136)',
-  thickness = 1.5,
+  thickness = 1.25,
 }: CustomAxesHelperProps): JSX.Element {
   const [hoveredAxis, setHoveredAxis] = React.useState<'x' | 'y' | 'z' | undefined>(undefined);
 
@@ -82,6 +82,7 @@ export function AxesHelper({
         <Line
           key={axis.id}
           points={axis.getPoints()}
+          opacity={0.6}
           color={axis.color}
           lineWidth={hoveredAxis === axis.id ? thickness * 2 : thickness}
           userData={{ isPreviewOnly: true }}

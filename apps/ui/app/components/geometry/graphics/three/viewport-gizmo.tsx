@@ -109,6 +109,7 @@ export function ViewportGizmoHelper(): ReactNode {
       },
       edges: {
         color: 0x33_33_33,
+        opacity: 1,
         hover: {
           color: serialized.hex,
         },

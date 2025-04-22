@@ -83,6 +83,8 @@ export function ViewportGizmoHelper(): ReactNode {
       antialias: true,
     });
     renderer.setSize(128, 128);
+    const dpr = Math.min(globalThis.devicePixelRatio, 2);
+    renderer.setPixelRatio(dpr);
     renderer.setAnimationLoop(animation);
     renderer.setClearColor(0x00_00_00, 0);
     rendererRef.current = renderer;
@@ -91,7 +93,7 @@ export function ViewportGizmoHelper(): ReactNode {
     const gizmoConfig: GizmoOptions = {
       type: 'cube',
       placement: 'bottom-right',
-      resolution: 1024,
+      resolution: 2048,
       font: {
         weight: 'normal',
       },

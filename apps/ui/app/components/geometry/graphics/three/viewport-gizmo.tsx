@@ -64,8 +64,6 @@ export function ViewportGizmoHelper(): ReactNode {
     canvas.style.position = 'absolute';
     canvas.style.bottom = '10px';
     canvas.style.right = '10px';
-    canvas.style.width = '128px';
-    canvas.style.height = '128px';
     canvas.style.zIndex = '10';
 
     // Find the parent container to append our canvas

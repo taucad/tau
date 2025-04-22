@@ -127,6 +127,7 @@ export function ThreeProvider({
           // Enable logarithmic depth buffer for better precision at low field of view,
           // eliminating visual artifacts on the object.
           logarithmicDepthBuffer: true,
+          antialias: true,
         }}
         style={{
           cursor,

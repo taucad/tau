@@ -1,13 +1,18 @@
 import { useThree, useFrame } from '@react-three/fiber';
-import type { GizmoOptions } from 'three-viewport-gizmo';
+import type { GizmoAxisOptions, GizmoOptions } from 'three-viewport-gizmo';
 import { ViewportGizmo } from 'three-viewport-gizmo';
 import { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { ReactNode } from 'react';
+import { Theme, useTheme } from 'remix-themes';
 import { useColor } from '@/hooks/use-color.js';
 
-export function ViewportGizmoHelper(): ReactNode {
+type ViewportGizmoHelperProps = {
+  readonly size?: number;
+};
+
+export function ViewportGizmoHelper({ size = 96 }: ViewportGizmoHelperProps): ReactNode {
   const { camera, gl, controls, scene } = useThree((state) => ({
     camera: state.camera,
     gl: state.gl,
@@ -20,6 +25,7 @@ export function ViewportGizmoHelper(): ReactNode {
   const rendererRef = useRef<THREE.WebGLRenderer | undefined>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const { serialized } = useColor();
+  const [theme] = useTheme();
 
   // Define event handlers using useCallback to maintain references
   const handleStart = useCallback(() => {
@@ -80,80 +86,43 @@ export function ViewportGizmoHelper(): ReactNode {
       alpha: true,
       antialias: true,
     });
-    renderer.setSize(128, 128);
+    renderer.setSize(size, size);
     const dpr = Math.min(globalThis.devicePixelRatio, 2);
     renderer.setPixelRatio(dpr);
     renderer.setAnimationLoop(animation);
     renderer.setClearColor(0x00_00_00, 0);
     rendererRef.current = renderer;
 
+    const backgroundColor = theme === Theme.DARK ? 0x44_44_44 : 0xcc_cc_cc;
+    const axisColors = {
+      color: theme === Theme.DARK ? 0x33_33_33 : 0xee_ee_ee,
+      labelColor: theme === Theme.DARK ? 0xdd_dd_dd : 0x33_33_33,
+      hover: {
+        color: serialized.hex,
+      },
+    } as const satisfies GizmoAxisOptions;
+
     // Configure the gizmo options
     const gizmoConfig: GizmoOptions = {
       type: 'cube',
       placement: 'bottom-right',
       resolution: 2048,
+      size,
       font: {
         weight: 'normal',
       },
       background: {
-        color: 0x44_44_44,
-        hover: { color: 0x44_44_44 },
+        color: backgroundColor,
+        hover: { color: backgroundColor },
       },
-      corners: {
-        color: 0x33_33_33,
-        hover: {
-          color: serialized.hex,
-        },
-      },
-      edges: {
-        color: 0x33_33_33,
-        opacity: 1,
-        hover: {
-          color: serialized.hex,
-        },
-      },
-      right: {
-        color: 0x33_33_33,
-        labelColor: 0xdd_dd_dd,
-        hover: {
-          color: serialized.hex,
-        },
-      },
-      top: {
-        color: 0x33_33_33,
-        labelColor: 0xdd_dd_dd,
-        hover: {
-          color: serialized.hex,
-        },
-      },
-      front: {
-        color: 0x33_33_33,
-        labelColor: 0xdd_dd_dd,
-        hover: {
-          color: serialized.hex,
-        },
-      },
-      back: {
-        color: 0x33_33_33,
-        labelColor: 0xdd_dd_dd,
-        hover: {
-          color: serialized.hex,
-        },
-      },
-      left: {
-        color: 0x33_33_33,
-        labelColor: 0xdd_dd_dd,
-        hover: {
-          color: serialized.hex,
-        },
-      },
-      bottom: {
-        color: 0x33_33_33,
-        labelColor: 0xdd_dd_dd,
-        hover: {
-          color: serialized.hex,
-        },
-      },
+      corners: axisColors,
+      edges: { ...axisColors, opacity: 1 },
+      right: axisColors,
+      top: axisColors,
+      front: axisColors,
+      back: axisColors,
+      left: axisColors,
+      bottom: axisColors,
     };
 
     // Create the gizmo
@@ -191,7 +160,7 @@ export function ViewportGizmoHelper(): ReactNode {
         renderer.dispose();
       }
     };
-  }, [camera, gl, controls, scene, serialized.hex, handleStart, handleChange, handleEnd]);
+  }, [camera, gl, controls, scene, serialized.hex, handleStart, handleChange, handleEnd, theme, size]);
 
   // Render the gizmo in each frame
   useFrame(() => {

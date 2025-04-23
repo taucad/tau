@@ -127,12 +127,9 @@ export function Stage({
     sceneRadius: number | undefined;
     // The radius of the shape.
     shapeRadius: number;
-    // The top of the scene
-    top: number;
   }>({
     sceneRadius: undefined,
     shapeRadius: 0,
-    top: 0,
   });
 
   const { perspective, rotation } = useMemo(() => {
@@ -172,7 +169,7 @@ export function Stage({
     box3.getBoundingSphere(sphere);
 
     set((previous) => {
-      return { shapeRadius: sphere.radius, sceneRadius: previous.sceneRadius, top: box3.max.z };
+      return { shapeRadius: sphere.radius, sceneRadius: previous.sceneRadius };
     });
   }, [isCentered, children]);
 

@@ -1,7 +1,7 @@
 import { OrbitControls } from '@react-three/drei';
 import React from 'react';
 import type { ComponentRef, RefObject } from 'react';
-import { ViewportGizmoHelper } from './viewport-gizmo.js';
+import { ViewportGizmoCube } from './viewport-gizmo-cube.js';
 
 type ControlsProperties = {
   readonly enableGizmo: boolean;
@@ -28,7 +28,7 @@ export const Controls = React.memo(function ({
         enableDamping={enableDamping}
         enableZoom={enableZoom}
       />
-      {enableGizmo ? <ViewportGizmoHelper /> : null}
+      {enableGizmo ? <ViewportGizmoCube /> : null}
     </>
   );
 });

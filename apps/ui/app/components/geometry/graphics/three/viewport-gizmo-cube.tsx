@@ -8,11 +8,11 @@ import type { ReactNode } from 'react';
 import { Theme, useTheme } from 'remix-themes';
 import { useColor } from '@/hooks/use-color.js';
 
-type ViewportGizmoHelperProps = {
+type ViewportGizmoCubeProps = {
   readonly size?: number;
 };
 
-export function ViewportGizmoHelper({ size = 96 }: ViewportGizmoHelperProps): ReactNode {
+export function ViewportGizmoCube({ size = 96 }: ViewportGizmoCubeProps): ReactNode {
   const { camera, gl, controls, scene } = useThree((state) => ({
     camera: state.camera,
     gl: state.gl,

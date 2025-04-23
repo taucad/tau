@@ -110,6 +110,7 @@ export function ViewportGizmoHelper({ size = 96 }: ViewportGizmoHelperProps): Re
       size,
       font: {
         weight: 'normal',
+        family: 'monospace',
       },
       background: {
         color: backgroundColor,

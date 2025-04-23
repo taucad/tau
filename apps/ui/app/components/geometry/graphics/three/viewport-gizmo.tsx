@@ -96,7 +96,7 @@ export function ViewportGizmoHelper({ size = 96 }: ViewportGizmoHelperProps): Re
     const backgroundColor = theme === Theme.DARK ? 0x44_44_44 : 0xcc_cc_cc;
     const axisColors = {
       color: theme === Theme.DARK ? 0x33_33_33 : 0xee_ee_ee,
-      labelColor: theme === Theme.DARK ? 0xdd_dd_dd : 0x33_33_33,
+      labelColor: theme === Theme.DARK ? 0xff_ff_ff : 0x00_00_00,
       hover: {
         color: serialized.hex,
       },
@@ -109,7 +109,7 @@ export function ViewportGizmoHelper({ size = 96 }: ViewportGizmoHelperProps): Re
       resolution: 2048,
       size,
       font: {
-        weight: 'bold',
+        weight: 'normal',
         family: 'monospace',
       },
       background: {

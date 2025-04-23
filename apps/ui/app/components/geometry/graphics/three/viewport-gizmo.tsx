@@ -109,7 +109,7 @@ export function ViewportGizmoHelper({ size = 96 }: ViewportGizmoHelperProps): Re
       resolution: 2048,
       size,
       font: {
-        weight: 'normal',
+        weight: 'bold',
         family: 'monospace',
       },
       background: {

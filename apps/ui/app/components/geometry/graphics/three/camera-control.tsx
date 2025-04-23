@@ -117,7 +117,7 @@ export function CameraHandler({ angle }: CameraHandlerProps): JSX.Element {
   // Store original camera settings to maintain consistent view
   const cameraState = useRef({
     initialized: false,
-    originalFov: 50, // Default FOV if not set
+    originalFov: 60, // Default FOV if not set
     originalPosition: new THREE.Vector3(),
     originalZoom: 1,
     targetDistance: 10_000,

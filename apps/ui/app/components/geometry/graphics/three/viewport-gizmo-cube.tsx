@@ -94,9 +94,15 @@ export function ViewportGizmoCube({ size = 96 }: ViewportGizmoCubeProps): ReactN
     rendererRef.current = renderer;
 
     const backgroundColor = theme === Theme.DARK ? 0x44_44_44 : 0xcc_cc_cc;
-    const axisColors = {
+    const axisConfig = {
       color: theme === Theme.DARK ? 0x33_33_33 : 0xee_ee_ee,
       labelColor: theme === Theme.DARK ? 0xff_ff_ff : 0x00_00_00,
+      hover: {
+        color: serialized.hex,
+      },
+    } as const satisfies GizmoAxisOptions;
+    const edgeConfig = {
+      color: theme === Theme.DARK ? 0x33_33_33 : 0xee_ee_ee,
       hover: {
         color: serialized.hex,
       },
@@ -106,7 +112,6 @@ export function ViewportGizmoCube({ size = 96 }: ViewportGizmoCubeProps): ReactN
     const gizmoConfig: GizmoOptions = {
       type: 'cube',
       placement: 'bottom-right',
-      resolution: 2048,
       size,
       font: {
         weight: 'normal',
@@ -116,14 +121,14 @@ export function ViewportGizmoCube({ size = 96 }: ViewportGizmoCubeProps): ReactN
         color: backgroundColor,
         hover: { color: backgroundColor },
       },
-      corners: axisColors,
-      edges: { ...axisColors, opacity: 1 },
-      right: axisColors,
-      top: axisColors,
-      front: axisColors,
-      back: axisColors,
-      left: axisColors,
-      bottom: axisColors,
+      corners: axisConfig,
+      edges: { ...edgeConfig, opacity: 1 },
+      right: axisConfig,
+      top: axisConfig,
+      front: { ...axisConfig, label: 'Back' },
+      back: { ...axisConfig, label: 'Front' },
+      left: axisConfig,
+      bottom: axisConfig,
     };
 
     // Create the gizmo

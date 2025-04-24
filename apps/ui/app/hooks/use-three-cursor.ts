@@ -34,6 +34,30 @@ export function useThreeCursor({ rotateIconBase64 }: UseCursorOptions): {
   const [isCtrlKeyDown, setIsCtrlKeyDown] = useState(false);
   const [isMetaKeyDown, setIsMetaKeyDown] = useState(false);
 
+  // Reset all states
+  const resetAllStates = () => {
+    setIsRightMouseDown(false);
+    setIsLeftMouseDown(false);
+    setIsShiftKeyDown(false);
+    setIsCtrlKeyDown(false);
+    setIsMetaKeyDown(false);
+  };
+
+  // Reset state on window blur
+  useEffect(() => {
+    const handleBlur = () => {
+      resetAllStates();
+    };
+
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+      // Also reset state on unmount
+      resetAllStates();
+    };
+  }, []);
+
   // Track key states
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

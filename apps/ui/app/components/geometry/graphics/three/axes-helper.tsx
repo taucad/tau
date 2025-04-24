@@ -40,10 +40,6 @@ export function AxesHelper({
 }: CustomAxesHelperProps): JSX.Element {
   const [hoveredAxis, setHoveredAxis] = React.useState<'x' | 'y' | 'z' | undefined>(undefined);
 
-  React.useEffect(() => {
-    globalThis.document.body.style.cursor = hoveredAxis ? 'pointer' : 'auto';
-  }, [hoveredAxis]);
-
   const axes = React.useMemo(
     () =>
       [

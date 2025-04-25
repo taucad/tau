@@ -3,18 +3,138 @@ import type { GizmoAxisOptions, GizmoOptions } from 'three-viewport-gizmo';
 import { ViewportGizmo } from 'three-viewport-gizmo';
 import { useRef, useEffect, useState, useCallback } from 'react';
 import * as THREE from 'three';
+import { Line2 } from 'three/examples/jsm/lines/Line2.js';
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { ReactNode } from 'react';
 import { Theme, useTheme } from 'remix-themes';
 import { useColor } from '@/hooks/use-color.js';
 
+const createAxesObject = ({
+  axesSize = 2.1,
+  xAxisColor = 'red',
+  yAxisColor = 'green',
+  zAxisColor = 'blue',
+  xLabelColor = 'red',
+  yLabelColor = 'green',
+  zLabelColor = 'blue',
+  lineOpacity = 0.6,
+  lineWidth = 1.5,
+}: {
+  axesSize?: number;
+  xAxisColor?: string;
+  yAxisColor?: string;
+  zAxisColor?: string;
+  xLabelColor?: string;
+  yLabelColor?: string;
+  zLabelColor?: string;
+  lineOpacity?: number;
+  lineWidth?: number;
+}) => {
+  const axesLines = [
+    {
+      id: 'x',
+      points: [new THREE.Vector3(0, 0, 0), new THREE.Vector3(axesSize, 0, 0)],
+      lineColor: xAxisColor,
+      labelColor: xLabelColor,
+      label: 'X',
+    },
+    {
+      id: 'y',
+      points: [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, axesSize, 0)],
+      lineColor: yAxisColor,
+      labelColor: yLabelColor,
+      label: 'Y',
+    },
+    {
+      id: 'z',
+      points: [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, axesSize)],
+      lineColor: zAxisColor,
+      labelColor: zLabelColor,
+      label: 'Z',
+    },
+  ];
+
+  const axes = new THREE.Group();
+  for (const line of axesLines) {
+    // Convert points to flat array for LineGeometry
+    const positions = [];
+    for (const point of line.points) {
+      positions.push(point.x, point.y, point.z);
+    }
+
+    const geometry = new LineGeometry();
+    geometry.setPositions(positions);
+
+    const material = new LineMaterial({
+      color: line.lineColor,
+      linewidth: lineWidth,
+      opacity: lineOpacity,
+      resolution: new THREE.Vector2(axesSize, axesSize),
+    });
+
+    const lineObject = new Line2(geometry, material);
+    axes.add(lineObject);
+
+    // Add text label at the end of each axis
+    const endPoint = line.points[1];
+
+    // Create a canvas for the text
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    const textCanvasSize = 64;
+    canvas.width = textCanvasSize;
+    canvas.height = textCanvasSize;
+
+    if (context) {
+      // Set the entire canvas to transparent
+      context.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw the text with smaller font size
+      context.fillStyle = line.labelColor;
+      context.font = '100 48px monospace';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(line.label, textCanvasSize / 2, textCanvasSize / 2);
+    }
+
+    // Create texture from canvas
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+
+    // Create a sprite with the texture
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      sizeAttenuation: false,
+      depthTest: true,
+      transparent: true,
+    });
+
+    // Set render order to ensure it renders on top
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.renderOrder = 3;
+    sprite.position.copy(endPoint);
+    sprite.scale.set(0.08, 0.06, 1); // Reduced vertical scale from 0.1 to 0.06
+
+    // Add increased offset to move labels further from line ends
+    const direction = new THREE.Vector3().subVectors(endPoint, new THREE.Vector3(0, 0, 0)).normalize();
+    sprite.position.add(direction.multiplyScalar(0.2));
+
+    axes.add(sprite);
+  }
+
+  axes.position.set(-axesSize / 2, -axesSize / 2, -axesSize / 2);
+  return axes;
+};
+
 type ViewportGizmoCubeProps = {
   readonly size?: number;
 };
 
-export function ViewportGizmoCube({ size = 96 }: ViewportGizmoCubeProps): ReactNode {
+export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): ReactNode {
   const { camera, gl, controls, scene } = useThree((state) => ({
-    camera: state.camera,
+    camera: state.camera as THREE.PerspectiveCamera,
     gl: state.gl,
     controls: state.controls as OrbitControls,
     scene: state.scene,
@@ -93,16 +213,23 @@ export function ViewportGizmoCube({ size = 96 }: ViewportGizmoCubeProps): ReactN
     renderer.setClearColor(0x00_00_00, 0);
     rendererRef.current = renderer;
 
-    const backgroundColor = theme === Theme.DARK ? 0x44_44_44 : 0xcc_cc_cc;
-    const axisConfig = {
-      color: theme === Theme.DARK ? 0x33_33_33 : 0xee_ee_ee,
+    const faceConfig = {
+      color: theme === Theme.DARK ? 0x33_33_33 : 0xdd_dd_dd,
       labelColor: theme === Theme.DARK ? 0xff_ff_ff : 0x00_00_00,
       hover: {
         color: serialized.hex,
       },
     } as const satisfies GizmoAxisOptions;
     const edgeConfig = {
-      color: theme === Theme.DARK ? 0x33_33_33 : 0xee_ee_ee,
+      color: theme === Theme.DARK ? 0x55_55_55 : 0xee_ee_ee,
+      opacity: 1,
+      hover: {
+        color: serialized.hex,
+      },
+    } as const satisfies GizmoAxisOptions;
+    const cornerConfig = {
+      ...faceConfig,
+      color: theme === Theme.DARK ? 0x33_33_33 : 0xdd_dd_dd,
       hover: {
         color: serialized.hex,
       },
@@ -111,24 +238,26 @@ export function ViewportGizmoCube({ size = 96 }: ViewportGizmoCubeProps): ReactN
     // Configure the gizmo options
     const gizmoConfig: GizmoOptions = {
       type: 'cube',
+      rounded: true,
       placement: 'bottom-right',
       size,
       font: {
         weight: 'normal',
         family: 'monospace',
       },
-      background: {
-        color: backgroundColor,
-        hover: { color: backgroundColor },
+      radius: 0.3,
+      offset: {
+        bottom: 5,
+        right: 5,
       },
-      corners: axisConfig,
-      edges: { ...edgeConfig, opacity: 1 },
-      right: axisConfig,
-      top: axisConfig,
-      front: { ...axisConfig, label: 'Back' },
-      back: { ...axisConfig, label: 'Front' },
-      left: axisConfig,
-      bottom: axisConfig,
+      corners: cornerConfig,
+      edges: edgeConfig,
+      right: faceConfig,
+      top: faceConfig,
+      front: { ...faceConfig, label: 'Back' },
+      back: { ...faceConfig, label: 'Front' },
+      left: faceConfig,
+      bottom: faceConfig,
     };
 
     // Create the gizmo
@@ -139,6 +268,21 @@ export function ViewportGizmoCube({ size = 96 }: ViewportGizmoCubeProps): ReactN
     gizmo.addEventListener('start', handleStart);
     gizmo.addEventListener('change', handleChange);
     gizmo.addEventListener('end', handleEnd);
+
+    gizmo.scale.multiplyScalar(0.7);
+    // Gizmo.add(roundedBoxMesh);
+    gizmo.add(
+      createAxesObject({
+        axesSize: 2.1,
+        xAxisColor: 'red',
+        yAxisColor: 'green',
+        zAxisColor: 'rgb(37, 78, 136)',
+        xLabelColor: 'red',
+        yLabelColor: 'green',
+        zLabelColor: 'rgb(37, 78, 136)',
+        lineWidth: 2,
+      }),
+    );
 
     // Attach the controls to enable proper interaction
     gizmo.attachControls(controls);

@@ -1,7 +1,7 @@
 import type { JSX } from 'react';
 import * as THREE from 'three';
 import { Line } from '@react-three/drei';
-import React from 'react';
+import React, { Fragment } from 'react';
 
 type CustomAxesHelperProps = {
   /**
@@ -75,20 +75,29 @@ export function AxesHelper({
     // eslint-disable-next-line react/no-unknown-property -- TODO: add typings for Three.js
     <group userData={{ isPreviewOnly: true }}>
       {axes.map((axis) => (
-        <Line
-          key={axis.id}
-          points={axis.getPoints()}
-          opacity={0.6}
-          color={axis.color}
-          lineWidth={hoveredAxis === axis.id ? thickness * 2 : thickness}
-          userData={{ isPreviewOnly: true }}
-          onPointerOver={() => {
-            setHoveredAxis(axis.id);
-          }}
-          onPointerOut={() => {
-            setHoveredAxis(undefined);
-          }}
-        />
+        <Fragment key={axis.id}>
+          <Line
+            points={axis.getPoints()}
+            opacity={0.6}
+            renderOrder={1}
+            color={axis.color}
+            lineWidth={hoveredAxis === axis.id ? thickness * 2 : thickness}
+          />
+          <Line
+            transparent
+            depthTest={false}
+            points={axis.getPoints()}
+            opacity={0}
+            renderOrder={2}
+            lineWidth={thickness * 8}
+            onPointerOver={() => {
+              setHoveredAxis(axis.id);
+            }}
+            onPointerOut={() => {
+              setHoveredAxis(undefined);
+            }}
+          />
+        </Fragment>
       ))}
     </group>
   );

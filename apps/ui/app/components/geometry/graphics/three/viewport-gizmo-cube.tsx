@@ -188,8 +188,8 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
     // Create a separate canvas for the gizmo
     const canvas = document.createElement('canvas');
     canvas.style.position = 'absolute';
-    canvas.style.bottom = '10px';
-    canvas.style.right = '10px';
+    canvas.style.bottom = '0';
+    canvas.style.right = '0';
     canvas.style.zIndex = '10';
 
     // Find the parent container to append our canvas
@@ -247,8 +247,8 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
       },
       radius: 0.3,
       offset: {
-        bottom: 5,
-        right: 5,
+        bottom: 0,
+        right: 0,
       },
       corners: cornerConfig,
       edges: edgeConfig,

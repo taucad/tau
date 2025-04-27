@@ -241,9 +241,11 @@ export function CameraControl({ defaultAngle = 90, onChange, className }: Camera
         >
           {/* Text labels that will move up on hover */}
           <div className="flex w-full justify-between px-1 text-xs leading-none transition-transform duration-300 group-hover:-translate-y-1.75 max-md:-translate-y-1.75">
-            <span className="w-[3.3ch] truncate text-clip md:w-fit">Orthographic</span>
+            <span className="hidden md:block">Orthographic</span>
+            <span className="md:hidden">Orth.</span>
             <div className="font-bold text-primary">{angle}°</div>
-            <span className="w-[3.3ch] truncate text-clip md:w-fit">Perspective</span>
+            <span className="hidden md:block">Perspective</span>
+            <span className="md:hidden">Persp.</span>
           </div>
 
           {/* Slider container that slides up from bottom */}

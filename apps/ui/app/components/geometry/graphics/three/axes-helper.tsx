@@ -90,7 +90,7 @@ export function AxesHelper({
           <Line
             points={axis.getPoints()}
             opacity={0.6}
-            // Large render order to ensure the axes are painted last
+            // Large render order to ensure the axes are placed on top of all other objects
             renderOrder={9999}
             color={axis.color}
             lineWidth={hoveredAxis === axis.id ? hoverThickness : thickness}

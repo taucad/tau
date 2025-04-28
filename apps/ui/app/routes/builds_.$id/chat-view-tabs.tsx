@@ -62,7 +62,7 @@ export function ChatViewTabs() {
       }}
     >
       <div className={cn('absolute top-0 left-0 z-10 mt-2 ml-2 group-data-[chat-open=false]/chat-layout:ml-12')}>
-        <TabsList defaultValue="editor" className="rounded-md">
+        <TabsList defaultValue="editor" className="rounded-md border">
           {tabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value} className="px-1.5 md:px-2">
               <tab.icon />

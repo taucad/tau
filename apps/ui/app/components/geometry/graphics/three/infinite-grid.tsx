@@ -205,36 +205,6 @@ type InfiniteGridProperties = {
    */
   readonly gridDistanceMultiplier: number;
   /**
-   * Maximum value for sigmoid center calculation (for shallow angles).
-   * Increasing shifts fade-out point farther from camera at shallow angles.
-   * @default 0.7
-   */
-  readonly sigmoidCenterMax: number;
-  /**
-   * Minimum value for sigmoid center calculation (for steep angles).
-   * Increasing shifts fade-out point farther from camera at steep angles.
-   * @default 0.4
-   */
-  readonly sigmoidCenterMin: number;
-  /**
-   * FOV adjustment factor for sigmoid center calculation.
-   * Increasing makes fade center more responsive to FOV changes.
-   * @default 0.5
-   */
-  readonly sigmoidCenterFovFactor: number;
-  /**
-   * Minimum sigmoid sharpness value (for shallow angles).
-   * Increasing creates more abrupt fade-out transition at shallow angles.
-   * @default 3.0
-   */
-  readonly sigmoidSharpnessMin: number;
-  /**
-   * Maximum sigmoid sharpness value (for steep angles).
-   * Increasing creates more abrupt fade-out transition at steep angles.
-   * @default 8.0
-   */
-  readonly sigmoidSharpnessMax: number;
-  /**
    * Minimum falloff base value for mixing operation.
    * Increasing strengthens minimum opacity at oblique viewing angles.
    * @default 0.05
@@ -315,11 +285,6 @@ function infiniteGridMaterial({
   viewAngleAdjustmentMax,
   fovScalingBase,
   gridDistanceMultiplier,
-  sigmoidCenterMax,
-  sigmoidCenterMin,
-  sigmoidCenterFovFactor,
-  sigmoidSharpnessMin,
-  sigmoidSharpnessMax,
   falloffBaseMin,
   falloffBaseMax,
   minFadeFactor,
@@ -438,21 +403,6 @@ function infiniteGridMaterial({
       },
       uGridDistanceMultiplier: {
         value: gridDistanceMultiplier,
-      },
-      uSigmoidCenterMax: {
-        value: sigmoidCenterMax,
-      },
-      uSigmoidCenterMin: {
-        value: sigmoidCenterMin,
-      },
-      uSigmoidCenterFovFactor: {
-        value: sigmoidCenterFovFactor,
-      },
-      uSigmoidSharpnessMin: {
-        value: sigmoidSharpnessMin,
-      },
-      uSigmoidSharpnessMax: {
-        value: sigmoidSharpnessMax,
       },
       uFalloffBaseMin: {
         value: falloffBaseMin,
@@ -614,11 +564,6 @@ function infiniteGridMaterial({
       uniform float uFovScalingBase;
       uniform float uGridDistanceMultiplier;
       uniform float uMinGridDistance;
-      uniform float uSigmoidCenterMax;
-      uniform float uSigmoidCenterMin;
-      uniform float uSigmoidCenterFovFactor;
-      uniform float uSigmoidSharpnessMin;
-      uniform float uSigmoidSharpnessMax;
       uniform float uFalloffBaseMin;
       uniform float uFalloffBaseMax;
       uniform float uMinFadeFactor;
@@ -699,17 +644,12 @@ function infiniteGridMaterial({
         // Calculate distance ratio with angle compensation
         float distanceRatio = adjustedDistance / (gridDistance * angleCompensation);
         
-        // Use a sigmoid function for fade with adaptive center based on angle and FOV
-        float sigmoidCenter = mix(uSigmoidCenterMax, uSigmoidCenterMin, viewAngleFactor) * (1.0 + uSigmoidCenterFovFactor / safeFov);
-        float sigmoidSharpness = mix(uSigmoidSharpnessMin, uSigmoidSharpnessMax, viewAngleFactor) * fovCompensation;
-        float d = 1.0 / (1.0 + exp(sigmoidSharpness * (distanceRatio - sigmoidCenter)));
-        
-        // Ensure consistent falloff behavior
+        // Simple power-based fade calculation (replacing sigmoid)
         float falloffBase = mix(uFalloffBaseMin, uFalloffBaseMax, viewAngleFactor);
         float falloffExponent = 1.0 + viewAngleFactor;
         
-        // Apply fade factor with angle-adaptive exponent
-        float fadeFactor = pow(d, falloffExponent);
+        // Calculate fade factor using simple power function
+        float fadeFactor = pow(max(0.0, 1.0 - distanceRatio), falloffExponent);
         
         // Apply simple distance falloff based on the ratio
         float distanceRatioSimple = min(planarDistance / gridDistance, 1.0);
@@ -778,11 +718,6 @@ export function InfiniteGrid({
   viewAngleAdjustmentMax = 1,
   fovScalingBase = 10,
   gridDistanceMultiplier = 10,
-  sigmoidCenterMax = 0.7,
-  sigmoidCenterMin = 0.4,
-  sigmoidCenterFovFactor = 0.5,
-  sigmoidSharpnessMin = 3,
-  sigmoidSharpnessMax = 8,
   falloffBaseMin = 0.05,
   falloffBaseMax = 0.5,
   minFadeFactor = 0.05,
@@ -830,11 +765,6 @@ export function InfiniteGrid({
         viewAngleAdjustmentMax,
         fovScalingBase,
         gridDistanceMultiplier,
-        sigmoidCenterMax,
-        sigmoidCenterMin,
-        sigmoidCenterFovFactor,
-        sigmoidSharpnessMin,
-        sigmoidSharpnessMax,
         falloffBaseMin,
         falloffBaseMax,
         minFadeFactor,
@@ -877,11 +807,6 @@ export function InfiniteGrid({
       viewAngleAdjustmentMax,
       fovScalingBase,
       gridDistanceMultiplier,
-      sigmoidCenterMax,
-      sigmoidCenterMin,
-      sigmoidCenterFovFactor,
-      sigmoidSharpnessMin,
-      sigmoidSharpnessMax,
       falloffBaseMin,
       falloffBaseMax,
       minFadeFactor,

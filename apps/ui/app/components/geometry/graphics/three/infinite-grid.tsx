@@ -339,7 +339,7 @@ function infiniteGridMaterial({
 
   const material = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
-
+    transparent: true,
     uniforms: {
       uSmallSize: {
         value: smallSize,
@@ -477,7 +477,7 @@ function infiniteGridMaterial({
         value: distanceFalloffRatio,
       },
     },
-    transparent: true,
+
     vertexShader: `
       varying vec3 worldPosition;
       varying vec3 viewVector;
@@ -793,7 +793,6 @@ export function InfiniteGrid({
 }: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
   const [theme] = useTheme();
   const materialRef = React.useRef<THREE.ShaderMaterial | undefined>(null);
-  const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera;
 
   // Create material with initial properties
   const material = React.useMemo(
@@ -897,12 +896,6 @@ export function InfiniteGrid({
   React.useEffect(() => {
     materialRef.current = material;
   }, [material]);
-
-  // Update camera FOV on every frame render
-  useFrame(() => {
-    if (!materialRef.current || !camera) return;
-    materialRef.current.uniforms.uCameraFov.value = camera.fov;
-  });
 
   return <Plane userData={{ isPreviewOnly: true }} material={material} renderOrder={9999} />;
 }

@@ -3,7 +3,6 @@ import { Plane } from '@react-three/drei';
 import React from 'react';
 import type { JSX } from 'react';
 import { Theme, useTheme } from 'remix-themes';
-import { useThree, useFrame } from '@react-three/fiber';
 
 type InfiniteGridProperties = {
   /**

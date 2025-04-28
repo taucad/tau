@@ -67,30 +67,6 @@ type InfiniteGridProperties = {
    */
   readonly tanBlendThreshold: number;
   /**
-   * Minimum FOV bias to ensure stability at extreme camera settings.
-   * Increasing improves stability at very low FOVs but reduces accuracy.
-   * @default 0.1
-   */
-  readonly minFovBias: number;
-  /**
-   * Reference FOV value used for normalization calculations.
-   * Increasing calibrates grid for wider FOV cameras.
-   * @default 90.0
-   */
-  readonly referenceFov: number;
-  /**
-   * Controls how much to boost the grid at low FOV values.
-   * Increasing improves grid visibility at narrow FOVs.
-   * @default 30.0
-   */
-  readonly fovExtensionFactor: number;
-  /**
-   * Bias value for FOV extension calculations.
-   * Increasing makes FOV extension effect more gradual.
-   * @default 5.0
-   */
-  readonly fovExtensionBias: number;
-  /**
    * Start threshold for steep angle adaptation (0.0-1.0).
    * Increasing delays steep angle adaptation until more perpendicular views.
    * @default 0.7
@@ -169,18 +145,6 @@ type InfiniteGridProperties = {
    */
   readonly shallowAnglePowerFactor: number;
   /**
-   * Maximum threshold for FOV compensation smoothstep.
-   * Increasing makes FOV compensation more gradual.
-   * @default 3.0
-   */
-  readonly fovCompThresholdMax: number;
-  /**
-   * FOV compensation multiplier for visibility adjustments.
-   * Increasing strengthens FOV-based visibility adjustments.
-   * @default 2.0
-   */
-  readonly fovCompMultiplier: number;
-  /**
    * Minimum value for angle-based distance adjustment.
    * Increasing increases minimum grid visibility at shallow angles.
    * @default 0.2
@@ -192,12 +156,6 @@ type InfiniteGridProperties = {
    * @default 1.0
    */
   readonly viewAngleAdjustmentMax: number;
-  /**
-   * Base value for FOV-based grid scaling.
-   * Increasing makes the grid adapt more aggressively to FOV changes.
-   * @default 10.0
-   */
-  readonly fovScalingBase: number;
   /**
    * Multiplier for grid distance calculation.
    * Increasing extends the grid farther from camera.
@@ -262,10 +220,6 @@ function infiniteGridMaterial({
   visibleWidthMultiplier,
   minAngle,
   tanBlendThreshold,
-  minFovBias,
-  referenceFov,
-  fovExtensionFactor,
-  fovExtensionBias,
   steepAngleThresholdStart,
   steepAngleThresholdEnd,
   steepAngleBoostMultiplier,
@@ -279,11 +233,8 @@ function infiniteGridMaterial({
   fragmentSteepAngleBoostMultiplier,
   fragmentShallowAngleBoostMultiplier,
   shallowAnglePowerFactor,
-  fovCompThresholdMax,
-  fovCompMultiplier,
   viewAngleAdjustmentMin,
   viewAngleAdjustmentMax,
-  fovScalingBase,
   gridDistanceMultiplier,
   falloffBaseMin,
   falloffBaseMax,
@@ -335,18 +286,6 @@ function infiniteGridMaterial({
       uTanBlendThreshold: {
         value: tanBlendThreshold,
       },
-      uMinFovBias: {
-        value: minFovBias,
-      },
-      uReferenceFov: {
-        value: referenceFov,
-      },
-      uFovExtensionFactor: {
-        value: fovExtensionFactor,
-      },
-      uFovExtensionBias: {
-        value: fovExtensionBias,
-      },
       uSteepAngleThresholdStart: {
         value: steepAngleThresholdStart,
       },
@@ -386,20 +325,11 @@ function infiniteGridMaterial({
       uShallowAnglePowerFactor: {
         value: shallowAnglePowerFactor,
       },
-      uFovCompThresholdMax: {
-        value: fovCompThresholdMax,
-      },
-      uFovCompMultiplier: {
-        value: fovCompMultiplier,
-      },
       uViewAngleAdjustmentMin: {
         value: viewAngleAdjustmentMin,
       },
       uViewAngleAdjustmentMax: {
         value: viewAngleAdjustmentMax,
-      },
-      uFovScalingBase: {
-        value: fovScalingBase,
       },
       uGridDistanceMultiplier: {
         value: gridDistanceMultiplier,
@@ -435,10 +365,6 @@ function infiniteGridMaterial({
       uniform float uCameraFov;
       uniform float uMinAngle;
       uniform float uTanBlendThreshold;
-      uniform float uMinFovBias;
-      uniform float uReferenceFov;
-      uniform float uFovExtensionFactor;
-      uniform float uFovExtensionBias;
       uniform float uSteepAngleThresholdStart;
       uniform float uSteepAngleThresholdEnd;
       uniform float uSteepAngleBoostMultiplier;
@@ -451,7 +377,6 @@ function infiniteGridMaterial({
       uniform float uPositionFactorThreshold;
       
       // Highly accurate tangent approximation that works well for all angles
-      // Especially for extreme FOV values
       float stableTan(float angle) {
         // Ensure angle is never exactly zero
         angle = max(angle, uMinAngle);
@@ -479,11 +404,8 @@ function infiniteGridMaterial({
         // Calculate the camera distance
         float cameraDistance = length(cameraPosition);
         
-        // Ensure FOV is never zero by adding a small bias
-        float safeFov = max(uCameraFov, uMinFovBias);
-        
         // Calculate half FOV in radians
-        float halfFovRadians = radians(safeFov * 0.5);
+        float halfFovRadians = radians(uCameraFov * 0.5);
         
         // Use a consistent calculation for all FOV values
         float tanHalfFov = stableTan(halfFovRadians);
@@ -491,18 +413,11 @@ function infiniteGridMaterial({
         // Calculate visible width consistently for all FOV values
         float visibleWidthAtDistance = 2.0 * cameraDistance * tanHalfFov;
         
-        // Create a smooth FOV extension factor with higher boost at extremely low FOVs
-        // This ensures grid visibility across all FOV values including problematic ranges
-        float fovFactor = uReferenceFov / max(safeFov, 1.0);
-        float fovExtensionFactor = 1.0 + uFovExtensionFactor / (safeFov + uFovExtensionBias) * smoothstep(0.0, 1.0, fovFactor - 1.0);
-        
         // Get normalized camera direction to detect viewing angle relative to grid plane
         vec3 cameraNormal = normalize(cameraPosition);
         float viewAngleFactor = abs(cameraNormal.${normalAxis});
         
         // Enhanced angle extension that increases gradually near top-down views
-        // The closer to top-down (viewAngleFactor → 1), the more we need to extend
-        // This is counter-intuitive but necessary for stability at steep angles
         float steepAngleBoost = smoothstep(uSteepAngleThresholdStart, uSteepAngleThresholdEnd, viewAngleFactor) * uSteepAngleBoostMultiplier;
         
         // Also boost at shallow angles as before
@@ -511,10 +426,10 @@ function infiniteGridMaterial({
         // Combined angle extension factor without discontinuities
         float angleExtensionFactor = 1.0 + shallowAngleBoost + steepAngleBoost;
         
-        // Apply a continuous scaling factor for all angles and FOVs
+        // Apply a continuous scaling factor for all angles
         float distanceFactor = log(1.0 + cameraDistance * uDistanceNormalizationFactor) * uDistanceFactorMultiplier;
         float gridDistance = visibleWidthAtDistance * uVisibleWidthMultiplier * 
-                           angleExtensionFactor * fovExtensionFactor + 
+                           angleExtensionFactor + 
                            distanceFactor;
         
         // Always ensure a reasonable minimum distance
@@ -550,18 +465,13 @@ function infiniteGridMaterial({
       uniform float uCameraFov;
       uniform float uMinAngle;
       uniform float uTanBlendThreshold;
-      uniform float uMinFovBias;
-      uniform float uReferenceFov;
       uniform float uSteepAngleThresholdStart;
       uniform float uSteepAngleThresholdEnd;
       uniform float uFragmentSteepAngleBoostMultiplier;
       uniform float uFragmentShallowAngleBoostMultiplier;
       uniform float uShallowAnglePowerFactor;
-      uniform float uFovCompThresholdMax;
-      uniform float uFovCompMultiplier;
       uniform float uViewAngleAdjustmentMin;
       uniform float uViewAngleAdjustmentMax;
-      uniform float uFovScalingBase;
       uniform float uGridDistanceMultiplier;
       uniform float uMinGridDistance;
       uniform float uFalloffBaseMin;
@@ -605,9 +515,6 @@ function infiniteGridMaterial({
       }
       
       void main() {
-        // Ensure FOV is never zero
-        float safeFov = max(uCameraFov, uMinFovBias);
-        
         // Calculate planar distance - distance in the grid plane
         float planarDistance = distance(cameraPosition.${planeAxes}, worldPosition.${planeAxes});
         
@@ -619,24 +526,18 @@ function infiniteGridMaterial({
         float shallowAngleBoost = pow(1.0 - viewAngleFactor, uShallowAnglePowerFactor) * uFragmentShallowAngleBoostMultiplier;
         float angleCompensation = 1.0 + shallowAngleBoost + steepAngleBoost;
         
-        // Create a smooth FOV compensation that works across all values
-        // Higher boost for both very low and very high FOV values
-        float fovFactor = uReferenceFov / max(safeFov, 1.0);
-        float fovCompensation = 1.0 + uFovCompMultiplier * smoothstep(0.0, uFovCompThresholdMax, fovFactor);
-        
         // Create a smooth distance adjustment that adapts to viewing angle
         float viewAngleAdjustment = mix(uViewAngleAdjustmentMin, uViewAngleAdjustmentMax, viewAngleFactor);
-        float adjustedDistance = planarDistance * viewAngleAdjustment / fovCompensation;
+        float adjustedDistance = planarDistance * viewAngleAdjustment;
         
         // Calculate visible width with stable tangent function
         float cameraDistance = length(cameraPosition);
-        float halfFovRadians = radians(safeFov * 0.5);
+        float halfFovRadians = radians(uCameraFov * 0.5);
         float tanHalfFov = stableTan(halfFovRadians);
         float visibleWidthAtDistance = 2.0 * cameraDistance * tanHalfFov;
         
-        // Calculate grid distance with enhanced scaling factors
-        float fovScalingFactor = 1.0 + uFovScalingBase / sqrt(safeFov + 1.0);
-        float gridDistance = visibleWidthAtDistance * uGridDistanceMultiplier * fovScalingFactor;
+        // Calculate grid distance with scaling factors
+        float gridDistance = visibleWidthAtDistance * uGridDistanceMultiplier;
         
         // Ensure minimum distance
         gridDistance = max(gridDistance, uMinGridDistance);
@@ -644,7 +545,7 @@ function infiniteGridMaterial({
         // Calculate distance ratio with angle compensation
         float distanceRatio = adjustedDistance / (gridDistance * angleCompensation);
         
-        // Simple power-based fade calculation (replacing sigmoid)
+        // Simple power-based fade calculation
         float falloffBase = mix(uFalloffBaseMin, uFalloffBaseMax, viewAngleFactor);
         float falloffExponent = 1.0 + viewAngleFactor;
         
@@ -659,7 +560,7 @@ function infiniteGridMaterial({
         // Combine the current fade with simple distance falloff
         fadeFactor = fadeFactor * simpleDistanceFade;
         
-        // Add minimal base opacity for stability across all angles and FOVs
+        // Add minimal base opacity for stability across all angles
         fadeFactor = max(fadeFactor, uMinFadeFactor);
         
         // Apply opacity adjustment that increases at extreme angles
@@ -695,10 +596,6 @@ export function InfiniteGrid({
   visibleWidthMultiplier = 10,
   minAngle = 0.0001,
   tanBlendThreshold = 0.2,
-  minFovBias = 0.1,
-  referenceFov = 90,
-  fovExtensionFactor = 30,
-  fovExtensionBias = 5,
   steepAngleThresholdStart = 0.7,
   steepAngleThresholdEnd = 1,
   steepAngleBoostMultiplier = 2,
@@ -712,11 +609,8 @@ export function InfiniteGrid({
   fragmentSteepAngleBoostMultiplier = 5,
   fragmentShallowAngleBoostMultiplier = 10,
   shallowAnglePowerFactor = 3,
-  fovCompThresholdMax = 3,
-  fovCompMultiplier = 2,
   viewAngleAdjustmentMin = 0.2,
   viewAngleAdjustmentMax = 1,
-  fovScalingBase = 10,
   gridDistanceMultiplier = 10,
   falloffBaseMin = 0.05,
   falloffBaseMax = 0.5,
@@ -742,10 +636,6 @@ export function InfiniteGrid({
         visibleWidthMultiplier,
         minAngle,
         tanBlendThreshold,
-        minFovBias,
-        referenceFov,
-        fovExtensionFactor,
-        fovExtensionBias,
         steepAngleThresholdStart,
         steepAngleThresholdEnd,
         steepAngleBoostMultiplier,
@@ -759,11 +649,8 @@ export function InfiniteGrid({
         fragmentSteepAngleBoostMultiplier,
         fragmentShallowAngleBoostMultiplier,
         shallowAnglePowerFactor,
-        fovCompThresholdMax,
-        fovCompMultiplier,
         viewAngleAdjustmentMin,
         viewAngleAdjustmentMax,
-        fovScalingBase,
         gridDistanceMultiplier,
         falloffBaseMin,
         falloffBaseMax,
@@ -784,10 +671,6 @@ export function InfiniteGrid({
       visibleWidthMultiplier,
       minAngle,
       tanBlendThreshold,
-      minFovBias,
-      referenceFov,
-      fovExtensionFactor,
-      fovExtensionBias,
       steepAngleThresholdStart,
       steepAngleThresholdEnd,
       steepAngleBoostMultiplier,
@@ -801,11 +684,8 @@ export function InfiniteGrid({
       fragmentSteepAngleBoostMultiplier,
       fragmentShallowAngleBoostMultiplier,
       shallowAnglePowerFactor,
-      fovCompThresholdMax,
-      fovCompMultiplier,
       viewAngleAdjustmentMin,
       viewAngleAdjustmentMax,
-      fovScalingBase,
       gridDistanceMultiplier,
       falloffBaseMin,
       falloffBaseMax,

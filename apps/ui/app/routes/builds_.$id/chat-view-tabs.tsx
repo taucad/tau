@@ -1,4 +1,5 @@
 import { Eye, Code, Terminal } from 'lucide-react';
+import type { JSX } from 'react';
 import { ChatConsole } from './chat-console.js';
 import { ChatEditor } from './chat-editor.js';
 import { ChatViewer } from './chat-viewer.js';
@@ -51,7 +52,7 @@ const tabs = [
   },
 ] as const;
 
-export function ChatViewTabs() {
+export function ChatViewTabs(): JSX.Element {
   const [chatTab, setChatTab] = useCookie<ChatTabs>(chatTabCookieName, 'preview');
   return (
     <Tabs

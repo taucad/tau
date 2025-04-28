@@ -29,6 +29,11 @@ type CustomAxesHelperProps = {
    * @default 5
    */
   readonly thickness?: number;
+  /**
+   * The thickness of the axes when hovered
+   * @default 2
+   */
+  readonly hoverThickness?: number;
 };
 
 export function AxesHelper({
@@ -37,6 +42,7 @@ export function AxesHelper({
   yAxisColor = 'rgb(64, 115, 63)',
   zAxisColor = 'rgb(37, 78, 136)',
   thickness = 1.25,
+  hoverThickness = 2,
 }: CustomAxesHelperProps): JSX.Element {
   const [hoveredAxis, setHoveredAxis] = React.useState<'x' | 'y' | 'z' | undefined>(undefined);
 
@@ -72,23 +78,28 @@ export function AxesHelper({
   );
 
   return (
-    // eslint-disable-next-line react/no-unknown-property -- TODO: add typings for Three.js
-    <group userData={{ isPreviewOnly: true }}>
+    <group
+      // eslint-disable-next-line react/no-unknown-property -- TODO: add typings for Three.js
+      userData={{ isPreviewOnly: true }}
+      /* Small offset to ensure the object is rendered on top of the axes */
+      // eslint-disable-next-line react/no-unknown-property -- TODO: add typings for Three.js
+      position={[0, 0, -0.1]}
+    >
       {axes.map((axis) => (
         <Fragment key={axis.id}>
           <Line
             points={axis.getPoints()}
             opacity={0.6}
-            renderOrder={1}
+            // Large render order to ensure the axes are painted last
+            renderOrder={9999}
             color={axis.color}
-            lineWidth={hoveredAxis === axis.id ? thickness * 2 : thickness}
+            lineWidth={hoveredAxis === axis.id ? hoverThickness : thickness}
           />
           <Line
             transparent
             depthTest={false}
             points={axis.getPoints()}
             opacity={0}
-            renderOrder={2}
             lineWidth={thickness * 8}
             onPointerOver={() => {
               setHoveredAxis(axis.id);

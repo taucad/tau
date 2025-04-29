@@ -91,18 +91,6 @@ type InfiniteGridProperties = {
    */
   readonly shallowAngleBoostMultiplier: number;
   /**
-   * Factor for logarithmic distance scaling.
-   * Increasing makes distance adaptation more sensitive at closer ranges.
-   * @default 0.01
-   */
-  readonly distanceNormalizationFactor: number;
-  /**
-   * Scale factor for distance-based grid size calculations.
-   * Increasing makes the grid grow more aggressively with distance.
-   * @default 100.0
-   */
-  readonly distanceFactorMultiplier: number;
-  /**
    * Minimum grid distance to ensure visibility.
    * Increasing ensures grid is always drawn at least this far from camera.
    * @default 1000.0
@@ -212,8 +200,6 @@ function infiniteGridMaterial({
   steepAngleThresholdEnd,
   steepAngleBoostMultiplier,
   shallowAngleBoostMultiplier,
-  distanceNormalizationFactor,
-  distanceFactorMultiplier,
   minGridDistance,
   positionFactorMax,
   positionFactorMin,
@@ -284,12 +270,6 @@ function infiniteGridMaterial({
       uShallowAngleBoostMultiplier: {
         value: shallowAngleBoostMultiplier,
       },
-      uDistanceNormalizationFactor: {
-        value: distanceNormalizationFactor,
-      },
-      uDistanceFactorMultiplier: {
-        value: distanceFactorMultiplier,
-      },
       uMinGridDistance: {
         value: minGridDistance,
       },
@@ -349,8 +329,6 @@ function infiniteGridMaterial({
       uniform float uSteepAngleThresholdEnd;
       uniform float uSteepAngleBoostMultiplier;
       uniform float uShallowAngleBoostMultiplier;
-      uniform float uDistanceNormalizationFactor;
-      uniform float uDistanceFactorMultiplier;
       uniform float uMinGridDistance;
       uniform float uPositionFactorMax;
       uniform float uPositionFactorMin;
@@ -406,11 +384,8 @@ function infiniteGridMaterial({
         // Combined angle extension factor without discontinuities
         float angleExtensionFactor = 1.0 + shallowAngleBoost + steepAngleBoost;
         
-        // Apply a continuous scaling factor for all angles
-        float distanceFactor = log(1.0 + cameraDistance * uDistanceNormalizationFactor) * uDistanceFactorMultiplier;
-        float gridDistance = visibleWidthAtDistance * uVisibleWidthMultiplier * 
-                           angleExtensionFactor + 
-                           distanceFactor;
+        // Calculate grid distance without distance normalization
+        float gridDistance = visibleWidthAtDistance * uVisibleWidthMultiplier * angleExtensionFactor;
         
         // Always ensure a reasonable minimum distance
         gridDistance = max(gridDistance, uMinGridDistance);
@@ -574,8 +549,6 @@ export function InfiniteGrid({
   steepAngleThresholdEnd = 1,
   steepAngleBoostMultiplier = 2,
   shallowAngleBoostMultiplier = 10,
-  distanceNormalizationFactor = 0.01,
-  distanceFactorMultiplier = 100,
   minGridDistance = 1000,
   positionFactorMax = 0.8,
   positionFactorMin = 0.5,
@@ -612,8 +585,6 @@ export function InfiniteGrid({
         steepAngleThresholdEnd,
         steepAngleBoostMultiplier,
         shallowAngleBoostMultiplier,
-        distanceNormalizationFactor,
-        distanceFactorMultiplier,
         minGridDistance,
         positionFactorMax,
         positionFactorMin,
@@ -645,8 +616,6 @@ export function InfiniteGrid({
       steepAngleThresholdEnd,
       steepAngleBoostMultiplier,
       shallowAngleBoostMultiplier,
-      distanceNormalizationFactor,
-      distanceFactorMultiplier,
       minGridDistance,
       positionFactorMax,
       positionFactorMin,

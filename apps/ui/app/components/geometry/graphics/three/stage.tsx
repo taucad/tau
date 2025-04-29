@@ -66,7 +66,7 @@ export const gridSizeConstants = {
   // Coefficient for the grid size calculation to fine-tune the result (lower = larger grid)
   baseGridSizeCoefficient: 5,
   // Threshold for rounding to 1× or 5× powers of 10
-  roundingThreshold: 2.5,
+  roundingThreshold: Math.sqrt(10),
 } as const;
 
 export type GridSizes = {
@@ -267,7 +267,7 @@ export function Stage({
     // Round to nice numbers (1, 2, or 5 times power of 10)
     let largeSize;
     // eslint-disable-next-line unicorn/prefer-ternary -- this is more readable
-    if (mantissa < Math.sqrt(5)) {
+    if (mantissa < gridSizeConstants.roundingThreshold) {
       // ≈ 2.236
       largeSize = 10 ** exponent;
     } else {

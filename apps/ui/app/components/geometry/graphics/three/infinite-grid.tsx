@@ -97,24 +97,6 @@ type InfiniteGridProperties = {
    */
   readonly minGridDistance: number;
   /**
-   * Maximum factor for camera-relative positioning (when viewed at shallow angles).
-   * Increasing strengthens camera-following behavior at shallow angles.
-   * @default 0.8
-   */
-  readonly positionFactorMax: number;
-  /**
-   * Minimum factor for camera-relative positioning (when viewed from above).
-   * Increasing strengthens camera-following behavior when viewed from above.
-   * @default 0.5
-   */
-  readonly positionFactorMin: number;
-  /**
-   * Threshold for angle-based position factor adjustment.
-   * Increasing delays transition to minimum position factor until more perpendicular views.
-   * @default 0.7
-   */
-  readonly positionFactorThreshold: number;
-  /**
    * Fragment shader boost multiplier for steep viewing angles.
    * Increasing enhances grid visibility at perpendicular viewing angles.
    * @default 5.0
@@ -201,9 +183,6 @@ function infiniteGridMaterial({
   steepAngleBoostMultiplier,
   shallowAngleBoostMultiplier,
   minGridDistance,
-  positionFactorMax,
-  positionFactorMin,
-  positionFactorThreshold,
   fragmentSteepAngleBoostMultiplier,
   fragmentShallowAngleBoostMultiplier,
   shallowAnglePowerFactor,
@@ -273,15 +252,6 @@ function infiniteGridMaterial({
       uMinGridDistance: {
         value: minGridDistance,
       },
-      uPositionFactorMax: {
-        value: positionFactorMax,
-      },
-      uPositionFactorMin: {
-        value: positionFactorMin,
-      },
-      uPositionFactorThreshold: {
-        value: positionFactorThreshold,
-      },
       uFragmentSteepAngleBoostMultiplier: {
         value: fragmentSteepAngleBoostMultiplier,
       },
@@ -330,9 +300,6 @@ function infiniteGridMaterial({
       uniform float uSteepAngleBoostMultiplier;
       uniform float uShallowAngleBoostMultiplier;
       uniform float uMinGridDistance;
-      uniform float uPositionFactorMax;
-      uniform float uPositionFactorMin;
-      uniform float uPositionFactorThreshold;
       
       // Highly accurate tangent approximation that works well for all angles
       float stableTan(float angle) {
@@ -392,11 +359,6 @@ function infiniteGridMaterial({
         
         // Scale the grid based on the calculated distance
         vec3 pos = position.${axes} * gridDistance;
-        
-        // Position the grid relative to camera with angle-adaptive positioning
-        // Reduce the positioning effect at steep angles to prevent flickering
-        float positionFactor = mix(uPositionFactorMax, uPositionFactorMin, smoothstep(uPositionFactorThreshold, uSteepAngleThresholdEnd, viewAngleFactor));
-        pos.${planeAxes} += cameraPosition.${planeAxes} * positionFactor;
         
         worldPosition = pos;
         
@@ -550,9 +512,6 @@ export function InfiniteGrid({
   steepAngleBoostMultiplier = 2,
   shallowAngleBoostMultiplier = 10,
   minGridDistance = 1000,
-  positionFactorMax = 0.8,
-  positionFactorMin = 0.5,
-  positionFactorThreshold = 0.7,
   fragmentSteepAngleBoostMultiplier = 5,
   fragmentShallowAngleBoostMultiplier = 10,
   shallowAnglePowerFactor = 3,
@@ -586,9 +545,6 @@ export function InfiniteGrid({
         steepAngleBoostMultiplier,
         shallowAngleBoostMultiplier,
         minGridDistance,
-        positionFactorMax,
-        positionFactorMin,
-        positionFactorThreshold,
         fragmentSteepAngleBoostMultiplier,
         fragmentShallowAngleBoostMultiplier,
         shallowAnglePowerFactor,
@@ -617,9 +573,6 @@ export function InfiniteGrid({
       steepAngleBoostMultiplier,
       shallowAngleBoostMultiplier,
       minGridDistance,
-      positionFactorMax,
-      positionFactorMin,
-      positionFactorThreshold,
       fragmentSteepAngleBoostMultiplier,
       fragmentShallowAngleBoostMultiplier,
       shallowAnglePowerFactor,

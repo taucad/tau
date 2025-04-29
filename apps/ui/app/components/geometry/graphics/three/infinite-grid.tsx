@@ -49,34 +49,17 @@ type InfiniteGridProperties = {
    */
   readonly lineOpacity: number;
   /**
-   * Controls how far the grid extends from the camera.
-   * Increasing extends the grid farther from the camera, creating a larger visible area.
-   * @default 10
-   */
-  readonly visibleWidthMultiplier: number;
-  /**
    * Minimum grid distance to ensure visibility.
    * Increasing ensures grid is always drawn at least this far from camera.
    * @default 1000.0
    */
   readonly minGridDistance: number;
   /**
-   * Multiplier for grid distance calculation.
-   * Increasing extends the grid farther from camera.
+   * Controls how far the grid extends from the camera.
+   * Increasing extends the grid farther from the camera, creating a larger visible area.
    * @default 10.0
    */
   readonly gridDistanceMultiplier: number;
-  /**
-   * Minimum falloff base value for mixing operation.
-   * @default 0.05
-   */
-  readonly falloffBaseMin: number;
-  /**
-   * Absolute minimum fade factor to prevent complete disappearance.
-   * Increasing maintains higher minimum visibility at all distances.
-   * @default 0.05
-   */
-  readonly minFadeFactor: number;
   /**
    * Alpha threshold for fragment discard (transparency cutoff).
    * Increasing makes semi-transparent areas of the grid fully transparent.
@@ -84,10 +67,10 @@ type InfiniteGridProperties = {
    */
   readonly alphaThreshold: number;
   /**
-   * The distance falloff ratio between 0 and 1. Lower values make the grid fade faster with distance.
-   * @default 0.7
+   * The falloff exponent for the grid. Higher values make the grid fade faster with distance.
+   * @default 10
    */
-  readonly distanceFalloffRatio?: number;
+  readonly falloffExponent?: number;
 };
 
 // Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
@@ -101,13 +84,10 @@ function infiniteGridMaterial({
   smallThickness,
   largeThickness,
   lineOpacity,
-  visibleWidthMultiplier,
   minGridDistance,
   gridDistanceMultiplier,
-  falloffBaseMin,
-  minFadeFactor,
   alphaThreshold,
-  distanceFalloffRatio,
+  falloffExponent,
 }: InfiniteGridProperties) {
   // Validate to ensure axes cannot be used to inject malicious code
   if (!['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'].includes(axes)) {
@@ -138,54 +118,32 @@ function infiniteGridMaterial({
       uLineOpacity: {
         value: lineOpacity,
       },
-      uVisibleWidthMultiplier: {
-        value: visibleWidthMultiplier,
-      },
-      uCameraFov: {
-        value: 60, // Default value, will be updated by component
-      },
       uMinGridDistance: {
         value: minGridDistance,
       },
       uGridDistanceMultiplier: {
         value: gridDistanceMultiplier,
       },
-      uFalloffBaseMin: {
-        value: falloffBaseMin,
-      },
-      uMinFadeFactor: {
-        value: minFadeFactor,
-      },
       uAlphaThreshold: {
         value: alphaThreshold,
       },
-      uDistanceFalloffRatio: {
-        value: distanceFalloffRatio,
+      uFalloffExponent: {
+        value: falloffExponent,
       },
     },
 
     vertexShader: `
       varying vec3 worldPosition;
   
-      uniform float uVisibleWidthMultiplier;
-      uniform float uCameraFov;
+      uniform float uGridDistanceMultiplier;
       uniform float uMinGridDistance;
       
       void main() {
         // Calculate the camera distance
         float cameraDistance = length(cameraPosition);
         
-        // Calculate half FOV in radians
-        float halfFovRadians = radians(uCameraFov * 0.5);
-        
-        // Use a consistent calculation for all FOV values
-        float tanHalfFov = tan(halfFovRadians);
-        
-        // Calculate visible width consistently for all FOV values
-        float visibleWidthAtDistance = 2.0 * cameraDistance * tanHalfFov;
-        
         // Calculate grid distance without distance normalization
-        float gridDistance = visibleWidthAtDistance * uVisibleWidthMultiplier;
+        float gridDistance = cameraDistance * uGridDistanceMultiplier;
         
         // Always ensure a reasonable minimum distance
         gridDistance = max(gridDistance, uMinGridDistance);
@@ -208,13 +166,11 @@ function infiniteGridMaterial({
       uniform float uLargeThickness;
       uniform vec3 uColor;
       uniform float uLineOpacity;
-      uniform float uCameraFov;
       uniform float uGridDistanceMultiplier;
       uniform float uMinGridDistance;
-      uniform float uFalloffBaseMin;
       uniform float uMinFadeFactor;
       uniform float uAlphaThreshold;
-      uniform float uDistanceFalloffRatio;
+      uniform float uFalloffExponent;
 
       float getGrid(float size, float thickness) {
         vec2 r = worldPosition.${planeAxes} / size;
@@ -222,22 +178,18 @@ function infiniteGridMaterial({
         vec2 grid = abs(fract(r - 0.5) - 0.5) / (fwidth(r) * thickness);
         float line = min(grid.x, grid.y);
         
-        // Use a smooth transition instead of hard clamping
-        return 1.0 - smoothstep(0.0, 1.0, line);
+        return 1.0 - min(line, 1.0);
       }
       
       void main() {
         // Calculate planar distance - distance in the grid plane
         float planarDistance = distance(cameraPosition.${planeAxes}, worldPosition.${planeAxes});
         
-        // Calculate visible width with standard tangent function
+        // Calculate the camera distance
         float cameraDistance = length(cameraPosition);
-        float halfFovRadians = radians(uCameraFov * 0.5);
-        float tanHalfFov = tan(halfFovRadians);
-        float visibleWidthAtDistance = 2.0 * cameraDistance * tanHalfFov;
         
         // Calculate grid distance with scaling factors
-        float gridDistance = visibleWidthAtDistance * uGridDistanceMultiplier;
+        float gridDistance = cameraDistance * uGridDistanceMultiplier;
         
         // Ensure minimum distance
         gridDistance = max(gridDistance, uMinGridDistance);
@@ -245,23 +197,8 @@ function infiniteGridMaterial({
         // Calculate distance ratio
         float distanceRatio = planarDistance / gridDistance;
         
-        // Simple fade calculation with constant base
-        float falloffBase = uFalloffBaseMin;
-        float falloffExponent = 1.0;
-        
         // Calculate fade factor using simple power function
-        float fadeFactor = pow(max(0.0, 1.0 - distanceRatio), falloffExponent);
-        
-        // Apply simple distance falloff based on the ratio
-        float distanceRatioSimple = min(planarDistance / gridDistance, 1.0);
-        float simpleFalloff = 1.0 - distanceRatioSimple;
-        float simpleDistanceFade = pow(simpleFalloff, (1.0 - uDistanceFalloffRatio) * 10.0);
-        
-        // Combine the current fade with simple distance falloff
-        fadeFactor = fadeFactor * simpleDistanceFade;
-        
-        // Add minimal base opacity for stability
-        fadeFactor = max(fadeFactor, uMinFadeFactor);
+        float fadeFactor = pow(max(0.0, 1.0 - distanceRatio), uFalloffExponent);
         
         float gridSmall = getGrid(uSmallSize, uSmallThickness);
         float gridLarge = getGrid(uLargeSize, uLargeThickness);
@@ -272,7 +209,7 @@ function infiniteGridMaterial({
         gl_FragColor = vec4(uColor.rgb, grid * fadeFactor * uLineOpacity);
         
         // Use a simple alpha threshold
-        if (gl_FragColor.a < uAlphaThreshold) gl_FragColor.a = 0.0;
+        if (gl_FragColor.a < uAlphaThreshold) discard;
       }
       `,
   });
@@ -286,13 +223,10 @@ export function InfiniteGrid({
   smallThickness = 1.25,
   largeThickness = 2.5,
   axes = 'xyz',
-  lineOpacity = 0.5,
-  distanceFalloffRatio = 0.7,
-  visibleWidthMultiplier = 10,
+  lineOpacity = 0.4,
   minGridDistance = 1000,
-  gridDistanceMultiplier = 10,
-  falloffBaseMin = 0.05,
-  minFadeFactor = 0.05,
+  gridDistanceMultiplier = 5,
+  falloffExponent = 5,
   alphaThreshold = 0.01,
 }: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
   const [theme] = useTheme();
@@ -309,13 +243,10 @@ export function InfiniteGrid({
         color: theme === Theme.LIGHT ? new THREE.Color('lightgrey') : new THREE.Color('grey'),
         axes,
         lineOpacity,
-        visibleWidthMultiplier,
         minGridDistance,
         gridDistanceMultiplier,
-        falloffBaseMin,
-        minFadeFactor,
         alphaThreshold,
-        distanceFalloffRatio,
+        falloffExponent,
       }),
     [
       smallSize,
@@ -325,13 +256,10 @@ export function InfiniteGrid({
       theme,
       axes,
       lineOpacity,
-      visibleWidthMultiplier,
       minGridDistance,
       gridDistanceMultiplier,
-      falloffBaseMin,
-      minFadeFactor,
       alphaThreshold,
-      distanceFalloffRatio,
+      falloffExponent,
     ],
   );
 

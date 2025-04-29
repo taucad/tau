@@ -115,7 +115,6 @@ function infiniteGridMaterial({
   }
 
   const planeAxes = axes.slice(0, 2);
-  const normalAxis = axes[2]; // The normal axis to the grid (usually 'z')
 
   const material = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,

@@ -55,18 +55,6 @@ type InfiniteGridProperties = {
    */
   readonly visibleWidthMultiplier: number;
   /**
-   * Minimum angle value used in tangent approximation to prevent division by zero.
-   * Increasing reduces precision for very small angles but improves stability.
-   * @default 0.0001
-   */
-  readonly minAngle: number;
-  /**
-   * Controls blending transition between different tangent calculation methods.
-   * Increasing makes the transition between calculation methods more gradual.
-   * @default 0.2
-   */
-  readonly tanBlendThreshold: number;
-  /**
    * Minimum grid distance to ensure visibility.
    * Increasing ensures grid is always drawn at least this far from camera.
    * @default 1000.0
@@ -124,7 +112,6 @@ type InfiniteGridProperties = {
 // Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
 // Modified by @rifont to:
 // - use varying thickness and enhanced distance falloff
-// - use a Taylor series approximation for the tangent function to avoid discontinuities at 90 degrees
 function infiniteGridMaterial({
   smallSize,
   largeSize,
@@ -134,8 +121,6 @@ function infiniteGridMaterial({
   largeThickness,
   lineOpacity,
   visibleWidthMultiplier,
-  minAngle,
-  tanBlendThreshold,
   minGridDistance,
   viewAngleAdjustmentMin,
   viewAngleAdjustmentMax,
@@ -182,12 +167,6 @@ function infiniteGridMaterial({
       uCameraFov: {
         value: 60, // Default value, will be updated by component
       },
-      uMinAngle: {
-        value: minAngle,
-      },
-      uTanBlendThreshold: {
-        value: tanBlendThreshold,
-      },
       uMinGridDistance: {
         value: minGridDistance,
       },
@@ -223,33 +202,7 @@ function infiniteGridMaterial({
   
       uniform float uVisibleWidthMultiplier;
       uniform float uCameraFov;
-      uniform float uMinAngle;
-      uniform float uTanBlendThreshold;
       uniform float uMinGridDistance;
-      
-      // Highly accurate tangent approximation that works well for all angles
-      float stableTan(float angle) {
-        // Ensure angle is never exactly zero
-        angle = max(angle, uMinAngle);
-        
-        // Use a continuous function that works for all angle ranges
-        // This combines Taylor series for small angles with direct calculation
-        // for larger angles in a continuous way
-        float x2 = angle * angle;
-        float x3 = x2 * angle;
-        float x5 = x3 * x2;
-        float x7 = x5 * x2;
-        
-        // Taylor series approximation: x + x³/3 + 2x⁵/15 + 17x⁷/315
-        float taylorTan = angle + (x3/3.0) + (2.0*x5/15.0) + (17.0*x7/315.0);
-        
-        // Standard calculation
-        float standardTan = sin(angle) / cos(angle);
-        
-        // Blend based on angle size - continuous transition
-        float blendFactor = 1.0 - smoothstep(0.0, uTanBlendThreshold, angle);
-        return mix(standardTan, taylorTan, blendFactor);
-      }
       
       void main() {
         // Calculate the camera distance
@@ -259,7 +212,7 @@ function infiniteGridMaterial({
         float halfFovRadians = radians(uCameraFov * 0.5);
         
         // Use a consistent calculation for all FOV values
-        float tanHalfFov = stableTan(halfFovRadians);
+        float tanHalfFov = tan(halfFovRadians);
         
         // Calculate visible width consistently for all FOV values
         float visibleWidthAtDistance = 2.0 * cameraDistance * tanHalfFov;
@@ -293,8 +246,6 @@ function infiniteGridMaterial({
       uniform vec3 uColor;
       uniform float uLineOpacity;
       uniform float uCameraFov;
-      uniform float uMinAngle;
-      uniform float uTanBlendThreshold;
       uniform float uViewAngleAdjustmentMin;
       uniform float uViewAngleAdjustmentMax;
       uniform float uGridDistanceMultiplier;
@@ -304,28 +255,6 @@ function infiniteGridMaterial({
       uniform float uMinFadeFactor;
       uniform float uAlphaThreshold;
       uniform float uDistanceFalloffRatio;
-
-      // Highly accurate tangent approximation that works well for all angles
-      float stableTan(float angle) {
-        // Ensure angle is never exactly zero
-        angle = max(angle, uMinAngle);
-        
-        // Use a continuous function that works for all angle ranges
-        float x2 = angle * angle;
-        float x3 = x2 * angle;
-        float x5 = x3 * x2;
-        float x7 = x5 * x2;
-        
-        // Taylor series approximation
-        float taylorTan = angle + (x3/3.0) + (2.0*x5/15.0) + (17.0*x7/315.0);
-        
-        // Standard calculation
-        float standardTan = sin(angle) / cos(angle);
-        
-        // Blend based on angle size - continuous transition
-        float blendFactor = 1.0 - smoothstep(0.0, uTanBlendThreshold, angle);
-        return mix(standardTan, taylorTan, blendFactor);
-      }
 
       float getGrid(float size, float thickness) {
         vec2 r = worldPosition.${planeAxes} / size;
@@ -348,10 +277,10 @@ function infiniteGridMaterial({
         float viewAngleAdjustment = mix(uViewAngleAdjustmentMin, uViewAngleAdjustmentMax, viewAngleFactor);
         float adjustedDistance = planarDistance * viewAngleAdjustment;
         
-        // Calculate visible width with stable tangent function
+        // Calculate visible width with standard tangent function
         float cameraDistance = length(cameraPosition);
         float halfFovRadians = radians(uCameraFov * 0.5);
-        float tanHalfFov = stableTan(halfFovRadians);
+        float tanHalfFov = tan(halfFovRadians);
         float visibleWidthAtDistance = 2.0 * cameraDistance * tanHalfFov;
         
         // Calculate grid distance with scaling factors
@@ -407,8 +336,6 @@ export function InfiniteGrid({
   lineOpacity = 0.4,
   distanceFalloffRatio = 0.7,
   visibleWidthMultiplier = 10,
-  minAngle = 0.0001,
-  tanBlendThreshold = 0.2,
   minGridDistance = 1000,
   viewAngleAdjustmentMin = 0.2,
   viewAngleAdjustmentMax = 1,
@@ -433,8 +360,6 @@ export function InfiniteGrid({
         axes,
         lineOpacity,
         visibleWidthMultiplier,
-        minAngle,
-        tanBlendThreshold,
         minGridDistance,
         viewAngleAdjustmentMin,
         viewAngleAdjustmentMax,
@@ -454,8 +379,6 @@ export function InfiniteGrid({
       axes,
       lineOpacity,
       visibleWidthMultiplier,
-      minAngle,
-      tanBlendThreshold,
       minGridDistance,
       viewAngleAdjustmentMin,
       viewAngleAdjustmentMax,

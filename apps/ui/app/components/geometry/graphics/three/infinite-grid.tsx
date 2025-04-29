@@ -61,18 +61,6 @@ type InfiniteGridProperties = {
    */
   readonly minGridDistance: number;
   /**
-   * Minimum value for angle-based distance adjustment.
-   * Increasing increases minimum grid visibility at shallow angles.
-   * @default 0.2
-   */
-  readonly viewAngleAdjustmentMin: number;
-  /**
-   * Maximum value for angle-based distance adjustment.
-   * Increasing cannot exceed 1.0; maintains full adjustment at perpendicular views.
-   * @default 1.0
-   */
-  readonly viewAngleAdjustmentMax: number;
-  /**
    * Multiplier for grid distance calculation.
    * Increasing extends the grid farther from camera.
    * @default 10.0
@@ -80,19 +68,12 @@ type InfiniteGridProperties = {
   readonly gridDistanceMultiplier: number;
   /**
    * Minimum falloff base value for mixing operation.
-   * Increasing strengthens minimum opacity at oblique viewing angles.
    * @default 0.05
    */
   readonly falloffBaseMin: number;
   /**
-   * Maximum falloff base value for mixing operation.
-   * Increasing strengthens minimum opacity at perpendicular viewing angles.
-   * @default 0.5
-   */
-  readonly falloffBaseMax: number;
-  /**
    * Absolute minimum fade factor to prevent complete disappearance.
-   * Increasing maintains higher minimum visibility at all distances and angles.
+   * Increasing maintains higher minimum visibility at all distances.
    * @default 0.05
    */
   readonly minFadeFactor: number;
@@ -122,11 +103,8 @@ function infiniteGridMaterial({
   lineOpacity,
   visibleWidthMultiplier,
   minGridDistance,
-  viewAngleAdjustmentMin,
-  viewAngleAdjustmentMax,
   gridDistanceMultiplier,
   falloffBaseMin,
-  falloffBaseMax,
   minFadeFactor,
   alphaThreshold,
   distanceFalloffRatio,
@@ -170,20 +148,11 @@ function infiniteGridMaterial({
       uMinGridDistance: {
         value: minGridDistance,
       },
-      uViewAngleAdjustmentMin: {
-        value: viewAngleAdjustmentMin,
-      },
-      uViewAngleAdjustmentMax: {
-        value: viewAngleAdjustmentMax,
-      },
       uGridDistanceMultiplier: {
         value: gridDistanceMultiplier,
       },
       uFalloffBaseMin: {
         value: falloffBaseMin,
-      },
-      uFalloffBaseMax: {
-        value: falloffBaseMax,
       },
       uMinFadeFactor: {
         value: minFadeFactor,
@@ -198,7 +167,6 @@ function infiniteGridMaterial({
 
     vertexShader: `
       varying vec3 worldPosition;
-      varying vec3 viewVector;
   
       uniform float uVisibleWidthMultiplier;
       uniform float uCameraFov;
@@ -228,16 +196,12 @@ function infiniteGridMaterial({
         
         worldPosition = pos;
         
-        // Calculate view vector from camera to this vertex
-        viewVector = normalize(cameraPosition - pos);
-        
         gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
       }
       `,
 
     fragmentShader: `
       varying vec3 worldPosition;
-      varying vec3 viewVector;
       
       uniform float uSmallSize;
       uniform float uLargeSize;
@@ -246,12 +210,9 @@ function infiniteGridMaterial({
       uniform vec3 uColor;
       uniform float uLineOpacity;
       uniform float uCameraFov;
-      uniform float uViewAngleAdjustmentMin;
-      uniform float uViewAngleAdjustmentMax;
       uniform float uGridDistanceMultiplier;
       uniform float uMinGridDistance;
       uniform float uFalloffBaseMin;
-      uniform float uFalloffBaseMax;
       uniform float uMinFadeFactor;
       uniform float uAlphaThreshold;
       uniform float uDistanceFalloffRatio;
@@ -270,13 +231,6 @@ function infiniteGridMaterial({
         // Calculate planar distance - distance in the grid plane
         float planarDistance = distance(cameraPosition.${planeAxes}, worldPosition.${planeAxes});
         
-        // Calculate view angle factor - dot product of view vector and grid normal
-        float viewAngleFactor = abs(viewVector.${normalAxis});
-        
-        // Create a smooth distance adjustment that adapts to viewing angle
-        float viewAngleAdjustment = mix(uViewAngleAdjustmentMin, uViewAngleAdjustmentMax, viewAngleFactor);
-        float adjustedDistance = planarDistance * viewAngleAdjustment;
-        
         // Calculate visible width with standard tangent function
         float cameraDistance = length(cameraPosition);
         float halfFovRadians = radians(uCameraFov * 0.5);
@@ -290,11 +244,11 @@ function infiniteGridMaterial({
         gridDistance = max(gridDistance, uMinGridDistance);
         
         // Calculate distance ratio
-        float distanceRatio = adjustedDistance / gridDistance;
+        float distanceRatio = planarDistance / gridDistance;
         
-        // Simple power-based fade calculation
-        float falloffBase = mix(uFalloffBaseMin, uFalloffBaseMax, viewAngleFactor);
-        float falloffExponent = 1.0 + viewAngleFactor;
+        // Simple fade calculation with constant base
+        float falloffBase = uFalloffBaseMin;
+        float falloffExponent = 1.0;
         
         // Calculate fade factor using simple power function
         float fadeFactor = pow(max(0.0, 1.0 - distanceRatio), falloffExponent);
@@ -307,7 +261,7 @@ function infiniteGridMaterial({
         // Combine the current fade with simple distance falloff
         fadeFactor = fadeFactor * simpleDistanceFade;
         
-        // Add minimal base opacity for stability across all angles
+        // Add minimal base opacity for stability
         fadeFactor = max(fadeFactor, uMinFadeFactor);
         
         float gridSmall = getGrid(uSmallSize, uSmallThickness);
@@ -337,11 +291,8 @@ export function InfiniteGrid({
   distanceFalloffRatio = 0.7,
   visibleWidthMultiplier = 10,
   minGridDistance = 1000,
-  viewAngleAdjustmentMin = 0.2,
-  viewAngleAdjustmentMax = 1,
   gridDistanceMultiplier = 10,
   falloffBaseMin = 0.05,
-  falloffBaseMax = 0.5,
   minFadeFactor = 0.05,
   alphaThreshold = 0.01,
 }: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
@@ -361,11 +312,8 @@ export function InfiniteGrid({
         lineOpacity,
         visibleWidthMultiplier,
         minGridDistance,
-        viewAngleAdjustmentMin,
-        viewAngleAdjustmentMax,
         gridDistanceMultiplier,
         falloffBaseMin,
-        falloffBaseMax,
         minFadeFactor,
         alphaThreshold,
         distanceFalloffRatio,
@@ -380,11 +328,8 @@ export function InfiniteGrid({
       lineOpacity,
       visibleWidthMultiplier,
       minGridDistance,
-      viewAngleAdjustmentMin,
-      viewAngleAdjustmentMax,
       gridDistanceMultiplier,
       falloffBaseMin,
-      falloffBaseMax,
       minFadeFactor,
       alphaThreshold,
       distanceFalloffRatio,

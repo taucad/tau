@@ -67,53 +67,11 @@ type InfiniteGridProperties = {
    */
   readonly tanBlendThreshold: number;
   /**
-   * Start threshold for steep angle adaptation (0.0-1.0).
-   * Increasing delays steep angle adaptation until more perpendicular views.
-   * @default 0.7
-   */
-  readonly steepAngleThresholdStart: number;
-  /**
-   * End threshold for steep angle adaptation (0.0-1.0).
-   * Increasing cannot exceed 1.0; keeps maximum at perpendicular view.
-   * @default 1.0
-   */
-  readonly steepAngleThresholdEnd: number;
-  /**
-   * Multiplier for grid extension at steep viewing angles.
-   * Increasing makes grid more visible when viewed from above/perpendicular.
-   * @default 2.0
-   */
-  readonly steepAngleBoostMultiplier: number;
-  /**
-   * Multiplier for grid extension at shallow viewing angles.
-   * Increasing makes grid more visible when viewed at glancing/oblique angles.
-   * @default 10.0
-   */
-  readonly shallowAngleBoostMultiplier: number;
-  /**
    * Minimum grid distance to ensure visibility.
    * Increasing ensures grid is always drawn at least this far from camera.
    * @default 1000.0
    */
   readonly minGridDistance: number;
-  /**
-   * Fragment shader boost multiplier for steep viewing angles.
-   * Increasing enhances grid visibility at perpendicular viewing angles.
-   * @default 5.0
-   */
-  readonly fragmentSteepAngleBoostMultiplier: number;
-  /**
-   * Fragment shader boost multiplier for shallow viewing angles.
-   * Increasing enhances grid visibility at oblique/glancing viewing angles.
-   * @default 10.0
-   */
-  readonly fragmentShallowAngleBoostMultiplier: number;
-  /**
-   * Power factor for shallow angle boost calculation.
-   * Increasing makes shallow angle visibility boost more aggressive.
-   * @default 3.0
-   */
-  readonly shallowAnglePowerFactor: number;
   /**
    * Minimum value for angle-based distance adjustment.
    * Increasing increases minimum grid visibility at shallow angles.
@@ -178,14 +136,7 @@ function infiniteGridMaterial({
   visibleWidthMultiplier,
   minAngle,
   tanBlendThreshold,
-  steepAngleThresholdStart,
-  steepAngleThresholdEnd,
-  steepAngleBoostMultiplier,
-  shallowAngleBoostMultiplier,
   minGridDistance,
-  fragmentSteepAngleBoostMultiplier,
-  fragmentShallowAngleBoostMultiplier,
-  shallowAnglePowerFactor,
   viewAngleAdjustmentMin,
   viewAngleAdjustmentMax,
   gridDistanceMultiplier,
@@ -237,29 +188,8 @@ function infiniteGridMaterial({
       uTanBlendThreshold: {
         value: tanBlendThreshold,
       },
-      uSteepAngleThresholdStart: {
-        value: steepAngleThresholdStart,
-      },
-      uSteepAngleThresholdEnd: {
-        value: steepAngleThresholdEnd,
-      },
-      uSteepAngleBoostMultiplier: {
-        value: steepAngleBoostMultiplier,
-      },
-      uShallowAngleBoostMultiplier: {
-        value: shallowAngleBoostMultiplier,
-      },
       uMinGridDistance: {
         value: minGridDistance,
-      },
-      uFragmentSteepAngleBoostMultiplier: {
-        value: fragmentSteepAngleBoostMultiplier,
-      },
-      uFragmentShallowAngleBoostMultiplier: {
-        value: fragmentShallowAngleBoostMultiplier,
-      },
-      uShallowAnglePowerFactor: {
-        value: shallowAnglePowerFactor,
       },
       uViewAngleAdjustmentMin: {
         value: viewAngleAdjustmentMin,
@@ -295,10 +225,6 @@ function infiniteGridMaterial({
       uniform float uCameraFov;
       uniform float uMinAngle;
       uniform float uTanBlendThreshold;
-      uniform float uSteepAngleThresholdStart;
-      uniform float uSteepAngleThresholdEnd;
-      uniform float uSteepAngleBoostMultiplier;
-      uniform float uShallowAngleBoostMultiplier;
       uniform float uMinGridDistance;
       
       // Highly accurate tangent approximation that works well for all angles
@@ -338,21 +264,8 @@ function infiniteGridMaterial({
         // Calculate visible width consistently for all FOV values
         float visibleWidthAtDistance = 2.0 * cameraDistance * tanHalfFov;
         
-        // Get normalized camera direction to detect viewing angle relative to grid plane
-        vec3 cameraNormal = normalize(cameraPosition);
-        float viewAngleFactor = abs(cameraNormal.${normalAxis});
-        
-        // Enhanced angle extension that increases gradually near top-down views
-        float steepAngleBoost = smoothstep(uSteepAngleThresholdStart, uSteepAngleThresholdEnd, viewAngleFactor) * uSteepAngleBoostMultiplier;
-        
-        // Also boost at shallow angles as before
-        float shallowAngleBoost = pow(1.0 - viewAngleFactor, 2.0) * uShallowAngleBoostMultiplier;
-        
-        // Combined angle extension factor without discontinuities
-        float angleExtensionFactor = 1.0 + shallowAngleBoost + steepAngleBoost;
-        
         // Calculate grid distance without distance normalization
-        float gridDistance = visibleWidthAtDistance * uVisibleWidthMultiplier * angleExtensionFactor;
+        float gridDistance = visibleWidthAtDistance * uVisibleWidthMultiplier;
         
         // Always ensure a reasonable minimum distance
         gridDistance = max(gridDistance, uMinGridDistance);
@@ -382,11 +295,6 @@ function infiniteGridMaterial({
       uniform float uCameraFov;
       uniform float uMinAngle;
       uniform float uTanBlendThreshold;
-      uniform float uSteepAngleThresholdStart;
-      uniform float uSteepAngleThresholdEnd;
-      uniform float uFragmentSteepAngleBoostMultiplier;
-      uniform float uFragmentShallowAngleBoostMultiplier;
-      uniform float uShallowAnglePowerFactor;
       uniform float uViewAngleAdjustmentMin;
       uniform float uViewAngleAdjustmentMax;
       uniform float uGridDistanceMultiplier;
@@ -436,11 +344,6 @@ function infiniteGridMaterial({
         // Calculate view angle factor - dot product of view vector and grid normal
         float viewAngleFactor = abs(viewVector.${normalAxis});
         
-        // Create a smooth angle compensation curve with extra boost for steep angles
-        float steepAngleBoost = smoothstep(uSteepAngleThresholdStart, uSteepAngleThresholdEnd, viewAngleFactor) * uFragmentSteepAngleBoostMultiplier;
-        float shallowAngleBoost = pow(1.0 - viewAngleFactor, uShallowAnglePowerFactor) * uFragmentShallowAngleBoostMultiplier;
-        float angleCompensation = 1.0 + shallowAngleBoost + steepAngleBoost;
-        
         // Create a smooth distance adjustment that adapts to viewing angle
         float viewAngleAdjustment = mix(uViewAngleAdjustmentMin, uViewAngleAdjustmentMax, viewAngleFactor);
         float adjustedDistance = planarDistance * viewAngleAdjustment;
@@ -457,8 +360,8 @@ function infiniteGridMaterial({
         // Ensure minimum distance
         gridDistance = max(gridDistance, uMinGridDistance);
         
-        // Calculate distance ratio with angle compensation
-        float distanceRatio = adjustedDistance / (gridDistance * angleCompensation);
+        // Calculate distance ratio
+        float distanceRatio = adjustedDistance / gridDistance;
         
         // Simple power-based fade calculation
         float falloffBase = mix(uFalloffBaseMin, uFalloffBaseMax, viewAngleFactor);
@@ -495,7 +398,6 @@ function infiniteGridMaterial({
   return material;
 }
 
-// eslint-disable-next-line complexity -- This is a complex component, but it's necessary for the grid
 export function InfiniteGrid({
   smallSize,
   largeSize,
@@ -507,14 +409,7 @@ export function InfiniteGrid({
   visibleWidthMultiplier = 10,
   minAngle = 0.0001,
   tanBlendThreshold = 0.2,
-  steepAngleThresholdStart = 0.7,
-  steepAngleThresholdEnd = 1,
-  steepAngleBoostMultiplier = 2,
-  shallowAngleBoostMultiplier = 10,
   minGridDistance = 1000,
-  fragmentSteepAngleBoostMultiplier = 5,
-  fragmentShallowAngleBoostMultiplier = 10,
-  shallowAnglePowerFactor = 3,
   viewAngleAdjustmentMin = 0.2,
   viewAngleAdjustmentMax = 1,
   gridDistanceMultiplier = 10,
@@ -540,14 +435,7 @@ export function InfiniteGrid({
         visibleWidthMultiplier,
         minAngle,
         tanBlendThreshold,
-        steepAngleThresholdStart,
-        steepAngleThresholdEnd,
-        steepAngleBoostMultiplier,
-        shallowAngleBoostMultiplier,
         minGridDistance,
-        fragmentSteepAngleBoostMultiplier,
-        fragmentShallowAngleBoostMultiplier,
-        shallowAnglePowerFactor,
         viewAngleAdjustmentMin,
         viewAngleAdjustmentMax,
         gridDistanceMultiplier,
@@ -568,14 +456,7 @@ export function InfiniteGrid({
       visibleWidthMultiplier,
       minAngle,
       tanBlendThreshold,
-      steepAngleThresholdStart,
-      steepAngleThresholdEnd,
-      steepAngleBoostMultiplier,
-      shallowAngleBoostMultiplier,
       minGridDistance,
-      fragmentSteepAngleBoostMultiplier,
-      fragmentShallowAngleBoostMultiplier,
-      shallowAnglePowerFactor,
       viewAngleAdjustmentMin,
       viewAngleAdjustmentMax,
       gridDistanceMultiplier,

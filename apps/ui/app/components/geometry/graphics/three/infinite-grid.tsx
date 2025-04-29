@@ -232,7 +232,7 @@ export function InfiniteGrid({
   smallThickness = 1.25,
   largeThickness = 2.5,
   axes = 'xyz',
-  lineOpacity = 0.5,
+  lineOpacity = 0.4,
   minGridDistance = 1000,
   gridDistanceMultiplier = 30,
   fadeStart = 0.05,

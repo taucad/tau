@@ -81,9 +81,6 @@ export function AxesHelper({
     <group
       // eslint-disable-next-line react/no-unknown-property -- TODO: add typings for Three.js
       userData={{ isPreviewOnly: true }}
-      /* Small offset to ensure the object is rendered on top of the axes */
-      // eslint-disable-next-line react/no-unknown-property -- TODO: add typings for Three.js
-      position={[0, 0, -0.1]}
     >
       {axes.map((axis) => (
         <Fragment key={axis.id}>

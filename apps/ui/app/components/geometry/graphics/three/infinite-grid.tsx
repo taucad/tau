@@ -225,7 +225,7 @@ export function InfiniteGrid({
   axes = 'xyz',
   lineOpacity = 0.4,
   minGridDistance = 1000,
-  gridDistanceMultiplier = 5,
+  gridDistanceMultiplier = 10,
   falloffExponent = 5,
   alphaThreshold = 0.01,
 }: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {

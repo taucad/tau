@@ -181,18 +181,6 @@ type InfiniteGridProperties = {
    */
   readonly minFadeFactor: number;
   /**
-   * Opacity adjustment multiplier for steep angles.
-   * Increasing boosts grid opacity when viewed from perpendicular angles.
-   * @default 0.2
-   */
-  readonly opacityAdjustmentSteep: number;
-  /**
-   * Opacity adjustment multiplier for shallow angles.
-   * Increasing boosts grid opacity when viewed from oblique/glancing angles.
-   * @default 0.2
-   */
-  readonly opacityAdjustmentShallow: number;
-  /**
    * Alpha threshold for fragment discard (transparency cutoff).
    * Increasing makes semi-transparent areas of the grid fully transparent.
    * @default 0.01
@@ -239,8 +227,6 @@ function infiniteGridMaterial({
   falloffBaseMin,
   falloffBaseMax,
   minFadeFactor,
-  opacityAdjustmentSteep,
-  opacityAdjustmentShallow,
   alphaThreshold,
   distanceFalloffRatio,
 }: InfiniteGridProperties) {
@@ -342,12 +328,6 @@ function infiniteGridMaterial({
       },
       uMinFadeFactor: {
         value: minFadeFactor,
-      },
-      uOpacityAdjustmentSteep: {
-        value: opacityAdjustmentSteep,
-      },
-      uOpacityAdjustmentShallow: {
-        value: opacityAdjustmentShallow,
       },
       uAlphaThreshold: {
         value: alphaThreshold,
@@ -477,8 +457,6 @@ function infiniteGridMaterial({
       uniform float uFalloffBaseMin;
       uniform float uFalloffBaseMax;
       uniform float uMinFadeFactor;
-      uniform float uOpacityAdjustmentSteep;
-      uniform float uOpacityAdjustmentShallow;
       uniform float uAlphaThreshold;
       uniform float uDistanceFalloffRatio;
 
@@ -563,17 +541,13 @@ function infiniteGridMaterial({
         // Add minimal base opacity for stability across all angles
         fadeFactor = max(fadeFactor, uMinFadeFactor);
         
-        // Apply opacity adjustment that increases at extreme angles
-        float opacityFactor = 1.0 + steepAngleBoost * uOpacityAdjustmentSteep + shallowAngleBoost * uOpacityAdjustmentShallow;
-        float angleAdjustedOpacity = uLineOpacity * opacityFactor;
-        
         float gridSmall = getGrid(uSmallSize, uSmallThickness);
         float gridLarge = getGrid(uLargeSize, uLargeThickness);
         
         float grid = max(gridSmall, gridLarge);
         
-        // Apply final color with enhanced opacity
-        gl_FragColor = vec4(uColor.rgb, grid * fadeFactor * angleAdjustedOpacity);
+        // Apply final color with basic opacity
+        gl_FragColor = vec4(uColor.rgb, grid * fadeFactor * uLineOpacity);
         
         // Use a simple alpha threshold
         if (gl_FragColor.a < uAlphaThreshold) gl_FragColor.a = 0.0;
@@ -591,7 +565,7 @@ export function InfiniteGrid({
   smallThickness = 1.25,
   largeThickness = 2,
   axes = 'xyz',
-  lineOpacity = 0.3,
+  lineOpacity = 0.4,
   distanceFalloffRatio = 0.7,
   visibleWidthMultiplier = 10,
   minAngle = 0.0001,
@@ -615,8 +589,6 @@ export function InfiniteGrid({
   falloffBaseMin = 0.05,
   falloffBaseMax = 0.5,
   minFadeFactor = 0.05,
-  opacityAdjustmentSteep = 0.05,
-  opacityAdjustmentShallow = 0.05,
   alphaThreshold = 0.01,
 }: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
   const [theme] = useTheme();
@@ -655,8 +627,6 @@ export function InfiniteGrid({
         falloffBaseMin,
         falloffBaseMax,
         minFadeFactor,
-        opacityAdjustmentSteep,
-        opacityAdjustmentShallow,
         alphaThreshold,
         distanceFalloffRatio,
       }),
@@ -690,8 +660,6 @@ export function InfiniteGrid({
       falloffBaseMin,
       falloffBaseMax,
       minFadeFactor,
-      opacityAdjustmentSteep,
-      opacityAdjustmentShallow,
       alphaThreshold,
       distanceFalloffRatio,
     ],

@@ -65,8 +65,6 @@ export const defaultStageOptions = {
 export const gridSizeConstants = {
   // Coefficient for the grid size calculation to fine-tune the result (lower = larger grid)
   baseGridSizeCoefficient: 5,
-  // Minimum base grid size to prevent too small grids, in mm
-  minimumBaseGridSize: 0.1,
   // Threshold for rounding to 1× or 5× powers of 10
   roundingThreshold: 2.5,
 } as const;

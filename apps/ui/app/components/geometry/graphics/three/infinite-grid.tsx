@@ -45,19 +45,19 @@ type InfiniteGridProperties = {
   /**
    * The base opacity of the grid lines.
    * Increasing makes the entire grid more visible/opaque.
-   * @default 0.3
+   * @default 0.5
    */
   readonly lineOpacity: number;
   /**
    * Minimum grid distance to ensure visibility.
    * Increasing ensures grid is always drawn at least this far from camera.
-   * @default 1000.0
+   * @default 1000
    */
   readonly minGridDistance: number;
   /**
    * Controls how far the grid extends from the camera.
    * Increasing extends the grid farther from the camera, creating a larger visible area.
-   * @default 10.0
+   * @default 30
    */
   readonly gridDistanceMultiplier: number;
   /**
@@ -67,10 +67,15 @@ type InfiniteGridProperties = {
    */
   readonly alphaThreshold: number;
   /**
-   * The falloff exponent for the grid. Higher values make the grid fade faster with distance.
-   * @default 10
+   * The fade start value for grid smoothstep (0-1). Lower values start fading closer to the camera.
+   * @default 0.05
    */
-  readonly falloffExponent?: number;
+  readonly fadeStart?: number;
+  /**
+   * The fade end value for grid smoothstep (0-1). Higher values end fading further from the camera.
+   * @default 0.3
+   */
+  readonly fadeEnd?: number;
 };
 
 // Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
@@ -87,7 +92,8 @@ function infiniteGridMaterial({
   minGridDistance,
   gridDistanceMultiplier,
   alphaThreshold,
-  falloffExponent,
+  fadeStart,
+  fadeEnd,
 }: InfiniteGridProperties) {
   // Validate to ensure axes cannot be used to inject malicious code
   if (!['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'].includes(axes)) {
@@ -127,8 +133,11 @@ function infiniteGridMaterial({
       uAlphaThreshold: {
         value: alphaThreshold,
       },
-      uFalloffExponent: {
-        value: falloffExponent,
+      uFadeStart: {
+        value: fadeStart,
+      },
+      uFadeEnd: {
+        value: fadeEnd,
       },
     },
 
@@ -168,9 +177,9 @@ function infiniteGridMaterial({
       uniform float uLineOpacity;
       uniform float uGridDistanceMultiplier;
       uniform float uMinGridDistance;
-      uniform float uMinFadeFactor;
       uniform float uAlphaThreshold;
-      uniform float uFalloffExponent;
+      uniform float uFadeStart;
+      uniform float uFadeEnd;
 
       float getGrid(float size, float thickness) {
         vec2 r = worldPosition.${planeAxes} / size;
@@ -197,8 +206,8 @@ function infiniteGridMaterial({
         // Calculate distance ratio
         float distanceRatio = planarDistance / gridDistance;
         
-        // Calculate fade factor using simple power function
-        float fadeFactor = pow(max(0.0, 1.0 - distanceRatio), uFalloffExponent);
+        // Calculate fade factor using smoothstep for cleaner fade
+        float fadeFactor = smoothstep(uFadeEnd, uFadeStart, distanceRatio);
         
         float gridSmall = getGrid(uSmallSize, uSmallThickness);
         float gridLarge = getGrid(uLargeSize, uLargeThickness);
@@ -223,10 +232,11 @@ export function InfiniteGrid({
   smallThickness = 1.25,
   largeThickness = 2.5,
   axes = 'xyz',
-  lineOpacity = 0.4,
+  lineOpacity = 0.5,
   minGridDistance = 1000,
-  gridDistanceMultiplier = 10,
-  falloffExponent = 5,
+  gridDistanceMultiplier = 30,
+  fadeStart = 0.05,
+  fadeEnd = 0.3,
   alphaThreshold = 0.01,
 }: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
   const [theme] = useTheme();
@@ -246,7 +256,8 @@ export function InfiniteGrid({
         minGridDistance,
         gridDistanceMultiplier,
         alphaThreshold,
-        falloffExponent,
+        fadeStart,
+        fadeEnd,
       }),
     [
       smallSize,
@@ -259,7 +270,8 @@ export function InfiniteGrid({
       minGridDistance,
       gridDistanceMultiplier,
       alphaThreshold,
-      falloffExponent,
+      fadeStart,
+      fadeEnd,
     ],
   );
 

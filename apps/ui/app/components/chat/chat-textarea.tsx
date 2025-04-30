@@ -479,7 +479,7 @@ export function ChatTextarea({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button size="icon" className="size-6 rounded-full" onClick={handleCancelClick}>
-                <Square className="size-3 fill-background" />
+                <Square className="size-3 fill-primary-foreground" />
               </Button>
             </TooltipTrigger>
             <TooltipContent className="flex items-center gap-2 align-baseline">

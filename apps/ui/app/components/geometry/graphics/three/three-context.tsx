@@ -162,19 +162,6 @@ export function ThreeProvider({
       </Canvas>
       {enableCameraControls ? (
         <div className="absolute bottom-0 left-0 z-10 m-2">
-          {/* {enableGrid ? (
-            <div className="mb-4">
-              <div className="rounded-md border bg-background p-1 text-xs">
-                {Object.entries(gridSizes).map(([key, value]) => (
-                  <div key={key}>
-                    <span className="whitespace-nowrap">
-                      {key}: {value}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null} */}
           <div className="flex items-center gap-2">
             <CameraControl
               defaultAngle={cameraAngle}

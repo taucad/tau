@@ -1,4 +1,5 @@
 import { useCallback, useRef } from 'react';
+import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
 import { ChatMessage } from './chat-message.js';
@@ -15,7 +16,7 @@ import { useModels } from '@/hooks/use-models.js';
 
 const chatResizeCookieNameHistory = 'chat-history-resize';
 
-export function ChatHistory() {
+export function ChatHistory(): JSX.Element {
   const { setCode, build } = useBuild();
   const { append, messages, reload, setMessages } = useChat({ ...useChatConstants, id: build?.id });
   const [chatResizeHistory, setChatResizeHistory] = useCookie(chatResizeCookieNameHistory, [85, 15]);

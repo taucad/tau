@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Globe, ArrowRight, ChevronDown, CircuitBoard, AudioLines, Image, X, OctagonX } from 'lucide-react';
+import type { JSX } from 'react';
+import { Globe, ArrowUp, ChevronDown, CircuitBoard, AudioLines, Image, X, OctagonX, Square } from 'lucide-react';
 import { useChat } from '@ai-sdk/react';
 import type { Attachment } from 'ai';
 import { ComingSoon } from '@/components/ui/coming-soon.js';
@@ -59,7 +60,7 @@ export function ChatTextarea({
   initialAttachments = defaultAttachments,
   onEscapePressed,
   conversationId,
-}: ChatTextareaProperties) {
+}: ChatTextareaProperties): JSX.Element {
   const { initialInputText, initialImageUrls } = useMemo(() => {
     let initialInputText = '';
     const initialImageUrls: string[] = [];
@@ -294,7 +295,7 @@ export function ChatTextarea({
       >
         <Textarea
           ref={textareaReference}
-          className="mb-8 size-full resize-none border-none p-4 pt-3 pr-10 pb-0 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
+          className="mb-8 size-full resize-none border-none p-4 pt-3 pb-0 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
           rows={3}
           value={inputText}
           placeholder="Ask Tau a question..."
@@ -353,45 +354,6 @@ export function ChatTextarea({
           <p className="rounded-md bg-background/50 px-2 font-medium text-primary">Drop images here</p>
         </div>
       ) : null}
-
-      {/* Submit button */}
-      {status === 'streaming' ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="absolute top-2 right-2 w-8 gap-1 text-muted-foreground @xs:w-fit @xs:pr-1"
-              onClick={handleCancelClick}
-            >
-              <span className="hidden @xs:block">Stop</span>
-              {/* !important is needed as `tailwind-merge` doesn't respect container queries */}
-              <KeyShortcut className="hidden! @xs:block!" variant="ghost">
-                {formattedCancelKeyCombination}
-              </KeyShortcut>
-              <OctagonX className="block @xs:hidden" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Stop</TooltipContent>
-        </Tooltip>
-      ) : (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="absolute top-2 right-2"
-              disabled={inputText.length === 0}
-              onClick={handleSubmit}
-            >
-              <ArrowRight className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Send</p>
-          </TooltipContent>
-        </Tooltip>
-      )}
 
       {/* Main input controls */}
       <div className="absolute bottom-2 left-2 flex flex-row items-center gap-1">
@@ -501,7 +463,7 @@ export function ChatTextarea({
 
       {/* Voice input */}
       <div className="absolute right-2 bottom-2 flex flex-row items-center gap-1">
-        <Tooltip>
+        {/* <Tooltip>
           <TooltipTrigger asChild>
             <Button size="xs" variant="ghost" className="h-6">
               <AudioLines />
@@ -510,7 +472,40 @@ export function ChatTextarea({
           <TooltipContent>
             Speak to Tau <ComingSoon variant="tooltip" className="ml-1" />
           </TooltipContent>
-        </Tooltip>
+        </Tooltip> */}
+        {/* Submit button */}
+        {status === 'streaming' ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="icon" className="size-6 rounded-full" onClick={handleCancelClick}>
+                <Square className="size-3 fill-background" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="flex items-center gap-2 align-baseline">
+              Stop{' '}
+              <KeyShortcut variant="tooltip" className="ml-1">
+                {formattedCancelKeyCombination}
+              </KeyShortcut>
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                // Variant="ghost"
+                className="size-6 rounded-full"
+                disabled={inputText.length === 0}
+                onClick={handleSubmit}
+              >
+                <ArrowUp className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Send</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </div>
   );

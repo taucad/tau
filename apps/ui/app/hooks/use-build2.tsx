@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import type { JSX, ReactNode } from 'react';
 import { createContext, useContext, useMemo } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { storage } from '@/db/storage.js';
@@ -31,7 +31,13 @@ type BuildContextType = {
 
 const BuildContext = createContext<BuildContextType | undefined>(undefined);
 
-export function BuildProvider({ children, buildId }: { readonly children: ReactNode; readonly buildId: string }) {
+export function BuildProvider({
+  children,
+  buildId,
+}: {
+  readonly children: ReactNode;
+  readonly buildId: string;
+}): JSX.Element {
   const queryClient = useQueryClient();
 
   // Query for fetching build data
@@ -147,7 +153,7 @@ export function BuildProvider({ children, buildId }: { readonly children: ReactN
   return <BuildContext.Provider value={value}>{children}</BuildContext.Provider>;
 }
 
-export function useBuild() {
+export function useBuild(): BuildContextType {
   const context = useContext(BuildContext);
   if (context === undefined) {
     throw new Error('useBuild must be used within a BuildProvider');

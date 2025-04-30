@@ -89,7 +89,7 @@ export function ChatHistory(): JSX.Element {
                 onCodeApply={setCode}
               />
             ))}
-            <ChatError id={build?.id} />
+            {build?.id ? <ChatError id={build.id} /> : null}
           </div>
           <ScrollDownButton containerRef={chatContainerReference} hasContent={messages.length > 0} />
         </div>

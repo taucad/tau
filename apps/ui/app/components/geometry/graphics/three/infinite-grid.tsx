@@ -81,6 +81,7 @@ type InfiniteGridProperties = {
 // Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
 // Modified by @rifont to:
 // - use varying thickness and enhanced distance falloff
+// - work correctly with logarithmic depth buffer
 function infiniteGridMaterial({
   smallSize,
   largeSize,
@@ -142,6 +143,8 @@ function infiniteGridMaterial({
     },
 
     vertexShader: `
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
       varying vec3 worldPosition;
   
       uniform float uGridDistanceMultiplier;
@@ -163,10 +166,15 @@ function infiniteGridMaterial({
         worldPosition = pos;
         
         gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        
+        #include <logdepthbuf_vertex>
       }
       `,
 
     fragmentShader: `
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+      
       varying vec3 worldPosition;
       
       uniform float uSmallSize;
@@ -191,6 +199,8 @@ function infiniteGridMaterial({
       }
       
       void main() {
+        #include <logdepthbuf_fragment>
+        
         // Calculate planar distance - distance in the grid plane
         float planarDistance = distance(cameraPosition.${planeAxes}, worldPosition.${planeAxes});
         

@@ -461,8 +461,8 @@ export function ChatTextarea({
         </div>
       </div>
 
-      {/* Voice input */}
       <div className="absolute right-2 bottom-2 flex flex-row items-center gap-1">
+        {/* Voice input */}
         {/* <Tooltip>
           <TooltipTrigger asChild>
             <Button size="xs" variant="ghost" className="h-6">

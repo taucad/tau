@@ -163,6 +163,9 @@ function infiniteGridMaterial({
         // Scale the grid based on the calculated distance
         vec3 pos = position.${axes} * gridDistance;
         
+        // Apply a small offset to avoid z-fighting but not hide the grid
+        pos.${axes[2]} -= 0.001; 
+        
         worldPosition = pos;
         
         gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);

@@ -491,7 +491,6 @@ export function ChatTextarea({
             <TooltipTrigger asChild>
               <Button
                 size="icon"
-                // Variant="ghost"
                 className="size-6 rounded-full"
                 disabled={inputText.length === 0}
                 onClick={handleSubmit}

@@ -1,9 +1,8 @@
 import React, { useRef, useLayoutEffect, useCallback } from 'react';
 import { useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
-import { BufferGeometry, Vector3 } from 'three';
+import { BufferGeometry } from 'three';
 import * as r3js from 'replicad-threejs-helper';
-import { Line } from '@react-three/drei';
 import { MatcapMaterial } from '@/components/geometry/graphics/three/matcap-material.js';
 import { useColor } from '@/hooks/use-color.js';
 
@@ -58,7 +57,6 @@ export const ReplicadMesh = React.memo(function ({
 
   const body = useRef(new BufferGeometry());
   const lines = useRef(new BufferGeometry());
-  const linePoints = useRef<Vector3[]>([]);
 
   const onClick = useFaceEvent(onFaceClick);
   const onHover = (event?: ThreeEvent<MouseEvent>) => {
@@ -89,20 +87,6 @@ export const ReplicadMesh = React.memo(function ({
     if (edges) r3js.syncLines(lines.current, edges);
     else if (faces) r3js.syncLinesFromFaces(lines.current, body.current);
 
-    // Convert buffer geometry positions to Vector3 array for Line component
-    if (lines.current.attributes.position) {
-      const positions = lines.current.attributes.position.array;
-      const newPoints: Vector3[] = [];
-
-      // Process position array into Vector3 points
-      for (let i = 0; i < positions.length; i += 3) {
-        newPoints.push(new Vector3(positions[i], positions[i + 1], positions[i + 2]));
-      }
-
-      // Update points reference
-      linePoints.current = newPoints;
-    }
-
     invalidate();
   }, [faces, edges, invalidate]);
 
@@ -120,8 +104,6 @@ export const ReplicadMesh = React.memo(function ({
       <mesh
         // eslint-disable-next-line react/no-unknown-property -- TODO: make Three.js type available for linter
         geometry={body.current}
-        // eslint-disable-next-line react/no-unknown-property -- TODO: make Three.js type available for linter
-        renderOrder={1}
         onClick={onClick}
         onPointerOver={onHover}
         onPointerMove={onHover}
@@ -137,15 +119,10 @@ export const ReplicadMesh = React.memo(function ({
           polygonOffsetUnits={1}
         />
       </mesh>
-      <Line
-        segments
-        points={linePoints.current}
-        color="#244224"
-        lineWidth={1.5}
-        // Render order higher than the mesh to avoid z fighting
-        // TODO: refine the line rendering to ensure lines are always drawn on top of the mesh. Some angles look bad.
-        renderOrder={2}
-      />
+      {/* eslint-disable-next-line react/no-unknown-property -- TODO: make Three.js type available for linter */}
+      <lineSegments geometry={lines.current}>
+        <lineBasicMaterial color="#244224" />
+      </lineSegments>
     </group>
   );
 });

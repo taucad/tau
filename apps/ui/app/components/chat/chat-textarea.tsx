@@ -18,6 +18,7 @@ import { cn } from '@/utils/ui.js';
 import type { MessagePart } from '@/types/chat.js';
 import { useKeydown } from '@/hooks/use-keydown.js';
 import { KeyShortcut } from '@/components/ui/key-shortcut.js';
+import { formatKeyCombination } from '@/utils/keys.js';
 import type { KeyCombination } from '@/utils/keys.js';
 import { toast } from '@/components/ui/sonner.js';
 import { useChatConstants } from '@/contexts/use-chat.js';
@@ -482,10 +483,7 @@ export function ChatTextarea({
               </Button>
             </TooltipTrigger>
             <TooltipContent className="flex items-center gap-2 align-baseline">
-              Stop{' '}
-              <KeyShortcut variant="tooltip" className="ml-1">
-                {formattedCancelKeyCombination}
-              </KeyShortcut>
+              Stop <KeyShortcut variant="tooltip">{formattedCancelKeyCombination}</KeyShortcut>
             </TooltipContent>
           </Tooltip>
         ) : (
@@ -501,8 +499,8 @@ export function ChatTextarea({
                 <ArrowUp className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>
-              <p>Send</p>
+            <TooltipContent className="flex items-center gap-2 align-baseline">
+              Send <KeyShortcut variant="tooltip">{formatKeyCombination({ key: 'Enter' })}</KeyShortcut>
             </TooltipContent>
           </Tooltip>
         )}

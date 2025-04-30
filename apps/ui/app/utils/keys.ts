@@ -16,7 +16,7 @@ const formatKey = (key: KeyCombination['key']): string => {
     ArrowDown: '↓',
     ArrowLeft: '←',
     ArrowRight: '→',
-    Enter: '↵',
+    Enter: '⏎',
     Escape: 'Esc',
     Backspace: '⌫',
     Delete: 'Del',

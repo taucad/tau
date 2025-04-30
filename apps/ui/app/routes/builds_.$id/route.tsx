@@ -13,6 +13,7 @@ import { LogProvider } from '@/contexts/log-context.js';
 import { defaultBuildName } from '@/constants/build-constants.js';
 import type { Handle } from '@/types/matches.js';
 import { useChatConstants } from '@/contexts/use-chat.js';
+import { AiChatProvider, useAiChat } from '@/components/chat/ai-chat-provider.js';
 
 function BuildNameEditor() {
   const { build, updateName, isLoading } = useBuild();
@@ -113,9 +114,19 @@ function Chat() {
   const { id } = useParams();
   const { build, isLoading, setMessages: setBuildMessages } = useBuild();
   const { setCode, setParameters } = useReplicad();
-  const { setMessages, messages, reload, status } = useChat({
+  const { setMessages, messages, reload, status } = useAiChat({
     ...useChatConstants,
-    id,
+    onFinish(message, options) {
+      console.log('onFinish', message, options);
+    },
+    onToolCall: new Map([
+      [
+        'web',
+        ({ toolCall }) => {
+          console.log('toolCall', toolCall);
+        },
+      ],
+    ]),
   });
 
   // Load and respond to build changes
@@ -168,9 +179,11 @@ export default function ChatRoute(): JSX.Element {
     <LogProvider>
       <BuildProvider buildId={id}>
         <CadProvider withExceptions evaluateDebounceTime={300}>
-          <div className="flex h-full">
-            <Chat />
-          </div>
+          <AiChatProvider value={{ ...useChatConstants, id }}>
+            <div className="flex h-full">
+              <Chat />
+            </div>
+          </AiChatProvider>
         </CadProvider>
       </BuildProvider>
     </LogProvider>

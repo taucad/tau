@@ -1,5 +1,6 @@
 import { Edit } from 'lucide-react';
 import { useState } from 'react';
+import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { ChatMessageReasoning } from './chat-message-reasoning.js';
 import { ChatMessageTool } from './chat-message-tool.js';
@@ -9,6 +10,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { CopyButton } from '@/components/copy-button.js';
 import { Button } from '@/components/ui/button.js';
 import { MessageRole } from '@/types/chat.js';
+import type { MessageAnnotation } from '@/types/chat.js';
 import { cn } from '@/utils/ui.js';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card.js';
 import { When } from '@/components/ui/utils/when.js';
@@ -21,10 +23,9 @@ type ChatMessageProperties = {
   readonly onEdit: ChatTextareaProperties['onSubmit'];
   readonly models: Model[];
   readonly onCodeApply?: (code: string) => void;
-  readonly conversationId?: string;
 };
 
-export function ChatMessage({ message, onEdit, models, onCodeApply, conversationId }: ChatMessageProperties) {
+export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessageProperties): JSX.Element {
   const isUser = message.role === MessageRole.User;
   const [isEditing, setIsEditing] = useState(false);
 
@@ -50,7 +51,6 @@ export function ChatMessage({ message, onEdit, models, onCodeApply, conversation
               initialContent={message.parts}
               initialAttachments={message.experimental_attachments}
               models={models}
-              conversationId={conversationId}
               onSubmit={async (event) => {
                 void onEdit(event);
                 setIsEditing(false);
@@ -64,7 +64,12 @@ export function ChatMessage({ message, onEdit, models, onCodeApply, conversation
             <div className={cn('flex flex-col gap-2', isUser && 'p-2')}>
               {message.experimental_attachments?.map((attachment, index) => {
                 return (
-                  <HoverCard key={`${message.id}-attachment-${index}`} openDelay={100} closeDelay={100}>
+                  <HoverCard
+                    // eslint-disable-next-line react/no-array-index-key -- Index is stable
+                    key={`${message.id}-attachment-${index}`}
+                    openDelay={100}
+                    closeDelay={100}
+                  >
                     <HoverCardTrigger asChild>
                       <img
                         src={attachment.url}
@@ -82,6 +87,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply, conversation
                 if (part.type === 'text') {
                   return (
                     <ChatMessageText
+                      // eslint-disable-next-line react/no-array-index-key -- Index is stable
                       key={`${message.id}-message-part-${index}`}
                       part={part}
                       onCodeApply={onCodeApply}
@@ -94,6 +100,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply, conversation
                   return (
                     part.reasoning.trim().length > 0 && (
                       <ChatMessageReasoning
+                        // eslint-disable-next-line react/no-array-index-key -- Index is stable
                         key={`${message.id}-message-part-${index}`}
                         part={part}
                         hasContent={message.content.length > 0}
@@ -103,6 +110,7 @@ export function ChatMessage({ message, onEdit, models, onCodeApply, conversation
                 }
 
                 if (part.type === 'tool-invocation') {
+                  // eslint-disable-next-line react/no-array-index-key -- Index is stable
                   return <ChatMessageTool key={`${message.id}-message-part-${index}`} part={part} />;
                 }
 
@@ -132,8 +140,9 @@ export function ChatMessage({ message, onEdit, models, onCodeApply, conversation
                   {message.annotations?.map((annotation, index) => {
                     return (
                       <ChatMessageAnnotation
+                        // eslint-disable-next-line react/no-array-index-key -- Index is stable
                         key={`${message.id}-message-annotation-${index}`}
-                        annotation={annotation}
+                        annotation={annotation as MessageAnnotation}
                       />
                     );
                   })}

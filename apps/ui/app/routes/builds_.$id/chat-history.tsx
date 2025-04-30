@@ -1,24 +1,24 @@
 import { useCallback, useRef } from 'react';
 import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
-import { useChat } from '@ai-sdk/react';
 import { ChatMessage } from './chat-message.js';
 import { ScrollDownButton } from './scroll-down-button.js';
 import { ChatError } from './chat-error.js';
 import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
 import { ChatTextarea } from '@/components/chat/chat-textarea.js';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable.js';
-import { createMessage, useChatConstants } from '@/contexts/use-chat.js';
+import { createMessage } from '@/contexts/use-chat.js';
 import { MessageRole, MessageStatus } from '@/types/chat.js';
 import { useBuild } from '@/hooks/use-build2.js';
 import { useCookie } from '@/hooks/use-cookie.js';
 import { useModels } from '@/hooks/use-models.js';
+import { useAiChat } from '@/components/chat/ai-chat-provider.js';
 
 const chatResizeCookieNameHistory = 'chat-history-resize';
 
 export function ChatHistory(): JSX.Element {
-  const { setCode, build } = useBuild();
-  const { append, messages, reload, setMessages } = useChat({ ...useChatConstants, id: build?.id });
+  const { setCode } = useBuild();
+  const { append, messages, reload, setMessages } = useAiChat();
   const [chatResizeHistory, setChatResizeHistory] = useCookie(chatResizeCookieNameHistory, [85, 15]);
   const { data: models } = useModels();
   const chatContainerReference = useRef<HTMLDivElement>(null);
@@ -84,12 +84,11 @@ export function ChatHistory(): JSX.Element {
                 key={message.id}
                 message={message}
                 models={models ?? []}
-                conversationId={build?.id}
                 onEdit={async (event) => onEdit(event, message.id)}
                 onCodeApply={setCode}
               />
             ))}
-            {build?.id ? <ChatError id={build.id} /> : null}
+            <ChatError />
           </div>
           <ScrollDownButton containerRef={chatContainerReference} hasContent={messages.length > 0} />
         </div>
@@ -103,7 +102,7 @@ export function ChatHistory(): JSX.Element {
         defaultSize={chatResizeHistory[1]}
         className="p-2"
       >
-        <ChatTextarea models={models ?? []} conversationId={build?.id} onSubmit={onSubmit} />
+        <ChatTextarea models={models ?? []} onSubmit={onSubmit} />
       </ResizablePanel>
     </ResizablePanelGroup>
   );

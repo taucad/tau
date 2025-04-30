@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import type { JSX } from 'react';
-import { Globe, ArrowUp, ChevronDown, CircuitBoard, AudioLines, Image, X, OctagonX, Square } from 'lucide-react';
-import { useChat } from '@ai-sdk/react';
+import { Globe, ArrowUp, ChevronDown, CircuitBoard, Image, X, Square } from 'lucide-react';
 import type { Attachment } from 'ai';
-import { ComingSoon } from '@/components/ui/coming-soon.js';
+import { useAiChat } from './ai-chat-provider.js';
 import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '@/components/ui/hover-card.js';
 import { Button } from '@/components/ui/button.js';
 import { Textarea } from '@/components/ui/textarea.js';
@@ -21,7 +20,6 @@ import { KeyShortcut } from '@/components/ui/key-shortcut.js';
 import { formatKeyCombination } from '@/utils/keys.js';
 import type { KeyCombination } from '@/utils/keys.js';
 import { toast } from '@/components/ui/sonner.js';
-import { useChatConstants } from '@/contexts/use-chat.js';
 import { useCookie } from '@/hooks/use-cookie.js';
 
 export type ChatTextareaProperties = {
@@ -41,7 +39,6 @@ export type ChatTextareaProperties = {
   readonly shouldAutoFocus?: boolean;
   readonly initialContent?: MessagePart[];
   readonly initialAttachments?: Attachment[];
-  readonly conversationId?: string;
 };
 
 const defaultContent: MessagePart[] = [];
@@ -60,7 +57,6 @@ export function ChatTextarea({
   initialContent = defaultContent,
   initialAttachments = defaultAttachments,
   onEscapePressed,
-  conversationId,
 }: ChatTextareaProperties): JSX.Element {
   const { initialInputText, initialImageUrls } = useMemo(() => {
     let initialInputText = '';
@@ -90,10 +86,7 @@ export function ChatTextarea({
   const fileInputReference = useRef<HTMLInputElement>(null);
   const textareaReference = useRef<HTMLTextAreaElement>(null);
   const { selectedModel, setSelectedModel } = useModels();
-  const { stop, status } = useChat({
-    ...useChatConstants,
-    id: conversationId,
-  });
+  const { stop, status } = useAiChat();
 
   const handleSubmit = async () => {
     // If there is no text or images, do not submit

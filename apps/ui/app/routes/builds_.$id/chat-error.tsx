@@ -1,17 +1,12 @@
 import { memo } from 'react';
-import { useChat } from '@ai-sdk/react';
 import { useChatConstants } from '@/contexts/use-chat.js';
 import { Button } from '@/components/ui/button.js';
 import { toast } from '@/components/ui/sonner.js';
+import { useAiChat } from '@/components/chat/ai-chat-provider.js';
 
-type ChatErrorProperties = {
-  readonly id: string;
-};
-
-export const ChatError = memo(({ id }: ChatErrorProperties) => {
-  const { reload, error } = useChat({
+export const ChatError = memo(() => {
+  const { reload, error } = useAiChat({
     ...useChatConstants,
-    id,
     onError() {
       toast.error('Unable to send the message');
     },

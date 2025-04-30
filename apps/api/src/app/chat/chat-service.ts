@@ -40,7 +40,7 @@ export class ChatService {
       tools: toolNode,
       name: 'research_expert',
       prompt:
-        'You are a research expert that can use specialized tools to accomplish tasks. Always use tools when appropriate.',
+        'You are a research expert that can use specialized tools to accomplish tasks. Always use the web tool, and only the web_search tool the web tool does not supply enough information.',
     });
 
     // Create a general agent for handling direct responses
@@ -53,6 +53,7 @@ export class ChatService {
 
     // Create a supervisor to orchestrate these agents
     const supervisor = createSupervisor({
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- TODO: fix types
       agents: [researchAgent, cadAgent],
       llm: unboundModel,
       prompt:

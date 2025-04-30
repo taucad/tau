@@ -80,7 +80,13 @@ export function ChatMessage({ message, onEdit, models, onCodeApply, conversation
               })}
               {message.parts?.map((part, index) => {
                 if (part.type === 'text') {
-                  return <ChatMessageText key={`${message.id}-message-part-${index}`} part={part} />;
+                  return (
+                    <ChatMessageText
+                      key={`${message.id}-message-part-${index}`}
+                      part={part}
+                      onCodeApply={onCodeApply}
+                    />
+                  );
                 }
 
                 if (part.type === 'reasoning') {

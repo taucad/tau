@@ -9,6 +9,7 @@ import type { ToolChoiceWithCategory } from '../tools/tool-service.js';
 import { ToolService } from '../tools/tool-service.js';
 import { nameGenerationSystemPrompt } from './prompts/chat-prompt-name.js';
 import type { LangGraphAdapterCallbacks } from './utils/langgraph-adapter.js';
+import { replicadSystemPrompt } from './prompts/chat-prompt-replicad.js';
 
 @Injectable()
 export class ChatService {
@@ -43,22 +44,21 @@ export class ChatService {
     });
 
     // Create a general agent for handling direct responses
-    const directResponseAgent = createReactAgent({
+    const cadAgent = createReactAgent({
       llm: unboundModel,
       tools: [], // No tools for direct responses
-      name: 'conversational_expert',
-      prompt:
-        'You are a conversational expert who responds directly to user queries. You provide thoughtful, helpful responses without using tools.',
+      name: 'cad_agent',
+      prompt: replicadSystemPrompt,
     });
 
     // Create a supervisor to orchestrate these agents
     const supervisor = createSupervisor({
-      agents: [researchAgent, directResponseAgent],
+      agents: [researchAgent, cadAgent],
       llm: unboundModel,
       prompt:
-        'You are a team supervisor managing a research expert and a conversational expert. ' +
+        'You are a team supervisor managing a research expert and a CAD agent. ' +
         'For queries that need external information or specific tool operations, use research_expert. ' +
-        "For general questions and conversations that don't require tools, use conversational_expert." +
+        'For queries that list a 3D object, use cad_agent.' +
         'When you receive a transfer back, be concise and end the conversation.',
       outputMode: 'full_history', // Include full agent message history
     }).compile();
@@ -82,7 +82,7 @@ export class ChatService {
         ]);
       },
       onEvent(parameters) {
-        console.log('onEvent', parameters);
+        console.log('onEvent', parameters.event);
       },
       onError(error) {
         Logger.error('Error in chat stream follows:');

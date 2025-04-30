@@ -2,6 +2,8 @@ import process from 'node:process';
 import { Injectable } from '@nestjs/common';
 import { ChatOpenAI } from '@langchain/openai';
 import type { ChatOpenAIFields } from '@langchain/openai';
+import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import type { GoogleGenerativeAIChatCallOptions } from '@langchain/google-genai';
 import { ChatOllama } from '@langchain/ollama';
 import type { ChatOllamaInput } from '@langchain/ollama';
 import { ChatAnthropic } from '@langchain/anthropic';
@@ -15,6 +17,7 @@ type ProviderOptionsMap = {
   ollama: ChatOllamaInput;
   anthropic: ChatAnthropicCallOptions;
   sambanova: ChatOpenAIFields;
+  google: GoogleGenerativeAIChatCallOptions & { model: string };
 };
 
 // Enhanced type that includes the createClass method
@@ -64,6 +67,14 @@ export const providers: {
         ...options,
         maxRetries: 2,
       }),
+  },
+  google: {
+    provider: 'google',
+    configuration: {
+      apiKey: process.env.GOOGLE_API_KEY,
+    },
+    inputTokensIncludesCachedReadTokens: false,
+    createClass: (options) => new ChatGoogleGenerativeAI(options),
   },
 };
 

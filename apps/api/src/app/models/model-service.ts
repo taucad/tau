@@ -264,6 +264,30 @@ const modelList: Record<StaticProviderId, Record<string, Model>> = {
       },
     },
   },
+  google: {
+    'gemini-2.5-pro': {
+      id: 'google-gemini-2.5-pro',
+      name: 'Gemini 2.5 Pro',
+      provider: 'google',
+      model: 'gemini-2.5-pro-preview-03-25',
+      details: {
+        family: 'Gemini',
+        families: ['Gemini'],
+        contextWindow: 1_048_576,
+        maxTokens: 65_536,
+        cost: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedReadTokens: 0,
+          cachedWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        temperature: 0,
+      },
+    },
+  },
 } as const;
 
 @Injectable()

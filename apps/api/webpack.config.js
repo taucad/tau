@@ -14,6 +14,9 @@ module.exports = {
       '.js': ['.ts', '.js']
     }
   },
+  module: {
+    rules: [{ test: /\.d\.ts$/, use: 'raw-loader' }],
+  },
   plugins: [
     new NxAppWebpackPlugin({
       target: 'node',

@@ -1,4 +1,5 @@
 import { Link, useNavigate } from '@remix-run/react';
+import type { JSX } from 'react';
 import { useModels } from '@/hooks/use-models.js';
 import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
 import { ChatTextarea } from '@/components/chat/chat-textarea.js';
@@ -10,8 +11,9 @@ import { cubeCode } from '@/components/mock-code.js';
 import { CommunityBuildGrid } from '@/components/project-grid.js';
 import { sampleBuilds } from '@/components/mock-builds.js';
 import { defaultBuildName } from '@/constants/build-constants.js';
+import { AiChatProvider } from '@/components/chat/ai-chat-provider.js';
 
-export default function ChatStart() {
+export default function ChatStart(): JSX.Element {
   const { data: models } = useModels();
   const navigate = useNavigate();
 
@@ -65,7 +67,9 @@ export default function ChatStart() {
           <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">What can I help you build?</h1>
         </div>
 
-        <ChatTextarea models={models ?? []} onSubmit={onSubmit} />
+        <AiChatProvider value={{}}>
+          <ChatTextarea models={models ?? []} onSubmit={onSubmit} />
+        </AiChatProvider>
       </div>
       <div className="container mx-auto px-4 py-8">
         <div className="mb-2 flex flex-row items-center justify-between">

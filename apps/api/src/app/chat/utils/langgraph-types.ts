@@ -1,7 +1,7 @@
 /**
  * Type definitions for LangGraph events and content parts
  */
-import type { StreamEvent, StreamEventData } from '@langchain/core/dist/tracers/event_stream';
+import type { StreamEvent as LangchainStreamEvent, StreamEventData } from '@langchain/core/dist/tracers/event_stream';
 
 // ============================================================================
 // Content Part Types
@@ -56,7 +56,7 @@ type BaseLangGraphEvent<EventType extends LangGraphEventName, DataType extends S
   event: EventType;
   data: DataType;
   metadata: LangGraphMetadata;
-} & Omit<StreamEvent, 'event' | 'data' | 'metadata'>;
+} & Omit<LangchainStreamEvent, 'event' | 'data' | 'metadata'>;
 
 /**
  * Event type definitions
@@ -66,6 +66,10 @@ export type ChatModelStreamEvent = BaseLangGraphEvent<
   {
     chunk: {
       content: string | ContentPart[];
+      tool_call_chunks: Array<{
+        index: string;
+        args: string;
+      }>;
     };
   }
 >;
@@ -122,4 +126,4 @@ type EventTypeMap<T extends LangGraphEventName> = T extends keyof EventTypeMappi
 /**
  * Union of all possible stream events, ensuring coverage of all LangGraphEventName combinations
  */
-export type TypedStreamEvent = EventTypeMap<LangGraphEventName>;
+export type StreamEvent = EventTypeMap<LangGraphEventName>;

@@ -2,13 +2,12 @@
 import type { IterableReadableStream } from '@langchain/core/dist/utils/stream';
 import { formatDataStreamPart, createDataStream } from 'ai';
 import type { DataStreamWriter } from 'ai';
-import type { StreamEvent } from '@langchain/core/tracers/log_stream.js';
+import type { StreamEvent as LangchainStreamEvent } from '@langchain/core/tracers/log_stream.js';
 import { generatePrefixedId, idPrefix } from '../../utils/id.js';
 import type { ChatUsageTokens } from '../chat-schema.js';
 import { processContent } from './process-content.js';
 import type {
-  LangGraphEventName,
-  TypedStreamEvent,
+  StreamEvent,
   ChatModelStreamEvent,
   ChatModelEndEvent,
   ToolStartEvent,
@@ -130,7 +129,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.event - The event that occurred.
    * @param parameters.data - The data associated with the event.
    */
-  onEvent?: (parameters: { event: LangGraphEventName; data: unknown }) => void;
+  onEvent?: (streamEvent: StreamEvent) => void;
 };
 
 /**
@@ -169,8 +168,8 @@ export class LangGraphAdapter {
    * @param options - Options for the adapter.
    */
   // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- the response is a complex type so we'll just infer it.
-  public static toDataStream(stream: IterableReadableStream<StreamEvent>, options: LangGraphAdapterOptions) {
-    const typedStream = stream as IterableReadableStream<TypedStreamEvent>;
+  public static toDataStream(stream: IterableReadableStream<LangchainStreamEvent>, options: LangGraphAdapterOptions) {
+    const typedStream = stream as IterableReadableStream<StreamEvent>;
     const { modelId, callbacks = {}, toolTypeMap = {}, parseToolResults } = options;
 
     const dataStream = createDataStream({
@@ -196,7 +195,7 @@ export class LangGraphAdapter {
 
         for await (const streamEvent of typedStream) {
           if (callbacks.onEvent) {
-            callbacks.onEvent({ event: streamEvent.event, data: streamEvent.data });
+            callbacks.onEvent(streamEvent);
           }
 
           // Since we're using TypedStreamEvent, we can directly check the event type
@@ -253,7 +252,9 @@ export class LangGraphAdapter {
             }
 
             case 'on_tool_stream': {
-              // TODO: Implement tool streaming
+              /** No-op - this event was removed in v0.2, on_tool_end is used instead.
+               * @see https://js.langchain.com/docs/versions/v0_2/migrating_astream_events/#removed-on_tool_stream
+               */
               break;
             }
 

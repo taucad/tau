@@ -125,9 +125,7 @@ export type LangGraphAdapterCallbacks = {
 
   /**
    * Called for any event.
-   * @param parameters - The parameters for the callback.
-   * @param parameters.event - The event that occurred.
-   * @param parameters.data - The data associated with the event.
+   * @param streamEvent - The event that occurred.
    */
   onEvent?: (streamEvent: StreamEvent) => void;
 };

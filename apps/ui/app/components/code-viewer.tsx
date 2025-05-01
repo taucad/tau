@@ -1,7 +1,6 @@
 import type { SyntaxHighlighterProps } from 'react-syntax-highlighter';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import type { RefObject } from 'react';
-import React from 'react';
+import type { JSX, RefObject } from 'react';
 import { cn } from '@/utils/ui.js';
 
 const displayLanguageFromOriginalLanguage = {
@@ -16,7 +15,7 @@ export function CodeViewer({
   showLineNumbers,
   language,
   ...rest
-}: SyntaxHighlighterProps & { readonly className?: string; readonly ref?: RefObject<SyntaxHighlighter> }) {
+}: SyntaxHighlighterProps & { readonly className?: string; readonly ref?: RefObject<SyntaxHighlighter> }): JSX.Element {
   return (
     <div className="relative w-full max-w-full overflow-hidden">
       <div className="w-full max-w-full overflow-x-auto">

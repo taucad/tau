@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { openai } from '@ai-sdk/openai';
-import { createReactAgent, ToolNode } from '@langchain/langgraph/prebuilt';
+import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import { createSupervisor } from '@langchain/langgraph-supervisor';
 import { streamText } from 'ai';
 import type { CoreMessage } from 'ai';
@@ -28,25 +28,33 @@ export class ChatService {
 
   // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- This is a complex generic that can be left inferred.
   public createGraph(modelId: string, selectedToolChoice: ToolChoiceWithCategory) {
-    const { tools } = this.toolService.getTools(selectedToolChoice);
+    const { tools, resolvedToolChoice } = this.toolService.getTools(selectedToolChoice);
 
-    const toolNode = new ToolNode(tools);
+    const researchTools = [tools.web_search, tools.web_browser];
     const { model: unboundModel, support } = this.modelService.buildModel(modelId);
-    const model = support?.tools === false ? unboundModel : (unboundModel.bindTools?.(tools) ?? unboundModel);
+    const model =
+      support?.tools === false
+        ? unboundModel
+        : (unboundModel.bindTools?.(
+            researchTools,
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case
+            support?.toolChoice === false ? undefined : { tool_choice: resolvedToolChoice },
+          ) ?? unboundModel);
 
     // Create specialized agents for tool usage
     const researchAgent = createReactAgent({
       llm: model,
-      tools: toolNode,
+      tools: researchTools,
       name: 'research_expert',
       prompt:
         'You are a research expert that can use specialized tools to accomplish tasks. Always use the web_search tool, and only the web_browser tool if the web_search tool does not supply enough information.',
     });
 
     // Create a general agent for handling direct responses
+    const cadTools = [tools.file_edit];
     const cadAgent = createReactAgent({
-      llm: unboundModel,
-      tools: [], // No tools for direct responses
+      llm: support?.tools === false ? unboundModel : (unboundModel.bindTools?.(cadTools) ?? unboundModel),
+      tools: cadTools,
       name: 'cad_agent',
       prompt: replicadSystemPrompt,
     });

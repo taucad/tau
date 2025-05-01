@@ -28,7 +28,7 @@ export const toolChoiceFromToolName = {
 @Injectable()
 export class ToolService {
   public getTools(selectedToolChoice: ToolChoiceWithCategory): {
-    tools: Array<Tool | DynamicStructuredTool>;
+    tools: Record<ToolCategory, Tool | DynamicStructuredTool>;
     resolvedToolChoice: string;
   } {
     const model = new OpenAI({ temperature: 0 });
@@ -60,9 +60,8 @@ export class ToolService {
     } as const satisfies Record<ToolChoiceWithCategory, string>;
 
     const resolvedToolChoice = toolNameFromToolChoice[selectedToolChoice];
-    const tools = Object.values(toolCategoryToTool);
 
-    return { tools, resolvedToolChoice };
+    return { tools: toolCategoryToTool, resolvedToolChoice };
   }
 
   public getToolParsers(): Partial<Record<ToolCategory, (content: string) => unknown[]>> {

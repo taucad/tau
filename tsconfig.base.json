@@ -21,6 +21,8 @@
     "allowJs": false,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
   },
   "exclude": ["node_modules", "tmp"]
 }

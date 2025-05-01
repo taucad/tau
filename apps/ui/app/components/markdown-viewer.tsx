@@ -4,23 +4,14 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import katexUrl from 'katex/dist/katex.min.css?url';
 import type { LinkDescriptor } from '@remix-run/node';
-import { Play } from 'lucide-react';
 import type { JSX } from 'react';
-import { Button } from '@/components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import { CodeViewer } from '@/components/code-viewer.js';
 import { CopyButton } from '@/components/copy-button.js';
 import { cn } from '@/utils/ui.js';
 
 export const markdownViewerLinks: LinkDescriptor[] = [{ rel: 'stylesheet', href: katexUrl }];
 
-export function MarkdownViewer({
-  children,
-  onCodeApply,
-}: {
-  readonly children: string;
-  readonly onCodeApply?: (code: string) => void;
-}): JSX.Element {
+export function MarkdownViewer({ children }: { readonly children: string }): JSX.Element {
   return (
     <Markdown
       className={cn(
@@ -66,41 +57,12 @@ export function MarkdownViewer({
                     className="[&_[data-slot=label]]:hidden @xs/code:[&_[data-slot=label]]:flex"
                     text={text}
                   />
-                  {onCodeApply ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          className="flex"
-                          onClick={() => {
-                            onCodeApply(text);
-                          }}
-                        >
-                          <span className="hidden @xs/code:block">Apply</span>
-                          <Play />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Apply code</TooltipContent>
-                    </Tooltip>
-                  ) : null}
                 </div>
               </div>
-              {/* <div className={cn('relative max-h-64', isExpanded ? 'max-h-none' : 'overflow-y-auto')}> */}
               <div>
                 <CodeViewer {...rest} language={language}>
                   {text}
                 </CodeViewer>
-
-                {/* FIXME: ensure the code viewer doesn't auto-collapse during scrolling */}
-                {/* <Button
-                  variant="ghost"
-                  size="xs"
-                  className="h-4 text-foreground/50 sticky bottom-0 w-full text-center rounded-none hover:bg-neutral/20"
-                  onClick={() => setIsExpanded((previous) => !previous)}
-                >
-                  <ChevronDown className={cn('transition-transform', isExpanded ? 'rotate-x-180' : '')} />
-                </Button> */}
               </div>
             </div>
           ) : (

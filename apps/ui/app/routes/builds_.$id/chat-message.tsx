@@ -22,10 +22,9 @@ type ChatMessageProperties = {
   readonly message: Message;
   readonly onEdit: ChatTextareaProperties['onSubmit'];
   readonly models: Model[];
-  readonly onCodeApply?: (code: string) => void;
 };
 
-export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessageProperties): JSX.Element {
+export function ChatMessage({ message, onEdit, models }: ChatMessageProperties): JSX.Element {
   const isUser = message.role === MessageRole.User;
   const [isEditing, setIsEditing] = useState(false);
 
@@ -90,7 +89,6 @@ export function ChatMessage({ message, onEdit, models, onCodeApply }: ChatMessag
                       // eslint-disable-next-line react/no-array-index-key -- Index is stable
                       key={`${message.id}-message-part-${index}`}
                       part={part}
-                      onCodeApply={onCodeApply}
                     />
                   );
                 }

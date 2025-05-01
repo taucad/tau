@@ -17,7 +17,6 @@ import { useAiChat } from '@/components/chat/ai-chat-provider.js';
 const chatResizeCookieNameHistory = 'chat-history-resize';
 
 export function ChatHistory(): JSX.Element {
-  const { setCode } = useBuild();
   const { append, messages, reload, setMessages } = useAiChat();
   const [chatResizeHistory, setChatResizeHistory] = useCookie(chatResizeCookieNameHistory, [85, 15]);
   const { data: models } = useModels();
@@ -85,7 +84,6 @@ export function ChatHistory(): JSX.Element {
                 message={message}
                 models={models ?? []}
                 onEdit={async (event) => onEdit(event, message.id)}
-                onCodeApply={setCode}
               />
             ))}
             <ChatError />

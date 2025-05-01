@@ -115,7 +115,6 @@ function Chat() {
   const { build, isLoading, setMessages: setBuildMessages } = useBuild();
   const { setCode, setParameters } = useReplicad();
   const { setMessages, messages, reload, status } = useAiChat({
-    ...useChatConstants,
     onFinish(message, options) {
       console.log('onFinish', message, options);
     },

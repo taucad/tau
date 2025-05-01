@@ -33,14 +33,14 @@ export class ChatController {
     @Req() request: FastifyRequest,
   ): Promise<void> {
     const coreMessages = convertToCoreMessages(body.messages);
-    const lastBodyMessage = body.messages.at(-1);
+    const lastHumanMessage = body.messages.findLast((message) => message.role === 'user');
 
     let modelId: string;
     let selectedToolChoice: ToolChoiceWithCategory = 'auto';
-    if (lastBodyMessage?.role === 'user') {
-      modelId = lastBodyMessage.model;
-      if (lastBodyMessage.metadata.toolChoice) {
-        selectedToolChoice = lastBodyMessage.metadata.toolChoice;
+    if (lastHumanMessage?.role === 'user') {
+      modelId = lastHumanMessage.model;
+      if (lastHumanMessage.metadata.toolChoice) {
+        selectedToolChoice = lastHumanMessage.metadata.toolChoice;
       }
     } else {
       throw new Error('Last message is not a user message');

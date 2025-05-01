@@ -66,6 +66,12 @@ export type ChatModelStreamEvent = BaseLangGraphEvent<
   {
     chunk: {
       content: string | ContentPart[];
+      tool_calls: Array<{
+        id?: string;
+        name: string;
+        args: string;
+        type: 'tool_call';
+      }>;
       tool_call_chunks: Array<{
         index: string;
         args: string;

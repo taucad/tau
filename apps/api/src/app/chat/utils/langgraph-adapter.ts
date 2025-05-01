@@ -339,8 +339,11 @@ export class LangGraphAdapter {
       if (originalToolCallId) {
         const toolCallId = generatePrefixedId(idPrefix.toolCall);
         toolCallState.currentToolCallId = toolCallId;
-        console.warn('toolTypeMap', toolTypeMap);
         const toolName = toolTypeMap[toolCall.name] ?? toolCall.name;
+        if (!toolName) {
+          throw new Error('Tool name not found in event: ' + JSON.stringify(streamEvent));
+        }
+
         toolCallState.currentToolName = toolName;
         dataStream.writePart('tool_call_streaming_start', {
           toolCallId,

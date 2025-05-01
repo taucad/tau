@@ -114,15 +114,22 @@ function Chat() {
   const { id } = useParams();
   const { build, isLoading, setMessages: setBuildMessages } = useBuild();
   const { setCode, setParameters } = useReplicad();
-  const { setMessages, messages, reload, status } = useAiChat({
+  const { setMessages, messages, reload, status, addToolResult } = useAiChat({
     onFinish(message, options) {
       console.log('onFinish', message, options);
     },
     onToolCall: new Map([
       [
-        'web_search',
+        'file_edit',
         ({ toolCall }) => {
-          console.log('toolCall', toolCall);
+          const toolCallArgs = toolCall.args as { content: string };
+          setCode(toolCallArgs.content);
+          addToolResult({
+            toolCallId: toolCall.toolCallId,
+            result: {
+              success: true,
+            },
+          });
         },
       ],
     ]),

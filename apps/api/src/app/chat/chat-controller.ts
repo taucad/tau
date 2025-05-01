@@ -1,7 +1,7 @@
-import { Body, Controller, Post, Res } from '@nestjs/common';
+import { Body, Controller, Post, Req, Res } from '@nestjs/common';
 import { convertToCoreMessages } from 'ai';
 import type { UIMessage } from 'ai';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { generatePrefixedId, idPrefix } from '../utils/id.js';
 import { ToolService, toolChoiceFromToolName } from '../tools/tool-service.js';
 import type { ToolChoiceWithCategory } from '../tools/tool-service.js';
@@ -27,7 +27,11 @@ export class ChatController {
   ) {}
 
   @Post()
-  public async getData(@Body() body: CreateChatBody, @Res() response: FastifyReply): Promise<void> {
+  public async getData(
+    @Body() body: CreateChatBody,
+    @Res() response: FastifyReply,
+    @Req() request: FastifyRequest,
+  ): Promise<void> {
     const coreMessages = convertToCoreMessages(body.messages);
     const lastBodyMessage = body.messages.at(-1);
 
@@ -55,6 +59,14 @@ export class ChatController {
     const langchainMessages = convertAiSdkMessagesToLangchainMessages(body.messages, coreMessages);
     const graph = this.chatService.createGraph(modelId, selectedToolChoice);
 
+    // Abort the request if the client disconnects
+    const abortController = new AbortController();
+    request.raw.socket.on('close', () => {
+      if (request.raw.destroyed) {
+        abortController.abort();
+      }
+    });
+
     const eventStream = graph.streamEvents(
       {
         messages: langchainMessages,
@@ -63,6 +75,7 @@ export class ChatController {
         streamMode: 'values',
         version: 'v2',
         runId: generatePrefixedId(idPrefix.run),
+        signal: abortController.signal,
       },
     );
 

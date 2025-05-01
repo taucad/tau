@@ -117,11 +117,10 @@ export type LangGraphAdapterCallbacks = {
 
   /**
    * Called when an error occurs.
-   * @param parameters - The parameters for the callback.
-   * @param parameters.error - The error that occurred.
+   * @param error - The error that occurred.
    * @returns An error message to send to the client.
    */
-  onError?: (parameters: { error: unknown }) => string;
+  onError?: (error: unknown) => string;
 
   /**
    * Called for any event.
@@ -304,7 +303,7 @@ export class LangGraphAdapter {
         });
       },
       onError(error) {
-        return callbacks.onError ? callbacks.onError({ error }) : 'An error occurred while processing the request';
+        return callbacks.onError ? callbacks.onError(error) : 'An error occurred while processing the request';
       },
     });
 

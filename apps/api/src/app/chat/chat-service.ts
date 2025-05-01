@@ -86,6 +86,11 @@ export class ChatService {
         console.log('onEvent', parameters.event);
       },
       onError(error) {
+        if (error instanceof Error && error.message === 'Aborted') {
+          Logger.warn('Request aborted');
+          return 'The request was aborted';
+        }
+
         Logger.error('Error in chat stream follows:');
         Logger.error(error);
         return 'An error occurred while processing the request';

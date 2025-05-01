@@ -563,6 +563,8 @@ export class LangGraphAdapter {
   /**
    * Extracts a tool call ID from a stream event.
    */
+  // TODO: the tool call ID should be extracted from the `on_chat_model_stream` event
+  // in the `tool_calls` array. This ensures that multiple parallel tool calls are supported.
   private static extractToolCallId(streamEvent: ToolStartEvent | ToolEndEvent): string {
     // A LangGraph UUID for the tool call.
     // Can take the following format:

@@ -10,7 +10,7 @@ export function ChatMessageTool({ part }: { readonly part: ToolInvocationUIPart 
       return <ChatMessageToolWebSearch part={part} />;
     }
 
-    case 'web-browser': {
+    case 'web_browser': {
       return <ChatMessageToolWebBrowser part={part} />;
     }
 

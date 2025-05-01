@@ -117,7 +117,7 @@ export const createWebBrowserTool = (options: WebBrowserOptions): DynamicStructu
       return webBrowserImpl(input, options);
     },
     {
-      name: 'web-browser',
+      name: 'web_browser',
       description: 'Useful for when you need to find something on or summarize a webpage.',
       schema: webBrowserSchema,
     },

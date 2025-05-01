@@ -1,10 +1,11 @@
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
 import { LoaderCircle } from 'lucide-react';
+import type { JSX } from 'react';
 import { Badge } from '@/components/ui/badge.js';
 import { createFaviconUrl, extractDomainFromUrl } from '@/utils/url.js';
 import { AnimatedShinyText } from '@/components/magicui/animated-shiny-text.js';
 
-export function ChatMessageToolWebBrowser({ part }: { readonly part: ToolInvocationUIPart }) {
+export function ChatMessageToolWebBrowser({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
   const url = part.toolInvocation.args.url as string;
   const faviconUrl = createFaviconUrl(url);
   const domain = extractDomainFromUrl(url, { includeTld: true });

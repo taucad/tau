@@ -183,6 +183,10 @@ export class LangGraphAdapter {
           isReasoning: false,
         };
 
+        const toolCallState = {
+          currentToolCallId: '',
+        };
+
         const totalUsageTokens = {
           inputTokens: 0,
           outputTokens: 0,
@@ -203,6 +207,8 @@ export class LangGraphAdapter {
                 dataStream,
                 callbacks,
                 reasoningState,
+                toolCallState,
+                toolTypeMap,
               });
               break;
             }
@@ -233,6 +239,7 @@ export class LangGraphAdapter {
                 dataStream,
                 callbacks,
                 toolTypeMap,
+                toolCallState,
               });
               break;
             }
@@ -244,6 +251,7 @@ export class LangGraphAdapter {
                 callbacks,
                 toolTypeMap,
                 parseToolResults,
+                toolCallState,
               });
               break;
             }
@@ -320,10 +328,36 @@ export class LangGraphAdapter {
     dataStream: EnhancedDataStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
     reasoningState: { thinkingBuffer: string; isReasoning: boolean };
+    toolCallState: { currentToolCallId: string };
+    toolTypeMap: Record<string, string>;
   }): void {
-    const { streamEvent, dataStream, callbacks, reasoningState } = parameters;
+    const { streamEvent, dataStream, callbacks, reasoningState, toolCallState, toolTypeMap } = parameters;
 
-    if (streamEvent.data.chunk.content) {
+    if (streamEvent.data.chunk.tool_calls.length > 0) {
+      // TODO: support parallel tool calls?
+      const toolCall = streamEvent.data.chunk.tool_calls[0];
+      const originalToolCallId = toolCall.id;
+      if (originalToolCallId) {
+        const toolCallId = generatePrefixedId(idPrefix.toolCall);
+        toolCallState.currentToolCallId = toolCallId;
+        const toolName = toolTypeMap[toolCall.name] ?? toolCall.name;
+        dataStream.writePart('tool_call_streaming_start', {
+          toolCallId,
+          toolName,
+        });
+      }
+    } else if (streamEvent.data.chunk.tool_call_chunks.length > 0) {
+      // If tool call chunks are present, we need to handle them separately.
+      const toolCallChunk = streamEvent.data.chunk.tool_call_chunks[0];
+      if (toolCallState.currentToolCallId) {
+        dataStream.writePart('tool_call_delta', {
+          toolCallId: toolCallState.currentToolCallId,
+          argsTextDelta: toolCallChunk.args,
+        });
+      } else {
+        throw new Error('Attempted to write tool call delta without a current tool call ID');
+      }
+    } else if (streamEvent.data.chunk.content) {
       const streamedContent = streamEvent.data.chunk.content;
 
       if (typeof streamedContent === 'string') {
@@ -487,10 +521,11 @@ export class LangGraphAdapter {
     dataStream: EnhancedDataStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
     toolTypeMap: Record<string, string>;
+    toolCallState: { currentToolCallId: string };
   }): void {
-    const { streamEvent, dataStream, callbacks, toolTypeMap } = parameters;
+    const { streamEvent, dataStream, callbacks, toolTypeMap, toolCallState } = parameters;
 
-    const toolCallId = this.extractToolCallId(streamEvent);
+    const toolCallId = toolCallState.currentToolCallId;
 
     // Get tool name from map or use raw name
     const toolName = toolTypeMap[streamEvent.name] ?? streamEvent.name;
@@ -526,8 +561,9 @@ export class LangGraphAdapter {
     callbacks: LangGraphAdapterCallbacks;
     toolTypeMap: Record<string, string>;
     parseToolResults?: Partial<Record<string, (content: string) => unknown[]>>;
+    toolCallState: { currentToolCallId: string };
   }): void {
-    const { streamEvent, dataStream, callbacks, toolTypeMap, parseToolResults } = parameters;
+    const { streamEvent, dataStream, callbacks, toolTypeMap, parseToolResults, toolCallState } = parameters;
 
     // Get tool name from map or use raw name
     const toolName = toolTypeMap[streamEvent.name] ?? streamEvent.name;
@@ -538,7 +574,8 @@ export class LangGraphAdapter {
     const toolParser = parseToolResults?.[toolName];
     const results = toolParser ? toolParser(content) : content;
 
-    const toolCallId = this.extractToolCallId(streamEvent);
+    const toolCallId = toolCallState.currentToolCallId;
+    toolCallState.currentToolCallId = ''; // Reset the current tool call ID
 
     // Convert any result to a serializable value
     // If it's null, undefined, or an empty object, convert to empty string
@@ -555,27 +592,6 @@ export class LangGraphAdapter {
     });
 
     callbacks.onToolEnd?.({ dataStream, toolCallId, toolName, result });
-  }
-
-  /**
-   * Extracts a tool call ID from a stream event.
-   */
-  // TODO: the tool call ID should be extracted from the `on_chat_model_stream` event
-  // in the `tool_calls` array. This ensures that multiple parallel tool calls are supported.
-  private static extractToolCallId(streamEvent: ToolStartEvent | ToolEndEvent): string {
-    // A LangGraph UUID for the tool call.
-    // Can take the following format:
-    // - 'tools:900ad182-0310-5937-82e6-c927691bcd81'
-    // - 'research_expert:5cd6c905-9671-5bb3-8581-227ef80bbb48|tools:900ad182-0310-5937-82e6-c927691bcd81'
-    // The unique part that joins the tool call and result is the last part after the final colon, so we extract that.
-    // We remove redundant dashes and use it as the seed for a new ID, preserving entropy.
-    const checkpointNs = streamEvent.metadata.langgraph_checkpoint_ns;
-    const rawId = checkpointNs.split(':').at(-1)?.replaceAll('-', '');
-    if (rawId === undefined) {
-      throw new Error('Tool call ID not found in stream event: ' + JSON.stringify(streamEvent));
-    }
-
-    return generatePrefixedId(idPrefix.toolCall, rawId);
   }
 
   /**

@@ -234,7 +234,7 @@ export function CameraControl({ defaultAngle = 90, onChange, className }: Camera
               size: 'sm',
             }),
             className,
-            'group relative w-30 gap-0 overflow-hidden p-0 hover:overflow-visible max-md:overflow-visible md:w-40 md:w-50',
+            'group relative w-30 gap-0 overflow-hidden p-0 hover:overflow-visible max-md:overflow-visible md:w-50',
             'flex items-center',
             'hover:cursor-pointer',
           )}

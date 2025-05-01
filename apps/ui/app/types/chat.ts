@@ -17,6 +17,7 @@ export type SourceOrigin = 'web' | 'notion' | 'history' | 'projects';
 export type MessagePart = UIMessage['parts'][number];
 
 export type MessageAnnotation = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- required for module augmentation
   [key: string]: any;
   type: 'usage';
   usageTokens: ChatUsageTokens;
@@ -49,7 +50,7 @@ declare module '@ai-sdk/react' {
        *
        * @default 'auto'
        */
-      toolChoice?: 'web' | 'none' | 'auto' | 'any';
+      toolChoice?: 'web_search' | 'none' | 'auto' | 'any';
     };
     /**
      * The annotations of the message.

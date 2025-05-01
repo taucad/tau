@@ -1,11 +1,12 @@
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
+import type { JSX } from 'react';
 import { ChatMessageToolWeb } from './chat-message-tool-web.js';
 import { ChatMessageToolTransfer, transferToStartingWith } from './chat-message-tool-transfer.js';
 import { ChatMessageToolWebBrowser } from './chat-message-tool-web-browser.js';
 
-export function ChatMessageTool({ part }: { readonly part: ToolInvocationUIPart }) {
+export function ChatMessageTool({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
   switch (part.toolInvocation.toolName) {
-    case 'web': {
+    case 'web_search': {
       return <ChatMessageToolWeb part={part} />;
     }
 

@@ -31,7 +31,7 @@ export type ChatTextareaProperties = {
   }: {
     content: string;
     model: string;
-    metadata?: { toolChoice?: 'web' | 'none' | 'auto' | 'any' };
+    metadata?: { toolChoice?: 'web_search' | 'none' | 'auto' | 'any' };
     imageUrls?: string[];
   }) => Promise<void>;
   readonly onEscapePressed?: () => void;
@@ -99,7 +99,7 @@ export function ChatTextarea({
       content: inputText,
       model: selectedModel,
       metadata: {
-        toolChoice: isSearching ? 'web' : 'auto',
+        toolChoice: isSearching ? 'web_search' : 'auto',
       },
       imageUrls: images,
     });

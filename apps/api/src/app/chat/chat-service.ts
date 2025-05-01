@@ -40,7 +40,7 @@ export class ChatService {
       tools: toolNode,
       name: 'research_expert',
       prompt:
-        'You are a research expert that can use specialized tools to accomplish tasks. Always use the web tool, and only the web_search tool the web tool does not supply enough information.',
+        'You are a research expert that can use specialized tools to accomplish tasks. Always use the web_search tool, and only the web_browser tool if the web_search tool does not supply enough information.',
     });
 
     // Create a general agent for handling direct responses

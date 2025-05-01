@@ -121,7 +121,7 @@ function Chat() {
     },
     onToolCall: new Map([
       [
-        'web',
+        'web_search',
         ({ toolCall }) => {
           console.log('toolCall', toolCall);
         },

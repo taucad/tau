@@ -40,7 +40,7 @@ export function createMessage({
   model: string;
   status: MessageStatus;
   metadata?: {
-    toolChoice?: 'web' | 'none' | 'auto' | 'any';
+    toolChoice?: 'web_search' | 'none' | 'auto' | 'any';
   };
   imageUrls?: string[];
 }): Message {

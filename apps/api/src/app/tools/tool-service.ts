@@ -1,12 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { SearxngSearch } from '@langchain/community/tools/searxng_search';
 import type { DynamicStructuredTool, Tool } from '@langchain/core/tools.js';
 import { OpenAI, OpenAIEmbeddings } from '@langchain/openai';
 import { createWebBrowserTool } from './tools/tool-web-browser.js';
+import { fileEditTool } from './tools/tool-file-edit.js';
+import { parseWebSearchResults, webSearchTool } from './tools/tool-web-search.js';
 
 export const toolCategory = {
-  web: 'web',
+  webSearch: 'web_search',
   webBrowser: 'web_browser',
+  fileEdit: 'file_edit',
 } as const satisfies Record<string, string>;
 
 export const toolChoice = {
@@ -20,14 +23,8 @@ export type ToolChoice = (typeof toolChoice)[keyof typeof toolChoice];
 export type ToolChoiceWithCategory = ToolChoice | ToolCategory;
 
 export const toolChoiceFromToolName = {
-  [SearxngSearch.name]: toolCategory.web,
+  [SearxngSearch.name]: toolCategory.webSearch,
 } as const satisfies Record<string, ToolCategory>;
-
-type WebResult = {
-  title: string;
-  link: string;
-  snippet: string;
-};
 
 @Injectable()
 export class ToolService {
@@ -39,15 +36,7 @@ export class ToolService {
     const embeddings = new OpenAIEmbeddings();
     // Define the tools for the agent to use
     const toolCategoryToTool: Record<ToolCategory, Tool | DynamicStructuredTool> = {
-      [toolCategory.web]: new SearxngSearch({
-        params: {
-          format: 'json',
-          engines: 'google,bing,duckduckgo,wikipedia',
-          numResults: 10,
-        },
-        apiBase: 'http://localhost:42114',
-        headers: {},
-      }),
+      [toolCategory.webSearch]: webSearchTool,
       [toolCategory.webBrowser]: createWebBrowserTool({
         model,
         embeddings,
@@ -57,11 +46,13 @@ export class ToolService {
         maxResults: 4,
         forceSummary: false,
       }),
+      [toolCategory.fileEdit]: fileEditTool,
     };
 
     const toolNameFromToolCategory: Record<ToolCategory, string> = {
-      [toolCategory.web]: toolCategoryToTool[toolCategory.web].name,
+      [toolCategory.webSearch]: toolCategoryToTool[toolCategory.webSearch].name,
       [toolCategory.webBrowser]: toolCategoryToTool[toolCategory.webBrowser].name,
+      [toolCategory.fileEdit]: toolCategoryToTool[toolCategory.fileEdit].name,
     };
 
     const toolNameFromToolChoice = {
@@ -75,27 +66,9 @@ export class ToolService {
     return { tools, resolvedToolChoice };
   }
 
-  public getToolParsers(): Record<string, (content: string) => unknown[]> {
+  public getToolParsers(): Partial<Record<ToolCategory, (content: string) => unknown[]>> {
     return {
-      [toolCategory.web]: this.parseSearxngResults,
+      [toolCategory.webSearch]: parseWebSearchResults,
     };
-  }
-
-  private parseSearxngResults(content: string): WebResult[] {
-    try {
-      // Searxng returns a comma-separated list of JSON objects, e.g.:
-      // `{"json": "..."},{"json": "..."}`
-      // So we need to parse it as an array of JSON objects.
-      const results = JSON.parse(`[${content}]`) as WebResult[];
-      if (!Array.isArray(results)) {
-        Logger.warn('Expected web results to be an array');
-        return [];
-      }
-
-      return results;
-    } catch (error) {
-      Logger.error('Failed to parse web results', error);
-      return [];
-    }
   }
 }

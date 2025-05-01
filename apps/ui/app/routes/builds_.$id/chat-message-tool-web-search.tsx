@@ -19,11 +19,12 @@ import { extractDomainFromUrl, createFaviconUrl } from '@/utils/url.js';
 
 export function ChatMessageToolWebSearch({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
   switch (part.toolInvocation.state) {
-    case 'call': {
+    case 'call':
+    case 'partial-call': {
       return (
         <div className="flex flex-col gap-2">
           <p className="text-lg">Sources</p>
-          <p className="border-l pl-2 text-sm text-foreground/50 italic">{part.toolInvocation.args.input}</p>
+          <p className="border-l pl-2 text-sm text-foreground/50 italic">{part.toolInvocation.args?.input}</p>
         </div>
       );
     }
@@ -189,10 +190,6 @@ export function ChatMessageToolWebSearch({ part }: { readonly part: ToolInvocati
           <p className="text-lg">Answer</p>
         </>
       );
-    }
-
-    case 'partial-call': {
-      throw new Error('Unexpected partial call for web tool');
     }
   }
 }

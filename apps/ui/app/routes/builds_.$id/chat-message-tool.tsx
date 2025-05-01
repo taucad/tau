@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 import { ChatMessageToolWebSearch } from './chat-message-tool-web-search.js';
 import { ChatMessageToolTransfer, transferToStartingWith } from './chat-message-tool-transfer.js';
 import { ChatMessageToolWebBrowser } from './chat-message-tool-web-browser.js';
+import { ChatMessageToolFileEdit } from './chat-message-tool-file-edit.js';
 
 export function ChatMessageTool({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
   switch (part.toolInvocation.toolName) {
@@ -12,6 +13,10 @@ export function ChatMessageTool({ part }: { readonly part: ToolInvocationUIPart 
 
     case 'web_browser': {
       return <ChatMessageToolWebBrowser part={part} />;
+    }
+
+    case 'file_edit': {
+      return <ChatMessageToolFileEdit part={part} />;
     }
 
     default: {

@@ -185,6 +185,7 @@ export class LangGraphAdapter {
 
         const toolCallState = {
           currentToolCallId: '',
+          currentToolName: '',
         };
 
         const totalUsageTokens = {
@@ -238,7 +239,6 @@ export class LangGraphAdapter {
                 streamEvent,
                 dataStream,
                 callbacks,
-                toolTypeMap,
                 toolCallState,
               });
               break;
@@ -249,7 +249,6 @@ export class LangGraphAdapter {
                 streamEvent,
                 dataStream,
                 callbacks,
-                toolTypeMap,
                 parseToolResults,
                 toolCallState,
               });
@@ -328,7 +327,7 @@ export class LangGraphAdapter {
     dataStream: EnhancedDataStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
     reasoningState: { thinkingBuffer: string; isReasoning: boolean };
-    toolCallState: { currentToolCallId: string };
+    toolCallState: { currentToolCallId: string; currentToolName: string };
     toolTypeMap: Record<string, string>;
   }): void {
     const { streamEvent, dataStream, callbacks, reasoningState, toolCallState, toolTypeMap } = parameters;
@@ -340,7 +339,9 @@ export class LangGraphAdapter {
       if (originalToolCallId) {
         const toolCallId = generatePrefixedId(idPrefix.toolCall);
         toolCallState.currentToolCallId = toolCallId;
+        console.warn('toolTypeMap', toolTypeMap);
         const toolName = toolTypeMap[toolCall.name] ?? toolCall.name;
+        toolCallState.currentToolName = toolName;
         dataStream.writePart('tool_call_streaming_start', {
           toolCallId,
           toolName,
@@ -520,15 +521,14 @@ export class LangGraphAdapter {
     streamEvent: ToolStartEvent;
     dataStream: EnhancedDataStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
-    toolTypeMap: Record<string, string>;
-    toolCallState: { currentToolCallId: string };
+    toolCallState: { currentToolCallId: string; currentToolName: string };
   }): void {
-    const { streamEvent, dataStream, callbacks, toolTypeMap, toolCallState } = parameters;
+    const { streamEvent, dataStream, callbacks, toolCallState } = parameters;
 
     const toolCallId = toolCallState.currentToolCallId;
+    const toolName = toolCallState.currentToolName;
 
     // Get tool name from map or use raw name
-    const toolName = toolTypeMap[streamEvent.name] ?? streamEvent.name;
     const { input } = streamEvent.data.input;
 
     let args: unknown;
@@ -559,23 +559,22 @@ export class LangGraphAdapter {
     streamEvent: ToolEndEvent;
     dataStream: EnhancedDataStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
-    toolTypeMap: Record<string, string>;
     parseToolResults?: Partial<Record<string, (content: string) => unknown[]>>;
-    toolCallState: { currentToolCallId: string };
+    toolCallState: { currentToolCallId: string; currentToolName: string };
   }): void {
-    const { streamEvent, dataStream, callbacks, toolTypeMap, parseToolResults, toolCallState } = parameters;
+    const { streamEvent, dataStream, callbacks, parseToolResults, toolCallState } = parameters;
 
     // Get tool name from map or use raw name
-    const toolName = toolTypeMap[streamEvent.name] ?? streamEvent.name;
+    const toolName = toolCallState.currentToolName;
     const { content } = streamEvent.data.output;
+    const toolCallId = toolCallState.currentToolCallId;
+    toolCallState.currentToolCallId = ''; // Reset the current tool call ID
+    toolCallState.currentToolName = ''; // Reset the current tool name
 
     // Parse tool results using the configurable parser with tool name.
     // If no parser is configured, use the content as is.
     const toolParser = parseToolResults?.[toolName];
     const results = toolParser ? toolParser(content) : content;
-
-    const toolCallId = toolCallState.currentToolCallId;
-    toolCallState.currentToolCallId = ''; // Reset the current tool call ID
 
     // Convert any result to a serializable value
     // If it's null, undefined, or an empty object, convert to empty string

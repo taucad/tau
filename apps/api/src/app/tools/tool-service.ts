@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { SearxngSearch } from '@langchain/community/tools/searxng_search';
 import type { DynamicStructuredTool, Tool } from '@langchain/core/tools.js';
 import { OpenAI, OpenAIEmbeddings } from '@langchain/openai';
 import { createWebBrowserTool } from './tools/tool-web-browser.js';
@@ -23,7 +22,7 @@ export type ToolChoice = (typeof toolChoice)[keyof typeof toolChoice];
 export type ToolChoiceWithCategory = ToolChoice | ToolCategory;
 
 export const toolChoiceFromToolName = {
-  [SearxngSearch.name]: toolCategory.webSearch,
+  'searxng-search': toolCategory.webSearch,
 } as const satisfies Record<string, ToolCategory>;
 
 @Injectable()

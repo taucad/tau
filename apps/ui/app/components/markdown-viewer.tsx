@@ -5,6 +5,7 @@ import rehypeKatex from 'rehype-katex';
 import katexUrl from 'katex/dist/katex.min.css?url';
 import type { LinkDescriptor } from '@remix-run/node';
 import { Play } from 'lucide-react';
+import type { JSX } from 'react';
 import { Button } from '@/components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import { CodeViewer } from '@/components/code-viewer.js';
@@ -19,7 +20,7 @@ export function MarkdownViewer({
 }: {
   readonly children: string;
   readonly onCodeApply?: (code: string) => void;
-}) {
+}): JSX.Element {
   return (
     <Markdown
       className={cn(

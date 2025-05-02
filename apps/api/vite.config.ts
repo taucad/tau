@@ -25,6 +25,7 @@ export default defineConfig({
       adapter: 'nest',
       // Tell the plugin where is your project entry
       appPath: './src/main.ts',
+      outputFormat: 'module',
       // Optional, default: 'viteNodeApp'
       // the name of named export of you app from the appPath file
       exportName: 'viteNodeApp',

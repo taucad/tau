@@ -1,10 +1,12 @@
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { defineConfig } from 'vite';
 import { VitePluginNode as vitePluginNode } from 'vite-plugin-node';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
-const __dirname = import.meta.dirname;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   root: __dirname,

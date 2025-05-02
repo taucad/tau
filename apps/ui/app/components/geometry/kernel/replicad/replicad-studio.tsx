@@ -1,5 +1,6 @@
 import { LoaderPinwheel, ImageDown, GalleryThumbnails, Clipboard } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { JSX } from 'react';
 import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
 import type { ReplicadViewerReference } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
 import { useReplicad } from '@/components/geometry/kernel/cad-context.js';
@@ -11,7 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { toast } from '@/components/ui/sonner.js';
 import { cn } from '@/utils/ui.js';
 
-export function ReplicadStudio() {
+export function ReplicadStudio(): JSX.Element {
   const { status, downloadStl, mesh } = useReplicad();
   const { updateThumbnail, build } = useBuild();
   const canvasReference = useRef<ReplicadViewerReference>(null);
@@ -55,7 +56,7 @@ export function ReplicadStudio() {
     });
 
     updateThumbnail(dataUrl);
-  }, [isScreenshotReady]);
+  }, [isScreenshotReady, updateThumbnail]);
 
   const handleUpdateThumbnail = async () => {
     updateThumbnailScreenshot();
@@ -74,7 +75,7 @@ export function ReplicadStudio() {
         clearTimeout(timeout);
       };
     }
-  }, [mesh, isScreenshotReady, status.isComputing]);
+  }, [mesh, isScreenshotReady, status.isComputing, updateThumbnailScreenshot]);
 
   const copyToClipboard = async () => {
     if (!canvasReference.current || !isScreenshotReady) {

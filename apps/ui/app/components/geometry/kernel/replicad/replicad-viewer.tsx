@@ -1,11 +1,11 @@
 import { LoaderPinwheel } from 'lucide-react';
-import type { RefObject } from 'react';
+import type { RefObject, JSX } from 'react';
 import { ReplicadMesh } from '@/components/geometry/kernel/replicad/replicad-mesh.js';
 import { ThreeProvider } from '@/components/geometry/graphics/three/three-context.js';
 import type { ThreeCanvasReference, CadViewerProperties } from '@/components/geometry/graphics/three/three-context.js';
 
 type ReplicadViewerProperties = CadViewerProperties & {
-  readonly mesh: any;
+  readonly mesh: unknown;
   readonly zoomLevel: number;
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
   readonly ref?: RefObject<ReplicadViewerReference | null>;
@@ -13,7 +13,7 @@ type ReplicadViewerProperties = CadViewerProperties & {
 
 export type ReplicadViewerReference = ThreeCanvasReference;
 
-export function ReplicadViewer({ mesh, zoomLevel, ...properties }: ReplicadViewerProperties) {
+export function ReplicadViewer({ mesh, zoomLevel, ...properties }: ReplicadViewerProperties): JSX.Element {
   return (
     <div className="size-full">
       {mesh ? (

@@ -32,7 +32,7 @@ const base64Loader: Plugin = {
 
 export default defineConfig({
   root: __dirname,
-  cacheDir: '../../node_modules/.vite/apps/ui-vite',
+  cacheDir: '../../node_modules/.vite/apps/ui',
   plugins: [
     base64Loader,
     remix({

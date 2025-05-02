@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
+import type { JSX } from 'react';
 import { useGLTF, useAnimations, useTexture } from '@react-three/drei';
-import type { Group } from 'three';
+import type { Group, MeshBasicMaterial } from 'three';
 import { Mesh, MeshMatcapMaterial, LoopRepeat } from 'three';
 import { useFrame } from '@react-three/fiber';
 import { useColor } from '@/hooks/use-color.js';
@@ -25,7 +26,7 @@ type CadLoaderProperties = {
   readonly action?: Action;
 };
 
-export function CadLoader({ action = 'Idle' }: CadLoaderProperties) {
+export function CadLoader({ action = 'Idle' }: CadLoaderProperties): JSX.Element {
   const group = useRef<Group>(null);
   const { scene, animations } = useGLTF('/robot.glb');
   const { actions, mixer } = useAnimations(animations, group);
@@ -50,7 +51,7 @@ export function CadLoader({ action = 'Idle' }: CadLoaderProperties) {
   useEffect(() => {
     scene.traverse((child) => {
       if (child instanceof Mesh) {
-        const originalMaterial = child.material;
+        const originalMaterial = child.material as MeshBasicMaterial;
 
         // Create new matcap material while preserving original material properties
         child.material = new MeshMatcapMaterial({
@@ -66,7 +67,7 @@ export function CadLoader({ action = 'Idle' }: CadLoaderProperties) {
     });
   }, [scene, matcapTexture, color.serialized.hex]);
 
-  useFrame((state, delta) => {
+  useFrame((_, delta) => {
     // Ensure the mixer updates on each frame
     mixer.update(delta);
   });
@@ -74,9 +75,12 @@ export function CadLoader({ action = 'Idle' }: CadLoaderProperties) {
   return (
     <group
       ref={group}
+      // eslint-disable-next-line react/no-unknown-property -- TODO: fix three.js types for linter
       position={[0, 0, 0]}
+      // eslint-disable-next-line react/no-unknown-property -- TODO: fix three.js types for linter
       rotation={[Math.PI / 2, 0, 0]} // Changed rotation to fix orientation
     >
+      {/* eslint-disable-next-line react/no-unknown-property -- TODO: fix three.js types for linter */}
       <primitive object={scene} />
     </group>
   );

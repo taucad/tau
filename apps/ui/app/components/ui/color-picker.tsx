@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import type { ComponentProps, RefObject } from 'react';
+import type { ComponentProps, JSX, RefObject } from 'react';
 import type { HslColor } from 'react-colorful';
 import { RotateCcw } from 'lucide-react';
 import { ThreeProvider } from '@/components/geometry/graphics/three/three-context.js';
-import { CadLoader } from '@/components/geometry/kernel/replicad/cad-loader.js';
+import { CadLoader } from '@/components/geometry/kernel/cad-loader.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import { Slider } from '@/components/ui/slider.js';
 import { KeyShortcut } from '@/components/ui/key-shortcut.js';
@@ -32,7 +32,7 @@ function ColorPicker({
   onReset,
   ref,
   ...properties
-}: Omit<React.ComponentProps<typeof Button>, 'value' | 'onChange' | 'onBlur'> & ColorPickerProperties) {
+}: Omit<React.ComponentProps<typeof Button>, 'value' | 'onChange' | 'onBlur'> & ColorPickerProperties): JSX.Element {
   const [open, setOpen] = useState(false);
 
   const handleChange = (value: HslColor) => {

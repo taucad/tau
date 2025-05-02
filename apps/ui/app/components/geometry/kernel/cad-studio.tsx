@@ -1,8 +1,8 @@
 import { LoaderPinwheel, ImageDown, GalleryThumbnails, Clipboard } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
-import type { ReplicadViewerReference } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
+import type { ThreeCanvasReference } from '@/components/geometry/graphics/three/three-context.js';
+import { CadViewer } from '@/components/geometry/kernel/cad-viewer.js';
 import { useCad } from '@/components/geometry/kernel/cad-context.js';
 import { DownloadButton } from '@/components/download-button.js';
 import { BoxDown } from '@/components/icons/box-down.js';
@@ -12,10 +12,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { toast } from '@/components/ui/sonner.js';
 import { cn } from '@/utils/ui.js';
 
-export function ReplicadStudio(): JSX.Element {
+export function CadStudio(): JSX.Element {
   const { status, downloadStl, mesh } = useCad();
   const { updateThumbnail, build } = useBuild();
-  const canvasReference = useRef<ReplicadViewerReference>(null);
+  const canvasReference = useRef<ThreeCanvasReference>(null);
   const [isScreenshotReady, setIsScreenshotReady] = useState(false);
 
   // Handle canvas ready state changes
@@ -126,7 +126,7 @@ export function ReplicadStudio(): JSX.Element {
     <>
       <div className="flex size-full flex-row">
         <div className="relative min-w-0 flex-1">
-          <ReplicadViewer
+          <CadViewer
             ref={canvasReference}
             enableGizmo
             enableGrid

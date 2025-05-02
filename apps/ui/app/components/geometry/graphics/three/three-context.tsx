@@ -21,7 +21,7 @@ import { useThreeCursor } from '@/hooks/use-three-cursor.js';
 
 const cameraAngleCookieName = 'camera-angle';
 
-export type CadViewerProperties = {
+export type ThreeViewerProperties = {
   readonly enableGizmo?: boolean;
   readonly enableGrid?: boolean;
   readonly enableAxesHelper?: boolean;
@@ -36,7 +36,7 @@ export type CadViewerProperties = {
   readonly zoomSpeed?: number;
 };
 
-export type ThreeContextProperties = CanvasProps & CadViewerProperties;
+export type ThreeContextProperties = CanvasProps & ThreeViewerProperties;
 
 // Updated ref type to include screenshot capability
 export type ThreeCanvasReference = HTMLCanvasElement & {

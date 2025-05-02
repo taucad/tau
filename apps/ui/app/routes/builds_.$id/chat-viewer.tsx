@@ -1,6 +1,6 @@
 import { memo } from 'react';
-import { ReplicadStudio } from '@/components/geometry/kernel/replicad/replicad-studio.js';
+import { CadStudio } from '@/components/geometry/kernel/cad-studio.js';
 
 export const ChatViewer = memo(function () {
-  return <ReplicadStudio />;
+  return <CadStudio />;
 });

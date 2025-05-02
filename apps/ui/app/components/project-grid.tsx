@@ -12,7 +12,7 @@ import type { Build } from '@/types/build.js';
 import type { CadKernelProvider, Category } from '@/types/cad.js';
 import { categories } from '@/types/cad.js';
 import { CadProvider, useCad } from '@/components/geometry/kernel/cad-context.js';
-import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
+import { CadViewer } from '@/components/geometry/kernel/cad-viewer.js';
 import { storage } from '@/db/storage.js';
 
 // Placeholder for language icons
@@ -126,7 +126,7 @@ function ProjectCard({
         )}
         {replicadCode && showPreview ? (
           <div className="absolute inset-0">
-            <ReplicadViewer mesh={mesh} className="bg-muted" zoomLevel={1.3} />
+            <CadViewer mesh={mesh} className="bg-muted" zoomLevel={1.3} />
           </div>
         ) : null}
         {replicadCode ? (

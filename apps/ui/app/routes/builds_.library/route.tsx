@@ -33,7 +33,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.j
 import type { Category } from '@/types/cad.js';
 import { categories } from '@/types/cad.js';
 import type { Build } from '@/types/build.js';
-import { CadProvider, useReplicad } from '@/components/geometry/kernel/cad-context.js';
+import { CadProvider, useCad } from '@/components/geometry/kernel/cad-context.js';
 import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
 import { useBuilds } from '@/hooks/use-builds.js';
 import { toast } from '@/components/ui/sonner.js';
@@ -271,7 +271,7 @@ function CategoryBadge({ category }: { readonly category: Category }) {
 // }
 
 function BuildLibraryCard({ project, viewMode }: { readonly project: Build; readonly viewMode: 'grid' | 'list' }) {
-  const { setCode, setParameters, mesh } = useReplicad();
+  const { setCode, setParameters, mesh } = useCad();
   const { deleteBuild, duplicateBuild } = useBuilds();
   const code = project.assets.mechanical?.files[project.assets.mechanical?.main]?.content;
   const parameters = project.assets.mechanical?.parameters;

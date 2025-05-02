@@ -23,7 +23,7 @@ type CadState = {
   };
 };
 
-type ReplicadAction =
+type CadAction =
   | { type: 'SET_CODE'; payload: string }
   | { type: 'SET_PARAMETERS'; payload: Record<string, unknown> }
   | { type: 'SET_DEFAULT_PARAMETERS'; payload: Record<string, unknown> }
@@ -39,8 +39,8 @@ const initialState: CadState = {
   mesh: undefined,
 };
 
-function useReplicadWorker() {
-  const { log } = useConsole({ defaultOrigin: { component: 'Replicad' } });
+function useCadWorker() {
+  const { log } = useConsole({ defaultOrigin: { component: 'Cad' } });
   const wrappedWorkerReference = useRef<Remote<BuilderWorkerInterface> | undefined>(undefined);
   const workerReference = useRef<Worker | undefined>(undefined);
   const workerInitializationId = useRef<number>(0);
@@ -123,7 +123,7 @@ function useReplicadWorker() {
   return { initWorker, terminateWorker };
 }
 
-function cadReducer(state: CadState, action: ReplicadAction): CadState {
+function cadReducer(state: CadState, action: CadAction): CadState {
   switch (action.type) {
     case 'SET_CODE': {
       return { ...state, code: action.payload };
@@ -147,21 +147,20 @@ function cadReducer(state: CadState, action: ReplicadAction): CadState {
   }
 }
 
-const CadContext = createContext<
-  | {
-      mesh: { edges: unknown; faces: unknown; color?: string } | undefined;
-      status: {
-        isComputing: boolean;
-        isBuffering: boolean;
-        error?: string;
-      };
-      downloadStl: () => Promise<Blob>;
-      setCode: (code: string) => void;
-      setParameters: (parameters: Record<string, unknown>) => void;
-      defaultParameters: Record<string, unknown>;
-    }
-  | undefined
->(undefined);
+type CadContextProperties = {
+  mesh: { edges: unknown; faces: unknown; color?: string } | undefined;
+  status: {
+    isComputing: boolean;
+    isBuffering: boolean;
+    error?: string;
+  };
+  downloadStl: () => Promise<Blob>;
+  setCode: (code: string) => void;
+  setParameters: (parameters: Record<string, unknown>) => void;
+  defaultParameters: Record<string, unknown>;
+};
+
+const CadContext = createContext<CadContextProperties | undefined>(undefined);
 
 /**
  * Provider component for CAD functionality
@@ -179,7 +178,7 @@ export function CadProvider({
   readonly evaluateDebounceTime?: number;
 }): JSX.Element {
   const [state, dispatch] = useReducer(cadReducer, initialState);
-  const { initWorker, terminateWorker } = useReplicadWorker();
+  const { initWorker, terminateWorker } = useCadWorker();
   const { log } = useConsole({ defaultOrigin: { component: 'CAD' } });
   const workerInitializationPromise = useRef<Promise<Remote<BuilderWorkerInterface> | undefined> | undefined>(
     undefined,
@@ -313,7 +312,7 @@ export function CadProvider({
   // Cleanup worker on unmount
   useEffect(() => {
     return () => {
-      log.debug('Unmounting ReplicadProvider, terminating worker');
+      log.debug('Unmounting CadProvider, terminating worker');
       workerInitializationPromise.current = undefined;
       terminateWorker();
     };
@@ -347,10 +346,10 @@ export function CadProvider({
   return <CadContext.Provider value={value}>{children}</CadContext.Provider>;
 }
 
-export function useReplicad() {
+export function useCad(): CadContextProperties {
   const context = useContext(CadContext);
   if (!context) {
-    throw new Error('useReplicad must be used within a ReplicadProvider');
+    throw new Error('useCad must be used within a CadProvider');
   }
 
   return context;

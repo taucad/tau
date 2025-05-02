@@ -11,7 +11,7 @@ import { SvgIcon } from '@/components/icons/svg-icon.js';
 import type { Build } from '@/types/build.js';
 import type { CadKernelProvider, Category } from '@/types/cad.js';
 import { categories } from '@/types/cad.js';
-import { CadProvider, useReplicad } from '@/components/geometry/kernel/cad-context.js';
+import { CadProvider, useCad } from '@/components/geometry/kernel/cad-context.js';
 import { ReplicadViewer } from '@/components/geometry/kernel/replicad/replicad-viewer.js';
 import { storage } from '@/db/storage.js';
 
@@ -67,7 +67,7 @@ function ProjectCard({
 }: CommunityBuildCardProperties) {
   const [showPreview, setShowPreview] = useState(true);
   const cardReference = useRef<HTMLDivElement>(null);
-  const { setCode, mesh } = useReplicad();
+  const { setCode, mesh } = useCad();
   const navigate = useNavigate();
   const LanguageIcon = Object.values(assets)
     .map((asset) => asset.language)

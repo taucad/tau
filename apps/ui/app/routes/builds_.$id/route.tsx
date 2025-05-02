@@ -4,7 +4,7 @@ import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
 import { ChatInterface } from '@/routes/builds_.$id/chat-interface.js';
-import { CadProvider, useReplicad } from '@/components/geometry/kernel/cad-context.js';
+import { CadProvider, useCad } from '@/components/geometry/kernel/cad-context.js';
 import { BuildProvider, useBuild } from '@/hooks/use-build2.js';
 import { Button } from '@/components/ui/button.js';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.js';
@@ -113,7 +113,7 @@ export const handle: Handle = {
 function Chat() {
   const { id } = useParams();
   const { build, isLoading, setMessages: setBuildMessages } = useBuild();
-  const { setCode, setParameters } = useReplicad();
+  const { setCode, setParameters } = useCad();
   const { setMessages, messages, reload, status, addToolResult } = useAiChat({
     onToolCall: new Map([
       [

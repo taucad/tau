@@ -1,7 +1,6 @@
 {
   "name": "root",
   "private": true,
-  "type": "module",
   "scripts": {
     "start": "nx run-many -t dev",
     "lint": "nx run-many -t lint",

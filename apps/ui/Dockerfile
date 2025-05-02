@@ -32,7 +32,7 @@ RUN pnpm install --frozen-lockfile --prod=false
 COPY . .
 
 # Build application
-RUN pnpm nx build ui
+RUN pnpm nx build ui --verbose
 
 # Remove development dependencies
 RUN pnpm prune --prod

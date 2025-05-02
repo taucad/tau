@@ -1,5 +1,5 @@
 import { Edit } from 'lucide-react';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { ChatMessageReasoning } from './chat-message-reasoning.js';
@@ -24,7 +24,7 @@ type ChatMessageProperties = {
   readonly models: Model[];
 };
 
-export function ChatMessage({ message, onEdit, models }: ChatMessageProperties): JSX.Element {
+export const ChatMessage = memo(function ({ message, onEdit, models }: ChatMessageProperties): JSX.Element {
   const isUser = message.role === MessageRole.User;
   const [isEditing, setIsEditing] = useState(false);
 
@@ -173,4 +173,4 @@ export function ChatMessage({ message, onEdit, models }: ChatMessageProperties):
       </div>
     </article>
   );
-}
+});

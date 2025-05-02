@@ -40,6 +40,7 @@ export default defineConfig({
         // eslint-disable-next-line @typescript-eslint/naming-convention -- this is the correct name
         v3_relativeSplatPath: true,
       },
+      buildDirectory: '../../dist/apps/ui',
     }),
     nxViteTsPaths(),
     tsconfigPaths(),

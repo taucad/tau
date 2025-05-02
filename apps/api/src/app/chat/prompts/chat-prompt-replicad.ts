@@ -1,5 +1,4 @@
-// @ts-expect-error - we are intentionally importing the types from the replicad package
-import replicadTypes from '../../../../../../node_modules/replicad/dist/replicad.d.ts';
+import replicadTypes from '../../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
 
 export const replicadSystemPrompt = `
 # Replicad API Guide for 3D Modeling in Browser

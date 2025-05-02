@@ -47,4 +47,4 @@ COPY --from=build /app /app
 # Start the server by default, this can be overwritten at runtime
 EXPOSE 3000
 CMD ["ls", "-la"]
-CMD [ "node", "/app/dist/apps/api/main.js" ] 
+CMD [ "node", "/app/dist/apps/api/main.cjs" ] 

@@ -1,17 +1,24 @@
 {
-  "jsc": {
-    "parser": {
-      "syntax": "typescript",
-      "tsx": false,
-      "decorators": true
-    },
-    "transform": {
-      "decoratorMetadata": true,
-      "react": null
-    },
-    "experimental": {}
-  },
+  "sourceMaps": true,
   "module": {
-    "type": "commonjs"
+      "type": "es6",
+      "strict": true,
+      "strictMode": true,
+      "noInterop": false
+  },
+  "jsc": {
+      "externalHelpers": true,
+      "target": "es2019",
+      "parser": {
+          "syntax": "typescript",
+          "tsx": true,
+          "decorators": true,
+          "dynamicImport": true
+      },
+      "transform": {
+          "legacyDecorator": true,
+          "decoratorMetadata": true
+      },
+      "keepClassNames": true
   }
 }

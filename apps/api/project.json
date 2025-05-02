@@ -8,50 +8,17 @@
     "setup-env": {
       "command": "if [ ! -f \"./apps/api/.env\" ]; then cp ./apps/api/.env.example ./apps/api/.env; fi"
     },
-    "build-swc": {
-      "executor": "@nx/js:swc",
-      "defaultConfiguration": "development",
-      "options": {
-        "tsConfig": "apps/api/tsconfig.app.json",
-        "outputPath": "dist/apps/api",
-        "main": "src/main.ts"
-      },
-      "configurations": {
-        "development": {
-          "optimization": false,
-          "sourceMap": true,
-          "extractLicenses": false,
-          "vendorChunk": true
-        },
-        "production": {
-          "optimization": true,
-          "sourceMap": false,
-          "extractLicenses": true,
-          "vendorChunk": false
-        }
-      }
-    },
-    "dev": {
-      "executor": "@nx/js:node",
-      "defaultConfiguration": "development",
-      "dependsOn": ["build", "setup-env"],
-      "options": {
-        "buildTarget": "api:build",
-        "runBuildTargetDependencies": false
-      },
-      "configurations": {
-        "development": {
-          "buildTarget": "api:build:development"
-        },
-        "production": {
-          "buildTarget": "api:build:production"
-        }
-      }
-    },
     "deploy": {
       "executor": "nx:run-commands",
       "options": {
         "command": "fly deploy --config ./apps/api/fly.toml --dockerfile ./apps/api/Dockerfile"
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node ./apps/api/dist/main.cjs"
       }
     },
     "launch": {

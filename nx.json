@@ -25,11 +25,15 @@
       }
     },
     {
-      "plugin": "@nx/webpack/plugin",
+      "plugin": "@nx/vite/plugin",
       "options": {
         "buildTargetName": "build",
+        "previewTargetName": "preview",
+        "testTargetName": "test",
+        "devTargetName": "dev",
         "serveTargetName": "serve",
-        "previewTargetName": "preview"
+        "serveStaticTargetName": "serve-static",
+        "outputPath": "dist"
       }
     },
     {

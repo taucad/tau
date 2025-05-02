@@ -9,13 +9,12 @@ LABEL fly_launch_runtime="Remix"
 # Remix app lives here
 WORKDIR /app
 
-# Configure PNPM
-RUN corepack enable
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-
 # Set production environment
 ENV NODE_ENV="production"
+
+# Install pnpm
+ARG PNPM_VERSION=10.8.1
+RUN npm install -g pnpm@$PNPM_VERSION
 
 # Throw-away build stage to reduce size of final image
 FROM base AS build

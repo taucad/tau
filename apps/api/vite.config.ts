@@ -11,6 +11,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   root: __dirname,
   cacheDir: '../../node_modules/.vite/apps/api',
+  build: {
+    outDir: '../../dist/apps/api',
+  },
   server: {
     // Vite server configs, for details see \[vite doc\](https://vitejs.dev/config/#server-host)
     port: process.env.PORT,

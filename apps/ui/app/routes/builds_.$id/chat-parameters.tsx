@@ -1,6 +1,5 @@
 import { RefreshCcw, RefreshCcwDot } from 'lucide-react';
-import { useCallback, useMemo } from 'react';
-import type { JSX } from 'react';
+import { useCallback, useMemo, memo } from 'react';
 import { pascalCaseToWords } from '@/utils/string.js';
 import { Slider } from '@/components/ui/slider.js';
 import { Switch } from '@/components/ui/switch.js';
@@ -23,7 +22,7 @@ const validateParameters = (parameters: Record<string, unknown>, defaultParamete
   return Object.fromEntries(Object.entries(parameters).filter(([key]) => allowedParameters.includes(key)));
 };
 
-export function ChatParameters(): JSX.Element {
+export const ChatParameters = memo(function () {
   const { setParameters, parameters } = useBuild();
   const { defaultParameters } = useReplicad();
 
@@ -158,4 +157,4 @@ export function ChatParameters(): JSX.Element {
         : null}
     </>
   );
-}
+});

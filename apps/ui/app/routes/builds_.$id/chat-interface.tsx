@@ -1,5 +1,5 @@
 import { MessageCircle, Settings2, LayoutGrid, Rows } from 'lucide-react';
-import { useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import type { JSX } from 'react';
 import { ChatHistory } from './chat-history.js';
 import { ChatViewTabs } from './chat-view-tabs.js';
@@ -37,7 +37,7 @@ const toggleViewModeKeyCombination = {
   ctrlKey: true,
 } satisfies KeyCombination;
 
-export function ChatInterface(): JSX.Element {
+export const ChatInterface = memo(function () {
   const [isChatOpen, setIsChatOpen] = useCookie(chatHistoryOpenCookieName, true);
   const [isParametersOpen, setIsParametersOpen] = useCookie(chatParametersOpenCookieName, true);
   const [chatResizeMain, setChatResizeMain] = useCookie(chatResizeMainCookieName, [25, 60, 15]);
@@ -222,4 +222,4 @@ export function ChatInterface(): JSX.Element {
       ) : null}
     </ResizablePanelGroup>
   );
-}
+});

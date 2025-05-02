@@ -1,5 +1,5 @@
 import { ChevronUp, Filter, Settings, Trash } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, memo } from 'react';
 import { collapsedConsoleSize } from './chat-view-split.js';
 import { Button } from '@/components/ui/button.js';
 import { Input } from '@/components/ui/input.js';
@@ -137,7 +137,7 @@ const formatTimestamp = (timestamp: number): string => {
   });
 };
 
-export function ChatConsole({
+export const ChatConsole = memo(function ({
   onButtonClick,
   keyCombination,
   onFilterChange,
@@ -396,4 +396,4 @@ export function ChatConsole({
       </div>
     </div>
   );
-}
+});

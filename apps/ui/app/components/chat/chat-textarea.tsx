@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import type { JSX } from 'react';
 import { Globe, ArrowUp, ChevronDown, CircuitBoard, Image, X, Square } from 'lucide-react';
 import type { Attachment } from 'ai';
@@ -50,7 +50,7 @@ const cancelKeyCombination = {
   metaKey: true,
 } satisfies KeyCombination;
 
-export function ChatTextarea({
+export const ChatTextarea = memo(function ({
   onSubmit,
   models,
   shouldAutoFocus: autoFocus = true,
@@ -499,4 +499,4 @@ export function ChatTextarea({
       </div>
     </div>
   );
-}
+});

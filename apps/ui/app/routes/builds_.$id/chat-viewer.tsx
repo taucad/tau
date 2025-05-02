@@ -1,6 +1,6 @@
-import type { JSX } from 'react';
+import { memo } from 'react';
 import { ReplicadStudio } from '@/components/geometry/kernel/replicad/replicad-studio.js';
 
-export function ChatViewer(): JSX.Element {
+export const ChatViewer = memo(function () {
   return <ReplicadStudio />;
-}
+});

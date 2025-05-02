@@ -1,5 +1,5 @@
 import { LoaderPinwheel } from 'lucide-react';
-import { useCallback, useEffect } from 'react';
+import { memo, useCallback, useEffect } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
 // eslint-disable-next-line import-x/no-unassigned-import -- setting up the Monaco editor web workers
@@ -9,7 +9,7 @@ import { CodeEditor } from '@/components/code-editor.js';
 import { useConsole } from '@/hooks/use-console.js';
 import { cn } from '@/utils/ui.js';
 
-export function ChatEditor({ className }: { readonly className?: string }) {
+export const ChatEditor = memo(function ({ className }: { readonly className?: string }) {
   const { setCode, code, isLoading } = useBuild();
   const { log } = useConsole({ defaultOrigin: { component: 'Editor' } });
 
@@ -90,4 +90,4 @@ export function ChatEditor({ className }: { readonly className?: string }) {
       />
     </>
   );
-}
+});

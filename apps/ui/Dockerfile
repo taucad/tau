@@ -16,6 +16,7 @@ ENV NODE_ENV="production"
 ARG PNPM_VERSION=10.8.1
 RUN npm install -g pnpm@$PNPM_VERSION
 
+
 # Throw-away build stage to reduce size of final image
 FROM base AS build
 
@@ -31,7 +32,7 @@ RUN pnpm install --frozen-lockfile --prod=false
 COPY . .
 
 # Build application
-RUN pnpm nx build ui --verbose
+RUN pnpm nx build ui
 
 # Remove development dependencies
 RUN pnpm prune --prod
@@ -45,4 +46,4 @@ COPY --from=build /app /app
 
 # Start the server by default, this can be overwritten at runtime
 EXPOSE 3000
-CMD [ "pnpm", "nx", "start", "ui", "--excludeTaskDependencies", "--verbose" ]
+CMD [ "pnpm", "nx", "start", "ui", "--excludeTaskDependencies" ]

@@ -72,7 +72,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // Wrap your app with ThemeProvider.
 // `specifiedTheme` is the stored theme in the session storage.
 // `themeAction` is the action name that's used to change the theme in the session storage.
-export default function AppWithProviders({ error }: { readonly error?: ReactNode }): JSX.Element {
+function AppWithProviders({ error }: { readonly error?: ReactNode }): JSX.Element {
   const data = useLoaderData<typeof loader>();
   const queryClient = useMemo(
     () =>
@@ -97,6 +97,8 @@ export default function AppWithProviders({ error }: { readonly error?: ReactNode
     </QueryClientProvider>
   );
 }
+
+export default AppWithProviders;
 
 export function App({
   error,

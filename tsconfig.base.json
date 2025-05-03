@@ -23,6 +23,9 @@
     "allowSyntheticDefaultImports": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noImplicitOverride": true,
+    "noEmitOnError": true,
   },
   "exclude": ["node_modules", "tmp"]
 }

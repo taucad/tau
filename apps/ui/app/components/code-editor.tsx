@@ -1,18 +1,20 @@
+import { Editor } from '@monaco-editor/react';
+import type { EditorProps } from '@monaco-editor/react';
+import { Theme, useTheme } from 'remix-themes';
+import type { JSX } from 'react';
 import { cn } from '@/utils/ui.js';
-import { Editor, type EditorProps } from '@monaco-editor/react';
-import { useTheme } from 'remix-themes';
 
 type CodeEditorProperties = EditorProps & {
-  onChange: (value: string) => void;
+  readonly onChange: (value: string) => void;
 };
 
-// const displayLanguageFromOriginalLanguage = {
+// Const displayLanguageFromOriginalLanguage = {
 //   kcl: 'typescript',
 // };
 
 // type MappedLanguage = keyof typeof displayLanguageFromOriginalLanguage;
 
-export function CodeEditor({ className, ...rest }: CodeEditorProperties) {
+export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.Element {
   const [theme] = useTheme();
 
   return (
@@ -39,7 +41,7 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties) {
         // Ensure scrollbars don't overlap content
         '[&_.monaco-scrollable-element]:overflow-hidden',
       )}
-      theme={theme === 'dark' ? 'vs-dark' : 'vs'}
+      theme={theme === Theme.DARK ? 'vs-dark' : 'vs'}
       defaultLanguage="typescript"
       options={{
         minimap: { enabled: false },
@@ -49,7 +51,7 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties) {
         scrollBeyondLastLine: false,
         // Ensure widgets like intellisense can appear above nearby elements
         fixedOverflowWidgets: true,
-        // help Monaco resize properly in flex containers
+        // Help Monaco resize properly in flex containers
         automaticLayout: true,
         // Custom scrollbar styling to match global scrollbar styles
         scrollbar: {

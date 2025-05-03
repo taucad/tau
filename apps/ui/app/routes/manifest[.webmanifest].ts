@@ -1,12 +1,12 @@
+/* eslint-disable @typescript-eslint/naming-convention -- snake_case is expected for webmanifest */
 import type { WebAppManifest } from '@remix-pwa/dev';
-import type { LinkDescriptor } from '@remix-run/node';
-import { json } from '@remix-run/node';
-import { metaConfig } from '@/config';
+import type { LinkDescriptor, LoaderFunction } from '@remix-run/node';
+import { metaConfig } from '@/config.js';
 
 export const webManifestLinks: LinkDescriptor[] = [{ rel: 'manifest', href: '/manifest.webmanifest' }];
 
-export const loader = () => {
-  return json(
+export const loader: LoaderFunction = () => {
+  return Response.json(
     {
       short_name: metaConfig.name,
       name: metaConfig.name,

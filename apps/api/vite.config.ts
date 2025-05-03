@@ -16,7 +16,7 @@ export default defineConfig({
   },
   server: {
     // Vite server configs, for details see \[vite doc\](https://vitejs.dev/config/#server-host)
-    port: process.env.PORT,
+    port: Number(process.env.PORT),
   },
   plugins: [
     nxViteTsPaths(),

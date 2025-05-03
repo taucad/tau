@@ -1,6 +1,7 @@
 import { History, MoreHorizontal } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { NavLink, useMatch, useNavigate } from '@remix-run/react';
+import type { ReactNode } from 'react';
+import { NavLink, useMatch, useNavigate } from 'react-router';
 import type { Build } from '@/types/build.js';
 import {
   SidebarGroup,
@@ -16,7 +17,7 @@ import { useBuilds } from '@/hooks/use-builds.js';
 const buildsPerPage = 5;
 const maxShortcutLength = 9;
 
-export function NavHistory() {
+export function NavHistory(): ReactNode {
   const [visibleCount, setVisibleCount] = useState(buildsPerPage);
   const { builds } = useBuilds();
 
@@ -30,7 +31,7 @@ export function NavHistory() {
   };
 
   if (visibleBuilds.length === 0) {
-    return;
+    return null;
   }
 
   return (
@@ -63,7 +64,7 @@ function NavHistoryItem({ build, index }: { readonly build: Build; readonly inde
     },
     () => {
       if (isMatch) return;
-      navigate(`/builds/${build.id}`);
+      void navigate(`/builds/${build.id}`);
     },
   );
   return (

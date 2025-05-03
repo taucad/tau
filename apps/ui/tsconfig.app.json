@@ -4,8 +4,13 @@
     "app/**/*.ts",
     "app/**/*.tsx",
     "app/**/*.js",
-    "app/**/*.jsx"
-, "vite-environment.d.ts"  ],
+    "app/**/*.jsx",
+    "vite-environment.d.ts",
+    ".react-router/types/**/*"
+  ],
+  "compilerOptions": {
+    "rootDirs": [".", "./.react-router/types"]
+  },
   "exclude": [
     "tests/**/*.spec.ts",
     "tests/**/*.test.ts",

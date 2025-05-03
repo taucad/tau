@@ -1,10 +1,11 @@
 import { Plus } from 'lucide-react';
-import { NavLink, useMatch, useNavigate } from '@remix-run/react';
+import { NavLink, useMatch, useNavigate } from 'react-router';
+import type { JSX } from 'react';
 import { SidebarGroup, SidebarMenuButton } from '@/components/ui/sidebar.js';
 import { KeyShortcut } from '@/components/ui/key-shortcut.js';
 import { useKeydown } from '@/hooks/use-keydown.js';
 
-export function NavChat() {
+export function NavChat(): JSX.Element {
   const navigate = useNavigate();
   const isMatch = useMatch('/');
   const { formattedKeyCombination } = useKeydown(
@@ -14,7 +15,7 @@ export function NavChat() {
     },
     () => {
       if (!isMatch) {
-        navigate('/');
+        void navigate('/');
       }
     },
   );

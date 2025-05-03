@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { JSX } from 'react';
-import { Link } from '@remix-run/react';
+import { Link } from 'react-router';
 import { Search, Code2, SlidersHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button.js';
 import { Input } from '@/components/ui/input.js';

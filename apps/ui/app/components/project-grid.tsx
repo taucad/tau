@@ -1,7 +1,7 @@
 import type { ComponentType, JSX } from 'react';
 import { Star, GitFork, Eye } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from '@remix-run/react';
+import { useNavigate } from 'react-router';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import { Button } from '@/components/ui/button.js';
 import { Badge } from '@/components/ui/badge.js';
@@ -110,7 +110,7 @@ function ProjectCard({
 
     const createdBuild = await storage.createBuild(newBuild);
     // Navigate to the new build
-    navigate(`/builds/${createdBuild.id}`);
+    void navigate(`/builds/${createdBuild.id}`);
   };
 
   return (

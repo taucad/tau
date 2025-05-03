@@ -1,4 +1,4 @@
-import { Link, useNavigate } from '@remix-run/react';
+import { Link, useNavigate } from 'react-router';
 import type { JSX } from 'react';
 import { useModels } from '@/hooks/use-models.js';
 import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
@@ -53,7 +53,7 @@ export default function ChatStart(): JSX.Element {
       });
 
       // Navigate immediately - the build page will handle the streaming
-      navigate(`/builds/${build.id}`);
+      await navigate(`/builds/${build.id}`);
     } catch (error) {
       console.error('Failed to create build:', error);
       // TODO: Show error toast

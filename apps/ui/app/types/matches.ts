@@ -1,5 +1,5 @@
-import type { UIMatch } from '@remix-run/react';
-import { useMatches } from '@remix-run/react';
+import type { UIMatch } from 'react-router';
+import { useMatches } from 'react-router';
 import type { ReactNode } from 'react';
 
 export type Handle = {

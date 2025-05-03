@@ -1,6 +1,7 @@
 import { ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { NavLink, useMatch, useNavigate } from '@remix-run/react';
+import { NavLink, useMatch, useNavigate } from 'react-router';
+import type { JSX } from 'react';
 import { KeyShortcut } from '@/components/ui/key-shortcut.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible.js';
 import {
@@ -31,7 +32,7 @@ export function NavMain({
     }>;
     keyCombination?: KeyCombination;
   }>;
-}) {
+}): JSX.Element {
   return (
     <SidebarGroup>
       <SidebarGroupLabel>Platform</SidebarGroupLabel>
@@ -117,7 +118,7 @@ function NavKeyboardShortcut({
   const navigate = useNavigate();
   const { formattedKeyCombination } = useKeydown(keyCombination, () => {
     if (isMatch) return;
-    navigate(url);
+    void navigate(url);
   });
   return <KeyShortcut className={className}>{formattedKeyCombination}</KeyShortcut>;
 }

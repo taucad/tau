@@ -1,10 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { vitePlugin as remix } from '@remix-run/dev';
+import { reactRouter } from '@react-router/dev/vite';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import tsconfigPaths from 'vite-tsconfig-paths';
-import { remixPWA } from '@remix-pwa/dev';
 import tailwindcss from '@tailwindcss/vite';
 // Import viteSvgSpriteWrapper from 'vite-svg-sprite-wrapper';
 import { defineConfig } from 'vite';
@@ -30,36 +29,17 @@ const base64Loader: Plugin = {
   },
 };
 
-declare module '@remix-run/node' {
-  // Or cloudflare, deno, etc.
-  // eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- required for module augmentation
-  interface Future {
-    v3_singleFetch: true;
-  }
-}
-
 export default defineConfig({
   root: __dirname,
   cacheDir: '../../node_modules/.vite/apps/ui',
   plugins: [
     base64Loader,
-    remix({
-      future: {
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- this is the correct name
-        unstable_optimizeDeps: true,
-        v3_relativeSplatPath: true,
-        v3_fetcherPersist: true,
-        v3_throwAbortReason: true,
-        v3_lazyRouteDiscovery: true,
-        v3_singleFetch: true,
-        v3_routeConfig: true,
-      },
-      buildDirectory: '../../dist/apps/ui',
-    }),
+    reactRouter(),
     nxViteTsPaths(),
     tsconfigPaths(),
-    remixPWA(),
+    // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
     tailwindcss(),
+    // TODO: add back after fixing the recrusive reload issue.
     // ViteSvgSpriteWrapper({
     //   icons: path.resolve(__dirname, './app/components/icons/raw/**/*.svg'),
     //   outputDir: path.resolve(__dirname, './app/components/icons/generated'),
@@ -83,7 +63,7 @@ export default defineConfig({
   },
 
   test: {
-    setupFiles: ['test-setup.ts'],
+    setupFiles: [],
     watch: false,
     globals: true,
     environment: 'jsdom',

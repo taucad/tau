@@ -1,4 +1,4 @@
-import { useRouteLoaderData } from '@remix-run/react';
+import { useRouteLoaderData } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { ENV } from '@/config.js';
 import type { loader } from '@/root.js';
@@ -33,6 +33,7 @@ export const getModels = async (): Promise<Model[]> => {
   }
 };
 
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- intentionally allowing inference
 export const useModels = () => {
   const loaderData = useRouteLoaderData<typeof loader>('root');
   const [selectedModel, setSelectedModel] = useCookie('chat-model', defaultChatModel);

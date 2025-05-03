@@ -3,7 +3,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import katexUrl from 'katex/dist/katex.min.css?url';
-import type { LinkDescriptor } from '@remix-run/node';
+import type { LinkDescriptor } from 'react-router';
 import type { JSX } from 'react';
 import { CodeViewer } from '@/components/code-viewer.js';
 import { CopyButton } from '@/components/copy-button.js';

@@ -16,7 +16,7 @@ import {
   Ellipsis,
   Copy,
 } from 'lucide-react';
-import { Link, useNavigate } from '@remix-run/react';
+import { Link, useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button.js';
 import { Input } from '@/components/ui/input.js';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar.js';
@@ -304,7 +304,7 @@ function BuildLibraryCard({ project, viewMode }: { readonly project: Build; read
         action: {
           label: 'Open',
           onClick() {
-            navigate(`/builds/${project.id}`);
+            void navigate(`/builds/${project.id}`);
           },
         },
       });

@@ -1,9 +1,12 @@
 import * as React from 'react';
 import { BookOpen, Bot, Frame, Hammer, Map, PieChart, UsersRound, Workflow } from 'lucide-react';
-
-import { NavMain } from '@/components/nav/nav-main';
-import { NavProjects } from '@/components/nav/nav-projects';
-import { NavUser } from '@/components/nav/nav-user';
+import { Link } from 'react-router';
+import { ColorToggle } from './nav/color-toggle.js';
+import { NavHistory } from './nav/nav-history.js';
+import { headerHeight } from './page.js';
+import { NavMain } from '@/components/nav/nav-main.js';
+import { NavProjects } from '@/components/nav/nav-projects.js';
+import { NavUser } from '@/components/nav/nav-user.js';
 import {
   Sidebar,
   SidebarContent,
@@ -11,14 +14,10 @@ import {
   SidebarHeader,
   SidebarMenuButton,
   SidebarRail,
-} from '@/components/ui/sidebar';
-import { Tau } from '@/components/icons/tau';
-import { NavChat } from '@/components/nav/nav-chat';
-import { ModeToggle } from '@/components/nav/mode-toggle';
-import { ColorToggle } from './nav/color-toggle';
-import { NavHistory } from './nav/nav-history';
-import { Link } from '@remix-run/react';
-import { headerHeight } from './page';
+} from '@/components/ui/sidebar.js';
+import { Tau } from '@/components/icons/tau.js';
+import { NavChat } from '@/components/nav/nav-chat.js';
+import { ModeToggle } from '@/components/nav/mode-toggle.js';
 
 // This is sample data.
 const data = {
@@ -37,7 +36,7 @@ const data = {
         key: 'b',
         ctrlKey: true,
       },
-      // items: [
+      // Items: [
       //   {
       //     title: 'History',
       //     url: '/builds/history',
@@ -108,7 +107,7 @@ const data = {
   ],
 };
 
-export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>) {
+export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>): React.JSX.Element {
   return (
     <Sidebar collapsible="icon" {...properties}>
       <SidebarHeader style={{ height: headerHeight }} className="border-b border-border">

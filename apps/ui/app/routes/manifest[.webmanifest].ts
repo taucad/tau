@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- snake_case is expected for webmanifest */
 import type { WebAppManifest } from '@remix-pwa/dev';
-import type { LinkDescriptor, LoaderFunction } from '@remix-run/node';
+import type { LinkDescriptor, LoaderFunction } from 'react-router';
 import { metaConfig } from '@/config.js';
 
 export const webManifestLinks: LinkDescriptor[] = [{ rel: 'manifest', href: '/manifest.webmanifest' }];

@@ -1,6 +1,7 @@
-import { Link, Outlet, redirect, useLocation, useNavigate } from '@remix-run/react';
+import { Link, Outlet, redirect, useLocation, useNavigate } from 'react-router';
 import { useEffect } from 'react';
-import type { LoaderFunctionArgs } from '@remix-run/node';
+import type { LoaderFunction } from 'react-router';
+import type { JSX } from 'react';
 import { Button } from '@/components/ui/button.js';
 import type { Handle } from '@/types/matches.js';
 
@@ -16,7 +17,7 @@ export const handle: Handle = {
   },
 };
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
+export const loader: LoaderFunction = async ({ request }) => {
   const url = new URL(request.url);
   if (url.pathname === '/builds') {
     return redirect('/');
@@ -26,13 +27,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 // We want to redirect to the new build page if the user navigates to the builds route
-export default function Builds() {
+export default function Builds(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
     if (location.pathname === '/builds') {
-      navigate('/');
+      void navigate('/');
     }
   }, [navigate, location.pathname]);
 

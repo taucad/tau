@@ -1,8 +1,9 @@
-import { useParams } from '@remix-run/react';
+import { useParams } from 'react-router';
 import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
+import type { Route } from './+types/route.js';
 import { ChatInterface } from '@/routes/builds_.$id/chat-interface.js';
 import { CadProvider, useCad } from '@/components/geometry/kernel/cad-context.js';
 import { BuildProvider, useBuild } from '@/hooks/use-build2.js';
@@ -96,7 +97,7 @@ function BuildNameEditor() {
 
 export const handle: Handle = {
   breadcrumb(match) {
-    const { id } = match.params;
+    const { id } = match.params as Route.LoaderArgs['params'];
 
     if (!id) {
       throw new Error('No build id provided');

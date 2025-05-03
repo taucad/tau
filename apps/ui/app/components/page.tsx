@@ -1,6 +1,6 @@
-import { Outlet } from '@remix-run/react';
+import { Outlet } from 'react-router';
 import { Fragment } from 'react/jsx-runtime';
-import type { ReactNode } from 'react';
+import type { JSX, ReactNode } from 'react';
 import { AppSidebar } from '@/components/app-sidebar.js';
 import {
   Breadcrumb,
@@ -20,7 +20,7 @@ import { useTypedMatches } from '@/types/matches.js';
 
 export const headerHeight = '3rem';
 
-export function Page({ error }: { readonly error?: ReactNode }) {
+export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
   const matches = useTypedMatches();
 
   const isOnline = useNetworkConnectivity();

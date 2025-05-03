@@ -1,4 +1,4 @@
-import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from 'react-router';
 import {
   isRouteErrorResponse,
   Links,
@@ -8,12 +8,12 @@ import {
   useRouteError,
   useNavigate,
   useLoaderData,
-} from '@remix-run/react';
+} from 'react-router';
 import type { Theme } from 'remix-themes';
 import { PreventFlashOnWrongTheme, ThemeProvider, useTheme } from 'remix-themes';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useEffect, useMemo } from 'react';
+import type { JSX, ReactNode } from 'react';
 import stylesUrl from './styles/global.css?url';
 import { getEnvironment, metaConfig } from './config.js';
 import { buttonVariants } from './components/ui/button.js';
@@ -22,7 +22,6 @@ import { themeSessionResolver } from '@/sessions.server.js';
 import { cn } from '@/utils/ui.js';
 import { TooltipProvider } from '@/components/ui/tooltip.js';
 import { markdownViewerLinks } from '@/components/markdown-viewer.js';
-import { useServiceWorker } from '@/hooks/use-service-worker.js';
 import { Toaster } from '@/components/ui/sonner.js';
 import { webManifestLinks } from '@/routes/manifest[.webmanifest].js';
 import type { Model } from '@/hooks/use-models.js';
@@ -49,6 +48,7 @@ export const meta: MetaFunction = () => [
   { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
 ];
 
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- loaders require type inference
 export async function loader({ request }: LoaderFunctionArgs) {
   const { getTheme } = await themeSessionResolver(request);
   const cookie = request.headers.get('Cookie') ?? '';
@@ -72,7 +72,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // Wrap your app with ThemeProvider.
 // `specifiedTheme` is the stored theme in the session storage.
 // `themeAction` is the action name that's used to change the theme in the session storage.
-export default function AppWithProviders({ error }: { readonly error?: ReactNode }) {
+export default function AppWithProviders({ error }: { readonly error?: ReactNode }): JSX.Element {
   const data = useLoaderData<typeof loader>();
   const queryClient = useMemo(
     () =>
@@ -84,9 +84,6 @@ export default function AppWithProviders({ error }: { readonly error?: ReactNode
       }),
     [],
   );
-
-  // Setup the service worker
-  useServiceWorker();
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -110,7 +107,7 @@ export function App({
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is used for system theme
   readonly ssrTheme: Theme | null;
   readonly env: Record<string, string>;
-}) {
+}): JSX.Element {
   const [theme] = useTheme();
   const color = useColor();
   const { setFaviconColor } = useFavicon();
@@ -144,16 +141,16 @@ export function App({
   );
 }
 
-export function ErrorBoundary() {
+export function ErrorBoundary(): JSX.Element {
   return <AppWithProviders error={<AppError />} />;
 }
 
-export function AppError() {
+export function AppError(): JSX.Element {
   const error = useRouteError();
   const navigate = useNavigate();
 
   const goBack = () => {
-    navigate(-1);
+    void navigate(-1);
   };
 
   if (isRouteErrorResponse(error)) {

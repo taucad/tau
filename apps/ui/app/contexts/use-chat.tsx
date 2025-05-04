@@ -7,6 +7,7 @@ import { ENV } from '@/config.js';
 export const useChatConstants = {
   api: `${ENV.TAU_API_URL}/v1/chat`,
   sendExtraMessageFields: true,
+  maxSteps: 10, // Allow the LLM to respond to client side tool calls.
 } as const satisfies Parameters<typeof useChat>[0];
 
 /**

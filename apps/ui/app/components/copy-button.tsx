@@ -1,39 +1,47 @@
 import { Copy, Check } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { useState, useEffect } from 'react';
-import React from 'react';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import React, { useState, useEffect } from 'react';
+import type { JSX } from 'react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { Button } from '@/components/ui/button.js';
 
-export interface CopyButtonProperties extends React.ComponentProps<typeof Button> {
+export type CopyButtonProperties = {
   /**
    * The text to copy.
    */
-  text: string;
+  readonly text: string;
   /**
    * The tooltip to display when the button is hovered.
    */
-  tooltip?: string;
-}
+  readonly tooltip?: string;
+} & React.ComponentProps<typeof Button>;
 
-export function CopyButton({ text, size, tooltip = 'Copy', ...properties }: CopyButtonProperties) {
+export function CopyButton({ text, size, tooltip = 'Copy', ...properties }: CopyButtonProperties): JSX.Element {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
     setCopied(true);
     if (globalThis.isSecureContext) {
-      navigator.clipboard.writeText(text || '');
+      void navigator.clipboard.writeText(text || '');
     } else {
       console.warn('Clipboard operations are only allowed in secure contexts.');
     }
   };
 
   useEffect(() => {
+    let timer: NodeJS.Timeout | undefined;
+
     if (copied) {
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         setCopied(false);
+        timer = undefined;
       }, 2000);
-      return () => clearTimeout(timer);
     }
+
+    return () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
   }, [copied]);
 
   return (

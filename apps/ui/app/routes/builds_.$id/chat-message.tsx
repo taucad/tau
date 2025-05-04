@@ -23,6 +23,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu.js';
 import { ChatModelSelector } from '@/components/chat/chat-model-selector.js';
 
@@ -143,23 +144,28 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
           </div>
         </When>
         <When shouldRender={!isUser}>
-          <div className="mt-1 flex flex-row items-center justify-start text-foreground/50">
-            <CopyButton size="icon" text={message.content} tooltip="Copy message" className="h-6" />
+          <div className="mt-1 flex flex-row items-start justify-start text-foreground/50">
+            <CopyButton size="icon" text={message.content} tooltip="Copy message" className="size-7" />
             <Tooltip>
               <TooltipTrigger>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button size="xs" variant="ghost">
+                    <Button size="xs" variant="ghost" className="h-7 gap-1 has-[>svg]:px-1.5">
                       <RefreshCw className="size-4" />
                       <ChevronDown className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="min-w-[200px]">
-                    <div className="px-2 pb-1.5 text-sm font-semibold">Switch model</div>
+                    <DropdownMenuLabel>Select model</DropdownMenuLabel>
                     <ChatModelSelector
                       models={models}
-                      className="w-full"
-                      renderButtonContents={(model) => <p>{model.name}</p>}
+                      className="h-fit w-full"
+                      renderButtonContents={(model) => (
+                        <div className="flex w-full flex-row items-center justify-between gap-2 text-xs">
+                          <span>{model.name}</span>
+                          <ChevronDown className="size-4 text-muted-foreground" />
+                        </div>
+                      )}
                       onSelect={(modelId) => {
                         onRetry({ modelId });
                       }}
@@ -172,32 +178,35 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
                       }}
                     >
                       <p>Try again</p>
-                      <RefreshCw className="size-4" />
+                      <RefreshCw className="size-4 text-muted-foreground" />
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </TooltipTrigger>
               <TooltipContent>Switch model</TooltipContent>
             </Tooltip>
-            {message.annotations?.map((annotation, index) => {
-              return (
-                <ChatMessageAnnotation
-                  // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                  key={`${message.id}-message-annotation-${index}`}
-                  annotation={annotation as MessageAnnotation}
-                />
-              );
-            })}
+            <div className="mx-1 flex flex-row items-center justify-end gap-1">
+              {message.annotations?.map((annotation, index) => {
+                return (
+                  <ChatMessageAnnotation
+                    // eslint-disable-next-line react/no-array-index-key -- Index is stable
+                    key={`${message.id}-message-annotation-${index}`}
+                    annotation={annotation as MessageAnnotation}
+                  />
+                );
+              })}
+            </div>
           </div>
         </When>
         <When shouldRender={isUser}>
           <div className="mt-1 flex flex-row items-center justify-end text-foreground/50">
-            <CopyButton size="icon" text={message.content} tooltip="Copy message" className="h-6" />
+            <CopyButton size="icon" text={message.content} tooltip="Copy message" className="size-7" />
             <Tooltip>
               <TooltipTrigger>
                 <Button
                   size="xs"
                   variant="ghost"
+                  className="size-7"
                   onClick={() => {
                     setIsEditing((previous) => !previous);
                   }}

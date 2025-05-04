@@ -21,7 +21,7 @@ export function ChatMessageAnnotationUsage({ annotation }: { readonly annotation
           <HoverCardTrigger asChild className="flex flex-row items-center" tabIndex={0}>
             <Badge
               variant="outline"
-              className="h-6 cursor-help font-medium text-inherit outline-none hover:bg-neutral/20"
+              className="h-7 cursor-help font-medium text-inherit outline-none hover:bg-neutral/20"
             >
               {formatCurrency(annotation.usageCost.totalCost)}
             </Badge>

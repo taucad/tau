@@ -113,7 +113,7 @@ export const handle: Handle = {
 
 function Chat() {
   const { id } = useParams();
-  const { build, isLoading, setMessages: setBuildMessages } = useBuild();
+  const { build, isLoading, setMessages: setBuildMessages, setCode: setBuildCode } = useBuild();
   const { setCode, setParameters } = useCad();
   const { setMessages, messages, reload, status, addToolResult } = useAiChat({
     onToolCall: new Map([
@@ -121,7 +121,7 @@ function Chat() {
         'file_edit',
         ({ toolCall }) => {
           const toolCallArgs = toolCall.args as { content: string };
-          setCode(toolCallArgs.content);
+          setBuildCode(toolCallArgs.content);
           addToolResult({
             toolCallId: toolCall.toolCallId,
             result: {

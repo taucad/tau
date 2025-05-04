@@ -76,7 +76,7 @@ export const ChatHistory = memo(function () {
       >
         <div ref={chatContainerReference} className="h-full overflow-y-auto p-4 pb-0">
           <div className="space-y-4">
-            {messages.map((message) => (
+            {messages.map((message, index) => (
               <ChatMessage
                 key={message.id}
                 message={message}
@@ -84,10 +84,13 @@ export const ChatHistory = memo(function () {
                 onEdit={async (event) => onEdit(event, message.id)}
                 onRetry={({ modelId }) => {
                   setMessages((messages) => {
-                    const currentIndex = messages.findIndex((message_) => message_.id === message.id);
+                    // Slicing with a negative index returns non-empty array, so we need
+                    // to ensure that the slice index is positve in the case only 2 messages are present.
+                    const sliceIndex = Math.max(index - 1, 0);
+                    const previousMessage = messages[sliceIndex];
                     const updatedMessages = [
-                      ...messages.slice(0, currentIndex),
-                      { ...message, model: modelId ?? message.model },
+                      ...messages.slice(0, sliceIndex),
+                      { ...previousMessage, model: modelId ?? previousMessage.model },
                     ];
                     return updatedMessages;
                   });

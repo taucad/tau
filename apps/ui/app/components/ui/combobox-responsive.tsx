@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { JSX, ReactNode } from 'react';
 import React from 'react';
 import { useIsMobile } from '@/hooks/use-mobile.js';
 import { Button } from '@/components/ui/button.js';
@@ -47,7 +47,7 @@ export function ComboBoxResponsive<T>({
   readonly searchPlaceHolder?: string;
   readonly asChildLabel?: boolean;
   readonly labelClassName?: string;
-}) {
+}): JSX.Element {
   const [open, setOpen] = React.useState(false);
   const isMobile = useIsMobile();
   const [selectedItem, setSelectedItem] = React.useState<T | undefined>(defaultValue);

@@ -122,12 +122,9 @@ function Chat() {
         ({ toolCall }) => {
           const toolCallArgs = toolCall.args as { content: string };
           setBuildCode(toolCallArgs.content);
-          addToolResult({
-            toolCallId: toolCall.toolCallId,
-            result: {
-              success: true,
-            },
-          });
+          return {
+            success: true,
+          };
         },
       ],
     ]),

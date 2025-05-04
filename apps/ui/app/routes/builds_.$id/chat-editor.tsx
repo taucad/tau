@@ -84,7 +84,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
         loading={<LoaderPinwheel className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
         className={cn('bg-background text-xs', className)}
         defaultLanguage="typescript"
-        defaultValue={code}
+        value={code}
         onChange={handleCodeChange}
         onValidate={handleValidate}
       />

@@ -82,6 +82,18 @@ export const ChatHistory = memo(function () {
                 message={message}
                 models={models ?? []}
                 onEdit={async (event) => onEdit(event, message.id)}
+                onRetry={({ modelId }) => {
+                  setMessages((messages) => {
+                    const currentIndex = messages.findIndex((message_) => message_.id === message.id);
+                    const updatedMessages = [
+                      ...messages.slice(0, currentIndex),
+                      { ...message, model: modelId ?? message.model },
+                    ];
+                    return updatedMessages;
+                  });
+
+                  void reload();
+                }}
               />
             ))}
             <ChatError />

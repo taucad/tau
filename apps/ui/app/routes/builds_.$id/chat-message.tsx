@@ -1,4 +1,4 @@
-import { Edit } from 'lucide-react';
+import { ChevronDown, Edit, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
 import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
@@ -17,14 +17,23 @@ import { When } from '@/components/ui/utils/when.js';
 import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
 import { ChatTextarea } from '@/components/chat/chat-textarea.js';
 import type { Model } from '@/hooks/use-models.js';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu.js';
+import { ChatModelSelector } from '@/components/chat/chat-model-selector.js';
 
 type ChatMessageProperties = {
   readonly message: Message;
   readonly onEdit: ChatTextareaProperties['onSubmit'];
   readonly models: Model[];
+  readonly onRetry: ({ modelId }: { modelId?: string }) => void;
 };
 
-export const ChatMessage = memo(function ({ message, onEdit, models }: ChatMessageProperties): JSX.Element {
+export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: ChatMessageProperties): JSX.Element {
   const isUser = message.role === MessageRole.User;
   const [isEditing, setIsEditing] = useState(false);
 
@@ -44,132 +53,171 @@ export const ChatMessage = memo(function ({ message, onEdit, models }: ChatMessa
           !isUser && 'w-full',
         )}
       >
-        <div className={cn(isUser ? 'rounded-xl bg-neutral/20' : 'pt-[6px]')}>
-          <When shouldRender={isUser ? isEditing : false}>
-            <ChatTextarea
-              initialContent={message.parts}
-              initialAttachments={message.experimental_attachments}
-              models={models}
-              onSubmit={async (event) => {
-                void onEdit(event);
-                setIsEditing(false);
-              }}
-              onEscapePressed={() => {
-                setIsEditing(false);
-              }}
-            />
-          </When>
-          <When shouldRender={!isEditing}>
-            <div className={cn('flex flex-col gap-2', isUser && 'p-2')}>
-              {message.experimental_attachments?.map((attachment, index) => {
+        <When shouldRender={isUser ? isEditing : false}>
+          <ChatTextarea
+            initialContent={message.parts}
+            initialAttachments={message.experimental_attachments}
+            models={models}
+            onSubmit={async (event) => {
+              void onEdit(event);
+              setIsEditing(false);
+            }}
+            onEscapePressed={() => {
+              setIsEditing(false);
+            }}
+          />
+        </When>
+        <When shouldRender={!isEditing}>
+          <div className={cn('flex flex-col gap-2', isUser && 'rounded-xl bg-neutral/20 p-2')}>
+            {message.experimental_attachments?.map((attachment, index) => {
+              return (
+                <HoverCard
+                  // eslint-disable-next-line react/no-array-index-key -- Index is stable
+                  key={`${message.id}-attachment-${index}`}
+                  openDelay={100}
+                  closeDelay={100}
+                >
+                  <HoverCardTrigger asChild>
+                    <img
+                      src={attachment.url}
+                      alt="Chat message"
+                      className="ml-auto h-8 w-auto cursor-zoom-in rounded-md border bg-muted object-cover"
+                    />
+                  </HoverCardTrigger>
+                  <HoverCardContent className="size-auto max-w-screen overflow-hidden p-0">
+                    <img src={attachment.url} alt="Chat message zoomed" className="h-48 md:h-96" />
+                  </HoverCardContent>
+                </HoverCard>
+              );
+            })}
+            {message.parts?.map((part, index) => {
+              if (part.type === 'text') {
                 return (
-                  <HoverCard
+                  <ChatMessageText
                     // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                    key={`${message.id}-attachment-${index}`}
-                    openDelay={100}
-                    closeDelay={100}
-                  >
-                    <HoverCardTrigger asChild>
-                      <img
-                        src={attachment.url}
-                        alt="Chat message"
-                        className="ml-auto h-8 w-auto cursor-zoom-in rounded-md border bg-muted object-cover"
-                      />
-                    </HoverCardTrigger>
-                    <HoverCardContent className="size-auto max-w-screen overflow-hidden p-0">
-                      <img src={attachment.url} alt="Chat message zoomed" className="h-48 md:h-96" />
-                    </HoverCardContent>
-                  </HoverCard>
+                    key={`${message.id}-message-part-${index}`}
+                    part={part}
+                  />
                 );
-              })}
-              {message.parts?.map((part, index) => {
-                if (part.type === 'text') {
-                  return (
-                    <ChatMessageText
+              }
+
+              if (part.type === 'reasoning') {
+                /* TODO: remove trim when backend is fixed to trim thinking tags */
+                return (
+                  part.reasoning.trim().length > 0 && (
+                    <ChatMessageReasoning
                       // eslint-disable-next-line react/no-array-index-key -- Index is stable
                       key={`${message.id}-message-part-${index}`}
                       part={part}
+                      hasContent={message.content.length > 0}
                     />
-                  );
-                }
+                  )
+                );
+              }
 
-                if (part.type === 'reasoning') {
-                  /* TODO: remove trim when backend is fixed to trim thinking tags */
-                  return (
-                    part.reasoning.trim().length > 0 && (
-                      <ChatMessageReasoning
-                        // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                        key={`${message.id}-message-part-${index}`}
-                        part={part}
-                        hasContent={message.content.length > 0}
-                      />
-                    )
-                  );
-                }
+              if (part.type === 'tool-invocation') {
+                // eslint-disable-next-line react/no-array-index-key -- Index is stable
+                return <ChatMessageTool key={`${message.id}-message-part-${index}`} part={part} />;
+              }
 
-                if (part.type === 'tool-invocation') {
+              if (part.type === 'source') {
+                // TODO: add source rendering to the message
+
+                return null;
+              }
+
+              if (part.type === 'step-start') {
+                // We are not rendering step-start parts.
+
+                return null;
+              }
+
+              if (part.type === 'file') {
+                // TODO: add file rendering
+                throw new Error('File rendering is not implemented');
+              }
+
+              const exhaustiveCheck: never = part;
+              throw new Error(`Unknown part: ${JSON.stringify(exhaustiveCheck)}`);
+            })}
+          </div>
+        </When>
+        <When shouldRender={!isUser}>
+          <div className="mt-1 flex flex-row items-center justify-start text-foreground/50">
+            <CopyButton size="icon" text={message.content} tooltip="Copy message" className="h-6" />
+            <Tooltip>
+              <TooltipTrigger>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="xs" variant="ghost">
+                      <RefreshCw className="size-4" />
+                      <ChevronDown className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-[200px]">
+                    <div className="px-2 pb-1.5 text-sm font-semibold">Switch model</div>
+                    <ChatModelSelector
+                      models={models}
+                      className="w-full"
+                      renderButtonContents={(model) => <p>{model.name}</p>}
+                      onSelect={(modelId) => {
+                        onRetry({ modelId });
+                      }}
+                    />
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="flex justify-between"
+                      onClick={() => {
+                        onRetry({});
+                      }}
+                    >
+                      <p>Try again</p>
+                      <RefreshCw className="size-4" />
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </TooltipTrigger>
+              <TooltipContent>Switch model</TooltipContent>
+            </Tooltip>
+            {message.annotations?.map((annotation, index) => {
+              return (
+                <ChatMessageAnnotation
                   // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                  return <ChatMessageTool key={`${message.id}-message-part-${index}`} part={part} />;
-                }
-
-                if (part.type === 'source') {
-                  // TODO: add source rendering to the message
-
-                  return null;
-                }
-
-                if (part.type === 'step-start') {
-                  // We are not rendering step-start parts.
-
-                  return null;
-                }
-
-                if (part.type === 'file') {
-                  // TODO: add file rendering
-                  throw new Error('File rendering is not implemented');
-                }
-
-                const exhaustiveCheck: never = part;
-                throw new Error(`Unknown part: ${JSON.stringify(exhaustiveCheck)}`);
-              })}
-              <When shouldRender={!isUser}>
-                <div className="mt-2 flex flex-row items-center justify-start gap-2 text-foreground/50">
-                  <CopyButton size="xs" text={message.content} tooltip="Copy message" />
-                  {message.annotations?.map((annotation, index) => {
-                    return (
-                      <ChatMessageAnnotation
-                        // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                        key={`${message.id}-message-annotation-${index}`}
-                        annotation={annotation as MessageAnnotation}
-                      />
-                    );
-                  })}
-                </div>
-              </When>
-            </div>
-          </When>
-        </div>
-      </div>
-      <div className="mt-auto">
-        {isUser ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="rounded-full opacity-0 transition-opacity group-hover/message:opacity-100 focus:opacity-100"
-                onClick={() => {
-                  setIsEditing((editing) => !editing);
-                }}
-              >
-                <Edit className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{isEditing ? 'Stop editing' : 'Edit message'}</p>
-            </TooltipContent>
-          </Tooltip>
-        ) : null}
+                  key={`${message.id}-message-annotation-${index}`}
+                  annotation={annotation as MessageAnnotation}
+                />
+              );
+            })}
+          </div>
+        </When>
+        <When shouldRender={isUser}>
+          <div className="mt-1 flex flex-row items-center justify-end text-foreground/50">
+            <CopyButton size="icon" text={message.content} tooltip="Copy message" className="h-6" />
+            <Tooltip>
+              <TooltipTrigger>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => {
+                    setIsEditing((previous) => !previous);
+                  }}
+                >
+                  <Edit className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{isEditing ? 'Stop editing' : 'Edit message'}</TooltipContent>
+            </Tooltip>
+            {message.annotations?.map((annotation, index) => {
+              return (
+                <ChatMessageAnnotation
+                  // eslint-disable-next-line react/no-array-index-key -- Index is stable
+                  key={`${message.id}-message-annotation-${index}`}
+                  annotation={annotation as MessageAnnotation}
+                />
+              );
+            })}
+          </div>
+        </When>
       </div>
     </article>
   );

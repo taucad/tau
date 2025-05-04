@@ -1,26 +1,23 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import type { JSX } from 'react';
-import { Globe, ArrowUp, ChevronDown, CircuitBoard, Image, X, Square } from 'lucide-react';
+import { Globe, ArrowUp, Image, X, Square, CircuitBoard, ChevronDown } from 'lucide-react';
 import type { Attachment } from 'ai';
 import { useAiChat } from './ai-chat-provider.js';
+import { ChatModelSelector } from './chat-model-selector.js';
 import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '@/components/ui/hover-card.js';
 import { Button } from '@/components/ui/button.js';
 import { Textarea } from '@/components/ui/textarea.js';
-import { Badge } from '@/components/ui/badge.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { ComboBoxResponsive } from '@/components/ui/combobox-responsive.js';
 import type { Model } from '@/hooks/use-models.js';
 import { useModels } from '@/hooks/use-models.js';
-import { SvgIcon } from '@/components/icons/svg-icon.js';
-import type { ModelProvider } from '@/types/cad.js';
-import { cn } from '@/utils/ui.js';
-import type { MessagePart } from '@/types/chat.js';
-import { useKeydown } from '@/hooks/use-keydown.js';
 import { KeyShortcut } from '@/components/ui/key-shortcut.js';
 import { formatKeyCombination } from '@/utils/keys.js';
 import type { KeyCombination } from '@/utils/keys.js';
 import { toast } from '@/components/ui/sonner.js';
 import { useCookie } from '@/hooks/use-cookie.js';
+import { cn } from '@/utils/ui.js';
+import type { MessagePart } from '@/types/chat.js';
+import { useKeydown } from '@/hooks/use-keydown.js';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
@@ -85,7 +82,7 @@ export const ChatTextarea = memo(function ({
   const [isDragging, setIsDragging] = useState(false);
   const fileInputReference = useRef<HTMLInputElement>(null);
   const textareaReference = useRef<HTMLTextAreaElement>(null);
-  const { selectedModel, setSelectedModel } = useModels();
+  const { selectedModel } = useModels();
   const { stop, status } = useAiChat();
 
   const handleSubmit = async () => {
@@ -204,15 +201,6 @@ export const ChatTextarea = memo(function ({
   const removeImage = useCallback((index: number) => {
     setImages((previous) => previous.filter((_, index_) => index_ !== index));
   }, []);
-
-  const providerModelsMap = new Map<string, Model[]>();
-  for (const model of models) {
-    if (!providerModelsMap.has(model.provider)) {
-      providerModelsMap.set(model.provider, []);
-    }
-
-    providerModelsMap.get(model.provider)?.push(model);
-  }
 
   const focusInput = useCallback(() => {
     textareaReference.current?.focus();
@@ -352,27 +340,8 @@ export const ChatTextarea = memo(function ({
       {/* Main input controls */}
       <div className="absolute bottom-2 left-2 flex flex-row items-center gap-1">
         {/* Model selector */}
-        <ComboBoxResponsive
-          className="group flex h-6 w-[initial] items-center justify-between gap-2 border-none px-2 text-xs"
-          popoverContentClassName="w-[300px]"
-          groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({
-            name: provider,
-            items: models,
-          }))}
-          renderLabel={(item) => (
-            <span className="flex w-full items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                {}
-                <SvgIcon id={item.provider as ModelProvider} />
-                <span className="font-mono">{item.name}</span>
-              </div>
-              {item.details.parameterSize ? (
-                <Badge variant="outline" className="bg-background">
-                  {item.details.parameterSize}
-                </Badge>
-              ) : null}
-            </span>
-          )}
+        <ChatModelSelector
+          models={models}
           renderButtonContents={(item) => (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -392,16 +361,7 @@ export const ChatTextarea = memo(function ({
               </TooltipContent>
             </Tooltip>
           )}
-          getValue={(item) => item.id}
-          placeholder="Select a model"
-          defaultValue={models.find((model) => model.id === selectedModel)}
-          onSelect={(model) => {
-            setSelectedModel(model);
-            focusInput();
-          }}
-          onClose={() => {
-            focusInput();
-          }}
+          onClose={focusInput}
         />
 
         {/* Search button */}
@@ -456,17 +416,6 @@ export const ChatTextarea = memo(function ({
       </div>
 
       <div className="absolute right-2 bottom-2 flex flex-row items-center gap-1">
-        {/* Voice input */}
-        {/* <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="xs" variant="ghost" className="h-6">
-              <AudioLines />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            Speak to Tau <ComingSoon variant="tooltip" className="ml-1" />
-          </TooltipContent>
-        </Tooltip> */}
         {/* Submit button */}
         {status === 'streaming' ? (
           <Tooltip>

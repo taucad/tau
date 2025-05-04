@@ -156,12 +156,12 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="min-w-[200px]">
-                    <DropdownMenuLabel>Select model</DropdownMenuLabel>
+                    <DropdownMenuLabel>Switch model</DropdownMenuLabel>
                     <ChatModelSelector
                       models={models}
                       className="h-fit w-full"
                       renderButtonContents={(model) => (
-                        <div className="flex w-full flex-row items-center justify-between gap-2 text-xs">
+                        <div className="flex w-full flex-row items-center justify-between gap-2 text-sm font-normal">
                           <span>{model.name}</span>
                           <ChevronDown className="size-4 text-muted-foreground" />
                         </div>

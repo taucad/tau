@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { SvgIcon } from '@/components/icons/svg-icon.js';
 import { InfoTooltip } from '@/components/info-tooltip.js';
 import { Badge } from '@/components/ui/badge.js';
@@ -9,7 +10,7 @@ import type { MessageAnnotation } from '@/types/chat.js';
 import { formatCurrency } from '@/utils/currency.js';
 import { formatNumber } from '@/utils/number.js';
 
-export function ChatMessageAnnotationUsage({ annotation }: { readonly annotation: MessageAnnotation }) {
+export function ChatMessageAnnotationUsage({ annotation }: { readonly annotation: MessageAnnotation }): JSX.Element {
   const { data: models } = useModels();
 
   switch (annotation.type) {
@@ -18,7 +19,10 @@ export function ChatMessageAnnotationUsage({ annotation }: { readonly annotation
       return (
         <HoverCard openDelay={100} closeDelay={100}>
           <HoverCardTrigger asChild className="flex flex-row items-center" tabIndex={0}>
-            <Badge variant="outline" className="cursor-help font-medium text-inherit outline-none hover:bg-neutral/20">
+            <Badge
+              variant="outline"
+              className="h-6 cursor-help font-medium text-inherit outline-none hover:bg-neutral/20"
+            >
               {formatCurrency(annotation.usageCost.totalCost)}
             </Badge>
           </HoverCardTrigger>

@@ -55,7 +55,7 @@ export function MarkdownViewer({ children }: { readonly children: string }): JSX
                   <CopyButton
                     size="xs"
                     className="[&_[data-slot=label]]:hidden @xs/code:[&_[data-slot=label]]:flex"
-                    text={text}
+                    getText={() => text}
                   />
                 </div>
               </div>

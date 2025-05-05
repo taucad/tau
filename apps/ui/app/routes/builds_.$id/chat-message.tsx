@@ -34,6 +34,17 @@ type ChatMessageProperties = {
   readonly onRetry: ({ modelId }: { modelId?: string }) => void;
 };
 
+const getMessageContent = (message: Message): string => {
+  const content = [];
+  for (const part of message.parts ?? []) {
+    if (part.type === 'text') {
+      content.push(part.text);
+    }
+  }
+
+  return content.join('\n\n');
+};
+
 export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: ChatMessageProperties): JSX.Element {
   const isUser = message.role === MessageRole.User;
   const [isEditing, setIsEditing] = useState(false);
@@ -148,7 +159,7 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
             <CopyButton
               tooltipContentProperties={{ side: 'bottom' }}
               size="icon"
-              text={message.content}
+              getText={() => getMessageContent(message)}
               tooltip="Copy message"
               className="size-7"
             />
@@ -209,7 +220,7 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
             <CopyButton
               tooltipContentProperties={{ side: 'bottom' }}
               size="icon"
-              text={message.content}
+              getText={() => getMessageContent(message)}
               tooltip="Copy message"
               className="size-7"
             />

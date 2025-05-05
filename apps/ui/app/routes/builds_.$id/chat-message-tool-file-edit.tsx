@@ -27,7 +27,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
               <CopyButton
                 size="xs"
                 className="[&_[data-slot=label]]:hidden @xs/code:[&_[data-slot=label]]:flex"
-                text={content}
+                getText={() => content}
               />
               <Tooltip>
                 <TooltipTrigger asChild>

@@ -6,9 +6,9 @@ import { Button } from '@/components/ui/button.js';
 
 export type CopyButtonProperties = {
   /**
-   * The text to copy.
+   * The function to get the text to copy.
    */
-  readonly text: string;
+  readonly getText: () => string;
   /**
    * The tooltip to display when the button is hovered.
    */
@@ -17,7 +17,7 @@ export type CopyButtonProperties = {
 } & React.ComponentProps<typeof Button>;
 
 export function CopyButton({
-  text,
+  getText,
   size,
   tooltip = 'Copy',
   tooltipContentProperties,
@@ -28,7 +28,7 @@ export function CopyButton({
   const handleCopy = () => {
     setCopied(true);
     if (globalThis.isSecureContext) {
-      void navigator.clipboard.writeText(text || '');
+      void navigator.clipboard.writeText(getText() ?? '');
     } else {
       console.warn('Clipboard operations are only allowed in secure contexts.');
     }

@@ -145,7 +145,13 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
         </When>
         <When shouldRender={!isUser}>
           <div className="mt-1 flex flex-row items-start justify-start text-foreground/50">
-            <CopyButton size="icon" text={message.content} tooltip="Copy message" className="size-7" />
+            <CopyButton
+              tooltipContentProperties={{ side: 'bottom' }}
+              size="icon"
+              text={message.content}
+              tooltip="Copy message"
+              className="size-7"
+            />
             <Tooltip>
               <TooltipTrigger>
                 <DropdownMenu>
@@ -155,7 +161,7 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
                       <ChevronDown className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="min-w-[200px]">
+                  <DropdownMenuContent align="start" side="top" className="min-w-[200px]">
                     <DropdownMenuLabel>Switch model</DropdownMenuLabel>
                     <ChatModelSelector
                       models={models}
@@ -183,7 +189,7 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
                   </DropdownMenuContent>
                 </DropdownMenu>
               </TooltipTrigger>
-              <TooltipContent>Switch model</TooltipContent>
+              <TooltipContent side="bottom">Switch model</TooltipContent>
             </Tooltip>
             <div className="mx-1 flex flex-row items-center justify-end gap-1">
               {message.annotations?.map((annotation, index) => {
@@ -200,7 +206,13 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
         </When>
         <When shouldRender={isUser}>
           <div className="mt-1 flex flex-row items-center justify-end text-foreground/50">
-            <CopyButton size="icon" text={message.content} tooltip="Copy message" className="size-7" />
+            <CopyButton
+              tooltipContentProperties={{ side: 'bottom' }}
+              size="icon"
+              text={message.content}
+              tooltip="Copy message"
+              className="size-7"
+            />
             <Tooltip>
               <TooltipTrigger>
                 <Button
@@ -214,7 +226,7 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
                   <Edit className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{isEditing ? 'Stop editing' : 'Edit message'}</TooltipContent>
+              <TooltipContent side="bottom">{isEditing ? 'Stop editing' : 'Edit message'}</TooltipContent>
             </Tooltip>
             {message.annotations?.map((annotation, index) => {
               return (

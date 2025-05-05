@@ -13,9 +13,16 @@ export type CopyButtonProperties = {
    * The tooltip to display when the button is hovered.
    */
   readonly tooltip?: string;
+  readonly tooltipContentProperties?: React.ComponentProps<typeof TooltipContent>;
 } & React.ComponentProps<typeof Button>;
 
-export function CopyButton({ text, size, tooltip = 'Copy', ...properties }: CopyButtonProperties): JSX.Element {
+export function CopyButton({
+  text,
+  size,
+  tooltip = 'Copy',
+  tooltipContentProperties,
+  ...properties
+}: CopyButtonProperties): JSX.Element {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -52,7 +59,7 @@ export function CopyButton({ text, size, tooltip = 'Copy', ...properties }: Copy
           {copied ? <Check /> : <Copy />}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{tooltip}</TooltipContent>
+      <TooltipContent {...tooltipContentProperties}>{tooltip}</TooltipContent>
     </Tooltip>
   );
 }

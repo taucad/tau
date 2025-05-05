@@ -26,7 +26,7 @@ export function ChatMessageAnnotationUsage({ annotation }: { readonly annotation
               {formatCurrency(annotation.usageCost.totalCost)}
             </Badge>
           </HoverCardTrigger>
-          <HoverCardContent className="w-auto p-2">
+          <HoverCardContent className="w-auto p-2 pt-1">
             <div className="flex flex-col space-y-1">
               <div className="flex flex-row items-baseline justify-between gap-4 p-2 pb-0">
                 <h4 className="font-medium">Usage Details</h4>

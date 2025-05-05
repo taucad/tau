@@ -17,7 +17,7 @@ export const ChatError = memo(() => {
   }
 
   return (
-    <div className="flex w-full flex-col items-start justify-center gap-1 rounded-md border border-destructive/20 bg-destructive/10 p-2 text-center text-sm">
+    <div className="flex w-full flex-col items-start justify-center gap-1 overflow-hidden rounded-md border border-destructive/20 bg-destructive/10 p-2 text-center text-sm">
       <div className="flex w-full items-start justify-between">
         <p>Unable to send the message.</p>
         <Button variant="outline" size="xs" className="h-auto p-1" onClick={async () => reload()}>
@@ -25,7 +25,7 @@ export const ChatError = memo(() => {
           Retry
         </Button>
       </div>
-      <pre className="text-left text-xs">{errorMessage}</pre>
+      <pre className="w-full overflow-x-auto text-left text-xs">{errorMessage}</pre>
     </div>
   );
 });

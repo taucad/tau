@@ -35,7 +35,7 @@ export function ComboBoxResponsive<T>({
   labelClassName,
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
-  readonly renderLabel: (item: T) => ReactNode;
+  readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
   readonly renderButtonContents: (item: T) => ReactNode;
   readonly getValue: (item: T) => string;
   readonly defaultValue?: T;
@@ -90,6 +90,7 @@ export function ComboBoxResponsive<T>({
             <ItemList
               groupedItems={groupedItems}
               setSelectedItem={handleSelect}
+              selectedItem={selectedItem}
               renderLabel={renderLabel}
               getValue={getValue}
               searchPlaceHolder={searchPlaceHolder}
@@ -113,6 +114,7 @@ export function ComboBoxResponsive<T>({
         <ItemList
           groupedItems={groupedItems}
           setSelectedItem={handleSelect}
+          selectedItem={selectedItem}
           renderLabel={renderLabel}
           getValue={getValue}
           searchPlaceHolder={searchPlaceHolder}
@@ -127,6 +129,7 @@ export function ComboBoxResponsive<T>({
 function ItemList<T>({
   groupedItems,
   setSelectedItem,
+  selectedItem,
   renderLabel,
   getValue,
   searchPlaceHolder,
@@ -135,7 +138,8 @@ function ItemList<T>({
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
   readonly setSelectedItem: (item: T) => void;
-  readonly renderLabel: (item: T) => ReactNode;
+  readonly selectedItem: T | undefined;
+  readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
   readonly getValue: (item: T) => string;
   readonly searchPlaceHolder: string;
   readonly asChildLabel?: boolean;
@@ -161,7 +165,7 @@ function ItemList<T>({
                     setSelectedItem(item);
                   }}
                 >
-                  {renderLabel(item)}
+                  {renderLabel(item, selectedItem)}
                 </CommandItem>
               );
             })}

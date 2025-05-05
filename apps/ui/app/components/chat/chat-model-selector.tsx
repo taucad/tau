@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import type { JSX, ReactNode } from 'react';
+import { Check } from 'lucide-react';
 import { ComboBoxResponsive } from '@/components/ui/combobox-responsive.js';
 import { Badge } from '@/components/ui/badge.js';
 import { SvgIcon } from '@/components/icons/svg-icon.js';
@@ -57,17 +58,20 @@ export function ChatModelSelector({
         name: provider,
         items: models,
       }))}
-      renderLabel={(item) => (
+      renderLabel={(item, selectedItem) => (
         <span className="flex w-full items-center justify-between text-xs">
           <div className="flex items-center gap-2">
             <SvgIcon id={item.provider as ModelProvider} />
             <span className="font-mono">{item.name}</span>
           </div>
-          {item.details.parameterSize ? (
-            <Badge variant="outline" className="bg-background">
-              {item.details.parameterSize}
-            </Badge>
-          ) : null}
+          <div className="flex items-center gap-2">
+            {item.details.parameterSize ? (
+              <Badge variant="outline" className="bg-background">
+                {item.details.parameterSize}
+              </Badge>
+            ) : null}
+            {selectedItem?.id === item.id ? <Check /> : null}
+          </div>
         </span>
       )}
       renderButtonContents={renderButtonContents}

@@ -290,6 +290,11 @@ export class LangGraphAdapter {
               break;
             }
 
+            case 'on_custom_event': {
+              // No-op: These events are not supported by the AI SDK
+              break;
+            }
+
             // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check for all event types
             default: {
               const unknownEvent: never = streamEvent;

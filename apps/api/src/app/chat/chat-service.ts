@@ -53,7 +53,11 @@ export class ChatService {
     // Create a general agent for handling direct responses
     const cadTools = [tools.file_edit];
     const cadAgent = createReactAgent({
-      llm: support?.tools === false ? unboundModel : (unboundModel.bindTools?.(cadTools) ?? unboundModel),
+      llm:
+        support?.tools === false
+          ? unboundModel
+          : // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case
+            (unboundModel.bindTools?.(cadTools, { tool_choice: 'file_edit' }) ?? unboundModel),
       tools: cadTools,
       name: 'cad_agent',
       prompt: replicadSystemPrompt,

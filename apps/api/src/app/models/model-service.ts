@@ -271,7 +271,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       id: 'google-gemini-2.5-pro',
       name: 'Gemini 2.5 Pro',
       provider: 'google_vertexai',
-      model: 'gemini-2.5-pro-preview-03-25',
+      model: 'gemini-2.5-pro-exp-03-25',
       details: {
         family: 'Gemini',
         families: ['Gemini'],

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const providerIdSchema = z
-  .enum(['openai', 'anthropic', 'sambanova', 'ollama', 'google'])
+  .enum(['openai', 'anthropic', 'sambanova', 'ollama', 'google_vertexai'])
   .describe('The provider of the model');
 
 export const providerSchema = z.object({

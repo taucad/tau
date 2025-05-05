@@ -5,10 +5,31 @@ const environmentSchema = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.string().default('3000'),
+  OPENAI_API_KEY: z.string(),
+  ANTHROPIC_API_KEY: z.string(),
+  SAMBA_API_KEY: z.string().optional(),
+  GOOGLE_VERTEX_AI_CREDENTIALS: z
+    .string()
+    .transform((value) => JSON.parse(value) as Record<string, unknown>)
+    .pipe(
+      z.object({
+        type: z.string(),
+        project_id: z.string(),
+        private_key_id: z.string(),
+        private_key: z.string(),
+        client_email: z.string(),
+        client_id: z.string(),
+        auth_uri: z.string(),
+        token_uri: z.string(),
+        auth_provider_x509_cert_url: z.string(),
+        client_x509_cert_url: z.string(),
+        universe_domain: z.string(),
+      }),
+    ),
   /* eslint-enable @typescript-eslint/naming-convention -- renabling */
 });
 
-export const getEnvironment = () => {
+export const getEnvironment = (): Environment => {
   const result = environmentSchema.safeParse(process.env);
 
   if (!result.success) {

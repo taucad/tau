@@ -7,9 +7,9 @@ import type { ProviderId } from '../providers/provider-schema.js';
 import { ProviderService } from '../providers/provider-service.js';
 import type { Model, ModelSupport } from './model-schema.js';
 
-type StaticProviderId = Exclude<ProviderId, 'ollama'>;
+type CloudProviderId = Exclude<ProviderId, 'ollama'>;
 
-const modelList: Record<StaticProviderId, Record<string, Model>> = {
+const modelList: Record<CloudProviderId, Record<string, Model>> = {
   anthropic: {
     'claude-3.7-sonnet-thinking': {
       id: 'anthropic-claude-3.7-sonnet-thinking',
@@ -264,11 +264,13 @@ const modelList: Record<StaticProviderId, Record<string, Model>> = {
       },
     },
   },
-  google: {
+
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- snake case format is preferred here
+  google_vertexai: {
     'gemini-2.5-pro': {
       id: 'google-gemini-2.5-pro',
       name: 'Gemini 2.5 Pro',
-      provider: 'google',
+      provider: 'google_vertexai',
       model: 'gemini-2.5-pro-preview-03-25',
       details: {
         family: 'Gemini',
@@ -415,7 +417,9 @@ export class ModelService implements OnModuleInit {
         }),
       );
 
-      return ollamaModelList;
+      const ollamaModelsWithToolSupport = ollamaModelList.filter((model) => model.support?.tools);
+
+      return ollamaModelsWithToolSupport;
     } catch (error) {
       Logger.error('Error getting ollama models', error);
       return [];

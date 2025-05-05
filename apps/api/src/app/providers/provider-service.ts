@@ -2,13 +2,14 @@ import process from 'node:process';
 import { Injectable } from '@nestjs/common';
 import { ChatOpenAI } from '@langchain/openai';
 import type { ChatOpenAIFields } from '@langchain/openai';
-import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
-import type { GoogleGenerativeAIChatCallOptions } from '@langchain/google-genai';
+import { ChatVertexAI } from '@langchain/google-vertexai';
+import type { ChatVertexAIInput } from '@langchain/google-vertexai';
 import { ChatOllama } from '@langchain/ollama';
 import type { ChatOllamaInput } from '@langchain/ollama';
 import { ChatAnthropic } from '@langchain/anthropic';
 import type { ChatAnthropicCallOptions } from '@langchain/anthropic';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { getEnvironment } from '../config.js';
 import type { ProviderId, Provider } from './provider-schema.js';
 
 // Type for mapping provider IDs to their option types
@@ -17,7 +18,7 @@ type ProviderOptionsMap = {
   ollama: ChatOllamaInput;
   anthropic: ChatAnthropicCallOptions;
   sambanova: ChatOpenAIFields;
-  google: GoogleGenerativeAIChatCallOptions & { model: string };
+  google_vertexai: ChatVertexAIInput & { model: string };
 };
 
 // Enhanced type that includes the createClass method
@@ -68,13 +69,24 @@ export const providers: {
         maxRetries: 2,
       }),
   },
-  google: {
-    provider: 'google',
+
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- snake case format is preferred here
+  google_vertexai: {
+    provider: 'google_vertexai',
     configuration: {
       apiKey: process.env.GOOGLE_API_KEY,
     },
     inputTokensIncludesCachedReadTokens: false,
-    createClass: (options) => new ChatGoogleGenerativeAI(options),
+    createClass(options) {
+      const credentials = getEnvironment().GOOGLE_VERTEX_AI_CREDENTIALS;
+      return new ChatVertexAI({
+        ...options,
+        authOptions: {
+          credentials,
+          projectId: credentials.project_id,
+        },
+      });
+    },
   },
 };
 

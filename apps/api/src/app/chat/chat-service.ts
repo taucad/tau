@@ -67,7 +67,7 @@ export class ChatService {
       prompt:
         'You are a team supervisor managing a research expert and a CAD agent. ' +
         'For queries that need external information or specific tool operations, use research_expert. ' +
-        'For queries that list a 3D object, use cad_agent.' +
+        'For queries that list a 3D object, use cad_agent. ' +
         'When you receive a transfer back, be concise and end the conversation.',
       outputMode: 'full_history', // Include full agent message history
     }).compile();

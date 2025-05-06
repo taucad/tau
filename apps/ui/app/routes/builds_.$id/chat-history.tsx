@@ -1,4 +1,4 @@
-import { memo, useCallback, useRef } from 'react';
+import { Fragment, memo, useCallback, useRef } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { ChatMessage } from './chat-message.js';
 import { ScrollDownButton } from './scroll-down-button.js';
@@ -11,11 +11,13 @@ import { MessageRole, MessageStatus } from '@/types/chat.js';
 import { useCookie } from '@/hooks/use-cookie.js';
 import { useModels } from '@/hooks/use-models.js';
 import { useAiChat } from '@/components/chat/ai-chat-provider.js';
+import { AnimatedShinyText } from '@/components/magicui/animated-shiny-text.js';
+import { When } from '@/components/ui/utils/when.js';
 
 const chatResizeCookieNameHistory = 'chat-history-resize';
 
 export const ChatHistory = memo(function () {
-  const { append, messages, reload, setMessages } = useAiChat();
+  const { append, messages, reload, setMessages, status } = useAiChat();
   const [chatResizeHistory, setChatResizeHistory] = useCookie(chatResizeCookieNameHistory, [85, 15]);
   const { data: models } = useModels();
   const chatContainerReference = useRef<HTMLDivElement>(null);
@@ -77,27 +79,38 @@ export const ChatHistory = memo(function () {
         <div ref={chatContainerReference} className="h-full overflow-y-auto p-4 pb-0">
           <div className="space-y-4">
             {messages.map((message, index) => (
-              <ChatMessage
-                key={message.id}
-                message={message}
-                models={models ?? []}
-                onEdit={async (event) => onEdit(event, message.id)}
-                onRetry={({ modelId }) => {
-                  setMessages((messages) => {
-                    // Slicing with a negative index returns non-empty array, so we need
-                    // to ensure that the slice index is positve in the case only 2 messages are present.
-                    const sliceIndex = Math.max(index - 1, 0);
-                    const previousMessage = messages[sliceIndex];
-                    const updatedMessages = [
-                      ...messages.slice(0, sliceIndex),
-                      { ...previousMessage, model: modelId ?? previousMessage.model },
-                    ];
-                    return updatedMessages;
-                  });
+              <Fragment key={message.id}>
+                <When
+                  shouldRender={message.parts?.length === 1 && status === 'submitted' && index === messages.length - 1}
+                >
+                  <AnimatedShinyText>Creating...</AnimatedShinyText>
+                </When>
+                <When
+                  shouldRender={message.parts?.length === 1 && status === 'streaming' && index === messages.length - 1}
+                >
+                  <AnimatedShinyText>Generating...</AnimatedShinyText>
+                </When>
+                <ChatMessage
+                  message={message}
+                  models={models ?? []}
+                  onEdit={async (event) => onEdit(event, message.id)}
+                  onRetry={({ modelId }) => {
+                    setMessages((messages) => {
+                      // Slicing with a negative index returns non-empty array, so we need
+                      // to ensure that the slice index is positve in the case only 2 messages are present.
+                      const sliceIndex = Math.max(index - 1, 0);
+                      const previousMessage = messages[sliceIndex];
+                      const updatedMessages = [
+                        ...messages.slice(0, sliceIndex),
+                        { ...previousMessage, model: modelId ?? previousMessage.model },
+                      ];
+                      return updatedMessages;
+                    });
 
-                  void reload();
-                }}
-              />
+                    void reload();
+                  }}
+                />
+              </Fragment>
             ))}
             <ChatError />
           </div>

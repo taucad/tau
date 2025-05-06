@@ -164,7 +164,7 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
               className="size-7"
             />
             <Tooltip>
-              <TooltipTrigger>
+              <TooltipTrigger asChild>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button size="xs" variant="ghost" className="h-7 gap-1 has-[>svg]:px-1.5">
@@ -225,7 +225,7 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
               className="size-7"
             />
             <Tooltip>
-              <TooltipTrigger>
+              <TooltipTrigger asChild>
                 <Button
                   size="xs"
                   variant="ghost"

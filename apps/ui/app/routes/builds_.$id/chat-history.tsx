@@ -81,12 +81,22 @@ export const ChatHistory = memo(function () {
             {messages.map((message, index) => (
               <Fragment key={message.id}>
                 <When
-                  shouldRender={message.parts?.length === 1 && status === 'submitted' && index === messages.length - 1}
+                  shouldRender={
+                    message.role === 'assistant' &&
+                    message.parts?.length === 1 &&
+                    status === 'submitted' &&
+                    index === messages.length - 1
+                  }
                 >
                   <AnimatedShinyText>Creating...</AnimatedShinyText>
                 </When>
                 <When
-                  shouldRender={message.parts?.length === 1 && status === 'streaming' && index === messages.length - 1}
+                  shouldRender={
+                    message.role === 'assistant' &&
+                    message.parts?.length === 1 &&
+                    status === 'streaming' &&
+                    index === messages.length - 1
+                  }
                 >
                   <AnimatedShinyText>Generating...</AnimatedShinyText>
                 </When>

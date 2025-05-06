@@ -65,7 +65,7 @@ function ProjectCard({
   tags,
   assets,
 }: CommunityBuildCardProperties) {
-  const [showPreview, setShowPreview] = useState(true);
+  const [showPreview, setShowPreview] = useState(false);
   const cardReference = useRef<HTMLDivElement>(null);
   const { setCode, mesh } = useCad();
   const navigate = useNavigate();

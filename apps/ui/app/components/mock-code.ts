@@ -1,86 +1,148 @@
+/* eslint-disable max-lines -- mocks */
 type Model = {
   id: string;
   name: string;
   code: string;
 };
 
-export const cubeCode = `// Cube
+export const cubeCode = `/**
+ * Parametric Cube with Filleted Edges
+ * A simple cube with adjustable dimensions and rounded edges.
+ */
 const { sketchRectangle, EdgeFinder } = replicad;
 
-export const defaultParams = {
-  length: 100,
-  filletRadius: 5,
+const defaultParams = {
+  length: 100,    // Length of cube sides in mm
+  filletRadius: 5, // Radius for rounded edges in mm
 };
 
-export const main = (r, { length, filletRadius }) => {
-  let shape = sketchRectangle(length, length)
-    .extrude(length)
+/**
+ * Creates a cube with filleted edges
+ * @param _ Unused parameter (required by replicad)
+ * @param params Custom parameters to override defaults
+ * @returns The complete cube model
+ */
+function main(_, params) {
+  // Merge default parameters with provided ones
+  const p = { ...defaultParams, ...params };
+  
+  // Create base cube shape
+  let shape = sketchRectangle(p.length, p.length)
+    .extrude(p.length)
     .fillet({
-      radius: filletRadius,
+      radius: p.filletRadius,
       filter: new EdgeFinder(),
-    })
+    });
 
   return shape;
-};
+}
 `;
 
-export const birdhouseCode = `// Birdhouse
-// source: https://github.com/Irev-Dev/curated-code-cad
-
+export const hollowBoxCode = `/**
+ * Parametric Box with Rounded Corners
+ * A customizable box with adjustable dimensions and corner radii.
+ */
 const defaultParams = {
-  height: 85.0,
-  width: 120.0,
-  thickness: 2.0,
-  holeDiameter: 50.0,
-  hookHeight: 10.0,
-  filletEdges: true,
+  width: 100,     // Width of the box in mm
+  length: 150,    // Length of the box in mm
+  height: 50,     // Height of the box in mm
+  thickness: 2,   // Wall thickness in mm
+  cornerRadius: 5, // Radius for rounded corners
+};
+
+const { drawRoundedRectangle } = replicad;
+
+/**
+ * Creates a parametric box with rounded corners
+ * @param _ Unused parameter (required by replicad)
+ * @param params Custom parameters to override defaults
+ * @returns The complete box model
+ */
+function main(_, params) {
+  // Merge default parameters with provided ones
+  const p = { ...defaultParams, ...params };
+  
+  // Create outer shape
+  const outer = drawRoundedRectangle(p.width, p.length, p.cornerRadius)
+    .sketchOnPlane()
+    .extrude(p.height);
+  
+  // Hollow out the box using the shell function
+  const hollowBox = outer.shell(p.thickness, (f) => f.inPlane("XY", p.height));
+
+  return hollowBox;
+}
+`;
+
+export const birdhouseCode = `/**
+ * Parametric Birdhouse
+ * A customizable birdhouse with adjustable dimensions and features.
+ */
+const defaultParams = {
+  height: 85.0, // Overall height of the birdhouse
+  width: 120.0, // Width of the birdhouse
+  thickness: 2.0, // Wall thickness
+  holeDiameter: 50.0, // Diameter of entrance hole
+  hookHeight: 10.0, // Height of the hanging hook
+  filletEdges: true, // Whether to add rounded edges
 };
 
 const { drawCircle, draw, makePlane } = replicad;
 
-function main(
-  r,
-  { width: inputWidth, height, thickness, holeDiameter, hookHeight, filletEdges }
-) {
-  const length = inputWidth;
-  const width = inputWidth * 0.9;
+/**
+ * Creates a parametric birdhouse with a triangular prism shape
+ * @param _ - Unused parameter
+ * @param params - Custom parameters to override defaults
+ * @returns The complete birdhouse model
+ */
+function main(_, params) {
+  // Merge default parameters with provided ones
+  const p = { ...defaultParams, ...params };
+  const length = p.width;
+  const width = p.width * 0.9;
 
+  // Create triangular prism house shape
   let tobleroneShape = draw([-width / 2, 0])
-    .lineTo([0, height])
+    .lineTo([0, p.height])
     .lineTo([width / 2, 0])
     .close()
     .sketchOnPlane("XZ", -length / 2)
     .extrude(length)
-    .shell(thickness, (f) => f.parallelTo("XZ"));
+    .shell(p.thickness, (f) => f.parallelTo("XZ")); // Shell to create hollow interior
 
-  if (filletEdges) {
-    tobleroneShape = tobleroneShape.fillet(thickness / 2, (e) =>
+  // Add fillets to edges if requested
+  if (p.filletEdges) {
+    tobleroneShape = tobleroneShape.fillet(p.thickness / 2, (e) =>
       e
         .inDirection("Y")
-        .either([(f) => f.inPlane("XY"), (f) => f.inPlane("XY", height)])
+        .either([(f) => f.inPlane("XY"), (f) => f.inPlane("XY", p.height)])
     );
   }
 
-  const hole = drawCircle(holeDiameter / 2)
-    .sketchOnPlane(makePlane("YZ").translate([-length / 2, 0, height / 3]))
+  // Create entrance hole
+  const hole = drawCircle(p.holeDiameter / 2)
+    .sketchOnPlane(makePlane("YZ").translate([-length / 2, 0, p.height / 3]))
     .extrude(length);
 
+  // Cut hole from house
   const base = tobleroneShape.cut(hole);
+  // Create complete body by duplicating and rotating
   const body = base.clone().fuse(base.rotate(90));
 
+  // Create hook for hanging
   const hookWidth = length / 2;
-  const hook = draw([0, hookHeight / 2])
-    .smoothSplineTo([hookHeight / 2, 0], -45)
+  const hook = draw([0, p.hookHeight / 2])
+    .smoothSplineTo([p.hookHeight / 2, 0], -45)
     .lineTo([hookWidth / 2, 0])
-    .line(-hookWidth / 4, hookHeight / 2)
-    .smoothSplineTo([0, hookHeight], {
+    .line(-hookWidth / 4, p.hookHeight / 2)
+    .smoothSplineTo([0, p.hookHeight], {
       endTangent: 180,
       endFactor: 0.6,
     })
     .closeWithMirror()
     .sketchOnPlane("XZ")
-    .extrude(thickness)
-    .translate([0, thickness / 2, height - thickness / 2]);
+    .extrude(p.thickness)
+    .translate([0, p.thickness / 2, p.height - p.thickness / 2]);
 
   return body.fuse(hook);
 }
@@ -311,45 +373,82 @@ const main = (
 };
 `;
 
-export const cycloidalGear = `const { drawCircle, drawParametricFunction } = replicad;
-
+export const cycloidalGear = `/**
+ * Parametric Cycloidal Gear
+ * A customizable gear using hypocycloid and epicycloid curves.
+ */
 const defaultParams = {
-  height: 40,
-  r1: 12,
-  r2: 1,
-  circleDiameter: 2,
-  twistAngle: 90,
+  height: 40, // Height of the gear
+  r1: 12, // Primary radius
+  r2: 1, // Secondary radius
+  circleDiameter: 2, // Diameter of the center hole
+  twistAngle: 90, // Angle of twist for extrusion
 };
 
-const hypocycloid = (t, r1, r2) => {
+const { drawCircle, drawParametricFunction } = replicad;
+
+/**
+ * Creates a hypocycloid curve
+ * @param t - Parameter value (angle)
+ * @param r1 - Radius of fixed circle
+ * @param r2 - Radius of rolling circle
+ * @returns Coordinates [x, y] of point on curve
+ */
+function hypocycloid(t, r1, r2) {
   return [
     (r1 - r2) * Math.cos(t) + r2 * Math.cos((r1 / r2) * t - t),
     (r1 - r2) * Math.sin(t) + r2 * Math.sin(-((r1 / r2) * t - t)),
   ];
-};
+}
 
-const epicycloid = (t, r1, r2) => {
+/**
+ * Creates an epicycloid curve
+ * @param t - Parameter value (angle)
+ * @param r1 - Radius of fixed circle
+ * @param r2 - Radius of rolling circle
+ * @returns Coordinates [x, y] of point on curve
+ */
+function epicycloid(t, r1, r2) {
   return [
     (r1 + r2) * Math.cos(t) - r2 * Math.cos((r1 / r2) * t + t),
     (r1 + r2) * Math.sin(t) - r2 * Math.sin((r1 / r2) * t + t),
   ];
-};
+}
 
-const gear = (t, r1 = defaultParams.r1, r2 = defaultParams.r2) => {
+/**
+ * Creates a combined gear profile using both curves
+ * @param t - Parameter value (angle)
+ * @param r1 - Primary radius
+ * @param r2 - Secondary radius
+ * @returns Coordinates [x, y] of point on curve
+ */
+function gear(t, r1 = defaultParams.r1, r2 = defaultParams.r2) {
   if ((-1) ** (1 + Math.floor((t / 2 / Math.PI) * (r1 / r2))) < 0)
     return epicycloid(t, r1, r2);
   else return hypocycloid(t, r1, r2);
-};
+}
 
-const main = (r, { height, r1, r2, twistAngle, circleDiameter }) => {
-  const base = drawParametricFunction((t) => gear(2 * Math.PI * t, r1, r2))
+/**
+ * Creates a cycloidal gear with customizable parameters
+ * @param _ - Unused parameter
+ * @param params - Custom parameters to override defaults
+ * @returns The complete gear model
+ */
+function main(_, params) {
+  // Merge default parameters with provided ones
+  const p = { ...defaultParams, ...params };
+  
+  // Create gear using parametric function
+  const base = drawParametricFunction((t) => gear(2 * Math.PI * t, p.r1, p.r2))
     .sketchOnPlane()
-    .extrude(height, { twistAngle: twistAngle });
+    .extrude(p.height, { twistAngle: p.twistAngle });
 
-  const hole = drawCircle(circleDiameter).sketchOnPlane().extrude(height);
+  // Create center hole
+  const hole = drawCircle(p.circleDiameter).sketchOnPlane().extrude(p.height);
 
+  // Cut hole from gear
   return base.cut(hole);
-};
+}
 `;
 
 export const bottle = `const defaultParams = {
@@ -411,7 +510,24 @@ const main = (
 };
 `;
 
-export const gridfinityBox = `const {
+export const gridfinityBox = `/**
+ * Parametric Gridfinity Box
+ * A customizable storage box compatible with the Gridfinity system.
+ */
+const defaultParams = {
+  xSize: 2, // Width in Gridfinity units
+  ySize: 1, // Length in Gridfinity units
+  height: 0.5, // Height in Gridfinity units
+  withMagnet: false, // Include magnet holes
+  withScrew: false, // Include screw holes
+  magnetRadius: 3.25, // Radius of magnet holes
+  magnetHeight: 2, // Depth of magnet holes
+  screwRadius: 1.5, // Radius of screw holes
+  keepFull: false, // Whether to keep box solid or hollow
+  wallThickness: 1.2, // Wall thickness
+};
+
+const {
   draw,
   drawRoundedRectangle,
   drawCircle,
@@ -420,19 +536,6 @@ export const gridfinityBox = `const {
   makeFace,
   EdgeFinder,
 } = replicad;
-
-const defaultParams = {
-  xSize: 2,
-  ySize: 1,
-  height: 0.5,
-  withMagnet: false,
-  withScrew: false,
-  magnetRadius: 3.25,
-  magnetHeight: 2,
-  screwRadius: 1.5,
-  keepFull: false,
-  wallThickness: 1.2,
-};
 
 // Gridfinity magic numbers
 const SIZE = 42.0;
@@ -449,7 +552,13 @@ const SOCKET_VERTICAL_PART =
   SOCKET_HEIGHT - SOCKET_SMALL_TAPER - SOCKET_BIG_TAPER;
 const SOCKET_TAPER_WIDTH = SOCKET_SMALL_TAPER + SOCKET_BIG_TAPER;
 
-const socketProfile = (_, startPoint) => {
+/**
+ * Creates a socket profile for the Gridfinity base
+ * @param _ - Unused parameter
+ * @param startPoint - Start position for the profile
+ * @returns The socket profile sketch
+ */
+function socketProfile(_, startPoint) {
   const full = draw([-CLEARANCE / 2, 0])
     .vLine(-CLEARANCE / 2)
     .lineTo([-SOCKET_BIG_TAPER, -SOCKET_BIG_TAPER])
@@ -459,15 +568,20 @@ const socketProfile = (_, startPoint) => {
     .translate(CLEARANCE / 2, 0);
 
   return full.sketchOnPlane("XZ", startPoint);
-};
+}
 
-const buildSocket = ({
+/**
+ * Creates a socket for the Gridfinity base
+ * @param options - Socket construction options
+ * @returns The socket solid
+ */
+function buildSocket({
   magnetRadius = 3.25,
   magnetHeight = 2,
   screwRadius = 1.5,
   withScrew = true,
   withMagnet = true,
-} = {}) => {
+} = {}) {
   const baseSocket = drawRoundedRectangle(
     SIZE - CLEARANCE,
     SIZE - CLEARANCE,
@@ -509,13 +623,27 @@ const buildSocket = ({
   }
 
   return slot;
-};
+}
 
-const range = (i) => [...Array(i).keys()];
-const cloneOnGrid = (
+/**
+ * Creates an array with sequential numbers
+ * @param i - Number of elements
+ * @returns Array of sequential numbers
+ */
+function range(i) {
+  return [...Array(i).keys()];
+}
+
+/**
+ * Clones a shape in a grid pattern
+ * @param shape - Shape to clone
+ * @param options - Grid configuration options
+ * @returns Array of cloned shapes with translations
+ */
+function cloneOnGrid(
   shape,
   { xSteps = 1, ySteps = 1, span = 10, xSpan = null, ySpan = null }
-) => {
+) {
   const xCorr = ((xSteps - 1) * (xSpan || span)) / 2;
   const yCorr = ((ySteps - 1) * (ySpan || xSpan || span)) / 2;
 
@@ -525,14 +653,19 @@ const cloneOnGrid = (
   return translations.map((translation) =>
     shape.clone().translate(translation)
   );
-};
+}
 
-const buildTopShape = ({
+/**
+ * Creates the top shape for the Gridfinity box
+ * @param options - Top shape configuration options
+ * @returns The top shape solid
+ */
+function buildTopShape({
   xSize,
   ySize,
   includeLip = true,
   wallThickness = 1.2,
-}) => {
+}) {
   const topShape = (basePlane, startPosition) => {
     const sketcher = draw([-SOCKET_TAPER_WIDTH, 0])
       .line(SOCKET_SMALL_TAPER, SOCKET_SMALL_TAPER)
@@ -584,53 +717,49 @@ const buildTopShape = ({
         [xSize * SIZE, ySize * SIZE, SOCKET_HEIGHT - 1]
       )
     );
-};
+}
 
-function main(
-  r,
-  {
-    xSize = 2,
-    ySize = 1,
-    height = 0.5,
-    keepFull = false,
-    wallThickness = 1.2,
-    withMagnet = false,
-    withScrew = false,
-    magnetRadius = 3.25,
-    magnetHeight = 2,
-    screwRadius = 1.5,
-  } = {}
-) {
-  const stdHeight = height * SIZE;
+/**
+ * Creates a Gridfinity-compatible storage box with customizable parameters
+ * @param _ - Unused parameter
+ * @param params - Custom parameters to override defaults
+ * @returns The complete Gridfinity box model
+ */
+function main(_, params) {
+  // Merge default parameters with provided ones
+  const p = { ...defaultParams, ...params };
+  
+  const stdHeight = p.height * SIZE;
 
   let box = drawRoundedRectangle(
-    xSize * SIZE - CLEARANCE,
-    ySize * SIZE - CLEARANCE,
+    p.xSize * SIZE - CLEARANCE,
+    p.ySize * SIZE - CLEARANCE,
     CORNER_RADIUS
   )
     .sketchOnPlane()
     .extrude(stdHeight);
 
-  if (!keepFull) {
-    box = box.shell(wallThickness, (f) => f.inPlane("XY", stdHeight));
+  if (!p.keepFull) {
+    box = box.shell(p.wallThickness, (f) => f.inPlane("XY", stdHeight));
   }
 
   const top = buildTopShape({
-    xSize,
-    ySize,
-    includeLip: !keepFull,
+    xSize: p.xSize,
+    ySize: p.ySize,
+    includeLip: !p.keepFull,
+    wallThickness: p.wallThickness,
   }).translateZ(stdHeight);
 
   const socket = buildSocket({
-    withMagnet,
-    withScrew,
-    magnetRadius,
-    magnetHeight,
-    screwRadius,
+    withMagnet: p.withMagnet,
+    withScrew: p.withScrew,
+    magnetRadius: p.magnetRadius,
+    magnetHeight: p.magnetHeight,
+    screwRadius: p.screwRadius,
   });
 
   let base = null;
-  cloneOnGrid(socket, { xSteps: xSize, ySteps: ySize, span: SIZE }).forEach(
+  cloneOnGrid(socket, { xSteps: p.xSize, ySteps: p.ySize, span: SIZE }).forEach(
     (movedSocket) => {
       if (base) base = base.fuse(movedSocket, { optimisation: "commonFace" });
       else base = movedSocket;
@@ -639,7 +768,7 @@ function main(
   return base
     .fuse(box, { optimisation: "commonFace" })
     .fuse(top, { optimisation: "commonFace" });
-};
+}
 `;
 
 export const decoratedBox = `const { sketchRectangle, EdgeFinder, FaceFinder } = replicad;
@@ -757,43 +886,97 @@ const main = ({ Sketcher, sketchRectangle, sketchCircle, Plane, makeSphere,FaceF
 }
 `;
 
-export const staircaseCode = `// Parametric Staircase Model
+export const staircaseCode = `/**
+ * Parametric Staircase Model
+ * A customizable staircase with adjustable dimensions, stringers, handrails, and balusters.
+ */
 const { draw, drawRoundedRectangle, drawCircle } = replicad;
 
 const defaultParams = {
   // Main staircase dimensions
   totalHeight: 2700, // mm - typical floor-to-floor height
   totalRun: 3600,    // mm - horizontal length of staircase
-  width: 1200,        // mm - width of stairs
+  width: 1200,       // mm - width of stairs
   numSteps: 15,      // number of steps
   
   // Step customization
   stepThickness: 50, // mm - thickness of each step
   nosing: 25,        // mm - step overhang
-  roundedSteps: true,
+  roundedSteps: true, // whether to use rounded corners on steps
   cornerRadius: 10,  // mm - radius for rounded corners on steps
   
   // Stringer options
-  includeStringers: true,
-  stringerWidth: 50, // mm
-  stringerThickness: 25, // mm
+  includeStringers: true, // whether to include side stringers
+  stringerWidth: 50, // mm - width of stringer boards
+  stringerThickness: 25, // mm - thickness of stringer boards
   
   // Handrail options
-  includeHandrails: true,
+  includeHandrails: true, // whether to include handrails
   handrailHeight: 900, // mm - height from step to top of handrail
-  handrailDiameter: 60, // mm
-  balusters: true,
-  balusterSpacing: 200, // mm
-  balusterDiameter: 20, // mm
+  handrailDiameter: 60, // mm - diameter of handrail
+  balusters: true, // whether to include vertical balusters
+  balusterSpacing: 200, // mm - spacing between balusters
+  balusterDiameter: 20, // mm - diameter of balusters
 };
 
 /**
+ * Creates a single baluster at the specified position
+ * @param x X coordinate of baluster
+ * @param y Y coordinate of baluster
+ * @param z Z coordinate of baluster
+ * @param p Parameters object containing dimensions
+ * @returns The baluster 3D shape
+ */
+function createBaluster(x, y, z, p) {
+  return drawCircle(p.balusterDiameter / 2)
+    .sketchOnPlane("XY")
+    .extrude(p.handrailHeight)
+    .translate([x, y, z]);
+}
+
+/**
+ * Creates a handrail segment between two points
+ * @param x1 Start X coordinate
+ * @param y1 Start Y coordinate
+ * @param z1 Start Z coordinate
+ * @param x2 End X coordinate
+ * @param y2 End Y coordinate
+ * @param z2 End Z coordinate
+ * @param p Parameters object containing dimensions
+ * @returns The handrail segment 3D shape
+ */
+function createHandrailSegment(x1, y1, z1, x2, y2, z2, p) {
+  // Calculate segment length and angles
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const dz = z2 - z1;
+  const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  
+  // Create basic cylinder
+  const segment = drawCircle(p.handrailDiameter / 2)
+    .sketchOnPlane("XY")
+    .extrude(length);
+  
+  // If the segment is perfectly vertical, no rotation needed
+  if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
+    return segment.translate([x1, y1, z1]);
+  }
+  
+  // Otherwise we need to rotate to align with the segment direction
+  const angleX = 90 - Math.atan2(dz, Math.sqrt(dx * dx + dy * dy)) * (180 / Math.PI);
+  
+  return segment
+    .rotate(angleX, [0, 1, 0], [0, 1, 0]) // Rotate around Y axis for X-Z angle
+    .translate([x1, y1, z1]); // Move to start position
+}
+
+/**
  * Creates a parametric staircase model
- * @param r Replicad environment
- * @param params Staircase parameters
+ * @param _ Unused parameter (required by replicad)
+ * @param params Custom parameters to override defaults
  * @returns The complete staircase model
  */
-function main(r, params = {}) {
+function main(_, params) {
   // Merge default parameters with provided ones
   const p = { ...defaultParams, ...params };
   
@@ -894,44 +1077,6 @@ function main(r, params = {}) {
   if (p.includeHandrails) {
     // Create handrails on both sides
     
-    // Helper function to create a single baluster
-    const createBaluster = (x, y, z) => {
-      return drawCircle(p.balusterDiameter / 2)
-        .sketchOnPlane("XY")
-        .extrude(p.handrailHeight)
-        .translate([x, y, z]);
-    };
-    
-    // Helper function to create a handrail segment
-    const createHandrailSegment = (x1, y1, z1, x2, y2, z2) => {
-      // Create a cylinder between two points
-      // We'll approximate this with an extruded circle along the Z axis,
-      // then rotate and position it correctly
-      
-      // Calculate segment length and angles
-      const dx = x2 - x1;
-      const dy = y2 - y1;
-      const dz = z2 - z1;
-      const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      
-      // Create basic cylinder
-      const segment = drawCircle(p.handrailDiameter / 2)
-        .sketchOnPlane("XY")
-        .extrude(length);
-      
-      // If the segment is perfectly vertical, no rotation needed
-      if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
-        return segment.translate([x1, y1, z1]);
-      }
-      
-      // Otherwise we need to rotate to align with the segment direction
-      const angleX = 90 - Math.atan2(dz, Math.sqrt(dx * dx + dy * dy)) * (180 / Math.PI);
-      
-      return segment
-        .rotate(angleX, [0, 1, 0], [0, 1, 0]) // Rotate around Y axis for X-Z angle
-        .translate([x1, y1, z1]); // Move to start position
-    };
-    
     // Create left and right handrails
     let leftHandrail = null;
     let rightHandrail = null;
@@ -950,12 +1095,14 @@ function main(r, params = {}) {
       // Create handrail segments with proper height offset
       const leftSegment = createHandrailSegment(
         x1, leftY, z1 + p.handrailHeight,
-        x2, leftY, z2 + p.handrailHeight
+        x2, leftY, z2 + p.handrailHeight,
+        p
       );
       
       const rightSegment = createHandrailSegment(
         x1, rightY, z1 + p.handrailHeight,
-        x2, rightY, z2 + p.handrailHeight
+        x2, rightY, z2 + p.handrailHeight,
+        p
       );
       
       // Add segments to respective handrails
@@ -974,8 +1121,8 @@ function main(r, params = {}) {
       // Add balusters if requested
       if (p.balusters) {
         // Place balusters at start of each step
-        const leftBaluster = createBaluster(x1, leftY, z1);
-        const rightBaluster = createBaluster(x1, rightY, z1);
+        const leftBaluster = createBaluster(x1, leftY, z1, p);
+        const rightBaluster = createBaluster(x1, rightY, z1, p);
         
         staircase = staircase.fuse(leftBaluster).fuse(rightBaluster);
         
@@ -987,8 +1134,8 @@ function main(r, params = {}) {
             const balusterX = x1 + (j * stepRun) / (numIntermediateBalusters + 1);
             const balusterZ = z1 + (j * stepRise) / (numIntermediateBalusters + 1);
             
-            const intermediateLeftBaluster = createBaluster(balusterX, leftY, balusterZ);
-            const intermediateRightBaluster = createBaluster(balusterX, rightY, balusterZ);
+            const intermediateLeftBaluster = createBaluster(balusterX, leftY, balusterZ, p);
+            const intermediateRightBaluster = createBaluster(balusterX, rightY, balusterZ, p);
             
             staircase = staircase
               .fuse(intermediateLeftBaluster)
@@ -1000,8 +1147,8 @@ function main(r, params = {}) {
     
     // Add final balusters at the top
     if (p.balusters) {
-      const topLeftBaluster = createBaluster(p.totalRun, leftY, p.totalHeight);
-      const topRightBaluster = createBaluster(p.totalRun, rightY, p.totalHeight);
+      const topLeftBaluster = createBaluster(p.totalRun, leftY, p.totalHeight, p);
+      const topRightBaluster = createBaluster(p.totalRun, rightY, p.totalHeight, p);
       staircase = staircase.fuse(topLeftBaluster).fuse(topRightBaluster);
     }
     
@@ -1010,7 +1157,8 @@ function main(r, params = {}) {
   }
   
   return staircase;
-}`;
+}
+`;
 
 const tableCode = `/**
  * Parametric Table
@@ -1620,11 +1768,118 @@ function main(_, params) {
 }
 `;
 
+const chairCode = `/**
+ * Parametric Chair Model
+ * A customizable chair with adjustable dimensions.
+ */
+const { drawRectangle, drawCircle, EdgeFinder } = replicad;
+
+const defaultParams = {
+  // Overall dimensions
+  seatWidth: 450,    // mm - Width of the seat
+  seatDepth: 420,    // mm - Depth of the seat
+  seatHeight: 460,   // mm - Height from floor to top of seat
+
+  // Component thicknesses
+  seatThickness: 20, // mm - Thickness of the seat plate
+  legThickness: 40,  // mm - Thickness of the square legs
+  backrestHeight: 500, // mm - Height of the backrest from the seat
+  backrestThickness: 20, // mm - Thickness of the backrest
+
+  // Design details
+  backrestAngle: 10, // degrees - Angle of the backrest from vertical (positive leans back)
+  filletRadius: 5,   // mm - Radius for filleting edges (0 for sharp edges)
+};
+
+/**
+ * Creates a parametric chair model
+ * @param _ Unused parameter (required by replicad)
+ * @param params Custom parameters to override defaults
+ * @returns The complete chair model
+ */
+function main(_, params) {
+  // Merge default parameters with provided ones
+  const p = { ...defaultParams, ...params };
+
+  // --- Create Seat ---
+  const seat = drawRectangle(p.seatWidth, p.seatDepth)
+    .sketchOnPlane("XY")
+    .extrude(p.seatThickness)
+    .translateZ(p.seatHeight - p.seatThickness); // Position seat top at seatHeight
+
+  // --- Create Legs ---
+  const legProfile = drawRectangle(p.legThickness, p.legThickness).sketchOnPlane("XY");
+  const legHeight = p.seatHeight - p.seatThickness;
+  const singleLeg = legProfile.extrude(legHeight);
+
+  // Calculate leg positions relative to seat center
+  const legOffsetX = p.seatWidth / 2 - p.legThickness / 2;
+  const legOffsetY = p.seatDepth / 2 - p.legThickness / 2;
+
+  // Create four legs by cloning and translating
+  const legFL = singleLeg.clone().translate([-legOffsetX, legOffsetY, 0]); // Front Left
+  const legFR = singleLeg.clone().translate([legOffsetX, legOffsetY, 0]);  // Front Right
+  const legBL = singleLeg.clone().translate([-legOffsetX, -legOffsetY, 0]); // Back Left
+  const legBR = singleLeg.clone().translate([legOffsetX, -legOffsetY, 0]); // Back Right
+
+  // --- Create Backrest ---
+  const angleRadians = p.backrestAngle * Math.PI / 180;
+  const zOffset = p.backrestThickness * Math.sin(angleRadians);
+  // Create backrest vertically first, starting at the seat top
+  const backrestStartZ = p.seatHeight + p.backrestHeight/2 - zOffset-5;
+  let backrest  = drawRectangle(p.seatWidth, p.backrestHeight)
+    .sketchOnPlane("XZ") // Sketch in XZ plane for vertical orientation
+    .extrude(p.backrestThickness)
+    // Position it at the back edge of the seat, centered, thickness protruding backwards
+    // The Z position is exactly at the seat height (top of seat)
+    .translate([0, -p.seatDepth / 2 + p.backrestThickness, backrestStartZ]); 
+
+  // Apply backrest angle if specified
+  if (p.backrestAngle !== 0) {
+    // Rotation axis is along the bottom edge of the backrest at the seat height
+    const rotationAxisOrigin = [0, -p.seatDepth / 2, p.seatHeight];
+    const rotationAxisDirection = [1, 0, 0]; // Rotate around X-axis
+    backrest = backrest.rotate(p.backrestAngle, rotationAxisOrigin, rotationAxisDirection);
+  }
+
+  // --- Assemble Chair ---
+  let chair = seat
+    .fuse(legFL)
+    .fuse(legFR)
+    .fuse(legBL)
+    .fuse(legBR)
+    .fuse(backrest);
+
+  // --- Apply Fillets (Optional) ---
+  if (p.filletRadius > 0) {
+    // Example: Fillet top edges of the seat and front/top edges of backrest
+    // More specific filtering might be needed for a production model
+    try {
+       chair = chair.fillet(p.filletRadius, (e) => e
+         .either([
+           (f) => f.inPlane("XY", p.seatHeight), // Top surface edges of seat
+           (f) => f.containsPoint([0, -p.seatDepth / 2, p.seatHeight + p.backrestHeight * 0.9]) // Edges near top of backrest
+         ])
+       );
+    } catch (error) {
+        console.warn("Filleting failed, returning shape without fillets:", error);
+    }
+  }
+
+  return chair;
+}
+`;
+
 export const mockModels = [
   {
     id: 'bld_birdhouse',
     name: 'Birdhouse',
     code: birdhouseCode,
+  },
+  {
+    id: 'bld_hollow-box',
+    name: 'Hollow Box',
+    code: hollowBoxCode,
   },
   {
     id: 'bld_tray',
@@ -1690,5 +1945,10 @@ export const mockModels = [
     id: 'bld_hex-screwdriver',
     name: 'Hex Screwdriver',
     code: hexScrewdriverCode,
+  },
+  {
+    id: 'bld_chair',
+    name: 'Chair',
+    code: chairCode,
   },
 ] satisfies Model[];

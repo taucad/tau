@@ -1,11 +1,11 @@
-import type { ComponentPropsWithoutRef } from 'react';
+import type { ComponentPropsWithoutRef, JSX } from 'react';
 import { cn } from '@/utils/ui.js';
 
 export type AnimatedShinyTextProps = {
   readonly shimmerWidth?: number;
 } & ComponentPropsWithoutRef<'span'>;
 
-export function AnimatedShinyText({ children, className, ...props }: AnimatedShinyTextProps) {
+export function AnimatedShinyText({ children, className, ...props }: AnimatedShinyTextProps): JSX.Element {
   return (
     <span
       className={cn(

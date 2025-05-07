@@ -64,7 +64,7 @@ function BuildNameEditor() {
   return (
     <Popover open={isEditing} onOpenChange={setIsEditing}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" className="justify-start p-2">
+        <Button variant="ghost" className="cursor-text justify-start p-2">
           <span
             data-animate={displayName.length > 0 && !(!name || name === build?.name || isEditing)}
             className="data-[animate=true]:animate-typewriter-20"

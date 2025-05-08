@@ -344,7 +344,7 @@ export const ChatTextarea = memo(function ({
           className={buttonVariants({
             variant: 'outline',
             size: 'sm',
-            class: 'w-min justify-start rounded-full border',
+            class: 'group w-min justify-start rounded-full border',
           })}
           models={models}
           renderButtonContents={(item) => (

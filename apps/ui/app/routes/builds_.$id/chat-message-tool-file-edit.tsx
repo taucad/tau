@@ -77,9 +77,8 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
             >
               <CodeViewer language="typescript">{content}</CodeViewer>
               <Button
-                variant="ghost"
                 size="xs"
-                className="sticky bottom-0 h-4 w-full rounded-none bg-neutral/20 text-center text-foreground/50 hover:bg-neutral"
+                className="sticky bottom-0 h-4 w-full rounded-none bg-neutral/10 text-center text-foreground/50 hover:bg-neutral/40"
                 onClick={() => {
                   setIsExpanded((previous) => !previous);
                 }}

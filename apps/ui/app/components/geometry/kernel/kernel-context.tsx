@@ -223,20 +223,6 @@ export function KernelProvider({
     [buildShapesFromCode, extractDefaultParametersFromCode, exportShape, terminateWorker, withExceptions],
   );
 
-  // Eagerly initialize the worker on mount
-  useEffect(() => {
-    // We intentionally do not await here because useEffect cannot be async.
-    // This ensures the worker is initialized as soon as possible.
-    (async () => {
-      try {
-        await getOrInitWorker();
-      } catch (error: unknown) {
-        console.error('KernelProvider: Failed to eagerly initialize worker', error);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- getOrInitWorker is stable and safe to omit
-  }, []);
-
   return <KernelContext.Provider value={contextValue}>{children}</KernelContext.Provider>;
 }
 

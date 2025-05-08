@@ -1,6 +1,6 @@
-import type { BaseMessageLike } from '@langchain/core/messages';
+import type { BaseMessageLike, MessageContentComplex } from '@langchain/core/messages';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
-import type { CoreMessage, Message } from 'ai';
+import type { CoreMessage, Message, ToolCallPart } from 'ai';
 
 /**
  * Convert a list of UI messages to a list of Langchain messages.
@@ -58,15 +58,45 @@ export const convertAiSdkMessagesToLangchainMessages: (
 
     // Handle tool messages which contain array `content`, the `content` must instead be a string.
     if (coreMessage.role === 'tool') {
-      return coreMessage.content.map(
-        (part) =>
-          new ToolMessage({
-            content: JSON.stringify(part.result),
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
-            tool_call_id: part.toolCallId,
-            name: part.toolName,
-          }),
-      );
+      return coreMessage.content.map((part) => {
+        const matchingAssistantToolMessage = coreMessages.find(
+          (message) =>
+            message.role === 'assistant' &&
+            Array.isArray(message.content) &&
+            message.content.find((content) => content.type === 'tool-call' && content.toolCallId === part.toolCallId),
+        );
+        const matchingToolCall = Array.isArray(matchingAssistantToolMessage?.content)
+          ? matchingAssistantToolMessage?.content.find(
+              (content) => content.type === 'tool-call' && content.toolCallId === part.toolCallId,
+            )
+          : null;
+        if (!matchingToolCall) {
+          throw new Error('Matching tool call not found');
+        }
+
+        // TODO: Langchain is buggy when dealing with tool calls and corresponding tool results.
+        // For now we are just converting to an AI Message to workaround that.
+        // new ToolMessage({
+        //   content: JSON.stringify(part.result),
+        //   // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
+        //   tool_call_id: part.toolCallId,
+        //   name: part.toolName,
+        // }),
+        return new AIMessage({
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                type: 'tool',
+                toolCallName: part.toolName,
+                toolCallId: part.toolCallId,
+                toolCallResult: part.result,
+                args: (matchingToolCall as ToolCallPart).args,
+              }),
+            },
+          ],
+        });
+      });
     }
 
     // Lastly, handle assistant messages.
@@ -75,70 +105,87 @@ export const convertAiSdkMessagesToLangchainMessages: (
         throw new TypeError('Core message content is not an array');
       }
 
-      // Langchain handles tool calls on a separate property.
-      const toolCalls = coreMessage.content.filter((part) => part.type === 'tool-call');
+      const content = coreMessage.content.flatMap<MessageContentComplex>((part) => {
+        if (part.type === 'text') {
+          return [
+            {
+              type: 'text',
+              text: part.text,
+              ...part.providerOptions,
+            },
+          ];
+        }
+
+        if (part.type === 'reasoning') {
+          // Many LLMs do not support a `thinking` type, but we still want to preserve the previous thinking for better context.
+          // For simplicity, we wrap it in a <thinking> tag instead and use the `text` type.
+          return [
+            {
+              type: 'text',
+              text: `<thinking>${part.text}</thinking>`,
+              ...part.providerOptions,
+            },
+          ];
+        }
+
+        if (part.type === 'redacted-reasoning') {
+          // Similar to the `reasoning type`, redacted reasoning is not supported by many LLMs.
+          // To preserve the previous thinking for better context, we wrap it in a <redacted-thinking> tag instead and use the `text` type.
+          return [
+            {
+              type: 'text',
+              text: `<redacted-thinking>${part.data}</redacted-thinking>`,
+              ...part.providerOptions,
+            },
+          ];
+        }
+
+        if (part.type === 'file') {
+          return [
+            {
+              type: 'document',
+              source: part.data,
+              ...part.providerOptions,
+            },
+          ];
+        }
+
+        // TODO: Langchain is buggy when dealing with tool calls and corresponding tool results.
+        // For now we are just converting to an AI Message to workaround that.
+        // if (part.type === 'tool-call') {
+        //   return {
+        //     type: 'tool_use',
+        //     name: part.toolName,
+        //     id: part.toolCallId,
+        //     input: JSON.stringify(part.args),
+        //   };
+        // }
+        if (part.type === 'tool-call') {
+          return [];
+        }
+
+        const exhaustiveCheck: never = part;
+        throw new Error(`Unknown part type: ${String(exhaustiveCheck)}`);
+      });
+
+      if (content.length === 0) {
+        return [];
+      }
 
       return [
         new AIMessage({
           // Tool calls need to be handled on a separate property alongside the content.
           // This is a necessary duplication of data as required by Langchain.
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
-          tool_calls: toolCalls.flatMap((part) => ({
-            name: part.toolName,
+          // TODO: Langchain is buggy when dealing with tool calls and corresponding tool results.
+          // For now we are just converting to an AI Message to workaround that.
+          // tool_calls: toolCalls.flatMap((part) => ({
+          //   name: part.toolName,
 
-            args: part.args as Record<string, unknown>,
-            id: part.toolCallId,
-            type: 'tool_call',
-          })),
-          content: coreMessage.content.map((part) => {
-            if (part.type === 'text') {
-              return {
-                type: 'text',
-                text: part.text,
-                ...part.providerOptions,
-              };
-            }
-
-            if (part.type === 'reasoning') {
-              // Many LLMs do not support a `thinking` type, but we still want to preserve the previous thinking for better context.
-              // For simplicity, we wrap it in a <thinking> tag instead and use the `text` type.
-              return {
-                type: 'text',
-                text: `<thinking>${part.text}</thinking>`,
-                ...part.providerOptions,
-              };
-            }
-
-            if (part.type === 'redacted-reasoning') {
-              // Similar to the `reasoning type`, redacted reasoning is not supported by many LLMs.
-              // To preserve the previous thinking for better context, we wrap it in a <redacted-thinking> tag instead and use the `text` type.
-              return {
-                type: 'text',
-                text: `<redacted-thinking>${part.data}</redacted-thinking>`,
-                ...part.providerOptions,
-              };
-            }
-
-            if (part.type === 'file') {
-              return {
-                type: 'document',
-                source: part.data,
-                ...part.providerOptions,
-              };
-            }
-
-            if (part.type === 'tool-call') {
-              return {
-                type: 'tool_use',
-                name: part.toolName,
-                id: part.toolCallId,
-                input: JSON.stringify(part.args),
-              };
-            }
-
-            const exhaustiveCheck: never = part;
-            throw new Error(`Unknown part type: ${String(exhaustiveCheck)}`);
-          }),
+          //   args: part.args as Record<string, unknown>,
+          //   id: part.toolCallId,
+          //   type: 'tool_call',
+          // })),
+          content,
         }),
       ];
     }

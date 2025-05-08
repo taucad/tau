@@ -1,6 +1,7 @@
 import { expose } from 'comlink';
 import * as replicad from 'replicad';
-import type { OpenCascadeInstance } from 'replicad-opencascadejs/src/replicad_with_exceptions.js';
+import type { OpenCascadeInstance as OpenCascadeInstanceWithExceptions } from 'replicad-opencascadejs/src/replicad_with_exceptions.js';
+import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import { initOpenCascade, initOpenCascadeWithExceptions } from './init-open-cascade.js';
 import { StudioHelper } from './utils/studio-helper.js';
 import { runInContext, buildModuleEvaluator } from './vm.js';
@@ -10,9 +11,7 @@ import { renderOutput, ShapeStandardizer } from './utils/render-output.js';
 let replicadHasOc = false;
 
 // Make replicad available in the global scope.
-// Eslint overrides are permissible as replicad needs to be global for the vm to work.
-
-(globalThis as any).replicad = replicad;
+(globalThis as unknown as { replicad: typeof replicad }).replicad = replicad;
 
 /**
  * Run code in a VM with the OC context
@@ -20,7 +19,7 @@ let replicadHasOc = false;
  * @param context
  * @returns the result of the code
  */
-export function runInContextAsOc(code: string, context: Record<string, unknown> = {}): any {
+export function runInContextAsOc(code: string, context: Record<string, unknown> = {}): unknown {
   const editedText = `
 ${code}
 let dp = {}
@@ -33,7 +32,7 @@ return main(replicad, __inputParams || dp)
   return runInContext(editedText, context);
 }
 
-async function runAsFunction(code: string, parameters: Record<string, unknown>): Promise<any> {
+async function runAsFunction(code: string, parameters: Record<string, unknown>): Promise<unknown> {
   const oc = await OC;
   return runInContextAsOc(code, {
     oc,
@@ -42,7 +41,7 @@ async function runAsFunction(code: string, parameters: Record<string, unknown>):
   });
 }
 
-export async function runAsModule(code: string, parameters: Record<string, unknown>): Promise<any> {
+export async function runAsModule(code: string, parameters: Record<string, unknown>): Promise<unknown> {
   const startTime = performance.now();
   const module = await buildModuleEvaluator(code);
   const buildTime = performance.now();
@@ -58,7 +57,7 @@ export async function runAsModule(code: string, parameters: Record<string, unkno
   return result;
 }
 
-const runCode = async (code: string, parameters: Record<string, unknown>): Promise<any> => {
+const runCode = async (code: string, parameters: Record<string, unknown>): Promise<unknown> => {
   console.log('Starting runCode evaluation');
   const startTime = performance.now();
 
@@ -118,10 +117,10 @@ try {
   } catch {}
 };
 
-const shapesMemory: Record<string, Array<{ shape: any; name: string }>> = {};
+const shapesMemory: Record<string, Array<{ shape: unknown; name: string }>> = {};
 
 const ocVersions: {
-  withExceptions: Promise<OpenCascadeInstance> | undefined;
+  withExceptions: Promise<OpenCascadeInstanceWithExceptions> | undefined;
   single: Promise<OpenCascadeInstance> | undefined;
   current: 'single' | 'withExceptions';
 } = {
@@ -131,7 +130,8 @@ const ocVersions: {
 };
 
 // Initialize OC as a placeholder that will be set during initialization
-let OC: Promise<OpenCascadeInstance>;
+// eslint-disable-next-line @typescript-eslint/naming-convention -- FIXME
+let OC: Promise<OpenCascadeInstance> | undefined;
 
 let isInitializing = false;
 
@@ -201,7 +201,7 @@ async function toggleExceptions() {
   return ocVersions.current;
 }
 
-const formatException = (oc: any, error: any): { error: boolean; message: string; stack?: string } => {
+const formatException = (oc: unknown, error: unknown): { error: boolean; message: string; stack?: string } => {
   let message = 'error';
 
   if (typeof error === 'number') {
@@ -223,7 +223,7 @@ const formatException = (oc: any, error: any): { error: boolean; message: string
   };
 };
 
-const buildShapesFromCode = async (code: string, parameters: Record<string, unknown>): Promise<any> => {
+const buildShapesFromCode = async (code: string, parameters: Record<string, unknown>): Promise<unknown> => {
   const startTime = performance.now();
   console.log('building shapes from code');
 
@@ -286,7 +286,11 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
 
 const defaultExportMeshConfig = { tolerance: 0.01, angularTolerance: 30 };
 
-const buildBlob = (shape: any, fileType: string, meshConfig: { tolerance: number; angularTolerance: number }): Blob => {
+const buildBlob = (
+  shape: unknown,
+  fileType: string,
+  meshConfig: { tolerance: number; angularTolerance: number },
+): Blob => {
   if (fileType === 'stl') return shape.blobSTL(meshConfig);
   if (fileType === 'stl-binary') return shape.blobSTL({ ...meshConfig, binary: true });
   if (fileType === 'step') return shape.blobSTEP();
@@ -314,7 +318,7 @@ const exportShape = async (
   }));
 };
 
-const faceInfo = (subshapeIndex: number, faceIndex: number, shapeId = 'defaultShape'): any | undefined => {
+const faceInfo = (subshapeIndex: number, faceIndex: number, shapeId = 'defaultShape'): unknown | undefined => {
   const face = shapesMemory[shapeId]?.[subshapeIndex]?.shape.faces[faceIndex];
   if (!face) return undefined;
   return {
@@ -324,7 +328,7 @@ const faceInfo = (subshapeIndex: number, faceIndex: number, shapeId = 'defaultSh
   };
 };
 
-const edgeInfo = (subshapeIndex: number, edgeIndex: number, shapeId = 'defaultShape'): any | undefined => {
+const edgeInfo = (subshapeIndex: number, edgeIndex: number, shapeId = 'defaultShape'): unknown | undefined => {
   const edge = shapesMemory[shapeId]?.[subshapeIndex]?.shape.edges[edgeIndex];
   if (!edge) return undefined;
   return {

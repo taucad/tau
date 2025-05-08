@@ -27,8 +27,8 @@ function chunks<T>(array: T[], size: number): T[][] {
 }
 
 // Number of builds per KernelProvider (worker)
-// 3-4 is a good balance between parallelism and browser limits
-const buildsPerWorker = 3;
+// 5-6 is a good balance between parallelism and browser limits
+const buildsPerWorker = 6;
 
 // Placeholder for language icons
 const languageIcons: Record<CadKernelProvider, ComponentType<{ className?: string }>> = {

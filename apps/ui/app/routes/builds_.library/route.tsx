@@ -364,7 +364,7 @@ function BuildLibraryCard({ project, viewMode }: { readonly project: Build; read
                 event.preventDefault();
               }}
             >
-              <CadViewer mesh={mesh} className="bg-muted" zoomLevel={1.3} />
+              <CadViewer mesh={mesh} className="bg-muted" zoomLevel={1.8} />
             </div>
           ) : null}
           <Button

@@ -179,7 +179,7 @@ function ProjectCard({
         )}
         {replicadCode && showPreview ? (
           <div className="absolute inset-0">
-            <CadViewer mesh={mesh} className="bg-muted" zoomLevel={1.3} />
+            <CadViewer mesh={mesh} className="bg-muted" zoomLevel={1.8} />
           </div>
         ) : null}
         {replicadCode ? (

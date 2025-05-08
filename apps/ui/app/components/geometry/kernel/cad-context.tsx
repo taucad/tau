@@ -1,9 +1,6 @@
-import { wrap } from 'comlink';
-import type { Remote } from 'comlink';
 import type { JSX, ReactNode } from 'react';
-import { createContext, useContext, useReducer, useEffect, useRef, useMemo, useCallback } from 'react';
-import type { BuilderWorkerInterface } from './replicad/replicad-builder.worker';
-import BuilderWorker from './replicad/replicad-builder.worker?worker';
+import { createContext, useContext, useReducer, useEffect, useMemo, useCallback } from 'react';
+import { useKernel } from './kernel-context.js';
 import { debounce } from '@/utils/functions.js';
 import { useConsole } from '@/hooks/use-console.js';
 
@@ -38,90 +35,6 @@ const initialState: CadState = {
   isBuffering: false,
   mesh: undefined,
 };
-
-function useCadWorker() {
-  const { log } = useConsole({ defaultOrigin: { component: 'Cad' } });
-  const wrappedWorkerReference = useRef<Remote<BuilderWorkerInterface> | undefined>(undefined);
-  const workerReference = useRef<Worker | undefined>(undefined);
-  const workerInitializationId = useRef<number>(0);
-
-  const initWorker = useCallback(async (withExceptions = false) => {
-    const initId = ++workerInitializationId.current;
-    const startTime = performance.now();
-    log.debug(`Initializing worker (id: ${initId})`);
-
-    if (wrappedWorkerReference.current) {
-      const endTime = performance.now();
-      log.debug(`Using existing worker (id: ${initId}). Check took ${endTime - startTime}ms`);
-
-      try {
-        // Ensure the worker is still responsive with a ready check
-        const readyResult = await wrappedWorkerReference.current.ready();
-
-        if (readyResult) {
-          // Worker is responsive and ready
-          return wrappedWorkerReference.current;
-        }
-
-        // Worker ready check failed - terminate and recreate
-        log.debug('Worker responded but not ready, recreating worker');
-        terminateWorker();
-      } catch (error) {
-        // Worker is unresponsive or threw an error - terminate and recreate
-        log.debug('Worker unresponsive during ready check, recreating worker', {
-          data: error instanceof Error ? error.message : String(error),
-        });
-        terminateWorker();
-      }
-    }
-
-    // Create a new worker
-    log.debug('Creating new worker');
-    workerReference.current = new BuilderWorker();
-    wrappedWorkerReference.current = wrap<BuilderWorkerInterface>(workerReference.current);
-
-    try {
-      const readyStartTime = performance.now();
-
-      // Initialize with the specified exceptions mode
-      log.debug(`Initializing OpenCascade with ${withExceptions ? 'exceptions' : 'normal'} mode`);
-      await wrappedWorkerReference.current.initialize(withExceptions);
-
-      const endTime = performance.now();
-      log.debug(
-        `New worker ready (id: ${initId}). Initialization took ${endTime - startTime}ms, ready took ${endTime - readyStartTime}ms`,
-      );
-    } catch (error) {
-      log.error(`Worker initialization failed (id: ${initId})`, {
-        data: error instanceof Error ? error.message : String(error),
-      });
-      wrappedWorkerReference.current = undefined;
-      throw error;
-    }
-
-    return wrappedWorkerReference.current;
-  }, []);
-
-  const terminateWorker = useCallback(() => {
-    log.debug(`Terminating worker (id: ${workerInitializationId.current})`);
-
-    if (workerReference.current) {
-      try {
-        workerReference.current.terminate();
-        log.debug('Terminated worker');
-      } catch (error) {
-        log.error('Error terminating worker', {
-          data: error instanceof Error ? error.message : String(error),
-        });
-      } finally {
-        wrappedWorkerReference.current = undefined;
-        workerReference.current = undefined;
-      }
-    }
-  }, []);
-
-  return { initWorker, terminateWorker };
-}
 
 function cadReducer(state: CadState, action: CadAction): CadState {
   switch (action.type) {
@@ -162,73 +75,28 @@ type CadContextProperties = {
 
 const CadContext = createContext<CadContextProperties | undefined>(undefined);
 
-/**
- * Provider component for CAD functionality
- * @param children - React children
- * @param withExceptions - Whether to initialize OpenCascade with exceptions mode (default: false)
- * @param evaluateDebounceTime - The debounce time for the evaluation function (default: 0)
- */
 export function CadProvider({
   children,
-  withExceptions = false,
   evaluateDebounceTime = 0,
 }: {
   readonly children: ReactNode;
-  readonly withExceptions?: boolean;
   readonly evaluateDebounceTime?: number;
 }): JSX.Element {
   const [state, dispatch] = useReducer(cadReducer, initialState);
-  const { initWorker, terminateWorker } = useCadWorker();
+  const kernel = useKernel();
   const { log } = useConsole({ defaultOrigin: { component: 'CAD' } });
-  const workerInitializationPromise = useRef<Promise<Remote<BuilderWorkerInterface> | undefined> | undefined>(
-    undefined,
-  );
-
-  // Centralized worker initialization function to avoid multiple initializations
-  const getOrInitWorker = useCallback(async () => {
-    if (workerInitializationPromise.current) {
-      log.debug('Reusing existing worker initialization promise');
-
-      try {
-        return await workerInitializationPromise.current;
-      } catch (error) {
-        // Only reset if this exact promise failed
-        log.error('Existing worker initialization failed, creating new one', {
-          data: error instanceof Error ? error.message : String(error),
-        });
-        workerInitializationPromise.current = undefined;
-      }
-    }
-
-    log.debug('Creating new worker initialization promise');
-    const initPromise = initWorker(withExceptions);
-    workerInitializationPromise.current = initPromise;
-
-    try {
-      return await initPromise;
-    } catch (error) {
-      // Only reset if this exact promise failed
-      if (workerInitializationPromise.current === initPromise) {
-        workerInitializationPromise.current = undefined;
-      }
-
-      throw error;
-    }
-  }, [initWorker, withExceptions]);
 
   // Memoize the evaluation function
   const evaluateCode = useCallback(
     async (code: string, parameters: Record<string, unknown>) => {
       const evalStartTime = performance.now();
-      const worker = await getOrInitWorker();
-      const workerInitTime = performance.now();
-      log.debug(`Worker initialization took ${workerInitTime - evalStartTime}ms`);
+      log.debug(`Starting evaluation at ${evalStartTime}ms`);
 
-      if (!worker || !code) return;
+      if (!code) return;
 
       const loadDefaultParameters = async (code: string) => {
         try {
-          const defaultParameters = await worker.extractDefaultParametersFromCode(code);
+          const defaultParameters = await kernel.extractDefaultParametersFromCode(code);
           dispatch({ type: 'SET_DEFAULT_PARAMETERS', payload: defaultParameters });
           log.debug('Loaded default parameters', { data: defaultParameters });
 
@@ -247,7 +115,7 @@ export function CadProvider({
         log.debug('Building shape');
 
         const buildStartTime = performance.now();
-        const result = await worker.buildShapesFromCode(code, mergedParameters);
+        const result = await kernel.buildShapesFromCode(code, mergedParameters);
         const buildEndTime = performance.now();
         log.debug(`Shape building took ${buildEndTime - buildStartTime}ms`);
 
@@ -258,7 +126,7 @@ export function CadProvider({
         const firstShape = result[0];
         if (!firstShape || firstShape.error) {
           log.error('Failed to build shape', { data: firstShape?.error });
-          throw new Error(firstShape?.error || 'Failed to generate shape');
+          throw new Error(firstShape?.error ?? 'Failed to generate shape');
         }
 
         const processingStartTime = performance.now();
@@ -285,7 +153,7 @@ export function CadProvider({
         dispatch({ type: 'SET_STATUS', payload: { isComputing: false, isBuffering: false } });
       }
     },
-    [getOrInitWorker],
+    [kernel],
   );
 
   // Create stable debounced evaluation function
@@ -298,7 +166,7 @@ export function CadProvider({
 
         void evaluateCode(code, parameters);
       }, evaluateDebounceTime),
-    [evaluateCode],
+    [evaluateCode, evaluateDebounceTime],
   );
 
   // Effect to handle code/parameter changes
@@ -313,10 +181,9 @@ export function CadProvider({
   useEffect(() => {
     return () => {
       log.debug('Unmounting CadProvider, terminating worker');
-      workerInitializationPromise.current = undefined;
-      terminateWorker();
+      kernel.terminateWorker();
     };
-  }, [terminateWorker]);
+  }, [kernel]);
 
   const value = useMemo(
     () => ({
@@ -327,10 +194,12 @@ export function CadProvider({
         error: state.error,
       },
       async downloadStl() {
-        const worker = await getOrInitWorker();
-        if (!worker) throw new Error('Worker not found');
-        const result = await worker.exportShape('stl');
-        return result[0].blob;
+        const result = await kernel.exportShape('stl');
+        if (result && result.length > 0 && result[0].blob) {
+          return result[0].blob;
+        }
+
+        throw new Error('Failed to export STL file');
       },
       setCode(code: string) {
         dispatch({ type: 'SET_CODE', payload: code });
@@ -340,7 +209,7 @@ export function CadProvider({
       },
       defaultParameters: state.defaultParameters ?? {},
     }),
-    [state.mesh, state.isComputing, state.isBuffering, state.error, state.defaultParameters, getOrInitWorker],
+    [state.mesh, state.isComputing, state.isBuffering, state.error, state.defaultParameters, kernel],
   );
 
   return <CadContext.Provider value={value}>{children}</CadContext.Provider>;

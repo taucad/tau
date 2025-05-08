@@ -15,6 +15,7 @@ import { defaultBuildName } from '@/constants/build-constants.js';
 import type { Handle } from '@/types/matches.js';
 import { useChatConstants } from '@/contexts/use-chat.js';
 import { AiChatProvider, useAiChat } from '@/components/chat/ai-chat-provider.js';
+import { KernelProvider } from '@/components/geometry/kernel/kernel-context.js';
 
 function BuildNameEditor() {
   const { build, updateName, isLoading } = useBuild();
@@ -179,13 +180,15 @@ export default function ChatRoute(): JSX.Element {
   return (
     <LogProvider>
       <BuildProvider buildId={id}>
-        <CadProvider withExceptions evaluateDebounceTime={300}>
-          <AiChatProvider value={{ ...useChatConstants, id }}>
-            <div className="flex h-full">
-              <Chat />
-            </div>
-          </AiChatProvider>
-        </CadProvider>
+        <KernelProvider withExceptions>
+          <CadProvider evaluateDebounceTime={300}>
+            <AiChatProvider value={{ ...useChatConstants, id }}>
+              <div className="flex h-full">
+                <Chat />
+              </div>
+            </AiChatProvider>
+          </CadProvider>
+        </KernelProvider>
       </BuildProvider>
     </LogProvider>
   );

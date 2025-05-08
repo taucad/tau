@@ -1,7 +1,8 @@
 import type { ComponentType, JSX } from 'react';
 import { Star, GitFork, Eye } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router';
+import { KernelProvider } from './geometry/kernel/kernel-context.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import { Button } from '@/components/ui/button.js';
 import { Badge } from '@/components/ui/badge.js';
@@ -14,6 +15,20 @@ import { categories } from '@/types/cad.js';
 import { CadProvider, useCad } from '@/components/geometry/kernel/cad-context.js';
 import { CadViewer } from '@/components/geometry/kernel/cad-viewer.js';
 import { storage } from '@/db/storage.js';
+
+// Utility function to split an array into chunks
+function chunks<T>(array: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    result.push(array.slice(i, i + size));
+  }
+
+  return result;
+}
+
+// Number of builds per KernelProvider (worker)
+// 3-4 is a good balance between parallelism and browser limits
+const buildsPerWorker = 3;
 
 // Placeholder for language icons
 const languageIcons: Record<CadKernelProvider, ComponentType<{ className?: string }>> = {
@@ -33,14 +48,26 @@ export type CommunityBuildGridProperties = {
 };
 
 export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBuildGridProperties): JSX.Element {
+  // Split builds into chunks to create a worker pool
+  const buildChunks = useMemo(() => chunks(builds, buildsPerWorker), [builds]);
+
   return (
     <>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {builds.map((build) => (
-          <CadProvider key={build.id}>
-            <ProjectCard {...build} />
-          </CadProvider>
-        ))}
+        {/* Create a separate KernelProvider (worker) for each chunk of builds */}
+        {buildChunks.map((chunk) => {
+          // Use the first build's id in each chunk to create a stable key
+          const chunkKey = chunk.length > 0 ? `worker-${chunk[0].id}` : `empty-chunk-${Date.now()}`;
+          return (
+            <KernelProvider key={chunkKey}>
+              {chunk.map((build) => (
+                <CadProvider key={build.id}>
+                  <ProjectCard {...build} />
+                </CadProvider>
+              ))}
+            </KernelProvider>
+          );
+        })}
       </div>
 
       {hasMore ? (
@@ -65,7 +92,8 @@ function ProjectCard({
   tags,
   assets,
 }: CommunityBuildCardProperties) {
-  const [showPreview, setShowPreview] = useState(false);
+  const [showPreview, setShowPreview] = useState(true);
+  const [isVisible, setIsVisible] = useState(false);
   const cardReference = useRef<HTMLDivElement>(null);
   const { setCode, mesh } = useCad();
   const navigate = useNavigate();
@@ -80,12 +108,37 @@ function ProjectCard({
   const replicadAsset = Object.values(assets).find((asset) => asset.language === 'replicad');
   const replicadCode = replicadAsset?.files[replicadAsset.main]?.content;
 
-  // When card becomes visible or preview is manually toggled, compile the code
+  // Set up visibility observer
   useEffect(() => {
-    if (showPreview && replicadCode) {
+    const currentElement = cardReference.current;
+    if (!currentElement) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setIsVisible(true);
+          // Once we've detected visibility, we can stop observing
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.1 }, // Trigger when at least 10% of the card is visible
+    );
+
+    observer.observe(currentElement);
+
+    return () => {
+      if (currentElement) {
+        observer.unobserve(currentElement);
+      }
+    };
+  }, []);
+
+  // Only load the CAD model when the card is visible and preview is enabled
+  useEffect(() => {
+    if (isVisible && showPreview && replicadCode) {
       setCode(replicadCode);
     }
-  }, [showPreview, replicadCode, setCode]);
+  }, [isVisible, showPreview, replicadCode, setCode]);
 
   const handleStar = () => {
     // TODO: Implement star functionality

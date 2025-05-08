@@ -38,6 +38,7 @@ import { CadViewer } from '@/components/geometry/kernel/cad-viewer.js';
 import { useBuilds } from '@/hooks/use-builds.js';
 import { toast } from '@/components/ui/sonner.js';
 import type { Handle } from '@/types/matches.js';
+import { KernelProvider } from '@/components/geometry/kernel/kernel-context.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -209,11 +210,13 @@ function LibraryBuildGrid({
 }) {
   return (
     <div className={viewMode === 'grid' ? 'grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'space-y-4'}>
-      {projects.slice(0, visibleProjects).map((project) => (
-        <CadProvider key={project.id}>
-          <BuildLibraryCard project={project} viewMode={viewMode} />
-        </CadProvider>
-      ))}
+      <KernelProvider>
+        {projects.slice(0, visibleProjects).map((project) => (
+          <CadProvider key={project.id}>
+            <BuildLibraryCard project={project} viewMode={viewMode} />
+          </CadProvider>
+        ))}
+      </KernelProvider>
     </div>
   );
 }

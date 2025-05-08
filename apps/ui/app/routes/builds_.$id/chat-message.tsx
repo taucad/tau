@@ -176,7 +176,7 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
                     <DropdownMenuLabel>Switch model</DropdownMenuLabel>
                     <ChatModelSelector
                       models={models}
-                      className="h-fit w-full"
+                      className="h-fit w-full p-2"
                       renderButtonContents={(model) => (
                         <div className="flex w-full flex-row items-center justify-between gap-2 text-sm font-normal">
                           <span>{model.name}</span>

@@ -5,7 +5,7 @@ import type { Attachment } from 'ai';
 import { useAiChat } from './ai-chat-provider.js';
 import { ChatModelSelector } from './chat-model-selector.js';
 import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '@/components/ui/hover-card.js';
-import { Button } from '@/components/ui/button.js';
+import { Button, buttonVariants } from '@/components/ui/button.js';
 import { Textarea } from '@/components/ui/textarea.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import type { Model } from '@/hooks/use-models.js';
@@ -277,7 +277,7 @@ export const ChatTextarea = memo(function ({
       >
         <Textarea
           ref={textareaReference}
-          className="mb-8 size-full resize-none border-none p-4 pt-3 pb-0 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
+          className="mb-12 size-full resize-none border-none p-4 pt-3 pb-0 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
           rows={3}
           value={inputText}
           placeholder="Ask Tau a question..."
@@ -341,11 +341,16 @@ export const ChatTextarea = memo(function ({
       <div className="absolute bottom-2 left-2 flex flex-row items-center gap-1">
         {/* Model selector */}
         <ChatModelSelector
+          className={buttonVariants({
+            variant: 'outline',
+            size: 'sm',
+            class: 'w-min justify-start rounded-full border',
+          })}
           models={models}
           renderButtonContents={(item) => (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 group-data-[state=open]:text-primary @md:max-w-fit">
+                <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full group-data-[state=open]:text-primary @md:max-w-fit">
                   <span className="hidden truncate text-xs @xs:block">{item.name}</span>
                   <span className="relative flex size-4 items-center justify-center">
                     <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @xs:scale-100" />
@@ -369,9 +374,8 @@ export const ChatTextarea = memo(function ({
           <TooltipTrigger asChild>
             <Button
               data-state={isSearching ? 'active' : 'inactive'}
-              size="xs"
-              variant="ghost"
-              className="group transition-transform duration-200 ease-in-out data-[state=active]:bg-neutral/20 data-[state=active]:text-primary data-[state=active]:shadow"
+              variant="outline"
+              className="group rounded-full transition-transform duration-200 ease-in-out data-[state=active]:bg-neutral/20 data-[state=active]:text-primary data-[state=active]:shadow"
               onMouseDown={(event) => {
                 // Prevent the button from being focused
                 event.stopPropagation();
@@ -394,8 +398,15 @@ export const ChatTextarea = memo(function ({
         <div className="flex flex-row items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="xs" title="Add image" type="button" onClick={handleFileSelect}>
-                <span className="hidden text-xs @xs:block">Upload</span>
+              <Button
+                variant="outline"
+                className="rounded-full"
+                size="sm"
+                title="Add image"
+                type="button"
+                onClick={handleFileSelect}
+              >
+                <span className="hidden @xs:block">Upload</span>
                 <Image />
               </Button>
             </TooltipTrigger>
@@ -420,8 +431,8 @@ export const ChatTextarea = memo(function ({
         {status === 'streaming' ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="icon" className="size-6 rounded-full" onClick={handleCancelClick}>
-                <Square className="size-3 fill-primary-foreground" />
+              <Button size="icon" className="rounded-full" onClick={handleCancelClick}>
+                <Square className="size-4 fill-primary-foreground" />
               </Button>
             </TooltipTrigger>
             <TooltipContent className="flex items-center gap-2 align-baseline">
@@ -431,13 +442,8 @@ export const ChatTextarea = memo(function ({
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                size="icon"
-                className="size-6 rounded-full"
-                disabled={inputText.length === 0}
-                onClick={handleSubmit}
-              >
-                <ArrowUp className="size-4" />
+              <Button size="icon" className="rounded-full" disabled={inputText.length === 0} onClick={handleSubmit}>
+                <ArrowUp className="size-5" />
               </Button>
             </TooltipTrigger>
             <TooltipContent className="flex items-center gap-2 align-baseline">

@@ -49,10 +49,7 @@ export function ChatModelSelector({
 
   return (
     <ComboBoxResponsive
-      className={cn(
-        'group flex h-6 w-[initial] items-center justify-between gap-2 border-none px-2 text-xs',
-        className,
-      )}
+      className={className}
       popoverContentClassName="w-[300px]"
       groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({
         name: provider,

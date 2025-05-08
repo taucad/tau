@@ -78,7 +78,7 @@ export function ComboBoxResponsive<T>({
     return (
       <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerTrigger asChild>
-          <Button variant="ghost" className={cn('w-[150px] justify-start', className)}>
+          <Button variant="ghost" className={className}>
             {selectedItem ? renderButtonContents(selectedItem) : placeholder}
           </Button>
         </DrawerTrigger>

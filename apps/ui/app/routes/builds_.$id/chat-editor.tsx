@@ -8,6 +8,8 @@ import { useBuild } from '@/hooks/use-build2.js';
 import { CodeEditor } from '@/components/code-editor.js';
 import { useConsole } from '@/hooks/use-console.js';
 import { cn } from '@/utils/ui.js';
+import { CopyButton } from '@/components/copy-button.js';
+import { DownloadButton } from '@/components/download-button.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }) {
   const { setCode, code, isLoading } = useBuild();
@@ -62,13 +64,19 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
 
   return (
     <>
-      {/* <div className="flex flex-row justify-between items-center top-0 right-0 absolute my-2 mr-22 gap-2">
-        <CopyButton variant="overlay" size="icon" text={code} className="text-muted-foreground" tooltip="Copy code" />
+      <div className="absolute top-0 right-0 z-10 my-2 mr-22 flex flex-row items-center justify-between gap-2">
+        <CopyButton
+          variant="overlay"
+          size="icon"
+          getText={() => code}
+          className="text-muted-foreground"
+          tooltip="Copy code"
+        />
         <DownloadButton
           variant="overlay"
           size="icon"
-          title={`${name}.ts`}
-          getBlob={() =>
+          title="main.ts"
+          getBlob={async () =>
             new Promise((resolve) => {
               const blob = new Blob([code], { type: 'text/plain' });
               resolve(blob);
@@ -77,7 +85,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
           className="text-muted-foreground"
           tooltip="Download code"
         />
-      </div> */}
+      </div>
       <CodeEditor
         // Modify the key to force re-render when loading state changes to update the default value. Slightly hacky, but it's the most efficient way to do it.
         key={isLoading ? 'loading' : 'ready'}

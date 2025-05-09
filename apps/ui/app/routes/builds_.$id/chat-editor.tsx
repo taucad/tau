@@ -64,7 +64,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
 
   return (
     <>
-      <div className="absolute top-0 right-0 z-10 my-2 mr-22 flex flex-row items-center justify-between gap-2">
+      <div className="absolute top-0 right-0 z-10 my-2 mr-12 flex flex-row items-center justify-between gap-2 group-data-[view-mode=split]/chat-layout:mr-52 md:mr-22 md:group-data-[view-mode=split]/chat-layout:mr-62">
         <CopyButton
           variant="overlay"
           size="icon"

@@ -1,10 +1,9 @@
-import { useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import type { JSX, ReactNode } from 'react';
 import { Check } from 'lucide-react';
 import { ComboBoxResponsive } from '@/components/ui/combobox-responsive.js';
 import { Badge } from '@/components/ui/badge.js';
 import { SvgIcon } from '@/components/icons/svg-icon.js';
-import { cn } from '@/utils/ui.js';
 import type { Model } from '@/hooks/use-models.js';
 import type { ModelProvider } from '@/types/cad.js';
 import { useModels } from '@/hooks/use-models.js';
@@ -17,7 +16,7 @@ type ChatModelSelectorProps = {
   readonly renderButtonContents: (item: Model) => ReactNode;
 };
 
-export function ChatModelSelector({
+export const ChatModelSelector = memo(function ({
   models,
   onSelect,
   onClose,
@@ -79,4 +78,4 @@ export function ChatModelSelector({
       onClose={onClose}
     />
   );
-}
+});

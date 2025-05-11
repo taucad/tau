@@ -1,11 +1,12 @@
-// Import type { SyntaxHighlighterProps } from 'react-syntax-highlighter';
-// import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { common, createStarryNight } from '@wooorm/starry-night';
+import { createStarryNight } from '@wooorm/starry-night';
 import { toJsxRuntime } from 'hast-util-to-jsx-runtime';
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime';
 import type { JSX } from 'react';
 import type { LinkDescriptor } from 'react-router';
 import type { ClassValue } from 'clsx';
+import sourceJavascript from '@wooorm/starry-night/source.js';
+import sourceTsx from '@wooorm/starry-night/source.tsx';
+import sourceTypescript from '@wooorm/starry-night/source.ts';
 import { starryNightGutter } from '@/components/hast-util-starry-night-gutter.js';
 import stylesUrl from '@/components/code-viewer.css?url';
 import { cn } from '@/utils/ui.js';
@@ -20,7 +21,7 @@ const displayLanguageFromOriginalLanguage: Record<Language, Language> = {
   javascript: 'javascript',
 } as const;
 
-const starryNight = await createStarryNight(common);
+const starryNight = await createStarryNight([sourceJavascript, sourceTsx, sourceTypescript]);
 
 type CodeViewerProps = {
   readonly text: string;

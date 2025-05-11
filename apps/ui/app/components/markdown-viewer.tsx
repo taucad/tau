@@ -60,9 +60,7 @@ export function MarkdownViewer({ children }: { readonly children: string }): JSX
                 </div>
               </div>
               <div>
-                <CodeViewer {...rest} language={language}>
-                  {text}
-                </CodeViewer>
+                <CodeViewer {...rest} language={language} text={text} />
               </div>
             </div>
           ) : (

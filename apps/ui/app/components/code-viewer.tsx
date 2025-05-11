@@ -1,52 +1,47 @@
-import type { SyntaxHighlighterProps } from 'react-syntax-highlighter';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import type { JSX, RefObject } from 'react';
+// Import type { SyntaxHighlighterProps } from 'react-syntax-highlighter';
+// import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { common, createStarryNight } from '@wooorm/starry-night';
+import { toJsxRuntime } from 'hast-util-to-jsx-runtime';
+import { Fragment, jsx, jsxs } from 'react/jsx-runtime';
+import type { JSX } from 'react';
+import type { LinkDescriptor } from 'react-router';
+import { starryNightGutter } from '@/components/hast-util-starry-night-gutter.js';
+import stylesUrl from '@/components/code-viewer.css?url';
 import { cn } from '@/utils/ui.js';
 
-const displayLanguageFromOriginalLanguage = {
+export const codeViewerLinks: LinkDescriptor[] = [{ rel: 'stylesheet', href: stylesUrl }];
+
+type Language = 'typescript' | 'kcl' | 'javascript';
+
+const displayLanguageFromOriginalLanguage: Record<Language, Language> = {
+  typescript: 'typescript',
   kcl: 'typescript',
+  javascript: 'javascript',
+} as const;
+
+const starryNight = await createStarryNight(common);
+
+type CodeViewerProps = {
+  readonly text: string;
+  readonly language: Language;
 };
 
-type MappedLanguage = keyof typeof displayLanguageFromOriginalLanguage;
+export function CodeViewer({ text, language }: CodeViewerProps): JSX.Element {
+  const displayLanguage = displayLanguageFromOriginalLanguage[language];
+  const scope = starryNight.flagToScope(displayLanguage);
+  const tree = starryNight.highlight(text, scope!);
+  const treeWithGutter = starryNightGutter(tree);
+  const reactNode = toJsxRuntime(treeWithGutter, { Fragment, jsx, jsxs }) as JSX.Element;
 
-export function CodeViewer({
-  ref,
-  className,
-  showLineNumbers,
-  language,
-  ...rest
-}: SyntaxHighlighterProps & { readonly className?: string; readonly ref?: RefObject<SyntaxHighlighter> }): JSX.Element {
   return (
-    <div className="relative w-full max-w-full overflow-hidden">
-      <div className="w-full max-w-full overflow-x-auto">
-        <SyntaxHighlighter
-          {...rest}
-          ref={ref}
-          customStyle={{
-            backgroundColor: 'transparent',
-            color: 'var(--foreground)',
-            margin: 0,
-            padding: '1em',
-            width: 'auto', // Allow content to determine width
-            minWidth: '100%', // Ensure it fills container
-            ...(showLineNumbers ? { paddingLeft: '3.8em', paddingTop: '0.5em', paddingBottom: '0.5em' } : {}),
-          }}
-          showLineNumbers={showLineNumbers}
-          language={language ? displayLanguageFromOriginalLanguage[language as MappedLanguage] || language : undefined}
-          codeTagProps={{
-            className: cn(
-              className,
-              /* Text shadow, remove it */
-              '[text-shadow:none]',
-              /* Dark mode, make it brighter and more contrast */
-              'dark:brightness-150 dark:contrast-100',
-              /* Some tokens have a background applied which we need to remove */
-              '[&_*]:!bg-transparent',
-            ),
-          }}
-          PreTag="pre"
-        />
-      </div>
+    <div
+      className={cn(
+        'h-auto overflow-x-scroll p-2 font-mono whitespace-pre [&_.line]:block [&_.line]:h-4.5 [&_.line]:leading-normal',
+        // Gutter
+        '[&_.line]:relative [&_.line::before]:mr-4 [&_.line::before]:inline-block [&_.line::before]:w-6 [&_.line::before]:text-right [&_.line::before]:text-muted-foreground [&_.line::before]:content-[attr(data-line-number)] [&_.line::before]:select-none',
+      )}
+    >
+      {reactNode}
     </div>
   );
 }

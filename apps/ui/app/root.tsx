@@ -28,11 +28,13 @@ import type { Model } from '@/hooks/use-models.js';
 import { getModels } from '@/hooks/use-models.js';
 import { ColorProvider, useColor } from '@/hooks/use-color.js';
 import { useFavicon } from '@/hooks/use-favicon.js';
+import { codeViewerLinks } from '@/components/code-viewer.js';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesUrl },
   ...webManifestLinks,
   ...markdownViewerLinks,
+  ...codeViewerLinks,
 ];
 
 export const meta: MetaFunction = () => [

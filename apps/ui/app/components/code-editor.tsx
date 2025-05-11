@@ -51,8 +51,6 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         scrollBeyondLastLine: false,
         // Ensure widgets like intellisense can appear above nearby elements
         fixedOverflowWidgets: true,
-        // Help Monaco resize properly in flex containers
-        automaticLayout: true,
         // Custom scrollbar styling to match global scrollbar styles
         scrollbar: {
           // Applying to ensure that other elements that use the scrollbar

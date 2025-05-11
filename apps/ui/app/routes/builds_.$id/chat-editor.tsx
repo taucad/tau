@@ -26,8 +26,6 @@ export const ChatEditor = memo(function ({
 
   useEffect(() => {
     if (monaco) {
-      monaco.languages.register({ id: 'typescript' });
-      monaco.languages.register({ id: 'javascript' });
       monaco.languages.typescript.typescriptDefaults.setEagerModelSync(true);
       monaco.languages.typescript.typescriptDefaults.setExtraLibs([
         {

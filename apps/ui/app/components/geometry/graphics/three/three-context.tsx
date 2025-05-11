@@ -103,17 +103,19 @@ export function ThreeProvider({
     }
 
     canvas.captureScreenshot = (options?: ScreenshotOptions) => {
-      return (
-        screenshotReference.current?.captureScreenshot({
-          ...options,
-          // Adjust zoom based on the camera angle
-          zoomLevel: 1.25 + 1 * (1 - cameraAngle / 90),
-        }) ?? ''
-      );
+      if (!screenshotReference.current) {
+        throw new Error('Screenshot reference is not found');
+      }
+
+      return screenshotReference.current.captureScreenshot({
+        ...options,
+        // Adjust zoom based on the camera angle
+        zoomLevel: 1.8,
+      });
     };
 
     return canvas;
-  }, [canvasReference, screenshotReference, cameraAngle]);
+  }, [canvasReference, screenshotReference]);
 
   const handleGridChange = (newGridSizes: GridSizes) => {
     setGridSizes(newGridSizes);

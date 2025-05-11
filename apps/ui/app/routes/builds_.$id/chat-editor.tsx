@@ -1,5 +1,5 @@
 import { LoaderPinwheel } from 'lucide-react';
-import { memo, useCallback, useEffect } from 'react';
+import { memo, useCallback, useEffect, useMemo } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
 // eslint-disable-next-line import-x/no-unassigned-import -- setting up the Monaco editor web workers
@@ -10,8 +10,15 @@ import { useConsole } from '@/hooks/use-console.js';
 import { cn } from '@/utils/ui.js';
 import { CopyButton } from '@/components/copy-button.js';
 import { DownloadButton } from '@/components/download-button.js';
+import { debounce } from '@/utils/functions.js';
 
-export const ChatEditor = memo(function ({ className }: { readonly className?: string }) {
+export const ChatEditor = memo(function ({
+  className,
+  debounceTime = 300,
+}: {
+  readonly className?: string;
+  readonly debounceTime?: number;
+}) {
   const { setCode, code, isLoading } = useBuild();
   const { log } = useConsole({ defaultOrigin: { component: 'Editor' } });
 
@@ -40,10 +47,20 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
   const handleCodeChange = useCallback(
     (value?: string) => {
       if (value) {
-        setCode(value);
+        log.debug('Code changed, preparing to debounce');
+        void debouncedSetCode(value);
       }
     },
     [setCode],
+  );
+
+  const debouncedSetCode = useMemo(
+    () =>
+      debounce((value: string) => {
+        log.debug('Setting code after debounce');
+        setCode(value);
+      }, debounceTime),
+    [setCode, debounceTime, log],
   );
 
   const handleValidate = useCallback(() => {
@@ -92,7 +109,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
         loading={<LoaderPinwheel className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
         className={cn('bg-background text-xs', className)}
         defaultLanguage="typescript"
-        value={code}
+        defaultValue={code}
         onChange={handleCodeChange}
         onValidate={handleValidate}
       />

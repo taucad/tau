@@ -1,7 +1,6 @@
 import type { JSX, ReactNode } from 'react';
 import { createContext, useContext, useReducer, useEffect, useMemo, useCallback } from 'react';
 import { useKernel } from './kernel-context.js';
-import { debounce } from '@/utils/functions.js';
 import { useConsole } from '@/hooks/use-console.js';
 
 // Combine related state
@@ -155,27 +154,15 @@ export function CadProvider({
     },
     [kernel],
   );
-
-  // Create stable debounced evaluation function
-  const debouncedEvaluate = useMemo(
-    () =>
-      debounce((code: string, parameters: Record<string, unknown>) => {
-        dispatch({ type: 'SET_STATUS', payload: { isBuffering: false } });
-
-        log.debug('Evaluating code after debounce');
-
-        void evaluateCode(code, parameters);
-      }, evaluateDebounceTime),
-    [evaluateCode, evaluateDebounceTime],
-  );
-
   // Effect to handle code/parameter changes
   useEffect(() => {
     const debounceStartTime = performance.now();
     log.debug(`Starting debounce at ${debounceStartTime}ms`);
-    dispatch({ type: 'SET_STATUS', payload: { isBuffering: true } });
-    void debouncedEvaluate(state.code, state.parameters);
-  }, [state.code, state.parameters, debouncedEvaluate]);
+
+    log.debug('Evaluating code after debounce');
+
+    void evaluateCode(state.code, state.parameters);
+  }, [state.code, state.parameters, evaluateCode]);
 
   // Cleanup worker on unmount
   useEffect(() => {

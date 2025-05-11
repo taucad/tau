@@ -1,8 +1,17 @@
-import { Editor } from '@monaco-editor/react';
+import { Editor, useMonaco } from '@monaco-editor/react';
 import type { EditorProps } from '@monaco-editor/react';
 import { Theme, useTheme } from 'remix-themes';
+import { useEffect } from 'react';
 import type { JSX } from 'react';
+import { shikiToMonaco } from '@shikijs/monaco';
+import { createHighlighter } from 'shiki';
 import { cn } from '@/utils/ui.js';
+
+// Create the highlighter, it can be reused
+const highlighter = await createHighlighter({
+  themes: ['github-light', 'github-dark'],
+  langs: ['javascript', 'typescript'],
+});
 
 type CodeEditorProperties = EditorProps & {
   readonly onChange: (value: string) => void;
@@ -17,10 +26,19 @@ type CodeEditorProperties = EditorProps & {
 export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.Element {
   const [theme] = useTheme();
 
+  const monaco = useMonaco();
+
+  useEffect(() => {
+    if (monaco) {
+      monaco.languages.register({ id: 'typescript' });
+      monaco.languages.register({ id: 'javascript' });
+      shikiToMonaco(highlighter, monaco);
+    }
+  }, [monaco]);
+
   return (
     <Editor
       className={cn(
-        className,
         // Target Monaco editor elements with Tailwind's nested syntax
         // Override the background color of the Monaco editor
         '[&_.monaco-editor]:![--vscode-editor-background:var(--background)]',
@@ -40,8 +58,9 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:rounded-[calc(var(--scrollbar-thickness)_-_var(--scrollbar-padding)_*_2)]',
         // Ensure scrollbars don't overlap content
         '[&_.monaco-scrollable-element]:overflow-hidden',
+        className,
       )}
-      theme={theme === Theme.DARK ? 'vs-dark' : 'vs'}
+      theme={theme === Theme.DARK ? 'github-dark' : 'github-light'}
       defaultLanguage="typescript"
       options={{
         minimap: { enabled: false },

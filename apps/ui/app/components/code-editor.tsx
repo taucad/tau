@@ -68,6 +68,7 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         scrollBeyondLastColumn: 1,
         // Disable vertical scroll beyond last line
         scrollBeyondLastLine: false,
+        wordWrap: 'on',
         // Ensure widgets like intellisense can appear above nearby elements
         fixedOverflowWidgets: true,
         // Custom scrollbar styling to match global scrollbar styles

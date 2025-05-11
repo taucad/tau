@@ -148,6 +148,115 @@ function main(_, params) {
 }
 `;
 
+export const drinkingGlassCode = `/**
+ * Parametric Drinking Glass
+ * A customizable glass with adjustable dimensions for height, radii, and thickness.
+ */
+const defaultParams = {
+  height: 140.0, // Overall height of the glass in mm
+  topRadius: 45.0, // Radius of the top opening in mm
+  baseRadius: 80.0, // Radius of the base in mm
+  wallThickness: 1.0, // Thickness of the glass walls and base in mm
+
+  filletRim: true, // Whether to add a fillet to the rim
+  rimFilletRadius: 1.0, // Radius for the rim fillet
+  filletBase: true, // Whether to add a fillet to the outer base edge
+  baseFilletRadius: 40, // Radius for the base fillet
+};
+
+const { draw, FaceFinder, EdgeFinder } = replicad;
+
+/**
+ * Creates a parametric drinking glass.
+ * @param _ Unused Replicad API object
+ * @param params Custom parameters to override defaults.
+ * @returns The 3D model of the glass.
+ */
+function main(_, params) {
+  const p = { ...defaultParams, ...params };
+
+  // Validate parameters to prevent common issues
+  if (p.topRadius <= 0) {
+    console.warn("topRadius should be greater than 0 for a valid opening.");
+    // Fallback to a minimum radius if invalid to avoid errors
+    p.topRadius = Math.max(p.topRadius, p.wallThickness * 1.1); 
+  }
+  if (p.topRadius < p.wallThickness) {
+    console.warn("topRadius is less than wallThickness, shelling may fail or produce unexpected results.");
+  }
+  if (p.baseRadius < 0) {
+    console.warn("baseRadius cannot be negative. Setting to 0.");
+    p.baseRadius = 0;
+  }
+  if (p.baseRadius < p.wallThickness && p.baseRadius > 0) {
+    console.warn("baseRadius is less than wallThickness, shelling may produce unexpected results for the base.");
+  }
+  if (p.height <= 0) {
+    console.warn("Height must be positive.");
+    p.height = 10; // Fallback height
+  }
+  if (p.wallThickness <= 0) {
+    console.warn("Wall thickness must be positive.");
+    p.wallThickness = 0.5; // Fallback thickness
+  }
+
+
+  // Create the 2D profile for revolution.
+  // The sketch is on the XZ plane, so points are [x, z].
+  // The glass will be revolved around the Z-axis.
+  const profile = draw([0, 0]) // Start at the center of the base
+    .lineTo([p.baseRadius, 0]) // Outer edge of the base
+    .lineTo([p.topRadius, p.height]) // Outer edge of the top rim
+    .lineTo([0, p.height]) // Center of the top (this line forms the top surface to be removed by shell)
+    .close(); // Close the profile by connecting back to [0,0]
+
+  // Revolve the profile to create a solid shape.
+  let glassSolid = profile
+    .sketchOnPlane("XZ")
+    .revolve();
+
+
+
+  // Hollow out the glass using the shell operation.
+  // We remove the top face to create the opening.
+  try {
+    glassSolid = glassSolid.shell(p.wallThickness, (f) =>
+      f.inPlane("XY", p.height) // Find faces in the XY plane at the specified height
+    );
+  } catch (e) {
+    console.error("Shell operation failed. This might be due to thickness or geometry constraints.", e);
+    // Return the solid un-shelled shape if shelling fails
+    return glassSolid;
+  }
+
+  // Apply fillet to the rim if enabled
+  if (p.filletRim && p.rimFilletRadius > 0) {
+    try {
+      glassSolid = glassSolid.fillet(p.rimFilletRadius, (e) =>
+        e.inPlane("XY", p.height) // Select edges on the top plane (inner and outer rim)
+      );
+    } catch (e) {
+      console.warn("Rim fillet operation failed.", e);
+    }
+  }
+
+  // Apply fillet to the base if enabled and baseRadius is positive
+  if (p.baseRadius > 0 && p.filletBase && p.baseFilletRadius > 0) {
+    try {
+      glassSolid = glassSolid.fillet(p.baseFilletRadius, (e) =>
+        e.inPlane("XY", p.wallThickness) // Select edges on the bottom plane
+      ).fillet(p.baseFilletRadius, (e) =>
+        e.inPlane("XY", 0) // Select edges on the bottom plane
+      );
+    } catch (e) {
+      console.warn("Base fillet operation failed.", e);
+    }
+  }
+
+  return glassSolid;
+}
+`;
+
 export const trayCode = `const { makeSolid, makeFace, assembleWire, EdgeFinder, genericSweep, Plane } =
   replicad;
 
@@ -1877,7 +1986,7 @@ export const mockModels = [
     code: birdhouseCode,
   },
   {
-    id: 'bld_hollow-box',
+    id: 'bld_hollow_box',
     name: 'Hollow Box',
     code: hollowBoxCode,
   },
@@ -1887,17 +1996,22 @@ export const mockModels = [
     code: trayCode,
   },
   {
+    id: 'bld_drinking_glass',
+    name: 'Drinking Glass',
+    code: drinkingGlassCode,
+  },
+  {
     id: 'bld_vase',
     name: 'Vase',
     code: vaseCode,
   },
   {
-    id: 'bld_wavy-vase',
+    id: 'bld_wavy_vase',
     name: 'Wavy Vase',
     code: wavyVase,
   },
   {
-    id: 'bld_cylindrical-gear',
+    id: 'bld_cylindrical_gear',
     name: 'Cycloidal Gear',
     code: cycloidalGear,
   },
@@ -1907,17 +2021,17 @@ export const mockModels = [
     code: bottle,
   },
   {
-    id: 'bld_gridfinity-box',
+    id: 'bld_gridfinity_box',
     name: 'Gridfinity Box',
     code: gridfinityBox,
   },
   {
-    id: 'bld_decorated-box',
+    id: 'bld_decorated_box',
     name: 'Decorated Box',
     code: decoratedBox,
   },
   {
-    id: 'bld_card-holder',
+    id: 'bld_card_holder',
     name: 'Card Holder',
     code: cardHolderCode,
   },
@@ -1937,12 +2051,12 @@ export const mockModels = [
     code: legoCode,
   },
   {
-    id: 'bld_simple-tray',
+    id: 'bld_simple_tray',
     name: 'Simple Tray',
     code: simpleTrayCode,
   },
   {
-    id: 'bld_hex-screwdriver',
+    id: 'bld_hex_screwdriver',
     name: 'Hex Screwdriver',
     code: hexScrewdriverCode,
   },

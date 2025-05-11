@@ -27,10 +27,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
             <div className="flex flex-row items-center gap-1 text-xs text-muted-foreground">
               <File className={cn('hidden size-3', part.toolInvocation.state === 'result' && 'block')} />
               <LoaderCircle
-                className={cn(
-                  'hidden size-3 animate-spin text-primary-foreground',
-                  part.toolInvocation.state === 'partial-call' && 'block',
-                )}
+                className={cn('hidden size-3 animate-spin', part.toolInvocation.state === 'partial-call' && 'block')}
               />
               <span>{fileName}</span>
             </div>

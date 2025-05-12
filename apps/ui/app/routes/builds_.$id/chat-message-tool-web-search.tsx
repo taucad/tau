@@ -24,7 +24,7 @@ export function ChatMessageToolWebSearch({ part }: { readonly part: ToolInvocati
       return (
         <div className="flex flex-col gap-2">
           <p className="text-lg">Sources</p>
-          <p className="border-l pl-2 text-sm text-foreground/50 italic">{part.toolInvocation.args?.input}</p>
+          <p className="border-l pl-2 text-sm text-foreground/50 italic">{part.toolInvocation.args?.query}</p>
         </div>
       );
     }
@@ -34,8 +34,8 @@ export function ChatMessageToolWebSearch({ part }: { readonly part: ToolInvocati
 
       const relevantSources = part.toolInvocation.result as Array<{
         title: string;
-        link: string;
-        snippet: string;
+        url: string;
+        content: string;
       }>;
       return (
         <>
@@ -63,7 +63,9 @@ export function ChatMessageToolWebSearch({ part }: { readonly part: ToolInvocati
                 </CollapsibleTrigger>
               </div>
               <CollapsibleContent>
-                <p className="border-l pl-2 text-sm text-foreground/50 italic">{part.toolInvocation.args.input}</p>
+                <p className="border-l pl-2 text-sm text-foreground/50 italic">
+                  {JSON.stringify(part.toolInvocation.args?.query)}
+                </p>
               </CollapsibleContent>
             </Collapsible>
             {/* {SOURCE_TOOLS.filter((source) => part.toolCalls?.some((s) => s.origin === source.key)).map((source) => {
@@ -96,14 +98,14 @@ export function ChatMessageToolWebSearch({ part }: { readonly part: ToolInvocati
       </When> */}
           <div className="grid grid-cols-4 gap-2">
             {relevantSources.slice(0, 3).map((source, index) => {
-              const sourceDomain = extractDomainFromUrl(source.link);
-              const sourceFaviconUrl = createFaviconUrl(source.link);
+              const sourceDomain = extractDomainFromUrl(source.url);
+              const sourceFaviconUrl = createFaviconUrl(source.url);
 
               return (
                 // eslint-disable-next-line react/no-array-index-key -- the array order is stable so using the index is safe
                 <HoverCard key={`${source.title}-${index}`} openDelay={100} closeDelay={100}>
                   <HoverCardTrigger asChild>
-                    <a href={source.link} target="_blank" rel="noreferrer">
+                    <a href={source.url} target="_blank" rel="noreferrer">
                       <div
                         key={source.title}
                         className="flex h-24 flex-col justify-between rounded-md bg-neutral/5 p-2 hover:bg-neutral/10"
@@ -122,7 +124,7 @@ export function ChatMessageToolWebSearch({ part }: { readonly part: ToolInvocati
                       <p className="text-sm text-foreground/50">{sourceDomain}</p>
                     </div>
                     <p className="text-sm font-medium">{source.title}</p>
-                    <p className="text-sm">{source.snippet}</p>
+                    <p className="text-sm">{source.content}</p>
                   </HoverCardContent>
                 </HoverCard>
               );
@@ -132,8 +134,8 @@ export function ChatMessageToolWebSearch({ part }: { readonly part: ToolInvocati
                 <SheetTrigger className="flex h-24 flex-col justify-between rounded-md bg-neutral/5 p-2 hover:bg-neutral/10">
                   <div className="flex flex-row flex-wrap items-center gap-px">
                     {relevantSources.slice(3, 9).map((source) => {
-                      const sourceDomain = extractDomainFromUrl(source.link);
-                      const sourceFaviconUrl = createFaviconUrl(source.link);
+                      const sourceDomain = extractDomainFromUrl(source.url);
+                      const sourceFaviconUrl = createFaviconUrl(source.url);
 
                       return (
                         <img
@@ -162,11 +164,11 @@ export function ChatMessageToolWebSearch({ part }: { readonly part: ToolInvocati
                   <SheetDescription asChild>
                     <div className="grid grid-cols-1 flex-wrap items-center gap-2 overflow-y-scroll p-4 pt-0">
                       {relevantSources.map((source) => {
-                        const sourceDomain = extractDomainFromUrl(source.link);
-                        const sourceFaviconUrl = createFaviconUrl(source.link);
+                        const sourceDomain = extractDomainFromUrl(source.url);
+                        const sourceFaviconUrl = createFaviconUrl(source.url);
 
                         return (
-                          <a key={source.link} href={source.link} target="_blank" className="w-full" rel="noreferrer">
+                          <a key={source.url} href={source.url} target="_blank" className="w-full" rel="noreferrer">
                             <div
                               key={source.title}
                               className="flex w-full flex-col space-y-2 rounded-md bg-neutral/5 p-2 hover:bg-neutral/10"
@@ -176,7 +178,7 @@ export function ChatMessageToolWebSearch({ part }: { readonly part: ToolInvocati
                                 <img src={sourceFaviconUrl} alt={sourceDomain} className="size-4 rounded-full" />
                                 <p className="text-xs font-medium text-foreground/50">{sourceDomain}</p>
                               </div>
-                              <p className="text-xs text-foreground">{source.snippet}</p>
+                              <p className="text-xs text-foreground">{source.content}</p>
                             </div>
                           </a>
                         );

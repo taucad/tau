@@ -22,7 +22,8 @@ export type ToolChoice = (typeof toolChoice)[keyof typeof toolChoice];
 export type ToolChoiceWithCategory = ToolChoice | ToolCategory;
 
 export const toolChoiceFromToolName = {
-  'searxng-search': toolCategory.webSearch,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Tavily search tool name
+  tavily_search: toolCategory.webSearch,
 } as const satisfies Record<string, ToolCategory>;
 
 @Injectable()

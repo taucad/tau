@@ -168,10 +168,7 @@ export function GraphicsProvider({ children, defaultCameraAngle }: GraphicsProvi
 
       // Screenshot capabilities
       screenshot: {
-        capture(options?: ScreenshotOptions) {
-          console.log('attempting capture');
-          return screenshotRef.current.capture(options);
-        },
+        capture: screenshotRef.current.capture,
         isReady: state.isScreenshotReady,
         registerCapture: registerScreenshotCapture,
       },

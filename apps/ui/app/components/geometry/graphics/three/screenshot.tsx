@@ -358,8 +358,6 @@ export function ScreenshotSetup(): ReactNode {
   const capture = useScreenCapture();
   const { screenshot } = useGraphics();
 
-  console.log('Screenshot capability ready', capture);
-
   useEffect(() => {
     screenshot.registerCapture(capture);
   }, [capture, screenshot]);

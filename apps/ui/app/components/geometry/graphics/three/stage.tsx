@@ -4,9 +4,11 @@ import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { PerspectiveCamera } from '@react-three/drei';
-import { InfiniteGrid } from '@/components/geometry/graphics/three/infinite-grid.js';
 import { AxesHelper } from '@/components/geometry/graphics/three/axes-helper.js';
-import { resetCamera as resetCameraFn } from '@/components/geometry/graphics/three/camera-control.js';
+import { resetCamera as resetCameraFn } from '@/components/geometry/graphics/camera-control.js';
+import { Grid } from '@/components/geometry/graphics/three/grid.js';
+import type { GridSizes } from '@/components/geometry/graphics/three/grid.js';
+import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
 
 export type StageOptions = {
   perspective?: {
@@ -61,21 +63,9 @@ export const defaultStageOptions = {
   },
 } as const satisfies StageOptions;
 
-// Grid size calculation constants
-export const gridSizeConstants = {
-  // Coefficient for the grid size calculation to fine-tune the result (lower = larger grid)
-  baseGridSizeCoefficient: 5,
-  // Threshold for rounding to 1× or 5× powers of 10
-  roundingThreshold: Math.sqrt(10),
-} as const;
+// Grid size calculation constants moved to grid.tsx
 
-export type GridSizes = {
-  smallSize: number;
-  largeSize: number;
-  effectiveSize?: number;
-  baseSize?: number;
-  zoomFactor?: number;
-};
+// GridSizes type moved to grid.tsx
 
 type StageProperties = {
   readonly children: ReactNode;
@@ -101,6 +91,7 @@ export function Stage({
   onGridChange,
   ...properties
 }: StageProperties): JSX.Element {
+  const { stageRef } = useGraphics();
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as RootState['controls'] & {
     /**
@@ -216,7 +207,13 @@ export function Stage({
     });
   }, [camera, invalidate, shapeRadius, rotation, perspective, setCurrentZoom]);
 
+  // Set up the ref in both GraphicsProvider and local ref
   React.useImperativeHandle(ref, () => ({
+    resetCamera,
+  }));
+
+  // Also set the resetCamera function on the stageRef in the GraphicsProvider
+  React.useImperativeHandle(stageRef, () => ({
     resetCamera,
   }));
 
@@ -236,65 +233,12 @@ export function Stage({
     }
   }, [camera, resetCamera, sceneRadius, shapeRadius]);
 
-  // Calculate grid sizes based solely on camera properties
-  const gridSizes = useMemo(() => {
-    if (!properties.hasGrid) {
-      return {
-        smallSize: 0,
-        largeSize: 0,
-        effectiveSize: 0,
-      };
-    }
-
-    // Get current camera distance
-    const cameraDistance = camera.position.length();
-
-    // Get current FOV
-    const { fov } = camera as THREE.PerspectiveCamera;
-
-    // Calculate the visible width at the center of the view
-    // This is the key formula: 2 * distance * tan(fov/2)
-    const visibleWidthAtDistance = 2 * cameraDistance * Math.tan(THREE.MathUtils.degToRad(fov / 2));
-
-    // Set base grid size as fraction of visible width (e.g. 1/20th)
-    // This ensures grid size is proportional to what's visible in the viewport
-    const baseGridSize = visibleWidthAtDistance / gridSizeConstants.baseGridSizeCoefficient;
-
-    // Find appropriate power of 10 for clean grid intervals
-    const exponent = Math.floor(Math.log10(baseGridSize));
-    const mantissa = baseGridSize / 10 ** exponent;
-
-    // Round to nice numbers (1, 2, or 5 times power of 10)
-    let largeSize;
-    // eslint-disable-next-line unicorn/prefer-ternary -- this is more readable
-    if (mantissa < gridSizeConstants.roundingThreshold) {
-      // ≈ 2.236
-      largeSize = 10 ** exponent;
-    } else {
-      largeSize = 5 * 10 ** exponent;
-    }
-
-    return {
-      smallSize: largeSize / 10,
-      largeSize,
-      effectiveSize: baseGridSize,
-      baseSize: cameraDistance,
-      zoomFactor: 1 / currentZoom,
-      fov,
-    };
-  }, [camera, currentZoom, properties.hasGrid]);
-
-  // Call onGridChange when gridSizes change
-  React.useEffect(() => {
-    onGridChange?.(gridSizes);
-  }, [gridSizes, onGridChange]);
-
   return (
     <group {...properties}>
       <PerspectiveCamera makeDefault />
       <group ref={outer}>
         {properties.hasAxesHelper ? <AxesHelper /> : null}
-        {properties.hasGrid ? <InfiniteGrid smallSize={gridSizes.smallSize} largeSize={gridSizes.largeSize} /> : null}
+        {properties.hasGrid ? <Grid currentZoom={currentZoom} /> : null}
         <group ref={inner}>{children}</group>
       </group>
     </group>

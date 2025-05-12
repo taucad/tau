@@ -1,7 +1,7 @@
 import { LoaderPinwheel, ImageDown, GalleryThumbnails, Clipboard } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect } from 'react';
 import type { JSX } from 'react';
-import type { ThreeCanvasReference } from '@/components/geometry/graphics/three/three-context.js';
+import { useGraphics } from '../graphics/graphics-context.js';
 import { CadViewer } from '@/components/geometry/kernel/cad-viewer.js';
 import { useCad } from '@/components/geometry/kernel/cad-context.js';
 import { DownloadButton } from '@/components/download-button.js';
@@ -15,21 +15,11 @@ import { cn } from '@/utils/ui.js';
 export function CadStudio(): JSX.Element {
   const { status, downloadStl, mesh } = useCad();
   const { updateThumbnail, build } = useBuild();
-  const canvasReference = useRef<ThreeCanvasReference>(null);
-  const [isScreenshotReady, setIsScreenshotReady] = useState(false);
-
-  // Handle canvas ready state changes
-  const handleCanvasReady = (ready: boolean) => {
-    setIsScreenshotReady(ready);
-  };
+  const { screenshot } = useGraphics();
 
   const downloadPng = async () => {
-    if (!canvasReference.current || !isScreenshotReady) {
-      throw new Error('Screenshot attempted before renderer was ready');
-    }
-
     // Use the captureScreenshot method to render the scene on demand and capture it
-    const dataUrl = canvasReference.current.captureScreenshot({
+    const dataUrl = screenshot.capture({
       output: {
         format: 'image/png',
         quality: 0.92,
@@ -44,11 +34,7 @@ export function CadStudio(): JSX.Element {
   };
 
   const updateThumbnailScreenshot = useCallback(() => {
-    if (!canvasReference.current || !isScreenshotReady) {
-      throw new Error('Screenshot attempted before renderer was ready');
-    }
-
-    const dataUrl = canvasReference.current.captureScreenshot({
+    const dataUrl = screenshot.capture({
       output: {
         format: 'image/webp',
         quality: 0.92,
@@ -56,35 +42,38 @@ export function CadStudio(): JSX.Element {
     });
 
     updateThumbnail(dataUrl);
-  }, [isScreenshotReady, updateThumbnail]);
+  }, [screenshot, updateThumbnail]);
 
-  const handleUpdateThumbnail = async () => {
+  const handleUpdateThumbnail = useCallback(() => {
     updateThumbnailScreenshot();
     toast.success('Thumbnail updated');
-  };
+  }, [updateThumbnailScreenshot]);
 
   // Automatically update the thumbnail when the mesh is loaded and the screenshot is ready
+  // @ts-expect-error: we only return when there's a timeout to cleanup
   useEffect(() => {
-    if (mesh && isScreenshotReady && !status.isComputing) {
+    if (mesh && screenshot.isReady && !status.isComputing) {
+      console.log('Updating thumbnail - mesh loaded and screenshot ready');
       // Update the thumbnail after a delay to allow the canvas to render
       const timeout = setTimeout(() => {
-        updateThumbnailScreenshot();
+        try {
+          updateThumbnailScreenshot();
+          console.log('Thumbnail updated successfully');
+        } catch (error) {
+          console.error('Error updating thumbnail:', error);
+        }
       }, 500);
 
       return () => {
         clearTimeout(timeout);
       };
     }
-  }, [mesh, isScreenshotReady, status.isComputing, updateThumbnailScreenshot]);
+  }, [mesh, screenshot.isReady, status.isComputing, updateThumbnailScreenshot]);
 
-  const copyToClipboard = async () => {
-    if (!canvasReference.current || !isScreenshotReady) {
-      throw new Error('Screenshot attempted before renderer was ready');
-    }
-
+  const copyToClipboard = useCallback(async () => {
     try {
       // Get the screenshot as a blob
-      const dataUrl = canvasReference.current.captureScreenshot({
+      const dataUrl = screenshot.capture({
         output: {
           format: 'image/png',
           quality: 0.92,
@@ -108,11 +97,11 @@ export function CadStudio(): JSX.Element {
       console.error('Failed to copy image to clipboard:', error);
       toast.error('Failed to copy image to clipboard');
     }
-  };
+  }, [screenshot]);
 
   useEffect(() => {
     // Check if build exists, has no thumbnail, and screenshot capability is ready
-    if (build && (!build.thumbnail || build.thumbnail === '') && isScreenshotReady) {
+    if (build && (!build.thumbnail || build.thumbnail === '') && screenshot.isReady) {
       // Automatically set the thumbnail
       try {
         updateThumbnailScreenshot();
@@ -120,14 +109,13 @@ export function CadStudio(): JSX.Element {
         console.error('Failed to auto-generate thumbnail:', error);
       }
     }
-  }, [build, isScreenshotReady, updateThumbnailScreenshot]);
+  }, [build, screenshot.isReady, updateThumbnailScreenshot]);
 
   return (
     <>
       <div className="flex size-full flex-row">
         <div className="relative min-w-0 flex-1">
           <CadViewer
-            ref={canvasReference}
             enableGizmo
             enableGrid
             enableZoom
@@ -135,7 +123,6 @@ export function CadStudio(): JSX.Element {
             enableCameraControls
             mesh={mesh}
             zoomLevel={1.25}
-            onCanvasReady={handleCanvasReady}
           />
           {/* Loading state, only show when mesh is loaded and computing */}
           {mesh && (status.isComputing || status.isBuffering) ? (
@@ -167,10 +154,10 @@ export function CadStudio(): JSX.Element {
               variant="overlay"
               size="icon"
               className="group relative text-muted-foreground"
-              disabled={!isScreenshotReady}
+              disabled={!screenshot.isReady}
               onClick={handleUpdateThumbnail}
             >
-              {isScreenshotReady ? (
+              {screenshot.isReady ? (
                 <GalleryThumbnails className="size-4" />
               ) : (
                 <LoaderPinwheel className="animate-spin ease-in-out" />
@@ -186,10 +173,10 @@ export function CadStudio(): JSX.Element {
               variant="overlay"
               size="icon"
               className="group relative text-muted-foreground"
-              disabled={!isScreenshotReady}
+              // Disabled={!screenshot.isReady}
               onClick={copyToClipboard}
             >
-              {isScreenshotReady ? (
+              {screenshot.isReady ? (
                 <Clipboard className="size-4" />
               ) : (
                 <LoaderPinwheel className="animate-spin ease-in-out" />
@@ -205,10 +192,10 @@ export function CadStudio(): JSX.Element {
           getBlob={downloadPng}
           title={`${build?.name}.png`}
           className="text-muted-foreground"
-          tooltip={isScreenshotReady ? 'Download PNG' : 'Preparing renderer...'}
-          disabled={!isScreenshotReady}
+          tooltip={screenshot.isReady ? 'Download PNG' : 'Preparing renderer...'}
+          disabled={!screenshot.isReady}
         >
-          {isScreenshotReady ? (
+          {screenshot.isReady ? (
             <ImageDown className="size-4" />
           ) : (
             <LoaderPinwheel className="animate-spin ease-in-out" />

@@ -16,6 +16,7 @@ import type { Handle } from '@/types/matches.js';
 import { useChatConstants } from '@/contexts/use-chat.js';
 import { AiChatProvider, useAiChat } from '@/components/chat/ai-chat-provider.js';
 import { KernelProvider } from '@/components/geometry/kernel/kernel-context.js';
+import { GraphicsProvider } from '@/components/geometry/graphics/graphics-context.js';
 
 function BuildNameEditor() {
   const { build, updateName, isLoading } = useBuild();
@@ -183,9 +184,11 @@ export default function ChatRoute(): JSX.Element {
         <KernelProvider>
           <CadProvider>
             <AiChatProvider value={{ ...useChatConstants, id }}>
-              <div className="flex h-full">
-                <Chat />
-              </div>
+              <GraphicsProvider defaultCameraAngle={60}>
+                <div className="flex h-full">
+                  <Chat />
+                </div>
+              </GraphicsProvider>
             </AiChatProvider>
           </CadProvider>
         </KernelProvider>

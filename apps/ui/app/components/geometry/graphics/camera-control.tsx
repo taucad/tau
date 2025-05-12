@@ -1,11 +1,16 @@
 import type { JSX } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { Slider } from '@/components/ui/slider.js';
 import { buttonVariants } from '@/components/ui/button.js';
 import { cn } from '@/utils/ui.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
+import { useCookie } from '@/hooks/use-cookie.js';
+
+// Cookie name constant - same as in the ThreeContext
+const cameraAngleCookieName = 'camera-angle';
 
 type CameraControlProps = {
   /**
@@ -20,14 +25,6 @@ type CameraControlProps = {
    * Class name for the slider container
    */
   readonly className?: string;
-};
-
-// Props for internal handler component that lives inside Canvas
-type CameraHandlerProps = {
-  /**
-   * Current angle between orthographic (0) and perspective (90)
-   */
-  readonly angle: number;
 };
 
 /**
@@ -110,9 +107,10 @@ function getPositionOnCircle(radius: number, angleInRadians: number): [number, n
  * Internal component that handles the camera matrix manipulation.
  * This MUST be used inside a Canvas/R3F component tree.
  */
-export function CameraHandler({ angle }: CameraHandlerProps): JSX.Element {
+export function CameraHandler(): JSX.Element {
   const camera = useThree((state) => state.camera);
   const { invalidate } = useThree();
+  const { cameraAngle } = useGraphics();
 
   // Store original camera settings to maintain consistent view
   const cameraState = useRef({
@@ -184,9 +182,9 @@ export function CameraHandler({ angle }: CameraHandlerProps): JSX.Element {
       cameraState.current.initialized = true;
 
       // Force immediate update with initial angle
-      updateCameraProjection(camera, angle);
+      updateCameraProjection(camera, cameraAngle);
     }
-  }, [camera, angle, updateCameraProjection]);
+  }, [camera, cameraAngle, updateCameraProjection]);
 
   // Update camera projection when angle changes
   useEffect(() => {
@@ -200,8 +198,8 @@ export function CameraHandler({ angle }: CameraHandlerProps): JSX.Element {
       return;
     }
 
-    updateCameraProjection(camera, angle);
-  }, [camera, angle, updateCameraProjection]);
+    updateCameraProjection(camera, cameraAngle);
+  }, [camera, cameraAngle, updateCameraProjection]);
 
   // Use an empty group as R3F requires returning a valid Three.js object
   return <group name="camera-handler" />;
@@ -214,15 +212,14 @@ export function CameraHandler({ angle }: CameraHandlerProps): JSX.Element {
  * Note: This component DOES NOT directly use Three.js hooks.
  * You must use CameraHandler inside the Canvas separately.
  */
-export function CameraControl({ defaultAngle = 90, onChange, className }: CameraControlProps): JSX.Element {
-  const [angle, setAngle] = useState(defaultAngle);
+export function CameraControl({ defaultAngle = 90, className }: Omit<CameraControlProps, 'onChange'>): JSX.Element {
+  const { setCameraAngle } = useGraphics();
+  const [angle, setAngle] = useCookie<number>(cameraAngleCookieName, defaultAngle);
 
-  // Notify parent component when angle changes
+  // Update camera angle directly in the Graphics context when angle changes
   useEffect(() => {
-    if (onChange) {
-      onChange(angle);
-    }
-  }, [angle, onChange]);
+    setCameraAngle(angle);
+  }, [angle, setCameraAngle]);
 
   return (
     <Tooltip>

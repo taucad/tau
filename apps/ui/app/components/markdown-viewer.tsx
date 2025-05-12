@@ -59,7 +59,7 @@ export function MarkdownViewer({ children }: { readonly children: string }): JSX
                   />
                 </div>
               </div>
-              <CodeViewer {...rest} language={language} text={text} className="p-2" />
+              <CodeViewer {...rest} language={language} text={text} className="overflow-x-auto p-3" />
             </div>
           ) : (
             <code

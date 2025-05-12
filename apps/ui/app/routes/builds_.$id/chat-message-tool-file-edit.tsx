@@ -8,14 +8,31 @@ import { useBuild } from '@/hooks/use-build2.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip.js';
 import { Button } from '@/components/ui/button.js';
 import { cn } from '@/utils/ui.js';
+import { AnimatedShinyText } from '@/components/magicui/animated-shiny-text.js';
 
 export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
   const { setCode } = useBuild();
   const [isExpanded, setIsExpanded] = useState(false);
 
   switch (part.toolInvocation.state) {
+    case 'partial-call': {
+      const { fileName = '' } = (part.toolInvocation.args ?? {}) as {
+        content?: string;
+        fileName?: string;
+      };
+      return (
+        <div className="border-neutral-200 @container/code overflow-hidden rounded-md border bg-neutral/10">
+          <div className="sticky top-0 flex flex-row items-center justify-between py-1 pr-1 pl-3 text-foreground/50">
+            <div className="flex flex-row items-center gap-1 text-xs text-muted-foreground">
+              <LoaderCircle className="size-3 animate-spin" />
+              <AnimatedShinyText>{fileName}</AnimatedShinyText>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     case 'call':
-    case 'partial-call':
     case 'result': {
       const { content = '', fileName = '' } = (part.toolInvocation.args ?? {}) as {
         content?: string;
@@ -26,9 +43,6 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
           <div className="sticky top-0 flex flex-row items-center justify-between border-b border-neutral/20 py-1 pr-1 pl-3 text-foreground/50">
             <div className="flex flex-row items-center gap-1 text-xs text-muted-foreground">
               <File className={cn('hidden size-3', part.toolInvocation.state === 'result' && 'block')} />
-              <LoaderCircle
-                className={cn('hidden size-3 animate-spin', part.toolInvocation.state === 'partial-call' && 'block')}
-              />
               <span>{fileName}</span>
             </div>
             <div className="flex flex-row gap-1">
@@ -56,23 +70,8 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
             </div>
           </div>
           <div className={cn('relative max-h-32', isExpanded ? 'max-h-none' : 'overflow-y-auto')}>
-            <div
-              className={cn(
-                'prose w-full max-w-full text-sm text-foreground',
-                '[--tw-prose-headings:text-foreground]',
-                '[--tw-prose-bullets:text-foreground]',
-                '[--tw-prose-bold:text-foreground]',
-                '[--tw-prose-counters:text-foreground]',
-                '[--tw-prose-lead:text-foreground]',
-                '[--tw-prose-quotes:text-foreground]',
-                '[--tw-prose-quote-borders:text-foreground]',
-                '[--tw-prose-kbd:text-foreground]',
-                '[--tw-prose-links:text-foreground]',
-                /* <pre> */
-                'p-0 ps-0 pe-0 text-xs leading-0',
-              )}
-            >
-              <CodeViewer language="typescript" text={content} className="p-2" />
+            <div className={cn('leading-0')}>
+              <CodeViewer language="typescript" text={content} className="overflow-x-auto p-3 text-xs" />
               <Button
                 size="xs"
                 className="sticky bottom-0 h-4 w-full rounded-none bg-neutral/10 text-center text-foreground/50 hover:bg-neutral/40"

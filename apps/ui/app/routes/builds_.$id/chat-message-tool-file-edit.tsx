@@ -72,7 +72,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
                 'p-0 ps-0 pe-0 text-xs leading-0',
               )}
             >
-              <CodeViewer language="typescript" text={content} className="backdrop-contrast-110" />
+              <CodeViewer language="typescript" text={content} className="p-2" />
               <Button
                 size="xs"
                 className="sticky bottom-0 h-4 w-full rounded-none bg-neutral/10 text-center text-foreground/50 hover:bg-neutral/40"

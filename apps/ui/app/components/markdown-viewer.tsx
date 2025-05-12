@@ -59,9 +59,7 @@ export function MarkdownViewer({ children }: { readonly children: string }): JSX
                   />
                 </div>
               </div>
-              <div>
-                <CodeViewer {...rest} language={language} text={text} className="backdrop-contrast-110" />
-              </div>
+              <CodeViewer {...rest} language={language} text={text} className="p-2" />
             </div>
           ) : (
             <code

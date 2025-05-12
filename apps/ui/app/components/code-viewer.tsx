@@ -4,22 +4,20 @@ import type { ClassValue } from 'clsx';
 import { Theme, useTheme } from 'remix-themes';
 import { cn } from '@/utils/ui.js';
 
-type Language = 'typescript' | 'kcl' | 'javascript';
+type Language = 'typescript' | 'kcl' | 'javascript' | 'jsx' | 'tsx';
 
-const mapLanguage: Record<Language, string> = {
-  typescript: 'typescript',
+const mapLanguage: Partial<Record<Language, string>> = {
   kcl: 'typescript',
-  javascript: 'javascript',
 } as const;
 
 type CodeViewerProps = {
   readonly text: string;
-  readonly language: Language;
+  readonly language: string;
   readonly className?: ClassValue;
 };
 
 export function CodeViewer({ text, language, className }: CodeViewerProps): JSX.Element {
-  const mappedLanguage = mapLanguage[language];
+  const mappedLanguage = mapLanguage[language as Language] ?? language;
   const [theme] = useTheme();
 
   return (
@@ -28,6 +26,7 @@ export function CodeViewer({ text, language, className }: CodeViewerProps): JSX.
         showLanguage={false}
         delay={300}
         language={mappedLanguage}
+        addDefaultStyles={false}
         theme={theme === Theme.DARK ? 'github-dark' : 'github-light'}
       >
         {text}

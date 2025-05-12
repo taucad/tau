@@ -74,13 +74,7 @@ type CadContextProperties = {
 
 const CadContext = createContext<CadContextProperties | undefined>(undefined);
 
-export function CadProvider({
-  children,
-  evaluateDebounceTime = 0,
-}: {
-  readonly children: ReactNode;
-  readonly evaluateDebounceTime?: number;
-}): JSX.Element {
+export function CadProvider({ children }: { readonly children: ReactNode }): JSX.Element {
   const [state, dispatch] = useReducer(cadReducer, initialState);
   const kernel = useKernel();
   const { log } = useConsole({ defaultOrigin: { component: 'CAD' } });

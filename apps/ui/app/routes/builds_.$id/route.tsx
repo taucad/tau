@@ -180,8 +180,8 @@ export default function ChatRoute(): JSX.Element {
   return (
     <LogProvider>
       <BuildProvider buildId={id}>
-        <KernelProvider withExceptions>
-          <CadProvider evaluateDebounceTime={300}>
+        <KernelProvider>
+          <CadProvider>
             <AiChatProvider value={{ ...useChatConstants, id }}>
               <div className="flex h-full">
                 <Chat />

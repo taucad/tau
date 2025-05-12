@@ -11,7 +11,7 @@ import rotateIconBase64 from '@/components/geometry/graphics/three/rotate-icon.s
 import { ScreenshotSetup } from '@/components/geometry/graphics/three/screenshot.js';
 import { cn } from '@/utils/ui.js';
 import { useThreeCursor } from '@/hooks/use-three-cursor.js';
-import { GridSizeIndicator } from '@/components/geometry/graphics/grid-size-indicator.js';
+import { GridSizeIndicator } from '@/components/geometry/graphics/grid-control.js';
 import { ResetCameraControl } from '@/components/geometry/graphics/reset-camera-control.js';
 
 export type ThreeViewerProperties = {

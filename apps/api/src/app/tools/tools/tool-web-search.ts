@@ -4,7 +4,7 @@ import { Logger } from '@nestjs/common';
 
 type WebSearchResult = {
   title: string;
-  link: string;
+  url: string;
   content: string;
 };
 

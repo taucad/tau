@@ -101,7 +101,6 @@ export function Stage({
      */
     getDistance: () => number;
   };
-  const { invalidate } = useThree();
   const outer = React.useRef<THREE.Group>(null);
   const inner = React.useRef<THREE.Group>(null);
 

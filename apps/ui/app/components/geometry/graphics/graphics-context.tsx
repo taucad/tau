@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useRef, useMemo } from 'react';
+import { createContext, useContext, useReducer, useRef, useMemo, useCallback } from 'react';
 import type { JSX, ReactNode } from 'react';
 import type { GridSizes } from '@/components/geometry/graphics/three/grid.js';
 import type { ScreenshotOptions } from '@/components/geometry/graphics/three/screenshot.js';
@@ -137,24 +137,14 @@ export function GraphicsProvider({ children, defaultCameraAngle }: GraphicsProvi
   };
 
   // Method to register screenshot capture capability
-  const registerScreenshotCapture = (captureMethod: (options?: ScreenshotOptions) => string) => {
-    screenshotRef.current = {
-      capture: captureMethod,
-    };
-    dispatch({ type: 'SET_SCREENSHOT_READY', payload: true });
-  };
-
-  // Camera reset methods
-  const camera = useMemo(
-    () => ({
-      registerReset(resetFn: () => void) {
-        resetCameraRef.current = resetFn;
-      },
-      reset() {
-        resetCameraRef.current?.();
-      },
-    }),
-    [], // No dependencies needed when using ref
+  const registerScreenshotCapture = useCallback(
+    (captureMethod: (options?: ScreenshotOptions) => string) => {
+      screenshotRef.current = {
+        capture: captureMethod,
+      };
+      dispatch({ type: 'SET_SCREENSHOT_READY', payload: true });
+    },
+    [dispatch],
   );
 
   // Create context value with useMemo for performance
@@ -171,7 +161,14 @@ export function GraphicsProvider({ children, defaultCameraAngle }: GraphicsProvi
       setIsGridSizeLocked,
 
       // Camera reset
-      camera,
+      camera: {
+        registerReset(resetFn: () => void) {
+          resetCameraRef.current = resetFn;
+        },
+        reset() {
+          resetCameraRef.current?.();
+        },
+      },
 
       // Screenshot capabilities
       screenshot: {
@@ -180,7 +177,7 @@ export function GraphicsProvider({ children, defaultCameraAngle }: GraphicsProvi
         registerCapture: registerScreenshotCapture,
       },
     }),
-    [state.gridSizes, state.cameraAngle, state.isGridSizeLocked, state.isScreenshotReady, camera],
+    [state.gridSizes, state.cameraAngle, state.isGridSizeLocked, state.isScreenshotReady, registerScreenshotCapture],
   );
 
   return <GraphicsContext.Provider value={value}>{children}</GraphicsContext.Provider>;

@@ -88,7 +88,7 @@ export const ChatHistory = memo(function () {
                     index === messages.length - 1
                   }
                 >
-                  <AnimatedShinyText>Creating...</AnimatedShinyText>
+                  <AnimatedShinyText className="text-sm italic">Creating...</AnimatedShinyText>
                 </When>
                 <When
                   shouldRender={
@@ -98,7 +98,7 @@ export const ChatHistory = memo(function () {
                     index === messages.length - 1
                   }
                 >
-                  <AnimatedShinyText>Generating...</AnimatedShinyText>
+                  <AnimatedShinyText className="text-sm italic">Generating...</AnimatedShinyText>
                 </When>
                 <ChatMessage
                   message={message}

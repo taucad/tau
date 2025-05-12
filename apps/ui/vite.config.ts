@@ -60,6 +60,7 @@ export default defineConfig({
       // Don't inline SVGs
       return !file.endsWith('.svg');
     },
+    target: 'es2022',
   },
 
   test: {

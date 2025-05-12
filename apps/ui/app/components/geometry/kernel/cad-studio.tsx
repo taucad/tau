@@ -1,5 +1,5 @@
 import { LoaderPinwheel, ImageDown, GalleryThumbnails, Clipboard } from 'lucide-react';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { JSX } from 'react';
 import { useGraphics } from '../graphics/graphics-context.js';
 import { CadViewer } from '@/components/geometry/kernel/cad-viewer.js';
@@ -16,6 +16,10 @@ export function CadStudio(): JSX.Element {
   const { status, downloadStl, mesh } = useCad();
   const { updateThumbnail, build } = useBuild();
   const { screenshot } = useGraphics();
+
+  // Add refs to track mesh and update state
+  const lastMeshRef = useRef(mesh);
+  const lastBuildIdRef = useRef(build ? build.id : undefined);
 
   const downloadPng = async () => {
     // Use the captureScreenshot method to render the scene on demand and capture it
@@ -34,41 +38,60 @@ export function CadStudio(): JSX.Element {
   };
 
   const updateThumbnailScreenshot = useCallback(() => {
-    const dataUrl = screenshot.capture({
-      output: {
-        format: 'image/webp',
-        quality: 0.92,
-      },
-    });
+    if (mesh && screenshot.isReady && !status.isComputing) {
+      const timeout = setTimeout(() => {
+        try {
+          const dataUrl = screenshot.capture({
+            output: {
+              format: 'image/webp',
+              quality: 0.92,
+            },
+          });
 
-    updateThumbnail(dataUrl);
-  }, [screenshot, updateThumbnail]);
+          updateThumbnail(dataUrl);
+          console.log('Thumbnail updated successfully');
+
+          // Update refs after successful update
+          lastMeshRef.current = mesh;
+          lastBuildIdRef.current = build ? build.id : undefined;
+        } catch (error) {
+          console.error('Error updating thumbnail:', error);
+        }
+      }, 100);
+      return () => {
+        clearTimeout(timeout);
+      };
+    }
+  }, [mesh, screenshot, status.isComputing, updateThumbnail, build]);
 
   const handleUpdateThumbnail = useCallback(() => {
     updateThumbnailScreenshot();
     toast.success('Thumbnail updated');
   }, [updateThumbnailScreenshot]);
 
-  // Automatically update the thumbnail when the mesh is loaded and the screenshot is ready
-  // @ts-expect-error: we only return when there's a timeout to cleanup
+  // Modified effect to only update when mesh or build changes
   useEffect(() => {
-    if (mesh && screenshot.isReady && !status.isComputing) {
-      console.log('Updating thumbnail - mesh loaded and screenshot ready');
-      // Update the thumbnail after a delay to allow the canvas to render
-      const timeout = setTimeout(() => {
-        try {
-          updateThumbnailScreenshot();
-          console.log('Thumbnail updated successfully');
-        } catch (error) {
-          console.error('Error updating thumbnail:', error);
-        }
-      }, 500);
+    // Only trigger update when mesh changes (not just rendering state)
+    const meshChanged = mesh !== lastMeshRef.current;
+    const buildIdChanged = build && build.id !== lastBuildIdRef.current;
 
-      return () => {
-        clearTimeout(timeout);
-      };
+    if ((meshChanged || buildIdChanged) && mesh && screenshot.isReady && !status.isComputing) {
+      console.log('Updating thumbnail - mesh or build changed');
+      updateThumbnailScreenshot();
     }
-  }, [mesh, screenshot.isReady, status.isComputing, updateThumbnailScreenshot]);
+  }, [mesh, build, screenshot.isReady, status.isComputing, updateThumbnailScreenshot]);
+
+  useEffect(() => {
+    // Check if build exists, has no thumbnail, and screenshot capability is ready
+    if (build && (!build.thumbnail || build.thumbnail === '') && screenshot.isReady && mesh && !status.isComputing) {
+      // Automatically set the thumbnail
+      try {
+        updateThumbnailScreenshot();
+      } catch (error) {
+        console.error('Failed to auto-generate thumbnail:', error);
+      }
+    }
+  }, [build, screenshot.isReady, mesh, status.isComputing, updateThumbnailScreenshot]);
 
   const copyToClipboard = useCallback(async () => {
     try {
@@ -98,18 +121,6 @@ export function CadStudio(): JSX.Element {
       toast.error('Failed to copy image to clipboard');
     }
   }, [screenshot]);
-
-  useEffect(() => {
-    // Check if build exists, has no thumbnail, and screenshot capability is ready
-    if (build && (!build.thumbnail || build.thumbnail === '') && screenshot.isReady) {
-      // Automatically set the thumbnail
-      try {
-        updateThumbnailScreenshot();
-      } catch (error) {
-        console.error('Failed to auto-generate thumbnail:', error);
-      }
-    }
-  }, [build, screenshot.isReady, updateThumbnailScreenshot]);
 
   return (
     <>

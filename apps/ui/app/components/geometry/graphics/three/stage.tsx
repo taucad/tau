@@ -1,14 +1,13 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import type { JSX, ReactNode, RefObject } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { PerspectiveCamera } from '@react-three/drei';
 import { AxesHelper } from '@/components/geometry/graphics/three/axes-helper.js';
-import { resetCamera as resetCameraFn } from '@/components/geometry/graphics/camera-control.js';
 import { Grid } from '@/components/geometry/graphics/three/grid.js';
 import type { GridSizes } from '@/components/geometry/graphics/three/grid.js';
-import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
+import { useCameraReset } from '@/components/geometry/graphics/hooks/use-camera-reset.js';
 
 export type StageOptions = {
   perspective?: {
@@ -91,7 +90,6 @@ export function Stage({
   onGridChange,
   ...properties
 }: StageProperties): JSX.Element {
-  const { stageRef } = useGraphics();
   const camera = useThree((state) => state.camera);
   const controls = useThree((state) => state.controls) as RootState['controls'] & {
     /**
@@ -109,7 +107,7 @@ export function Stage({
 
   // Add state for tracking zoom
   const [currentZoom, setCurrentZoom] = React.useState<number>(1);
-  const originalDistanceReference = React.useRef<number | undefined>(null);
+  const originalDistanceReference = React.useRef<number | undefined>(undefined);
 
   const [{ shapeRadius, sceneRadius }, set] = React.useState<{
     // The radius of the scene. Used to determine if the camera needs to be updated
@@ -127,6 +125,44 @@ export function Stage({
       rotation: { ...defaultStageOptions.rotation, ...stageOptions.rotation },
     };
   }, [stageOptions]);
+
+  // Function to set scene radius
+  const setSceneRadius = useCallback((radius: number) => {
+    set((previous) => ({
+      ...previous,
+      sceneRadius: radius,
+    }));
+  }, []);
+
+  // Use the camera reset hook
+  const resetCamera = useCameraReset({
+    shapeRadius,
+    // Explicitly provide the required properties
+    rotation: {
+      side: rotation.side ?? defaultStageOptions.rotation.side,
+      vertical: rotation.vertical ?? defaultStageOptions.rotation.vertical,
+    },
+    perspective: {
+      offsetRatio: perspective.offsetRatio ?? defaultStageOptions.perspective.offsetRatio,
+      zoomLevel: perspective.zoomLevel ?? defaultStageOptions.perspective.zoomLevel,
+      nearPlane: perspective.nearPlane ?? defaultStageOptions.perspective.nearPlane,
+      minimumFarPlane: perspective.minimumFarPlane ?? defaultStageOptions.perspective.minimumFarPlane,
+      farPlaneRadiusMultiplier:
+        perspective.farPlaneRadiusMultiplier ?? defaultStageOptions.perspective.farPlaneRadiusMultiplier,
+    },
+    setCurrentZoom,
+    setSceneRadius,
+    originalDistanceReference,
+  });
+
+  // Expose resetCamera via ref if provided
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      resetCamera,
+    }),
+    [resetCamera],
+  );
 
   /**
    * Position the scene.
@@ -167,9 +203,7 @@ export function Stage({
     if (!controls) return;
 
     const handleControlsChange = () => {
-      if (originalDistanceReference.current === null) {
-        originalDistanceReference.current = controls.getDistance?.();
-      }
+      originalDistanceReference.current ??= controls.getDistance?.();
 
       const distance = controls.getDistance?.();
       if (distance && originalDistanceReference.current) {
@@ -186,36 +220,6 @@ export function Stage({
       controls.removeEventListener?.('change', handleControlsChange);
     };
   }, [camera.type, camera.zoom, controls]);
-
-  const resetCamera = React.useCallback(() => {
-    originalDistanceReference.current = null;
-
-    // Use the shared resetCamera function from camera-control.tsx
-    resetCameraFn({
-      camera,
-      shapeRadius,
-      rotation,
-      perspective,
-      setCurrentZoom,
-      setSceneRadius(radius) {
-        set((previous) => ({
-          ...previous,
-          sceneRadius: radius,
-        }));
-      },
-      invalidate,
-    });
-  }, [camera, invalidate, shapeRadius, rotation, perspective, setCurrentZoom]);
-
-  // Set up the ref in both GraphicsProvider and local ref
-  React.useImperativeHandle(ref, () => ({
-    resetCamera,
-  }));
-
-  // Also set the resetCamera function on the stageRef in the GraphicsProvider
-  React.useImperativeHandle(stageRef, () => ({
-    resetCamera,
-  }));
 
   /**
    * Position the camera based on the scene's bounding box.

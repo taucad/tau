@@ -9,12 +9,12 @@ import { useGraphics } from '@/components/geometry/graphics/graphics-context.js'
  * Uses the Graphics context's resetCamera method
  */
 export function ResetCameraControl(): JSX.Element {
-  const { resetCamera } = useGraphics();
+  const { camera } = useGraphics();
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="overlay" size="icon" onClick={resetCamera}>
+        <Button variant="overlay" size="icon" onClick={camera.reset}>
           <Focus />
         </Button>
       </TooltipTrigger>

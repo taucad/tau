@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, useRef, useMemo } from 'react';
-import type { JSX, ReactNode, RefObject } from 'react';
+import type { JSX, ReactNode } from 'react';
 import type { GridSizes } from '@/components/geometry/graphics/three/grid.js';
 import type { ScreenshotOptions } from '@/components/geometry/graphics/three/screenshot.js';
 
@@ -80,11 +80,13 @@ type GraphicsContextType = {
   // Methods
   setGridSizes: (sizes: GridSizes) => void;
   setCameraAngle: (angle: number) => void;
-  resetCamera: () => void;
   setIsGridSizeLocked: (scale: boolean) => void;
 
-  // We need to expose the stageRef to allow other components to provide the ref value
-  stageRef: RefObject<{ resetCamera: () => void } | undefined>;
+  // Camera reset functionality
+  camera: {
+    registerReset: (resetFn: () => void) => void;
+    reset: () => void;
+  };
 
   // Screenshot capabilities
   screenshot: {
@@ -113,8 +115,8 @@ export function GraphicsProvider({ children, defaultCameraAngle }: GraphicsProvi
 
   const [state, dispatch] = useReducer(graphicsReducer, initialState);
 
-  // Use a correctly typed ref
-  const stageRef = useRef<{ resetCamera: () => void } | undefined>(undefined);
+  // Remove stageRef and add resetCameraFn state
+  const resetCameraRef = useRef<(() => void) | undefined>(undefined);
 
   // Reference to store screenshot methods
   const screenshotRef = useRef<ScreenshotData>(defaultScreenshotData);
@@ -127,13 +129,6 @@ export function GraphicsProvider({ children, defaultCameraAngle }: GraphicsProvi
   // Camera angle setter
   const setCameraAngle = (angle: number) => {
     dispatch({ type: 'SET_CAMERA_ANGLE', payload: angle });
-  };
-
-  // Reset camera method
-  const resetCamera = () => {
-    if (stageRef.current) {
-      stageRef.current.resetCamera();
-    }
   };
 
   // Set fixed scale method
@@ -149,6 +144,19 @@ export function GraphicsProvider({ children, defaultCameraAngle }: GraphicsProvi
     dispatch({ type: 'SET_SCREENSHOT_READY', payload: true });
   };
 
+  // Camera reset methods
+  const camera = useMemo(
+    () => ({
+      registerReset(resetFn: () => void) {
+        resetCameraRef.current = resetFn;
+      },
+      reset() {
+        resetCameraRef.current?.();
+      },
+    }),
+    [], // No dependencies needed when using ref
+  );
+
   // Create context value with useMemo for performance
   const value = useMemo(
     () => ({
@@ -160,11 +168,10 @@ export function GraphicsProvider({ children, defaultCameraAngle }: GraphicsProvi
       // Methods
       setGridSizes,
       setCameraAngle,
-      resetCamera,
       setIsGridSizeLocked,
 
-      // Stage ref for components that need it
-      stageRef,
+      // Camera reset
+      camera,
 
       // Screenshot capabilities
       screenshot: {
@@ -173,7 +180,7 @@ export function GraphicsProvider({ children, defaultCameraAngle }: GraphicsProvi
         registerCapture: registerScreenshotCapture,
       },
     }),
-    [state.gridSizes, state.cameraAngle, state.isGridSizeLocked, state.isScreenshotReady],
+    [state.gridSizes, state.cameraAngle, state.isGridSizeLocked, state.isScreenshotReady, camera],
   );
 
   return <GraphicsContext.Provider value={value}>{children}</GraphicsContext.Provider>;
@@ -183,7 +190,18 @@ export function GraphicsProvider({ children, defaultCameraAngle }: GraphicsProvi
 export function useGraphics(): GraphicsContextType {
   const context = useContext(GraphicsContext);
   if (context === undefined) {
-    throw new Error('useGraphics must be used within a GraphicsProvider');
+    return {
+      gridSizes: { smallSize: 1, largeSize: 10 },
+      cameraAngle: 60,
+      isGridSizeLocked: false,
+      /* eslint-disable @typescript-eslint/no-empty-function -- empty state */
+      setGridSizes() {},
+      setCameraAngle() {},
+      setIsGridSizeLocked() {},
+      camera: { registerReset() {}, reset() {} },
+      screenshot: { capture: () => '', isReady: false, registerCapture() {} },
+      /* eslint-enable @typescript-eslint/no-empty-function -- renabling */
+    };
   }
 
   return context;

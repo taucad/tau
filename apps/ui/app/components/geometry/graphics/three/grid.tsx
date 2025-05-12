@@ -25,18 +25,13 @@ export type GridSizes = {
  * Hook to calculate grid sizes based on camera properties
  */
 export function useGridSizes(currentZoom: number): GridSizes {
-  const camera = useThree((state) => state.camera);
+  // Only subscribe to the specific properties you need
+  const cameraPosition = useThree((state) => state.camera.position.length());
+  const cameraFov = useThree((state) => (state.camera instanceof THREE.PerspectiveCamera ? state.camera.fov : 75));
 
   return useMemo(() => {
-    // Get current camera distance
-    const cameraDistance = camera.position.length();
-
-    // Get current FOV
-    const { fov } = camera as THREE.PerspectiveCamera;
-
-    // Calculate the visible width at the center of the view
-    // This is the key formula: 2 * distance * tan(fov/2)
-    const visibleWidthAtDistance = 2 * cameraDistance * Math.tan(THREE.MathUtils.degToRad(fov / 2));
+    // Calculate grid sizes based on these specific values
+    const visibleWidthAtDistance = 2 * cameraPosition * Math.tan(THREE.MathUtils.degToRad(cameraFov / 2));
 
     // Set base grid size as fraction of visible width (e.g. 1/20th)
     // This ensures grid size is proportional to what's visible in the viewport
@@ -60,11 +55,11 @@ export function useGridSizes(currentZoom: number): GridSizes {
       smallSize: largeSize / 10,
       largeSize,
       effectiveSize: baseGridSize,
-      baseSize: cameraDistance,
+      baseSize: cameraPosition,
       zoomFactor: 1 / currentZoom,
-      fov,
+      fov: cameraFov,
     };
-  }, [camera, currentZoom]);
+  }, [cameraPosition, cameraFov, currentZoom]);
 }
 
 type GridProps = {
@@ -80,10 +75,18 @@ type GridProps = {
 function GridComponent({ currentZoom }: GridProps) {
   const calculatedGridSizes = useGridSizes(currentZoom);
   const { setGridSizes, gridSizes } = useGraphics();
+  const previousGridSizesRef = React.useRef(calculatedGridSizes);
 
-  // Update context with grid sizes
+  // Only update when grid sizes change significantly
   React.useEffect(() => {
-    setGridSizes(calculatedGridSizes);
+    // Check if the difference is significant enough to update
+    if (
+      Math.abs(previousGridSizesRef.current.smallSize - calculatedGridSizes.smallSize) > 0.001 ||
+      Math.abs(previousGridSizesRef.current.largeSize - calculatedGridSizes.largeSize) > 0.001
+    ) {
+      previousGridSizesRef.current = calculatedGridSizes;
+      setGridSizes(calculatedGridSizes);
+    }
   }, [calculatedGridSizes, setGridSizes]);
 
   return <InfiniteGrid smallSize={gridSizes.smallSize} largeSize={gridSizes.largeSize} />;

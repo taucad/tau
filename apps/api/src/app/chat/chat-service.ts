@@ -106,8 +106,8 @@ export class ChatService {
         Logger.error('Error in chat stream follows:');
         Logger.error(error);
         const errorMessage = error instanceof Error ? error.message : 'An error occurred while processing the request';
-        // Only show the error message in development mode
-        return import.meta.env.DEV ? errorMessage : 'An error occurred while processing the request';
+
+        return errorMessage;
       },
     };
   }

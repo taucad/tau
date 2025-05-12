@@ -25,6 +25,7 @@ export function CodeViewer({ text, language, className }: CodeViewerProps): JSX.
   return (
     <div className={cn('[&_pre]:my-0 [&_pre]:bg-transparent! [&_pre]:leading-[1.45]', className)}>
       <ShikiHighlighter
+        showLanguage={false}
         delay={300}
         language={mappedLanguage}
         theme={theme === Theme.DARK ? 'github-dark' : 'github-light'}

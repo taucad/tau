@@ -1,9 +1,9 @@
 import { LoaderPinwheel, ImageDown, GalleryThumbnails, Clipboard } from 'lucide-react';
 import { useCallback, useEffect, useRef } from 'react';
 import type { JSX } from 'react';
-import { useGraphics } from '../graphics/graphics-context.js';
-import { CadViewer } from '@/components/geometry/kernel/cad-viewer.js';
-import { useCad } from '@/components/geometry/kernel/cad-context.js';
+import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
+import { CadViewer } from '@/components/geometry/cad/cad-viewer.js';
+import { useCad } from '@/components/geometry/cad/cad-context.js';
 import { DownloadButton } from '@/components/download-button.js';
 import { BoxDown } from '@/components/icons/box-down.js';
 import { Button } from '@/components/ui/button.js';
@@ -11,6 +11,9 @@ import { useBuild } from '@/hooks/use-build2.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import { toast } from '@/components/ui/sonner.js';
 import { cn } from '@/utils/ui.js';
+import { CameraControl } from '@/components/geometry/cad/camera-control.js';
+import { GridSizeIndicator } from '@/components/geometry/cad/grid-control.js';
+import { ResetCameraControl } from '@/components/geometry/cad/reset-camera-control.js';
 
 export function CadStudio(): JSX.Element {
   const { status, downloadStl, mesh } = useCad();
@@ -62,6 +65,8 @@ export function CadStudio(): JSX.Element {
         clearTimeout(timeout);
       };
     }
+
+    throw new Error('Mesh or screenshot is not ready');
   }, [mesh, screenshot, status.isComputing, updateThumbnail, build]);
 
   const handleUpdateThumbnail = useCallback(() => {
@@ -126,15 +131,7 @@ export function CadStudio(): JSX.Element {
     <>
       <div className="flex size-full flex-row">
         <div className="relative min-w-0 flex-1">
-          <CadViewer
-            enableGizmo
-            enableGrid
-            enableZoom
-            enableAxesHelper
-            enableCameraControls
-            mesh={mesh}
-            zoomLevel={1.25}
-          />
+          <CadViewer enableGizmo enableGrid enableZoom enableAxesHelper mesh={mesh} zoomLevel={1.25} />
           {/* Loading state, only show when mesh is loaded and computing */}
           {mesh && (status.isComputing || status.isBuffering) ? (
             <div className="absolute top-[90%] left-[50%] -translate-x-[50%] -translate-y-[90%]">
@@ -150,6 +147,15 @@ export function CadStudio(): JSX.Element {
             {status.error ? (
               <div className="rounded-md bg-destructive/10 px-3 py-0.5 text-xs text-destructive">{status.error}</div>
             ) : null}
+          </div>
+
+          {/* Camera and grid controls */}
+          <div className="absolute bottom-0 left-0 z-10 m-2">
+            <div className="flex items-center gap-2">
+              <CameraControl defaultAngle={60} className="w-60" />
+              <GridSizeIndicator />
+              <ResetCameraControl />
+            </div>
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import type { JSX, ReactNode } from 'react';
 import { createContext, useContext, useReducer, useEffect, useMemo, useCallback } from 'react';
-import { useKernel } from './kernel-context.js';
+import { useKernel } from '@/components/geometry/kernel/kernel-context.js';
 import { useConsole } from '@/hooks/use-console.js';
 
 // Combine related state
@@ -98,6 +98,8 @@ export function CadProvider({ children }: { readonly children: ReactNode }): JSX
           log.error('Failed to load default parameters', {
             data: error instanceof Error ? error.message : String(error),
           });
+
+          return {};
         }
       };
 

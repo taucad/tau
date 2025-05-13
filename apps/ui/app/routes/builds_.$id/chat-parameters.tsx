@@ -6,7 +6,7 @@ import { Switch } from '@/components/ui/switch.js';
 import { Input } from '@/components/ui/input.js';
 import { useBuild } from '@/hooks/use-build2.js';
 import { Button } from '@/components/ui/button.js';
-import { useCad } from '@/components/geometry/kernel/cad-context.js';
+import { useCad } from '@/components/geometry/cad/cad-context.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import { cn } from '@/utils/ui.js';
 import { debounce } from '@/utils/functions.js';

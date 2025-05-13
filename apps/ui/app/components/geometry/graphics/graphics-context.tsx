@@ -10,6 +10,9 @@ type GraphicsState = {
   cameraAngle: number;
   isGridSizeLocked: boolean;
   isScreenshotReady: boolean;
+  gridUnit: string;
+  gridUnitFactor: number;
+  gridUnitSystem: 'metric' | 'imperial';
 };
 
 // Initial state
@@ -19,6 +22,9 @@ const defaultInitialState: GraphicsState = {
   cameraAngle: 60,
   isGridSizeLocked: false,
   isScreenshotReady: false,
+  gridUnit: 'mm',
+  gridUnitFactor: 1,
+  gridUnitSystem: 'metric',
 };
 
 // Action types
@@ -26,7 +32,8 @@ type GraphicsAction =
   | { type: 'UPDATE_GRID_SIZE'; payload: GridSizes }
   | { type: 'SET_CAMERA_ANGLE'; payload: number }
   | { type: 'SET_GRID_SIZE_LOCKED'; payload: boolean }
-  | { type: 'SET_SCREENSHOT_READY'; payload: boolean };
+  | { type: 'SET_SCREENSHOT_READY'; payload: boolean }
+  | { type: 'SET_GRID_UNIT'; payload: { unit: string; factor: number; system: 'metric' | 'imperial' } };
 
 // Add explicit return type to ensure complete coverage
 function graphicsReducer(state: GraphicsState, action: GraphicsAction): GraphicsState {
@@ -56,6 +63,16 @@ function graphicsReducer(state: GraphicsState, action: GraphicsAction): Graphics
     case 'SET_SCREENSHOT_READY': {
       return { ...state, isScreenshotReady: action.payload };
     }
+
+    case 'SET_GRID_UNIT': {
+      const { unit, factor, system } = action.payload;
+      return {
+        ...state,
+        gridUnit: unit,
+        gridUnitFactor: factor,
+        gridUnitSystem: system,
+      };
+    }
   }
 }
 
@@ -76,11 +93,15 @@ type GraphicsContextType = {
   gridSizes: GridSizes;
   cameraAngle: number;
   isGridSizeLocked: boolean;
+  gridUnit: string;
+  gridUnitFactor: number;
+  gridUnitSystem: 'metric' | 'imperial';
 
   // Methods
   setGridSizes: (sizes: GridSizes) => void;
   setCameraAngle: (angle: number) => void;
   setIsGridSizeLocked: (scale: boolean) => void;
+  setGridUnit: (unit: string, factor: number, system: 'metric' | 'imperial') => void;
 
   // Camera reset functionality
   camera: {
@@ -136,6 +157,14 @@ export function GraphicsProvider({ children, defaultCameraAngle }: GraphicsProvi
     dispatch({ type: 'SET_GRID_SIZE_LOCKED', payload: scale });
   };
 
+  // Method to set grid unit and factor
+  const setGridUnit = (unit: string, factor: number, system: 'metric' | 'imperial') => {
+    dispatch({
+      type: 'SET_GRID_UNIT',
+      payload: { unit, factor, system },
+    });
+  };
+
   // Method to register screenshot capture capability
   const registerScreenshotCapture = useCallback(
     (captureMethod: (options?: ScreenshotOptions) => string) => {
@@ -154,11 +183,15 @@ export function GraphicsProvider({ children, defaultCameraAngle }: GraphicsProvi
       gridSizes: state.gridSizes,
       cameraAngle: state.cameraAngle,
       isGridSizeLocked: state.isGridSizeLocked,
+      gridUnit: state.gridUnit,
+      gridUnitFactor: state.gridUnitFactor,
+      gridUnitSystem: state.gridUnitSystem,
 
       // Methods
       setGridSizes,
       setCameraAngle,
       setIsGridSizeLocked,
+      setGridUnit,
 
       // Camera reset
       camera: {
@@ -177,7 +210,16 @@ export function GraphicsProvider({ children, defaultCameraAngle }: GraphicsProvi
         registerCapture: registerScreenshotCapture,
       },
     }),
-    [state.gridSizes, state.cameraAngle, state.isGridSizeLocked, state.isScreenshotReady, registerScreenshotCapture],
+    [
+      state.gridSizes,
+      state.cameraAngle,
+      state.isGridSizeLocked,
+      state.isScreenshotReady,
+      state.gridUnit,
+      state.gridUnitFactor,
+      state.gridUnitSystem,
+      registerScreenshotCapture,
+    ],
   );
 
   return <GraphicsContext.Provider value={value}>{children}</GraphicsContext.Provider>;
@@ -191,10 +233,14 @@ export function useGraphics(): GraphicsContextType {
       gridSizes: { smallSize: 1, largeSize: 10 },
       cameraAngle: 60,
       isGridSizeLocked: false,
+      gridUnit: 'mm',
+      gridUnitFactor: 1,
+      gridUnitSystem: 'metric',
       /* eslint-disable @typescript-eslint/no-empty-function -- empty state */
       setGridSizes() {},
       setCameraAngle() {},
       setIsGridSizeLocked() {},
+      setGridUnit() {},
       camera: { registerReset() {}, reset() {} },
       screenshot: { capture: () => '', isReady: false, registerCapture() {} },
       /* eslint-enable @typescript-eslint/no-empty-function -- renabling */

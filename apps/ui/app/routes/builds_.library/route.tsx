@@ -33,8 +33,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.j
 import type { Category } from '@/types/cad.js';
 import { categories } from '@/types/cad.js';
 import type { Build } from '@/types/build.js';
-import { CadProvider, useCad } from '@/components/geometry/kernel/cad-context.js';
-import { CadViewer } from '@/components/geometry/kernel/cad-viewer.js';
+import { CadProvider, useCad } from '@/components/geometry/cad/cad-context.js';
+import { CadViewer } from '@/components/geometry/cad/cad-viewer.js';
 import { useBuilds } from '@/hooks/use-builds.js';
 import { toast } from '@/components/ui/sonner.js';
 import type { Handle } from '@/types/matches.js';

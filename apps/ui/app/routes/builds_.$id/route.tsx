@@ -5,7 +5,7 @@ import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
 import type { Route } from './+types/route.js';
 import { ChatInterface } from '@/routes/builds_.$id/chat-interface.js';
-import { CadProvider, useCad } from '@/components/geometry/kernel/cad-context.js';
+import { CadProvider, useCad } from '@/components/geometry/cad/cad-context.js';
 import { BuildProvider, useBuild } from '@/hooks/use-build2.js';
 import { Button } from '@/components/ui/button.js';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.js';

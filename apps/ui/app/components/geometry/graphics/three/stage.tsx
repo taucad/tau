@@ -7,7 +7,7 @@ import { PerspectiveCamera } from '@react-three/drei';
 import { AxesHelper } from '@/components/geometry/graphics/three/axes-helper.js';
 import { Grid } from '@/components/geometry/graphics/three/grid.js';
 import type { GridSizes } from '@/components/geometry/graphics/three/grid.js';
-import { useCameraReset } from '@/components/geometry/graphics/hooks/use-camera-reset.js';
+import { useCameraReset } from '@/components/geometry/graphics/three/use-camera-reset.js';
 
 export type StageOptions = {
   perspective?: {

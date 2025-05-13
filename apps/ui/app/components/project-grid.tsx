@@ -12,8 +12,8 @@ import { SvgIcon } from '@/components/icons/svg-icon.js';
 import type { Build } from '@/types/build.js';
 import type { CadKernelProvider, Category } from '@/types/cad.js';
 import { categories } from '@/types/cad.js';
-import { CadProvider, useCad } from '@/components/geometry/kernel/cad-context.js';
-import { CadViewer } from '@/components/geometry/kernel/cad-viewer.js';
+import { CadProvider, useCad } from '@/components/geometry/cad/cad-context.js';
+import { CadViewer } from '@/components/geometry/cad/cad-viewer.js';
 import { storage } from '@/db/storage.js';
 
 // Utility function to split an array into chunks

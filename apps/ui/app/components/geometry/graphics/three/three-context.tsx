@@ -3,16 +3,13 @@ import { Canvas } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useEffect, useState, useRef } from 'react';
 import type { JSX } from 'react';
-import { CameraControl } from '@/components/geometry/graphics/camera-control.js';
 import { CameraHandler } from '@/components/geometry/graphics/three/camera-handler.js';
 import { Scene } from '@/components/geometry/graphics/three/scene.js';
 import type { StageOptions } from '@/components/geometry/graphics/three/stage.js';
-import rotateIconBase64 from '@/components/geometry/graphics/three/rotate-icon.svg?base64';
+import rotateIconBase64 from '@/components/geometry/graphics/rotate-icon.svg?base64';
 import { ScreenshotSetup } from '@/components/geometry/graphics/three/screenshot.js';
 import { cn } from '@/utils/ui.js';
 import { useThreeCursor } from '@/hooks/use-three-cursor.js';
-import { GridSizeIndicator } from '@/components/geometry/graphics/grid-control.js';
-import { ResetCameraControl } from '@/components/geometry/graphics/reset-camera-control.js';
 
 export type ThreeViewerProperties = {
   readonly enableGizmo?: boolean;
@@ -101,15 +98,6 @@ export function ThreeProviderContent({
           {isCanvasReady ? <ScreenshotSetup /> : null}
         </Scene>
       </Canvas>
-      {enableCameraControls ? (
-        <div className="absolute bottom-0 left-0 z-10 m-2">
-          <div className="flex items-center gap-2">
-            <CameraControl defaultAngle={defaultCameraAngle} className="w-60" />
-            {enableGrid ? <GridSizeIndicator /> : null}
-            <ResetCameraControl />
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { ReplicadMesh } from '@/components/geometry/kernel/replicad/replicad-mes
 import { ThreeProvider } from '@/components/geometry/graphics/three/three-context.js';
 import type { ThreeViewerProperties } from '@/components/geometry/graphics/three/three-context.js';
 
-type CadViewerProperties = ThreeViewerProperties & {
+type CadViewerProperties = Omit<ThreeViewerProperties, 'enableCameraControls'> & {
   readonly mesh: unknown;
   readonly zoomLevel: number;
 };
@@ -13,7 +13,7 @@ export function CadViewer({ mesh, zoomLevel, ...properties }: CadViewerPropertie
   return (
     <div className="size-full">
       {mesh ? (
-        <ThreeProvider stageOptions={{ perspective: { zoomLevel } }} {...properties}>
+        <ThreeProvider stageOptions={{ perspective: { zoomLevel } }} enableCameraControls={false} {...properties}>
           <ReplicadMesh {...mesh} />
         </ThreeProvider>
       ) : (

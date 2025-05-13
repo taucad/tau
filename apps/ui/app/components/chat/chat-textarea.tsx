@@ -406,10 +406,10 @@ export const ChatTextarea = memo(function ({
               models={models}
               renderButtonContents={(item) => (
                 <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full group-data-[state=open]:text-primary @md:max-w-fit">
-                  <span className="hidden truncate text-xs @xs:block">{item.name}</span>
+                  <span className="hidden truncate text-xs @[24rem]:block">{item.name}</span>
                   <span className="relative flex size-4 items-center justify-center">
-                    <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @xs:scale-100" />
-                    <CircuitBoard className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @xs:scale-0" />
+                    <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[24rem]:scale-100" />
+                    <CircuitBoard className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @[24rem]:scale-0" />
                   </span>
                 </span>
               )}
@@ -438,7 +438,7 @@ export const ChatTextarea = memo(function ({
                 setIsSearching((previous) => !previous);
               }}
             >
-              <span className="hidden text-xs @xs:block">Search</span>
+              <span className="hidden text-xs @[24rem]:block">Search</span>
               <Globe className="transition-transform duration-200 ease-in-out group-hover:rotate-180" />
             </Button>
           </TooltipTrigger>
@@ -459,7 +459,7 @@ export const ChatTextarea = memo(function ({
                 type="button"
                 onClick={handleFileSelect}
               >
-                <span className="hidden @xs:block">Upload</span>
+                <span className="hidden @[24rem]:block">Upload</span>
                 <Image />
               </Button>
             </TooltipTrigger>

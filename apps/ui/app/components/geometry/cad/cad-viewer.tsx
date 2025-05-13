@@ -10,17 +10,17 @@ type CadViewerProperties = Omit<ThreeViewerProperties, 'enableCameraControls'> &
 };
 
 export function CadViewer({ mesh, zoomLevel, ...properties }: CadViewerProperties): JSX.Element {
+  if (!mesh) {
+    return (
+      <div className="flex size-full items-center justify-center text-2xl font-bold">
+        <LoaderPinwheel className="size-20 animate-spin stroke-1 text-primary ease-in-out" />
+      </div>
+    );
+  }
+
   return (
-    <div className="size-full">
-      {mesh ? (
-        <ThreeProvider stageOptions={{ perspective: { zoomLevel } }} enableCameraControls={false} {...properties}>
-          <ReplicadMesh {...mesh} />
-        </ThreeProvider>
-      ) : (
-        <div className="flex h-full items-center justify-center text-2xl font-bold">
-          <LoaderPinwheel className="size-20 animate-spin stroke-1 text-primary ease-in-out" />
-        </div>
-      )}
-    </div>
+    <ThreeProvider stageOptions={{ perspective: { zoomLevel } }} enableCameraControls={false} {...properties}>
+      <ReplicadMesh {...mesh} />
+    </ThreeProvider>
   );
 }

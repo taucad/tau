@@ -27,7 +27,7 @@ export type ThreeViewerProperties = {
 
 export type ThreeContextProperties = CanvasProps & ThreeViewerProperties;
 
-export function ThreeProviderContent({
+export function ThreeProvider({
   children,
   enableGizmo = false,
   enableGrid = false,
@@ -55,52 +55,44 @@ export function ThreeProviderContent({
   }, []);
 
   return (
-    <div className="relative size-full">
-      <Canvas
-        gl={{
-          // Enable logarithmic depth buffer for better precision at low field of view,
-          // eliminating visual artifacts on the object.
-          logarithmicDepthBuffer: true,
-          antialias: true,
-        }}
-        style={{
-          cursor,
-        }}
-        dpr={dpr}
-        frameloop="demand"
-        className={cn('bg-background', className)}
-        onCreated={(state) => {
-          // Make sure the WebGLRenderer is fully initialized
-          if (state.gl?.domElement) {
-            setIsCanvasReady(true);
-          }
-        }}
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
-        onContextMenu={handleContextMenu}
-        {...properties}
+    <Canvas
+      gl={{
+        // Enable logarithmic depth buffer for better precision at low field of view,
+        // eliminating visual artifacts on the object.
+        logarithmicDepthBuffer: true,
+        antialias: true,
+      }}
+      style={{
+        cursor,
+      }}
+      dpr={dpr}
+      frameloop="demand"
+      className={cn('bg-background', className)}
+      onCreated={(state) => {
+        // Make sure the WebGLRenderer is fully initialized
+        if (state.gl?.domElement) {
+          setIsCanvasReady(true);
+        }
+      }}
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
+      onContextMenu={handleContextMenu}
+      {...properties}
+    >
+      <Scene
+        hasGizmo={enableGizmo}
+        isCentered={center}
+        hasDamping={enableDamping}
+        hasZoom={enableZoom}
+        hasGrid={enableGrid}
+        hasAxesHelper={enableAxesHelper}
+        stageOptions={stageOptions}
+        zoomSpeed={zoomSpeed}
       >
-        <Scene
-          hasGizmo={enableGizmo}
-          isCentered={center}
-          hasDamping={enableDamping}
-          hasZoom={enableZoom}
-          hasGrid={enableGrid}
-          hasAxesHelper={enableAxesHelper}
-          stageOptions={stageOptions}
-          zoomSpeed={zoomSpeed}
-        >
-          {children}
-          <CameraHandler />
-          {isCanvasReady ? <ScreenshotSetup /> : null}
-        </Scene>
-      </Canvas>
-    </div>
+        {children}
+        <CameraHandler />
+        {isCanvasReady ? <ScreenshotSetup /> : null}
+      </Scene>
+    </Canvas>
   );
 }
-
-export function ThreeProvider(props: ThreeContextProperties): JSX.Element {
-  return <ThreeProviderContent {...props} />;
-}
-
-ThreeProvider.displayName = 'ThreeProvider';

@@ -185,9 +185,7 @@ export default function ChatRoute(): JSX.Element {
           <CadProvider>
             <AiChatProvider value={{ ...useChatConstants, id }}>
               <GraphicsProvider defaultCameraAngle={60}>
-                <div className="flex h-full">
-                  <Chat />
-                </div>
+                <Chat />
               </GraphicsProvider>
             </AiChatProvider>
           </CadProvider>

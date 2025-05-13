@@ -130,34 +130,30 @@ export function CadStudio(): JSX.Element {
 
   return (
     <>
-      <div className="flex size-full flex-row">
-        <div className="relative min-w-0 flex-1">
-          <CadViewer enableGizmo enableGrid enableZoom enableAxesHelper mesh={mesh} zoomLevel={1.25} />
-          {/* Loading state, only show when mesh is loaded and computing */}
-          {mesh && (status.isComputing || status.isBuffering) ? (
-            <div className="absolute top-[90%] left-[50%] -translate-x-[50%] -translate-y-[90%]">
-              <div className="border-neutral-200 m-auto flex items-center gap-2 rounded-md border bg-background/70 p-2 backdrop-blur-sm">
-                <span className="font-mono text-sm text-muted-foreground">
-                  {status.isBuffering ? 'Buffering...' : 'Rendering...'}
-                </span>
-                <LoaderPinwheel className="h-6 w-6 animate-spin text-primary ease-in-out" />
-              </div>
-            </div>
-          ) : null}
-          <div className="absolute bottom-12 left-2">
-            {status.error ? (
-              <div className="rounded-md bg-destructive/10 px-3 py-0.5 text-xs text-destructive">{status.error}</div>
-            ) : null}
+      <CadViewer enableGizmo enableGrid enableZoom enableAxesHelper mesh={mesh} zoomLevel={1.25} />
+      {/* Loading state, only show when mesh is loaded and computing */}
+      {mesh && (status.isComputing || status.isBuffering) ? (
+        <div className="absolute top-[90%] left-[50%] -translate-x-[50%] -translate-y-[90%]">
+          <div className="border-neutral-200 m-auto flex items-center gap-2 rounded-md border bg-background/70 p-2 backdrop-blur-sm">
+            <span className="font-mono text-sm text-muted-foreground">
+              {status.isBuffering ? 'Buffering...' : 'Rendering...'}
+            </span>
+            <LoaderPinwheel className="h-6 w-6 animate-spin text-primary ease-in-out" />
           </div>
+        </div>
+      ) : null}
+      <div className="absolute bottom-12 left-2">
+        {status.error ? (
+          <div className="rounded-md bg-destructive/10 px-3 py-0.5 text-xs text-destructive">{status.error}</div>
+        ) : null}
+      </div>
 
-          {/* Camera and grid controls */}
-          <div className="absolute bottom-0 left-0 z-10 m-2">
-            <div className="flex items-center gap-2">
-              <CameraControl defaultAngle={60} className="w-60" />
-              <GridSizeIndicator />
-              <ResetCameraControl />
-            </div>
-          </div>
+      {/* Camera and grid controls */}
+      <div className="absolute bottom-0 left-0 z-10 m-2">
+        <div className="flex items-center gap-2">
+          <CameraControl defaultAngle={60} className="w-60" />
+          <GridSizeIndicator />
+          <ResetCameraControl />
         </div>
       </div>
       <div
@@ -191,7 +187,7 @@ export function CadStudio(): JSX.Element {
               variant="overlay"
               size="icon"
               className="group relative text-muted-foreground"
-              // Disabled={!screenshot.isReady}
+              disabled={!screenshot.isReady}
               onClick={copyToClipboard}
             >
               {screenshot.isReady ? (

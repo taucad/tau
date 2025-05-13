@@ -69,19 +69,17 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
               </Tooltip>
             </div>
           </div>
-          <div className={cn('relative max-h-32', isExpanded ? 'max-h-none' : 'overflow-y-auto')}>
-            <div className={cn('leading-0')}>
-              <CodeViewer language="typescript" text={content} className="overflow-x-auto p-3 text-xs" />
-              <Button
-                size="xs"
-                className="sticky bottom-0 h-4 w-full rounded-none bg-neutral/10 text-center text-foreground/50 hover:bg-neutral/40"
-                onClick={() => {
-                  setIsExpanded((previous) => !previous);
-                }}
-              >
-                <ChevronDown className={cn('transition-transform', isExpanded ? 'rotate-x-180' : '')} />
-              </Button>
-            </div>
+          <div className={cn('relative max-h-32 leading-0', isExpanded ? 'max-h-none' : 'overflow-y-auto')}>
+            <CodeViewer language="typescript" text={content} className="overflow-x-auto p-3 text-xs" />
+            <Button
+              size="xs"
+              className="sticky bottom-0 h-4 w-full rounded-none bg-neutral/10 text-center text-foreground/50 hover:bg-neutral/40"
+              onClick={() => {
+                setIsExpanded((previous) => !previous);
+              }}
+            >
+              <ChevronDown className={cn('transition-transform', isExpanded ? 'rotate-x-180' : '')} />
+            </Button>
           </div>
         </div>
       );

@@ -65,7 +65,7 @@ export const ChatHistory = memo(function () {
 
   return (
     <div className="relative flex h-full flex-col">
-      <div ref={chatContainerReference} className="-mb-10 flex-1 overflow-y-auto pb-10">
+      <div ref={chatContainerReference} className="-mb-2 flex-1 overflow-y-auto pb-2">
         <div className="space-y-4 p-4 pb-0">
           {messages.map((message, index) => (
             <Fragment key={message.id}>
@@ -115,7 +115,7 @@ export const ChatHistory = memo(function () {
         </div>
         <ScrollDownButton containerRef={chatContainerReference} hasContent={messages.length > 0} />
       </div>
-      <div className="bottom-0 isolate z-10 mx-3 mb-3 rounded-2xl bg-background">
+      <div className="bottom-0 z-10 mx-3 mb-3 rounded-2xl bg-background">
         <ChatTextarea models={models ?? []} onSubmit={onSubmit} />
       </div>
     </div>

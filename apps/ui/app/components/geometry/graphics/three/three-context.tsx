@@ -9,7 +9,6 @@ import type { StageOptions } from '@/components/geometry/graphics/three/stage.js
 import rotateIconBase64 from '@/components/geometry/graphics/rotate-icon.svg?base64';
 import { ScreenshotSetup } from '@/components/geometry/graphics/three/screenshot.js';
 import { cn } from '@/utils/ui.js';
-import { useThreeCursor } from '@/hooks/use-three-cursor.js';
 
 export type ThreeViewerProperties = {
   readonly enableGizmo?: boolean;
@@ -45,11 +44,6 @@ export function ThreeProvider({
   const dpr = Math.min(globalThis.devicePixelRatio, 2);
   const [isCanvasReady, setIsCanvasReady] = useState(false);
 
-  // Use the cursor hook for mouse and keyboard interactions
-  const { cursor, handleMouseDown, handleMouseUp, handleContextMenu } = useThreeCursor({
-    rotateIconBase64,
-  });
-
   useEffect(() => {
     THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
   }, []);
@@ -63,7 +57,7 @@ export function ThreeProvider({
         antialias: true,
       }}
       style={{
-        cursor,
+        cursor: `url(data:image/svg+xml;base64,${rotateIconBase64}) 13 13, auto`,
       }}
       dpr={dpr}
       frameloop="demand"
@@ -74,9 +68,6 @@ export function ThreeProvider({
           setIsCanvasReady(true);
         }
       }}
-      onMouseDown={handleMouseDown}
-      onMouseUp={handleMouseUp}
-      onContextMenu={handleContextMenu}
       {...properties}
     >
       <Scene

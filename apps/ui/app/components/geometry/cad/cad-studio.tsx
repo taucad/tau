@@ -49,6 +49,7 @@ export function CadStudio(): JSX.Element {
               format: 'image/webp',
               quality: 0.92,
             },
+            zoomLevel: 1.8,
           });
 
           updateThumbnail(dataUrl);

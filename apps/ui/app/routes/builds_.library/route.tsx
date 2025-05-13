@@ -352,7 +352,7 @@ function BuildLibraryCard({ project, viewMode }: { readonly project: Build; read
             <img
               src={project.thumbnail || '/placeholder.svg'}
               alt={project.name}
-              className="size-full object-cover transition-transform group-hover:scale-105"
+              className="size-full scale-95 object-cover transition-transform group-hover:scale-100"
               loading="lazy"
             />
           )}

@@ -1,8 +1,14 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import type { JSX } from 'react';
-import { Globe, ArrowUp, Image, X, Square, CircuitBoard, ChevronDown } from 'lucide-react';
+import { Globe, ArrowUp, Image, X, Square, CircuitBoard, ChevronDown, AtSign } from 'lucide-react';
 import type { Attachment } from 'ai';
 import type { ClassValue } from 'clsx';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu.js';
 import { useAiChat } from '@/components/chat/ai-chat-provider.js';
 import { ChatModelSelector } from '@/components/chat/chat-model-selector.js';
 import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '@/components/ui/hover-card.js';
@@ -19,6 +25,7 @@ import { useCookie } from '@/hooks/use-cookie.js';
 import { cn } from '@/utils/ui.js';
 import type { MessagePart } from '@/types/chat.js';
 import { useKeydown } from '@/hooks/use-keydown.js';
+import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
@@ -87,6 +94,7 @@ export const ChatTextarea = memo(function ({
   const textareaReference = useRef<HTMLTextAreaElement>(null);
   const { selectedModel } = useModels();
   const { stop, status } = useAiChat();
+  const { screenshot } = useGraphics();
 
   const handleSubmit = async () => {
     // If there is no text or images, do not submit
@@ -246,6 +254,32 @@ export const ChatTextarea = memo(function ({
     }
   }, []);
 
+  // Add a new function to capture model screenshot
+  const handleAddModelScreenshot = useCallback(() => {
+    if (screenshot.isReady) {
+      try {
+        const dataUrl = screenshot.capture({
+          output: {
+            format: 'image/png',
+            quality: 0.92,
+          },
+          zoomLevel: 1.5,
+        });
+
+        // Add the screenshot to images state
+        setImages((previous) => [...previous, dataUrl]);
+
+        // Focus the textarea after adding
+        focusInput();
+      } catch (error) {
+        toast.error('Failed to capture model screenshot');
+        console.error('Screenshot error:', error);
+      }
+    } else {
+      toast.error('Renderer not ready');
+    }
+  }, [screenshot, focusInput]);
+
   useEffect(() => {
     if (autoFocus) {
       focusInput();
@@ -269,7 +303,6 @@ export const ChatTextarea = memo(function ({
         data-state={isFocused ? 'active' : 'inactive'}
         className={cn(
           'flex size-full cursor-text resize-none flex-col overflow-auto rounded-2xl border bg-neutral/10 shadow-md data-[state=active]:border-primary',
-          images.length > 0 && 'pt-10',
         )}
         onClick={() => {
           focusInput();
@@ -280,7 +313,10 @@ export const ChatTextarea = memo(function ({
       >
         <Textarea
           ref={textareaReference}
-          className="mt-2 mb-10 size-full max-h-48 resize-none border-none px-4 pt-1 pb-1 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
+          className={cn(
+            'mt-2 mb-10 size-full max-h-48 resize-none border-none px-4 pt-1 pb-1 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
+            'mt-6 pt-5',
+          )}
           rows={3}
           value={inputText}
           placeholder="Ask Tau a question..."
@@ -297,41 +333,48 @@ export const ChatTextarea = memo(function ({
         />
       </div>
 
-      {/* Image previews */}
-      {images.length > 0 && (
-        <div className="absolute top-0 left-0 m-4 flex flex-wrap gap-2">
-          {images.map((image, index) => (
-            <div key={image} className="relative">
-              <HoverCard openDelay={100} closeDelay={100}>
-                <HoverCardTrigger asChild>
-                  <img
-                    src={image}
-                    alt="Uploaded"
-                    className="h-8 w-8 cursor-zoom-in rounded-md border bg-muted object-cover"
-                  />
-                </HoverCardTrigger>
-                <HoverCardPortal>
-                  <HoverCardContent side="top" align="start" className="size-auto max-w-screen overflow-hidden p-0">
-                    <img src={image} alt="Uploaded" className="h-48 object-cover md:h-96" />
-                  </HoverCardContent>
-                </HoverCardPortal>
-              </HoverCard>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute -top-2 -right-2 size-4 rounded-full border-[1px] bg-background text-foreground"
-                aria-label="Remove image"
-                type="button"
-                onClick={() => {
-                  removeImage(index);
-                }}
-              >
-                <X className="!size-3 stroke-2" />
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Context */}
+      <div className="absolute top-0 left-0 m-4 flex flex-wrap gap-1">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="icon" className="size-6">
+              <AtSign className="size-3" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="top">
+            <DropdownMenuItem onSelect={handleAddModelScreenshot}>Add model screenshot</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {images.map((image, index) => (
+          <div key={image} className="relative">
+            <HoverCard openDelay={100} closeDelay={100}>
+              <HoverCardTrigger asChild>
+                <div className="flex h-6 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border bg-muted object-cover">
+                  <span className="px-1 text-xs">Image</span>
+                  <img src={image} alt="Uploaded" className="size-6 border-l object-cover" />
+                </div>
+              </HoverCardTrigger>
+              <HoverCardPortal>
+                <HoverCardContent side="top" align="start" className="size-auto max-w-screen overflow-hidden p-0">
+                  <img src={image} alt="Uploaded" className="h-48 object-cover md:h-96" />
+                </HoverCardContent>
+              </HoverCardPortal>
+            </HoverCard>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute -top-2 -right-2 z-10 size-4 rounded-full border-[1px] bg-background text-foreground"
+              aria-label="Remove image"
+              type="button"
+              onClick={() => {
+                removeImage(index);
+              }}
+            >
+              <X className="!size-3 stroke-2" />
+            </Button>
+          </div>
+        ))}
+      </div>
 
       {/* Drag and drop feedback */}
       {isDragging ? (

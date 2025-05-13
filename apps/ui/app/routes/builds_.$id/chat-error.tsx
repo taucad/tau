@@ -12,7 +12,7 @@ export const ChatError = memo(() => {
   let errorMessage: string;
 
   try {
-    errorMessage = JSON.stringify(JSON.parse(error.message), null, 2);
+    errorMessage = JSON.stringify({ garbage: 'super duper super duper super duper super duper' }, null, 2);
   } catch {
     errorMessage = error.message;
   }
@@ -32,7 +32,7 @@ export const ChatError = memo(() => {
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="overflow-x-scroll border-t border-destructive/20 p-2 text-xs whitespace-pre-line">
+        <pre className="overflow-x-scroll border-t border-destructive/20 p-2 text-xs whitespace-pre-wrap">
           {errorMessage}
         </pre>
       </CollapsibleContent>

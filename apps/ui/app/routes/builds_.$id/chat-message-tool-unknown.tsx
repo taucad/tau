@@ -16,7 +16,7 @@ export function ChatMessageToolUnknown({ part }: { readonly part: ToolInvocation
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="overflow-x-scroll border-t border-destructive/20 p-2 text-xs">
+        <pre className="overflow-x-scroll border-t border-destructive/20 p-2 text-xs whitespace-pre-wrap">
           {JSON.stringify(part.toolInvocation, null, 2)}
         </pre>
       </CollapsibleContent>

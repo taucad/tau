@@ -25,7 +25,7 @@ export const useNetworkConnectivity = (
     onOnline?: (isOnline: boolean) => void;
     onOffline?: (isOnline: boolean) => void;
   } = {},
-) => {
+): boolean => {
   const isOnline = useSyncExternalStore(
     subscribeToNetworkConnectivity,
     getNetworkConnectivitySnapshot,

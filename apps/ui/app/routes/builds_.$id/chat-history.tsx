@@ -1,8 +1,8 @@
 import { Fragment, memo, useCallback, useRef } from 'react';
 import type { Message } from '@ai-sdk/react';
-import { ChatMessage } from './chat-message.js';
-import { ScrollDownButton } from './scroll-down-button.js';
-import { ChatError } from './chat-error.js';
+import { ChatMessage } from '@/routes/builds_.$id/chat-message.js';
+import { ScrollDownButton } from '@/routes/builds_.$id/scroll-down-button.js';
+import { ChatError } from '@/routes/builds_.$id/chat-error.js';
 import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
 import { ChatTextarea } from '@/components/chat/chat-textarea.js';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable.js';

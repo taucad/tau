@@ -67,6 +67,15 @@ const config = [
           allowDirectConstAssertionInArrowFunctions: true,
         }
       ],
+
+      "no-restricted-imports": ["error", {
+        patterns: [
+          {
+            group: [".*"],
+            message: "Use absolute imports instead of relative imports. For example, instead of `import { Foo } from './foo'`, use `import { Foo } from '@/foo'`.",
+          },
+        ],
+      }],
     },
     // Configure Typescript support
     languageOptions: {

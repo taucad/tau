@@ -14,13 +14,12 @@ import { PreventFlashOnWrongTheme, ThemeProvider, useTheme } from 'remix-themes'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
 import type { JSX, ReactNode } from 'react';
-import stylesUrl from './styles/global.css?url';
-import { getEnvironment, metaConfig } from './config.js';
-import { buttonVariants } from './components/ui/button.js';
+import globalStylesUrl from '@/styles/global.css?url';
+import { getEnvironment, metaConfig } from '@/config.js';
+import { buttonVariants } from '@/components/ui/button.js';
 import { Page } from '@/components/page.js';
 import { themeSessionResolver } from '@/sessions.server.js';
 import { cn } from '@/utils/ui.js';
-import { TooltipProvider } from '@/components/ui/tooltip.js';
 import { markdownViewerLinks } from '@/components/markdown-viewer.js';
 import { Toaster } from '@/components/ui/sonner.js';
 import { webManifestLinks } from '@/routes/manifest[.webmanifest].js';
@@ -28,9 +27,10 @@ import type { Model } from '@/hooks/use-models.js';
 import { getModels } from '@/hooks/use-models.js';
 import { ColorProvider, useColor } from '@/hooks/use-color.js';
 import { useFavicon } from '@/hooks/use-favicon.js';
+import { TooltipProvider } from '@/components/ui/tooltip.js';
 
 export const links: LinksFunction = () => [
-  { rel: 'stylesheet', href: stylesUrl },
+  { rel: 'stylesheet', href: globalStylesUrl },
   ...webManifestLinks,
   ...markdownViewerLinks,
 ];
@@ -89,7 +89,7 @@ function AppWithProviders({ error }: { readonly error?: ReactNode }): JSX.Elemen
     <QueryClientProvider client={queryClient}>
       <ThemeProvider specifiedTheme={data?.theme} themeAction="/action/set-theme">
         <ColorProvider>
-          <TooltipProvider delayDuration={0}>
+          <TooltipProvider>
             <App error={error} ssrTheme={data?.theme} env={data?.env} />
           </TooltipProvider>
         </ColorProvider>

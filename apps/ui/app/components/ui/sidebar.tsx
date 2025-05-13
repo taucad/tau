@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input.js';
 import { Separator } from '@/components/ui/separator.js';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet.js';
 import { Skeleton } from '@/components/ui/skeleton.js';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import { useCookie } from '@/hooks/use-cookie.js';
 import type { KeyCombination } from '@/utils/keys.js';
 
@@ -108,26 +108,22 @@ function SidebarProvider({
 
   return (
     <SidebarContext.Provider value={contextValue}>
-      <TooltipProvider delayDuration={0}>
-        <div
-          data-slot="sidebar-wrapper"
-          style={{
-            '--sidebar-width': sidebarWidth,
-            '--sidebar-width-icon': sidebarWidthIcon,
-            '--sidebar-width-current': isMobile ? sidebarWidthMobile : open ? sidebarWidth : sidebarWidthIcon,
-            ...style,
-          }}
-          className={cn('group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar', className)}
-          {...properties}
-        >
-          {children}
-        </div>
-      </TooltipProvider>
+      <div
+        data-slot="sidebar-wrapper"
+        style={{
+          '--sidebar-width': sidebarWidth,
+          '--sidebar-width-icon': sidebarWidthIcon,
+          '--sidebar-width-current': isMobile ? sidebarWidthMobile : open ? sidebarWidth : sidebarWidthIcon,
+          ...style,
+        }}
+        className={cn('group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar', className)}
+        {...properties}
+      >
+        {children}
+      </div>
     </SidebarContext.Provider>
   );
 }
-
-SidebarProvider.displayName = 'SidebarProvider';
 
 function Sidebar({
   side = 'left',

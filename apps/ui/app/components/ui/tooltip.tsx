@@ -7,11 +7,7 @@ function TooltipProvider({ delayDuration = 0, ...properties }: React.ComponentPr
 }
 
 function Tooltip({ ...properties }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
-  return (
-    <TooltipProvider>
-      <TooltipPrimitive.Root data-slot="tooltip" {...properties} />
-    </TooltipProvider>
-  );
+  return <TooltipPrimitive.Root data-slot="tooltip" {...properties} />;
 }
 
 function TooltipTrigger({ ...properties }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {

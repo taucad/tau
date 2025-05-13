@@ -1,9 +1,8 @@
 import { MessageCircle, Settings2, LayoutGrid, Rows } from 'lucide-react';
 import { memo, useCallback } from 'react';
-import type { JSX } from 'react';
-import { ChatHistory } from './chat-history.js';
-import { ChatViewTabs } from './chat-view-tabs.js';
-import { ChatViewSplit } from './chat-view-split.js';
+import { ChatHistory } from '@/routes/builds_.$id/chat-history.js';
+import { ChatViewTabs } from '@/routes/builds_.$id/chat-view-tabs.js';
+import { ChatViewSplit } from '@/routes/builds_.$id/chat-view-split.js';
 import { Button } from '@/components/ui/button.js';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable.js';
 import { cn } from '@/utils/ui.js';

@@ -23,7 +23,7 @@ export const ChatModelSelector = memo(function ({
   className,
   renderButtonContents,
 }: ChatModelSelectorProps): JSX.Element {
-  const { selectedModel, setSelectedModel } = useModels();
+  const { selectedModel, setSelectedModelId } = useModels();
 
   const providerModelsMap = new Map<string, Model[]>();
   for (const model of models) {
@@ -39,11 +39,11 @@ export const ChatModelSelector = memo(function ({
       const model = typeof item === 'string' ? models.find((m) => m.id === item) : item;
 
       if (model) {
-        setSelectedModel(model.id);
+        setSelectedModelId(model.id);
         onSelect?.(model.id);
       }
     },
-    [models, onSelect, setSelectedModel],
+    [models, onSelect, setSelectedModelId],
   );
 
   return (
@@ -73,7 +73,7 @@ export const ChatModelSelector = memo(function ({
       renderButtonContents={renderButtonContents}
       getValue={(item) => item.id}
       placeholder="Select a model"
-      defaultValue={models.find((model) => model.id === selectedModel)}
+      defaultValue={models.find((model) => model.id === selectedModel?.id)}
       onSelect={handleSelectModel}
       onClose={onClose}
     />

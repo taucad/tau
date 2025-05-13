@@ -107,7 +107,7 @@ export const ChatTextarea = memo(function ({
     setImages([]);
     await onSubmit({
       content: inputText,
-      model: selectedModel,
+      model: selectedModel?.id ?? '',
       metadata: {
         toolChoice: isSearching ? 'web_search' : 'auto',
       },
@@ -395,16 +395,16 @@ export const ChatTextarea = memo(function ({
       {/* Main input controls */}
       <div className="absolute bottom-2 left-2 flex flex-row items-center gap-1">
         {/* Model selector */}
-        <ChatModelSelector
-          className={buttonVariants({
-            variant: 'outline',
-            size: 'sm',
-            class: 'group w-min justify-start rounded-full border',
-          })}
-          models={models}
-          renderButtonContents={(item) => (
-            <Tooltip>
-              <TooltipTrigger asChild>
+        <Tooltip>
+          <TooltipTrigger>
+            <ChatModelSelector
+              className={buttonVariants({
+                variant: 'outline',
+                size: 'sm',
+                class: 'group w-min justify-start rounded-full border',
+              })}
+              models={models}
+              renderButtonContents={(item) => (
                 <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full group-data-[state=open]:text-primary @md:max-w-fit">
                   <span className="hidden truncate text-xs @xs:block">{item.name}</span>
                   <span className="relative flex size-4 items-center justify-center">
@@ -412,17 +412,15 @@ export const ChatTextarea = memo(function ({
                     <CircuitBoard className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @xs:scale-0" />
                   </span>
                 </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>
-                  <span>Select model{` `}</span>
-                  <span>({item.name})</span>
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          )}
-          onClose={focusInput}
-        />
+              )}
+              onClose={focusInput}
+            />
+          </TooltipTrigger>
+          <TooltipContent>
+            <span>Select model{` `}</span>
+            <span>({selectedModel?.name})</span>
+          </TooltipContent>
+        </Tooltip>
 
         {/* Search button */}
         <Tooltip>

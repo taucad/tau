@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import type { JSX } from 'react';
 import { Globe, ArrowUp, Image, X, Square, CircuitBoard, ChevronDown } from 'lucide-react';
 import type { Attachment } from 'ai';
+import type { ClassValue } from 'clsx';
 import { useAiChat } from '@/components/chat/ai-chat-provider.js';
 import { ChatModelSelector } from '@/components/chat/chat-model-selector.js';
 import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '@/components/ui/hover-card.js';
@@ -36,6 +37,7 @@ export type ChatTextareaProperties = {
   readonly shouldAutoFocus?: boolean;
   readonly initialContent?: MessagePart[];
   readonly initialAttachments?: Attachment[];
+  readonly className?: ClassValue;
 };
 
 const defaultContent: MessagePart[] = [];
@@ -54,6 +56,7 @@ export const ChatTextarea = memo(function ({
   initialContent = defaultContent,
   initialAttachments = defaultAttachments,
   onEscapePressed,
+  className,
 }: ChatTextareaProperties): JSX.Element {
   const { initialInputText, initialImageUrls } = useMemo(() => {
     let initialInputText = '';
@@ -260,12 +263,12 @@ export const ChatTextarea = memo(function ({
   }, [handlePaste]);
 
   return (
-    <div className="@container relative h-full">
+    <div className={cn('@container relative h-full', className)}>
       {/* Textarea */}
       <div
         data-state={isFocused ? 'active' : 'inactive'}
         className={cn(
-          'flex size-full cursor-text resize-none flex-col overflow-auto rounded-xl border shadow-md data-[state=active]:border-primary',
+          'flex size-full cursor-text resize-none flex-col overflow-auto rounded-2xl border bg-neutral/10 shadow-md data-[state=active]:border-primary',
           images.length > 0 && 'pt-10',
         )}
         onClick={() => {
@@ -277,7 +280,7 @@ export const ChatTextarea = memo(function ({
       >
         <Textarea
           ref={textareaReference}
-          className="mb-12 size-full resize-none border-none p-4 pt-3 pb-0 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
+          className="mt-2 mb-10 size-full max-h-48 resize-none border-none px-4 pt-1 pb-1 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
           rows={3}
           value={inputText}
           placeholder="Ask Tau a question..."

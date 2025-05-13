@@ -164,42 +164,42 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
               className="size-7"
             />
             <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenu>
+              <DropdownMenu>
+                <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
                     <Button size="xs" variant="ghost" className="h-7 gap-1 has-[>svg]:px-1.5">
                       <RefreshCw className="size-4" />
                       <ChevronDown className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" side="top" className="min-w-[200px]">
-                    <DropdownMenuLabel>Switch model</DropdownMenuLabel>
-                    <ChatModelSelector
-                      models={models}
-                      className="h-fit w-full p-2"
-                      renderButtonContents={(model) => (
-                        <div className="flex w-full flex-row items-center justify-between gap-2 text-sm font-normal">
-                          <span>{model.name}</span>
-                          <ChevronDown className="size-4 text-muted-foreground" />
-                        </div>
-                      )}
-                      onSelect={(modelId) => {
-                        onRetry({ modelId });
-                      }}
-                    />
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      className="flex justify-between"
-                      onClick={() => {
-                        onRetry({});
-                      }}
-                    >
-                      <p>Try again</p>
-                      <RefreshCw className="size-4 text-muted-foreground" />
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </TooltipTrigger>
+                </TooltipTrigger>
+                <DropdownMenuContent align="start" side="top" className="min-w-[200px]">
+                  <DropdownMenuLabel>Switch model</DropdownMenuLabel>
+                  <ChatModelSelector
+                    models={models}
+                    className="h-fit w-full p-2"
+                    renderButtonContents={(model) => (
+                      <div className="flex w-full flex-row items-center justify-between gap-2 text-sm font-normal">
+                        <span>{model.name}</span>
+                        <ChevronDown className="size-4 text-muted-foreground" />
+                      </div>
+                    )}
+                    onSelect={(modelId) => {
+                      onRetry({ modelId });
+                    }}
+                  />
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="flex justify-between"
+                    onClick={() => {
+                      onRetry({});
+                    }}
+                  >
+                    <p>Try again</p>
+                    <RefreshCw className="size-4 text-muted-foreground" />
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <TooltipContent side="bottom">Switch model</TooltipContent>
             </Tooltip>
             <div className="mx-1 flex flex-row items-center justify-end gap-1">

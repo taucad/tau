@@ -45,8 +45,6 @@ export function ThreeProviderContent({
   const dpr = Math.min(globalThis.devicePixelRatio, 2);
   const [isCanvasReady, setIsCanvasReady] = useState(false);
 
-  const canvasReference = useRef<HTMLCanvasElement>(null);
-
   // Use the cursor hook for mouse and keyboard interactions
   const { cursor, handleMouseDown, handleMouseUp, handleContextMenu } = useThreeCursor({
     rotateIconBase64,
@@ -59,7 +57,6 @@ export function ThreeProviderContent({
   return (
     <div className="relative size-full">
       <Canvas
-        ref={canvasReference}
         gl={{
           // Enable logarithmic depth buffer for better precision at low field of view,
           // eliminating visual artifacts on the object.

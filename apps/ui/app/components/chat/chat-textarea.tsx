@@ -348,7 +348,9 @@ export const ChatTextarea = memo(function ({
                 </TooltipTrigger>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" side="top">
-                <DropdownMenuItem onSelect={handleAddModelScreenshot}>Add model screenshot</DropdownMenuItem>
+                <DropdownMenuItem onSelect={handleAddModelScreenshot}>
+                  <Image /> Add model screenshot
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
             <TooltipContent>Add context</TooltipContent>

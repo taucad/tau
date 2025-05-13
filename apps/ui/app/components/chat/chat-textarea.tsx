@@ -45,6 +45,7 @@ export type ChatTextareaProperties = {
   readonly initialContent?: MessagePart[];
   readonly initialAttachments?: Attachment[];
   readonly className?: ClassValue;
+  readonly withContextActions?: boolean;
 };
 
 const defaultContent: MessagePart[] = [];
@@ -64,6 +65,7 @@ export const ChatTextarea = memo(function ({
   initialAttachments = defaultAttachments,
   onEscapePressed,
   className,
+  withContextActions = true,
 }: ChatTextareaProperties): JSX.Element {
   const { initialInputText, initialImageUrls } = useMemo(() => {
     let initialInputText = '';
@@ -315,7 +317,7 @@ export const ChatTextarea = memo(function ({
           ref={textareaReference}
           className={cn(
             'mt-2 mb-10 size-full max-h-48 resize-none border-none px-4 pt-1 pb-1 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
-            'mt-6 pt-5',
+            (images.length > 0 || withContextActions) && 'mt-6 pt-5',
           )}
           rows={3}
           value={inputText}
@@ -335,23 +337,25 @@ export const ChatTextarea = memo(function ({
 
       {/* Context */}
       <div className="absolute top-0 left-0 m-4 flex flex-wrap gap-1">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon" className="size-6">
-              <AtSign className="size-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" side="top">
-            <DropdownMenuItem onSelect={handleAddModelScreenshot}>Add model screenshot</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {withContextActions ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" className="size-6">
+                <AtSign className="size-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="top">
+              <DropdownMenuItem onSelect={handleAddModelScreenshot}>Add model screenshot</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
         {images.map((image, index) => (
           <div key={image} className="relative">
             <HoverCard openDelay={100} closeDelay={100}>
               <HoverCardTrigger asChild>
                 <div className="flex h-6 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border bg-muted object-cover">
+                  <img src={image} alt="Uploaded" className="size-6 border-r object-cover" />
                   <span className="px-1 text-xs">Image</span>
-                  <img src={image} alt="Uploaded" className="size-6 border-l object-cover" />
                 </div>
               </HoverCardTrigger>
               <HoverCardPortal>

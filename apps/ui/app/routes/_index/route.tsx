@@ -68,7 +68,7 @@ export default function ChatStart(): JSX.Element {
         </div>
 
         <AiChatProvider value={{}}>
-          <ChatTextarea models={models ?? []} onSubmit={onSubmit} />
+          <ChatTextarea models={models ?? []} withContextActions={false} onSubmit={onSubmit} />
         </AiChatProvider>
       </div>
       <div className="container mx-auto px-4 py-8">

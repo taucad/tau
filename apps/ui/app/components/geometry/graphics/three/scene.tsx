@@ -1,5 +1,5 @@
-import type { ComponentRef, ReactNode, RefObject, JSX } from 'react';
-import type { StageOptions, GridSizes } from '@/components/geometry/graphics/three/stage.js';
+import type { ReactNode, JSX } from 'react';
+import type { StageOptions } from '@/components/geometry/graphics/three/stage.js';
 import { Stage } from '@/components/geometry/graphics/three/stage.js';
 import { Controls } from '@/components/geometry/graphics/three/controls.js';
 
@@ -12,12 +12,7 @@ type SceneProperties = {
   readonly hasAxesHelper?: boolean;
   readonly stageOptions?: StageOptions;
   readonly isCentered?: boolean;
-  readonly onGridChange?: (gridSizes: GridSizes) => void;
   readonly zoomSpeed: number;
-  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
-  readonly controlsRef?: RefObject<ComponentRef<typeof Controls> | null>;
-  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
-  readonly stageRef?: RefObject<ComponentRef<typeof Stage> | null>;
 };
 
 export function Scene({
@@ -29,28 +24,12 @@ export function Scene({
   hasAxesHelper = false,
   stageOptions,
   isCentered = true,
-  controlsRef,
-  stageRef,
-  onGridChange,
   zoomSpeed,
 }: SceneProperties): JSX.Element {
   return (
     <>
-      <Controls
-        ref={controlsRef}
-        enableGizmo={hasGizmo}
-        enableDamping={hasDamping}
-        enableZoom={hasZoom}
-        zoomSpeed={zoomSpeed}
-      />
-      <Stage
-        ref={stageRef}
-        stageOptions={stageOptions}
-        isCentered={isCentered}
-        hasGrid={hasGrid}
-        hasAxesHelper={hasAxesHelper}
-        onGridChange={onGridChange}
-      >
+      <Controls enableGizmo={hasGizmo} enableDamping={hasDamping} enableZoom={hasZoom} zoomSpeed={zoomSpeed} />
+      <Stage stageOptions={stageOptions} isCentered={isCentered} hasGrid={hasGrid} hasAxesHelper={hasAxesHelper}>
         {children}
       </Stage>
     </>

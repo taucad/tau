@@ -1,12 +1,11 @@
 import React, { useMemo, useCallback } from 'react';
-import type { JSX, ReactNode, RefObject } from 'react';
+import type { JSX, ReactNode } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { PerspectiveCamera } from '@react-three/drei';
 import { AxesHelper } from '@/components/geometry/graphics/three/axes-helper.js';
 import { Grid } from '@/components/geometry/graphics/three/grid.js';
-import type { GridSizes } from '@/components/geometry/graphics/three/grid.js';
 import { useCameraReset } from '@/components/geometry/graphics/three/use-camera-reset.js';
 
 export type StageOptions = {
@@ -72,22 +71,12 @@ type StageProperties = {
   readonly stageOptions?: StageOptions;
   readonly hasGrid?: boolean;
   readonly hasAxesHelper?: boolean;
-  readonly onGridChange?: (gridSizes: GridSizes) => void;
-  readonly ref?: RefObject<
-    | {
-        resetCamera: () => void;
-      }
-    // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is required by React
-    | null
-  >;
 } & Omit<React.HTMLAttributes<HTMLDivElement>, 'id'>;
 
 export function Stage({
   children,
   isCentered = false,
   stageOptions = defaultStageOptions,
-  ref,
-  onGridChange,
   ...properties
 }: StageProperties): JSX.Element {
   const camera = useThree((state) => state.camera);
@@ -153,15 +142,6 @@ export function Stage({
     setSceneRadius,
     originalDistanceReference,
   });
-
-  // Expose resetCamera via ref if provided
-  React.useImperativeHandle(
-    ref,
-    () => ({
-      resetCamera,
-    }),
-    [resetCamera],
-  );
 
   /**
    * Position the scene.

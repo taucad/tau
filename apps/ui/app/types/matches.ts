@@ -4,13 +4,14 @@ import type { ReactNode } from 'react';
 
 export type Handle = {
   breadcrumb?: (match: UIMatch) => ReactNode;
+  actions?: (match: UIMatch) => ReactNode;
 };
 
 type TypedUiMatch = UIMatch & {
   handle: Handle;
 };
 
-export const useTypedMatches = () => {
+export const useTypedMatches = (): TypedUiMatch[] => {
   const matches = useMatches() as TypedUiMatch[];
 
   return matches;

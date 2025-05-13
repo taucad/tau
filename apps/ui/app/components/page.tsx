@@ -26,6 +26,7 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
   const isOnline = useNetworkConnectivity();
 
   const breadcrumbItems = matches.filter((match) => Boolean(match.handle?.breadcrumb));
+  const actionItems = matches.filter((match) => Boolean(match.handle?.actions));
 
   return (
     <SidebarProvider>
@@ -75,6 +76,13 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
                 </TooltipTrigger>
                 <TooltipContent>You are offline. Reconnect to access online features.</TooltipContent>
               </Tooltip>
+            )}
+            {actionItems.length > 0 && (
+              <div className="flex items-center gap-2">
+                {actionItems.map((match) => (
+                  <Fragment key={match.id}>{match.handle.actions?.(match)}</Fragment>
+                ))}
+              </div>
             )}
           </div>
         </header>

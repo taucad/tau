@@ -1,9 +1,9 @@
 import * as React from 'react';
 import { BookOpen, Bot, Frame, Hammer, Map, PieChart, UsersRound, Workflow } from 'lucide-react';
 import { Link } from 'react-router';
-import { ColorToggle } from './nav/color-toggle.js';
-import { NavHistory } from './nav/nav-history.js';
-import { headerHeight } from './page.js';
+import { ColorToggle } from '@/components/nav/color-toggle.js';
+import { NavHistory } from '@/components/nav/nav-history.js';
+import { headerHeight } from '@/components/page.js';
 import { NavMain } from '@/components/nav/nav-main.js';
 import { NavProjects } from '@/components/nav/nav-projects.js';
 import { NavUser } from '@/components/nav/nav-user.js';

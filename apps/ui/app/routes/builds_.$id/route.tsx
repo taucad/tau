@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
+import { PackagePlus } from 'lucide-react';
+// eslint-disable-next-line no-restricted-imports -- allowed for router types
 import type { Route } from './+types/route.js';
 import { ChatInterface } from '@/routes/builds_.$id/chat-interface.js';
 import { CadProvider, useCad } from '@/components/geometry/cad/cad-context.js';
@@ -17,6 +19,7 @@ import { useChatConstants } from '@/contexts/use-chat.js';
 import { AiChatProvider, useAiChat } from '@/components/chat/ai-chat-provider.js';
 import { KernelProvider } from '@/components/geometry/kernel/kernel-context.js';
 import { GraphicsProvider } from '@/components/geometry/graphics/graphics-context.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 
 function BuildNameEditor() {
   const { build, updateName, isLoading } = useBuild();
@@ -109,6 +112,18 @@ export const handle: Handle = {
       <BuildProvider buildId={id}>
         <BuildNameEditor />
       </BuildProvider>
+    );
+  },
+  actions() {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="outline" className="md:hidden" size="icon">
+            <PackagePlus className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>New Build</TooltipContent>
+      </Tooltip>
     );
   },
 };

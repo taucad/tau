@@ -1,5 +1,6 @@
 import { Download } from 'lucide-react';
 import React from 'react';
+import type { JSX } from 'react';
 import { Button } from '@/components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import { toast } from '@/components/ui/sonner.js';
@@ -26,14 +27,13 @@ export type DownloadButtonProperties = {
 } & React.ComponentProps<typeof Button>;
 
 export function DownloadButton({
-  ref: reference,
   getBlob,
   size,
   title = 'download.txt',
   tooltip = 'Download',
   children,
   ...properties
-}: DownloadButtonProperties) {
+}: DownloadButtonProperties): JSX.Element {
   const handleDownload = async () => {
     try {
       const newBlob = await getBlob();
@@ -69,7 +69,7 @@ export function DownloadButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button ref={reference} size={size} variant="ghost" onClick={handleDownload} {...properties}>
+        <Button size={size} variant="ghost" onClick={handleDownload} {...properties}>
           <span>{children ?? <Download />}</span>
           {size !== 'icon' && 'Download'}
         </Button>

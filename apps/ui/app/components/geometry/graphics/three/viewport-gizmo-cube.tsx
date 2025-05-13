@@ -250,6 +250,7 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
         bottom: 0,
         right: 0,
       },
+      container,
       corners: cornerConfig,
       edges: edgeConfig,
       right: faceConfig,

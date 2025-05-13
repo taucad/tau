@@ -56,8 +56,11 @@ export class ChatService {
       llm:
         support?.tools === false
           ? unboundModel
-          : // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case
-            (unboundModel.bindTools?.(cadTools, { tool_choice: 'file_edit' }) ?? unboundModel),
+          : (unboundModel.bindTools?.(
+              cadTools,
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case
+              support?.toolChoice === false ? undefined : { tool_choice: resolvedToolChoice },
+            ) ?? unboundModel),
       tools: cadTools,
       name: 'cad_agent',
       prompt: replicadSystemPrompt,

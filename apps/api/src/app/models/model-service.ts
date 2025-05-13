@@ -16,6 +16,9 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       name: 'Claude 3.7 Sonnet (Thinking)',
       provider: 'anthropic',
       model: 'claude-3-7-sonnet-20250219',
+      support: {
+        toolChoice: false,
+      },
       details: {
         family: 'Claude',
         families: ['Claude'],

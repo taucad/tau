@@ -338,16 +338,21 @@ export const ChatTextarea = memo(function ({
       {/* Context */}
       <div className="absolute top-0 left-0 m-4 flex flex-wrap gap-1">
         {withContextActions ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon" className="size-6">
-                <AtSign className="size-3" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" side="top">
-              <DropdownMenuItem onSelect={handleAddModelScreenshot}>Add model screenshot</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Tooltip>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="icon" className="size-6">
+                    <AtSign className="size-3" />
+                  </Button>
+                </TooltipTrigger>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="top">
+                <DropdownMenuItem onSelect={handleAddModelScreenshot}>Add model screenshot</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <TooltipContent>Add context</TooltipContent>
+          </Tooltip>
         ) : null}
         {images.map((image, index) => (
           <div key={image} className="relative">

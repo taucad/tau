@@ -12,7 +12,7 @@ export const ChatError = memo(() => {
   let errorMessage: string;
 
   try {
-    errorMessage = JSON.stringify({ garbage: 'super duper super duper super duper super duper' }, null, 2);
+    errorMessage = JSON.stringify(JSON.parse(error.message), null, 2);
   } catch {
     errorMessage = error.message;
   }

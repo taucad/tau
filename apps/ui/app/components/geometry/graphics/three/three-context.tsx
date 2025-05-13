@@ -1,7 +1,7 @@
 import type { CanvasProps } from '@react-three/fiber';
 import { Canvas } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import { CameraHandler } from '@/components/geometry/graphics/three/camera-handler.js';
 import { Scene } from '@/components/geometry/graphics/three/scene.js';

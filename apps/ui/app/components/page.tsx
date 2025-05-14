@@ -1,22 +1,22 @@
 import { Outlet } from 'react-router';
 import { Fragment } from 'react/jsx-runtime';
 import type { JSX, ReactNode } from 'react';
-import { AppSidebar } from '@/components/app-sidebar.js';
+import { AppSidebar } from '~/components/app-sidebar.js';
 import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb.js';
-import { Separator } from '@/components/ui/separator.js';
-import { sidebarToggleKeyCombo, SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { Badge } from '@/components/ui/badge.js';
-import { useNetworkConnectivity } from '@/hooks/use-network-connectivity.js';
-import { KeyShortcut } from '@/components/ui/key-shortcut.js';
-import { formatKeyCombination } from '@/utils/keys.js';
-import { useTypedMatches } from '@/types/matches.js';
+} from '~/components/ui/breadcrumb.js';
+import { Separator } from '~/components/ui/separator.js';
+import { sidebarToggleKeyCombo, SidebarInset, SidebarProvider, SidebarTrigger } from '~/components/ui/sidebar.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { Badge } from '~/components/ui/badge.js';
+import { useNetworkConnectivity } from '~/hooks/use-network-connectivity.js';
+import { KeyShortcut } from '~/components/ui/key-shortcut.js';
+import { formatKeyCombination } from '~/utils/keys.js';
+import { useTypedMatches } from '~/types/matches.js';
 
 export const headerHeight = '3rem';
 

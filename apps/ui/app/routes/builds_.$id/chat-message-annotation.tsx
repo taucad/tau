@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { ChatMessageAnnotationUsage } from './chat-message-annotation-usage.js';
-import type { MessageAnnotation } from '@/types/chat.js';
+import type { MessageAnnotation } from '~/types/chat.js';
 
 export function ChatMessageAnnotation({ annotation }: { readonly annotation: MessageAnnotation }): JSX.Element {
   switch (annotation.type) {

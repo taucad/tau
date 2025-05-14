@@ -1,15 +1,15 @@
 import { Fragment, memo, useCallback, useRef } from 'react';
 import type { Message } from '@ai-sdk/react';
-import { ChatMessage } from '@/routes/builds_.$id/chat-message.js';
-import { ScrollDownButton } from '@/routes/builds_.$id/scroll-down-button.js';
-import { ChatError } from '@/routes/builds_.$id/chat-error.js';
-import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
-import { ChatTextarea } from '@/components/chat/chat-textarea.js';
-import { createMessage } from '@/utils/chat.js';
-import { MessageRole, MessageStatus } from '@/types/chat.js';
-import { useAiChat } from '@/components/chat/ai-chat-provider.js';
-import { AnimatedShinyText } from '@/components/magicui/animated-shiny-text.js';
-import { When } from '@/components/ui/utils/when.js';
+import { ChatMessage } from '~/routes/builds_.$id/chat-message.js';
+import { ScrollDownButton } from '~/routes/builds_.$id/scroll-down-button.js';
+import { ChatError } from '~/routes/builds_.$id/chat-error.js';
+import type { ChatTextareaProperties } from '~/components/chat/chat-textarea.js';
+import { ChatTextarea } from '~/components/chat/chat-textarea.js';
+import { createMessage } from '~/utils/chat.js';
+import { MessageRole, MessageStatus } from '~/types/chat.js';
+import { useAiChat } from '~/components/chat/ai-chat-provider.js';
+import { AnimatedShinyText } from '~/components/magicui/animated-shiny-text.js';
+import { When } from '~/components/ui/utils/when.js';
 
 export const ChatHistory = memo(function () {
   const { append, messages, reload, setMessages, status } = useAiChat();

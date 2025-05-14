@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
 import type { RefObject } from 'react';
-import { resetCamera as resetCameraFn } from '@/components/geometry/graphics/three/camera-reset.js';
-import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
+import { resetCamera as resetCameraFn } from '~/components/geometry/graphics/three/camera-reset.js';
+import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
 
 // Define the specific types needed for camera reset
 type ResetRotation = {

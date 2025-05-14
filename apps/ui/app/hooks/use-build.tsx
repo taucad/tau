@@ -2,8 +2,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { JSX, ReactNode } from 'react';
 import { createContext, useContext, useMemo } from 'react';
 import type { Message } from '@ai-sdk/react';
-import { storage } from '@/db/storage.js';
-import type { Build } from '@/types/build.js';
+import { storage } from '~/db/storage.js';
+import type { Build } from '~/types/build.js';
 
 // Function to fetch builds
 const fetchBuild = async (buildId: string): Promise<Build> => {

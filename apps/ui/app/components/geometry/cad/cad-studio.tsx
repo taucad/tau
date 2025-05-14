@@ -1,19 +1,19 @@
 import { LoaderPinwheel, ImageDown, GalleryThumbnails, Clipboard } from 'lucide-react';
 import { useCallback, useEffect, useRef } from 'react';
 import type { JSX } from 'react';
-import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
-import { CadViewer } from '@/components/geometry/cad/cad-viewer.js';
-import { useCad } from '@/components/geometry/cad/cad-context.js';
-import { DownloadButton } from '@/components/download-button.js';
-import { BoxDown } from '@/components/icons/box-down.js';
-import { Button } from '@/components/ui/button.js';
-import { useBuild } from '@/hooks/use-build.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { toast } from '@/components/ui/sonner.js';
-import { cn } from '@/utils/ui.js';
-import { CameraControl } from '@/components/geometry/cad/camera-control.js';
-import { GridSizeIndicator } from '@/components/geometry/cad/grid-control.js';
-import { ResetCameraControl } from '@/components/geometry/cad/reset-camera-control.js';
+import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
+import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
+import { useCad } from '~/components/geometry/cad/cad-context.js';
+import { DownloadButton } from '~/components/download-button.js';
+import { BoxDown } from '~/components/icons/box-down.js';
+import { Button } from '~/components/ui/button.js';
+import { useBuild } from '~/hooks/use-build.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { toast } from '~/components/ui/sonner.js';
+import { cn } from '~/utils/ui.js';
+import { CameraControl } from '~/components/geometry/cad/camera-control.js';
+import { GridSizeIndicator } from '~/components/geometry/cad/grid-control.js';
+import { ResetCameraControl } from '~/components/geometry/cad/reset-camera-control.js';
 
 export function CadStudio(): JSX.Element {
   const { status, downloadStl, mesh } = useCad();

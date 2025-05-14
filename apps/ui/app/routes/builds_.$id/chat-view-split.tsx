@@ -4,10 +4,10 @@ import type { ImperativePanelHandle } from 'react-resizable-panels';
 import { ChatConsole } from './chat-console.js';
 import { ChatEditor } from './chat-editor.js';
 import { ChatViewer } from './chat-viewer.js';
-import type { KeyCombination } from '@/utils/keys.js';
-import { useCookie } from '@/hooks/use-cookie.js';
-import { useKeydown } from '@/hooks/use-keydown.js';
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable.js';
+import type { KeyCombination } from '~/utils/keys.js';
+import { useCookie } from '~/hooks/use-cookie.js';
+import { useKeydown } from '~/hooks/use-keydown.js';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '~/components/ui/resizable.js';
 
 const chatResizeViewerCookieName = 'chat-resize-viewer';
 const chatResizeCodeCookieName = 'chat-resize-editor';

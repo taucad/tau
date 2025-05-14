@@ -1,9 +1,9 @@
 import { ArrowDown } from 'lucide-react';
 import { useRef, memo, useCallback } from 'react';
 import type { RefObject } from 'react';
-import { Button } from '@/components/ui/button.js';
-import { cn } from '@/utils/ui.js';
-import { useScroll } from '@/hooks/use-scroll.js';
+import { Button } from '~/components/ui/button.js';
+import { cn } from '~/utils/ui.js';
+import { useScroll } from '~/hooks/use-scroll.js';
 
 type ScrollDownButtonProperties = {
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- required by React

@@ -4,7 +4,7 @@ import { useGLTF, useAnimations, useTexture } from '@react-three/drei';
 import type { Group, MeshBasicMaterial } from 'three';
 import { Mesh, MeshMatcapMaterial, LoopRepeat } from 'three';
 import { useFrame } from '@react-three/fiber';
-import { useColor } from '@/hooks/use-color.js';
+import { useColor } from '~/hooks/use-color.js';
 
 type Action =
   | 'Dance'

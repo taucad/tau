@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { ReactNode } from 'react';
 import { Theme, useTheme } from 'remix-themes';
-import { useColor } from '@/hooks/use-color.js';
+import { useColor } from '~/hooks/use-color.js';
 
 type ViewportGizmoBlenderProps = {
   readonly size?: number;

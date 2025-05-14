@@ -4,9 +4,9 @@ import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { PerspectiveCamera } from '@react-three/drei';
-import { AxesHelper } from '@/components/geometry/graphics/three/axes-helper.js';
-import { Grid } from '@/components/geometry/graphics/three/grid.js';
-import { useCameraReset } from '@/components/geometry/graphics/three/use-camera-reset.js';
+import { AxesHelper } from '~/components/geometry/graphics/three/axes-helper.js';
+import { Grid } from '~/components/geometry/graphics/three/grid.js';
+import { useCameraReset } from '~/components/geometry/graphics/three/use-camera-reset.js';
 
 export type StageOptions = {
   perspective?: {

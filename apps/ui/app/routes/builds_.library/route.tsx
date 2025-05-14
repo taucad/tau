@@ -18,28 +18,28 @@ import {
   Pencil,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
-import { Button } from '@/components/ui/button.js';
-import { Input } from '@/components/ui/input.js';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar.js';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card.js';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.js';
+import { Button } from '~/components/ui/button.js';
+import { Input } from '~/components/ui/input.js';
+import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar.js';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '~/components/ui/card.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu.js';
-import { cn } from '@/utils/ui.js';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.js';
-import type { Category } from '@/types/cad.js';
-import { categories } from '@/types/cad.js';
-import type { Build } from '@/types/build.js';
-import { CadProvider, useCad } from '@/components/geometry/cad/cad-context.js';
-import { CadViewer } from '@/components/geometry/cad/cad-viewer.js';
-import { useBuilds } from '@/hooks/use-builds.js';
-import { toast } from '@/components/ui/sonner.js';
-import type { Handle } from '@/types/matches.js';
-import { KernelProvider } from '@/components/geometry/kernel/kernel-context.js';
+} from '~/components/ui/dropdown-menu.js';
+import { cn } from '~/utils/ui.js';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '~/components/ui/tabs.js';
+import type { Category } from '~/types/cad.js';
+import { categories } from '~/types/cad.js';
+import type { Build } from '~/types/build.js';
+import { CadProvider, useCad } from '~/components/geometry/cad/cad-context.js';
+import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
+import { useBuilds } from '~/hooks/use-builds.js';
+import { toast } from '~/components/ui/sonner.js';
+import type { Handle } from '~/types/matches.js';
+import { KernelProvider } from '~/components/geometry/kernel/kernel-context.js';
 import {
   Dialog,
   DialogContent,
@@ -47,8 +47,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog.js';
-import { BuildProvider, useBuild } from '@/hooks/use-build.js';
+} from '~/components/ui/dialog.js';
+import { BuildProvider, useBuild } from '~/hooks/use-build.js';
 
 export const handle: Handle = {
   breadcrumb() {

@@ -4,7 +4,7 @@ import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import type { BuilderWorkerInterface } from './replicad/replicad-builder.worker';
 import BuilderWorker from './replicad/replicad-builder.worker?worker';
-import { useConsole } from '@/hooks/use-console.js';
+import { useConsole } from '~/hooks/use-console.js';
 
 export type Shape = {
   mesh: unknown;

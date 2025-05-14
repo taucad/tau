@@ -1,9 +1,9 @@
 import React, { useCallback, useState } from 'react';
 import type { ClassValue } from 'clsx';
 import { LockIcon } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { Button } from '@/components/ui/button.js';
-import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { Button } from '~/components/ui/button.js';
+import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -12,11 +12,11 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu.js';
-import { Switch } from '@/components/ui/switch.js';
-import { cn } from '@/utils/ui.js';
-import { formatNumber } from '@/utils/number.js';
-import useCookie from '@/hooks/use-cookie.js';
+} from '~/components/ui/dropdown-menu.js';
+import { Switch } from '~/components/ui/switch.js';
+import { cn } from '~/utils/ui.js';
+import { formatNumber } from '~/utils/number.js';
+import useCookie from '~/hooks/use-cookie.js';
 
 type GridSizeIndicatorProps = {
   /**

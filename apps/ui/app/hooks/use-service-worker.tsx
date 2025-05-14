@@ -1,7 +1,7 @@
 import { useSWEffect } from '@remix-pwa/sw';
 import { useEffect, useRef } from 'react';
 import { useNetworkConnectivity } from './use-network-connectivity.js';
-import { toast } from '@/components/ui/sonner.js';
+import { toast } from '~/components/ui/sonner.js';
 
 const networkStatusCookie = 'network-status';
 const networkStatusToastId = 'network-connectivity';

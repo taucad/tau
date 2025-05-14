@@ -1,15 +1,15 @@
 import { ChevronUp, Filter, Settings, Trash } from 'lucide-react';
 import { useState, useCallback, memo } from 'react';
 import { collapsedConsoleSize } from './chat-view-split.js';
-import { Button } from '@/components/ui/button.js';
-import { Input } from '@/components/ui/input.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { KeyShortcut } from '@/components/ui/key-shortcut.js';
-import { cn } from '@/utils/ui.js';
-import { useConsole } from '@/hooks/use-console.js';
-import type { LogLevel, LogOrigin } from '@/types/console.js';
-import { logLevels } from '@/types/console.js';
-import { Badge } from '@/components/ui/badge.js';
+import { Button } from '~/components/ui/button.js';
+import { Input } from '~/components/ui/input.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { KeyShortcut } from '~/components/ui/key-shortcut.js';
+import { cn } from '~/utils/ui.js';
+import { useConsole } from '~/hooks/use-console.js';
+import type { LogLevel, LogOrigin } from '~/types/console.js';
+import { logLevels } from '~/types/console.js';
+import { Badge } from '~/components/ui/badge.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,8 +17,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu.js';
-import { useCookie } from '@/hooks/use-cookie.js';
+} from '~/components/ui/dropdown-menu.js';
+import { useCookie } from '~/hooks/use-cookie.js';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   readonly onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;

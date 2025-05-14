@@ -6,20 +6,20 @@ import { useChat } from '@ai-sdk/react';
 import { PackagePlus } from 'lucide-react';
 // eslint-disable-next-line no-restricted-imports -- allowed for router types
 import type { Route } from './+types/route.js';
-import { ChatInterface } from '@/routes/builds_.$id/chat-interface.js';
-import { CadProvider, useCad } from '@/components/geometry/cad/cad-context.js';
-import { BuildProvider, useBuild } from '@/hooks/use-build.js';
-import { Button } from '@/components/ui/button.js';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.js';
-import { Input } from '@/components/ui/input.js';
-import { LogProvider } from '@/hooks/use-logs.js';
-import { defaultBuildName } from '@/constants/build-names.js';
-import type { Handle } from '@/types/matches.js';
-import { useChatConstants } from '@/utils/chat.js';
-import { AiChatProvider, useAiChat } from '@/components/chat/ai-chat-provider.js';
-import { KernelProvider } from '@/components/geometry/kernel/kernel-context.js';
-import { GraphicsProvider } from '@/components/geometry/graphics/graphics-context.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
+import { ChatInterface } from '~/routes/builds_.$id/chat-interface.js';
+import { CadProvider, useCad } from '~/components/geometry/cad/cad-context.js';
+import { BuildProvider, useBuild } from '~/hooks/use-build.js';
+import { Button } from '~/components/ui/button.js';
+import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
+import { Input } from '~/components/ui/input.js';
+import { LogProvider } from '~/hooks/use-logs.js';
+import { defaultBuildName } from '~/constants/build-names.js';
+import type { Handle } from '~/types/matches.js';
+import { useChatConstants } from '~/utils/chat.js';
+import { AiChatProvider, useAiChat } from '~/components/chat/ai-chat-provider.js';
+import { KernelProvider } from '~/components/geometry/kernel/kernel-context.js';
+import { GraphicsProvider } from '~/components/geometry/graphics/graphics-context.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 
 function BuildNameEditor() {
   const { build, updateName, isLoading } = useBuild();

@@ -1,4 +1,4 @@
-import { cn } from '@/utils/ui.js';
+import { cn } from '~/utils/ui.js';
 
 export function BoxDown(properties: React.SVGProps<SVGSVGElement>) {
   return (

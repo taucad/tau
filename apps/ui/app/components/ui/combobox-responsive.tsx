@@ -1,6 +1,6 @@
 import type { JSX, ReactNode } from 'react';
 import React from 'react';
-import { useIsMobile } from '@/hooks/use-mobile.js';
+import { useIsMobile } from '~/hooks/use-mobile.js';
 import {
   Command,
   CommandEmpty,
@@ -8,10 +8,10 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from '@/components/ui/command.js';
-import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from '@/components/ui/drawer.js';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.js';
-import { cn } from '@/utils/ui.js';
+} from '~/components/ui/command.js';
+import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from '~/components/ui/drawer.js';
+import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
+import { cn } from '~/utils/ui.js';
 
 type GroupedItems<T> = {
   name: string;

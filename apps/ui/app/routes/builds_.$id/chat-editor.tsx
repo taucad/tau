@@ -4,13 +4,13 @@ import { useMonaco } from '@monaco-editor/react';
 import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
 // eslint-disable-next-line import-x/no-unassigned-import -- setting up the Monaco editor web workers
 import './chat-config.js';
-import { useBuild } from '@/hooks/use-build.js';
-import { CodeEditor } from '@/components/code-editor.js';
-import { useConsole } from '@/hooks/use-console.js';
-import { cn } from '@/utils/ui.js';
-import { CopyButton } from '@/components/copy-button.js';
-import { DownloadButton } from '@/components/download-button.js';
-import { debounce } from '@/utils/function.js';
+import { useBuild } from '~/hooks/use-build.js';
+import { CodeEditor } from '~/components/code-editor.js';
+import { useConsole } from '~/hooks/use-console.js';
+import { cn } from '~/utils/ui.js';
+import { CopyButton } from '~/components/copy-button.js';
+import { DownloadButton } from '~/components/download-button.js';
+import { debounce } from '~/utils/function.js';
 
 export const ChatEditor = memo(function ({
   className,

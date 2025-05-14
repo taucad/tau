@@ -3,8 +3,8 @@ import { useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import { BufferGeometry } from 'three';
 import * as r3js from 'replicad-threejs-helper';
-import { MatcapMaterial } from '@/components/geometry/graphics/three/matcap-material.js';
-import { useColor } from '@/hooks/use-color.js';
+import { MatcapMaterial } from '~/components/geometry/graphics/three/matcap-material.js';
+import { useColor } from '~/hooks/use-color.js';
 
 export const useApplyHighlights = (geometry: BufferGeometry, highlight: number | number[]) => {
   const { invalidate } = useThree();

@@ -1,7 +1,7 @@
 import type { JSX, ReactNode } from 'react';
 import { createContext, useContext, useReducer, useEffect, useMemo, useCallback } from 'react';
-import { useKernel } from '@/components/geometry/kernel/kernel-context.js';
-import { useConsole } from '@/hooks/use-console.js';
+import { useKernel } from '~/components/geometry/kernel/kernel-context.js';
+import { useConsole } from '~/hooks/use-console.js';
 
 // Combine related state
 type CadState = {

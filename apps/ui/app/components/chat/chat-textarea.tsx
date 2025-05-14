@@ -8,23 +8,23 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu.js';
-import { useAiChat } from '@/components/chat/ai-chat-provider.js';
-import { ChatModelSelector } from '@/components/chat/chat-model-selector.js';
-import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '@/components/ui/hover-card.js';
-import { Button } from '@/components/ui/button.js';
-import { Textarea } from '@/components/ui/textarea.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { useModels } from '@/hooks/use-models.js';
-import { KeyShortcut } from '@/components/ui/key-shortcut.js';
-import { formatKeyCombination } from '@/utils/keys.js';
-import type { KeyCombination } from '@/utils/keys.js';
-import { toast } from '@/components/ui/sonner.js';
-import { useCookie } from '@/hooks/use-cookie.js';
-import { cn } from '@/utils/ui.js';
-import type { MessagePart } from '@/types/chat.js';
-import { useKeydown } from '@/hooks/use-keydown.js';
-import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
+} from '~/components/ui/dropdown-menu.js';
+import { useAiChat } from '~/components/chat/ai-chat-provider.js';
+import { ChatModelSelector } from '~/components/chat/chat-model-selector.js';
+import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '~/components/ui/hover-card.js';
+import { Button } from '~/components/ui/button.js';
+import { Textarea } from '~/components/ui/textarea.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { useModels } from '~/hooks/use-models.js';
+import { KeyShortcut } from '~/components/ui/key-shortcut.js';
+import { formatKeyCombination } from '~/utils/keys.js';
+import type { KeyCombination } from '~/utils/keys.js';
+import { toast } from '~/components/ui/sonner.js';
+import { useCookie } from '~/hooks/use-cookie.js';
+import { cn } from '~/utils/ui.js';
+import type { MessagePart } from '~/types/chat.js';
+import { useKeydown } from '~/hooks/use-keydown.js';
+import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({

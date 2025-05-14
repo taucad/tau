@@ -1,6 +1,6 @@
 import * as React from 'react';
 import * as HoverCardPrimitive from '@radix-ui/react-hover-card';
-import { cn } from '@/utils/ui.js';
+import { cn } from '~/utils/ui.js';
 
 function HoverCard({ ...properties }: React.ComponentProps<typeof HoverCardPrimitive.Root>) {
   return <HoverCardPrimitive.Root data-slot="hover-card" {...properties} />;

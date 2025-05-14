@@ -2,17 +2,17 @@ import { History, MoreHorizontal } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink, useMatch, useNavigate } from 'react-router';
-import type { Build } from '@/types/build.js';
+import type { Build } from '~/types/build.js';
 import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from '@/components/ui/sidebar.js';
-import { useKeydown } from '@/hooks/use-keydown.js';
-import { KeyShortcut } from '@/components/ui/key-shortcut.js';
-import { useBuilds } from '@/hooks/use-builds.js';
+} from '~/components/ui/sidebar.js';
+import { useKeydown } from '~/hooks/use-keydown.js';
+import { KeyShortcut } from '~/components/ui/key-shortcut.js';
+import { useBuilds } from '~/hooks/use-builds.js';
 
 const buildsPerPage = 5;
 const maxShortcutLength = 9;

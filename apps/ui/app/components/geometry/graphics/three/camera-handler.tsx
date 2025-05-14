@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { JSX } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
-import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
+import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
 
 /**
  * Internal component that handles the camera matrix manipulation.

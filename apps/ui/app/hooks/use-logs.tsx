@@ -1,9 +1,9 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { LogEntry, LogOptions } from '@/types/console.js';
-import { logLevels } from '@/types/console.js';
-import { generatePrefixedId } from '@/utils/id.js';
-import { idPrefix } from '@/constants/id.js';
+import type { LogEntry, LogOptions } from '~/types/console.js';
+import { logLevels } from '~/types/console.js';
+import { generatePrefixedId } from '~/utils/id.js';
+import { idPrefix } from '~/constants/id.js';
 
 // Moved from types/console.ts
 export type LogContextType = {

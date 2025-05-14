@@ -1,11 +1,11 @@
 import type { JSX } from 'react';
 import { useEffect } from 'react';
-import { Slider } from '@/components/ui/slider.js';
-import { buttonVariants } from '@/components/ui/button.js';
-import { cn } from '@/utils/ui.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
-import { useCookie } from '@/hooks/use-cookie.js';
+import { Slider } from '~/components/ui/slider.js';
+import { buttonVariants } from '~/components/ui/button.js';
+import { cn } from '~/utils/ui.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
+import { useCookie } from '~/hooks/use-cookie.js';
 
 // Cookie name constant - same as in the ThreeContext
 const cameraAngleCookieName = 'camera-angle';

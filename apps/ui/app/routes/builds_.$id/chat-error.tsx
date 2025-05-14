@@ -1,8 +1,8 @@
 import { memo } from 'react';
 import { ChevronRight, RefreshCcw } from 'lucide-react';
-import { Button } from '@/components/ui/button.js';
-import { useAiChat } from '@/components/chat/ai-chat-provider.js';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible.js';
+import { Button } from '~/components/ui/button.js';
+import { useAiChat } from '~/components/chat/ai-chat-provider.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
 
 export const ChatError = memo(() => {
   const { reload, error } = useAiChat({});

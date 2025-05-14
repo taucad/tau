@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
+import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
 
 /**
  * Options for configuring screenshot capture

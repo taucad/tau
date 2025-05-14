@@ -1,9 +1,9 @@
 import { useRouteLoaderData } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { ENV } from '@/config.js';
-import type { loader } from '@/root.js';
-import { useCookie } from '@/hooks/use-cookie.js';
+import { ENV } from '~/config.js';
+import type { loader } from '~/root.js';
+import { useCookie } from '~/hooks/use-cookie.js';
 
 export const defaultChatModel = 'anthropic-claude-3.7-sonnet-thinking';
 

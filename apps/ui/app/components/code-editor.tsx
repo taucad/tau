@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 import type { JSX } from 'react';
 import { shikiToMonaco } from '@shikijs/monaco';
 import { createHighlighter } from 'shiki';
-import { cn } from '@/utils/ui.js';
+import { cn } from '~/utils/ui.js';
 
 // Create the highlighter, it can be reused
 const highlighter = await createHighlighter({

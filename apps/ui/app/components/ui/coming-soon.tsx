@@ -1,7 +1,7 @@
 import type { VariantProps } from 'class-variance-authority';
 import { cva } from 'class-variance-authority';
-import { Badge } from '@/components/ui/badge.js';
-import { cn } from '@/utils/ui.js';
+import { Badge } from '~/components/ui/badge.js';
+import { cn } from '~/utils/ui.js';
 
 const comingSoonVariants = cva(
   // Font

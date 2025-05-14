@@ -1,5 +1,5 @@
 import type { PartialDeep } from 'type-fest';
-import type { Build } from '@/types/build.js';
+import type { Build } from '~/types/build.js';
 
 export type StorageProvider = {
   // Build operations

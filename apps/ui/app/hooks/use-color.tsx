@@ -9,7 +9,7 @@ import {
   convertLchToLab,
   convertRgbToHsl,
 } from 'culori/fn';
-import { useCookie } from '@/hooks/use-cookie';
+import { useCookie } from '~/hooks/use-cookie';
 
 /**
  * Colors are defined in OKLCH space.

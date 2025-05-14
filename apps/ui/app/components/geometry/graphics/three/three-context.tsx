@@ -3,12 +3,12 @@ import { Canvas } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
-import { CameraHandler } from '@/components/geometry/graphics/three/camera-handler.js';
-import { Scene } from '@/components/geometry/graphics/three/scene.js';
-import type { StageOptions } from '@/components/geometry/graphics/three/stage.js';
-import rotateIconBase64 from '@/components/geometry/graphics/rotate-icon.svg?base64';
-import { ScreenshotSetup } from '@/components/geometry/graphics/three/screenshot.js';
-import { cn } from '@/utils/ui.js';
+import { CameraHandler } from '~/components/geometry/graphics/three/camera-handler.js';
+import { Scene } from '~/components/geometry/graphics/three/scene.js';
+import type { StageOptions } from '~/components/geometry/graphics/three/stage.js';
+import rotateIconBase64 from '~/components/geometry/graphics/rotate-icon.svg?base64';
+import { ScreenshotSetup } from '~/components/geometry/graphics/three/screenshot.js';
+import { cn } from '~/utils/ui.js';
 
 export type ThreeViewerProperties = {
   readonly enableGizmo?: boolean;

@@ -9,7 +9,7 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { ReactNode } from 'react';
 import { Theme, useTheme } from 'remix-themes';
-import { useColor } from '@/hooks/use-color.js';
+import { useColor } from '~/hooks/use-color.js';
 
 const createAxesObject = ({
   axesSize = 2.1,

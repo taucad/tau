@@ -1,18 +1,18 @@
 import { RefreshCcw, RefreshCcwDot, ChevronRight, Search, X, Info } from 'lucide-react';
 import { useCallback, useMemo, memo, useState, useEffect } from 'react';
-import { categorizeParameters } from '@/routes/builds_.$id/chat-parameters-sorter.js';
-import { pascalCaseToWords } from '@/utils/string.js';
-import { Slider } from '@/components/ui/slider.js';
-import { Switch } from '@/components/ui/switch.js';
-import { Input } from '@/components/ui/input.js';
-import { ChatParametersInputNumber } from '@/routes/builds_.$id/chat-parameters-input-number.js';
-import { useBuild } from '@/hooks/use-build.js';
-import { Button } from '@/components/ui/button.js';
-import { useCad } from '@/components/geometry/cad/cad-context.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { cn } from '@/utils/ui.js';
-import { debounce } from '@/utils/function.js';
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible.js';
+import { categorizeParameters } from '~/routes/builds_.$id/chat-parameters-sorter.js';
+import { pascalCaseToWords } from '~/utils/string.js';
+import { Slider } from '~/components/ui/slider.js';
+import { Switch } from '~/components/ui/switch.js';
+import { Input } from '~/components/ui/input.js';
+import { ChatParametersInputNumber } from '~/routes/builds_.$id/chat-parameters-input-number.js';
+import { useBuild } from '~/hooks/use-build.js';
+import { Button } from '~/components/ui/button.js';
+import { useCad } from '~/components/geometry/cad/cad-context.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { cn } from '~/utils/ui.js';
+import { debounce } from '~/utils/function.js';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '~/components/ui/collapsible.js';
 
 /**
  * Filter parameters to only include the allowed parameters - allowed parameters are the keys of the default parameters

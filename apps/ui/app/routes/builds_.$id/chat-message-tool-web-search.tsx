@@ -1,14 +1,14 @@
 import { ChevronRight } from 'lucide-react';
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
 import type { JSX } from 'react';
-import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet.js';
-import { Badge } from '@/components/ui/badge.js';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip.js';
-import { ComingSoon } from '@/components/ui/coming-soon.js';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card.js';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible.js';
-import { Button } from '@/components/ui/button.js';
-import { extractDomainFromUrl, createFaviconUrl } from '@/utils/url.js';
+import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '~/components/ui/sheet.js';
+import { Badge } from '~/components/ui/badge.js';
+import { Tooltip, TooltipTrigger, TooltipContent } from '~/components/ui/tooltip.js';
+import { ComingSoon } from '~/components/ui/coming-soon.js';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '~/components/ui/hover-card.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
+import { Button } from '~/components/ui/button.js';
+import { extractDomainFromUrl, createFaviconUrl } from '~/utils/url.js';
 
 // Const SOURCE_TOOLS = [
 //   { icon: Globe2, key: 'web' },

@@ -2,8 +2,8 @@ import { Link, Outlet, redirect, useLocation, useNavigate } from 'react-router';
 import { useEffect } from 'react';
 import type { LoaderFunction } from 'react-router';
 import type { JSX } from 'react';
-import { Button } from '@/components/ui/button.js';
-import type { Handle } from '@/types/matches.js';
+import { Button } from '~/components/ui/button.js';
+import type { Handle } from '~/types/matches.js';
 
 export const handle: Handle = {
   breadcrumb() {

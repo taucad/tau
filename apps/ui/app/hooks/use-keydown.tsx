@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useMemo } from 'react';
-import { formatKeyCombination } from '@/utils/keys.js';
-import type { KeyCombination } from '@/utils/keys.js';
+import { formatKeyCombination } from '~/utils/keys.js';
+import type { KeyCombination } from '~/utils/keys.js';
 
 type KeydownOptions = {
   preventDefault?: boolean;

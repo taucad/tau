@@ -1,5 +1,5 @@
 import type { ComponentPropsWithoutRef, JSX } from 'react';
-import { cn } from '@/utils/ui.js';
+import { cn } from '~/utils/ui.js';
 
 export type AnimatedShinyTextProps = {
   readonly shimmerWidth?: number;

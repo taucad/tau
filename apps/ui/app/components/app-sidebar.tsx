@@ -1,12 +1,12 @@
 import * as React from 'react';
 import { BookOpen, Bot, Frame, Hammer, Map, PieChart, UsersRound, Workflow } from 'lucide-react';
 import { Link } from 'react-router';
-import { ColorToggle } from '@/components/nav/color-toggle.js';
-import { NavHistory } from '@/components/nav/nav-history.js';
-import { headerHeight } from '@/components/page.js';
-import { NavMain } from '@/components/nav/nav-main.js';
-import { NavProjects } from '@/components/nav/nav-projects.js';
-import { NavUser } from '@/components/nav/nav-user.js';
+import { ColorToggle } from '~/components/nav/color-toggle.js';
+import { NavHistory } from '~/components/nav/nav-history.js';
+import { headerHeight } from '~/components/page.js';
+import { NavMain } from '~/components/nav/nav-main.js';
+import { NavProjects } from '~/components/nav/nav-projects.js';
+import { NavUser } from '~/components/nav/nav-user.js';
 import {
   Sidebar,
   SidebarContent,
@@ -14,10 +14,10 @@ import {
   SidebarHeader,
   SidebarMenuButton,
   SidebarRail,
-} from '@/components/ui/sidebar.js';
-import { Tau } from '@/components/icons/tau.js';
-import { NavChat } from '@/components/nav/nav-chat.js';
-import { ModeToggle } from '@/components/nav/mode-toggle.js';
+} from '~/components/ui/sidebar.js';
+import { Tau } from '~/components/icons/tau.js';
+import { NavChat } from '~/components/nav/nav-chat.js';
+import { ModeToggle } from '~/components/nav/mode-toggle.js';
 
 // This is sample data.
 const data = {

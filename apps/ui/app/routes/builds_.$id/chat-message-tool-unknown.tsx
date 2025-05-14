@@ -1,7 +1,7 @@
 import { TriangleAlert, ChevronRight } from 'lucide-react';
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
 import type { JSX } from 'react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
 
 export function ChatMessageToolUnknown({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
   return (

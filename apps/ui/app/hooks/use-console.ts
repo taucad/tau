@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
-import { useLogContext } from '@/hooks/use-logs.js';
-import type { LogLevel, LogOptions, LogOrigin } from '@/types/console.js';
-import { logLevels } from '@/types/console.js';
+import { useLogContext } from '~/hooks/use-logs.js';
+import type { LogLevel, LogOptions, LogOrigin } from '~/types/console.js';
+import { logLevels } from '~/types/console.js';
 
 /**
  * Options for the useConsole hook

@@ -72,7 +72,7 @@ const config = [
         patterns: [
           {
             group: [".*"],
-            message: "Use absolute imports instead of relative imports. For example, instead of `import { Foo } from './foo'`, use `import { Foo } from '@/foo'`.",
+            message: "Use absolute imports instead of relative imports. For example, instead of `import { Foo } from './foo'`, use `import { Foo } from '~/foo'`.",
           },
         ],
       }],

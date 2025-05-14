@@ -2,20 +2,20 @@ import { ChevronDown, ChevronRight, Edit, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
 import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
-import { ChatMessageReasoning } from '@/routes/builds_.$id/chat-message-reasoning.js';
-import { ChatMessageTool } from '@/routes/builds_.$id/chat-message-tool.js';
-import { ChatMessageAnnotation } from '@/routes/builds_.$id/chat-message-annotation.js';
-import { ChatMessageText } from '@/routes/builds_.$id/chat-message-text.js';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip.js';
-import { CopyButton } from '@/components/copy-button.js';
-import { Button } from '@/components/ui/button.js';
-import { MessageRole } from '@/types/chat.js';
-import type { MessageAnnotation } from '@/types/chat.js';
-import { cn } from '@/utils/ui.js';
-import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card.js';
-import { When } from '@/components/ui/utils/when.js';
-import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
-import { ChatTextarea } from '@/components/chat/chat-textarea.js';
+import { ChatMessageReasoning } from '~/routes/builds_.$id/chat-message-reasoning.js';
+import { ChatMessageTool } from '~/routes/builds_.$id/chat-message-tool.js';
+import { ChatMessageAnnotation } from '~/routes/builds_.$id/chat-message-annotation.js';
+import { ChatMessageText } from '~/routes/builds_.$id/chat-message-text.js';
+import { Tooltip, TooltipTrigger, TooltipContent } from '~/components/ui/tooltip.js';
+import { CopyButton } from '~/components/copy-button.js';
+import { Button } from '~/components/ui/button.js';
+import { MessageRole } from '~/types/chat.js';
+import type { MessageAnnotation } from '~/types/chat.js';
+import { cn } from '~/utils/ui.js';
+import { HoverCard, HoverCardTrigger, HoverCardContent } from '~/components/ui/hover-card.js';
+import { When } from '~/components/ui/utils/when.js';
+import type { ChatTextareaProperties } from '~/components/chat/chat-textarea.js';
+import { ChatTextarea } from '~/components/chat/chat-textarea.js';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -23,8 +23,8 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuLabel,
-} from '@/components/ui/dropdown-menu.js';
-import { ChatModelSelector } from '@/components/chat/chat-model-selector.js';
+} from '~/components/ui/dropdown-menu.js';
+import { ChatModelSelector } from '~/components/chat/chat-model-selector.js';
 
 type ChatMessageProperties = {
   readonly message: Message;

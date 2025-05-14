@@ -1,8 +1,8 @@
 import { Copy, Check } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import type { JSX } from 'react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { Button } from '@/components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { Button } from '~/components/ui/button.js';
 
 export type CopyButtonProperties = {
   /**

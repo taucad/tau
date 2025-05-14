@@ -1,9 +1,9 @@
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
 import { LoaderCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { Badge } from '@/components/ui/badge.js';
-import { createFaviconUrl, extractDomainFromUrl } from '@/utils/url.js';
-import { AnimatedShinyText } from '@/components/magicui/animated-shiny-text.js';
+import { Badge } from '~/components/ui/badge.js';
+import { createFaviconUrl, extractDomainFromUrl } from '~/utils/url.js';
+import { AnimatedShinyText } from '~/components/magicui/animated-shiny-text.js';
 
 export function ChatMessageToolWebBrowser({ part }: { readonly part: ToolInvocationUIPart }): ReactNode {
   switch (part.toolInvocation.state) {

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { Build } from '@/types/build.js';
-import { storage } from '@/db/storage.js';
+import type { Build } from '~/types/build.js';
+import { storage } from '~/db/storage.js';
 
 // Function to fetch builds
 export const fetchBuilds = async (): Promise<Build[]> => {

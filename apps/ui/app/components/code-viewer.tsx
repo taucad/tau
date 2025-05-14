@@ -2,7 +2,7 @@ import { useShikiHighlighter } from 'react-shiki';
 import type { JSX } from 'react';
 import type { ClassValue } from 'clsx';
 import { useTheme } from 'remix-themes';
-import { cn } from '@/utils/ui.js';
+import { cn } from '~/utils/ui.js';
 
 type Language = 'typescript' | 'kcl' | 'javascript' | 'jsx' | 'tsx';
 

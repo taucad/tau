@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
-import { InfiniteGrid } from '@/components/geometry/graphics/three/infinite-grid.js';
-import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
+import { InfiniteGrid } from '~/components/geometry/graphics/three/infinite-grid.js';
+import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
 
 // Grid size calculation constants
 export const gridSizeConstants = {

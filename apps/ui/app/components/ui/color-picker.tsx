@@ -2,15 +2,15 @@ import React, { useState } from 'react';
 import type { ComponentProps, JSX, RefObject } from 'react';
 import type { HslColor } from 'react-colorful';
 import { RotateCcw } from 'lucide-react';
-import { ThreeProvider } from '@/components/geometry/graphics/three/three-context.js';
-import { CadLoader } from '@/components/geometry/graphics/three/cad-loader.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { Slider } from '@/components/ui/slider.js';
-import { KeyShortcut } from '@/components/ui/key-shortcut.js';
-import { cn } from '@/utils/ui.js';
-import { Button } from '@/components/ui/button.js';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.js';
-import { useKeydown } from '@/hooks/use-keydown.js';
+import { ThreeProvider } from '~/components/geometry/graphics/three/three-context.js';
+import { CadLoader } from '~/components/geometry/graphics/three/cad-loader.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { Slider } from '~/components/ui/slider.js';
+import { KeyShortcut } from '~/components/ui/key-shortcut.js';
+import { cn } from '~/utils/ui.js';
+import { Button } from '~/components/ui/button.js';
+import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
+import { useKeydown } from '~/hooks/use-keydown.js';
 
 export type ColorPickerValue = HslColor;
 

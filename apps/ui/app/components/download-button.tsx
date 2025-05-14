@@ -1,9 +1,9 @@
 import { Download } from 'lucide-react';
 import React from 'react';
 import type { JSX } from 'react';
-import { Button } from '@/components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { toast } from '@/components/ui/sonner.js';
+import { Button } from '~/components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { toast } from '~/components/ui/sonner.js';
 
 export type DownloadButtonProperties = {
   /**

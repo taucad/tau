@@ -1,8 +1,8 @@
 import type { JSX } from 'react';
 import { Focus } from 'lucide-react';
-import { Button } from '@/components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { useGraphics } from '@/components/geometry/graphics/graphics-context.js';
+import { Button } from '~/components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
 
 /**
  * Reset camera control button that resets the camera to the default view

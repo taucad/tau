@@ -2,8 +2,8 @@ import { ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { NavLink, useMatch, useNavigate } from 'react-router';
 import type { JSX } from 'react';
-import { KeyShortcut } from '@/components/ui/key-shortcut.js';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible.js';
+import { KeyShortcut } from '~/components/ui/key-shortcut.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -13,10 +13,10 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-} from '@/components/ui/sidebar.js';
-import type { KeyCombination } from '@/utils/keys.js';
-import { formatKeyCombination } from '@/utils/keys.js';
-import { useKeydown } from '@/hooks/use-keydown.js';
+} from '~/components/ui/sidebar.js';
+import type { KeyCombination } from '~/utils/keys.js';
+import { formatKeyCombination } from '~/utils/keys.js';
+import { useKeydown } from '~/hooks/use-keydown.js';
 
 export function NavMain({
   items,

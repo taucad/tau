@@ -1,5 +1,5 @@
-import { mockModels } from '@/constants/build-code-examples.js';
-import type { Build } from '@/types/build.js';
+import { mockModels } from '~/constants/build-code-examples.js';
+import type { Build } from '~/types/build.js';
 
 // Sample data
 export const sampleBuilds: Build[] = mockModels.map((model) => ({

@@ -1,8 +1,8 @@
 import type { Message, useChat } from '@ai-sdk/react';
-import type { MessageRole, MessageStatus } from '@/types/chat.js';
-import { generatePrefixedId } from '@/utils/id.js';
-import { idPrefix } from '@/constants/id.js';
-import { ENV } from '@/config.js';
+import type { MessageRole, MessageStatus } from '~/types/chat.js';
+import { generatePrefixedId } from '~/utils/id.js';
+import { idPrefix } from '~/constants/id.js';
+import { ENV } from '~/config.js';
 
 export const useChatConstants = {
   api: `${ENV.TAU_API_URL}/v1/chat`,

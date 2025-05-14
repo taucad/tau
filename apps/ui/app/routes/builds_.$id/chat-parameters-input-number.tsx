@@ -1,8 +1,8 @@
 import * as React from 'react';
-import { Angle } from '@/components/icons/angle.js';
-import { cn } from '@/utils/ui.js';
-import { Input } from '@/components/ui/input.js';
-import { isCountParameter, isAngleParameter } from '@/constants/build-parameters.js';
+import { Angle } from '~/components/icons/angle.js';
+import { cn } from '~/utils/ui.js';
+import { Input } from '~/components/ui/input.js';
+import { isCountParameter, isAngleParameter } from '~/constants/build-parameters.js';
 
 type MeasurementDescriptor = 'length' | 'angle' | 'count';
 

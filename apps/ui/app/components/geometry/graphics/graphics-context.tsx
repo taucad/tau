@@ -1,7 +1,7 @@
 import { createContext, useContext, useReducer, useRef, useMemo, useCallback } from 'react';
 import type { JSX, ReactNode } from 'react';
-import type { GridSizes } from '@/components/geometry/graphics/three/grid.js';
-import type { ScreenshotOptions } from '@/components/geometry/graphics/three/screenshot.js';
+import type { GridSizes } from '~/components/geometry/graphics/three/grid.js';
+import type { ScreenshotOptions } from '~/components/geometry/graphics/three/screenshot.js';
 
 // State type definition
 type GraphicsState = {

@@ -3,18 +3,18 @@ import { Star, GitFork, Eye } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { KernelProvider } from './geometry/kernel/kernel-context.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import { Button } from '@/components/ui/button.js';
-import { Badge } from '@/components/ui/badge.js';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar.js';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card.js';
-import { SvgIcon } from '@/components/icons/svg-icon.js';
-import type { Build } from '@/types/build.js';
-import type { CadKernelProvider, Category } from '@/types/cad.js';
-import { categories } from '@/types/cad.js';
-import { CadProvider, useCad } from '@/components/geometry/cad/cad-context.js';
-import { CadViewer } from '@/components/geometry/cad/cad-viewer.js';
-import { storage } from '@/db/storage.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { Button } from '~/components/ui/button.js';
+import { Badge } from '~/components/ui/badge.js';
+import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar.js';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '~/components/ui/card.js';
+import { SvgIcon } from '~/components/icons/svg-icon.js';
+import type { Build } from '~/types/build.js';
+import type { CadKernelProvider, Category } from '~/types/cad.js';
+import { categories } from '~/types/cad.js';
+import { CadProvider, useCad } from '~/components/geometry/cad/cad-context.js';
+import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
+import { storage } from '~/db/storage.js';
 
 // Utility function to split an array into chunks
 function chunks<T>(array: T[], size: number): T[][] {

@@ -1,5 +1,6 @@
 import { Link, useNavigate } from 'react-router';
 import type { JSX } from 'react';
+import { PencilRuler } from 'lucide-react';
 import { useModels } from '@/hooks/use-models.js';
 import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
 import { ChatTextarea } from '@/components/chat/chat-textarea.js';
@@ -12,7 +13,6 @@ import { CommunityBuildGrid } from '@/components/project-grid.js';
 import { sampleBuilds } from '@/components/mock-builds.js';
 import { defaultBuildName } from '@/constants/build-constants.js';
 import { AiChatProvider } from '@/components/chat/ai-chat-provider.js';
-import { SvgIcon } from '@/components/icons/svg-icon.js';
 
 export default function ChatStart(): JSX.Element {
   const { data: models } = useModels();
@@ -70,7 +70,7 @@ export default function ChatStart(): JSX.Element {
 
         <AiChatProvider value={{}}>
           <ChatTextarea models={models ?? []} withContextActions={false} onSubmit={onSubmit} />
-          <div className="relative my-6 flex items-center justify-center">
+          <div className="relative mx-auto my-6 flex w-48 items-center justify-center">
             <div className="absolute inset-0 flex items-center">
               <span className="border-gray-300 w-full border-t" />
             </div>
@@ -109,7 +109,7 @@ export default function ChatStart(): JSX.Element {
               }}
             >
               Start from scratch
-              <SvgIcon id="replicad" />
+              <PencilRuler />
             </Button>
           </div>
         </AiChatProvider>

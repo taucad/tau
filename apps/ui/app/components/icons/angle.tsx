@@ -14,8 +14,8 @@ export function Angle(properties: React.SVGProps<SVGSVGElement>): JSX.Element {
       strokeLinejoin="round"
       {...properties}
     >
-      <path d="M11 21a10 10 0 0 0-4-8" />
-      <path d="M14.5 3 3.4 17.8A2 2 0 0 0 5 21h16" />
+      <path d="M11 20a10 10 0 0 0-3.986-7.99" />
+      <path d="M13 4 3.4 16.8A2 2 0 0 0 5 20h16" />
     </svg>
   );
 }

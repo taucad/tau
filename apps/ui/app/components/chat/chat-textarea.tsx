@@ -357,7 +357,7 @@ export const ChatTextarea = memo(function ({
           <div key={image} className="relative">
             <HoverCard openDelay={100} closeDelay={100}>
               <HoverCardTrigger asChild>
-                <div className="flex h-6 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border bg-background object-cover">
+                <div className="flex h-6 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border bg-muted object-cover">
                   <img src={image} alt="Uploaded" className="size-6 border-r object-cover" />
                   <span className="px-1 text-xs">Image</span>
                 </div>

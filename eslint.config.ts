@@ -1,10 +1,8 @@
 import xo from 'xo';
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
+import type { Linter } from 'eslint';
 
-/**
- * @type {import('eslint').Linter.Config[]}
- */
-const config = [
+const config: Linter.Config[] = [
   ...xo.xoToEslintConfig([{ space: true, react: true, prettier: 'compat' }]),
   eslintPluginPrettierRecommended,
   {

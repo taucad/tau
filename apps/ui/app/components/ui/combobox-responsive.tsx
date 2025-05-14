@@ -1,7 +1,6 @@
 import type { JSX, ReactNode } from 'react';
 import React from 'react';
 import { useIsMobile } from '@/hooks/use-mobile.js';
-import { Button } from '@/components/ui/button.js';
 import {
   Command,
   CommandEmpty,
@@ -22,27 +21,27 @@ type GroupedItems<T> = {
 export function ComboBoxResponsive<T>({
   groupedItems,
   renderLabel,
-  renderButtonContents,
+  children,
   getValue,
   defaultValue,
   onSelect,
   onClose,
-  className,
   popoverContentClassName,
+  popoverProperties,
   placeholder = 'Set item',
   searchPlaceHolder = 'Filter items...',
   asChildLabel = false,
   labelClassName,
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
-  readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
-  readonly renderButtonContents: (item: T) => ReactNode;
+  readonly renderLabel: (item: T, selectedItem: T) => ReactNode;
+  readonly children: ReactNode;
   readonly getValue: (item: T) => string;
-  readonly defaultValue?: T;
+  readonly defaultValue: T;
   readonly onSelect?: (value: string) => void;
   readonly onClose?: () => void;
-  readonly className?: string;
   readonly popoverContentClassName?: string;
+  readonly popoverProperties?: React.ComponentProps<typeof PopoverContent>;
   readonly placeholder?: string;
   readonly searchPlaceHolder?: string;
   readonly asChildLabel?: boolean;
@@ -50,7 +49,7 @@ export function ComboBoxResponsive<T>({
 }): JSX.Element {
   const [open, setOpen] = React.useState(false);
   const isMobile = useIsMobile();
-  const [selectedItem, setSelectedItem] = React.useState<T | undefined>(defaultValue);
+  const [selectedItem, setSelectedItem] = React.useState<T>(defaultValue);
   const selectionMadeReference = React.useRef(false);
 
   const handleSelect = (item: T) => {
@@ -77,11 +76,7 @@ export function ComboBoxResponsive<T>({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={handleOpenChange}>
-        <DrawerTrigger asChild>
-          <Button variant="ghost" className={className}>
-            {selectedItem ? renderButtonContents(selectedItem) : placeholder}
-          </Button>
-        </DrawerTrigger>
+        <DrawerTrigger asChild>{children}</DrawerTrigger>
         <DrawerContent aria-describedby="drawer-title">
           <DrawerTitle className="sr-only" id="drawer-title">
             {placeholder}
@@ -105,12 +100,8 @@ export function ComboBoxResponsive<T>({
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        <Button variant="ghost" className={cn('w-[150px] justify-start', className)}>
-          {selectedItem ? renderButtonContents(selectedItem) : placeholder}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className={cn('w-[200px] p-0', popoverContentClassName)} align="start">
+      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverContent className={cn('w-[200px] p-0', popoverContentClassName)} {...popoverProperties}>
         <ItemList
           groupedItems={groupedItems}
           setSelectedItem={handleSelect}
@@ -138,8 +129,8 @@ function ItemList<T>({
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
   readonly setSelectedItem: (item: T) => void;
-  readonly selectedItem: T | undefined;
-  readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
+  readonly selectedItem: T;
+  readonly renderLabel: (item: T, selectedItem: T) => ReactNode;
   readonly getValue: (item: T) => string;
   readonly searchPlaceHolder: string;
   readonly asChildLabel?: boolean;

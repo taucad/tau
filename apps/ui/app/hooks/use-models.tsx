@@ -5,7 +5,7 @@ import { ENV } from '@/config.js';
 import type { loader } from '@/root.js';
 import { useCookie } from '@/hooks/use-cookie.js';
 
-const defaultChatModel = 'anthropic-claude-3.7-sonnet-thinking';
+export const defaultChatModel = 'anthropic-claude-3.7-sonnet-thinking';
 
 export type Model = {
   id: string;
@@ -46,7 +46,12 @@ export const useModels = () => {
   });
 
   const selectedModel = useMemo(() => {
-    return data?.find((model) => model.id === selectedModelId);
+    const model = data?.find((model) => model.id === selectedModelId);
+    if (!model) {
+      throw new Error(`Model ${selectedModelId} not found`);
+    }
+
+    return model;
   }, [data, selectedModelId]);
 
   return { data, isLoading, selectedModel, setSelectedModelId };

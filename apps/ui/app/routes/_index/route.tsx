@@ -1,7 +1,6 @@
 import { Link, useNavigate } from 'react-router';
 import type { JSX } from 'react';
 import { PencilRuler } from 'lucide-react';
-import { useModels } from '@/hooks/use-models.js';
 import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
 import { ChatTextarea } from '@/components/chat/chat-textarea.js';
 import { Button } from '@/components/ui/button.js';
@@ -15,7 +14,6 @@ import { defaultBuildName } from '@/constants/build-constants.js';
 import { AiChatProvider } from '@/components/chat/ai-chat-provider.js';
 
 export default function ChatStart(): JSX.Element {
-  const { data: models } = useModels();
   const navigate = useNavigate();
 
   const onSubmit: ChatTextareaProperties['onSubmit'] = async ({ content, model, metadata, imageUrls }) => {
@@ -69,7 +67,7 @@ export default function ChatStart(): JSX.Element {
         </div>
 
         <AiChatProvider value={{}}>
-          <ChatTextarea models={models ?? []} withContextActions={false} onSubmit={onSubmit} />
+          <ChatTextarea withContextActions={false} onSubmit={onSubmit} />
           <div className="relative mx-auto my-6 flex w-48 items-center justify-center">
             <div className="absolute inset-0 flex items-center">
               <span className="border-gray-300 w-full border-t" />

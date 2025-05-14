@@ -1,4 +1,4 @@
-import { ChevronDown, Edit, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronRight, Edit, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
 import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
@@ -16,7 +16,6 @@ import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/h
 import { When } from '@/components/ui/utils/when.js';
 import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
 import { ChatTextarea } from '@/components/chat/chat-textarea.js';
-import type { Model } from '@/hooks/use-models.js';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -24,13 +23,14 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuLabel,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu.js';
 import { ChatModelSelector } from '@/components/chat/chat-model-selector.js';
 
 type ChatMessageProperties = {
   readonly message: Message;
   readonly onEdit: ChatTextareaProperties['onSubmit'];
-  readonly models: Model[];
   readonly onRetry: ({ modelId }: { modelId?: string }) => void;
 };
 
@@ -45,7 +45,7 @@ const getMessageContent = (message: Message): string => {
   return content.join('\n\n');
 };
 
-export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: ChatMessageProperties): JSX.Element {
+export const ChatMessage = memo(function ({ message, onEdit, onRetry }: ChatMessageProperties): JSX.Element {
   const isUser = message.role === MessageRole.User;
   const [isEditing, setIsEditing] = useState(false);
 
@@ -69,7 +69,6 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
           <ChatTextarea
             initialContent={message.parts}
             initialAttachments={message.experimental_attachments}
-            models={models}
             onSubmit={async (event) => {
               void onEdit(event);
               setIsEditing(false);
@@ -176,18 +175,21 @@ export const ChatMessage = memo(function ({ message, onEdit, models, onRetry }: 
                 <DropdownMenuContent align="start" side="top" className="min-w-[200px]">
                   <DropdownMenuLabel>Switch model</DropdownMenuLabel>
                   <ChatModelSelector
-                    models={models}
+                    popoverProperties={{ side: 'right', align: 'start' }}
                     className="h-fit w-full p-2"
-                    renderButtonContents={(model) => (
-                      <div className="flex w-full flex-row items-center justify-between gap-2 text-sm font-normal">
-                        <span>{model.name}</span>
-                        <ChevronDown className="size-4 text-muted-foreground" />
-                      </div>
-                    )}
                     onSelect={(modelId) => {
                       onRetry({ modelId });
                     }}
-                  />
+                  >
+                    {(selectedModel) => (
+                      <Button variant="ghost" size="sm" className="group w-full justify-start rounded-sm p-2">
+                        <div className="flex w-full flex-row items-center justify-between gap-2 text-sm font-normal">
+                          <span>{selectedModel.name}</span>
+                          <ChevronRight className="size-4 text-muted-foreground transition-transform duration-200 ease-in-out group-data-[state=open]:rotate-90" />
+                        </div>
+                      </Button>
+                    )}
+                  </ChatModelSelector>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="flex justify-between"

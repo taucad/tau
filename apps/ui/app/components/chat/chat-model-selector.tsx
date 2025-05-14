@@ -9,21 +9,20 @@ import type { ModelProvider } from '@/types/cad.js';
 import { useModels } from '@/hooks/use-models.js';
 
 type ChatModelSelectorProps = {
-  readonly models: Model[];
   readonly onSelect?: (modelId: string) => void;
   readonly onClose?: () => void;
   readonly className?: string;
-  readonly renderButtonContents: (item: Model) => ReactNode;
+  readonly children: (selectedModel: Model) => ReactNode;
+  readonly popoverProperties?: React.ComponentProps<typeof ComboBoxResponsive>['popoverProperties'];
 };
 
 export const ChatModelSelector = memo(function ({
-  models,
   onSelect,
   onClose,
-  className,
-  renderButtonContents,
+  children,
+  ...props
 }: ChatModelSelectorProps): JSX.Element {
-  const { selectedModel, setSelectedModelId } = useModels();
+  const { selectedModel, setSelectedModelId, data: models = [] } = useModels();
 
   const providerModelsMap = new Map<string, Model[]>();
   for (const model of models) {
@@ -48,7 +47,6 @@ export const ChatModelSelector = memo(function ({
 
   return (
     <ComboBoxResponsive
-      className={className}
       popoverContentClassName="w-[300px]"
       groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({
         name: provider,
@@ -70,12 +68,14 @@ export const ChatModelSelector = memo(function ({
           </div>
         </span>
       )}
-      renderButtonContents={renderButtonContents}
       getValue={(item) => item.id}
       placeholder="Select a model"
-      defaultValue={models.find((model) => model.id === selectedModel?.id)}
+      defaultValue={selectedModel}
       onSelect={handleSelectModel}
       onClose={onClose}
-    />
+      {...props}
+    >
+      {children(selectedModel)}
+    </ComboBoxResponsive>
   );
 });

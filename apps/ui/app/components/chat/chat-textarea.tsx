@@ -12,10 +12,9 @@ import {
 import { useAiChat } from '@/components/chat/ai-chat-provider.js';
 import { ChatModelSelector } from '@/components/chat/chat-model-selector.js';
 import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '@/components/ui/hover-card.js';
-import { Button, buttonVariants } from '@/components/ui/button.js';
+import { Button } from '@/components/ui/button.js';
 import { Textarea } from '@/components/ui/textarea.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
-import type { Model } from '@/hooks/use-models.js';
 import { useModels } from '@/hooks/use-models.js';
 import { KeyShortcut } from '@/components/ui/key-shortcut.js';
 import { formatKeyCombination } from '@/utils/keys.js';
@@ -40,7 +39,6 @@ export type ChatTextareaProperties = {
     imageUrls?: string[];
   }) => Promise<void>;
   readonly onEscapePressed?: () => void;
-  readonly models: Model[];
   readonly shouldAutoFocus?: boolean;
   readonly initialContent?: MessagePart[];
   readonly initialAttachments?: Attachment[];
@@ -59,7 +57,6 @@ const cancelKeyCombination = {
 
 export const ChatTextarea = memo(function ({
   onSubmit,
-  models,
   shouldAutoFocus: autoFocus = true,
   initialContent = defaultContent,
   initialAttachments = defaultAttachments,
@@ -360,7 +357,7 @@ export const ChatTextarea = memo(function ({
           <div key={image} className="relative">
             <HoverCard openDelay={100} closeDelay={100}>
               <HoverCardTrigger asChild>
-                <div className="flex h-6 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border bg-muted object-cover">
+                <div className="flex h-6 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border bg-background object-cover">
                   <img src={image} alt="Uploaded" className="size-6 border-r object-cover" />
                   <span className="px-1 text-xs">Image</span>
                 </div>
@@ -390,7 +387,7 @@ export const ChatTextarea = memo(function ({
       {/* Drag and drop feedback */}
       {isDragging ? (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-primary/10 backdrop-blur-xs">
-          <p className="rounded-md bg-background/50 px-2 font-medium text-primary">Drop images here</p>
+          <p className="rounded-md bg-background/50 px-2 font-medium text-primary">Add image(s)</p>
         </div>
       ) : null}
 
@@ -398,29 +395,24 @@ export const ChatTextarea = memo(function ({
       <div className="absolute bottom-2 left-2 flex flex-row items-center gap-1">
         {/* Model selector */}
         <Tooltip>
-          <TooltipTrigger>
-            <ChatModelSelector
-              className={buttonVariants({
-                variant: 'outline',
-                size: 'sm',
-                class: 'group w-min justify-start rounded-full border',
-              })}
-              models={models}
-              renderButtonContents={(item) => (
-                <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full group-data-[state=open]:text-primary @md:max-w-fit">
-                  <span className="hidden truncate text-xs @[24rem]:block">{item.name}</span>
-                  <span className="relative flex size-4 items-center justify-center">
-                    <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[24rem]:scale-100" />
-                    <CircuitBoard className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @[24rem]:scale-0" />
+          <ChatModelSelector popoverProperties={{ align: 'start' }} onClose={focusInput}>
+            {() => (
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="sm" className="rounded-full">
+                  <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full group-data-[state=open]:text-primary @md:max-w-fit">
+                    <span className="hidden truncate text-xs @[22rem]:block">{selectedModel?.name || 'Offline'}</span>
+                    <span className="relative flex size-4 items-center justify-center">
+                      <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100" />
+                      <CircuitBoard className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0" />
+                    </span>
                   </span>
-                </span>
-              )}
-              onClose={focusInput}
-            />
-          </TooltipTrigger>
+                </Button>
+              </TooltipTrigger>
+            )}
+          </ChatModelSelector>
           <TooltipContent>
             <span>Select model{` `}</span>
-            <span>({selectedModel?.name})</span>
+            <span>({selectedModel?.name || 'Offline'})</span>
           </TooltipContent>
         </Tooltip>
 
@@ -440,7 +432,7 @@ export const ChatTextarea = memo(function ({
                 setIsSearching((previous) => !previous);
               }}
             >
-              <span className="hidden text-xs @[24rem]:block">Search</span>
+              <span className="hidden text-xs @[22rem]:block">Search</span>
               <Globe className="transition-transform duration-200 ease-in-out group-hover:rotate-180" />
             </Button>
           </TooltipTrigger>
@@ -450,35 +442,26 @@ export const ChatTextarea = memo(function ({
         </Tooltip>
 
         {/* Upload button */}
-        <div className="flex flex-row items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                className="rounded-full"
-                size="sm"
-                title="Add image"
-                type="button"
-                onClick={handleFileSelect}
-              >
-                <span className="hidden @[24rem]:block">Upload</span>
-                <Image />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Upload an image</p>
-            </TooltipContent>
-          </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="outline" className="rounded-full" title="Add image" onClick={handleFileSelect}>
+              <span className="hidden text-xs @[22rem]:block">Upload</span>
+              <Image />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Upload an image</p>
+          </TooltipContent>
+        </Tooltip>
 
-          <input
-            ref={fileInputReference}
-            multiple
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleFileChange}
-          />
-        </div>
+        <input
+          ref={fileInputReference}
+          multiple
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileChange}
+        />
       </div>
 
       <div className="absolute right-2 bottom-2 flex flex-row items-center gap-1">

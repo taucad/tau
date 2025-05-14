@@ -197,7 +197,7 @@ export const ChatInterface = memo(function () {
         maxSize={30}
         defaultSize={chatResizeMain[2]}
         className={cn(
-          'hidden w-64 shrink-0 flex-col gap-3 text-sm xl:w-96',
+          'hidden w-64 shrink-0 flex-col gap-2 text-sm xl:w-96',
           'group-data-[parameters-open=true]/chat-layout:md:flex',
         )}
         id="chat-parameters"
@@ -213,7 +213,7 @@ export const ChatInterface = memo(function () {
         <Drawer open={isParametersOpen} onOpenChange={setIsParametersOpen}>
           <DrawerContent className={cn('flex flex-col justify-between gap-2 text-sm', 'md:hidden')}>
             <span className="px-4 text-lg font-medium">Parameters</span>
-            <div className="overflow-y-auto p-4">
+            <div className="overflow-y-auto p-4 pt-2">
               <ChatParameters />
             </div>
           </DrawerContent>

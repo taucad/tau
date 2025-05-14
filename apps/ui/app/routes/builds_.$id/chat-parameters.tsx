@@ -271,14 +271,14 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
           ) : null}
         </div>
 
-        <div className="absolute top-0 right-0 flex gap-2">
+        <div className="absolute top-0 right-0 mt-7 mr-4 flex gap-2 md:mt-2 md:mr-12">
           {Object.keys(validParameters).length > 0 && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="overlay"
                   size="icon"
-                  className="mt-2 text-muted-foreground transition-colors hover:text-foreground"
+                  className="text-muted-foreground transition-colors hover:text-foreground"
                   onClick={resetAllParameters}
                 >
                   <RefreshCcw />
@@ -293,7 +293,7 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
               <Button
                 variant="overlay"
                 size="icon"
-                className="mt-2 mr-12 text-muted-foreground transition-colors hover:text-foreground"
+                className="text-muted-foreground transition-colors hover:text-foreground"
                 aria-expanded={allExpanded}
                 onClick={toggleAllGroups}
               >

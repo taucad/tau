@@ -193,14 +193,14 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
       }
 
       // If it's a number, render an appropriate numeric input
-      if (type === 'number' || /^\d+(\.\d+)?$/.test(String(value))) {
+      if (type === 'number') {
         // Convert to number if it's a string that looks like a number
-        const numericValue = type === 'number' ? value : Number.parseFloat(String(value));
+        const numericValue = Number.parseFloat(String(value));
 
         return (
           <div className="flex w-full flex-row items-center gap-2">
             <Slider
-              value={[numericValue as number]}
+              value={[numericValue]}
               min={0}
               max={(defaultParameters[key] as number) * 4 || 100}
               step={1}
@@ -220,7 +220,7 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
             />
             <div className="flex flex-row items-center">
               <ChatParametersInputNumber
-                value={numericValue as number}
+                value={numericValue}
                 className="h-6 w-12 bg-background p-1"
                 name={key}
                 onChange={(event) => {
@@ -324,7 +324,7 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
                   toggleGroup(groupName);
                 }}
               >
-                <CollapsibleTrigger className="group/collapsible flex w-full items-center justify-between bg-muted/30 p-2 transition-colors hover:bg-muted/50">
+                <CollapsibleTrigger className="group/collapsible flex w-full items-center justify-between bg-muted/70 p-2 transition-colors hover:bg-muted">
                   <h3 className="text-sm font-medium">{groupName}</h3>
                   <ChevronRight className="size-4 text-muted-foreground transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
                 </CollapsibleTrigger>

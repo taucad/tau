@@ -1,4 +1,4 @@
-import { RefreshCcw, RefreshCcwDot, ChevronRight, Search, X } from 'lucide-react';
+import { RefreshCcw, RefreshCcwDot, ChevronRight, Search, X, Info } from 'lucide-react';
 import { useCallback, useMemo, memo, useState, useEffect } from 'react';
 import { categorizeParameters } from '@/routes/builds_.$id/chat-parameters-sorter.js';
 import { pascalCaseToWords } from '@/utils/string.js';
@@ -247,7 +247,7 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
     [handleParameterChange, defaultParameters],
   );
 
-  return (
+  return allParameters && Object.keys(filteredGroups).length > 0 ? (
     <>
       <div className="mb-2 flex flex-col">
         <div className="relative mb-3">
@@ -314,79 +314,87 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
       ) : null}
 
       <div className="space-y-3">
-        {allParameters
-          ? Object.entries(filteredGroups).map(([groupName, entries]) => (
-              <Collapsible
-                key={groupName}
-                open={openGroups[groupName]}
-                className="overflow-hidden rounded-md border border-border/40"
-                onOpenChange={() => {
-                  toggleGroup(groupName);
-                }}
-              >
-                <CollapsibleTrigger className="group/collapsible flex w-full items-center justify-between bg-muted/70 p-2 transition-colors hover:bg-muted">
-                  <h3 className="text-sm font-medium">{groupName}</h3>
-                  <ChevronRight className="size-4 text-muted-foreground transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
-                </CollapsibleTrigger>
+        {Object.entries(filteredGroups).map(([groupName, entries]) => (
+          <Collapsible
+            key={groupName}
+            open={openGroups[groupName]}
+            className="overflow-hidden rounded-md border border-border/40"
+            onOpenChange={() => {
+              toggleGroup(groupName);
+            }}
+          >
+            <CollapsibleTrigger className="group/collapsible flex w-full items-center justify-between bg-muted/70 p-2 transition-colors hover:bg-muted">
+              <h3 className="text-sm font-medium">{groupName}</h3>
+              <ChevronRight className="size-4 text-muted-foreground transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
+            </CollapsibleTrigger>
 
-                <CollapsibleContent className="p-1">
-                  {entries.map(([key, value], index, parameterArray) => {
-                    const prettyKey = pascalCaseToWords(key);
-                    const isLast = index === parameterArray.length - 1;
-                    const isMatch = isParameterMatch(key);
+            <CollapsibleContent className="p-1">
+              {entries.map(([key, value], index, parameterArray) => {
+                const prettyKey = pascalCaseToWords(key);
+                const isLast = index === parameterArray.length - 1;
+                const isMatch = isParameterMatch(key);
 
-                    return (
-                      <div key={key}>
-                        <div
-                          className={cn(
-                            '@container/parameter flex flex-col gap-1.5 rounded-md p-2 transition-colors hover:bg-muted/30',
-                          )}
-                        >
-                          <div className="flex h-auto min-h-6 flex-row justify-between gap-2">
-                            <div className="flex flex-row items-baseline gap-2">
-                              <span
-                                className={cn(
-                                  localParameters[key] === undefined ? 'font-normal' : 'font-medium',
-                                  isMatch && 'font-medium text-primary',
-                                )}
-                              >
-                                {prettyKey}
-                              </span>
-                              <span className="hidden text-xs text-muted-foreground @[10rem]/parameter:block">
-                                {typeof value}
-                              </span>
-                            </div>
-                            {localParameters[key] !== undefined && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="xs"
-                                    className="text-muted-foreground opacity-70 transition-opacity hover:opacity-100"
-                                    onClick={() => {
-                                      resetSingleParameter(key);
-                                    }}
-                                  >
-                                    <RefreshCcwDot className="size-3.5" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Reset &quot;{prettyKey}&quot;</TooltipContent>
-                              </Tooltip>
+                return (
+                  <div key={key}>
+                    <div
+                      className={cn(
+                        '@container/parameter flex flex-col gap-1.5 rounded-md p-2 transition-colors hover:bg-muted/30',
+                      )}
+                    >
+                      <div className="flex h-auto min-h-6 flex-row justify-between gap-2">
+                        <div className="flex flex-row items-baseline gap-2">
+                          <span
+                            className={cn(
+                              localParameters[key] === undefined ? 'font-normal' : 'font-medium',
+                              isMatch && 'font-medium text-primary',
                             )}
-                          </div>
-                          <div className="mt-auto flex w-full flex-row items-center gap-2">
-                            {renderParameterInput(key, value)}
-                          </div>
+                          >
+                            {prettyKey}
+                          </span>
+                          <span className="hidden text-xs text-muted-foreground @[10rem]/parameter:block">
+                            {typeof value}
+                          </span>
                         </div>
-                        {!isLast && <div className="my-1 h-px w-full bg-border/30" />}
+                        {localParameters[key] !== undefined && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="xs"
+                                className="text-muted-foreground opacity-70 transition-opacity hover:opacity-100"
+                                onClick={() => {
+                                  resetSingleParameter(key);
+                                }}
+                              >
+                                <RefreshCcwDot className="size-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Reset &quot;{prettyKey}&quot;</TooltipContent>
+                          </Tooltip>
+                        )}
                       </div>
-                    );
-                  })}
-                </CollapsibleContent>
-              </Collapsible>
-            ))
-          : null}
+                      <div className="mt-auto flex w-full flex-row items-center gap-2">
+                        {renderParameterInput(key, value)}
+                      </div>
+                    </div>
+                    {!isLast && <div className="my-1 h-px w-full bg-border/30" />}
+                  </div>
+                );
+              })}
+            </CollapsibleContent>
+          </Collapsible>
+        ))}
       </div>
     </>
+  ) : (
+    <div className="flex flex-col items-center justify-center rounded-md border border-dashed p-8 text-center">
+      <div className="mb-3 rounded-full bg-muted/50 p-2">
+        <Info className="size-6 text-muted-foreground" strokeWidth={1.5} />
+      </div>
+      <h3 className="mb-1 text-base font-medium">No parameters available</h3>
+      <p className="text-sm text-muted-foreground">
+        Parameters will appear here when they become available for this model
+      </p>
+    </div>
   );
 });

@@ -4,7 +4,7 @@ import { storage } from '@/db/storage.js';
 
 // Function to fetch builds
 export const fetchBuilds = async (): Promise<Build[]> => {
-  const clientBuilds = storage.getBuilds();
+  const clientBuilds = await storage.getBuilds();
   if (!clientBuilds) {
     throw new Error('Builds not found');
   }
@@ -12,6 +12,7 @@ export const fetchBuilds = async (): Promise<Build[]> => {
   return clientBuilds;
 };
 
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- let types be inferred
 export function useBuilds() {
   const queryClient = useQueryClient();
 
@@ -34,7 +35,7 @@ export function useBuilds() {
 
   const duplicateMutation = useMutation({
     async mutationFn(buildId: string) {
-      const sourceBuild = storage.getBuild(buildId);
+      const sourceBuild = await storage.getBuild(buildId);
       if (!sourceBuild) {
         throw new Error('Build not found');
       }

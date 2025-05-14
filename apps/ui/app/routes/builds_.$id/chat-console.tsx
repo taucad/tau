@@ -365,7 +365,7 @@ export const ChatConsole = memo(function ({
               className={cn(
                 'rounded border-l-2 bg-background px-2 py-1 font-mono text-xs',
                 'group/log cursor-default border-primary hover:bg-muted/20',
-                'flex-shrink-0 overflow-x-auto',
+                'flex-shrink-0 text-wrap',
                 {
                   'border-destructive': log.level === logLevels.error,
                   'border-warning': log.level === logLevels.warn,

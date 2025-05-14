@@ -15,6 +15,7 @@ import {
   Trash,
   Ellipsis,
   Copy,
+  Pencil,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button.js';
@@ -39,6 +40,15 @@ import { useBuilds } from '@/hooks/use-builds.js';
 import { toast } from '@/components/ui/sonner.js';
 import type { Handle } from '@/types/matches.js';
 import { KernelProvider } from '@/components/geometry/kernel/kernel-context.js';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog.js';
+import { BuildProvider, useBuild } from '@/hooks/use-build2.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -212,9 +222,11 @@ function LibraryBuildGrid({
     <div className={viewMode === 'grid' ? 'grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'space-y-4'}>
       <KernelProvider>
         {projects.slice(0, visibleProjects).map((project) => (
-          <CadProvider key={project.id}>
-            <BuildLibraryCard project={project} viewMode={viewMode} />
-          </CadProvider>
+          <BuildProvider key={project.id} buildId={project.id}>
+            <CadProvider>
+              <BuildLibraryCard project={project} viewMode={viewMode} />
+            </CadProvider>
+          </BuildProvider>
         ))}
       </KernelProvider>
     </div>
@@ -275,10 +287,13 @@ function CategoryBadge({ category }: { readonly category: Category }) {
 
 function BuildLibraryCard({ project, viewMode }: { readonly project: Build; readonly viewMode: 'grid' | 'list' }) {
   const { setCode, setParameters, mesh } = useCad();
+  const { updateName } = useBuild();
   const { deleteBuild, duplicateBuild } = useBuilds();
   const code = project.assets.mechanical?.files[project.assets.mechanical?.main]?.content;
   const parameters = project.assets.mechanical?.parameters;
   const navigate = useNavigate();
+  const [showRenameDialog, setShowRenameDialog] = useState(false);
+  const [newName, setNewName] = useState(project.name);
 
   // Start with preview false, then enable it once we have both code and mesh
   const [showPreview, setShowPreview] = useState(false);
@@ -314,6 +329,17 @@ function BuildLibraryCard({ project, viewMode }: { readonly project: Build; read
     } catch (error) {
       toast.error('Failed to duplicate build');
       console.error('Error in component:', error);
+    }
+  };
+
+  const handleRename = async () => {
+    try {
+      updateName(newName);
+      toast.success(`Renamed to ${newName}`);
+      setShowRenameDialog(false);
+    } catch (error) {
+      toast.error('Failed to rename build');
+      console.error('Error renaming build:', error);
     }
   };
 
@@ -418,6 +444,15 @@ function BuildLibraryCard({ project, viewMode }: { readonly project: Build; read
                 <Copy className="mr-2 size-4" />
                 <span>Duplicate</span>
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  setNewName(project.name);
+                  setShowRenameDialog(true);
+                }}
+              >
+                <Pencil className="mr-2 size-4" />
+                <span>Rename</span>
+              </DropdownMenuItem>
               <DropdownMenuItem>
                 <Star className="mr-2 size-4" />
                 <span>Favorite</span>
@@ -428,6 +463,60 @@ function BuildLibraryCard({ project, viewMode }: { readonly project: Build; read
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Rename Dialog */}
+          <Dialog open={showRenameDialog} onOpenChange={setShowRenameDialog}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Rename build</DialogTitle>
+                <DialogDescription>Enter a new name for this build.</DialogDescription>
+              </DialogHeader>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (newName.trim() && newName !== project.name) {
+                    void handleRename();
+                  }
+                }}
+              >
+                <div className="grid gap-4 py-4">
+                  <Input
+                    value={newName}
+                    placeholder="Enter new name"
+                    className="col-span-3"
+                    onChange={(event) => {
+                      setNewName(event.target.value);
+                    }}
+                  />
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      event.preventDefault();
+                      setShowRenameDialog(false);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={!newName.trim() || newName === project.name}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      event.preventDefault();
+                      void handleRename();
+                    }}
+                  >
+                    Save
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
         </CardFooter>
       </Card>
     </Link>

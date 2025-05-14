@@ -32,6 +32,10 @@ export function resetCamera({
     return;
   }
 
+  // If the shape radius is less than or requal to 0, we didn't get an object to render.
+  // Leaving it at 0 or less results in undefined camera behavior, so we set it to 1000.
+  const adjustedShapeRadius = shapeRadius <= 0 ? 1000 : shapeRadius;
+
   // Reset zoom tracking state using the appropriate configured zoom level
   setCurrentZoom(perspective.zoomLevel);
 
@@ -48,13 +52,13 @@ export function resetCamera({
   const adjustedOffsetRatio = perspective.offsetRatio * fovAdjustmentFactor;
 
   // Compute camera position using spherical coordinates
-  const [x, y] = getPositionOnCircle(shapeRadius * adjustedOffsetRatio, rotation.side);
-  const [, z] = getPositionOnCircle(shapeRadius * adjustedOffsetRatio, rotation.vertical);
+  const [x, y] = getPositionOnCircle(adjustedShapeRadius * adjustedOffsetRatio, rotation.side);
+  const [, z] = getPositionOnCircle(adjustedShapeRadius * adjustedOffsetRatio, rotation.vertical);
 
   camera.position.set(x, y, z);
   camera.zoom = perspective.zoomLevel;
   camera.near = perspective.nearPlane;
-  camera.far = Math.max(perspective.minimumFarPlane, shapeRadius * perspective.farPlaneRadiusMultiplier);
+  camera.far = Math.max(perspective.minimumFarPlane, adjustedShapeRadius * perspective.farPlaneRadiusMultiplier);
 
   // Aim the camera at the center of the scene
   camera.lookAt(0, 0, 0);

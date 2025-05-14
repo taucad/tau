@@ -1,4 +1,4 @@
-import { useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
@@ -118,8 +118,10 @@ export const handle: Handle = {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="outline" className="md:hidden" size="icon">
-            <PackagePlus className="size-4" />
+          <Button asChild variant="outline" className="md:hidden" size="icon">
+            <Link to="/">
+              <PackagePlus className="size-4" />
+            </Link>
           </Button>
         </TooltipTrigger>
         <TooltipContent>New Build</TooltipContent>

@@ -203,7 +203,7 @@ export const ChatInterface = memo(function () {
         id="chat-parameters"
       >
         <span className="m-2 mb-0 text-lg font-medium">Parameters</span>
-        <div className="flex flex-col overflow-y-auto p-2">
+        <div className="flex h-full flex-col overflow-y-auto p-2">
           <ChatParameters />
         </div>
       </ResizablePanel>

@@ -387,7 +387,7 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
       </div>
     </>
   ) : (
-    <div className="flex flex-col items-center justify-center rounded-md border border-dashed p-8 text-center">
+    <div className="flex h-full flex-col items-center justify-center rounded-md border border-dashed p-8 text-center">
       <div className="mb-3 rounded-full bg-muted/50 p-2">
         <Info className="size-6 text-muted-foreground" strokeWidth={1.5} />
       </div>

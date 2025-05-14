@@ -129,7 +129,7 @@ export function CadStudio(): JSX.Element {
   }, [screenshot]);
 
   return (
-    <>
+    <div className="relative size-full">
       <CadViewer enableGizmo enableGrid enableZoom enableAxesHelper mesh={mesh} zoomLevel={1.25} />
       {/* Loading state, only show when mesh is loaded and computing */}
       {mesh && (status.isComputing || status.isBuffering) ? (
@@ -227,6 +227,6 @@ export function CadStudio(): JSX.Element {
           {mesh ? <BoxDown /> : <LoaderPinwheel className="animate-spin ease-in-out" />}
         </DownloadButton>
       </div>
-    </>
+    </div>
   );
 }

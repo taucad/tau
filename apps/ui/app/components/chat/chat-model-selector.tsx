@@ -12,7 +12,7 @@ type ChatModelSelectorProps = {
   readonly onSelect?: (modelId: string) => void;
   readonly onClose?: () => void;
   readonly className?: string;
-  readonly children: (selectedModel: Model) => ReactNode;
+  readonly children: (props: { selectedModel?: Model }) => ReactNode;
   readonly popoverProperties?: React.ComponentProps<typeof ComboBoxResponsive>['popoverProperties'];
 };
 
@@ -75,7 +75,7 @@ export const ChatModelSelector = memo(function ({
       onClose={onClose}
       {...props}
     >
-      {children(selectedModel)}
+      {children({ selectedModel })}
     </ComboBoxResponsive>
   );
 });

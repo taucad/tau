@@ -34,10 +34,10 @@ export function ComboBoxResponsive<T>({
   labelClassName,
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
-  readonly renderLabel: (item: T, selectedItem: T) => ReactNode;
+  readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
   readonly children: ReactNode;
   readonly getValue: (item: T) => string;
-  readonly defaultValue: T;
+  readonly defaultValue: T | undefined;
   readonly onSelect?: (value: string) => void;
   readonly onClose?: () => void;
   readonly popoverContentClassName?: string;
@@ -49,7 +49,7 @@ export function ComboBoxResponsive<T>({
 }): JSX.Element {
   const [open, setOpen] = React.useState(false);
   const isMobile = useIsMobile();
-  const [selectedItem, setSelectedItem] = React.useState<T>(defaultValue);
+  const [selectedItem, setSelectedItem] = React.useState<T | undefined>(defaultValue);
   const selectionMadeReference = React.useRef(false);
 
   const handleSelect = (item: T) => {
@@ -129,8 +129,8 @@ function ItemList<T>({
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
   readonly setSelectedItem: (item: T) => void;
-  readonly selectedItem: T;
-  readonly renderLabel: (item: T, selectedItem: T) => ReactNode;
+  readonly selectedItem: T | undefined;
+  readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
   readonly getValue: (item: T) => string;
   readonly searchPlaceHolder: string;
   readonly asChildLabel?: boolean;

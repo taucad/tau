@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router';
+import { useCallback } from 'react';
 import type { JSX } from 'react';
 import { PencilRuler } from 'lucide-react';
 import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
@@ -16,18 +17,54 @@ import { AiChatProvider } from '@/components/chat/ai-chat-provider.js';
 export default function ChatStart(): JSX.Element {
   const navigate = useNavigate();
 
-  const onSubmit: ChatTextareaProperties['onSubmit'] = async ({ content, model, metadata, imageUrls }) => {
-    try {
-      // Create the initial message as pending
-      const userMessage = createMessage({
-        content,
-        role: MessageRole.User,
-        model,
-        status: MessageStatus.Pending, // Set as pending
-        metadata: metadata ?? {},
-        imageUrls,
-      });
+  const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
+    async ({ content, model, metadata, imageUrls }) => {
+      try {
+        // Create the initial message as pending
+        const userMessage = createMessage({
+          content,
+          role: MessageRole.User,
+          model,
+          status: MessageStatus.Pending, // Set as pending
+          metadata: metadata ?? {},
+          imageUrls,
+        });
 
+        const build = await storage.createBuild({
+          name: defaultBuildName,
+          description: '',
+          stars: 0,
+          forks: 0,
+          author: {
+            name: 'You',
+            avatar: '/avatar-sample.png',
+          },
+          tags: [],
+          thumbnail: '',
+          messages: [userMessage],
+          assets: {
+            mechanical: {
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
+              files: { 'model.ts': { content: cubeCode } },
+              main: 'model.ts',
+              language: 'replicad',
+              parameters: {},
+            },
+          },
+        });
+
+        // Navigate immediately - the build page will handle the streaming
+        await navigate(`/builds/${build.id}`);
+      } catch (error) {
+        console.error('Failed to create build:', error);
+        // TODO: Show error toast
+      }
+    },
+    [navigate],
+  );
+
+  const handleStartFromScratch = useCallback(async () => {
+    try {
       const build = await storage.createBuild({
         name: defaultBuildName,
         description: '',
@@ -39,25 +76,21 @@ export default function ChatStart(): JSX.Element {
         },
         tags: [],
         thumbnail: '',
-        messages: [userMessage],
+        messages: [],
         assets: {
           mechanical: {
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-            files: { 'model.ts': { content: cubeCode } },
+            files: { 'model.ts': { content: emptyCode } },
             main: 'model.ts',
             language: 'replicad',
             parameters: {},
           },
         },
       });
-
-      // Navigate immediately - the build page will handle the streaming
       await navigate(`/builds/${build.id}`);
     } catch (error) {
-      console.error('Failed to create build:', error);
-      // TODO: Show error toast
+      console.error('Failed to create empty build:', error);
     }
-  };
+  }, [navigate]);
 
   return (
     <>
@@ -72,42 +105,12 @@ export default function ChatStart(): JSX.Element {
             <div className="absolute inset-0 flex items-center">
               <span className="border-gray-300 w-full border-t" />
             </div>
-            <div className="text-gray-500 relative bg-white px-4 text-sm">or</div>
+            <div className="relative bg-background px-4 text-sm text-muted-foreground">or</div>
           </div>
           <div className="flex justify-center">
-            <Button
-              variant="outline"
-              onClick={async () => {
-                try {
-                  const build = await storage.createBuild({
-                    name: defaultBuildName,
-                    description: '',
-                    stars: 0,
-                    forks: 0,
-                    author: {
-                      name: 'You',
-                      avatar: '/avatar-sample.png',
-                    },
-                    tags: [],
-                    thumbnail: '',
-                    messages: [],
-                    assets: {
-                      mechanical: {
-                        files: { 'model.ts': { content: emptyCode } },
-                        main: 'model.ts',
-                        language: 'replicad',
-                        parameters: {},
-                      },
-                    },
-                  });
-                  await navigate(`/builds/${build.id}`);
-                } catch (error) {
-                  console.error('Failed to create empty build:', error);
-                }
-              }}
-            >
+            <Button variant="outline" className="font-light" onClick={handleStartFromScratch}>
               Start from scratch
-              <PencilRuler />
+              <PencilRuler className="stroke-1" />
             </Button>
           </div>
         </AiChatProvider>

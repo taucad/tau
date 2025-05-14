@@ -47,9 +47,6 @@ export const useModels = () => {
 
   const selectedModel = useMemo(() => {
     const model = data?.find((model) => model.id === selectedModelId);
-    if (!model) {
-      throw new Error(`Model ${selectedModelId} not found`);
-    }
 
     return model;
   }, [data, selectedModelId]);

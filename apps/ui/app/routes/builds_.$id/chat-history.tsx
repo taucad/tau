@@ -7,14 +7,12 @@ import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js'
 import { ChatTextarea } from '@/components/chat/chat-textarea.js';
 import { createMessage } from '@/contexts/use-chat.js';
 import { MessageRole, MessageStatus } from '@/types/chat.js';
-import { useModels } from '@/hooks/use-models.js';
 import { useAiChat } from '@/components/chat/ai-chat-provider.js';
 import { AnimatedShinyText } from '@/components/magicui/animated-shiny-text.js';
 import { When } from '@/components/ui/utils/when.js';
 
 export const ChatHistory = memo(function () {
   const { append, messages, reload, setMessages, status } = useAiChat();
-  const { data: models } = useModels();
   const chatContainerReference = useRef<HTMLDivElement>(null);
 
   const onSubmit: ChatTextareaProperties['onSubmit'] = async ({ content, model, metadata, imageUrls }) => {
@@ -91,7 +89,6 @@ export const ChatHistory = memo(function () {
               </When>
               <ChatMessage
                 message={message}
-                models={models ?? []}
                 onEdit={async (event) => onEdit(event, message.id)}
                 onRetry={({ modelId }) => {
                   setMessages((messages) => {
@@ -116,7 +113,7 @@ export const ChatHistory = memo(function () {
         <ScrollDownButton containerRef={chatContainerReference} hasContent={messages.length > 0} />
       </div>
       <div className="bottom-0 z-10 mx-3 mb-3 rounded-2xl bg-background">
-        <ChatTextarea models={models ?? []} onSubmit={onSubmit} />
+        <ChatTextarea onSubmit={onSubmit} />
       </div>
     </div>
   );

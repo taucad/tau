@@ -3,8 +3,13 @@
     "#comment": "This exists to make ShadCN be happy with a default tsconfig.json, enabling seamless installs with the default component install command.",
     "compilerOptions": {
         "paths": {
-            "@/*": ["./apps/ui/app/*"]
+            "~/*": ["./apps/ui/app/*"]
         }
-    }
+    },
+    "include": [
+        "eslint.config.ts",
+        "vitest.workspace.ts",
+        "jest.config.ts",
+    ]
 }
   

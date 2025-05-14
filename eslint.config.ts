@@ -21,10 +21,7 @@ const config = [
       ],
       // Ensure that import type side effects are prevented when using `verbatimModuleSyntax: true`.
       // '@typescript-eslint/no-import-type-side-effects': 'error',
-      'import-x/consistent-type-specifier-style': [
-        'error',
-        "prefer-top-level",
-      ],
+      'import-x/consistent-type-specifier-style': ['error', 'prefer-top-level'],
       // Ensure that duplicate imports have separate lines for `type` and non-modifier imports.
       'import-x/no-duplicates': [
         'error',
@@ -50,8 +47,8 @@ const config = [
         'error',
         {
           fixToUnknown: true,
-          ignoreRestArgs: true
-        }
+          ignoreRestArgs: true,
+        },
       ],
 
       // Require explicit return and argument types on exported functions' and classes' public class methods.
@@ -65,17 +62,21 @@ const config = [
           allowTypedFunctionExpressions: true,
           allowHigherOrderFunctions: true,
           allowDirectConstAssertionInArrowFunctions: true,
-        }
+        },
       ],
 
-      "no-restricted-imports": ["error", {
-        patterns: [
-          {
-            group: [".*"],
-            message: "Use absolute imports instead of relative imports. For example, instead of `import { Foo } from './foo'`, use `import { Foo } from '~/foo'`.",
-          },
-        ],
-      }],
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['.*'],
+              message:
+                "Use absolute imports instead of relative imports. For example, instead of `import { Foo } from './foo'`, use `import { Foo } from '~/foo'`.",
+            },
+          ],
+        },
+      ],
     },
     // Configure Typescript support
     languageOptions: {
@@ -122,8 +123,11 @@ const config = [
       'n/no-extraneous-import': 'off',
       // React is a global variable in the UI
       'react/react-in-jsx-scope': 'off',
-      'react/boolean-prop-naming': ['error', { rule: '^(is|has|as|should|with)[A-Z]([A-Za-z0-9]?)+$', validateNested: true }],
-      // defaultProps is deprecated and irrelevant when using functional components.
+      'react/boolean-prop-naming': [
+        'error',
+        { rule: '^(is|has|as|should|with)[A-Z]([A-Za-z0-9]?)+$', validateNested: true },
+      ],
+      // DefaultProps is deprecated and irrelevant when using functional components.
       'react/require-default-props': 'off',
     },
   },

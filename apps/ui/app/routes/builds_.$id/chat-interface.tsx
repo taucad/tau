@@ -202,8 +202,8 @@ export const ChatInterface = memo(function () {
         )}
         id="chat-parameters"
       >
-        <span className="m-2 mb-0 font-mono text-lg font-bold">Parameters</span>
-        <div className="flex flex-col gap-2 overflow-y-auto p-2 pt-0">
+        <span className="m-2 mb-0 text-lg font-bold">Parameters</span>
+        <div className="flex flex-col overflow-y-auto p-2">
           <ChatParameters />
         </div>
       </ResizablePanel>
@@ -213,7 +213,7 @@ export const ChatInterface = memo(function () {
         <Drawer open={isParametersOpen} onOpenChange={setIsParametersOpen}>
           <DrawerContent className={cn('flex flex-col justify-between gap-2 text-sm', 'md:hidden')}>
             <span className="px-4 text-lg font-bold">Parameters</span>
-            <div className="grid grid-cols-2 gap-2 overflow-y-auto p-4">
+            <div className="overflow-y-auto p-4">
               <ChatParameters />
             </div>
           </DrawerContent>

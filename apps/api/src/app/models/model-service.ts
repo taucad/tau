@@ -281,8 +281,8 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
         contextWindow: 1_048_576,
         maxTokens: 65_536,
         cost: {
-          inputTokens: 0.15,
-          outputTokens: 0.6,
+          inputTokens: 1.25,
+          outputTokens: 10,
           cachedReadTokens: 0,
           cachedWriteTokens: 0,
         },

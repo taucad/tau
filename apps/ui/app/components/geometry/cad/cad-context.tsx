@@ -119,8 +119,22 @@ export function CadProvider({ children }: { readonly children: ReactNode }): JSX
         }
 
         const firstShape = result[0];
-        if (!firstShape || firstShape.error) {
+
+        if (!firstShape) {
+          // Gracefully handle the case where no shape is generated
+          dispatch({
+            type: 'SET_MESH',
+            payload: {},
+          });
+          return;
+        }
+
+        if (firstShape.error) {
           log.error('Failed to build shape', { data: firstShape?.error });
+          dispatch({
+            type: 'SET_MESH',
+            payload: {},
+          });
           throw new Error(firstShape?.error ?? 'Failed to generate shape');
         }
 

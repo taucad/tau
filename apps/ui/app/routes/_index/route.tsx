@@ -7,11 +7,12 @@ import { Button } from '@/components/ui/button.js';
 import { storage } from '@/db/storage.js';
 import { MessageRole, MessageStatus } from '@/types/chat.js';
 import { createMessage } from '@/contexts/use-chat.js';
-import { cubeCode } from '@/components/mock-code.js';
+import { cubeCode, emptyCode } from '@/components/mock-code.js';
 import { CommunityBuildGrid } from '@/components/project-grid.js';
 import { sampleBuilds } from '@/components/mock-builds.js';
 import { defaultBuildName } from '@/constants/build-constants.js';
 import { AiChatProvider } from '@/components/chat/ai-chat-provider.js';
+import { SvgIcon } from '@/components/icons/svg-icon.js';
 
 export default function ChatStart(): JSX.Element {
   const { data: models } = useModels();
@@ -69,6 +70,48 @@ export default function ChatStart(): JSX.Element {
 
         <AiChatProvider value={{}}>
           <ChatTextarea models={models ?? []} withContextActions={false} onSubmit={onSubmit} />
+          <div className="relative my-6 flex items-center justify-center">
+            <div className="absolute inset-0 flex items-center">
+              <span className="border-gray-300 w-full border-t" />
+            </div>
+            <div className="text-gray-500 relative bg-white px-4 text-sm">or</div>
+          </div>
+          <div className="flex justify-center">
+            <Button
+              variant="outline"
+              onClick={async () => {
+                try {
+                  const build = await storage.createBuild({
+                    name: defaultBuildName,
+                    description: '',
+                    stars: 0,
+                    forks: 0,
+                    author: {
+                      name: 'You',
+                      avatar: '/avatar-sample.png',
+                    },
+                    tags: [],
+                    thumbnail: '',
+                    messages: [],
+                    assets: {
+                      mechanical: {
+                        files: { 'model.ts': { content: emptyCode } },
+                        main: 'model.ts',
+                        language: 'replicad',
+                        parameters: {},
+                      },
+                    },
+                  });
+                  await navigate(`/builds/${build.id}`);
+                } catch (error) {
+                  console.error('Failed to create empty build:', error);
+                }
+              }}
+            >
+              Start from scratch
+              <SvgIcon id="replicad" />
+            </Button>
+          </div>
         </AiChatProvider>
       </div>
       <div className="container mx-auto px-4 py-8">

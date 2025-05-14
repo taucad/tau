@@ -5,6 +5,9 @@ type Model = {
   code: string;
 };
 
+export const emptyCode = `function main(_, params) {}
+`;
+
 export const cubeCode = `/**
  * Parametric Cube with Filleted Edges
  * A simple cube with adjustable dimensions and rounded edges.

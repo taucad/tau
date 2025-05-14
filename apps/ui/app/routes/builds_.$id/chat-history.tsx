@@ -112,7 +112,7 @@ export const ChatHistory = memo(function () {
         </div>
         <ScrollDownButton containerRef={chatContainerReference} hasContent={messages.length > 0} />
       </div>
-      <div className="bottom-0 z-10 mx-3 mb-3 rounded-2xl bg-background">
+      <div className="bottom-0 z-10 mx-2 mb-2 rounded-2xl bg-background">
         <ChatTextarea onSubmit={onSubmit} />
       </div>
     </div>

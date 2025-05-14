@@ -7,7 +7,7 @@ import { useCad } from '@/components/geometry/cad/cad-context.js';
 import { DownloadButton } from '@/components/download-button.js';
 import { BoxDown } from '@/components/icons/box-down.js';
 import { Button } from '@/components/ui/button.js';
-import { useBuild } from '@/hooks/use-build2.js';
+import { useBuild } from '@/hooks/use-build.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.js';
 import { toast } from '@/components/ui/sonner.js';
 import { cn } from '@/utils/ui.js';

@@ -4,7 +4,7 @@ import type { JSX } from 'react';
 import { ChevronDown, File, LoaderCircle, Play } from 'lucide-react';
 import { CodeViewer } from '@/components/code-viewer.js';
 import { CopyButton } from '@/components/copy-button.js';
-import { useBuild } from '@/hooks/use-build2.js';
+import { useBuild } from '@/hooks/use-build.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip.js';
 import { Button } from '@/components/ui/button.js';
 import { cn } from '@/utils/ui.js';

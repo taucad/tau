@@ -1,10 +1,10 @@
 import { memo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
-import { getRandomExamples } from '@/routes/builds_.$id/chat-examples-constants.js';
+import { getRandomExamples } from '@/constants/chat-prompt-examples.js';
 import { Button } from '@/components/ui/button.js';
 import { useAiChat } from '@/components/chat/ai-chat-provider.js';
 import { useModels } from '@/hooks/use-models.js';
-import { createMessage } from '@/contexts/use-chat.js';
+import { createMessage } from '@/utils/chat.js';
 import { MessageRole, MessageStatus } from '@/types/chat.js';
 
 export const ChatExamples = memo(function () {

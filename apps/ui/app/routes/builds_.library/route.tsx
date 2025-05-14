@@ -48,7 +48,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog.js';
-import { BuildProvider, useBuild } from '@/hooks/use-build2.js';
+import { BuildProvider, useBuild } from '@/hooks/use-build.js';
 
 export const handle: Handle = {
   breadcrumb() {

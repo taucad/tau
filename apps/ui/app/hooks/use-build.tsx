@@ -7,7 +7,7 @@ import type { Build } from '@/types/build.js';
 
 // Function to fetch builds
 const fetchBuild = async (buildId: string): Promise<Build> => {
-  const clientBuild = storage.getBuild(buildId);
+  const clientBuild = await storage.getBuild(buildId);
 
   if (clientBuild) {
     return clientBuild;

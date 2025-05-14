@@ -7,11 +7,11 @@ import { ChatTextarea } from '@/components/chat/chat-textarea.js';
 import { Button } from '@/components/ui/button.js';
 import { storage } from '@/db/storage.js';
 import { MessageRole, MessageStatus } from '@/types/chat.js';
-import { createMessage } from '@/contexts/use-chat.js';
-import { cubeCode, emptyCode } from '@/components/mock-code.js';
+import { createMessage } from '@/utils/chat.js';
+import { emptyCode } from '@/constants/build-code-examples.js';
 import { CommunityBuildGrid } from '@/components/project-grid.js';
-import { sampleBuilds } from '@/components/mock-builds.js';
-import { defaultBuildName } from '@/constants/build-constants.js';
+import { sampleBuilds } from '@/constants/build-examples.js';
+import { defaultBuildName } from '@/constants/build-names.js';
 import { AiChatProvider } from '@/components/chat/ai-chat-provider.js';
 
 export default function ChatStart(): JSX.Element {
@@ -45,7 +45,7 @@ export default function ChatStart(): JSX.Element {
           assets: {
             mechanical: {
               // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-              files: { 'model.ts': { content: cubeCode } },
+              files: { 'model.ts': { content: emptyCode } },
               main: 'model.ts',
               language: 'replicad',
               parameters: {},

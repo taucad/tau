@@ -5,7 +5,7 @@ import { ScrollDownButton } from '@/routes/builds_.$id/scroll-down-button.js';
 import { ChatError } from '@/routes/builds_.$id/chat-error.js';
 import type { ChatTextareaProperties } from '@/components/chat/chat-textarea.js';
 import { ChatTextarea } from '@/components/chat/chat-textarea.js';
-import { createMessage } from '@/contexts/use-chat.js';
+import { createMessage } from '@/utils/chat.js';
 import { MessageRole, MessageStatus } from '@/types/chat.js';
 import { useAiChat } from '@/components/chat/ai-chat-provider.js';
 import { AnimatedShinyText } from '@/components/magicui/animated-shiny-text.js';

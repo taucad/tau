@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu.js';
 import type { CadKernelProvider } from '@/types/cad.js';
 import { cadKernelProviders } from '@/types/cad.js';
-import { sampleBuilds } from '@/components/mock-builds.js';
+import { sampleBuilds } from '@/constants/build-examples.js';
 import { CommunityBuildGrid } from '@/components/project-grid.js';
 import type { Handle } from '@/types/matches.js';
 

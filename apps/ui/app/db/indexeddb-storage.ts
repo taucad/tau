@@ -3,7 +3,7 @@ import deepmerge from 'deepmerge';
 import type { StorageProvider } from './storage-type.js';
 import type { Build } from '@/types/build.js';
 import { metaConfig } from '@/config.js';
-import { idPrefix } from '@/utils/constants.js';
+import { idPrefix } from '@/constants/id-prefix.js';
 import { generatePrefixedId } from '@/utils/id.js';
 
 export class IndexedDbStorageProvider implements StorageProvider {

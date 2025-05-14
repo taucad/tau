@@ -1,5 +1,5 @@
 import { generateId } from 'ai';
-import type { IdPrefix } from './constants.js';
+import type { IdPrefix } from '../constants/id-prefix.js';
 
 /**
  * Generates a prefixed ID

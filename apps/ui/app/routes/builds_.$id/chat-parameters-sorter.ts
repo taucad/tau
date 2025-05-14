@@ -2,7 +2,7 @@
  * Common 3D descriptor terms that should not form their own categories
  * These should be associated with the feature they describe
  */
-import { descriptorTerms, commonGeneralTerms } from '@/routes/builds_.$id/chat-parameters-constants.js';
+import { descriptorTerms, commonGeneralTerms } from '@/constants/build-parameters.js';
 
 /**
  * Extract meaningful terms from a parameter name

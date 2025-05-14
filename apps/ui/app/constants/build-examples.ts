@@ -1,4 +1,4 @@
-import { mockModels } from '@/components/mock-code.js';
+import { mockModels } from '@/constants/build-code-examples.js';
 import type { Build } from '@/types/build.js';
 
 // Sample data

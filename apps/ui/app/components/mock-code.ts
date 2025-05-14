@@ -1006,27 +1006,27 @@ const { draw, drawRoundedRectangle, drawCircle } = replicad;
 
 const defaultParams = {
   // Main staircase dimensions
-  totalHeight: 2700, // mm - typical floor-to-floor height
-  totalRun: 3600,    // mm - horizontal length of staircase
-  width: 1200,       // mm - width of stairs
-  numSteps: 15,      // number of steps
+  staircaseHeight: 2700, // mm - typical floor-to-floor height
+  staircaseRun: 3600,    // mm - horizontal length of staircase
+  staircaseWidth: 1200,       // mm - width of stairs
+  stepCount: 15,      // number of steps
   
   // Step customization
   stepThickness: 50, // mm - thickness of each step
-  nosing: 25,        // mm - step overhang
-  roundedSteps: true, // whether to use rounded corners on steps
-  cornerRadius: 10,  // mm - radius for rounded corners on steps
+  stepNosing: 25,        // mm - step overhang
+  roundedStep: true, // whether to use rounded corners on steps
+  stepCornerRadius: 10,  // mm - radius for rounded corners on steps
   
   // Stringer options
-  includeStringers: true, // whether to include side stringers
+  includeStringer: true, // whether to include side stringers
   stringerWidth: 50, // mm - width of stringer boards
   stringerThickness: 25, // mm - thickness of stringer boards
   
   // Handrail options
-  includeHandrails: true, // whether to include handrails
+  includeHandrail: true, // whether to include handrails
   handrailHeight: 900, // mm - height from step to top of handrail
   handrailDiameter: 60, // mm - diameter of handrail
-  balusters: true, // whether to include vertical balusters
+  includeBaluster: true, // whether to include vertical balusters
   balusterSpacing: 200, // mm - spacing between balusters
   balusterDiameter: 20, // mm - diameter of balusters
 };
@@ -1093,8 +1093,8 @@ function main(_, params) {
   const p = { ...defaultParams, ...params };
   
   // Calculate derived dimensions
-  const stepRise = p.totalHeight / p.numSteps; // Height of each step
-  const stepRun = p.totalRun / p.numSteps;     // Depth of each step
+  const stepRise = p.staircaseHeight / p.stepCount; // Height of each step
+  const stepRun = p.staircaseRun / p.stepCount;     // Depth of each step
   
   // Validation of dimensions against typical building codes
   // Most codes require:
@@ -1115,29 +1115,29 @@ function main(_, params) {
   // Build individual steps
   let staircase = null;
   
-  for (let i = 0; i < p.numSteps; i++) {
+  for (let i = 0; i < p.stepCount; i++) {
     // Calculate step position
     const x = i * stepRun;
     const z = i * stepRise;
     
     // Create basic step shape
     let step;
-    if (p.roundedSteps) {
+    if (p.roundedStep) {
       // For rounded rectangle, we need width, height, and corner radius
-      step = drawRoundedRectangle(stepRun + p.nosing, p.width, p.cornerRadius)
+      step = drawRoundedRectangle(stepRun + p.stepNosing, p.staircaseWidth, p.stepCornerRadius)
         .sketchOnPlane("XY") // Steps are in XY plane
         .extrude(p.stepThickness) // Extrude to create 3D step
-        .translate([x - p.nosing, 0, z]); // Position step
+        .translate([x - p.stepNosing, 0, z]); // Position step
     } else {
       // For regular rectangle using draw
-      step = draw([x - p.nosing, -p.width / 2])
-        .hLine(stepRun + p.nosing) // Horizontal line to the right
-        .vLine(p.width)            // Vertical line up
-        .hLine(-(stepRun + p.nosing)) // Horizontal line to the left
+      step = draw([x - p.stepNosing, -p.staircaseWidth / 2])
+        .hLine(stepRun + p.stepNosing) // Horizontal line to the right
+        .vLine(p.staircaseWidth)            // Vertical line up
+        .hLine(-(stepRun + p.stepNosing)) // Horizontal line to the left
         .close()
         .sketchOnPlane("XY")
         .extrude(p.stepThickness)
-        .translate([-p.nosing, 0, z]);
+        .translate([-p.stepNosing, 0, z]);
     }
     
     // Add step to staircase
@@ -1149,19 +1149,19 @@ function main(_, params) {
   }
   
   // Add stringers if requested
-  if (p.includeStringers) {
+  if (p.includeStringer) {
     // Create left stringer shape
     // First create the profile in XZ plane
     const leftStringerProfile = [];
     
     // Add points for the stringer profile
-    leftStringerProfile.push([-p.nosing, 0]); // Bottom front
-    leftStringerProfile.push([p.totalRun, 0]); // Bottom back
-    leftStringerProfile.push([p.totalRun, p.totalHeight]); // Top back
-    leftStringerProfile.push([p.totalRun - stepRun, p.totalHeight]); // Top step
+    leftStringerProfile.push([-p.stepNosing, 0]); // Bottom front
+    leftStringerProfile.push([p.staircaseRun, 0]); // Bottom back
+    leftStringerProfile.push([p.staircaseRun, p.staircaseHeight]); // Top back
+    leftStringerProfile.push([p.staircaseRun - stepRun, p.staircaseHeight]); // Top step
     
         // Add sawtooth pattern for steps
-    for (let i = p.numSteps - 1; i >= 0; i--) {
+    for (let i = p.stepCount - 1; i >= 0; i--) {
       leftStringerProfile.push([i * stepRun, i * stepRise + p.stepThickness]);
       leftStringerProfile.push([i * stepRun, i * stepRise]);
     }
@@ -1175,18 +1175,18 @@ function main(_, params) {
     // Create left stringer
     const leftStringerSketch = leftStringerPen.close().sketchOnPlane("XZ");
     const leftStringer = leftStringerSketch.extrude(p.stringerWidth)
-      .translate([0, -p.width / 2 + p.stringerWidth, 0]);
+      .translate([0, -p.staircaseWidth / 2 + p.stringerWidth, 0]);
     
     // Create right stringer
     const rightStringer = leftStringer.clone()
-      .translate([0, p.width - p.stringerWidth, 0]);
+      .translate([0, p.staircaseWidth - p.stringerWidth, 0]);
     
     // Add stringers to staircase
     staircase = staircase.fuse(leftStringer).fuse(rightStringer);
   }
   
   // Add handrails if requested
-  if (p.includeHandrails) {
+  if (p.includeHandrail) {
     // Create handrails on both sides
     
     // Create left and right handrails
@@ -1194,11 +1194,11 @@ function main(_, params) {
     let rightHandrail = null;
     
     // Left and right Y positions
-    const leftY = -p.width / 2 + p.stringerWidth / 2;
-    const rightY = p.width / 2 - p.stringerWidth / 2;
+    const leftY = -p.staircaseWidth / 2 + p.stringerWidth / 2;
+    const rightY = p.staircaseWidth / 2 - p.stringerWidth / 2;
     
     // Create segments for each step section
-    for (let i = 0; i < p.numSteps; i++) {
+    for (let i = 0; i < p.stepCount; i++) {
       const x1 = i * stepRun;
       const z1 = i * stepRise;
       const x2 = (i + 1) * stepRun;
@@ -1231,7 +1231,7 @@ function main(_, params) {
       }
       
       // Add balusters if requested
-      if (p.balusters) {
+      if (p.includeBaluster) {
         // Place balusters at start of each step
         const leftBaluster = createBaluster(x1, leftY, z1, p);
         const rightBaluster = createBaluster(x1, rightY, z1, p);
@@ -1259,8 +1259,8 @@ function main(_, params) {
     
     // Add final balusters at the top
     if (p.balusters) {
-      const topLeftBaluster = createBaluster(p.totalRun, leftY, p.totalHeight, p);
-      const topRightBaluster = createBaluster(p.totalRun, rightY, p.totalHeight, p);
+      const topLeftBaluster = createBaluster(p.staircaseRun, leftY, p.staircaseHeight, p);
+      const topRightBaluster = createBaluster(p.staircaseRun, rightY, p.staircaseHeight, p);
       staircase = staircase.fuse(topLeftBaluster).fuse(topRightBaluster);
     }
     

@@ -62,7 +62,7 @@ export function ChatParametersInputNumber({
             baseIndicatorClass,
             'rounded-l-md border-r-0',
             'transition-[color,box-shadow] group-focus-within:z-10 group-focus-within:border-ring',
-            'cursor-pointer',
+            'cursor-text',
           )}
           onClick={handleIndicatorClick}
         >

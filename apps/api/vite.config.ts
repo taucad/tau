@@ -21,13 +21,13 @@ export default defineConfig({
   plugins: [
     nxViteTsPaths(),
     tsconfigPaths(),
-    ...vitePluginNode({
+    vitePluginNode({
       // Nodejs native Request adapter
       // currently this plugin support 'express', 'nest', 'koa' and 'fastify' out of box,
       // you can also pass a function if you are using other frameworks, see Custom Adapter section
       adapter: 'nest',
       // Tell the plugin where is your project entry
-      appPath: './src/main.ts',
+      appPath: './app/main.ts',
       outputFormat: 'module',
       // Optional, default: 'viteNodeApp'
       // the name of named export of you app from the appPath file

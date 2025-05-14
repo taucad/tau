@@ -1,5 +1,5 @@
-import replicadTypes from '../../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
-import { mockModels } from '../../../../../ui/app/components/mock-code.js';
+import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
+import { mockModels } from '../../../../ui/app/constants/build-code-examples.js';
 
 const mockModelsString = mockModels
   .map((model) => `### Example: ${model.name}\n\`\`\`typescript\n${model.code}\`\`\``)

@@ -1,7 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "outDir": "../../dist/out-tsc",
+    "outDir": "../../dist/ui/out-tsc",
     "types": [
       "vitest/globals",
       "vitest/importMeta",
@@ -24,6 +24,7 @@
     "tests/**/*.spec.js",
     "tests/**/*.test.js",
     "tests/**/*.spec.jsx",
-    "tests/**/*.test.jsx"
-, "vite-environment.d.ts"  ]
+    "tests/**/*.test.jsx",
+    "vite-environment.d.ts"
+  ]
 }

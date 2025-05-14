@@ -7,7 +7,7 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
-import { AppModule } from './app/app.module';
+import { AppModule } from '~/app.module.js';
 
 // Create Fastify adapter with custom options for body size limits
 const fastifyAdapter = new FastifyAdapter({

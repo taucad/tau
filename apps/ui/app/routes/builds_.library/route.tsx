@@ -6,7 +6,7 @@ import {
   Layout,
   Eye,
   ArrowRight,
-  Table,
+  Table as TableIcon,
   Cog,
   List,
   ChevronLeft,
@@ -80,6 +80,7 @@ import { BuildActionDropdown } from '~/components/build-action-dropdown.js';
 import { createBuildMutations } from '~/hooks/build-mutations.js';
 import { Checkbox } from '~/components/ui/checkbox.js';
 import { formatRelativeTime } from '~/utils/date.js';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '~/components/ui/table.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -206,7 +207,7 @@ export default function PersonalCadProjects(): JSX.Element {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon">
-                  {viewMode === 'grid' ? <Grid className="size-4" /> : <Table className="size-4" />}
+                  {viewMode === 'grid' ? <Grid /> : <TableIcon />}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -218,7 +219,7 @@ export default function PersonalCadProjects(): JSX.Element {
                     event.preventDefault();
                   }}
                 >
-                  <Grid className="mr-2 size-4" />
+                  <Grid />
                   <span>Grid</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -229,7 +230,7 @@ export default function PersonalCadProjects(): JSX.Element {
                     event.preventDefault();
                   }}
                 >
-                  <Table className="mr-2 size-4" />
+                  <TableIcon />
                   <span>Table</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -370,40 +371,36 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
 
       {viewMode === 'table' ? (
         // Table View
-        <div className="rounded-md border">
-          <table className="w-full">
-            <thead>
-              {table.getHeaderGroups().map((headerGroup) => (
-                <tr key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => (
-                    <th key={header.id} className="border-b p-2 text-left text-sm font-medium">
-                      {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
-                    </th>
+        <Table>
+          <TableHeader>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <TableHead key={header.id}>
+                    {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {table.getRowModel().rows?.length ? (
+              table.getRowModel().rows.map((row) => (
+                <TableRow key={row.id} className={row.getIsSelected() ? 'bg-muted/50' : undefined}>
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
                   ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody>
-              {table.getRowModel().rows?.length ? (
-                table.getRowModel().rows.map((row) => (
-                  <tr key={row.id} className={row.getIsSelected() ? 'bg-muted/50' : undefined}>
-                    {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="border-b p-2">
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={table.getAllColumns().length} className="h-24 text-center">
-                    No results.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={table.getAllColumns().length} className="h-24 text-center">
+                  No results.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
       ) : (
         // Grid View
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

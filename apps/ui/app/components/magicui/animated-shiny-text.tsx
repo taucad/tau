@@ -9,7 +9,7 @@ export function AnimatedShinyText({ children, className, ...props }: AnimatedShi
   return (
     <span
       className={cn(
-        'max-w-md text-neutral/70',
+        'max-w-md text-neutral/80',
 
         // Shine effect
         'animate-shiny-text [background-size:170%_100%] bg-clip-text bg-repeat',

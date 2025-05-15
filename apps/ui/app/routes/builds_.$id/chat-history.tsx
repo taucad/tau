@@ -3,6 +3,7 @@ import type { Message } from '@ai-sdk/react';
 import { ChatMessage } from '~/routes/builds_.$id/chat-message.js';
 import { ScrollDownButton } from '~/routes/builds_.$id/scroll-down-button.js';
 import { ChatError } from '~/routes/builds_.$id/chat-error.js';
+import { ChatStatus } from '~/routes/builds_.$id/chat-status.js';
 import type { ChatTextareaProperties } from '~/components/chat/chat-textarea.js';
 import { ChatTextarea } from '~/components/chat/chat-textarea.js';
 import { createMessage } from '~/utils/chat.js';
@@ -10,6 +11,7 @@ import { MessageRole, MessageStatus } from '~/types/chat.js';
 import { useAiChat } from '~/components/chat/ai-chat-provider.js';
 import { AnimatedShinyText } from '~/components/magicui/animated-shiny-text.js';
 import { When } from '~/components/ui/utils/when.js';
+import { cn } from '~/utils/ui.js';
 
 export const ChatHistory = memo(function () {
   const { append, messages, reload, setMessages, status } = useAiChat();
@@ -63,7 +65,7 @@ export const ChatHistory = memo(function () {
 
   return (
     <div className="relative flex h-full flex-col">
-      <div ref={chatContainerReference} className="-mb-2 flex-1 overflow-y-auto pb-2">
+      <div ref={chatContainerReference} className="-mb-3 flex-1 overflow-y-auto pb-10">
         <div className="space-y-4 p-4 pb-0">
           {messages.map((message, index) => (
             <Fragment key={message.id}>
@@ -112,7 +114,8 @@ export const ChatHistory = memo(function () {
         </div>
         <ScrollDownButton containerRef={chatContainerReference} hasContent={messages.length > 0} />
       </div>
-      <div className="bottom-0 z-10 mx-2 mb-2 rounded-2xl bg-background">
+      <div className={cn('relative mx-2 mb-2 rounded-2xl')}>
+        <ChatStatus status={status} className="absolute inset-x-0 -top-9" />
         <ChatTextarea onSubmit={onSubmit} />
       </div>
     </div>

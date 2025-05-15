@@ -40,8 +40,9 @@
 
   --l-primary: 0.5719;
   --c-primary: 0.1898;
-
+  
   --l-secondary: 0.8;
+  --c-secondary: 0.1898;
 
   /* Base colors */
   --background: oklch(var(--l-base) 0.005 var(--hue-neutral));
@@ -55,7 +56,7 @@
   --primary-foreground: oklch(var(--l-base) 0.01 var(--hue-neutral));
 
   /* Secondary colors */
-  --secondary: oklch(var(--l-secondary) var(--c-primary) var(--hue-secondary));
+  --secondary: oklch(var(--l-secondary) var(--c-secondary) var(--hue-secondary));
   --secondary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
 
   /* Neutral scale using consistent chroma */
@@ -101,6 +102,10 @@
   --scrollbar-track: transparent;
   --scrollbar-thickness: 9px;
   --scrollbar-padding: 1.5px;
+
+  /* Highlighter specific */
+  --highlighter: oklch(var(--l-secondary) var(--c-secondary) var(--hue-secondary) / 0.5);
+  --highlighter-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral) / 0.7);
 }
 
 .dark,
@@ -116,10 +121,11 @@
   --l-intense: 0.88;
   --l-deepest: 0.95;
 
-  --l-secondary: 0.6;
-
   --primary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
-  --secondary-foreground: oklch(var(--l-base) 0.01 var(--hue-neutral));
+  --secondary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
+
+  --highlighter: oklch(var(--l-secondary) var(--c-secondary) var(--hue-secondary) / 0.5);
+  --highlighter-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral) / 0.85);
 }
 
 @custom-variant dark (&:is(.dark *));
@@ -188,8 +194,8 @@
   --color-popover-foreground: var(--popover-foreground);
 
   /* Highlighter specific */
-  --color-highlighter: var(--secondary);
-  --color-highlighter-foreground: var(--foreground);
+  --color-highlighter: var(--highlighter);
+  --color-highlighter-foreground: var(--highlighter-foreground);
 
   --animate-pulse-subtle: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-gradient: gradient 5s ease infinite;
@@ -391,7 +397,7 @@
   }
 
   ::selection {
-    @apply bg-highlighter text-highlighter-foreground/80;
+    @apply bg-highlighter text-highlighter-foreground;
   }
 }
 

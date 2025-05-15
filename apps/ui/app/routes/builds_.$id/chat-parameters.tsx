@@ -1,7 +1,7 @@
 import { RefreshCcw, RefreshCcwDot, ChevronRight, Search, X, Info } from 'lucide-react';
 import { useCallback, useMemo, memo, useState, useEffect } from 'react';
 import { categorizeParameters } from '~/routes/builds_.$id/chat-parameters-sorter.js';
-import { pascalCaseToWords } from '~/utils/string.js';
+import { camelCaseToSentenceCase } from '~/utils/string.js';
 import { Slider } from '~/components/ui/slider.js';
 import { Switch } from '~/components/ui/switch.js';
 import { Input } from '~/components/ui/input.js';
@@ -77,7 +77,7 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
       // For each group, check if any parameter matches the search term
       for (const [groupName, entries] of Object.entries(parameterGroups)) {
         const matchingEntries = entries.filter(([key]) => {
-          const prettyKey = pascalCaseToWords(key).toLowerCase();
+          const prettyKey = camelCaseToSentenceCase(key).toLowerCase();
           return prettyKey.includes(debouncedSearchTerm);
         });
 
@@ -168,7 +168,7 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
   const isParameterMatch = useCallback(
     (key: string): boolean => {
       if (!debouncedSearchTerm) return false;
-      const prettyKey = pascalCaseToWords(key).toLowerCase();
+      const prettyKey = camelCaseToSentenceCase(key).toLowerCase();
       return prettyKey.includes(debouncedSearchTerm);
     },
     [debouncedSearchTerm],
@@ -330,7 +330,7 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
 
             <CollapsibleContent className="p-1">
               {entries.map(([key, value], index, parameterArray) => {
-                const prettyKey = pascalCaseToWords(key);
+                const prettyKey = camelCaseToSentenceCase(key);
                 const isLast = index === parameterArray.length - 1;
                 const isMatch = isParameterMatch(key);
 

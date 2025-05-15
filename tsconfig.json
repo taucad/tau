@@ -3,9 +3,7 @@
     "compilerOptions": {
         "paths": {
             // This path mapping exists to make ShadCN be happy with a default tsconfig.json, enabling seamless installs with the default component install command.
-            "~/*": [
-                "./apps/ui/app/*"
-            ]
+            "~/*": ["./apps/ui/app/*"]
         }
     },
     "include": [

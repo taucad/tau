@@ -14,6 +14,7 @@ import { defaultBuildName } from '~/constants/build-names.js';
 import { AiChatProvider } from '~/components/chat/ai-chat-provider.js';
 import { Separator } from '~/components/ui/separator.js';
 import { InteractiveHoverButton } from '~/components/magicui/interactive-hover-button.js';
+import { toast } from '~/components/ui/sonner.js';
 
 export default function ChatStart(): JSX.Element {
   const navigate = useNavigate();
@@ -56,9 +57,8 @@ export default function ChatStart(): JSX.Element {
 
         // Navigate immediately - the build page will handle the streaming
         await navigate(`/builds/${build.id}`);
-      } catch (error) {
-        console.error('Failed to create build:', error);
-        // TODO: Show error toast
+      } catch {
+        toast.error('Failed to create build');
       }
     },
     [navigate],
@@ -80,6 +80,7 @@ export default function ChatStart(): JSX.Element {
         messages: [],
         assets: {
           mechanical: {
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
             files: { 'model.ts': { content: emptyCode } },
             main: 'model.ts',
             language: 'replicad',

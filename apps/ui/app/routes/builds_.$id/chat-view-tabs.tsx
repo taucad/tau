@@ -1,12 +1,12 @@
 import { Eye, Code, Terminal } from 'lucide-react';
 import type { JSX } from 'react';
-import { ChatConsole } from './chat-console.js';
-import { ChatEditor } from './chat-editor.js';
-import { ChatViewer } from './chat-viewer.js';
+import { ChatConsole } from '~/routes/builds_.$id/chat-console.js';
+import { ChatEditor } from '~/routes/builds_.$id/chat-editor.js';
+import { ChatViewer } from '~/routes/builds_.$id/chat-viewer.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import type { KeyCombination } from '~/utils/keys.js';
 import { cn } from '~/utils/ui.js';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '~/components/ui/tabs.js';
+import { Tabs, TabsList, TabsTrigger, TabsContent, TabsContents } from '~/components/ui/tabs.js';
 
 const chatTabCookieName = 'chat-tab';
 type ChatTabs = (typeof tabs)[number]['value'];
@@ -72,14 +72,14 @@ export function ChatViewTabs(): JSX.Element {
           ))}
         </TabsList>
       </div>
-      <TabsContent value="preview" className="mt-0 flex size-full flex-1">
+      <TabsContent withAnimation={false} value="preview" className="mt-0 flex size-full flex-1">
         <ChatViewer />
       </TabsContent>
       {/* subtract 6rem for the chat history and chat input as they don't take the full height */}
-      <TabsContent value="editor" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
+      <TabsContent withAnimation={false} value="editor" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
         <ChatEditor className="mt-[3rem]" />
       </TabsContent>
-      <TabsContent value="console" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
+      <TabsContent withAnimation={false} value="console" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
         <ChatConsole data-view="tabs" className="mt-[3rem]" />
       </TabsContent>
     </Tabs>

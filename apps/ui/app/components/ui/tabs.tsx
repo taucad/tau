@@ -101,17 +101,27 @@ function TabsTrigger({ className, value, ...props }: TabsTriggerProps) {
 type TabsContentProps = React.ComponentProps<typeof TabsPrimitive.Content> &
   HTMLMotionProps<'div'> & {
     readonly transition?: Transition;
+    readonly withAnimation?: boolean;
   };
 
 function TabsContent({
   className,
   children,
+  withAnimation = true,
   transition = {
     duration: 0.5,
     ease: 'easeInOut',
   },
   ...props
 }: TabsContentProps) {
+  if (!withAnimation) {
+    return (
+      <TabsPrimitive.Content data-slot="tabs-content" className={cn('flex-1 outline-none', className)} {...props}>
+        {children}
+      </TabsPrimitive.Content>
+    );
+  }
+
   return (
     <TabsPrimitive.Content asChild {...props}>
       <motion.div
@@ -142,7 +152,7 @@ function TabsContents({
   transition = { type: 'spring', stiffness: 200, damping: 25 },
   ...props
 }: TabsContentsProps) {
-  const containerRef = React.useRef<HTMLDivElement | undefined>(null);
+  const containerRef = React.useRef<HTMLDivElement>(null);
 
   const [height, setHeight] = React.useState(0);
 

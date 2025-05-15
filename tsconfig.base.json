@@ -28,4 +28,5 @@
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true
   },
+  "exclude": ["node_modules", "tmp"]
 }

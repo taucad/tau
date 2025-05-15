@@ -558,6 +558,16 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
 function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReactTable<Build>> }) {
   const sortingState = table.getState().sorting[0];
 
+  const toggleSorting = (id: string) => {
+    if (sortingState?.id === id) {
+      // Toggle direction if already sorting by this column
+      table.setSorting([{ id, desc: !sortingState.desc }]);
+    } else {
+      // Set to descending order by default on first click
+      table.setSorting([{ id, desc: true }]);
+    }
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -570,7 +580,7 @@ function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReact
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={() => {
-            table.setSorting([{ id: 'updatedAt', desc: true }]);
+            toggleSorting('updatedAt');
           }}
           onSelect={(event) => {
             event.preventDefault();
@@ -578,12 +588,16 @@ function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReact
         >
           <span className="flex items-center">
             Last Updated
-            {sortingState?.id === 'updatedAt' && sortingState?.desc ? <ArrowDown className="ml-2 h-3.5 w-3.5" /> : null}
+            {sortingState?.id === 'updatedAt' && sortingState.desc ? (
+              <ArrowDown className="ml-2 h-3.5 w-3.5" />
+            ) : sortingState?.id === 'updatedAt' && !sortingState.desc ? (
+              <ArrowUp className="ml-2 h-3.5 w-3.5" />
+            ) : null}
           </span>
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => {
-            table.setSorting([{ id: 'lastOpened', desc: true }]);
+            toggleSorting('lastOpened');
           }}
           onSelect={(event) => {
             event.preventDefault();
@@ -591,14 +605,16 @@ function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReact
         >
           <span className="flex items-center">
             Last Opened
-            {sortingState?.id === 'lastOpened' && sortingState?.desc ? (
+            {sortingState?.id === 'lastOpened' && sortingState.desc ? (
               <ArrowDown className="ml-2 h-3.5 w-3.5" />
+            ) : sortingState?.id === 'lastOpened' && !sortingState.desc ? (
+              <ArrowUp className="ml-2 h-3.5 w-3.5" />
             ) : null}
           </span>
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => {
-            table.setSorting([{ id: 'createdAt', desc: true }]);
+            toggleSorting('createdAt');
           }}
           onSelect={(event) => {
             event.preventDefault();
@@ -606,12 +622,16 @@ function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReact
         >
           <span className="flex items-center">
             Created Date
-            {sortingState?.id === 'createdAt' && sortingState?.desc ? <ArrowDown className="ml-2 h-3.5 w-3.5" /> : null}
+            {sortingState?.id === 'createdAt' && sortingState.desc ? (
+              <ArrowDown className="ml-2 h-3.5 w-3.5" />
+            ) : sortingState?.id === 'createdAt' && !sortingState.desc ? (
+              <ArrowUp className="ml-2 h-3.5 w-3.5" />
+            ) : null}
           </span>
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => {
-            table.setSorting([{ id: 'name', desc: false }]);
+            toggleSorting('name');
           }}
           onSelect={(event) => {
             event.preventDefault();
@@ -619,7 +639,11 @@ function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReact
         >
           <span className="flex items-center">
             Name
-            {sortingState?.id === 'name' && !sortingState?.desc && <ArrowUp className="ml-2 h-3.5 w-3.5" />}
+            {sortingState?.id === 'name' && sortingState.desc ? (
+              <ArrowDown className="ml-2 h-3.5 w-3.5" />
+            ) : sortingState?.id === 'name' && !sortingState.desc ? (
+              <ArrowUp className="ml-2 h-3.5 w-3.5" />
+            ) : null}
           </span>
         </DropdownMenuItem>
       </DropdownMenuContent>

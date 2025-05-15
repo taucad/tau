@@ -34,7 +34,7 @@ import { createColumns } from '~/routes/builds_.library/columns.js';
 import { CategoryBadge } from '~/components/category-badge.js';
 import { Button, buttonVariants } from '~/components/ui/button.js';
 import { Input } from '~/components/ui/input.js';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '~/components/ui/card.js';
+import { Card, CardContent, CardHeader, CardDescription, CardFooter } from '~/components/ui/card.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select.js';
 import {
   DropdownMenu,
@@ -57,14 +57,6 @@ import { toast } from '~/components/ui/sonner.js';
 import type { Handle } from '~/types/matches.js';
 import { KernelProvider } from '~/components/geometry/kernel/kernel-context.js';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '~/components/ui/dialog.js';
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -76,12 +68,13 @@ import {
 } from '~/components/ui/alert-dialog.js';
 import { BuildProvider } from '~/hooks/use-build.js';
 import { useCookie } from '~/hooks/use-cookie.js';
-import { BuildActionDropdown } from '~/components/build-action-dropdown.js';
+import { BuildActionDropdown } from '~/routes/builds_.library/build-action-dropdown.js';
 import { createBuildMutations } from '~/hooks/build-mutations.js';
 import { Checkbox } from '~/components/ui/checkbox.js';
 import { formatRelativeTime } from '~/utils/date.js';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '~/components/ui/table.js';
 import { camelCaseToSentenceCase } from '~/utils/string.js';
+import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -311,27 +304,6 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = useState({});
   const [globalFilter, setGlobalFilter] = useState('');
-  const [showRenameDialog, setShowRenameDialog] = useState(false);
-  const [buildToRename, setBuildToRename] = useState<Build | undefined>(undefined);
-  const [newName, setNewName] = useState('');
-
-  const handleRenameClick = (build: Build) => {
-    setBuildToRename(build);
-    setNewName(build.name);
-    setShowRenameDialog(true);
-  };
-
-  const handleRename = async () => {
-    if (buildToRename && newName.trim() && newName !== buildToRename.name) {
-      try {
-        await actions.handleRename(buildToRename.id, newName);
-        setShowRenameDialog(false);
-        setBuildToRename(undefined);
-      } catch {
-        // Error is already handled in the action
-      }
-    }
-  };
 
   // Find the most appropriate page size based on current selected count
   const getAppropriatePageSize = useCallback((selectedCount = 0, isGrid = true) => {
@@ -354,7 +326,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
 
   const table = useReactTable({
     data: projects,
-    columns: createColumns(actions, handleRenameClick),
+    columns: createColumns(actions),
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     onSortingChange: setSorting,
@@ -455,9 +427,6 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
                     onSelect={() => {
                       row.toggleSelected();
                     }}
-                    onRenameClick={() => {
-                      handleRenameClick(row.original);
-                    }}
                   />
                 </CadProvider>
               </BuildProvider>
@@ -549,48 +518,6 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
           </div>
         </div>
       </div>
-
-      <Dialog open={showRenameDialog} onOpenChange={setShowRenameDialog}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Rename build</DialogTitle>
-            <DialogDescription>Enter a new name for this build.</DialogDescription>
-          </DialogHeader>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (newName.trim() && buildToRename && newName !== buildToRename.name) {
-                void handleRename();
-              }
-            }}
-          >
-            <div className="grid gap-4 py-4">
-              <Input
-                value={newName}
-                placeholder="Enter new name"
-                className="col-span-3"
-                onChange={(event) => {
-                  setNewName(event.target.value);
-                }}
-              />
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setShowRenameDialog(false);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!newName.trim() || !buildToRename || newName === buildToRename.name}>
-                Save
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -692,14 +619,28 @@ type BuildLibraryCardProps = {
   readonly actions: BuildActions;
   readonly isSelected?: boolean;
   readonly onSelect?: () => void;
-  readonly onRenameClick: () => void;
 };
 
-function BuildLibraryCard({ build, actions, isSelected, onSelect, onRenameClick }: BuildLibraryCardProps) {
+function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibraryCardProps) {
   const { setCode, setParameters, mesh } = useCad();
   const code = build.assets.mechanical?.files[build.assets.mechanical?.main]?.content;
   const parameters = build.assets.mechanical?.parameters;
   const [showPreview, setShowPreview] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [name, setName] = useState(build.name);
+
+  const handleRename = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (name.trim() && name !== build.name) {
+      try {
+        await actions.handleRename(build.id, name);
+      } catch {
+        // Error is already handled in the action
+      }
+    }
+
+    setIsEditing(false);
+  };
 
   useEffect(() => {
     if (showPreview) {
@@ -753,7 +694,31 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect, onRenameClick 
       </div>
       <CardHeader>
         <div className="flex items-start justify-between">
-          <CardTitle>{build.name}</CardTitle>
+          <Popover open={isEditing} onOpenChange={setIsEditing}>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" className="cursor-text justify-start p-0 text-xl font-semibold">
+                {build.name}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-64 -translate-x-2 p-1">
+              <form className="flex items-center gap-2 align-middle" onSubmit={handleRename}>
+                <Input
+                  autoFocus
+                  value={name}
+                  className="h-8"
+                  onChange={(event) => {
+                    setName(event.target.value);
+                  }}
+                  onFocus={(event) => {
+                    event.target.select();
+                  }}
+                />
+                <Button type="submit" size="sm" disabled={!name.trim() || name === build.name}>
+                  Save
+                </Button>
+              </form>
+            </PopoverContent>
+          </Popover>
         </div>
         <CardDescription>{build.description}</CardDescription>
       </CardHeader>
@@ -774,7 +739,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect, onRenameClick 
           </Link>
         </Button>
 
-        <BuildActionDropdown shouldStopPropagation build={build} actions={actions} onRenameClick={onRenameClick} />
+        <BuildActionDropdown shouldStopPropagation build={build} actions={actions} />
       </CardFooter>
     </Card>
   );

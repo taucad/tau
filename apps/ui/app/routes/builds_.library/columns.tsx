@@ -2,6 +2,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { ArrowRight } from 'lucide-react';
 import { Link } from 'react-router';
 import type { ReactNode } from 'react';
+import { useState } from 'react';
 import { CategoryBadge } from '~/components/category-badge.js';
 import { DataTableColumnHeader } from '~/routes/builds_.library/data-table-column-header.js';
 import { Button } from '~/components/ui/button.js';
@@ -10,13 +11,76 @@ import type { Category } from '~/types/cad.js';
 import { Checkbox } from '~/components/ui/checkbox.js';
 import { formatRelativeTime } from '~/utils/date.js';
 import type { BuildActions } from '~/routes/builds_.library/route.js';
-import { BuildActionDropdown } from '~/components/build-action-dropdown.js';
+import { BuildActionDropdown } from '~/routes/builds_.library/build-action-dropdown.js';
+import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
+import { Input } from '~/components/ui/input.js';
+
+// Rename component for table cells
+function BuildNameCell({ build, actions }: { readonly build: Build; readonly actions: BuildActions }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [name, setName] = useState(build.name);
+
+  const handleRename = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (name.trim() && name !== build.name) {
+      try {
+        await actions.handleRename(build.id, name);
+        setIsEditing(false);
+      } catch {
+        // Error is already handled in the action
+      }
+    } else {
+      setIsEditing(false);
+    }
+  };
+
+  return (
+    <div className="flex w-full items-center justify-between gap-3 pr-2">
+      <div className="flex items-center gap-3">
+        <div className="relative h-9 w-9 overflow-hidden rounded-full">
+          <img
+            src={build.thumbnail || '/placeholder.svg'}
+            alt={build.name}
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+          {!build.thumbnail && !build.author.avatar && (
+            <div className="absolute inset-0 flex items-center justify-center bg-muted text-muted-foreground">
+              {build.name.charAt(0)}
+            </div>
+          )}
+        </div>
+        <Popover open={isEditing} onOpenChange={setIsEditing}>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" className="cursor-text justify-start p-2 font-medium">
+              {build.name}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-64 -translate-x-2 p-1">
+            <form className="flex items-center gap-2 align-middle" onSubmit={handleRename}>
+              <Input
+                autoFocus
+                value={name}
+                className="h-8"
+                onChange={(event) => {
+                  setName(event.target.value);
+                }}
+                onFocus={(event) => {
+                  event.target.select();
+                }}
+              />
+              <Button type="submit" size="sm" disabled={!name.trim() || name === build.name}>
+                Save
+              </Button>
+            </form>
+          </PopoverContent>
+        </Popover>
+      </div>
+    </div>
+  );
+}
 
 // Create a factory function for columns that accepts actions
-export const createColumns = (
-  actions: BuildActions,
-  onRenameClick: (build: Build) => void,
-): Array<ColumnDef<Build>> => [
+export const createColumns = (actions: BuildActions): Array<ColumnDef<Build>> => [
   {
     id: 'select',
     header: ({ table }) => (
@@ -47,27 +111,7 @@ export const createColumns = (
     accessorKey: 'name',
     header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
     cell({ row }): ReactNode {
-      const build = row.original;
-
-      return (
-        <div className="flex w-full items-center justify-between gap-3 pr-2">
-          <div className="flex items-center gap-3">
-            <div className="relative h-9 w-9 overflow-hidden rounded-full">
-              <img
-                src={build.thumbnail || '/placeholder.svg'}
-                alt={build.name}
-                className="absolute inset-0 h-full w-full object-cover"
-              />
-              {!build.thumbnail && !build.author.avatar && (
-                <div className="absolute inset-0 flex items-center justify-center bg-muted text-muted-foreground">
-                  {build.name.charAt(0)}
-                </div>
-              )}
-            </div>
-            <span className="font-medium">{build.name}</span>
-          </div>
-        </div>
-      );
+      return <BuildNameCell build={row.original} actions={actions} />;
     },
     enableSorting: true,
     enableHiding: false,
@@ -113,15 +157,7 @@ export const createColumns = (
 
       return (
         <div className="flex items-center justify-end gap-2">
-          {actions ? (
-            <BuildActionDropdown
-              build={build}
-              actions={actions}
-              onRenameClick={() => {
-                onRenameClick(build);
-              }}
-            />
-          ) : null}
+          {actions ? <BuildActionDropdown build={build} actions={actions} /> : null}
 
           {!isDeleted && (
             <Link to={`/builds/${build.id}`}>

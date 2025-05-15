@@ -67,7 +67,18 @@ export const materialTerms = ['color', 'opacity', 'density', 'weight'];
 /**
  * Terms that indicate a parameter controls inclusion or exclusion
  */
-export const inclusionTerms = ['include', 'exclude', 'enable', 'disable', 'show', 'hide', 'add', 'remove'];
+export const inclusionTerms = [
+  'include',
+  'exclude',
+  'enable',
+  'disable',
+  'show',
+  'hide',
+  'add',
+  'remove',
+  'with',
+  'without',
+];
 
 /**
  * Common general terms that should be given lower priority when forming groups

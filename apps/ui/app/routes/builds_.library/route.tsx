@@ -190,7 +190,7 @@ export default function PersonalCadProjects(): JSX.Element {
           setActiveFilter(value as 'all' | Category);
         }}
       >
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-2">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <TabsList className="">
             <TabsTrigger value="all" className="flex items-center gap-2">
               <Layout className="size-4" />
@@ -334,26 +334,23 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
   };
 
   // Find the most appropriate page size based on current selected count
-  const getAppropriatePageSize = useCallback(
-    (selectedCount = 0, isGrid = true) => {
-      const pageSizes = isGrid ? gridPageSizes : tablePageSizes;
-      // If no items are selected, use default page size
-      if (selectedCount === 0) {
-        return pageSizes[0];
-      }
+  const getAppropriatePageSize = useCallback((selectedCount = 0, isGrid = true) => {
+    const pageSizes = isGrid ? gridPageSizes : tablePageSizes;
+    // If no items are selected, use default page size
+    if (selectedCount === 0) {
+      return pageSizes[0];
+    }
 
-      // Find the closest page size that can accommodate all selected items
-      for (const size of pageSizes) {
-        if (size >= selectedCount) {
-          return size;
-        }
+    // Find the closest page size that can accommodate all selected items
+    for (const size of pageSizes) {
+      if (size >= selectedCount) {
+        return size;
       }
+    }
 
-      // If selected count is larger than any page size, return the largest available
-      return pageSizes.at(-1);
-    },
-    [gridPageSizes, tablePageSizes],
-  );
+    // If selected count is larger than any page size, return the largest available
+    return pageSizes.at(-1);
+  }, []);
 
   const table = useReactTable({
     data: projects,

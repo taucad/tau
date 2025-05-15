@@ -4,9 +4,12 @@ import { motion } from 'motion/react';
 import type { HTMLMotionProps } from 'motion/react';
 import { cn } from '~/utils/ui.js';
 
-type CheckboxProps = React.ComponentProps<typeof CheckboxPrimitive.Root> & HTMLMotionProps<'button'>;
+type CheckboxProps = React.ComponentProps<typeof CheckboxPrimitive.Root> &
+  HTMLMotionProps<'button'> & {
+    readonly size?: 'default' | 'large';
+  };
 
-function Checkbox({ className, onCheckedChange, ...props }: CheckboxProps) {
+function Checkbox({ className, onCheckedChange, size = 'default', ...props }: CheckboxProps): React.JSX.Element {
   const [isChecked, setIsChecked] = React.useState(props?.checked ?? props?.defaultChecked ?? false);
 
   React.useEffect(() => {
@@ -26,7 +29,9 @@ function Checkbox({ className, onCheckedChange, ...props }: CheckboxProps) {
       <motion.button
         data-slot="checkbox"
         className={cn(
-          'peer flex size-4 shrink-0 items-center justify-center rounded-sm bg-input transition-colors duration-500 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground',
+          'peer flex shrink-0 items-center justify-center bg-input transition-colors duration-500 outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:aria-invalid:ring-destructive/40',
+          size === 'default' ? 'size-4' : 'size-8',
+          size === 'default' ? 'rounded-sm' : 'rounded-md',
           className,
         )}
         whileTap={{ scale: 0.95 }}
@@ -41,7 +46,7 @@ function Checkbox({ className, onCheckedChange, ...props }: CheckboxProps) {
             viewBox="0 0 24 24"
             strokeWidth="3.5"
             stroke="currentColor"
-            className="size-3"
+            className={cn(size === 'default' ? 'size-3' : 'size-6')}
             initial="unchecked"
             animate={isChecked ? 'checked' : 'unchecked'}
           >

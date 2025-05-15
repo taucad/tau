@@ -1,33 +1,49 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { JSX } from 'react';
 import {
   Search,
-  Filter,
   Grid,
-  List,
-  Zap,
-  Cpu,
   Layout,
-  Cog,
   Eye,
-  Star,
   ArrowRight,
+  Table,
+  Cog,
+  List,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Trash,
-  Ellipsis,
-  Copy,
-  Pencil,
+  AlertCircle,
+  ArrowUpDown,
+  ArrowDown,
+  ArrowUp,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router';
-import { Button } from '~/components/ui/button.js';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  flexRender,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from '@tanstack/react-table';
+import type { VisibilityState, SortingState } from '@tanstack/react-table';
+import { createColumns } from '~/routes/builds_.library/columns.js';
+import { CategoryBadge } from '~/components/category-badge.js';
+import { Button, buttonVariants } from '~/components/ui/button.js';
 import { Input } from '~/components/ui/input.js';
-import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar.js';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '~/components/ui/card.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuCheckboxItem,
   DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
 } from '~/components/ui/dropdown-menu.js';
 import { cn } from '~/utils/ui.js';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '~/components/ui/tabs.js';
@@ -48,7 +64,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from '~/components/ui/dialog.js';
-import { BuildProvider, useBuild } from '~/hooks/use-build.js';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '~/components/ui/alert-dialog.js';
+import { BuildProvider } from '~/hooks/use-build.js';
+import { useCookie } from '~/hooks/use-cookie.js';
+import { BuildActionDropdown } from '~/components/build-action-dropdown.js';
+import { createBuildMutations } from '~/hooks/build-mutations.js';
+import { Checkbox } from '~/components/ui/checkbox.js';
+import { formatRelativeTime } from '~/utils/date.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -62,35 +93,85 @@ export const handle: Handle = {
   },
 };
 
-const itemsPerPage = 12;
+export type BuildActions = {
+  handleDelete: (build: Build) => void;
+  handleDuplicate: (build: Build) => Promise<void>;
+  handleRename: (buildId: string, newName: string) => Promise<void>;
+  handleRestore: (build: Build) => void;
+};
 
 export default function PersonalCadProjects(): JSX.Element {
-  const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<string>('all');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [sortBy, setSortBy] = useState<'lastOpened' | 'createdAt' | 'name' | 'updatedAt'>('updatedAt');
-  const [visibleProjects, setVisibleProjects] = useState(itemsPerPage);
-  const { builds } = useBuilds();
+  const [viewMode, setViewMode] = useCookie<'grid' | 'table'>('builds-view-mode', 'grid');
+  const [showDeleted, setShowDeleted] = useState(false);
+  const { builds, deleteBuild, duplicateBuild, restoreBuild } = useBuilds({ includeDeleted: showDeleted });
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const buildMutations = useMemo(() => createBuildMutations(queryClient), [queryClient]);
 
-  const filteredProjects = builds
-    .filter(
-      (project) =>
-        (activeFilter === 'all' || Object.keys(project.assets).includes(activeFilter)) &&
-        (project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          project.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          project.tags?.some((tag) => tag.toLowerCase().includes(searchTerm.toLowerCase()))),
-    )
-    .sort((a, b) => {
-      return sortBy === 'createdAt'
-        ? b.createdAt - a.createdAt
-        : sortBy === 'updatedAt'
-          ? b.updatedAt - a.updatedAt
-          : a.name.localeCompare(b.name);
-    });
+  const handleToggleDeleted = useCallback((value: boolean) => {
+    setShowDeleted(value);
+  }, []);
 
-  const loadMore = useCallback(() => {
-    setVisibleProjects((previous) => Math.min(previous + itemsPerPage, filteredProjects.length));
-  }, [filteredProjects.length]);
+  const handleDelete = useCallback(
+    (build: Build) => {
+      void deleteBuild(build.id);
+      toast.success(`Deleted ${build.name}`);
+    },
+    [deleteBuild],
+  );
+
+  const handleDuplicate = useCallback(
+    async (build: Build) => {
+      try {
+        await duplicateBuild(build.id);
+        toast.success(`Duplicated ${build.name}`, {
+          action: {
+            label: 'Open',
+            onClick() {
+              void navigate(`/builds/${build.id}`);
+            },
+          },
+        });
+      } catch (error) {
+        toast.error('Failed to duplicate build');
+        console.error('Error in component:', error);
+      }
+    },
+    [duplicateBuild, navigate],
+  );
+
+  const handleRestore = useCallback(
+    (build: Build) => {
+      void restoreBuild(build.id);
+      toast.success(`Restored ${build.name}`);
+    },
+    [restoreBuild],
+  );
+
+  const handleRename = useCallback(
+    async (buildId: string, newName: string) => {
+      try {
+        await buildMutations.updateName(buildId, newName);
+        toast.success(`Renamed to ${newName}`);
+      } catch (error) {
+        toast.error('Failed to rename build');
+        console.error('Error renaming build:', error);
+      }
+    },
+    [buildMutations],
+  );
+
+  const actions: BuildActions = {
+    handleDelete,
+    handleDuplicate,
+    handleRename,
+    handleRestore,
+  };
+
+  const filteredBuilds = builds.filter(
+    (build) => activeFilter === 'all' || Object.keys(build.assets).includes(activeFilter),
+  );
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -101,22 +182,6 @@ export default function PersonalCadProjects(): JSX.Element {
         </Link>
       </div>
 
-      {/* Search and Controls */}
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row">
-        <div className="relative flex-grow">
-          <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-10"
-            placeholder="Search builds..."
-            value={searchTerm}
-            onChange={(event) => {
-              setSearchTerm(event.target.value);
-            }}
-          />
-        </div>
-      </div>
-
-      {}
       <Tabs
         value={activeFilter}
         onValueChange={(value) => {
@@ -127,36 +192,21 @@ export default function PersonalCadProjects(): JSX.Element {
           <TabsList className="">
             <TabsTrigger value="all" className="flex items-center gap-2">
               <Layout className="size-4" />
-              <span className="hidden sm:inline">all</span>
+              <span className="hidden sm:inline">All</span>
             </TabsTrigger>
             {Object.entries(categories).map(([key, { icon: Icon, color }]) => (
-              <TabsTrigger key={key} value={key} className="flex items-center gap-2">
+              <TabsTrigger key={key} value={key} className="flex items-center gap-2 capitalize">
                 <Icon className={`size-4 ${color}`} />
                 <span className="hidden sm:inline">{key}</span>
               </TabsTrigger>
             ))}
           </TabsList>
           <div className="flex items-center gap-2">
-            <Select
-              value={sortBy}
-              onValueChange={(value: 'lastOpened' | 'createdAt' | 'updatedAt' | 'name') => {
-                setSortBy(value);
-              }}
-            >
-              <SelectTrigger size="sm" className="w-[180px]">
-                <SelectValue placeholder="Sort by" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="updatedAt">Last Updated</SelectItem>
-                <SelectItem value="lastOpened">Last Opened</SelectItem>
-                <SelectItem value="createdAt">Created Date</SelectItem>
-                <SelectItem value="name">Name</SelectItem>
-              </SelectContent>
-            </Select>
+            {/* View mode toggle */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon">
-                  <Filter className="size-4" />
+                  {viewMode === 'grid' ? <Grid className="size-4" /> : <Table className="size-4" />}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -164,44 +214,72 @@ export default function PersonalCadProjects(): JSX.Element {
                   onClick={() => {
                     setViewMode('grid');
                   }}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                  }}
                 >
                   <Grid className="mr-2 size-4" />
                   <span>Grid</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => {
-                    setViewMode('list');
+                    setViewMode('table');
+                  }}
+                  onSelect={(event) => {
+                    event.preventDefault();
                   }}
                 >
-                  <List className="mr-2 size-4" />
-                  <span>List</span>
+                  <Table className="mr-2 size-4" />
+                  <span>Table</span>
                 </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Settings menu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <Cog className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Settings</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuCheckboxItem
+                  checked={showDeleted}
+                  onCheckedChange={handleToggleDeleted}
+                  onSelect={(event) => {
+                    event.preventDefault();
+                  }}
+                >
+                  Show deleted builds
+                </DropdownMenuCheckboxItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </div>
-        <TabsContent value="all">
-          <LibraryBuildGrid projects={filteredProjects} visibleProjects={visibleProjects} viewMode={viewMode} />
+        <TabsContent withAnimation={false} value="all">
+          <UnifiedBuildList projects={filteredBuilds} viewMode={viewMode} actions={actions} />
         </TabsContent>
-        <TabsContent value="mechanical">
-          <LibraryBuildGrid
-            projects={filteredProjects.filter((p) => Object.keys(p.assets).includes('mechanical'))}
-            visibleProjects={visibleProjects}
+        <TabsContent withAnimation={false} value="mechanical">
+          <UnifiedBuildList
+            projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('mechanical'))}
             viewMode={viewMode}
+            actions={actions}
           />
         </TabsContent>
-        <TabsContent value="electrical">
-          <LibraryBuildGrid
-            projects={filteredProjects.filter((p) => Object.keys(p.assets).includes('electrical'))}
-            visibleProjects={visibleProjects}
+        <TabsContent withAnimation={false} value="electrical">
+          <UnifiedBuildList
+            projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('electrical'))}
             viewMode={viewMode}
+            actions={actions}
           />
         </TabsContent>
-        <TabsContent value="firmware">
-          <LibraryBuildGrid
-            projects={filteredProjects.filter((p) => Object.keys(p.assets).includes('firmware'))}
-            visibleProjects={visibleProjects}
+        <TabsContent withAnimation={false} value="firmware">
+          <UnifiedBuildList
+            projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('firmware'))}
             viewMode={viewMode}
+            actions={actions}
           />
         </TabsContent>
       </Tabs>
@@ -209,93 +287,397 @@ export default function PersonalCadProjects(): JSX.Element {
   );
 }
 
-function LibraryBuildGrid({
-  projects,
-  visibleProjects,
-  viewMode,
-}: {
+type UnifiedBuildListProps = {
   readonly projects: Build[];
-  readonly visibleProjects: number;
-  readonly viewMode: 'grid' | 'list';
-}) {
-  return (
-    <div className={viewMode === 'grid' ? 'grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'space-y-4'}>
-      <KernelProvider>
-        {projects.slice(0, visibleProjects).map((project) => (
-          <BuildProvider key={project.id} buildId={project.id}>
-            <CadProvider>
-              <BuildLibraryCard project={project} viewMode={viewMode} />
-            </CadProvider>
-          </BuildProvider>
-        ))}
-      </KernelProvider>
-    </div>
-  );
-}
+  readonly viewMode: 'grid' | 'table';
+  readonly actions: BuildActions;
+};
 
-function CategoryBadge({ category }: { readonly category: Category }) {
-  const icons = {
-    mechanical: <Cog className="size-4" />,
-    electrical: <Zap className="size-4" />,
-    firmware: <Cpu className="size-4" />,
-  };
-
-  const colors = {
-    mechanical: 'text-blue',
-    electrical: 'text-yellow',
-    firmware: 'text-purple',
-  };
-
-  return (
-    <div className={cn('flex items-center gap-1.5', colors[category])}>
-      {icons[category]}
-      <span className="capitalize">{category}</span>
-    </div>
-  );
-}
-
-// TODO: review statuses
-// function StatusDropdown({ status, projectId }: { status: string; projectId: string }) {
-//   const statusColors = {
-//     draft: 'bg-gray-100 hover:bg-neutral',
-//     published: 'bg-blue-100 hover:bg-blue-200',
-//     archived: 'bg-red-100 hover:bg-red-200',
-//   };
-
-//   return (
-//     <DropdownMenu>
-//       <DropdownMenuTrigger asChild>
-//         <Button
-//           variant="outline"
-//           size="sm"
-//           className={cn('h-7 text-xs font-normal', statusColors[status as keyof typeof statusColors])}
-//         >
-//           {status}
-//           <ChevronDown className="ml-1 h-3 w-3" />
-//         </Button>
-//       </DropdownMenuTrigger>
-//       <DropdownMenuContent align="end">
-//         <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'draft')}>Draft</DropdownMenuItem>
-//         <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'review')}>Review</DropdownMenuItem>
-//         <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'published')}>Published</DropdownMenuItem>
-//         <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'completed')}>Completed</DropdownMenuItem>
-//         <DropdownMenuItem onClick={() => handleStatusChange(projectId, 'archived')}>Archived</DropdownMenuItem>
-//       </DropdownMenuContent>
-//     </DropdownMenu>
-//   );
-// }
-
-function BuildLibraryCard({ project, viewMode }: { readonly project: Build; readonly viewMode: 'grid' | 'list' }) {
-  const { setCode, setParameters, mesh } = useCad();
-  const { updateName } = useBuild();
-  const { deleteBuild, duplicateBuild } = useBuilds();
-  const code = project.assets.mechanical?.files[project.assets.mechanical?.main]?.content;
-  const parameters = project.assets.mechanical?.parameters;
-  const navigate = useNavigate();
+function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps) {
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [rowSelection, setRowSelection] = useState({});
+  const [globalFilter, setGlobalFilter] = useState('');
   const [showRenameDialog, setShowRenameDialog] = useState(false);
-  const [newName, setNewName] = useState(project.name);
+  const [buildToRename, setBuildToRename] = useState<Build | undefined>(undefined);
+  const [newName, setNewName] = useState('');
 
-  // Start with preview false, then enable it once we have both code and mesh
+  const handleRenameClick = (build: Build) => {
+    setBuildToRename(build);
+    setNewName(build.name);
+    setShowRenameDialog(true);
+  };
+
+  const handleRename = async () => {
+    if (buildToRename && newName.trim() && newName !== buildToRename.name) {
+      try {
+        await actions.handleRename(buildToRename.id, newName);
+        setShowRenameDialog(false);
+        setBuildToRename(undefined);
+      } catch {
+        // Error is already handled in the action
+      }
+    }
+  };
+
+  const table = useReactTable({
+    data: projects,
+    columns: createColumns(actions, handleRenameClick),
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    onSortingChange: setSorting,
+    getSortedRowModel: getSortedRowModel(),
+    onColumnVisibilityChange: setColumnVisibility,
+    onRowSelectionChange: setRowSelection,
+    onGlobalFilterChange: setGlobalFilter,
+    getFilteredRowModel: getFilteredRowModel(),
+    state: {
+      sorting,
+      columnVisibility,
+      rowSelection,
+      globalFilter,
+    },
+    initialState: {
+      pagination: {
+        pageSize: viewMode === 'grid' ? 12 : 10,
+      },
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="relative flex-grow">
+          <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="h-8 pl-10"
+            placeholder="Search builds..."
+            value={globalFilter}
+            onChange={(event) => {
+              setGlobalFilter(event.target.value);
+            }}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Add bulk actions when rows are selected */}
+          {table.getFilteredSelectedRowModel().rows.length > 0 && (
+            <BulkActions table={table} deleteBuild={actions.handleDelete} />
+          )}
+          <SortingDropdown table={table} />
+          <ViewOptionsDropdown table={table} />
+        </div>
+      </div>
+
+      {viewMode === 'table' ? (
+        // Table View
+        <div className="rounded-md border">
+          <table className="w-full">
+            <thead>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <th key={header.id} className="border-b p-2 text-left text-sm font-medium">
+                      {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                    </th>
+                  ))}
+                </tr>
+              ))}
+            </thead>
+            <tbody>
+              {table.getRowModel().rows?.length ? (
+                table.getRowModel().rows.map((row) => (
+                  <tr key={row.id} className={row.getIsSelected() ? 'bg-muted/50' : undefined}>
+                    {row.getVisibleCells().map((cell) => (
+                      <td key={cell.id} className="border-b p-2">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={table.getAllColumns().length} className="h-24 text-center">
+                    No results.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        // Grid View
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <KernelProvider>
+            {table.getRowModel().rows.map((row) => (
+              <BuildProvider key={row.original.id} buildId={row.original.id}>
+                <CadProvider>
+                  <BuildLibraryCard
+                    build={row.original}
+                    actions={actions}
+                    isSelected={row.getIsSelected()}
+                    onSelect={() => {
+                      row.toggleSelected();
+                    }}
+                    onRenameClick={() => {
+                      handleRenameClick(row.original);
+                    }}
+                  />
+                </CadProvider>
+              </BuildProvider>
+            ))}
+          </KernelProvider>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <div className="flex-1 text-sm text-muted-foreground">
+          {table.getFilteredSelectedRowModel().rows.length} of {table.getFilteredRowModel().rows.length} row(s)
+          selected.
+        </div>
+        <div className="flex items-center space-x-6 lg:space-x-8">
+          <div className="flex items-center space-x-2">
+            <p className="text-sm font-medium">Items per page</p>
+            <Select
+              value={`${table.getState().pagination.pageSize}`}
+              onValueChange={(value) => {
+                table.setPageSize(Number(value));
+              }}
+            >
+              <SelectTrigger className="h-8 w-[70px]">
+                <SelectValue placeholder={table.getState().pagination.pageSize} />
+              </SelectTrigger>
+              <SelectContent side="top">
+                {viewMode === 'grid'
+                  ? [12, 24, 36, 48, 60].map((pageSize) => (
+                      <SelectItem key={pageSize} value={`${pageSize}`}>
+                        {pageSize}
+                      </SelectItem>
+                    ))
+                  : [10, 20, 30, 40, 50].map((pageSize) => (
+                      <SelectItem key={pageSize} value={`${pageSize}`}>
+                        {pageSize}
+                      </SelectItem>
+                    ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex w-[100px] items-center justify-center text-sm font-medium">
+            Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="outline"
+              className="hidden h-8 w-8 p-0 lg:flex"
+              disabled={!table.getCanPreviousPage()}
+              onClick={() => {
+                table.setPageIndex(0);
+              }}
+            >
+              <span className="sr-only">Go to first page</span>
+              <ChevronsLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              className="h-8 w-8 p-0"
+              disabled={!table.getCanPreviousPage()}
+              onClick={() => {
+                table.previousPage();
+              }}
+            >
+              <span className="sr-only">Go to previous page</span>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              className="h-8 w-8 p-0"
+              disabled={!table.getCanNextPage()}
+              onClick={() => {
+                table.nextPage();
+              }}
+            >
+              <span className="sr-only">Go to next page</span>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              className="hidden h-8 w-8 p-0 lg:flex"
+              disabled={!table.getCanNextPage()}
+              onClick={() => {
+                table.setPageIndex(table.getPageCount() - 1);
+              }}
+            >
+              <span className="sr-only">Go to last page</span>
+              <ChevronsRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <Dialog open={showRenameDialog} onOpenChange={setShowRenameDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename build</DialogTitle>
+            <DialogDescription>Enter a new name for this build.</DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (newName.trim() && buildToRename && newName !== buildToRename.name) {
+                void handleRename();
+              }
+            }}
+          >
+            <div className="grid gap-4 py-4">
+              <Input
+                value={newName}
+                placeholder="Enter new name"
+                className="col-span-3"
+                onChange={(event) => {
+                  setNewName(event.target.value);
+                }}
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setShowRenameDialog(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!newName.trim() || !buildToRename || newName === buildToRename.name}>
+                Save
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReactTable<Build>> }) {
+  const sortingState = table.getState().sorting[0];
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="icon">
+          <ArrowUpDown className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => {
+            table.setSorting([{ id: 'updatedAt', desc: true }]);
+          }}
+          onSelect={(event) => {
+            event.preventDefault();
+          }}
+        >
+          <span className="flex items-center">
+            Last Updated
+            {sortingState?.id === 'updatedAt' && sortingState?.desc ? <ArrowDown className="ml-2 h-3.5 w-3.5" /> : null}
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            table.setSorting([{ id: 'lastOpened', desc: true }]);
+          }}
+          onSelect={(event) => {
+            event.preventDefault();
+          }}
+        >
+          <span className="flex items-center">
+            Last Opened
+            {sortingState?.id === 'lastOpened' && sortingState?.desc ? (
+              <ArrowDown className="ml-2 h-3.5 w-3.5" />
+            ) : null}
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            table.setSorting([{ id: 'createdAt', desc: true }]);
+          }}
+          onSelect={(event) => {
+            event.preventDefault();
+          }}
+        >
+          <span className="flex items-center">
+            Created Date
+            {sortingState?.id === 'createdAt' && sortingState?.desc ? <ArrowDown className="ml-2 h-3.5 w-3.5" /> : null}
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            table.setSorting([{ id: 'name', desc: false }]);
+          }}
+          onSelect={(event) => {
+            event.preventDefault();
+          }}
+        >
+          <span className="flex items-center">
+            Name
+            {sortingState?.id === 'name' && !sortingState?.desc && <ArrowUp className="ml-2 h-3.5 w-3.5" />}
+          </span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function ViewOptionsDropdown({ table }: { readonly table: ReturnType<typeof useReactTable<Build>> }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="icon">
+          <List className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {table
+          .getAllColumns()
+          .filter((column) => column.getCanHide())
+          .map((column) => {
+            return (
+              <DropdownMenuCheckboxItem
+                key={column.id}
+                className="capitalize"
+                checked={column.getIsVisible()}
+                onCheckedChange={(value) => {
+                  column.toggleVisibility(Boolean(value));
+                }}
+                onSelect={(event) => {
+                  event.preventDefault();
+                }}
+              >
+                {column.id}
+              </DropdownMenuCheckboxItem>
+            );
+          })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+type BuildLibraryCardProps = {
+  readonly build: Build;
+  readonly actions: BuildActions;
+  readonly isSelected?: boolean;
+  readonly onSelect?: () => void;
+  readonly onRenameClick: () => void;
+};
+
+function BuildLibraryCard({ build, actions, isSelected, onSelect, onRenameClick }: BuildLibraryCardProps) {
+  const { setCode, setParameters, mesh } = useCad();
+  const code = build.assets.mechanical?.files[build.assets.mechanical?.main]?.content;
+  const parameters = build.assets.mechanical?.parameters;
   const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
@@ -310,215 +692,169 @@ function BuildLibraryCard({ project, viewMode }: { readonly project: Build; read
     }
   }, [code, setCode, parameters, setParameters, showPreview]);
 
-  const handleDelete = () => {
-    deleteBuild(project.id);
-    toast.success(`Deleted ${project.name}`);
-  };
-
-  const handleDuplicate = async () => {
-    try {
-      await duplicateBuild(project.id);
-      toast.success(`Duplicated ${project.name}`, {
-        action: {
-          label: 'Open',
-          onClick() {
-            void navigate(`/builds/${project.id}`);
-          },
-        },
-      });
-    } catch (error) {
-      toast.error('Failed to duplicate build');
-      console.error('Error in component:', error);
-    }
-  };
-
-  const handleRename = async () => {
-    try {
-      updateName(newName);
-      toast.success(`Renamed to ${newName}`);
-      setShowRenameDialog(false);
-    } catch (error) {
-      toast.error('Failed to rename build');
-      console.error('Error renaming build:', error);
-    }
-  };
-
-  if (viewMode === 'list') {
-    return (
-      <Link to={`/builds/${project.id}`} className="block">
-        <div className="flex items-center gap-4 rounded-lg border p-4 hover:bg-accent">
-          <div className="flex-shrink-0">
-            <Avatar className="aspect-video w-12 scale-200">
-              <AvatarImage src={project.thumbnail || project.author.avatar} alt={project.name} />
-              <AvatarFallback>{project.name.charAt(0)}</AvatarFallback>
-            </Avatar>
-          </div>
-          <div className="flex-grow">
-            <h3 className="font-semibold">{project.name}</h3>
-            <p className="text-sm text-muted-foreground">{project.description}</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="flex gap-2">
-              {Object.keys(project.assets).map((cat) => (
-                <CategoryBadge key={cat} category={cat as Category} />
-              ))}
-            </div>
-            {/* <StatusDropdown status={project.status} projectId={project.id} /> */}
-          </div>
-        </div>
-      </Link>
-    );
-  }
-
   return (
-    <Link to={`/builds/${project.id}`} draggable={!showPreview}>
-      <Card className="group relative flex flex-col overflow-hidden">
-        <div className="relative aspect-video overflow-hidden bg-muted">
-          {!showPreview && (
-            <img
-              src={project.thumbnail || '/placeholder.svg'}
-              alt={project.name}
-              className="size-full scale-95 object-cover transition-transform group-hover:scale-100"
-              loading="lazy"
-            />
-          )}
-          {showPreview ? (
-            <div
-              className="absolute inset-0"
-              onClick={(event) => {
-                event.stopPropagation();
-                event.preventDefault();
-              }}
-            >
-              <CadViewer mesh={mesh} className="bg-muted" zoomLevel={1.8} />
-            </div>
-          ) : null}
-          <Button
-            variant="outline"
-            size="icon"
-            className={cn('absolute top-2 right-2', showPreview && 'text-primary')}
+    <Card className={cn('group relative flex flex-col overflow-hidden', isSelected && 'ring-2 ring-primary')}>
+      <div className="absolute top-2 left-2 z-10">
+        <Checkbox size="large" checked={isSelected} onCheckedChange={() => onSelect?.()} />
+      </div>
+      <div className="relative aspect-video overflow-hidden bg-muted">
+        {!showPreview && (
+          <img
+            src={build.thumbnail || '/placeholder.svg'}
+            alt={build.name}
+            className="size-full scale-95 object-cover transition-transform group-hover:scale-100"
+            loading="lazy"
+          />
+        )}
+        {showPreview ? (
+          <div
+            className="absolute inset-0"
             onClick={(event) => {
               event.stopPropagation();
               event.preventDefault();
-              setShowPreview(!showPreview);
             }}
           >
-            <Eye className="size-4" />
-          </Button>
+            <CadViewer mesh={mesh} className="bg-muted" zoomLevel={1.8} />
+          </div>
+        ) : null}
+        <Button
+          variant="outline"
+          size="icon"
+          className={cn('absolute top-2 right-2', showPreview && 'text-primary')}
+          onClick={(event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            setShowPreview(!showPreview);
+          }}
+        >
+          <Eye className="size-4" />
+        </Button>
+      </div>
+      <CardHeader>
+        <div className="flex items-start justify-between">
+          <CardTitle>{build.name}</CardTitle>
         </div>
-        <CardHeader>
-          <div className="flex items-start justify-between">
-            <CardTitle>{project.name}</CardTitle>
+        <CardDescription>{build.description}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex-grow">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap gap-2">
+            {Object.keys(build.assets).map((cat) => (
+              <CategoryBadge key={cat} category={cat as Category} />
+            ))}
           </div>
-          <CardDescription>{project.description}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex-grow">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex flex-wrap gap-2">
-              {Object.keys(project.assets).map((cat) => (
-                <CategoryBadge key={cat} category={cat as Category} />
-              ))}
-            </div>
-            {/* <StatusDropdown status={project.status} projectId={project.id} /> */}
-          </div>
-        </CardContent>
-        <CardFooter className="flex items-center justify-between">
-          <Button variant="outline">
+        </div>
+      </CardContent>
+      <CardFooter className="flex items-center justify-between">
+        <Button asChild variant="outline">
+          <Link to={`/builds/${build.id}`}>
             <span>Open</span>
             <ArrowRight className="size-4" />
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <Ellipsis className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              onClick={(event) => {
-                event.stopPropagation();
-                event.preventDefault();
-              }}
-            >
-              <DropdownMenuItem onClick={handleDuplicate}>
-                <Copy className="mr-2 size-4" />
-                <span>Duplicate</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  setNewName(project.name);
-                  setShowRenameDialog(true);
-                }}
-              >
-                <Pencil className="mr-2 size-4" />
-                <span>Rename</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Star className="mr-2 size-4" />
-                <span>Favorite</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem variant="destructive" onClick={handleDelete}>
-                <Trash className="mr-2 size-4" />
-                <span>Delete</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          </Link>
+        </Button>
 
-          {/* Rename Dialog */}
-          <Dialog open={showRenameDialog} onOpenChange={setShowRenameDialog}>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Rename build</DialogTitle>
-                <DialogDescription>Enter a new name for this build.</DialogDescription>
-              </DialogHeader>
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (newName.trim() && newName !== project.name) {
-                    void handleRename();
-                  }
-                }}
-              >
-                <div className="grid gap-4 py-4">
-                  <Input
-                    value={newName}
-                    placeholder="Enter new name"
-                    className="col-span-3"
-                    onChange={(event) => {
-                      setNewName(event.target.value);
-                    }}
-                  />
-                </div>
-                <DialogFooter>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      event.preventDefault();
-                      setShowRenameDialog(false);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={!newName.trim() || newName === project.name}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      event.preventDefault();
-                      void handleRename();
-                    }}
-                  >
-                    Save
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
-        </CardFooter>
-      </Card>
-    </Link>
+        <BuildActionDropdown shouldStopPropagation build={build} actions={actions} onRenameClick={onRenameClick} />
+      </CardFooter>
+    </Card>
+  );
+}
+
+type BulkActionsProps = {
+  readonly table: ReturnType<typeof useReactTable<Build>>;
+  readonly deleteBuild: (build: Build) => void;
+};
+
+function BulkActions({ table, deleteBuild }: BulkActionsProps) {
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  // Get selected row data
+  const selectedRows = table.getFilteredSelectedRowModel().rows;
+  const selectedCount = selectedRows.length;
+
+  const handleBulkDelete = () => {
+    // Close the dialog
+    setShowDeleteDialog(false);
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    // Delete each selected build
+    for (const row of selectedRows) {
+      try {
+        const build = row.original;
+        deleteBuild(build);
+        successCount++;
+      } catch (error) {
+        errorCount++;
+        console.error('Error deleting build:', error);
+      }
+    }
+
+    // Clear selection after deleting
+    table.resetRowSelection();
+
+    // Show toast with results
+    if (successCount > 0 && errorCount === 0) {
+      toast.success(`Successfully deleted ${successCount} build${successCount === 1 ? '' : 's'}`);
+    } else if (successCount > 0 && errorCount > 0) {
+      toast.warning(
+        `Deleted ${successCount} build${successCount === 1 ? '' : 's'}, but failed to delete ${errorCount}`,
+      );
+    } else {
+      toast.error(`Failed to delete selected builds`);
+    }
+  };
+
+  return (
+    <>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1 border-destructive text-destructive hover:bg-destructive/10"
+          onClick={() => {
+            setShowDeleteDialog(true);
+          }}
+        >
+          <Trash className="h-4 w-4" />
+          Delete
+          <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-xs">{selectedCount}</span>
+        </Button>
+      </div>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-destructive" />
+              Delete {selectedCount} build{selectedCount === 1 ? '' : 's'}?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <p>The following builds will be moved to the trash:</p>
+              <ul className="max-h-40 list-disc overflow-y-auto pl-6 text-sm">
+                {selectedRows.map((row) => {
+                  const build = row.original;
+                  return (
+                    <li key={row.id}>
+                      {build.name}{' '}
+                      <span className="text-muted-foreground/70 italic">
+                        (modified {formatRelativeTime(build.updatedAt)})
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className={buttonVariants({ variant: 'destructive' })} onClick={handleBulkDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

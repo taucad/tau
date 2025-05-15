@@ -1,9 +1,10 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { JSX, ReactNode } from 'react';
 import { createContext, useContext, useMemo } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { storage } from '~/db/storage.js';
 import type { Build } from '~/types/build.js';
+import { createBuildMutations } from '~/hooks/build-mutations.js';
 
 // Function to fetch builds
 const fetchBuild = async (buildId: string): Promise<Build> => {
@@ -39,88 +40,12 @@ export function BuildProvider({
   readonly buildId: string;
 }): JSX.Element {
   const queryClient = useQueryClient();
+  const mutations = useMemo(() => createBuildMutations(queryClient), [queryClient]);
 
   // Query for fetching build data
   const buildQuery = useQuery({
     queryKey: ['build', buildId],
     queryFn: async () => fetchBuild(buildId),
-  });
-
-  // Mutation for updating code
-  const codeUpdate = useMutation({
-    mutationFn: async (code: string) =>
-      storage.updateBuild(buildId, {
-        assets: {
-          mechanical: {
-            files: {
-              // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-              'model.ts': {
-                content: code,
-              },
-            },
-          },
-        },
-      }),
-    onSuccess() {
-      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
-    },
-  });
-
-  // Mutation for updating parameters
-  const parameterUpdate = useMutation({
-    async mutationFn(parameters: Record<string, unknown>) {
-      return storage.updateBuild(
-        buildId,
-        {
-          assets: {
-            mechanical: {
-              parameters,
-            },
-          },
-        },
-        { ignoreKeys: ['parameters'] },
-      );
-    },
-    onSuccess() {
-      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
-    },
-  });
-
-  // Mutation for updating messages
-  const messageUpdate = useMutation({
-    async mutationFn(messages: Message[]) {
-      return storage.updateBuild(
-        buildId,
-        {
-          messages,
-        },
-        { ignoreKeys: ['messages'] },
-      );
-    },
-    onSuccess() {
-      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
-    },
-  });
-
-  // Mutation for updating name
-  const nameUpdate = useMutation({
-    async mutationFn(name: string) {
-      return storage.updateBuild(buildId, { name });
-    },
-    onSuccess() {
-      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
-      void queryClient.invalidateQueries({ queryKey: ['builds'] });
-    },
-  });
-
-  // Mutation for updating thumbnail
-  const thumbnailUpdate = useMutation({
-    async mutationFn(thumbnail: string) {
-      return storage.updateBuild(buildId, { thumbnail });
-    },
-    onSuccess() {
-      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
-    },
   });
 
   const build = buildQuery.data;
@@ -132,22 +57,13 @@ export function BuildProvider({
       error: buildQuery.error as Error | undefined,
       code: build?.assets.mechanical?.files[build.assets.mechanical.main]?.content ?? '',
       parameters: build?.assets.mechanical?.parameters ?? {},
-      setCode: codeUpdate.mutate,
-      setParameters: parameterUpdate.mutate,
-      setMessages: messageUpdate.mutate,
-      updateName: nameUpdate.mutate,
-      updateThumbnail: thumbnailUpdate.mutate,
+      setCode: async (code: string) => mutations.updateCode(buildId, code),
+      setParameters: async (parameters: Record<string, unknown>) => mutations.updateParameters(buildId, parameters),
+      setMessages: async (messages: Message[]) => mutations.updateMessages(buildId, messages),
+      updateName: async (name: string) => mutations.updateName(buildId, name),
+      updateThumbnail: async (thumbnail: string) => mutations.updateThumbnail(buildId, thumbnail),
     }),
-    [
-      build,
-      buildQuery.isLoading,
-      buildQuery.error,
-      codeUpdate.mutate,
-      parameterUpdate.mutate,
-      messageUpdate.mutate,
-      nameUpdate.mutate,
-      thumbnailUpdate.mutate,
-    ],
+    [build, buildId, buildQuery.isLoading, buildQuery.error, mutations],
   );
 
   return <BuildContext.Provider value={value}>{children}</BuildContext.Provider>;

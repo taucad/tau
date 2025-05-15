@@ -2,7 +2,7 @@ import type { ComponentType, JSX } from 'react';
 import { Star, GitFork, Eye } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import { KernelProvider } from './geometry/kernel/kernel-context.js';
+import { KernelProvider } from '~/components/geometry/kernel/kernel-context.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { Button } from '~/components/ui/button.js';
 import { Badge } from '~/components/ui/badge.js';

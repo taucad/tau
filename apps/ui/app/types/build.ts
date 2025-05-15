@@ -1,5 +1,5 @@
 import type { Message } from '@ai-sdk/react';
-import type { CadKernelProvider, Category } from './cad.js';
+import type { CadKernelProvider, Category } from '~/types/cad.js';
 
 type File = {
   content: string;
@@ -21,6 +21,7 @@ export type Build = {
   createdAt: number;
   updatedAt: number;
   forkedFrom?: string;
+  deletedAt?: number;
   // Status: 'draft' | 'review' | 'published' | 'completed' | 'archived';
   assets: Partial<
     Record<

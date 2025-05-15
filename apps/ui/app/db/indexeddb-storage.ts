@@ -103,7 +103,7 @@ export class IndexedDbStorageProvider implements StorageProvider {
     });
   }
 
-  public async getBuilds(): Promise<Build[]> {
+  public async getBuilds(options?: { includeDeleted?: boolean }): Promise<Build[]> {
     const db = await this.getDb();
 
     return new Promise((resolve, reject) => {
@@ -118,7 +118,10 @@ export class IndexedDbStorageProvider implements StorageProvider {
       };
 
       request.onsuccess = () => {
-        resolve(request.result as Build[]);
+        const builds = request.result as Build[];
+        // Filter out deleted builds unless explicitly requested
+        const filteredBuilds = options?.includeDeleted ? builds : builds.filter((build) => !build.deletedAt);
+        resolve(filteredBuilds);
       };
 
       transaction.oncomplete = () => {
@@ -152,27 +155,12 @@ export class IndexedDbStorageProvider implements StorageProvider {
   }
 
   public async deleteBuild(buildId: string): Promise<void> {
-    const db = await this.getDb();
+    // Get the build to make sure it exists
+    const build = await this.getBuild(buildId);
+    if (!build) return;
 
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeName, 'readwrite');
-      const store = transaction.objectStore(this.storeName);
-      const request = store.delete(buildId);
-
-      // eslint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-      request.onerror = () => {
-        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
-        reject(request.error);
-      };
-
-      request.onsuccess = () => {
-        resolve();
-      };
-
-      transaction.oncomplete = () => {
-        db.close();
-      };
-    });
+    // Perform soft delete by updating deletedAt timestamp
+    await this.updateBuild(buildId, { deletedAt: Date.now() });
   }
 
   private async getDb(): Promise<IDBDatabase> {

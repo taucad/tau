@@ -1,7 +1,6 @@
 import { Link, useNavigate } from 'react-router';
 import { useCallback } from 'react';
 import type { JSX } from 'react';
-import { PencilRuler } from 'lucide-react';
 import type { ChatTextareaProperties } from '~/components/chat/chat-textarea.js';
 import { ChatTextarea } from '~/components/chat/chat-textarea.js';
 import { Button } from '~/components/ui/button.js';

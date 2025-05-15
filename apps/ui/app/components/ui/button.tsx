@@ -44,7 +44,7 @@ function Button({
 }: React.ComponentProps<'button'> &
   VariantProps<typeof buttonVariants> & {
     readonly asChild?: boolean;
-  }) {
+  }): React.JSX.Element {
   const Comp = asChild ? Slot : 'button';
 
   return <Comp data-slot="button" className={cn(buttonVariants({ variant, size, className }))} {...properties} />;

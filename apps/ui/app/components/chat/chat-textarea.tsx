@@ -296,7 +296,7 @@ export const ChatTextarea = memo(function ({
   }, [handlePaste]);
 
   return (
-    <div className={cn('@container relative h-full', className)}>
+    <div className={cn('@container relative h-full bg-background', className)}>
       {/* Textarea */}
       <div
         data-state={isFocused ? 'active' : 'inactive'}

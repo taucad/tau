@@ -6,7 +6,7 @@
 :root {
   /* Base color hues */
   --hue-primary: 266deg;
-  --hue-secondary: calc(var(--hue-primary) - 180deg); /* Secondary color is opposite of primary */
+  --hue-secondary: calc(var(--hue-primary) - 230deg); /* Secondary color is nearly opposite of primary */
   --hue-neutral: calc(var(--hue-primary) - 10deg);
   --hue-destructive: 15deg;
   --hue-success: 150deg;
@@ -41,6 +41,8 @@
   --l-primary: 0.5719;
   --c-primary: 0.1898;
 
+  --l-secondary: 0.8;
+
   /* Base colors */
   --background: oklch(var(--l-base) 0.005 var(--hue-neutral));
   --foreground: oklch(var(--l-deepest) 0.02 var(--hue-neutral));
@@ -53,7 +55,7 @@
   --primary-foreground: oklch(var(--l-base) 0.01 var(--hue-neutral));
 
   /* Secondary colors */
-  --secondary: oklch(var(--l-primary) var(--c-primary) var(--hue-secondary));
+  --secondary: oklch(var(--l-secondary) var(--c-primary) var(--hue-secondary));
   --secondary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
 
   /* Neutral scale using consistent chroma */
@@ -113,6 +115,8 @@
   --l-high: 0.78;
   --l-intense: 0.88;
   --l-deepest: 0.95;
+
+  --l-secondary: 0.6;
 
   --primary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
   --secondary-foreground: oklch(var(--l-base) 0.01 var(--hue-neutral));

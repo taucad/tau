@@ -14,6 +14,23 @@
         "--transport",
         "stdio"
       ]
+    },
+    "@magicuidesign/mcp": {
+      "command": "pnpx",
+      "args": ["-y", "@magicuidesign/mcp@latest"]
+    },
+    "shadcn": {
+      "description": "",
+      "type": "stdio",
+      "command": "pnpx",
+      "args": [
+        "-y",
+        "shadcn@canary",
+        "registry:mcp"
+      ],
+      "env": {
+        "REGISTRY_URL": "https://raw.githubusercontent.com/shadcn-ui/ui/refs/heads/main/apps/v4/registry.json"
+      }
     }
   }
 }

@@ -81,6 +81,7 @@ import { createBuildMutations } from '~/hooks/build-mutations.js';
 import { Checkbox } from '~/components/ui/checkbox.js';
 import { formatRelativeTime } from '~/utils/date.js';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '~/components/ui/table.js';
+import { camelCaseToSentenceCase } from '~/utils/string.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -210,11 +211,16 @@ export default function PersonalCadProjects(): JSX.Element {
                   {viewMode === 'grid' ? <Grid /> : <TableIcon />}
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent
+                align="end"
+                onCloseAutoFocus={(event) => {
+                  event.preventDefault();
+                }}
+              >
                 <DropdownMenuCheckboxItem
                   checked={viewMode === 'grid'}
-                  onCheckedChange={() => {
-                    setViewMode('grid');
+                  onCheckedChange={(checked) => {
+                    if (checked) setViewMode('grid');
                   }}
                   onSelect={(event) => {
                     event.preventDefault();
@@ -225,8 +231,8 @@ export default function PersonalCadProjects(): JSX.Element {
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem
                   checked={viewMode === 'table'}
-                  onCheckedChange={() => {
-                    setViewMode('table');
+                  onCheckedChange={(checked) => {
+                    if (checked) setViewMode('table');
                   }}
                   onSelect={(event) => {
                     event.preventDefault();
@@ -297,13 +303,17 @@ type UnifiedBuildListProps = {
 };
 
 function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps) {
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'updatedAt', desc: true }]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = useState({});
   const [globalFilter, setGlobalFilter] = useState('');
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [buildToRename, setBuildToRename] = useState<Build | undefined>(undefined);
   const [newName, setNewName] = useState('');
+
+  // Page size options for different view modes
+  const gridPageSizes = [12, 24, 36, 48, 60];
+  const tablePageSizes = [10, 20, 30, 40, 50];
 
   const handleRenameClick = (build: Build) => {
     setBuildToRename(build);
@@ -322,6 +332,25 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
       }
     }
   };
+
+  // Find the most appropriate page size based on current selected count
+  const getAppropriatePageSize = useCallback((selectedCount = 0, isGrid = true) => {
+    const pageSizes = isGrid ? gridPageSizes : tablePageSizes;
+    // If no items are selected, use default page size
+    if (selectedCount === 0) {
+      return pageSizes[0];
+    }
+
+    // Find the closest page size that can accommodate all selected items
+    for (const size of pageSizes) {
+      if (size >= selectedCount) {
+        return size;
+      }
+    }
+
+    // If selected count is larger than any page size, return the largest available
+    return pageSizes.at(-1);
+  }, []);
 
   const table = useReactTable({
     data: projects,
@@ -342,10 +371,19 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
     },
     initialState: {
       pagination: {
-        pageSize: viewMode === 'grid' ? 12 : 10,
+        pageSize: viewMode === 'grid' ? gridPageSizes[0] : tablePageSizes[0],
       },
     },
   });
+
+  // Update page size when view mode changes or selection changes
+  useEffect(() => {
+    const selectedCount = Object.keys(rowSelection).length;
+    const newPageSize = getAppropriatePageSize(selectedCount, viewMode === 'grid');
+    if (newPageSize) {
+      table.setPageSize(newPageSize);
+    }
+  }, [viewMode, rowSelection, getAppropriatePageSize, table]);
 
   return (
     <div className="space-y-4">
@@ -671,7 +709,6 @@ function ViewOptionsDropdown({ table }: { readonly table: ReturnType<typeof useR
             return (
               <DropdownMenuCheckboxItem
                 key={column.id}
-                className="capitalize"
                 checked={column.getIsVisible()}
                 onCheckedChange={(value) => {
                   column.toggleVisibility(Boolean(value));
@@ -680,7 +717,7 @@ function ViewOptionsDropdown({ table }: { readonly table: ReturnType<typeof useR
                   event.preventDefault();
                 }}
               >
-                {column.id}
+                {camelCaseToSentenceCase(column.id)}
               </DropdownMenuCheckboxItem>
             );
           })}

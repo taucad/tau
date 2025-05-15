@@ -134,6 +134,6 @@ export const createColumns = (
         </div>
       );
     },
-    enableHiding: true,
+    enableHiding: false,
   },
 ];

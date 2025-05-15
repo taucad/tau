@@ -302,6 +302,10 @@ type UnifiedBuildListProps = {
   readonly actions: BuildActions;
 };
 
+// Page size options for different view modes
+const gridPageSizes = [12, 24, 36, 48, 60];
+const tablePageSizes = [10, 20, 30, 40, 50];
+
 function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps) {
   const [sorting, setSorting] = useState<SortingState>([{ id: 'updatedAt', desc: true }]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
@@ -310,10 +314,6 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [buildToRename, setBuildToRename] = useState<Build | undefined>(undefined);
   const [newName, setNewName] = useState('');
-
-  // Page size options for different view modes
-  const gridPageSizes = [12, 24, 36, 48, 60];
-  const tablePageSizes = [10, 20, 30, 40, 50];
 
   const handleRenameClick = (build: Build) => {
     setBuildToRename(build);
@@ -334,23 +334,26 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
   };
 
   // Find the most appropriate page size based on current selected count
-  const getAppropriatePageSize = useCallback((selectedCount = 0, isGrid = true) => {
-    const pageSizes = isGrid ? gridPageSizes : tablePageSizes;
-    // If no items are selected, use default page size
-    if (selectedCount === 0) {
-      return pageSizes[0];
-    }
-
-    // Find the closest page size that can accommodate all selected items
-    for (const size of pageSizes) {
-      if (size >= selectedCount) {
-        return size;
+  const getAppropriatePageSize = useCallback(
+    (selectedCount = 0, isGrid = true) => {
+      const pageSizes = isGrid ? gridPageSizes : tablePageSizes;
+      // If no items are selected, use default page size
+      if (selectedCount === 0) {
+        return pageSizes[0];
       }
-    }
 
-    // If selected count is larger than any page size, return the largest available
-    return pageSizes.at(-1);
-  }, []);
+      // Find the closest page size that can accommodate all selected items
+      for (const size of pageSizes) {
+        if (size >= selectedCount) {
+          return size;
+        }
+      }
+
+      // If selected count is larger than any page size, return the largest available
+      return pageSizes.at(-1);
+    },
+    [gridPageSizes, tablePageSizes],
+  );
 
   const table = useReactTable({
     data: projects,
@@ -598,6 +601,15 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
 function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReactTable<Build>> }) {
   const sortingState = table.getState().sorting[0];
 
+  // Dynamically get sortable columns from the table
+  const sortFields = table
+    .getAllColumns()
+    .filter((column) => column.getCanSort())
+    .map((column) => ({
+      id: column.id,
+      label: camelCaseToSentenceCase(column.id),
+    }));
+
   const toggleSorting = (id: string) => {
     if (sortingState?.id === id) {
       // Toggle direction if already sorting by this column
@@ -606,6 +618,11 @@ function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReact
       // Set to descending order by default on first click
       table.setSorting([{ id, desc: true }]);
     }
+  };
+
+  const renderSortIndicator = (fieldId: string) => {
+    if (sortingState?.id !== fieldId) return null;
+    return sortingState.desc ? <ArrowDown className="ml-auto" /> : <ArrowUp className="ml-auto" />;
   };
 
   return (
@@ -618,74 +635,21 @@ function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReact
       <DropdownMenuContent align="end">
         <DropdownMenuLabel>Sort by</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={() => {
-            toggleSorting('updatedAt');
-          }}
-          onSelect={(event) => {
-            event.preventDefault();
-          }}
-        >
-          <span className="flex items-center">
-            Last Updated
-            {sortingState?.id === 'updatedAt' && sortingState.desc ? (
-              <ArrowDown className="ml-2 h-3.5 w-3.5" />
-            ) : sortingState?.id === 'updatedAt' && !sortingState.desc ? (
-              <ArrowUp className="ml-2 h-3.5 w-3.5" />
-            ) : null}
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => {
-            toggleSorting('lastOpened');
-          }}
-          onSelect={(event) => {
-            event.preventDefault();
-          }}
-        >
-          <span className="flex items-center">
-            Last Opened
-            {sortingState?.id === 'lastOpened' && sortingState.desc ? (
-              <ArrowDown className="ml-2 h-3.5 w-3.5" />
-            ) : sortingState?.id === 'lastOpened' && !sortingState.desc ? (
-              <ArrowUp className="ml-2 h-3.5 w-3.5" />
-            ) : null}
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => {
-            toggleSorting('createdAt');
-          }}
-          onSelect={(event) => {
-            event.preventDefault();
-          }}
-        >
-          <span className="flex items-center">
-            Created Date
-            {sortingState?.id === 'createdAt' && sortingState.desc ? (
-              <ArrowDown className="ml-2 h-3.5 w-3.5" />
-            ) : sortingState?.id === 'createdAt' && !sortingState.desc ? (
-              <ArrowUp className="ml-2 h-3.5 w-3.5" />
-            ) : null}
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => {
-            toggleSorting('name');
-          }}
-          onSelect={(event) => {
-            event.preventDefault();
-          }}
-        >
-          <span className="flex items-center">
-            Name
-            {sortingState?.id === 'name' && sortingState.desc ? (
-              <ArrowDown className="ml-2 h-3.5 w-3.5" />
-            ) : sortingState?.id === 'name' && !sortingState.desc ? (
-              <ArrowUp className="ml-2 h-3.5 w-3.5" />
-            ) : null}
-          </span>
-        </DropdownMenuItem>
+        {sortFields.map((field) => (
+          <DropdownMenuItem
+            key={field.id}
+            className="flex w-full items-center"
+            onClick={() => {
+              toggleSorting(field.id);
+            }}
+            onSelect={(event) => {
+              event.preventDefault();
+            }}
+          >
+            {field.label}
+            {renderSortIndicator(field.id)}
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );

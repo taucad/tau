@@ -30,5 +30,9 @@ export const formatRelativeTime = (date: Date | number): string => {
   if (diffInDays < 7) return `${diffInDays} days ago`;
 
   // For dates older than a week, return formatted date
-  return targetDate.toLocaleDateString();
+  return targetDate.toLocaleDateString('en-US', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
 };

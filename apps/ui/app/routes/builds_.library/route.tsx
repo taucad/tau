@@ -211,28 +211,30 @@ export default function PersonalCadProjects(): JSX.Element {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onClick={() => {
+                <DropdownMenuCheckboxItem
+                  checked={viewMode === 'grid'}
+                  onCheckedChange={() => {
                     setViewMode('grid');
                   }}
                   onSelect={(event) => {
                     event.preventDefault();
                   }}
                 >
-                  <Grid />
                   <span>Grid</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
+                  <Grid className="ml-auto" />
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={viewMode === 'table'}
+                  onCheckedChange={() => {
                     setViewMode('table');
                   }}
                   onSelect={(event) => {
                     event.preventDefault();
                   }}
                 >
-                  <TableIcon />
                   <span>Table</span>
-                </DropdownMenuItem>
+                  <TableIcon className="ml-auto" />
+                </DropdownMenuCheckboxItem>
               </DropdownMenuContent>
             </DropdownMenu>
 

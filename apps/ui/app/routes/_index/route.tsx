@@ -13,6 +13,8 @@ import { CommunityBuildGrid } from '~/components/project-grid.js';
 import { sampleBuilds } from '~/constants/build-examples.js';
 import { defaultBuildName } from '~/constants/build-names.js';
 import { AiChatProvider } from '~/components/chat/ai-chat-provider.js';
+import { Separator } from '~/components/ui/separator.js';
+import { InteractiveHoverButton } from '~/components/magicui/interactive-hover-button.js';
 
 export default function ChatStart(): JSX.Element {
   const navigate = useNavigate();
@@ -101,17 +103,18 @@ export default function ChatStart(): JSX.Element {
 
         <AiChatProvider value={{}}>
           <ChatTextarea withContextActions={false} onSubmit={onSubmit} />
-          <div className="relative mx-auto my-6 flex w-48 items-center justify-center">
-            <div className="absolute inset-0 flex items-center">
-              <span className="border-gray-300 w-full border-t" />
-            </div>
-            <div className="relative bg-background px-4 text-sm text-muted-foreground">or</div>
+          <div className="mx-auto my-6 flex w-20 items-center justify-center">
+            <Separator />
+            <div className="mx-4 text-sm font-light text-muted-foreground">or</div>
+            <Separator />
           </div>
           <div className="flex justify-center">
-            <Button variant="outline" className="font-light" onClick={handleStartFromScratch}>
-              Start from scratch
-              <PencilRuler className="stroke-1" />
-            </Button>
+            <InteractiveHoverButton
+              className="flex items-center gap-2 font-light [&_svg]:size-6 [&_svg]:stroke-1"
+              onClick={handleStartFromScratch}
+            >
+              Build from code
+            </InteractiveHoverButton>
           </div>
         </AiChatProvider>
       </div>

@@ -10,40 +10,40 @@ importers:
     dependencies:
       '@ai-sdk/openai':
         specifier: ^1.3.6
-        version: 1.3.6(zod@3.24.1)
+        version: 1.3.6(zod@3.24.4)
       '@ai-sdk/react':
         specifier: ^1.2.3
-        version: 1.2.5(react@19.0.0)(zod@3.24.1)
+        version: 1.2.5(react@19.0.0)(zod@3.24.4)
       '@ai-sdk/ui-utils':
         specifier: ^1.2.4
-        version: 1.2.4(zod@3.24.1)
+        version: 1.2.4(zod@3.24.4)
       '@langchain/anthropic':
         specifier: ^0.3.19
-        version: 0.3.19(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)
+        version: 0.3.19(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)
       '@langchain/community':
         specifier: ^0.3.42
-        version: 0.3.42(7f3e648836631850550c12d82618c756)
+        version: 0.3.42(e63a39cc5dd3bb443ac002a334af9276)
       '@langchain/core':
         specifier: ^0.3.50
-        version: 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
+        version: 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
       '@langchain/google-vertexai':
         specifier: ^0.2.5
-        version: 0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)(zod@3.24.1)
+        version: 0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)(zod@3.24.4)
       '@langchain/langgraph':
         specifier: ^0.2.67
-        version: 0.2.67(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(zod-to-json-schema@3.24.1(zod@3.24.1))
+        version: 0.2.67(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(zod-to-json-schema@3.24.1(zod@3.24.4))
       '@langchain/langgraph-supervisor':
         specifier: ^0.0.11
-        version: 0.0.11(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(@langchain/langgraph@0.2.67(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(zod-to-json-schema@3.24.1(zod@3.24.1)))
+        version: 0.0.11(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(@langchain/langgraph@0.2.67(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(zod-to-json-schema@3.24.1(zod@3.24.4)))
       '@langchain/ollama':
         specifier: ^0.2.0
-        version: 0.2.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))
+        version: 0.2.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))
       '@langchain/openai':
         specifier: ^0.5.8
-        version: 0.5.8(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)(ws@8.18.0)
+        version: 0.5.8(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)(ws@8.18.0)
       '@langchain/tavily':
         specifier: ^0.1.1
-        version: 0.1.1(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))
+        version: 0.1.1(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.52.2)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
@@ -59,15 +59,21 @@ importers:
       '@nestjs/platform-fastify':
         specifier: ^11.0.17
         version: 11.0.17(@nestjs/common@11.0.17(reflect-metadata@0.2.2)(rxjs@7.8.1))(@nestjs/core@11.0.17)
+      '@radix-ui/react-alert-dialog':
+        specifier: ^1.1.13
+        version: 1.1.13(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       '@radix-ui/react-avatar':
         specifier: ^1.1.3
         version: 1.1.3(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@radix-ui/react-checkbox':
+        specifier: ^1.3.1
+        version: 1.3.1(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       '@radix-ui/react-collapsible':
         specifier: ^1.1.3
         version: 1.1.3(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       '@radix-ui/react-dialog':
         specifier: ^1.1.6
-        version: 1.1.6(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+        version: 1.1.13(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       '@radix-ui/react-dropdown-menu':
         specifier: ^2.1.6
         version: 2.1.6(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
@@ -97,7 +103,7 @@ importers:
         version: 1.2.3(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       '@radix-ui/react-slot':
         specifier: ^1.1.2
-        version: 1.1.2(@types/react@19.0.12)(react@19.0.0)
+        version: 1.2.2(@types/react@19.0.12)(react@19.0.0)
       '@radix-ui/react-switch':
         specifier: ^1.1.3
         version: 1.1.3(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
@@ -137,9 +143,12 @@ importers:
       '@tanstack/react-query':
         specifier: '4'
         version: 4.36.1(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@tanstack/react-table':
+        specifier: ^8.21.3
+        version: 8.21.3(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       ai:
         specifier: ^4.2.10
-        version: 4.2.10(react@19.0.0)(zod@3.24.1)
+        version: 4.2.10(react@19.0.0)(zod@3.24.4)
       autoprefixer:
         specifier: 10.4.20
         version: 10.4.20(postcss@8.5.1)
@@ -181,19 +190,22 @@ importers:
         version: 0.16.21
       langchain:
         specifier: ^0.3.24
-        version: 0.3.24(@langchain/anthropic@0.3.19(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13))(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(@langchain/google-genai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(zod@3.24.1))(@langchain/google-vertexai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)(zod@3.24.1))(@langchain/ollama@0.2.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))))(axios@1.9.0)(cheerio@1.0.0)(encoding@0.1.13)(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))(ws@8.18.0)
+        version: 0.3.24(@langchain/anthropic@0.3.19(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13))(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(@langchain/google-genai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(zod@3.24.4))(@langchain/google-vertexai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)(zod@3.24.4))(@langchain/ollama@0.2.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))))(axios@1.9.0)(cheerio@1.0.0)(encoding@0.1.13)(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))(ws@8.18.0)
       lucide-react:
         specifier: ^0.475.0
         version: 0.475.0(react@19.0.0)
       monaco-editor:
         specifier: ^0.52.2
         version: 0.52.2
+      motion:
+        specifier: ^12.11.3
+        version: 12.11.3(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       ollama:
         specifier: ^0.5.12
         version: 0.5.13
       openai:
         specifier: ^4.82.0
-        version: 4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)
+        version: 4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)
       react:
         specifier: ^19.0.0
         version: 19.0.0
@@ -265,7 +277,7 @@ importers:
         version: 1.1.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       zod:
         specifier: ^3.24.1
-        version: 3.24.1
+        version: 3.24.4
     devDependencies:
       '@nestjs/schematics':
         specifier: ^11.0.5
@@ -3324,6 +3336,19 @@ packages:
   '@radix-ui/primitive@1.1.2':
     resolution: {integrity: sha512-XnbHrrprsNqZKQhStrSwgRUQzoCI1glLzdw79xiZPoofhGICeZRSQ3dIxAKH1gb3OHfNf4d6f+vAv3kil2eggA==}
 
+  '@radix-ui/react-alert-dialog@1.1.13':
+    resolution: {integrity: sha512-/uPs78OwxGxslYOG5TKeUsv9fZC0vo376cXSADdKirTmsLJU2au6L3n34c3p6W26rFDDDze/hwy4fYeNd0qdGA==}
+    peerDependencies:
+      '@types/react': '*'
+      '@types/react-dom': '*'
+      react: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+      react-dom: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+      '@types/react-dom':
+        optional: true
+
   '@radix-ui/react-arrow@1.1.2':
     resolution: {integrity: sha512-G+KcpzXHq24iH0uGG/pF8LyzpFJYGD4RfLjCIBfGdSLXvjLHST31RUiRVrupIBMvIppMgSzQ6l66iAxl03tdlg==}
     peerDependencies:
@@ -3352,6 +3377,19 @@ packages:
 
   '@radix-ui/react-avatar@1.1.3':
     resolution: {integrity: sha512-Paen00T4P8L8gd9bNsRMw7Cbaz85oxiv+hzomsRZgFm2byltPFDtfcoqlWJ8GyZlIBWgLssJlzLCnKU0G0302g==}
+    peerDependencies:
+      '@types/react': '*'
+      '@types/react-dom': '*'
+      react: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+      react-dom: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+      '@types/react-dom':
+        optional: true
+
+  '@radix-ui/react-checkbox@1.3.1':
+    resolution: {integrity: sha512-xTaLKAO+XXMPK/BpVTSaAAhlefmvMSACjIhK9mGsImvX2ljcTDm8VGR1CuS1uYcNdR5J+oiOhoJZc5un6bh3VQ==}
     peerDependencies:
       '@types/react': '*'
       '@types/react-dom': '*'
@@ -3425,8 +3463,8 @@ packages:
       '@types/react':
         optional: true
 
-  '@radix-ui/react-dialog@1.1.6':
-    resolution: {integrity: sha512-/IVhJV5AceX620DUJ4uYVMymzsipdKBzo3edo+omeskCKGm9FRHM0ebIdbPnlQVJqyuHbuBltQUOG2mOTq2IYw==}
+  '@radix-ui/react-dialog@1.1.13':
+    resolution: {integrity: sha512-ARFmqUyhIVS3+riWzwGTe7JLjqwqgnODBUZdqpWar/z1WFs9z76fuOs/2BOWCR+YboRn4/WN9aoaGVwqNRr8VA==}
     peerDependencies:
       '@types/react': '*'
       '@types/react-dom': '*'
@@ -3495,8 +3533,30 @@ packages:
       '@types/react':
         optional: true
 
+  '@radix-ui/react-focus-guards@1.1.2':
+    resolution: {integrity: sha512-fyjAACV62oPV925xFCrH8DR5xWhg9KYtJT4s3u54jxp+L/hbpTY2kIeEFFbFe+a/HCE94zGQMZLIpVTPVZDhaA==}
+    peerDependencies:
+      '@types/react': '*'
+      react: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+
   '@radix-ui/react-focus-scope@1.1.2':
     resolution: {integrity: sha512-zxwE80FCU7lcXUGWkdt6XpTTCKPitG1XKOwViTxHVKIJhZl9MvIl2dVHeZENCWD9+EdWv05wlaEkRXUykU27RA==}
+    peerDependencies:
+      '@types/react': '*'
+      '@types/react-dom': '*'
+      react: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+      react-dom: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+      '@types/react-dom':
+        optional: true
+
+  '@radix-ui/react-focus-scope@1.1.6':
+    resolution: {integrity: sha512-r9zpYNUQY+2jWHWZGyddQLL9YHkM/XvSFHVcWs7bdVuxMAnCwTAuy6Pf47Z4nw7dYcUou1vg/VgjjrrH03VeBw==}
     peerDependencies:
       '@types/react': '*'
       '@types/react-dom': '*'
@@ -3900,6 +3960,15 @@ packages:
 
   '@radix-ui/react-use-previous@1.1.0':
     resolution: {integrity: sha512-Z/e78qg2YFnnXcW88A4JmTtm4ADckLno6F7OXotmkQfeuCVaKuYzqAATPhVzl3delXE7CxIV8shofPn3jPc5Og==}
+    peerDependencies:
+      '@types/react': '*'
+      react: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+
+  '@radix-ui/react-use-previous@1.1.1':
+    resolution: {integrity: sha512-2dHfToCj/pzca2Ck724OZ5L0EVrr3eHRNsG/b3xQJLA2hZpVCS99bLAX+hm1IHXDEnzU6by5z/5MIY794/a8NQ==}
     peerDependencies:
       '@types/react': '*'
       react: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
@@ -4916,6 +4985,17 @@ packages:
         optional: true
       react-native:
         optional: true
+
+  '@tanstack/react-table@8.21.3':
+    resolution: {integrity: sha512-5nNMTSETP4ykGegmVkhjcS8tTLW6Vl4axfEGQN3v0zdHYbK4UfoqfPChclTrJ4EoK9QynqAu9oUf8VEmrpZ5Ww==}
+    engines: {node: '>=12'}
+    peerDependencies:
+      react: '>=16.8'
+      react-dom: '>=16.8'
+
+  '@tanstack/table-core@8.21.3':
+    resolution: {integrity: sha512-ldZXEhOBb8Is7xLs01fR3YEc3DERiz5silj8tnGkFZytt1abEvl/GhUmCE0PMLaMPTa3Jk4HbKmRlHmu+gCftg==}
+    engines: {node: '>=12'}
 
   '@testing-library/dom@10.4.0':
     resolution: {integrity: sha512-pemlzrSESWbdAloYml3bAJMEfNh1Z7EduzqPKprCH5S341frlpYnUEW0H72dLxa6IsYr+mPno20GiSm+h9dEdQ==}
@@ -7626,6 +7706,20 @@ packages:
   fraction.js@4.3.7:
     resolution: {integrity: sha512-ZsDfxO51wGAXREY55a7la9LScWpwv9RxIrYABrlvOFBlH/ShPnrtsXeuUIfXKKOVicNxQ+o8JTbJvjS4M89yew==}
 
+  framer-motion@12.11.3:
+    resolution: {integrity: sha512-ksUtDFBZtrbQFt4bEMFrFgo7camhmXcLeuylKQxEYSd9czkZ4tZmFROxWczWeu51WqC2m91ifpvgGCBLd0uviQ==}
+    peerDependencies:
+      '@emotion/is-prop-valid': '*'
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
+    peerDependenciesMeta:
+      '@emotion/is-prop-valid':
+        optional: true
+      react:
+        optional: true
+      react-dom:
+        optional: true
+
   fresh@0.5.2:
     resolution: {integrity: sha512-zJ2mQYM18rEFOudeV4GShTGIQ7RbzA7ozbU9I/XBpm7kqgMywgmylMwXHxZJmkVoYkna9d2pVXVXPdYTP9ej8Q==}
     engines: {node: '>= 0.6'}
@@ -9648,6 +9742,26 @@ packages:
   morgan@1.10.0:
     resolution: {integrity: sha512-AbegBVI4sh6El+1gNwvD5YIck7nSA36weD7xvIxG4in80j/UoK8AEGaWnnz8v1GxonMCltmlNs5ZKbGvl9b1XQ==}
     engines: {node: '>= 0.8.0'}
+
+  motion-dom@12.11.2:
+    resolution: {integrity: sha512-wZ396XNNTI9GOkyrr80wFSbZc1JbIHSHTbLdririSbkEgahWWKmsHzsxyxqBBvuBU/iaQWVu1YCjdpXYNfo2yQ==}
+
+  motion-utils@12.9.4:
+    resolution: {integrity: sha512-BW3I65zeM76CMsfh3kHid9ansEJk9Qvl+K5cu4DVHKGsI52n76OJ4z2CUJUV+Mn3uEP9k1JJA3tClG0ggSrRcg==}
+
+  motion@12.11.3:
+    resolution: {integrity: sha512-R9t8IYJ5hSl+Ao5rj6XGS4lJN+fXQstcpwKOcFA5aWjlwjf3IHcHr8DUjPV0My6T/5ZCQ1jqh0pmjggO4zUpEA==}
+    peerDependencies:
+      '@emotion/is-prop-valid': '*'
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
+    peerDependenciesMeta:
+      '@emotion/is-prop-valid':
+        optional: true
+      react:
+        optional: true
+      react-dom:
+        optional: true
 
   mri@1.2.0:
     resolution: {integrity: sha512-tzzskb3bG8LvYGFF/mDTpq3jpI6Q9wc3LEmBaghu+DdCssd1FakN7Bc0hVNmEyGq1bq3RgfkCb3cmQLpNPOroA==}
@@ -12906,9 +13020,6 @@ packages:
     peerDependencies:
       zod: ^3.24.1
 
-  zod@3.24.1:
-    resolution: {integrity: sha512-muH7gBL9sI1nciMZV67X5fTKKBLtwpZ5VBp1vsOQzj1MhrBZ4wlVCm3gedKZWLp0Oyel8sIGfeiz54Su+OVT+A==}
-
   zod@3.24.4:
     resolution: {integrity: sha512-OdqJE9UDRPwWsrHjLN2F8bPxvwJBK22EHLWtanu0LSYr5YqzsaaW3RMgmjwr8Rypg5k+meEJdSPXJZXE/yqOMg==}
 
@@ -12954,39 +13065,39 @@ snapshots:
 
   '@adobe/css-tools@4.4.1': {}
 
-  '@ai-sdk/openai@1.3.6(zod@3.24.1)':
+  '@ai-sdk/openai@1.3.6(zod@3.24.4)':
     dependencies:
       '@ai-sdk/provider': 1.1.0
-      '@ai-sdk/provider-utils': 2.2.3(zod@3.24.1)
-      zod: 3.24.1
+      '@ai-sdk/provider-utils': 2.2.3(zod@3.24.4)
+      zod: 3.24.4
 
-  '@ai-sdk/provider-utils@2.2.3(zod@3.24.1)':
+  '@ai-sdk/provider-utils@2.2.3(zod@3.24.4)':
     dependencies:
       '@ai-sdk/provider': 1.1.0
       nanoid: 3.3.8
       secure-json-parse: 2.7.0
-      zod: 3.24.1
+      zod: 3.24.4
 
   '@ai-sdk/provider@1.1.0':
     dependencies:
       json-schema: 0.4.0
 
-  '@ai-sdk/react@1.2.5(react@19.0.0)(zod@3.24.1)':
+  '@ai-sdk/react@1.2.5(react@19.0.0)(zod@3.24.4)':
     dependencies:
-      '@ai-sdk/provider-utils': 2.2.3(zod@3.24.1)
-      '@ai-sdk/ui-utils': 1.2.4(zod@3.24.1)
+      '@ai-sdk/provider-utils': 2.2.3(zod@3.24.4)
+      '@ai-sdk/ui-utils': 1.2.4(zod@3.24.4)
       react: 19.0.0
       swr: 2.3.3(react@19.0.0)
       throttleit: 2.1.0
     optionalDependencies:
-      zod: 3.24.1
+      zod: 3.24.4
 
-  '@ai-sdk/ui-utils@1.2.4(zod@3.24.1)':
+  '@ai-sdk/ui-utils@1.2.4(zod@3.24.4)':
     dependencies:
       '@ai-sdk/provider': 1.1.0
-      '@ai-sdk/provider-utils': 2.2.3(zod@3.24.1)
-      zod: 3.24.1
-      zod-to-json-schema: 3.24.1(zod@3.24.1)
+      '@ai-sdk/provider-utils': 2.2.3(zod@3.24.4)
+      zod: 3.24.4
+      zod-to-json-schema: 3.24.1(zod@3.24.4)
 
   '@ampproject/remapping@2.3.0':
     dependencies:
@@ -13936,17 +14047,17 @@ snapshots:
     transitivePeerDependencies:
       - encoding
 
-  '@browserbasehq/stagehand@1.12.0(@playwright/test@1.50.1)(deepmerge@4.3.1)(dotenv@16.4.7)(encoding@0.1.13)(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))(zod@3.24.1)':
+  '@browserbasehq/stagehand@1.12.0(@playwright/test@1.50.1)(deepmerge@4.3.1)(dotenv@16.4.7)(encoding@0.1.13)(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))(zod@3.24.4)':
     dependencies:
       '@anthropic-ai/sdk': 0.27.3(encoding@0.1.13)
       '@browserbasehq/sdk': 2.2.0(encoding@0.1.13)
       '@playwright/test': 1.50.1
       deepmerge: 4.3.1
       dotenv: 16.4.7
-      openai: 4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)
+      openai: 4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)
       ws: 8.18.0
-      zod: 3.24.1
-      zod-to-json-schema: 3.24.1(zod@3.24.1)
+      zod: 3.24.4
+      zod-to-json-schema: 3.24.1(zod@3.24.4)
     transitivePeerDependencies:
       - bufferutil
       - encoding
@@ -14424,9 +14535,9 @@ snapshots:
 
   '@humanwhocodes/retry@0.4.2': {}
 
-  '@ibm-cloud/watsonx-ai@1.5.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))':
+  '@ibm-cloud/watsonx-ai@1.5.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))':
     dependencies:
-      '@langchain/textsplitters': 0.1.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))
+      '@langchain/textsplitters': 0.1.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))
       '@types/node': 18.19.75
       extend: 3.0.2
       ibm-cloud-sdk-core: 5.1.2
@@ -14660,33 +14771,33 @@ snapshots:
 
   '@jspm/core@2.0.1': {}
 
-  '@langchain/anthropic@0.3.19(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)':
+  '@langchain/anthropic@0.3.19(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)':
     dependencies:
       '@anthropic-ai/sdk': 0.37.0(encoding@0.1.13)
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
       fast-xml-parser: 4.5.3
-      zod: 3.24.1
-      zod-to-json-schema: 3.24.1(zod@3.24.1)
+      zod: 3.24.4
+      zod-to-json-schema: 3.24.1(zod@3.24.4)
     transitivePeerDependencies:
       - encoding
 
-  '@langchain/community@0.3.42(7f3e648836631850550c12d82618c756)':
+  '@langchain/community@0.3.42(e63a39cc5dd3bb443ac002a334af9276)':
     dependencies:
-      '@browserbasehq/stagehand': 1.12.0(@playwright/test@1.50.1)(deepmerge@4.3.1)(dotenv@16.4.7)(encoding@0.1.13)(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))(zod@3.24.1)
-      '@ibm-cloud/watsonx-ai': 1.5.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
-      '@langchain/openai': 0.5.8(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)(ws@8.18.0)
+      '@browserbasehq/stagehand': 1.12.0(@playwright/test@1.50.1)(deepmerge@4.3.1)(dotenv@16.4.7)(encoding@0.1.13)(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))(zod@3.24.4)
+      '@ibm-cloud/watsonx-ai': 1.5.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
+      '@langchain/openai': 0.5.8(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)(ws@8.18.0)
       binary-extensions: 2.3.0
       expr-eval: 2.0.2
       flat: 5.0.2
       ibm-cloud-sdk-core: 5.1.2
       js-yaml: 4.1.0
-      langchain: 0.3.24(@langchain/anthropic@0.3.19(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13))(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(@langchain/google-genai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(zod@3.24.1))(@langchain/google-vertexai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)(zod@3.24.1))(@langchain/ollama@0.2.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))))(axios@1.9.0)(cheerio@1.0.0)(encoding@0.1.13)(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))(ws@8.18.0)
-      langsmith: 0.3.22(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
-      openai: 4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)
+      langchain: 0.3.24(@langchain/anthropic@0.3.19(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13))(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(@langchain/google-genai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(zod@3.24.4))(@langchain/google-vertexai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)(zod@3.24.4))(@langchain/ollama@0.2.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))))(axios@1.9.0)(cheerio@1.0.0)(encoding@0.1.13)(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))(ws@8.18.0)
+      langsmith: 0.3.22(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
+      openai: 4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)
       uuid: 10.0.0
-      zod: 3.24.1
-      zod-to-json-schema: 3.24.1(zod@3.24.1)
+      zod: 3.24.4
+      zod-to-json-schema: 3.24.1(zod@3.24.4)
     optionalDependencies:
       '@browserbasehq/sdk': 2.2.0(encoding@0.1.13)
       cheerio: 1.0.0
@@ -14718,63 +14829,63 @@ snapshots:
       - handlebars
       - peggy
 
-  '@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))':
+  '@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))':
     dependencies:
       '@cfworker/json-schema': 4.1.0
       ansi-styles: 5.2.0
       camelcase: 6.3.0
       decamelize: 1.2.0
       js-tiktoken: 1.0.16
-      langsmith: 0.3.22(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
+      langsmith: 0.3.22(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
       mustache: 4.2.0
       p-queue: 6.6.2
       p-retry: 4.6.2
       uuid: 10.0.0
-      zod: 3.24.1
-      zod-to-json-schema: 3.24.1(zod@3.24.1)
+      zod: 3.24.4
+      zod-to-json-schema: 3.24.1(zod@3.24.4)
     transitivePeerDependencies:
       - openai
 
-  '@langchain/google-common@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(zod@3.24.1)':
+  '@langchain/google-common@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(zod@3.24.4)':
     dependencies:
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
       uuid: 10.0.0
-      zod-to-json-schema: 3.24.1(zod@3.24.1)
+      zod-to-json-schema: 3.24.1(zod@3.24.4)
     transitivePeerDependencies:
       - zod
 
-  '@langchain/google-gauth@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)(zod@3.24.1)':
+  '@langchain/google-gauth@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)(zod@3.24.4)':
     dependencies:
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
-      '@langchain/google-common': 0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(zod@3.24.1)
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
+      '@langchain/google-common': 0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(zod@3.24.4)
       google-auth-library: 9.15.1(encoding@0.1.13)
     transitivePeerDependencies:
       - encoding
       - supports-color
       - zod
 
-  '@langchain/google-genai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(zod@3.24.1)':
+  '@langchain/google-genai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(zod@3.24.4)':
     dependencies:
       '@google/generative-ai': 0.24.1
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
       uuid: 11.1.0
-      zod-to-json-schema: 3.24.1(zod@3.24.1)
+      zod-to-json-schema: 3.24.1(zod@3.24.4)
     transitivePeerDependencies:
       - zod
     optional: true
 
-  '@langchain/google-vertexai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)(zod@3.24.1)':
+  '@langchain/google-vertexai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)(zod@3.24.4)':
     dependencies:
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
-      '@langchain/google-gauth': 0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)(zod@3.24.1)
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
+      '@langchain/google-gauth': 0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)(zod@3.24.4)
     transitivePeerDependencies:
       - encoding
       - supports-color
       - zod
 
-  '@langchain/langgraph-checkpoint@0.0.17(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))':
+  '@langchain/langgraph-checkpoint@0.0.17(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))':
     dependencies:
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
       uuid: 10.0.0
 
   '@langchain/langgraph-sdk@0.0.36':
@@ -14784,50 +14895,50 @@ snapshots:
       p-retry: 4.6.2
       uuid: 9.0.1
 
-  '@langchain/langgraph-supervisor@0.0.11(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(@langchain/langgraph@0.2.67(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(zod-to-json-schema@3.24.1(zod@3.24.1)))':
+  '@langchain/langgraph-supervisor@0.0.11(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(@langchain/langgraph@0.2.67(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(zod-to-json-schema@3.24.1(zod@3.24.4)))':
     dependencies:
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
-      '@langchain/langgraph': 0.2.67(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(zod-to-json-schema@3.24.1(zod@3.24.1))
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
+      '@langchain/langgraph': 0.2.67(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(zod-to-json-schema@3.24.1(zod@3.24.4))
       uuid: 10.0.0
-      zod: 3.24.1
+      zod: 3.24.4
 
-  '@langchain/langgraph@0.2.67(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(zod-to-json-schema@3.24.1(zod@3.24.1))':
+  '@langchain/langgraph@0.2.67(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(zod-to-json-schema@3.24.1(zod@3.24.4))':
     dependencies:
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
-      '@langchain/langgraph-checkpoint': 0.0.17(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
+      '@langchain/langgraph-checkpoint': 0.0.17(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))
       '@langchain/langgraph-sdk': 0.0.36
       uuid: 10.0.0
-      zod: 3.24.1
+      zod: 3.24.4
     optionalDependencies:
-      zod-to-json-schema: 3.24.1(zod@3.24.1)
+      zod-to-json-schema: 3.24.1(zod@3.24.4)
 
-  '@langchain/ollama@0.2.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))':
+  '@langchain/ollama@0.2.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))':
     dependencies:
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
       ollama: 0.5.13
       uuid: 10.0.0
-      zod: 3.24.1
-      zod-to-json-schema: 3.24.1(zod@3.24.1)
+      zod: 3.24.4
+      zod-to-json-schema: 3.24.1(zod@3.24.4)
 
-  '@langchain/openai@0.5.8(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)(ws@8.18.0)':
+  '@langchain/openai@0.5.8(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)(ws@8.18.0)':
     dependencies:
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
       js-tiktoken: 1.0.16
-      openai: 4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)
-      zod: 3.24.1
-      zod-to-json-schema: 3.24.1(zod@3.24.1)
+      openai: 4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)
+      zod: 3.24.4
+      zod-to-json-schema: 3.24.1(zod@3.24.4)
     transitivePeerDependencies:
       - encoding
       - ws
 
-  '@langchain/tavily@0.1.1(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))':
+  '@langchain/tavily@0.1.1(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))':
     dependencies:
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
       zod: 3.24.4
 
-  '@langchain/textsplitters@0.1.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))':
+  '@langchain/textsplitters@0.1.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))':
     dependencies:
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
       js-tiktoken: 1.0.16
 
   '@leichtgewicht/ip-codec@2.0.5': {}
@@ -16037,6 +16148,20 @@ snapshots:
 
   '@radix-ui/primitive@1.1.2': {}
 
+  '@radix-ui/react-alert-dialog@1.1.13(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
+    dependencies:
+      '@radix-ui/primitive': 1.1.2
+      '@radix-ui/react-compose-refs': 1.1.2(@types/react@19.0.12)(react@19.0.0)
+      '@radix-ui/react-context': 1.1.2(@types/react@19.0.12)(react@19.0.0)
+      '@radix-ui/react-dialog': 1.1.13(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@radix-ui/react-primitive': 2.1.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@radix-ui/react-slot': 1.2.2(@types/react@19.0.12)(react@19.0.0)
+      react: 19.0.0
+      react-dom: 19.0.0(react@19.0.0)
+    optionalDependencies:
+      '@types/react': 19.0.12
+      '@types/react-dom': 19.0.4(@types/react@19.0.12)
+
   '@radix-ui/react-arrow@1.1.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
     dependencies:
       '@radix-ui/react-primitive': 2.0.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
@@ -16061,6 +16186,22 @@ snapshots:
       '@radix-ui/react-primitive': 2.0.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       '@radix-ui/react-use-callback-ref': 1.1.0(@types/react@19.0.12)(react@19.0.0)
       '@radix-ui/react-use-layout-effect': 1.1.0(@types/react@19.0.12)(react@19.0.0)
+      react: 19.0.0
+      react-dom: 19.0.0(react@19.0.0)
+    optionalDependencies:
+      '@types/react': 19.0.12
+      '@types/react-dom': 19.0.4(@types/react@19.0.12)
+
+  '@radix-ui/react-checkbox@1.3.1(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
+    dependencies:
+      '@radix-ui/primitive': 1.1.2
+      '@radix-ui/react-compose-refs': 1.1.2(@types/react@19.0.12)(react@19.0.0)
+      '@radix-ui/react-context': 1.1.2(@types/react@19.0.12)(react@19.0.0)
+      '@radix-ui/react-presence': 1.1.4(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@radix-ui/react-primitive': 2.1.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@radix-ui/react-use-controllable-state': 1.2.2(@types/react@19.0.12)(react@19.0.0)
+      '@radix-ui/react-use-previous': 1.1.1(@types/react@19.0.12)(react@19.0.0)
+      '@radix-ui/react-use-size': 1.1.1(@types/react@19.0.12)(react@19.0.0)
       react: 19.0.0
       react-dom: 19.0.0(react@19.0.0)
     optionalDependencies:
@@ -16119,20 +16260,20 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.0.12
 
-  '@radix-ui/react-dialog@1.1.6(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
+  '@radix-ui/react-dialog@1.1.13(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
     dependencies:
-      '@radix-ui/primitive': 1.1.1
-      '@radix-ui/react-compose-refs': 1.1.1(@types/react@19.0.12)(react@19.0.0)
-      '@radix-ui/react-context': 1.1.1(@types/react@19.0.12)(react@19.0.0)
-      '@radix-ui/react-dismissable-layer': 1.1.5(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
-      '@radix-ui/react-focus-guards': 1.1.1(@types/react@19.0.12)(react@19.0.0)
-      '@radix-ui/react-focus-scope': 1.1.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
-      '@radix-ui/react-id': 1.1.0(@types/react@19.0.12)(react@19.0.0)
-      '@radix-ui/react-portal': 1.1.4(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
-      '@radix-ui/react-presence': 1.1.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
-      '@radix-ui/react-primitive': 2.0.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
-      '@radix-ui/react-slot': 1.1.2(@types/react@19.0.12)(react@19.0.0)
-      '@radix-ui/react-use-controllable-state': 1.1.0(@types/react@19.0.12)(react@19.0.0)
+      '@radix-ui/primitive': 1.1.2
+      '@radix-ui/react-compose-refs': 1.1.2(@types/react@19.0.12)(react@19.0.0)
+      '@radix-ui/react-context': 1.1.2(@types/react@19.0.12)(react@19.0.0)
+      '@radix-ui/react-dismissable-layer': 1.1.9(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@radix-ui/react-focus-guards': 1.1.2(@types/react@19.0.12)(react@19.0.0)
+      '@radix-ui/react-focus-scope': 1.1.6(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@radix-ui/react-id': 1.1.1(@types/react@19.0.12)(react@19.0.0)
+      '@radix-ui/react-portal': 1.1.8(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@radix-ui/react-presence': 1.1.4(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@radix-ui/react-primitive': 2.1.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@radix-ui/react-slot': 1.2.2(@types/react@19.0.12)(react@19.0.0)
+      '@radix-ui/react-use-controllable-state': 1.2.2(@types/react@19.0.12)(react@19.0.0)
       aria-hidden: 1.2.4
       react: 19.0.0
       react-dom: 19.0.0(react@19.0.0)
@@ -16194,11 +16335,28 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.0.12
 
+  '@radix-ui/react-focus-guards@1.1.2(@types/react@19.0.12)(react@19.0.0)':
+    dependencies:
+      react: 19.0.0
+    optionalDependencies:
+      '@types/react': 19.0.12
+
   '@radix-ui/react-focus-scope@1.1.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
     dependencies:
       '@radix-ui/react-compose-refs': 1.1.1(@types/react@19.0.12)(react@19.0.0)
       '@radix-ui/react-primitive': 2.0.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       '@radix-ui/react-use-callback-ref': 1.1.0(@types/react@19.0.12)(react@19.0.0)
+      react: 19.0.0
+      react-dom: 19.0.0(react@19.0.0)
+    optionalDependencies:
+      '@types/react': 19.0.12
+      '@types/react-dom': 19.0.4(@types/react@19.0.12)
+
+  '@radix-ui/react-focus-scope@1.1.6(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
+    dependencies:
+      '@radix-ui/react-compose-refs': 1.1.2(@types/react@19.0.12)(react@19.0.0)
+      '@radix-ui/react-primitive': 2.1.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@radix-ui/react-use-callback-ref': 1.1.1(@types/react@19.0.12)(react@19.0.0)
       react: 19.0.0
       react-dom: 19.0.0(react@19.0.0)
     optionalDependencies:
@@ -16628,6 +16786,12 @@ snapshots:
       '@types/react': 19.0.12
 
   '@radix-ui/react-use-previous@1.1.0(@types/react@19.0.12)(react@19.0.0)':
+    dependencies:
+      react: 19.0.0
+    optionalDependencies:
+      '@types/react': 19.0.12
+
+  '@radix-ui/react-use-previous@1.1.1(@types/react@19.0.12)(react@19.0.0)':
     dependencies:
       react: 19.0.0
     optionalDependencies:
@@ -17677,6 +17841,14 @@ snapshots:
     optionalDependencies:
       react-dom: 19.0.0(react@19.0.0)
 
+  '@tanstack/react-table@8.21.3(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
+    dependencies:
+      '@tanstack/table-core': 8.21.3
+      react: 19.0.0
+      react-dom: 19.0.0(react@19.0.0)
+
+  '@tanstack/table-core@8.21.3': {}
+
   '@testing-library/dom@10.4.0':
     dependencies:
       '@babel/code-frame': 7.26.2
@@ -18592,15 +18764,15 @@ snapshots:
       clean-stack: 2.2.0
       indent-string: 4.0.0
 
-  ai@4.2.10(react@19.0.0)(zod@3.24.1):
+  ai@4.2.10(react@19.0.0)(zod@3.24.4):
     dependencies:
       '@ai-sdk/provider': 1.1.0
-      '@ai-sdk/provider-utils': 2.2.3(zod@3.24.1)
-      '@ai-sdk/react': 1.2.5(react@19.0.0)(zod@3.24.1)
-      '@ai-sdk/ui-utils': 1.2.4(zod@3.24.1)
+      '@ai-sdk/provider-utils': 2.2.3(zod@3.24.4)
+      '@ai-sdk/react': 1.2.5(react@19.0.0)(zod@3.24.4)
+      '@ai-sdk/ui-utils': 1.2.4(zod@3.24.4)
       '@opentelemetry/api': 1.9.0
       jsondiffpatch: 0.6.0
-      zod: 3.24.1
+      zod: 3.24.4
     optionalDependencies:
       react: 19.0.0
 
@@ -19318,7 +19490,7 @@ snapshots:
 
   cmdk@1.0.4(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0):
     dependencies:
-      '@radix-ui/react-dialog': 1.1.6(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@radix-ui/react-dialog': 1.1.13(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       '@radix-ui/react-id': 1.1.0(@types/react@19.0.12)(react@19.0.0)
       '@radix-ui/react-primitive': 2.0.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       react: 19.0.0
@@ -20976,6 +21148,15 @@ snapshots:
 
   fraction.js@4.3.7: {}
 
+  framer-motion@12.11.3(react-dom@19.0.0(react@19.0.0))(react@19.0.0):
+    dependencies:
+      motion-dom: 12.11.2
+      motion-utils: 12.9.4
+      tslib: 2.8.1
+    optionalDependencies:
+      react: 19.0.0
+      react-dom: 19.0.0(react@19.0.0)
+
   fresh@0.5.2: {}
 
   fresh@2.0.0:
@@ -22546,26 +22727,26 @@ snapshots:
 
   kuler@2.0.0: {}
 
-  langchain@0.3.24(@langchain/anthropic@0.3.19(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13))(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(@langchain/google-genai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(zod@3.24.1))(@langchain/google-vertexai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)(zod@3.24.1))(@langchain/ollama@0.2.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))))(axios@1.9.0)(cheerio@1.0.0)(encoding@0.1.13)(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))(ws@8.18.0):
+  langchain@0.3.24(@langchain/anthropic@0.3.19(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13))(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(@langchain/google-genai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(zod@3.24.4))(@langchain/google-vertexai@0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)(zod@3.24.4))(@langchain/ollama@0.2.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))))(axios@1.9.0)(cheerio@1.0.0)(encoding@0.1.13)(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))(ws@8.18.0):
     dependencies:
-      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
-      '@langchain/openai': 0.5.8(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)(ws@8.18.0)
-      '@langchain/textsplitters': 0.1.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))
+      '@langchain/core': 0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
+      '@langchain/openai': 0.5.8(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)(ws@8.18.0)
+      '@langchain/textsplitters': 0.1.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))
       js-tiktoken: 1.0.16
       js-yaml: 4.1.0
       jsonpointer: 5.0.1
-      langsmith: 0.3.22(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1))
+      langsmith: 0.3.22(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4))
       openapi-types: 12.1.3
       p-retry: 4.6.2
       uuid: 10.0.0
       yaml: 2.7.0
-      zod: 3.24.1
-      zod-to-json-schema: 3.24.1(zod@3.24.1)
+      zod: 3.24.4
+      zod-to-json-schema: 3.24.1(zod@3.24.4)
     optionalDependencies:
-      '@langchain/anthropic': 0.3.19(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)
-      '@langchain/google-genai': 0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(zod@3.24.1)
-      '@langchain/google-vertexai': 0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))(encoding@0.1.13)(zod@3.24.1)
-      '@langchain/ollama': 0.2.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)))
+      '@langchain/anthropic': 0.3.19(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)
+      '@langchain/google-genai': 0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(zod@3.24.4)
+      '@langchain/google-vertexai': 0.2.5(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))(encoding@0.1.13)(zod@3.24.4)
+      '@langchain/ollama': 0.2.0(@langchain/core@0.3.50(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)))
       axios: 1.9.0
       cheerio: 1.0.0
     transitivePeerDependencies:
@@ -22573,7 +22754,7 @@ snapshots:
       - openai
       - ws
 
-  langsmith@0.3.22(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)):
+  langsmith@0.3.22(openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)):
     dependencies:
       '@types/uuid': 10.0.0
       chalk: 4.1.2
@@ -22583,7 +22764,7 @@ snapshots:
       semver: 7.7.1
       uuid: 10.0.0
     optionalDependencies:
-      openai: 4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1)
+      openai: 4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4)
 
   launch-editor@2.9.1:
     dependencies:
@@ -23715,6 +23896,20 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  motion-dom@12.11.2:
+    dependencies:
+      motion-utils: 12.9.4
+
+  motion-utils@12.9.4: {}
+
+  motion@12.11.3(react-dom@19.0.0(react@19.0.0))(react@19.0.0):
+    dependencies:
+      framer-motion: 12.11.3(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      tslib: 2.8.1
+    optionalDependencies:
+      react: 19.0.0
+      react-dom: 19.0.0(react@19.0.0)
+
   mri@1.2.0: {}
 
   mrmime@1.0.1: {}
@@ -24010,7 +24205,7 @@ snapshots:
       is-docker: 2.2.1
       is-wsl: 2.2.0
 
-  openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.1):
+  openai@4.96.2(encoding@0.1.13)(ws@8.18.0)(zod@3.24.4):
     dependencies:
       '@types/node': 18.19.75
       '@types/node-fetch': 2.6.12
@@ -24021,7 +24216,7 @@ snapshots:
       node-fetch: 2.7.0(encoding@0.1.13)
     optionalDependencies:
       ws: 8.18.0
-      zod: 3.24.1
+      zod: 3.24.4
     transitivePeerDependencies:
       - encoding
 
@@ -26661,7 +26856,7 @@ snapshots:
 
   vaul@1.1.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0):
     dependencies:
-      '@radix-ui/react-dialog': 1.1.6(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      '@radix-ui/react-dialog': 1.1.13(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       react: 19.0.0
       react-dom: 19.0.0(react@19.0.0)
     transitivePeerDependencies:
@@ -27307,11 +27502,9 @@ snapshots:
 
   yoctocolors@2.1.1: {}
 
-  zod-to-json-schema@3.24.1(zod@3.24.1):
+  zod-to-json-schema@3.24.1(zod@3.24.4):
     dependencies:
-      zod: 3.24.1
-
-  zod@3.24.1: {}
+      zod: 3.24.4
 
   zod@3.24.4: {}
 

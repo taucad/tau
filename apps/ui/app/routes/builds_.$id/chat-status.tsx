@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import type { ClassValue } from 'clsx';
 import { cn } from '~/utils/ui.js';
 import { AnimatedShinyText } from '~/components/magicui/animated-shiny-text.js';
+import { HammerAnimation } from '~/components/hammer-animation.js';
 
 type ChatStatusProperties = {
   readonly status: ReturnType<typeof useChat>['status'];
@@ -11,7 +12,7 @@ type ChatStatusProperties = {
 };
 
 export const ChatStatus = memo(function ({ status, className }: ChatStatusProperties) {
-  const isVisible = status === 'streaming';
+  const isVisible = status === 'ready';
 
   return (
     <div className={cn(className)}>
@@ -24,7 +25,8 @@ export const ChatStatus = memo(function ({ status, className }: ChatStatusProper
             exit={{ opacity: 0, y: 20 }}
             transition={{ duration: 0.3 }}
           >
-            <div className="w-full bg-neutral/10 px-3 pt-2 pb-5">
+            <div className="flex w-full items-center gap-1.5 bg-neutral/10 px-3 pt-2 pb-5">
+              <HammerAnimation className="h-6 w-6" />
               <AnimatedShinyText>Generating...</AnimatedShinyText>
             </div>
           </motion.div>

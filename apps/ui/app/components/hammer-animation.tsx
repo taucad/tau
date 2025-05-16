@@ -18,7 +18,7 @@ export function HammerAnimation({ className }: { readonly className?: string }):
       setTimeout(() => {
         setIsHitting(false);
       }, 400);
-    }, 2000);
+    }, 1000);
 
     return () => {
       clearInterval(interval);

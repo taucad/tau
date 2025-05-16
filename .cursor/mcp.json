@@ -16,18 +16,22 @@
       ]
     },
     "@magicuidesign/mcp": {
+      "description": "Installing Magic UI Components",
       "command": "pnpx",
       "args": ["-y", "@magicuidesign/mcp@latest"]
     },
-    "shadcn": {
-      "description": "",
-      "type": "stdio",
+    "shadcn/animate-ui": {
+      "description": "Installing Animate UI Components",
       "command": "pnpx",
-      "args": [
-        "-y",
-        "shadcn@canary",
-        "registry:mcp"
-      ],
+      "args": ["-y", "shadcn@canary", "registry:mcp"],
+      "env": {
+        "REGISTRY_URL": "https://animate-ui.com/r/registry.json"
+      }
+    },
+    "shadcn": {
+      "description": "Installing Shadcn UI Components",
+      "command": "pnpx",
+      "args": ["-y", "shadcn@canary", "registry:mcp"],
       "env": {
         "REGISTRY_URL": "https://raw.githubusercontent.com/shadcn-ui/ui/refs/heads/main/apps/v4/registry.json"
       }

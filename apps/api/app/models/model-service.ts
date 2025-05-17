@@ -2,14 +2,40 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleInit } from '@nestjs/common';
 import ollama from 'ollama';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import type { ChatUsageCost, ChatUsageTokens } from '../chat/chat-schema.js';
-import type { ProviderId } from '../providers/provider-schema.js';
-import { ProviderService } from '../providers/provider-service.js';
-import type { Model, ModelSupport } from './model-schema.js';
+import type { ChatUsageCost, ChatUsageTokens } from '~/chat/chat-schema.js';
+import type { ProviderId } from '~/providers/provider-schema.js';
+import { ProviderService } from '~/providers/provider-service.js';
+import type { Model, ModelSupport } from '~/models/model-schema.js';
 
 type CloudProviderId = Exclude<ProviderId, 'ollama'>;
 
 const modelList: Record<CloudProviderId, Record<string, Model>> = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- snake case format is preferred here
+  google_vertexai: {
+    'gemini-2.5-pro': {
+      id: 'google-gemini-2.5-pro',
+      name: 'Gemini 2.5 Pro',
+      provider: 'google_vertexai',
+      model: 'gemini-2.5-pro-preview-05-06',
+      details: {
+        family: 'Gemini',
+        families: ['Gemini'],
+        contextWindow: 1_048_576,
+        maxTokens: 65_536,
+        cost: {
+          inputTokens: 1.25,
+          outputTokens: 10,
+          cachedReadTokens: 0,
+          cachedWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        temperature: 0,
+      },
+    },
+  },
+
   anthropic: {
     'claude-3.7-sonnet-thinking': {
       id: 'anthropic-claude-3.7-sonnet-thinking',
@@ -258,32 +284,6 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
           inputTokens: 2.5,
           outputTokens: 10,
           cachedReadTokens: 1.25,
-          cachedWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-    },
-  },
-
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- snake case format is preferred here
-  google_vertexai: {
-    'gemini-2.5-pro': {
-      id: 'google-gemini-2.5-pro',
-      name: 'Gemini 2.5 Pro',
-      provider: 'google_vertexai',
-      model: 'gemini-2.5-pro-exp-03-25',
-      details: {
-        family: 'Gemini',
-        families: ['Gemini'],
-        contextWindow: 1_048_576,
-        maxTokens: 65_536,
-        cost: {
-          inputTokens: 1.25,
-          outputTokens: 10,
-          cachedReadTokens: 0,
           cachedWriteTokens: 0,
         },
       },

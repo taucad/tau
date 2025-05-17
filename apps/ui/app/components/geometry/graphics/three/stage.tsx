@@ -51,7 +51,7 @@ export const defaultStageOptions = {
   perspective: {
     offsetRatio: 3,
     nearPlane: 1,
-    minimumFarPlane: 1_000_000,
+    minimumFarPlane: 10_000_000_000,
     farPlaneRadiusMultiplier: 5,
     zoomLevel: 1.25,
   },

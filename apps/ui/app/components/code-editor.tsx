@@ -50,8 +50,8 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:!bg-(--scrollbar-thumb)/80',
         // Apply scrollbar dimensions
         // !important is needed to override the `style` attribute set by Monaco
-        '[&_.monaco-scrollable-element_>_.scrollbar.vertical_>_.slider]:!w-[calc(var(--scrollbar-thickness)_-_var(--scrollbar-padding)_*_2)]',
-        '[&_.monaco-scrollable-element_>_.scrollbar.horizontal_>_.slider]:!h-[calc(var(--scrollbar-thickness)_-_var(--scrollbar-padding)_*_2)]',
+        '[&_.monaco-scrollable-element_>_.scrollbar.vertical_>_.slider]:!w-[calc((calc(var(--scrollbar-thickness)_-_var(--scrollbar-padding)_*_2)*2))]',
+        '[&_.monaco-scrollable-element_>_.scrollbar.horizontal_>_.slider]:!h-[calc((calc(var(--scrollbar-thickness)_-_var(--scrollbar-padding)_*_2))*2)]',
         // Apply rounded corners to scrollbar sliders
         '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:rounded-[calc(var(--scrollbar-thickness)_-_var(--scrollbar-padding)_*_2)]',
         // Ensure scrollbars don't overlap content
@@ -73,11 +73,11 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         scrollbar: {
           // Applying to ensure that other elements that use the scrollbar
           // dimensions are styled correctly.
-          // This is equivalent to `calc(var(--scrollbar-thickness) - var(--scrollbar-padding) * 2)`
-          verticalScrollbarSize: 7,
-          horizontalScrollbarSize: 7,
-          verticalSliderSize: 7,
-          horizontalSliderSize: 7,
+          // This is equivalent to `calc(var(--scrollbar-thickness) - var(--scrollbar-padding) * 2) * 2`
+          verticalScrollbarSize: 14,
+          horizontalScrollbarSize: 14,
+          verticalSliderSize: 14,
+          horizontalSliderSize: 14,
           // Ensure browser back and forward navigation scroll does not take effect,
           // as it causes janky editor behavior resulting in poor UX.
           alwaysConsumeMouseWheel: true,

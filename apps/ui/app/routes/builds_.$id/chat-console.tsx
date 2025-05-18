@@ -252,6 +252,7 @@ export const ChatConsole = memo(function ({
           </TooltipContent>
         </Tooltip>
         <Input
+          autoComplete="off"
           className="h-6 w-full group-data-[view=tabs]/console:h-8"
           placeholder="Filter..."
           value={filter}

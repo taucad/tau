@@ -71,6 +71,7 @@ export function ChatParametersInputNumber({
       ) : null}
       <Input
         ref={inputRef}
+        autoComplete="off"
         type="number"
         value={value}
         className={cn(

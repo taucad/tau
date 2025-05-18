@@ -119,6 +119,7 @@ export function BuildActionDropdown({
           <form className="flex items-center gap-2 align-middle" onSubmit={handleRename}>
             <Input
               autoFocus
+              autoComplete="off"
               value={newName}
               className="h-8"
               onChange={(event) => {

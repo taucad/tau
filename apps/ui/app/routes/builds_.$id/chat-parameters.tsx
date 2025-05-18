@@ -235,6 +235,7 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
       // For string values, render a text input
       return (
         <Input
+          autoComplete="off"
           type="text"
           value={String(value)}
           className="h-6 w-12 bg-background p-1"
@@ -252,6 +253,7 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
       <div className="mb-2 flex flex-col">
         <div className="relative mb-3">
           <Input
+            autoComplete="off"
             type="text"
             placeholder="Search parameters..."
             value={searchTerm}

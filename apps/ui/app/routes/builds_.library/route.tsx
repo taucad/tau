@@ -363,6 +363,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
         <div className="relative flex-grow">
           <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
+            autoComplete="off"
             className="h-8 pl-10"
             placeholder="Search builds..."
             value={globalFilter}
@@ -704,6 +705,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
               <form className="flex items-center gap-2 align-middle" onSubmit={handleRename}>
                 <Input
                   autoFocus
+                  autoComplete="off"
                   value={name}
                   className="h-8"
                   onChange={(event) => {

@@ -13,6 +13,17 @@ function Input({ className, type, ...properties }: React.ComponentProps<'input'>
         type === 'number' && ['[&::-webkit-inner-spin-button]:appearance-none'],
         className,
       )}
+      {...(properties.autoComplete === 'off'
+        ? /* Disable auto-complete on password managers */
+          {
+            // 1Password
+            /* autoComplete: 'off' - Already passed through, documented for completeness  */
+            // LastPass
+            'data-lpignore': 'true',
+            // Dashlane
+            'data-form-type': 'other',
+          }
+        : {})}
       {...properties}
     />
   );

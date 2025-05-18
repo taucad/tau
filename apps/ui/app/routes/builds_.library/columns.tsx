@@ -59,6 +59,7 @@ function BuildNameCell({ build, actions }: { readonly build: Build; readonly act
             <form className="flex items-center gap-2 align-middle" onSubmit={handleRename}>
               <Input
                 autoFocus
+                autoComplete="off"
                 value={name}
                 className="h-8"
                 onChange={(event) => {

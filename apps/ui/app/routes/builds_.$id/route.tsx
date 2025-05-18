@@ -82,6 +82,7 @@ function BuildNameEditor() {
         <form className="flex items-center gap-2 align-middle" onSubmit={handleSubmit}>
           <Input
             autoFocus
+            autoComplete="off"
             value={name}
             className="h-8"
             onChange={(event) => {

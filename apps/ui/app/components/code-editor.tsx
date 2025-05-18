@@ -48,12 +48,8 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         // Existing scrollbar styles
         '[&_.monaco-scrollable-element_>_.scrollbar]:!bg-(--scrollbar-track)',
         '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:!bg-(--scrollbar-thumb)/80',
-        // Apply scrollbar dimensions
-        // !important is needed to override the `style` attribute set by Monaco
-        '[&_.monaco-scrollable-element_>_.scrollbar.vertical_>_.slider]:!w-[calc((calc(var(--scrollbar-thickness)_-_var(--scrollbar-padding)_*_2)*2))]',
-        '[&_.monaco-scrollable-element_>_.scrollbar.horizontal_>_.slider]:!h-[calc((calc(var(--scrollbar-thickness)_-_var(--scrollbar-padding)_*_2))*2)]',
         // Apply rounded corners to scrollbar sliders
-        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:rounded-[calc(var(--scrollbar-thickness)_-_var(--scrollbar-padding)_*_2)]',
+        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:rounded-[4px]',
         // Ensure scrollbars don't overlap content
         '[&_.monaco-scrollable-element]:overflow-hidden',
         className,
@@ -79,7 +75,6 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         scrollbar: {
           // Applying to ensure that other elements that use the scrollbar
           // dimensions are styled correctly.
-          // This is equivalent to `calc(var(--scrollbar-thickness) - var(--scrollbar-padding) * 2) * 2`
           verticalScrollbarSize: 14,
           horizontalScrollbarSize: 14,
           verticalSliderSize: 14,

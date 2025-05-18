@@ -1,9 +1,9 @@
 import { useRef, useCallback } from 'react';
 import type { JSX } from 'react';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
-import { ChatConsole } from './chat-console.js';
-import { ChatEditor } from './chat-editor.js';
-import { ChatViewer } from './chat-viewer.js';
+import { ChatConsole } from '~/routes/builds_.$id/chat-console.js';
+import { ChatEditor } from '~/routes/builds_.$id/chat-editor.js';
+import { ChatViewer } from '~/routes/builds_.$id/chat-viewer.js';
 import type { KeyCombination } from '~/utils/keys.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import { useKeydown } from '~/hooks/use-keydown.js';

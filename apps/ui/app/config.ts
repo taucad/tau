@@ -14,7 +14,7 @@ const environmentSchema = z.object({
   /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
 });
 
-export const getEnvironment = async () => {
+export const getEnvironment = async (): Promise<Environment> => {
   const result = environmentSchema.safeParse(process.env);
 
   if (!result.success) {

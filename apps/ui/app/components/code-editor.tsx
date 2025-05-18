@@ -1,11 +1,14 @@
 import { Editor, useMonaco } from '@monaco-editor/react';
 import type { EditorProps } from '@monaco-editor/react';
 import { Theme, useTheme } from 'remix-themes';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { JSX } from 'react';
 import { shikiToMonaco } from '@shikijs/monaco';
 import { createHighlighter } from 'shiki';
+import { registerCompletion } from 'monacopilot';
+import type { CompletionRegistration, Monaco, StandaloneCodeEditor } from 'monacopilot';
 import { cn } from '~/utils/ui.js';
+import { ENV } from '~/config.js';
 
 // Create the highlighter, it can be reused
 const highlighter = await createHighlighter({
@@ -25,6 +28,22 @@ type CodeEditorProperties = EditorProps & {
 
 export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.Element {
   const [theme] = useTheme();
+  const completionRef = useRef<CompletionRegistration | undefined>(null);
+
+  const handleMount = useCallback((editor: StandaloneCodeEditor, monaco: Monaco) => {
+    console.log('handleMount', editor, monaco);
+    completionRef.current = registerCompletion(monaco, editor, {
+      endpoint: `${ENV.TAU_API_URL}/v1/code-completion`,
+      language: 'typescript',
+      trigger: 'onTyping',
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      completionRef.current?.deregister();
+    };
+  }, []);
 
   const monaco = useMonaco();
 
@@ -84,6 +103,7 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
           alwaysConsumeMouseWheel: true,
         },
       }}
+      onMount={handleMount}
       {...rest}
     />
   );

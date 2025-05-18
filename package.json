@@ -55,6 +55,7 @@
     "@shikijs/monaco": "^3.4.0",
     "@tanstack/react-query": "4",
     "@tanstack/react-table": "^8.21.3",
+    "@xstate/react": "^5.0.4",
     "ai": "^4.2.10",
     "autoprefixer": "10.4.20",
     "axios": "^1.7.9",
@@ -72,6 +73,7 @@
     "langchain": "^0.3.24",
     "lucide-react": "^0.475.0",
     "monaco-editor": "^0.52.2",
+    "monacopilot": "^1.1.23",
     "motion": "^12.11.3",
     "ollama": "^0.5.12",
     "openai": "^4.82.0",
@@ -98,6 +100,7 @@
     "three-viewport-gizmo": "git://github.com/opensrchq/three-viewport-gizmo#8121c24a01bfcda01dfce58b369fcc74ecdef271",
     "uint8array-extras": "^1.4.0",
     "vaul": "^1.1.2",
+    "xstate": "^5.19.3",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -167,6 +170,12 @@
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "#comment": "Override use-sync-external-store to fix react-router issue https://github.com/remix-run/react-router/issues/12841",
+  "pnpm": {
+    "overrides": {
+      "use-sync-external-store": "1.5.0"
+    }
   },
   "packageManager": "pnpm@10.10.0+sha512.d615db246fe70f25dcfea6d8d73dee782ce23e2245e3c4f6f888249fb568149318637dca73c2c5c8ef2a4ca0d5657fb9567188bfab47f566d1ee6ce987815c39"
 }

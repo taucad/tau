@@ -1,7 +1,8 @@
 import type { JSX, ReactNode } from 'react';
 import { createContext, useContext, useReducer, useEffect, useMemo, useCallback } from 'react';
 import { useKernel } from '~/components/geometry/kernel/kernel-context.js';
-import { useConsole } from '~/hooks/use-console.js';
+import { useLogs } from '~/hooks/use-console.js';
+import type { Shape } from '~/types/cad.js';
 
 // Combine related state
 type CadState = {
@@ -11,12 +12,7 @@ type CadState = {
   error?: string;
   isComputing: boolean;
   isBuffering: boolean;
-  mesh?: {
-    edges: unknown;
-    faces: unknown;
-    color?: string;
-    opacity?: number;
-  };
+  shapes: Shape[];
 };
 
 type CadAction =
@@ -24,7 +20,7 @@ type CadAction =
   | { type: 'SET_PARAMETERS'; payload: Record<string, unknown> }
   | { type: 'SET_DEFAULT_PARAMETERS'; payload: Record<string, unknown> }
   | { type: 'SET_STATUS'; payload: { error?: string; isComputing?: boolean; isBuffering?: boolean } }
-  | { type: 'SET_MESH'; payload: CadState['mesh'] };
+  | { type: 'SET_SHAPES'; payload: CadState['shapes'] };
 
 const initialState: CadState = {
   code: '',
@@ -32,7 +28,7 @@ const initialState: CadState = {
   defaultParameters: undefined,
   isComputing: false,
   isBuffering: false,
-  mesh: undefined,
+  shapes: [],
 };
 
 function cadReducer(state: CadState, action: CadAction): CadState {
@@ -53,14 +49,14 @@ function cadReducer(state: CadState, action: CadAction): CadState {
       return { ...state, ...action.payload };
     }
 
-    case 'SET_MESH': {
-      return { ...state, mesh: action.payload };
+    case 'SET_SHAPES': {
+      return { ...state, shapes: action.payload };
     }
   }
 }
 
 type CadContextProperties = {
-  mesh: { edges: unknown; faces: unknown; color?: string } | undefined;
+  shapes: Shape[];
   status: {
     isComputing: boolean;
     isBuffering: boolean;
@@ -77,7 +73,7 @@ const CadContext = createContext<CadContextProperties | undefined>(undefined);
 export function CadProvider({ children }: { readonly children: ReactNode }): JSX.Element {
   const [state, dispatch] = useReducer(cadReducer, initialState);
   const kernel = useKernel();
-  const { log } = useConsole({ defaultOrigin: { component: 'CAD' } });
+  const { log } = useLogs({ defaultOrigin: { component: 'CAD' } });
 
   // Memoize the evaluation function
   const evaluateCode = useCallback(
@@ -118,36 +114,27 @@ export function CadProvider({ children }: { readonly children: ReactNode }): JSX
           throw new Error(result.message);
         }
 
-        const firstShape = result[0];
-
-        if (!firstShape) {
+        console.log({ result });
+        if (!result) {
           // Gracefully handle the case where no shape is generated
           dispatch({
-            type: 'SET_MESH',
-            payload: {},
+            type: 'SET_SHAPES',
+            payload: [],
           });
           return;
         }
 
-        if (firstShape.error) {
-          log.error('Failed to build shape', { data: firstShape?.error });
-          dispatch({
-            type: 'SET_MESH',
-            payload: {},
-          });
-          throw new Error(firstShape?.error ?? 'Failed to generate shape');
+        const shapesWithoutErrors = result.filter((shape) => !shape.error);
+
+        if (shapesWithoutErrors.length === 0) {
+          throw new Error(result.map((shape) => shape.error).join(', '));
         }
 
         const processingStartTime = performance.now();
         log.debug('Built shape');
         dispatch({
-          type: 'SET_MESH',
-          payload: {
-            faces: firstShape.mesh,
-            edges: firstShape.edges,
-            color: firstShape.color,
-            opacity: firstShape.opacity,
-          },
+          type: 'SET_SHAPES',
+          payload: shapesWithoutErrors,
         });
         const processingEndTime = performance.now();
         log.debug(`Mesh processing and dispatch took ${processingEndTime - processingStartTime}ms`);
@@ -184,7 +171,7 @@ export function CadProvider({ children }: { readonly children: ReactNode }): JSX
 
   const value = useMemo(
     () => ({
-      mesh: state.mesh,
+      shapes: state.shapes,
       status: {
         isComputing: state.isComputing,
         isBuffering: state.isBuffering,
@@ -206,7 +193,7 @@ export function CadProvider({ children }: { readonly children: ReactNode }): JSX
       },
       defaultParameters: state.defaultParameters ?? {},
     }),
-    [state.mesh, state.isComputing, state.isBuffering, state.error, state.defaultParameters, kernel],
+    [state.shapes, state.isComputing, state.isBuffering, state.error, state.defaultParameters, kernel],
   );
 
   return <CadContext.Provider value={value}>{children}</CadContext.Provider>;

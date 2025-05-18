@@ -1,18 +1,11 @@
-import React, { createContext, useCallback, useContext, useRef, useMemo, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useRef, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
-import type { BuilderWorkerInterface } from './replicad/replicad-builder.worker';
-import BuilderWorker from './replicad/replicad-builder.worker?worker';
-import { useConsole } from '~/hooks/use-console.js';
-
-export type Shape = {
-  mesh: unknown;
-  edges: unknown;
-  error?: string;
-  color?: string;
-  opacity?: number;
-};
+import type { BuilderWorkerInterface } from '~/components/geometry/kernel/replicad/replicad-builder.worker.js';
+import BuilderWorker from '~/components/geometry/kernel/replicad/replicad-builder.worker.js?worker';
+import { useLogs } from '~/hooks/use-console.js';
+import type { Shape } from '~/types/cad.js';
 
 export type BuildShapesResult = Shape[] | { error: true; message: string };
 export type ExportFormat = 'stl' | 'stl-binary' | 'step' | 'step-assembly';
@@ -43,7 +36,7 @@ export function KernelProvider({
   readonly children: ReactNode;
   readonly withExceptions?: boolean;
 }): React.JSX.Element {
-  const { log } = useConsole({ defaultOrigin: { component: 'Kernel' } });
+  const { log } = useLogs({ defaultOrigin: { component: 'Kernel' } });
   const wrappedWorkerReference = useRef<Remote<BuilderWorkerInterface> | undefined>(undefined);
   const workerReference = useRef<Worker | undefined>(undefined);
   const workerInitializationId = useRef<number>(0);
@@ -165,7 +158,9 @@ export function KernelProvider({
         return { error: true, message: 'Worker initialization failed' };
       }
 
-      return worker.buildShapesFromCode(code, parameters) as BuildShapesResult;
+      const shapes = await worker.buildShapesFromCode(code, parameters);
+
+      return shapes as BuildShapesResult;
     },
     [getOrInitWorker],
   );

@@ -16,12 +16,12 @@ import { GridSizeIndicator } from '~/components/geometry/cad/grid-control.js';
 import { ResetCameraControl } from '~/components/geometry/cad/reset-camera-control.js';
 
 export function CadStudio(): JSX.Element {
-  const { status, downloadStl, mesh } = useCad();
+  const { status, downloadStl, shapes } = useCad();
   const { updateThumbnail, build } = useBuild();
   const { screenshot } = useGraphics();
 
-  // Add refs to track mesh and update state
-  const lastMeshRef = useRef(mesh);
+  // Add refs to track shapes and update state
+  const lastShapesRef = useRef(shapes);
   const lastBuildIdRef = useRef(build ? build.id : undefined);
 
   const downloadPng = async () => {
@@ -41,7 +41,7 @@ export function CadStudio(): JSX.Element {
   };
 
   const updateThumbnailScreenshot = useCallback(() => {
-    if (mesh && screenshot.isReady && !status.isComputing) {
+    if (shapes.length > 0 && screenshot.isReady && !status.isComputing) {
       const timeout = setTimeout(() => {
         try {
           const dataUrl = screenshot.capture({
@@ -56,7 +56,7 @@ export function CadStudio(): JSX.Element {
           console.log('Thumbnail updated successfully');
 
           // Update refs after successful update
-          lastMeshRef.current = mesh;
+          lastShapesRef.current = shapes;
           lastBuildIdRef.current = build ? build.id : undefined;
         } catch (error) {
           console.error('Error updating thumbnail:', error);
@@ -67,29 +67,35 @@ export function CadStudio(): JSX.Element {
       };
     }
 
-    throw new Error('Mesh or screenshot is not ready');
-  }, [mesh, screenshot, status.isComputing, updateThumbnail, build]);
+    throw new Error('Shapes or screenshot is not ready');
+  }, [shapes, screenshot, status.isComputing, updateThumbnail, build]);
 
   const handleUpdateThumbnail = useCallback(() => {
     updateThumbnailScreenshot();
     toast.success('Thumbnail updated');
   }, [updateThumbnailScreenshot]);
 
-  // Modified effect to only update when mesh or build changes
+  // Modified effect to only update when shapes or build changes
   useEffect(() => {
-    // Only trigger update when mesh changes (not just rendering state)
-    const meshChanged = mesh !== lastMeshRef.current;
+    // Only trigger update when shapes changes (not just rendering state)
+    const shapesChanged = shapes !== lastShapesRef.current;
     const buildIdChanged = build && build.id !== lastBuildIdRef.current;
 
-    if ((meshChanged || buildIdChanged) && mesh && screenshot.isReady && !status.isComputing) {
-      console.log('Updating thumbnail - mesh or build changed');
+    if ((shapesChanged || buildIdChanged) && shapes && screenshot.isReady && !status.isComputing) {
+      console.log('Updating thumbnail - shapes or build changed');
       updateThumbnailScreenshot();
     }
-  }, [mesh, build, screenshot.isReady, status.isComputing, updateThumbnailScreenshot]);
+  }, [shapes, build, screenshot.isReady, status.isComputing, updateThumbnailScreenshot]);
 
   useEffect(() => {
     // Check if build exists, has no thumbnail, and screenshot capability is ready
-    if (build && (!build.thumbnail || build.thumbnail === '') && screenshot.isReady && mesh && !status.isComputing) {
+    if (
+      build &&
+      (!build.thumbnail || build.thumbnail === '') &&
+      screenshot.isReady &&
+      shapes.length > 0 &&
+      !status.isComputing
+    ) {
       // Automatically set the thumbnail
       try {
         updateThumbnailScreenshot();
@@ -97,7 +103,7 @@ export function CadStudio(): JSX.Element {
         console.error('Failed to auto-generate thumbnail:', error);
       }
     }
-  }, [build, screenshot.isReady, mesh, status.isComputing, updateThumbnailScreenshot]);
+  }, [build, screenshot.isReady, shapes, status.isComputing, updateThumbnailScreenshot]);
 
   const copyToClipboard = useCallback(async () => {
     try {
@@ -131,9 +137,9 @@ export function CadStudio(): JSX.Element {
   return (
     <>
       <div className="relative size-full">
-        <CadViewer enableGizmo enableGrid enableZoom enableAxesHelper mesh={mesh} zoomLevel={1.25} />
-        {/* Loading state, only show when mesh is loaded and computing */}
-        {mesh && (status.isComputing || status.isBuffering) ? (
+        <CadViewer enableGizmo enableGrid enableZoom enableAxesHelper shapes={shapes} zoomLevel={1.25} />
+        {/* Loading state, only show when shapes is loaded and computing */}
+        {shapes.length > 0 && (status.isComputing || status.isBuffering) ? (
           <div className="absolute top-[90%] left-[50%] -translate-x-[50%] -translate-y-[90%]">
             <div className="border-neutral-200 m-auto flex items-center gap-2 rounded-md border bg-background/70 p-2 backdrop-blur-sm">
               <span className="font-mono text-sm text-muted-foreground">
@@ -223,10 +229,10 @@ export function CadStudio(): JSX.Element {
           getBlob={downloadStl}
           title={`${build?.name}.stl`}
           className="group text-muted-foreground"
-          disabled={!mesh}
+          disabled={shapes.length === 0}
           tooltip="Download STL"
         >
-          {mesh ? <BoxDown /> : <LoaderPinwheel className="animate-spin ease-in-out" />}
+          {shapes.length > 0 ? <BoxDown /> : <LoaderPinwheel className="animate-spin ease-in-out" />}
         </DownloadButton>
       </div>
     </>

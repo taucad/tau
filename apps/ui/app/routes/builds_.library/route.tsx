@@ -623,7 +623,7 @@ type BuildLibraryCardProps = {
 };
 
 function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibraryCardProps) {
-  const { setCode, setParameters, mesh } = useCad();
+  const { setCode, setParameters, shapes } = useCad();
   const code = build.assets.mechanical?.files[build.assets.mechanical?.main]?.content;
   const parameters = build.assets.mechanical?.parameters;
   const [showPreview, setShowPreview] = useState(false);
@@ -677,7 +677,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
               event.preventDefault();
             }}
           >
-            <CadViewer mesh={mesh} className="bg-muted" zoomLevel={1.8} />
+            <CadViewer shapes={shapes} className="bg-muted" zoomLevel={1.8} />
           </div>
         ) : null}
         <Button

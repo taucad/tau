@@ -95,7 +95,7 @@ function ProjectCard({
   const [showPreview, setShowPreview] = useState(true);
   const [isVisible, setIsVisible] = useState(false);
   const cardReference = useRef<HTMLDivElement>(null);
-  const { setCode, mesh } = useCad();
+  const { setCode, shapes } = useCad();
   const navigate = useNavigate();
   const LanguageIcon = Object.values(assets)
     .map((asset) => asset.language)
@@ -179,7 +179,7 @@ function ProjectCard({
         )}
         {replicadCode && showPreview ? (
           <div className="absolute inset-0">
-            <CadViewer mesh={mesh} className="bg-muted" zoomLevel={1.8} />
+            <CadViewer shapes={shapes} className="bg-muted" zoomLevel={1.8} />
           </div>
         ) : null}
         {replicadCode ? (

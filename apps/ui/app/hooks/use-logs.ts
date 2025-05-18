@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
-import { useLogContext } from '~/hooks/use-logs.js';
-import type { LogLevel, LogOptions, LogOrigin } from '~/types/console.js';
+import type { LogOptions, LogOrigin, LogEntry } from '~/types/console.js';
 import { logLevels } from '~/types/console.js';
+import { logActor } from '~/machines/logs.js';
 
 /**
  * Options for the useConsole hook
@@ -16,10 +16,26 @@ type UseConsoleOptions = {
 /**
  * A hook that provides console logging functionality
  */
-export const useConsole = (options: UseConsoleOptions = {}) => {
-  const { logs, addLog, addLogs, clearLogs, filterLogs, setLogs } = useLogContext();
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- useing type inference
+export function useLogs(options: UseConsoleOptions = {}) {
   const { defaultOrigin } = options;
 
+  // Function to send events to the actor
+  const addLog = useCallback((message: string, options?: LogOptions) => {
+    logActor.send({ type: 'addLog', message, options });
+  }, []);
+
+  const addLogs = useCallback((entries: Array<{ message: string; options?: LogOptions }>) => {
+    logActor.send({ type: 'addLogs', entries });
+  }, []);
+
+  const clear = useCallback(() => {
+    logActor.send({ type: 'clearLogs' });
+  }, []);
+
+  const setLogs = useCallback((logs: LogEntry[]) => {
+    logActor.send({ type: 'setLogs', logs });
+  }, []);
   // Log messages with ERROR level
   const error = useCallback(
     (message: string, options?: Omit<LogOptions, 'level'>) => {
@@ -80,35 +96,8 @@ export const useConsole = (options: UseConsoleOptions = {}) => {
     [addLog, defaultOrigin],
   );
 
-  // Get logs filtered by level
-  const getLogsByLevel = useCallback(
-    (level: LogLevel) => {
-      return filterLogs((log) => log.level === level);
-    },
-    [filterLogs],
-  );
-
-  // Get logs filtered by origin component
-  const getLogsByComponent = useCallback(
-    (component: string) => {
-      return filterLogs((log) => log.origin?.component === component);
-    },
-    [filterLogs],
-  );
-
-  // Get logs filtered by origin operation
-  const getLogsByOperation = useCallback(
-    (operation: string) => {
-      return filterLogs((log) => log.origin?.operation === operation);
-    },
-    [filterLogs],
-  );
-
   return useMemo(
     () => ({
-      // Access to all logs
-      logs,
-
       log: {
         // Log level specific methods
         error,
@@ -128,29 +117,8 @@ export const useConsole = (options: UseConsoleOptions = {}) => {
       setLogs,
 
       // Clear all logs
-      clear: clearLogs,
-
-      // Filtering methods
-      getLogsByLevel,
-      getLogsByComponent,
-      getLogsByOperation,
-      filterLogs,
+      clear,
     }),
-    [
-      logs,
-      error,
-      warn,
-      info,
-      debug,
-      trace,
-      addLog,
-      addLogs,
-      setLogs,
-      clearLogs,
-      getLogsByLevel,
-      getLogsByComponent,
-      getLogsByOperation,
-      filterLogs,
-    ],
+    [error, warn, info, debug, trace, addLog, addLogs, setLogs, clear],
   );
-};
+}

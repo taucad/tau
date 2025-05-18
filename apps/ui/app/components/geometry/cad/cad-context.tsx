@@ -1,7 +1,7 @@
 import type { JSX, ReactNode } from 'react';
 import { createContext, useContext, useReducer, useEffect, useMemo, useCallback } from 'react';
 import { useKernel } from '~/components/geometry/kernel/kernel-context.js';
-import { useLogs } from '~/hooks/use-console.js';
+import { useLogs } from '~/hooks/use-logs.js';
 import type { Shape } from '~/types/cad.js';
 
 // Combine related state

@@ -12,7 +12,6 @@ import { BuildProvider, useBuild } from '~/hooks/use-build.js';
 import { Button } from '~/components/ui/button.js';
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
 import { Input } from '~/components/ui/input.js';
-import { LogProvider } from '~/hooks/use-logs.js';
 import { defaultBuildName } from '~/constants/build-names.js';
 import type { Handle } from '~/types/matches.js';
 import { useChatConstants } from '~/utils/chat.js';
@@ -197,18 +196,16 @@ export default function ChatRoute(): JSX.Element {
   }
 
   return (
-    <LogProvider>
-      <BuildProvider buildId={id}>
-        <KernelProvider>
-          <CadProvider>
-            <AiChatProvider value={{ ...useChatConstants, id }}>
-              <GraphicsProvider defaultCameraAngle={60}>
-                <Chat />
-              </GraphicsProvider>
-            </AiChatProvider>
-          </CadProvider>
-        </KernelProvider>
-      </BuildProvider>
-    </LogProvider>
+    <BuildProvider buildId={id}>
+      <KernelProvider>
+        <CadProvider>
+          <AiChatProvider value={{ ...useChatConstants, id }}>
+            <GraphicsProvider defaultCameraAngle={60}>
+              <Chat />
+            </GraphicsProvider>
+          </AiChatProvider>
+        </CadProvider>
+      </KernelProvider>
+    </BuildProvider>
   );
 }

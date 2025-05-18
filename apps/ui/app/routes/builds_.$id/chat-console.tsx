@@ -1,12 +1,13 @@
 import { ChevronUp, Filter, Settings, Trash } from 'lucide-react';
 import { useState, useCallback, memo } from 'react';
-import { collapsedConsoleSize } from './chat-view-split.js';
+import { useSelector } from '@xstate/react';
+import { collapsedConsoleSize } from '~/routes/builds_.$id/chat-view-split.js';
 import { Button } from '~/components/ui/button.js';
 import { Input } from '~/components/ui/input.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import { cn } from '~/utils/ui.js';
-import { useConsole } from '~/hooks/use-console.js';
+import { useLogs } from '~/hooks/use-logs.js';
 import type { LogLevel, LogOrigin } from '~/types/console.js';
 import { logLevels } from '~/types/console.js';
 import { Badge } from '~/components/ui/badge.js';
@@ -19,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from '~/components/ui/dropdown-menu.js';
 import { useCookie } from '~/hooks/use-cookie.js';
+import { logActor } from '~/machines/logs.js';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   readonly onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -144,12 +146,31 @@ export const ChatConsole = memo(function ({
   className,
   ...properties
 }: ChatConsoleProperties) {
-  const log = useConsole({ defaultOrigin: { component: 'ChatConsole' } });
+  const log = useLogs({ defaultOrigin: { component: 'ChatConsole' } });
   const [filter, setFilter] = useState('');
 
   // Cookie-persisted state for log levels
   const [enabledLevels, setEnabledLevels] = useCookie(consoleLogLevelsCookieName, defaultLogLevels);
   const [displayConfig, setDisplayConfig] = useCookie(consoleDisplayConfigCookieName, defaultDisplayConfig);
+
+  // Filter logs based on search text and verbosity levels
+  const filteredLogs = useSelector(logActor, (state) => {
+    const { logs } = state.context;
+
+    return logs.filter((log) => {
+      // Check if log level is enabled
+      if (!enabledLevels[log.level]) {
+        return false;
+      }
+
+      // If there's a text filter, check if the message contains it
+      if (filter && !log.message.toLowerCase().includes(filter.toLowerCase())) {
+        return false;
+      }
+
+      return true;
+    });
+  });
 
   // Handle filter changes
   const handleFilterChange = useCallback(
@@ -188,21 +209,6 @@ export const ChatConsole = memo(function ({
     },
     [setDisplayConfig],
   );
-
-  // Filter logs based on search text and verbosity levels
-  const filteredLogs = log.filterLogs((log) => {
-    // Check if log level is enabled
-    if (!enabledLevels[log.level]) {
-      return false;
-    }
-
-    // If there's a text filter, check if the message contains it
-    if (filter && !log.message.toLowerCase().includes(filter.toLowerCase())) {
-      return false;
-    }
-
-    return true;
-  });
 
   return (
     <div

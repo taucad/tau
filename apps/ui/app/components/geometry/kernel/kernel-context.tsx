@@ -4,7 +4,7 @@ import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import type { BuilderWorkerInterface } from '~/components/geometry/kernel/replicad/replicad-builder.worker.js';
 import BuilderWorker from '~/components/geometry/kernel/replicad/replicad-builder.worker.js?worker';
-import { useLogs } from '~/hooks/use-console.js';
+import { useLogs } from '~/hooks/use-logs.js';
 import type { Shape } from '~/types/cad.js';
 
 export type BuildShapesResult = Shape[] | { error: true; message: string };

@@ -7,7 +7,7 @@ import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.
 import '~/routes/builds_.$id/chat-config.js';
 import { useBuild } from '~/hooks/use-build.js';
 import { CodeEditor } from '~/components/code-editor.js';
-import { useConsole } from '~/hooks/use-console.js';
+import { useLogs } from '~/hooks/use-logs.js';
 import { cn } from '~/utils/ui.js';
 import { CopyButton } from '~/components/copy-button.js';
 import { DownloadButton } from '~/components/download-button.js';
@@ -21,7 +21,7 @@ export const ChatEditor = memo(function ({
   readonly debounceTime?: number;
 }) {
   const { setCode, code, isLoading } = useBuild();
-  const { log } = useConsole({ defaultOrigin: { component: 'Editor' } });
+  const { log } = useLogs({ defaultOrigin: { component: 'Editor' } });
 
   const monaco = useMonaco();
 

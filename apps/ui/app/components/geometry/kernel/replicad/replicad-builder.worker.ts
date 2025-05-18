@@ -2,10 +2,13 @@ import { expose } from 'comlink';
 import * as replicad from 'replicad';
 import type { OpenCascadeInstance as OpenCascadeInstanceWithExceptions } from 'replicad-opencascadejs/src/replicad_with_exceptions.js';
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
-import { initOpenCascade, initOpenCascadeWithExceptions } from './init-open-cascade.js';
-import { StudioHelper } from './utils/studio-helper.js';
-import { runInContext, buildModuleEvaluator } from './vm.js';
-import { renderOutput, ShapeStandardizer } from './utils/render-output.js';
+import {
+  initOpenCascade,
+  initOpenCascadeWithExceptions,
+} from '~/components/geometry/kernel/replicad/init-open-cascade.js';
+import { StudioHelper } from '~/components/geometry/kernel/replicad/utils/studio-helper.js';
+import { runInContext, buildModuleEvaluator } from '~/components/geometry/kernel/replicad/vm.js';
+import { renderOutput, ShapeStandardizer } from '~/components/geometry/kernel/replicad/utils/render-output.js';
 
 // Track whether we've already set OC in replicad to avoid repeated calls
 let replicadHasOc = false;
@@ -19,7 +22,7 @@ let replicadHasOc = false;
  * @param context
  * @returns the result of the code
  */
-export function runInContextAsOc(code: string, context: Record<string, unknown> = {}): unknown {
+function runInContextAsOc(code: string, context: Record<string, unknown> = {}): unknown {
   const editedText = `
 ${code}
 let dp = {}

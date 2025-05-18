@@ -71,6 +71,10 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         fixedOverflowWidgets: true,
         // Enable smooth cursor animation when typing and keying left/right/up/down
         cursorSmoothCaretAnimation: 'on',
+        // Disable the sticky scrolling which displays the parent closure at the top of the editor for better performance.
+        stickyScroll: {
+          enabled: false,
+        },
         // Custom scrollbar styling to match global scrollbar styles
         scrollbar: {
           // Applying to ensure that other elements that use the scrollbar

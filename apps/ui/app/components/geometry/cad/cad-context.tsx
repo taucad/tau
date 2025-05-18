@@ -114,7 +114,6 @@ export function CadProvider({ children }: { readonly children: ReactNode }): JSX
           throw new Error(result.message);
         }
 
-        console.log({ result });
         if (!result) {
           // Gracefully handle the case where no shape is generated
           dispatch({

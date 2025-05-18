@@ -69,6 +69,8 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         wordWrap: 'on',
         // Ensure widgets like intellisense can appear above nearby elements
         fixedOverflowWidgets: true,
+        // Enable smooth cursor animation when typing and keying left/right/up/down
+        cursorSmoothCaretAnimation: 'on',
         // Custom scrollbar styling to match global scrollbar styles
         scrollbar: {
           // Applying to ensure that other elements that use the scrollbar

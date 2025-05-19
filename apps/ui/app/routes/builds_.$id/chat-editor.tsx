@@ -1,29 +1,27 @@
 import { LoaderPinwheel } from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo } from 'react';
+import { memo, useCallback, useEffect } from 'react';
+import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
+import { useSelector } from '@xstate/react';
 // eslint-disable-next-line no-restricted-imports -- replicad types are not in the monorepo
 import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
 // eslint-disable-next-line import-x/no-unassigned-import -- setting up the Monaco editor web workers
 import '~/routes/builds_.$id/chat-config.js';
-import { useBuild } from '~/hooks/use-build.js';
 import { CodeEditor } from '~/components/code-editor.js';
-import { useLogs } from '~/hooks/use-logs.js';
 import { cn } from '~/utils/ui.js';
 import { CopyButton } from '~/components/copy-button.js';
 import { DownloadButton } from '~/components/download-button.js';
-import { debounce } from '~/utils/function.js';
+import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 
-export const ChatEditor = memo(function ({
-  className,
-  debounceTime = 300,
-}: {
-  readonly className?: string;
-  readonly debounceTime?: number;
-}) {
-  const { setCode, code, isLoading } = useBuild();
-  const { log } = useLogs({ defaultOrigin: { component: 'Editor' } });
-
+export const ChatEditor = memo(function ({ className }: { readonly className?: string }) {
   const monaco = useMonaco();
+  const code = useSelector(cadActor, (state) => state.context.code);
+
+  const handleCodeChange = useCallback((value: ComponentProps<typeof CodeEditor>['value']) => {
+    if (value) {
+      cadActor.send({ type: 'setCode', code: value });
+    }
+  }, []);
 
   useEffect(() => {
     if (monaco) {
@@ -45,40 +43,26 @@ export const ChatEditor = memo(function ({
     }
   }, [monaco]);
 
-  const handleCodeChange = useCallback(
-    (value?: string) => {
-      if (value) {
-        log.debug('Code changed, preparing to debounce');
-        void debouncedSetCode(value);
-      }
-    },
-    [setCode],
-  );
-
-  const debouncedSetCode = useMemo(
-    () =>
-      debounce((value: string) => {
-        log.debug('Setting code after debounce');
-        setCode(value);
-      }, debounceTime),
-    [setCode, debounceTime, log],
-  );
-
   const handleValidate = useCallback(() => {
     const errors = monaco?.editor.getModelMarkers({});
     if (errors?.length) {
-      for (const error of errors) {
-        const lineInfo = `${error.startLineNumber.toString().padStart(2)}:${error.startColumn.toString().padEnd(2)}`;
-
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- unable to use MarkerSeverity due to monaco-editor using CJS
-        if (error.severity === 1) {
-          log.warn(`${lineInfo}: ${error.message}`);
-        } else {
-          log.error(`${lineInfo}: ${error.message}`);
-        }
-      }
+      // Send errors to the CAD actor
+      cadActor.send({
+        type: 'setMonacoErrors',
+        errors: errors.map((error) => ({
+          startLineNumber: error.startLineNumber,
+          startColumn: error.startColumn,
+          message: error.message,
+          severity: error.severity,
+          endLineNumber: error.endLineNumber,
+          endColumn: error.endColumn,
+        })),
+      });
+    } else {
+      // Clear errors when there are none
+      cadActor.send({ type: 'setMonacoErrors', errors: [] });
     }
-  }, [monaco, log]);
+  }, [monaco]);
 
   return (
     <>
@@ -105,12 +89,10 @@ export const ChatEditor = memo(function ({
         />
       </div>
       <CodeEditor
-        // Modify the key to force re-render when loading state changes to update the default value. Slightly hacky, but it's the most efficient way to do it.
-        key={isLoading ? 'loading' : 'ready'}
         loading={<LoaderPinwheel className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
         className={cn('bg-background text-xs', className)}
         defaultLanguage="typescript"
-        defaultValue={code}
+        value={code}
         onChange={handleCodeChange}
         onValidate={handleValidate}
       />

@@ -1,8 +1,8 @@
 import type { ComponentType, JSX } from 'react';
 import { Star, GitFork, Eye } from 'lucide-react';
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { KernelProvider } from '~/components/geometry/kernel/kernel-context.js';
+import { useActor, useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { Button } from '~/components/ui/button.js';
 import { Badge } from '~/components/ui/badge.js';
@@ -12,23 +12,9 @@ import { SvgIcon } from '~/components/icons/svg-icon.js';
 import type { Build } from '~/types/build.js';
 import type { CadKernelProvider, Category } from '~/types/cad.js';
 import { categories } from '~/types/cad.js';
-import { CadProvider, useCad } from '~/components/geometry/cad/cad-context.js';
 import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
 import { storage } from '~/db/storage.js';
-
-// Utility function to split an array into chunks
-function chunks<T>(array: T[], size: number): T[][] {
-  const result: T[][] = [];
-  for (let i = 0; i < array.length; i += size) {
-    result.push(array.slice(i, i + size));
-  }
-
-  return result;
-}
-
-// Number of builds per KernelProvider (worker)
-// 5-6 is a good balance between parallelism and browser limits
-const buildsPerWorker = 6;
+import { cadMachine } from '~/machines/cad.js';
 
 // Placeholder for language icons
 const languageIcons: Record<CadKernelProvider, ComponentType<{ className?: string }>> = {
@@ -48,26 +34,12 @@ export type CommunityBuildGridProperties = {
 };
 
 export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBuildGridProperties): JSX.Element {
-  // Split builds into chunks to create a worker pool
-  const buildChunks = useMemo(() => chunks(builds, buildsPerWorker), [builds]);
-
   return (
     <>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {/* Create a separate KernelProvider (worker) for each chunk of builds */}
-        {buildChunks.map((chunk) => {
-          // Use the first build's id in each chunk to create a stable key
-          const chunkKey = chunk.length > 0 ? `worker-${chunk[0].id}` : `empty-chunk-${Date.now()}`;
-          return (
-            <KernelProvider key={chunkKey}>
-              {chunk.map((build) => (
-                <CadProvider key={build.id}>
-                  <ProjectCard {...build} />
-                </CadProvider>
-              ))}
-            </KernelProvider>
-          );
-        })}
+        {builds.map((build) => (
+          <ProjectCard key={build.id} {...build} />
+        ))}
       </div>
 
       {hasMore ? (
@@ -95,7 +67,8 @@ function ProjectCard({
   const [showPreview, setShowPreview] = useState(true);
   const [isVisible, setIsVisible] = useState(false);
   const cardReference = useRef<HTMLDivElement>(null);
-  const { setCode, shapes } = useCad();
+  const [_, send, actorRef] = useActor(cadMachine);
+  const shapes = useSelector(actorRef, (state) => state.context.shapes);
   const navigate = useNavigate();
   const LanguageIcon = Object.values(assets)
     .map((asset) => asset.language)
@@ -136,9 +109,9 @@ function ProjectCard({
   // Only load the CAD model when the card is visible and preview is enabled
   useEffect(() => {
     if (isVisible && showPreview && replicadCode) {
-      setCode(replicadCode);
+      send({ type: 'setCode', code: replicadCode });
     }
-  }, [isVisible, showPreview, replicadCode, setCode]);
+  }, [isVisible, showPreview, replicadCode, send]);
 
   const handleStar = () => {
     // TODO: Implement star functionality

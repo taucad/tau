@@ -53,6 +53,7 @@
     "@remix-pwa/sw": "^3.0.10",
     "@remix-pwa/worker-runtime": "^2.1.4",
     "@shikijs/monaco": "^3.4.0",
+    "@statelyai/inspect": "^0.4.0",
     "@tanstack/react-query": "4",
     "@tanstack/react-table": "^8.21.3",
     "@xstate/react": "^5.0.4",

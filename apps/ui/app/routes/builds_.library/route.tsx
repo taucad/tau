@@ -30,6 +30,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
+import { useActor, useSelector } from '@xstate/react';
 import { createColumns } from '~/routes/builds_.library/columns.js';
 import { CategoryBadge } from '~/components/category-badge.js';
 import { Button, buttonVariants } from '~/components/ui/button.js';
@@ -50,12 +51,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '~/components/ui/tabs.j
 import type { Category } from '~/types/cad.js';
 import { categories } from '~/types/cad.js';
 import type { Build } from '~/types/build.js';
-import { CadProvider, useCad } from '~/components/geometry/cad/cad-context.js';
 import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
 import { useBuilds } from '~/hooks/use-builds.js';
 import { toast } from '~/components/ui/sonner.js';
 import type { Handle } from '~/types/matches.js';
-import { KernelProvider } from '~/components/geometry/kernel/kernel-context.js';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -75,6 +74,7 @@ import { formatRelativeTime } from '~/utils/date.js';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '~/components/ui/table.js';
 import { camelCaseToSentenceCase } from '~/utils/string.js';
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
+import { cadMachine } from '~/machines/cad.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -417,22 +417,18 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
       ) : (
         // Grid View
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          <KernelProvider>
-            {table.getRowModel().rows.map((row) => (
-              <BuildProvider key={row.original.id} buildId={row.original.id}>
-                <CadProvider>
-                  <BuildLibraryCard
-                    build={row.original}
-                    actions={actions}
-                    isSelected={row.getIsSelected()}
-                    onSelect={() => {
-                      row.toggleSelected();
-                    }}
-                  />
-                </CadProvider>
-              </BuildProvider>
-            ))}
-          </KernelProvider>
+          {table.getRowModel().rows.map((row) => (
+            <BuildProvider key={row.original.id} buildId={row.original.id}>
+              <BuildLibraryCard
+                build={row.original}
+                actions={actions}
+                isSelected={row.getIsSelected()}
+                onSelect={() => {
+                  row.toggleSelected();
+                }}
+              />
+            </BuildProvider>
+          ))}
         </div>
       )}
 
@@ -623,7 +619,8 @@ type BuildLibraryCardProps = {
 };
 
 function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibraryCardProps) {
-  const { setCode, setParameters, shapes } = useCad();
+  const [_, send, actorRef] = useActor(cadMachine);
+  const shapes = useSelector(actorRef, (state) => state.context.shapes);
   const code = build.assets.mechanical?.files[build.assets.mechanical?.main]?.content;
   const parameters = build.assets.mechanical?.parameters;
   const [showPreview, setShowPreview] = useState(false);
@@ -646,14 +643,14 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
   useEffect(() => {
     if (showPreview) {
       if (code) {
-        setCode(code);
+        send({ type: 'setCode', code });
       }
 
       if (parameters) {
-        setParameters(parameters);
+        send({ type: 'setParameters', parameters });
       }
     }
-  }, [code, setCode, parameters, setParameters, showPreview]);
+  }, [code, parameters, showPreview, send]);
 
   return (
     <Card className={cn('group relative flex flex-col overflow-hidden', isSelected && 'ring-2 ring-primary')}>

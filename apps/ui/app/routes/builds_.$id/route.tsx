@@ -4,10 +4,10 @@ import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
 import { PackagePlus } from 'lucide-react';
+import { createActor } from 'xstate';
 // eslint-disable-next-line no-restricted-imports -- allowed for router types
 import type { Route } from './+types/route.js';
 import { ChatInterface } from '~/routes/builds_.$id/chat-interface.js';
-import { CadProvider, useCad } from '~/components/geometry/cad/cad-context.js';
 import { BuildProvider, useBuild } from '~/hooks/use-build.js';
 import { Button } from '~/components/ui/button.js';
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
@@ -16,9 +16,9 @@ import { defaultBuildName } from '~/constants/build-names.js';
 import type { Handle } from '~/types/matches.js';
 import { useChatConstants } from '~/utils/chat.js';
 import { AiChatProvider, useAiChat } from '~/components/chat/ai-chat-provider.js';
-import { KernelProvider } from '~/components/geometry/kernel/kernel-context.js';
 import { GraphicsProvider } from '~/components/geometry/graphics/graphics-context.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 
 function BuildNameEditor() {
   const { build, updateName, isLoading } = useBuild();
@@ -132,35 +132,96 @@ export const handle: Handle = {
 
 function Chat() {
   const { id } = useParams();
-  const { build, isLoading, setMessages: setBuildMessages, setCode: setBuildCode } = useBuild();
-  const { setCode, setParameters } = useCad();
+  const {
+    build,
+    isLoading,
+    setMessages: setBuildMessages,
+    setCode: setBuildCode,
+    setParameters: setBuildParameters,
+  } = useBuild();
+
   const { setMessages, messages, reload, status, addToolResult } = useAiChat({
     onToolCall: new Map([
       [
         'file_edit',
         ({ toolCall }) => {
           const toolCallArgs = toolCall.args as { content: string };
+          // Instead of setting both, we just set the code in the CAD actor
+          // which will handle all downstream updates
+          cadActor.send({ type: 'setCode', code: toolCallArgs.content });
+
+          // We need to update the build's code too for persistence
           setBuildCode(toolCallArgs.content);
-          return {
-            success: true,
-          };
+
+          // We now track the CAD actor state to determine success/failure
+          const unsubscribe = cadActor.subscribe((state) => {
+            // Check if processing completed
+            if (state.value === 'success' || state.value === 'error') {
+              // Format CAD and Monaco errors for AI
+              const errorMessages = [];
+
+              // Add CAD kernel errors if any
+              if (state.context.error) {
+                errorMessages.push(`CAD Error: ${state.context.error}`);
+              }
+
+              // Add Monaco/TS errors if any
+              if (state.context.monacoErrors && state.context.monacoErrors.length > 0) {
+                for (const error of state.context.monacoErrors) {
+                  errorMessages.push(`Line ${error.startLineNumber}: ${error.message}`);
+                }
+              }
+
+              // Prepare the result
+              const result = {
+                success: state.value === 'success' && errorMessages.length === 0,
+                message:
+                  errorMessages.length > 0
+                    ? `Code updated but has errors:\n${errorMessages.join('\n')}`
+                    : 'Code updated successfully',
+              };
+
+              // Send the result to the AI chat
+              addToolResult({
+                toolCallId: toolCall.toolCallId,
+                result,
+              });
+
+              // Clean up the subscription
+              unsubscribe.unsubscribe();
+            }
+          });
+
+          // Return a pending response to indicate we're handling it asynchronously
+          return { pending: true };
         },
       ],
     ]),
   });
 
+  // Subscribe the build to persist code & parameters changes
+  useEffect(() => {
+    cadActor.subscribe((state) => {
+      if (state.value === 'compiling') {
+        setBuildParameters(state.context.parameters);
+        setBuildCode(state.context.code);
+      }
+    });
+  }, [setBuildCode, setBuildParameters]);
+
   // Load and respond to build changes
   useEffect(() => {
     if (!build || isLoading) return;
     // Set code
-    setCode(build.assets.mechanical?.files[build.assets.mechanical.main]?.content ?? '');
+    cadActor.send({
+      type: 'setCode',
+      code: build.assets.mechanical?.files[build.assets.mechanical.main]?.content ?? '',
+    });
 
     // Set parameters
     const parameters = build.assets.mechanical?.parameters;
-    setParameters(parameters ?? {});
-  }, [id, build, isLoading]);
+    cadActor.send({ type: 'setParameters', parameters: parameters ?? {} });
 
-  useEffect(() => {
     // Set initial messages
     if (!build || isLoading) return;
     setMessages(build.messages);
@@ -170,7 +231,8 @@ function Chat() {
     if (build.messages.length > 0 && build.messages.at(-1)?.role !== 'assistant') {
       void reload();
     }
-  }, [id, isLoading]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on mount
+  }, [cadActor, id, isLoading]);
 
   useEffect(() => {
     if (status === 'submitted') {
@@ -197,15 +259,11 @@ export default function ChatRoute(): JSX.Element {
 
   return (
     <BuildProvider buildId={id}>
-      <KernelProvider>
-        <CadProvider>
-          <AiChatProvider value={{ ...useChatConstants, id }}>
-            <GraphicsProvider defaultCameraAngle={60}>
-              <Chat />
-            </GraphicsProvider>
-          </AiChatProvider>
-        </CadProvider>
-      </KernelProvider>
+      <AiChatProvider value={{ ...useChatConstants, id }}>
+        <GraphicsProvider defaultCameraAngle={60}>
+          <Chat />
+        </GraphicsProvider>
+      </AiChatProvider>
     </BuildProvider>
   );
 }

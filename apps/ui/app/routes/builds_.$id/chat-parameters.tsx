@@ -1,18 +1,17 @@
 import { RefreshCcw, RefreshCcwDot, ChevronRight, Search, X, Info } from 'lucide-react';
-import { useCallback, useMemo, memo, useState, useEffect } from 'react';
+import { useCallback, useMemo, memo, useState } from 'react';
+import { useSelector } from '@xstate/react';
 import { categorizeParameters } from '~/routes/builds_.$id/chat-parameters-sorter.js';
 import { camelCaseToSentenceCase } from '~/utils/string.js';
 import { Slider } from '~/components/ui/slider.js';
 import { Switch } from '~/components/ui/switch.js';
 import { Input } from '~/components/ui/input.js';
 import { ChatParametersInputNumber } from '~/routes/builds_.$id/chat-parameters-input-number.js';
-import { useBuild } from '~/hooks/use-build.js';
 import { Button } from '~/components/ui/button.js';
-import { useCad } from '~/components/geometry/cad/cad-context.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { cn } from '~/utils/ui.js';
-import { debounce } from '~/utils/function.js';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '~/components/ui/collapsible.js';
+import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 
 /**
  * Filter parameters to only include the allowed parameters - allowed parameters are the keys of the default parameters
@@ -26,33 +25,19 @@ const validateParameters = (parameters: Record<string, unknown>, defaultParamete
   return Object.fromEntries(Object.entries(parameters).filter(([key]) => allowedParameters.includes(key)));
 };
 
-export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly debounceTime?: number } = {}) {
-  const { setParameters, parameters } = useBuild();
-  const { defaultParameters } = useCad();
-  const [localParameters, setLocalParameters] = useState(parameters);
+export const ChatParameters = memo(function () {
+  const parameters = useSelector(cadActor, (state) => state.context.parameters);
+  const defaultParameters = useSelector(cadActor, (state) => state.context.defaultParameters);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [allExpanded, setAllExpanded] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
 
-  // Sync local parameters with actual parameters
-  useEffect(() => {
-    setLocalParameters(parameters);
-  }, [parameters]);
-
-  // Debounce search term to prevent excessive re-renders
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm.toLowerCase());
-    }, 200);
-
-    return () => {
-      clearTimeout(handler);
-    };
-  }, [searchTerm]);
+  const setParameters = useCallback((newParameters: Record<string, unknown>) => {
+    cadActor.send({ type: 'setParameters', parameters: newParameters });
+  }, []);
 
   const { validParameters, allParameters, parameterGroups, filteredGroups, hasSearchResults } = useMemo(() => {
-    const validParameters = validateParameters(localParameters, defaultParameters);
+    const validParameters = validateParameters(parameters, defaultParameters);
     const allParameters = { ...defaultParameters, ...validParameters };
     const parameterEntries = Object.entries(allParameters);
 
@@ -73,12 +58,13 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
     const filteredGroups: Record<string, Array<[string, unknown]>> = {};
     let hasSearchResults = false;
 
-    if (debouncedSearchTerm) {
+    if (searchTerm) {
+      const searchTermLower = searchTerm.toLowerCase();
       // For each group, check if any parameter matches the search term
       for (const [groupName, entries] of Object.entries(parameterGroups)) {
         const matchingEntries = entries.filter(([key]) => {
           const prettyKey = camelCaseToSentenceCase(key).toLowerCase();
-          return prettyKey.includes(debouncedSearchTerm);
+          return prettyKey.includes(searchTermLower);
         });
 
         if (matchingEntries.length > 0) {
@@ -105,26 +91,17 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
       filteredGroups,
       hasSearchResults,
     };
-  }, [localParameters, defaultParameters, allExpanded, debouncedSearchTerm]);
-
-  const debouncedSetParameters = useMemo(
-    () =>
-      debounce((newParameters: Record<string, unknown>) => {
-        setParameters(newParameters);
-      }, debounceTime),
-    [setParameters, debounceTime],
-  );
+  }, [allExpanded, searchTerm, defaultParameters, parameters]);
 
   const handleParameterChange = useCallback(
     (key: string, value: unknown) => {
-      // Update local state immediately for responsive UI
-      const newParameters = { ...localParameters, [key]: value };
-      setLocalParameters(newParameters);
-
-      // Debounce the actual parameter update
-      void debouncedSetParameters(newParameters);
+      // Update parameters directly
+      setParameters({
+        ...parameters,
+        [key]: value,
+      });
     },
-    [localParameters, debouncedSetParameters],
+    [parameters, setParameters],
   );
 
   const resetAllParameters = useCallback(() => {
@@ -157,7 +134,7 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
   }, [allExpanded, parameterGroups]);
 
   const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchTerm(event.target.value);
+    setSearchTerm(event.target.value.toLowerCase());
   }, []);
 
   const clearSearch = useCallback(() => {
@@ -167,11 +144,11 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
   // Determine if a parameter name matches the search term for highlighting
   const isParameterMatch = useCallback(
     (key: string): boolean => {
-      if (!debouncedSearchTerm) return false;
+      if (!searchTerm) return false;
       const prettyKey = camelCaseToSentenceCase(key).toLowerCase();
-      return prettyKey.includes(debouncedSearchTerm);
+      return prettyKey.includes(searchTerm);
     },
-    [debouncedSearchTerm],
+    [searchTerm],
   );
 
   const renderParameterInput = useCallback(
@@ -309,9 +286,9 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
         </div>
       </div>
 
-      {!hasSearchResults && debouncedSearchTerm ? (
+      {!hasSearchResults && searchTerm ? (
         <div className="py-4 text-center text-sm text-muted-foreground">
-          No parameters matching &quot;{debouncedSearchTerm}&quot;
+          No parameters matching &quot;{searchTerm}&quot;
         </div>
       ) : null}
 
@@ -347,7 +324,7 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
                         <div className="flex flex-row items-baseline gap-2">
                           <span
                             className={cn(
-                              localParameters[key] === undefined ? 'font-normal' : 'font-medium',
+                              parameters[key] === undefined ? 'font-normal' : 'font-medium',
                               isMatch && 'font-medium text-primary',
                             )}
                           >
@@ -357,7 +334,7 @@ export const ChatParameters = memo(function ({ debounceTime = 300 }: { readonly 
                             {typeof value}
                           </span>
                         </div>
-                        {localParameters[key] !== undefined && (
+                        {parameters[key] !== undefined && (
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button

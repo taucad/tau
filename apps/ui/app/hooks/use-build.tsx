@@ -18,9 +18,9 @@ const fetchBuild = async (buildId: string): Promise<Build> => {
 };
 
 type BuildContextType = {
-  build: Build | undefined;
   isLoading: boolean;
-  error: Error | undefined;
+  build: Build | undefined;
+  error: unknown;
   code: string;
   parameters: Record<string, unknown>;
   setCode: (code: string) => void;
@@ -48,23 +48,22 @@ export function BuildProvider({
     queryFn: async () => fetchBuild(buildId),
   });
 
-  const build = buildQuery.data;
+  const value = useMemo(() => {
+    const { data, isLoading, error } = buildQuery;
 
-  const value = useMemo(
-    () => ({
-      build,
-      isLoading: buildQuery.isLoading,
-      error: buildQuery.error as Error | undefined,
-      code: build?.assets.mechanical?.files[build.assets.mechanical.main]?.content ?? '',
-      parameters: build?.assets.mechanical?.parameters ?? {},
+    return {
+      build: data,
+      isLoading,
+      error,
+      code: data?.assets.mechanical?.files[data.assets.mechanical.main]?.content ?? '',
+      parameters: data?.assets.mechanical?.parameters ?? {},
       setCode: async (code: string) => mutations.updateCode(buildId, code),
       setParameters: async (parameters: Record<string, unknown>) => mutations.updateParameters(buildId, parameters),
       setMessages: async (messages: Message[]) => mutations.updateMessages(buildId, messages),
       updateName: async (name: string) => mutations.updateName(buildId, name),
       updateThumbnail: async (thumbnail: string) => mutations.updateThumbnail(buildId, thumbnail),
-    }),
-    [build, buildId, buildQuery.isLoading, buildQuery.error, mutations],
-  );
+    };
+  }, [buildQuery, mutations, buildId]);
 
   return <BuildContext.Provider value={value}>{children}</BuildContext.Provider>;
 }

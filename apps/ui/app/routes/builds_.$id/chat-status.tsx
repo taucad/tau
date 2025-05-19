@@ -26,7 +26,7 @@ export const ChatStatus = memo(function ({ status, className }: ChatStatusProper
             transition={{ duration: 0.3 }}
           >
             <div className="flex w-full items-center gap-1.5 bg-neutral/10 px-3 pt-2 pb-5">
-              <HammerAnimation className="h-6 w-6" />
+              <HammerAnimation className="size-5" />
               <AnimatedShinyText>Generating...</AnimatedShinyText>
             </div>
           </motion.div>

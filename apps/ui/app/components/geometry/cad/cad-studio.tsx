@@ -79,7 +79,7 @@ export function CadStudio(): JSX.Element {
     const shapesChanged = shapes !== lastShapesRef.current;
     const buildIdChanged = build && build.id !== lastBuildIdRef.current;
 
-    if ((shapesChanged || buildIdChanged) && shapes && screenshot.isReady && !status.isComputing) {
+    if ((shapesChanged || buildIdChanged) && shapes.length > 0 && screenshot.isReady && !status.isComputing) {
       console.log('Updating thumbnail - shapes or build changed');
       updateThumbnailScreenshot();
     }

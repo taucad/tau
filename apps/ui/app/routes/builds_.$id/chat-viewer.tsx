@@ -26,7 +26,6 @@ export const ChatViewer = memo(function () {
     return new Promise<Blob>((resolve, reject) => {
       cadActor.send({ type: 'exportShape', format: 'stl' });
       cadActor.subscribe((state) => {
-        console.log('state', state);
         if (state.context.exportedBlob) {
           resolve(state.context.exportedBlob);
         } else if (state.matches('error') && typeof state.context.error === 'string') {

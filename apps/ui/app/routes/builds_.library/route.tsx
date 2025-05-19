@@ -619,7 +619,7 @@ type BuildLibraryCardProps = {
 };
 
 function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibraryCardProps) {
-  const [_, send, actorRef] = useActor(cadMachine);
+  const [_, send, actorRef] = useActor(cadMachine, { input: { id: `cad-card-${build.id}` } });
   const shapes = useSelector(actorRef, (state) => state.context.shapes);
   const code = build.assets.mechanical?.files[build.assets.mechanical?.main]?.content;
   const parameters = build.assets.mechanical?.parameters;

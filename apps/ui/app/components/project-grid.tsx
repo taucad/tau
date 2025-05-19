@@ -67,9 +67,13 @@ function ProjectCard({
   const [showPreview, setShowPreview] = useState(true);
   const [isVisible, setIsVisible] = useState(false);
   const cardReference = useRef<HTMLDivElement>(null);
-  const [_, send, actorRef] = useActor(cadMachine);
+
+  // Create a unique instance of the CAD machine for this card using the card's ID
+  const [_, send, actorRef] = useActor(cadMachine, { input: { id: `cad-card-${id}` } });
   const shapes = useSelector(actorRef, (state) => state.context.shapes);
+
   const navigate = useNavigate();
+
   const LanguageIcon = Object.values(assets)
     .map((asset) => asset.language)
     .map((language) => ({

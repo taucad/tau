@@ -31,7 +31,6 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
   const completionRef = useRef<CompletionRegistration | undefined>(null);
 
   const handleMount = useCallback((editor: StandaloneCodeEditor, monaco: Monaco) => {
-    console.log('handleMount', editor, monaco);
     completionRef.current = registerCompletion(monaco, editor, {
       endpoint: `${ENV.TAU_API_URL}/v1/code-completion`,
       language: 'typescript',

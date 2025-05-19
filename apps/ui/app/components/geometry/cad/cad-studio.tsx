@@ -66,8 +66,6 @@ export function CadStudio(): JSX.Element {
         clearTimeout(timeout);
       };
     }
-
-    throw new Error('Shapes or screenshot is not ready');
   }, [shapes, screenshot, status.isComputing, updateThumbnail, build]);
 
   const handleUpdateThumbnail = useCallback(() => {

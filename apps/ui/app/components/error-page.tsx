@@ -66,7 +66,7 @@ export function AppError(): JSX.Element {
                 <CopyButton size="sm" variant="outline" getText={() => error.stack ?? ''} tooltip="Copy stack trace" />
               </div>
             </div>
-            <pre className="max-h-[60vh] overflow-auto border-l-4 border-l-destructive/20 p-4 text-left font-mono text-xs break-words whitespace-pre-wrap text-foreground">
+            <pre className="max-h-[50vh] overflow-auto border-l-4 border-l-destructive/20 p-4 text-left font-mono text-xs break-words whitespace-pre-wrap text-foreground">
               {error.stack}
             </pre>
           </div>

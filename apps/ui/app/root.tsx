@@ -1,14 +1,5 @@
 import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from 'react-router';
-import {
-  isRouteErrorResponse,
-  Links,
-  Meta,
-  Scripts,
-  ScrollRestoration,
-  useRouteError,
-  useNavigate,
-  useLoaderData,
-} from 'react-router';
+import { Links, Meta, Scripts, ScrollRestoration, useLoaderData } from 'react-router';
 import type { Theme } from 'remix-themes';
 import { PreventFlashOnWrongTheme, ThemeProvider, useTheme } from 'remix-themes';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -16,7 +7,6 @@ import { useEffect, useMemo } from 'react';
 import type { JSX, ReactNode } from 'react';
 import globalStylesUrl from '~/styles/global.css?url';
 import { getEnvironment, metaConfig } from '~/config.js';
-import { buttonVariants } from '~/components/ui/button.js';
 import { Page } from '~/components/page.js';
 import { themeSessionResolver } from '~/sessions.server.js';
 import { cn } from '~/utils/ui.js';
@@ -28,6 +18,7 @@ import { getModels } from '~/hooks/use-models.js';
 import { ColorProvider, useColor } from '~/hooks/use-color.js';
 import { useFavicon } from '~/hooks/use-favicon.js';
 import { TooltipProvider } from '~/components/ui/tooltip.js';
+import { AppError } from '~/components/error-page.js';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: globalStylesUrl },
@@ -145,50 +136,4 @@ export function App({
 
 export function ErrorBoundary(): JSX.Element {
   return <AppWithProviders error={<AppError />} />;
-}
-
-export function AppError(): JSX.Element {
-  const error = useRouteError();
-  const navigate = useNavigate();
-
-  const goBack = () => {
-    void navigate(-1);
-  };
-
-  if (isRouteErrorResponse(error)) {
-    console.error('Route error', error);
-    return (
-      <div className="flex size-full flex-col items-center justify-center gap-4">
-        <h1 className="text-xl">
-          {error.status} {error.statusText}
-        </h1>
-        <p>{error.data}</p>
-        <p>
-          Please try again later,{' '}
-          <button
-            type="button"
-            className={cn(buttonVariants({ variant: 'link' }), 'h-auto cursor-pointer p-0 text-base underline')}
-            onClick={goBack}
-          >
-            head back
-          </button>
-          {', '}
-          or navigate to a different page.
-        </p>
-      </div>
-    );
-  }
-
-  if (error instanceof Error) {
-    return (
-      <div className="flex flex-col gap-4 p-2">
-        <h1 className="text-xl">Error</h1>
-        <p>{error.message}</p>
-        <p>The stack trace is:</p>
-        <pre>{error.stack}</pre>
-      </div>
-    );
-  }
-
-  return <h1>Unknown Error</h1>;
 }

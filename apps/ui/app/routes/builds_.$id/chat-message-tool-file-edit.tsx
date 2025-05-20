@@ -1,18 +1,21 @@
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { JSX } from 'react';
 import { ChevronDown, File, LoaderCircle, Play } from 'lucide-react';
 import { CodeViewer } from '~/components/code-viewer.js';
 import { CopyButton } from '~/components/copy-button.js';
-import { useBuild } from '~/hooks/use-build.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '~/components/ui/tooltip.js';
 import { Button } from '~/components/ui/button.js';
 import { cn } from '~/utils/ui.js';
 import { AnimatedShinyText } from '~/components/magicui/animated-shiny-text.js';
+import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 
 export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
-  const { setCode } = useBuild();
   const [isExpanded, setIsExpanded] = useState(false);
+
+  const setCode = useCallback((code: string) => {
+    cadActor.send({ type: 'setCode', code });
+  }, []);
 
   switch (part.toolInvocation.state) {
     case 'partial-call': {

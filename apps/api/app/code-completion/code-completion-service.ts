@@ -27,7 +27,6 @@ export class CodeCompletionService {
   }
 
   public async complete(body: CompletionRequestBody): Promise<unknown> {
-    console.log('complete', body);
     return this.copilot.complete({ body });
   }
 }

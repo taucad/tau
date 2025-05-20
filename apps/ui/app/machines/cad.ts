@@ -1,10 +1,10 @@
 import { createMachine, assign, assertEvent } from 'xstate';
-import { kernelActor } from '~/machines/kernel.js';
+import type { ActorRefFrom } from 'xstate';
+import { kernelMachine } from '~/machines/kernel.js';
 import type { Shape } from '~/types/cad.js';
 
 // Interface defining the context for the CAD machine
 export type CadContext = {
-  clientId: string;
   code: string;
   parameters: Record<string, unknown>;
   defaultParameters: Record<string, unknown>;
@@ -17,8 +17,8 @@ export type CadContext = {
     startColumn: number;
     endColumn: number;
   }>;
-  isBuffering: boolean;
-  unsubscribe: (() => void) | undefined;
+  state: 'idle' | 'buffering' | 'rendering' | 'success' | 'error';
+  kernelRef: ActorRefFrom<typeof kernelMachine> | undefined;
   exportedBlob: Blob | undefined;
 };
 
@@ -33,11 +33,6 @@ type CadEvent =
   | { type: 'setDefaultParameters'; parameters: Record<string, unknown> }
   | { type: 'exportShape'; format: string }
   | { type: 'shapeExported'; blob: Blob };
-
-// Define input type for the machine
-type CadMachineInput = {
-  id?: string;
-};
 
 // Debounce delay for code changes in milliseconds
 const debounceDelay = 500;
@@ -58,87 +53,62 @@ export const cadMachine = createMachine(
       context: {} as CadContext,
       // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
       events: {} as CadEvent,
-      // Add input type
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-      input: {} as CadMachineInput,
     },
     id: 'cad',
-    context({ input }) {
-      return {
-        clientId: input?.id ?? 'cad-default', // Use nullish coalescing operator
-        code: '',
-        parameters: {},
-        defaultParameters: {},
-        shapes: [],
-        error: undefined,
-        monacoErrors: [],
-        isBuffering: false,
-        unsubscribe: undefined,
-        exportedBlob: undefined,
-      };
-    },
-    entry: assign({
-      unsubscribe({ self }) {
-        // Subscribe to the kernel actor
-        const subscription = kernelActor.subscribe((state) => {
-          // Get the client ID from the context (it's created when the machine starts)
-          const { clientId } = self.getSnapshot().context;
+    entry: [
+      assign({
+        kernelRef({ spawn, self }) {
+          const kernelRef = spawn(kernelMachine, { id: 'kernel' });
 
-          // Filter for updates relevant to this client ID
-          const clientState = state.context.clientStates[clientId];
-          if (!clientState) return;
+          // Subscribe to the kernel actor's state changes
+          kernelRef.subscribe((state) => {
+            // When kernel reaches success state, send success event to cad machine
+            if (state.matches('success') && state.context.shapes) {
+              self.send({ type: 'kernelSuccess', shapes: state.context.shapes });
+            }
 
-          // Send relevant updates to this CAD machine
-          if (clientState.shapes) {
-            self.send({
-              type: 'kernelSuccess',
-              shapes: clientState.shapes,
-            });
-          }
+            // When kernel reaches error state, send error event to cad machine
+            if (state.matches('error') && state.context.error !== undefined) {
+              self.send({ type: 'kernelError', error: state.context.error });
+            }
 
-          if (clientState.error) {
-            self.send({
-              type: 'kernelError',
-              error: clientState.error,
-            });
-          }
+            // When default parameters are updated in kernel
+            if (state.context.defaultParameters) {
+              self.send({
+                type: 'setDefaultParameters',
+                parameters: state.context.defaultParameters,
+              });
+            }
 
-          if (clientState.defaultParameters) {
-            self.send({
-              type: 'setDefaultParameters',
-              parameters: clientState.defaultParameters,
-            });
-          }
+            // When a blob has been exported
+            if (state.context.exportedBlob) {
+              self.send({
+                type: 'shapeExported',
+                // Use type assertion to ensure TS knows this is a Blob
+                blob: state.context.exportedBlob,
+              });
+            }
+          });
 
-          if (clientState.exportedBlob) {
-            self.send({
-              type: 'shapeExported',
-              blob: clientState.exportedBlob,
-            });
-          }
-        });
-
-        // Return unsubscribe function to be stored in context
-        return () => {
-          subscription.unsubscribe();
-        };
-      },
-    }),
-    exit({ context }) {
-      // Clean up subscription when machine stops
-      if (context.unsubscribe) {
-        context.unsubscribe();
-      }
-
-      // Tell kernel this client is disconnecting
-      kernelActor.send({
-        type: 'clientDisconnect',
-        clientId: context.clientId,
-      });
+          return kernelRef;
+        },
+      }),
+    ],
+    context: {
+      code: '',
+      parameters: {},
+      defaultParameters: {},
+      shapes: [],
+      error: undefined,
+      monacoErrors: [],
+      state: 'idle',
+      kernelRef: undefined,
+      exportedBlob: undefined,
     },
     initial: 'idle',
     states: {
       idle: {
+        entry: assign({ state: 'idle' }),
         on: {
           setCode: {
             target: 'debouncing',
@@ -146,11 +116,12 @@ export const cadMachine = createMachine(
               'setCode',
               ({ context }) => {
                 // When code changes, extract parameters
-                kernelActor.send({
-                  type: 'extractParameters',
-                  code: context.code,
-                  clientId: context.clientId,
-                });
+                if (context.kernelRef && context.code) {
+                  context.kernelRef.send({
+                    type: 'extractParameters',
+                    code: context.code,
+                  });
+                }
               },
             ],
           },
@@ -168,12 +139,11 @@ export const cadMachine = createMachine(
           exportShape: {
             actions: [
               ({ context, event }) => {
-                if (event.type === 'exportShape') {
-                  kernelActor.send({
+                if (context.kernelRef && event.type === 'exportShape') {
+                  context.kernelRef.send({
                     type: 'exportShape',
                     format: event.format,
-                    clientId: context.clientId,
-                  });
+                  } as const);
                 }
               },
             ],
@@ -181,15 +151,10 @@ export const cadMachine = createMachine(
           shapeExported: {
             actions: 'setExportedBlob',
           },
-          kernelSuccess: {
-            actions: 'setShapes',
-          },
-          kernelError: {
-            actions: 'setError',
-          },
         },
       },
       debouncing: {
+        entry: assign({ state: 'buffering' }),
         after: {
           [debounceDelay]: 'compiling',
         },
@@ -200,11 +165,12 @@ export const cadMachine = createMachine(
               'setCode',
               ({ context }) => {
                 // When code changes, extract parameters
-                kernelActor.send({
-                  type: 'extractParameters',
-                  code: context.code,
-                  clientId: context.clientId,
-                });
+                if (context.kernelRef && context.code) {
+                  context.kernelRef.send({
+                    type: 'extractParameters',
+                    code: context.code,
+                  });
+                }
               },
             ],
             reenter: true, // Reset debounce timer when new code comes in
@@ -224,12 +190,11 @@ export const cadMachine = createMachine(
           exportShape: {
             actions: [
               ({ context, event }) => {
-                if (event.type === 'exportShape') {
-                  kernelActor.send({
+                if (context.kernelRef && event.type === 'exportShape') {
+                  context.kernelRef.send({
                     type: 'exportShape',
                     format: event.format,
-                    clientId: context.clientId,
-                  });
+                  } as const);
                 }
               },
             ],
@@ -237,23 +202,16 @@ export const cadMachine = createMachine(
           shapeExported: {
             actions: 'setExportedBlob',
           },
-          kernelSuccess: {
-            actions: 'setShapes',
-          },
-          kernelError: {
-            actions: 'setError',
-          },
         },
       },
       compiling: {
         entry: [
-          assign({ isBuffering: true }),
+          assign({ state: 'rendering' }),
           ({ context }) => {
-            kernelActor.send({
+            context.kernelRef?.send({
               type: 'evaluate',
               code: context.code,
               parameters: context.parameters,
-              clientId: context.clientId,
             });
           },
         ],
@@ -271,11 +229,12 @@ export const cadMachine = createMachine(
               'setCode',
               ({ context }) => {
                 // When code changes, extract parameters
-                kernelActor.send({
-                  type: 'extractParameters',
-                  code: context.code,
-                  clientId: context.clientId,
-                });
+                if (context.kernelRef && context.code) {
+                  context.kernelRef.send({
+                    type: 'extractParameters',
+                    code: context.code,
+                  });
+                }
               },
             ],
             target: 'debouncing',
@@ -293,12 +252,11 @@ export const cadMachine = createMachine(
           exportShape: {
             actions: [
               ({ context, event }) => {
-                if (event.type === 'exportShape') {
-                  kernelActor.send({
+                if (context.kernelRef && event.type === 'exportShape') {
+                  context.kernelRef.send({
                     type: 'exportShape',
                     format: event.format,
-                    clientId: context.clientId,
-                  });
+                  } as const);
                 }
               },
             ],
@@ -309,7 +267,7 @@ export const cadMachine = createMachine(
         },
       },
       success: {
-        entry: assign({ isBuffering: false, error: undefined }),
+        entry: assign({ state: 'success', error: undefined }),
         on: {
           setCode: {
             target: 'debouncing',
@@ -317,11 +275,12 @@ export const cadMachine = createMachine(
               'setCode',
               ({ context }) => {
                 // When code changes, extract parameters
-                kernelActor.send({
-                  type: 'extractParameters',
-                  code: context.code,
-                  clientId: context.clientId,
-                });
+                if (context.kernelRef && context.code) {
+                  context.kernelRef.send({
+                    type: 'extractParameters',
+                    code: context.code,
+                  });
+                }
               },
             ],
           },
@@ -339,29 +298,22 @@ export const cadMachine = createMachine(
           exportShape: {
             actions: [
               ({ context, event }) => {
-                if (event.type === 'exportShape') {
-                  kernelActor.send({
+                if (context.kernelRef && event.type === 'exportShape') {
+                  context.kernelRef.send({
                     type: 'exportShape',
                     format: event.format,
-                    clientId: context.clientId,
-                  });
+                  } as const);
                 }
               },
             ],
           },
           shapeExported: {
             actions: 'setExportedBlob',
-          },
-          kernelSuccess: {
-            actions: 'setShapes',
-          },
-          kernelError: {
-            actions: 'setError',
           },
         },
       },
       error: {
-        entry: assign({ isBuffering: false }),
+        entry: assign({ state: 'error' }),
         on: {
           setCode: {
             target: 'debouncing',
@@ -369,11 +321,12 @@ export const cadMachine = createMachine(
               'setCode',
               ({ context }) => {
                 // When code changes, extract parameters
-                kernelActor.send({
-                  type: 'extractParameters',
-                  code: context.code,
-                  clientId: context.clientId,
-                });
+                if (context.kernelRef && context.code) {
+                  context.kernelRef.send({
+                    type: 'extractParameters',
+                    code: context.code,
+                  });
+                }
               },
             ],
           },
@@ -391,24 +344,17 @@ export const cadMachine = createMachine(
           exportShape: {
             actions: [
               ({ context, event }) => {
-                if (event.type === 'exportShape') {
-                  kernelActor.send({
+                if (context.kernelRef && event.type === 'exportShape') {
+                  context.kernelRef.send({
                     type: 'exportShape',
                     format: event.format,
-                    clientId: context.clientId,
-                  });
+                  } as const);
                 }
               },
             ],
           },
           shapeExported: {
             actions: 'setExportedBlob',
-          },
-          kernelSuccess: {
-            actions: 'setShapes',
-          },
-          kernelError: {
-            actions: 'setError',
           },
         },
       },
@@ -422,42 +368,36 @@ export const cadMachine = createMachine(
           return event.code;
         },
       }),
-
       setParameters: assign({
         parameters({ event }) {
           assertEvent(event, 'setParameters');
           return event.parameters;
         },
       }),
-
       setShapes: assign({
         shapes({ event }) {
           assertEvent(event, 'kernelSuccess');
           return event.shapes;
         },
       }),
-
       setError: assign({
         error({ event }) {
           assertEvent(event, 'kernelError');
           return event.error;
         },
       }),
-
       setMonacoErrors: assign({
         monacoErrors({ event }) {
           assertEvent(event, 'setMonacoErrors');
           return event.errors;
         },
       }),
-
       setDefaultParameters: assign({
         defaultParameters({ event }) {
           assertEvent(event, 'setDefaultParameters');
           return event.parameters;
         },
       }),
-
       setExportedBlob: assign({
         exportedBlob({ event }) {
           assertEvent(event, 'shapeExported');

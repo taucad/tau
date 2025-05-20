@@ -201,7 +201,6 @@ function Chat() {
   // Subscribe the build to persist code & parameters changes
   useEffect(() => {
     const subscription = cadActor.subscribe((state) => {
-      console.log('state', state);
       if (state.value === 'compiling') {
         setBuildParameters(state.context.parameters);
         setBuildCode(state.context.code);
@@ -236,7 +235,7 @@ function Chat() {
       void reload();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on mount
-  }, [cadActor, id, isLoading]);
+  }, [id, isLoading]);
 
   useEffect(() => {
     if (status === 'submitted') {

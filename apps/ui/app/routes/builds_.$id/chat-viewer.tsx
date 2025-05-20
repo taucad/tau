@@ -17,7 +17,7 @@ import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 
 export const ChatViewer = memo(function () {
   const error = useSelector(cadActor, (state) => state.context.error);
-  const isBuffering = useSelector(cadActor, (state) => state.context.isBuffering);
+  const state = useSelector(cadActor, (state) => state.context.state);
   const shapes = useSelector(cadActor, (state) => state.context.shapes);
   const { updateThumbnail, build } = useBuild();
   const { screenshot } = useGraphics();
@@ -55,7 +55,7 @@ export const ChatViewer = memo(function () {
   };
 
   const updateThumbnailScreenshot = useCallback(() => {
-    if (shapes.length > 0 && screenshot.isReady && !isBuffering) {
+    if (shapes.length > 0 && screenshot.isReady && state === 'success') {
       const timeout = setTimeout(() => {
         try {
           const dataUrl = screenshot.capture({
@@ -79,7 +79,7 @@ export const ChatViewer = memo(function () {
         clearTimeout(timeout);
       };
     }
-  }, [shapes, screenshot, isBuffering, updateThumbnail]);
+  }, [shapes, screenshot, state, updateThumbnail]);
 
   const handleUpdateThumbnail = useCallback(() => {
     updateThumbnailScreenshot();
@@ -91,15 +91,20 @@ export const ChatViewer = memo(function () {
     // Only trigger update when shapes changes (not just rendering state)
     const shapesChanged = shapes !== lastShapesRef.current;
 
-    if (shapesChanged && shapes.length > 0 && screenshot.isReady && !isBuffering) {
+    if (shapesChanged && shapes.length > 0 && screenshot.isReady && state === 'success') {
       console.log('Updating thumbnail - shapes or build changed');
       updateThumbnailScreenshot();
     }
-  }, [shapes, screenshot.isReady, isBuffering, updateThumbnailScreenshot]);
+  }, [shapes, screenshot.isReady, state, updateThumbnailScreenshot]);
 
   useEffect(() => {
     // Check if build exists, has no thumbnail, and screenshot capability is ready
-    if ((!build?.thumbnail || build?.thumbnail === '') && screenshot.isReady && shapes.length > 0 && !isBuffering) {
+    if (
+      (!build?.thumbnail || build?.thumbnail === '') &&
+      screenshot.isReady &&
+      shapes.length > 0 &&
+      state === 'success'
+    ) {
       // Automatically set the thumbnail
       try {
         updateThumbnailScreenshot();
@@ -107,7 +112,7 @@ export const ChatViewer = memo(function () {
         console.error('Failed to auto-generate thumbnail:', error);
       }
     }
-  }, [build?.thumbnail, screenshot.isReady, shapes, isBuffering, updateThumbnailScreenshot]);
+  }, [build?.thumbnail, screenshot.isReady, shapes, state, updateThumbnailScreenshot]);
 
   const copyToClipboard = useCallback(async () => {
     try {
@@ -143,10 +148,10 @@ export const ChatViewer = memo(function () {
       <div className="relative size-full">
         <CadViewer enableGizmo enableGrid enableZoom enableAxesHelper shapes={shapes} zoomLevel={1.25} />
         {/* Loading state, only show when shapes is loaded and computing */}
-        {shapes.length > 0 && isBuffering ? (
+        {shapes.length > 0 && ['buffering', 'rendering'].includes(state) ? (
           <div className="absolute top-[90%] left-[50%] -translate-x-[50%] -translate-y-[90%]">
             <div className="border-neutral-200 m-auto flex items-center gap-2 rounded-md border bg-background/70 p-2 backdrop-blur-sm">
-              <span className="font-mono text-sm text-muted-foreground">Buffering...</span>
+              <span className="font-mono text-sm text-muted-foreground capitalize">{state}...</span>
               <LoaderPinwheel className="h-6 w-6 animate-spin text-primary ease-in-out" />
             </div>
           </div>

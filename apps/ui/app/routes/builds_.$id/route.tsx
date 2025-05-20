@@ -4,7 +4,6 @@ import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
 import { PackagePlus } from 'lucide-react';
-import { createActor } from 'xstate';
 // eslint-disable-next-line no-restricted-imports -- allowed for router types
 import type { Route } from './+types/route.js';
 import { ChatInterface } from '~/routes/builds_.$id/chat-interface.js';
@@ -201,13 +200,18 @@ function Chat() {
 
   // Subscribe the build to persist code & parameters changes
   useEffect(() => {
-    cadActor.subscribe((state) => {
+    const subscription = cadActor.subscribe((state) => {
+      console.log('state', state);
       if (state.value === 'compiling') {
         setBuildParameters(state.context.parameters);
         setBuildCode(state.context.code);
       }
     });
-  }, [setBuildCode, setBuildParameters]);
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [setBuildParameters, setBuildCode]);
 
   // Load and respond to build changes
   useEffect(() => {

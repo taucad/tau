@@ -14,9 +14,9 @@ import { CameraControl } from '~/components/geometry/cad/camera-control.js';
 import { GridSizeIndicator } from '~/components/geometry/cad/grid-control.js';
 import { ResetCameraControl } from '~/components/geometry/cad/reset-camera-control.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
+import { ChatViewerError } from '~/routes/builds_.$id/chat-viewer-error.js';
 
 export const ChatViewer = memo(function () {
-  const error = useSelector(cadActor, (state) => state.context.error);
   const state = useSelector(cadActor, (state) => state.context.state);
   const shapes = useSelector(cadActor, (state) => state.context.shapes);
   const { updateThumbnail, build } = useBuild();
@@ -147,20 +147,7 @@ export const ChatViewer = memo(function () {
     <>
       <div className="relative size-full">
         <CadViewer enableGizmo enableGrid enableZoom enableAxesHelper shapes={shapes} zoomLevel={1.25} />
-        {/* Loading state, only show when shapes is loaded and computing */}
-        {shapes.length > 0 && ['buffering', 'rendering'].includes(state) ? (
-          <div className="absolute top-[90%] left-[50%] -translate-x-[50%] -translate-y-[90%]">
-            <div className="border-neutral-200 m-auto flex items-center gap-2 rounded-md border bg-background/70 p-2 backdrop-blur-sm">
-              <span className="font-mono text-sm text-muted-foreground capitalize">{state}...</span>
-              <LoaderPinwheel className="h-6 w-6 animate-spin text-primary ease-in-out" />
-            </div>
-          </div>
-        ) : null}
-        <div className="absolute bottom-12 left-2">
-          {error ? (
-            <div className="rounded-md bg-destructive/10 px-3 py-0.5 text-xs text-destructive">{error}</div>
-          ) : null}
-        </div>
+        <ChatViewerError />
 
         {/* Camera and grid controls */}
         <div className="absolute bottom-0 left-0 z-10 m-2">

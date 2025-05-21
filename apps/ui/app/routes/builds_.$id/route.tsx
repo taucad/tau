@@ -242,12 +242,12 @@ function Chat() {
       // A message just got submitted, set the build messages to include the new message.
       console.log('setting build messages after submitted');
       setBuildMessages(messages as Message[]);
-    } else if (status === 'ready' && messages.length > 0) {
+    } else if (status === 'ready' && build?.messages.length !== messages.length) {
       console.log('setting build messages after ready');
       // The chat became ready again, set the build messages to include the new messages.
       setBuildMessages(messages as Message[]);
     }
-  }, [status, setBuildMessages]);
+  }, [status, setBuildMessages, messages, build?.messages]);
 
   return <ChatInterface />;
 }

@@ -202,7 +202,6 @@ function Chat() {
   useEffect(() => {
     const subscription = cadActor.subscribe((state) => {
       if (state.value === 'rendering') {
-        console.log('rendering', state);
         setBuildCodeParameters(state.context.code, state.context.parameters);
       }
     });
@@ -240,10 +239,8 @@ function Chat() {
   useEffect(() => {
     if (status === 'submitted') {
       // A message just got submitted, set the build messages to include the new message.
-      console.log('setting build messages after submitted');
       setBuildMessages(messages as Message[]);
     } else if (status === 'ready' && build?.messages.length !== messages.length) {
-      console.log('setting build messages after ready');
       // The chat became ready again, set the build messages to include the new messages.
       setBuildMessages(messages as Message[]);
     }

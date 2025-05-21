@@ -64,7 +64,7 @@ function ProjectCard({
   tags,
   assets,
 }: CommunityBuildCardProperties) {
-  const [showPreview, setShowPreview] = useState(true);
+  const [showPreview, setShowPreview] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const cardReference = useRef<HTMLDivElement>(null);
 

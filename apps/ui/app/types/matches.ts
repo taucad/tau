@@ -1,5 +1,4 @@
 import type { UIMatch } from 'react-router';
-import { useMatches } from 'react-router';
 import type { ReactNode } from 'react';
 
 export type Handle = {
@@ -7,12 +6,7 @@ export type Handle = {
   actions?: (match: UIMatch) => ReactNode;
 };
 
-type TypedUiMatch = UIMatch & {
+// eslint-disable-next-line @typescript-eslint/naming-convention -- keeping the convention from react-router
+export type TypedUIMatch = UIMatch & {
   handle: Handle;
-};
-
-export const useTypedMatches = (): TypedUiMatch[] => {
-  const matches = useMatches() as TypedUiMatch[];
-
-  return matches;
 };

@@ -16,17 +16,19 @@ import { Badge } from '~/components/ui/badge.js';
 import { useNetworkConnectivity } from '~/hooks/use-network-connectivity.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import { formatKeyCombination } from '~/utils/keys.js';
-import { useTypedMatches } from '~/types/matches.js';
+import { useTypedMatches } from '~/hooks/use-typed-matches.js';
 
 export const headerHeight = '3rem';
 
 export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
-  const matches = useTypedMatches();
+  const { breadcrumbItems, hasBreadcrumbItems, actionItems, hasActionItems } = useTypedMatches((handles) => ({
+    breadcrumbItems: handles.breadcrumb,
+    hasBreadcrumbItems: handles.breadcrumb.length > 0,
+    actionItems: handles.actions,
+    hasActionItems: handles.actions.length > 0,
+  }));
 
   const isOnline = useNetworkConnectivity();
-
-  const breadcrumbItems = matches.filter((match) => Boolean(match.handle?.breadcrumb));
-  const actionItems = matches.filter((match) => Boolean(match.handle?.actions));
 
   return (
     <SidebarProvider>
@@ -46,11 +48,11 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
                 <KeyShortcut variant="tooltip">{formatKeyCombination(sidebarToggleKeyCombo)}</KeyShortcut>
               </TooltipContent>
             </Tooltip>
-            {breadcrumbItems.length > 0 && (
+            {hasBreadcrumbItems ? (
               <span className="h-4">
                 <Separator orientation="vertical" />
               </span>
-            )}
+            ) : null}
             <Breadcrumb>
               <BreadcrumbList className="sm:gap-0">
                 {breadcrumbItems.map((match) => (
@@ -77,13 +79,13 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
                 <TooltipContent>You are offline. Reconnect to access online features.</TooltipContent>
               </Tooltip>
             )}
-            {actionItems.length > 0 && (
+            {hasActionItems ? (
               <div className="flex items-center gap-2">
                 {actionItems.map((match) => (
                   <Fragment key={match.id}>{match.handle.actions?.(match)}</Fragment>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
         </header>
         <section className="h-[calc(100dvh-var(--header-height)-1px)] overflow-y-auto">

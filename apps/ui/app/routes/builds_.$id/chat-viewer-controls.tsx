@@ -97,7 +97,12 @@ export function ChatViewerControls(): JSX.Element {
   useEffect(() => {
     const subscription = cadActor.subscribe((state) => {
       if (state.value === 'rendered' && state.context.shapes.length > 0) {
-        updateThumbnailScreenshot();
+        console.log('updating thumbnail');
+        // TODO: remove this timeout after refining the cad state machine to provide a more accurate signal
+        const timeout = setTimeout(() => {
+          updateThumbnailScreenshot();
+          clearTimeout(timeout);
+        }, 100);
       }
     });
 

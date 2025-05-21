@@ -13,6 +13,7 @@ export function createBuildMutations(queryClient: QueryClient): {
   updateName: (buildId: string, name: string) => Promise<void>;
   updateThumbnail: (buildId: string, thumbnail: string) => Promise<void>;
   updateCode: (buildId: string, code: string) => Promise<void>;
+  updateCodeParameters: (buildId: string, code: string, parameters: Record<string, unknown>) => Promise<void>;
   updateParameters: (buildId: string, parameters: Record<string, unknown>) => Promise<void>;
   updateMessages: (buildId: string, messages: Message[]) => Promise<void>;
 } {
@@ -96,6 +97,26 @@ export function createBuildMutations(queryClient: QueryClient): {
                 content: code,
               },
             },
+          },
+        },
+      });
+      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
+    },
+
+    /**
+     * Update a build's code and parameters
+     */
+    async updateCodeParameters(buildId: string, code: string, parameters: Record<string, unknown>) {
+      await storage.updateBuild(buildId, {
+        assets: {
+          mechanical: {
+            files: {
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
+              'model.ts': {
+                content: code,
+              },
+            },
+            parameters,
           },
         },
       });

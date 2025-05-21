@@ -136,7 +136,7 @@ function Chat() {
     isLoading,
     setMessages: setBuildMessages,
     setCode: setBuildCode,
-    setParameters: setBuildParameters,
+    setCodeParameters: setBuildCodeParameters,
   } = useBuild();
 
   const { setMessages, messages, reload, status, addToolResult } = useAiChat({
@@ -155,7 +155,7 @@ function Chat() {
           // We now track the CAD actor state to determine success/failure
           const unsubscribe = cadActor.subscribe((state) => {
             // Check if processing completed
-            if (state.value === 'success' || state.value === 'error') {
+            if (state.value === 'rendered' || state.value === 'error') {
               // Format CAD and Monaco errors for AI
               const errorMessages = [];
 
@@ -173,7 +173,7 @@ function Chat() {
 
               // Prepare the result
               const result = {
-                success: state.value === 'success' && errorMessages.length === 0,
+                success: state.value === 'rendered' && errorMessages.length === 0,
                 message:
                   errorMessages.length > 0
                     ? `Code updated but has errors:\n${errorMessages.join('\n')}`
@@ -201,16 +201,16 @@ function Chat() {
   // Subscribe the build to persist code & parameters changes
   useEffect(() => {
     const subscription = cadActor.subscribe((state) => {
-      if (state.value === 'compiling') {
-        setBuildParameters(state.context.parameters);
-        setBuildCode(state.context.code);
+      if (state.value === 'rendering') {
+        console.log('rendering', state);
+        setBuildCodeParameters(state.context.code, state.context.parameters);
       }
     });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [setBuildParameters, setBuildCode]);
+  }, [setBuildCodeParameters]);
 
   // Load and respond to build changes
   useEffect(() => {
@@ -240,14 +240,13 @@ function Chat() {
   useEffect(() => {
     if (status === 'submitted') {
       // A message just got submitted, set the build messages to include the new message.
-
+      console.log('setting build messages after submitted');
       setBuildMessages(messages as Message[]);
     } else if (status === 'ready' && messages.length > 0) {
+      console.log('setting build messages after ready');
       // The chat became ready again, set the build messages to include the new messages.
-
       setBuildMessages(messages as Message[]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- we don't want to trigger the effect for all message changes.
   }, [status, setBuildMessages]);
 
   return <ChatInterface />;

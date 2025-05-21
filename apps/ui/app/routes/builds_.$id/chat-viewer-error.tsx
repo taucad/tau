@@ -5,14 +5,14 @@ import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 
 export function ChatViewerError(): JSX.Element {
   const error = useSelector(cadActor, (state) => state.context.error);
-  const state = useSelector(cadActor, (state) => state.context.state);
+  const status = useSelector(cadActor, (state) => state.context.status);
   const shapes = useSelector(cadActor, (state) => state.context.shapes);
   return (
     <>
-      {shapes.length > 0 && ['buffering', 'rendering'].includes(state) ? (
+      {shapes.length > 0 && ['buffering', 'rendering'].includes(status) ? (
         <div className="absolute top-[90%] left-[50%] -translate-x-[50%] -translate-y-[90%]">
           <div className="border-neutral-200 m-auto flex items-center gap-2 rounded-md border bg-background/70 p-2 backdrop-blur-sm">
-            <span className="font-mono text-sm text-muted-foreground capitalize">{state}...</span>
+            <span className="font-mono text-sm text-muted-foreground capitalize">{status}...</span>
             <LoaderPinwheel className="h-6 w-6 animate-spin text-primary ease-in-out" />
           </div>
         </div>

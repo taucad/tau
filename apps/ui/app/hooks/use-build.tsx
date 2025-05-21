@@ -26,6 +26,7 @@ type BuildContextType = {
   setCode: (code: string) => void;
   setParameters: (parameters: Record<string, unknown>) => void;
   setMessages: (messages: Message[]) => void;
+  setCodeParameters: (code: string, parameters: Record<string, unknown>) => void;
   updateName: (name: string) => void;
   updateThumbnail: (thumbnail: string) => void;
 };
@@ -60,6 +61,8 @@ export function BuildProvider({
       setCode: async (code: string) => mutations.updateCode(buildId, code),
       setParameters: async (parameters: Record<string, unknown>) => mutations.updateParameters(buildId, parameters),
       setMessages: async (messages: Message[]) => mutations.updateMessages(buildId, messages),
+      setCodeParameters: async (code: string, parameters: Record<string, unknown>) =>
+        mutations.updateCodeParameters(buildId, code, parameters),
       updateName: async (name: string) => mutations.updateName(buildId, name),
       updateThumbnail: async (thumbnail: string) => mutations.updateThumbnail(buildId, thumbnail),
     };
@@ -75,4 +78,12 @@ export function useBuild(): BuildContextType {
   }
 
   return context;
+}
+
+// New selector hook that allows selecting specific properties from the build
+export function useBuildSelector<T>(selector: (state: BuildContextType) => T): T {
+  const buildContext = useBuild();
+
+  // Use useMemo to only recompute when the selected value changes
+  return useMemo(() => selector(buildContext), [buildContext, selector]);
 }

@@ -25,8 +25,6 @@ type BuildContextType = {
   parameters: Record<string, unknown>;
   activeChat: Chat | undefined;
   activeChatId: string | undefined;
-  setCode: (code: string) => void;
-  setParameters: (parameters: Record<string, unknown>) => void;
   setChatMessages: (chatId: string, messages: Message[]) => void;
   setCodeParameters: (code: string, parameters: Record<string, unknown>) => void;
   updateName: (name: string) => void;
@@ -70,8 +68,6 @@ export function BuildProvider({
       parameters: data?.assets.mechanical?.parameters ?? {},
       activeChatId,
       activeChat,
-      setCode: async (code: string) => mutations.updateCode(buildId, code),
-      setParameters: async (parameters: Record<string, unknown>) => mutations.updateParameters(buildId, parameters),
       async setChatMessages(chatId: string, messages: Message[]) {
         await mutations.updateChatMessages(buildId, chatId, messages);
       },

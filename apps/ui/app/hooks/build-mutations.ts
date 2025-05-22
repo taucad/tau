@@ -14,9 +14,7 @@ export function createBuildMutations(queryClient: QueryClient): {
   duplicateBuild: (buildId: string) => Promise<Build>;
   updateName: (buildId: string, name: string) => Promise<void>;
   updateThumbnail: (buildId: string, thumbnail: string) => Promise<void>;
-  updateCode: (buildId: string, code: string) => Promise<void>;
   updateCodeParameters: (buildId: string, code: string, parameters: Record<string, unknown>) => Promise<void>;
-  updateParameters: (buildId: string, parameters: Record<string, unknown>) => Promise<void>;
   // New chat-related mutations
   addChat: (buildId: string, initialMessages?: Message[]) => Promise<Chat>;
   updateChatMessages: (buildId: string, chatId: string, messages: Message[]) => Promise<void>;
@@ -93,53 +91,20 @@ export function createBuildMutations(queryClient: QueryClient): {
     },
 
     /**
-     * Update a build's code
-     */
-    async updateCode(buildId: string, code: string) {
-      await storage.updateBuild(buildId, {
-        assets: {
-          mechanical: {
-            files: {
-              // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-              'model.ts': {
-                content: code,
-              },
-            },
-          },
-        },
-      });
-      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
-    },
-
-    /**
      * Update a build's code and parameters
      */
     async updateCodeParameters(buildId: string, code: string, parameters: Record<string, unknown>) {
-      await storage.updateBuild(buildId, {
-        assets: {
-          mechanical: {
-            files: {
-              // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-              'model.ts': {
-                content: code,
-              },
-            },
-            parameters,
-          },
-        },
-      });
-      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
-    },
-
-    /**
-     * Update a build's parameters
-     */
-    async updateParameters(buildId: string, parameters: Record<string, unknown>) {
       await storage.updateBuild(
         buildId,
         {
           assets: {
             mechanical: {
+              files: {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
+                'model.ts': {
+                  content: code,
+                },
+              },
               parameters,
             },
           },

@@ -140,7 +140,6 @@ function Chat() {
     activeChat,
     activeChatId,
     setChatMessages: setBuildChatMessages,
-    setCode: setBuildCode,
     setCodeParameters: setBuildCodeParameters,
   } = useBuild();
 
@@ -153,9 +152,6 @@ function Chat() {
           // Instead of setting both, we just set the code in the CAD actor
           // which will handle all downstream updates
           cadActor.send({ type: 'setCode', code: toolCallArgs.content });
-
-          // We need to update the build's code too for persistence
-          setBuildCode(toolCallArgs.content);
 
           // We now track the CAD actor state to determine success/failure
           const unsubscribe = cadActor.subscribe((state) => {

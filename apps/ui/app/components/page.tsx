@@ -66,7 +66,7 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
               </BreadcrumbList>
             </Breadcrumb>
           </div>
-          <div className="flex items-center gap-2 px-4">
+          <div className="flex items-center gap-2 px-2">
             {!isOnline && (
               <Tooltip>
                 <TooltipTrigger asChild>

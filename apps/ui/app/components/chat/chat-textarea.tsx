@@ -85,7 +85,7 @@ export const ChatTextarea = memo(function ({
     return { initialInputText, initialImageUrls };
   }, [initialContent, initialAttachments]);
   const [inputText, setInputText] = useState(initialInputText);
-  const [isSearching, setIsSearching] = useCookie('chat-web', true);
+  const [isSearching, setIsSearching] = useCookie('chat-web-search', false);
   const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);

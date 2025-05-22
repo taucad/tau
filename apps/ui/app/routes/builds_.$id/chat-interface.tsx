@@ -197,25 +197,21 @@ export const ChatInterface = memo(function () {
         maxSize={30}
         defaultSize={chatResizeMain[2]}
         className={cn(
-          'hidden w-64 shrink-0 flex-col gap-2 text-sm xl:w-96',
+          'hidden w-64 shrink-0 flex-col text-sm xl:w-96',
           'group-data-[parameters-open=true]/chat-layout:md:flex',
         )}
         id="chat-parameters"
       >
-        <span className="m-2 mb-0 text-lg font-medium">Parameters</span>
-        <div className="flex h-full flex-col overflow-y-auto p-2">
-          <ChatParameters />
-        </div>
+        <span className="p-2 pb-0 text-lg font-medium">Parameters</span>
+        <ChatParameters />
       </ResizablePanel>
 
       {/* TODO: revisit if a drawer is the best UX here. */}
       {isMobile && !isChatOpen ? (
         <Drawer open={isParametersOpen} onOpenChange={setIsParametersOpen}>
-          <DrawerContent className={cn('flex flex-col justify-between gap-2 text-sm', 'md:hidden')}>
+          <DrawerContent className={cn('flex h-[60dvh] flex-col text-sm', 'md:hidden')}>
             <span className="px-4 text-lg font-medium">Parameters</span>
-            <div className="overflow-y-auto p-4 pt-2">
-              <ChatParameters />
-            </div>
+            <ChatParameters />
           </DrawerContent>
         </Drawer>
       ) : null}

@@ -237,16 +237,18 @@ export const ChatParameters = memo(function () {
     [handleParameterChange, defaultParameters],
   );
 
+  const containerPadding = 'p-4 md:p-2';
+
   return allParameters && Object.keys(allParameters).length > 0 ? (
     <>
-      <div className="mb-2 flex flex-col">
-        <div className="relative mb-3">
+      <div className={cn('flex flex-col', containerPadding, 'pt-3 pb-0 md:pt-4 md:pb-0')}>
+        <div className="relative">
           <Input
             autoComplete="off"
             type="text"
             placeholder="Search parameters..."
             value={searchTerm}
-            className="h-8 pr-8 pl-8 text-sm"
+            className="h-8 bg-background pr-8 pl-8 text-sm"
             onChange={handleSearchChange}
           />
           <Search className="absolute top-2 left-2 size-4 text-muted-foreground" />
@@ -261,49 +263,49 @@ export const ChatParameters = memo(function () {
             </Button>
           ) : null}
         </div>
+      </div>
 
-        <div className="absolute top-0 right-0 mt-7 mr-4 flex gap-2 md:mt-2 md:mr-12">
-          {Object.keys(validParameters).length > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="overlay"
-                  size="icon"
-                  className="text-muted-foreground transition-colors hover:text-foreground"
-                  onClick={resetAllParameters}
-                >
-                  <RefreshCcw />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Reset all parameters</TooltipContent>
-            </Tooltip>
-          )}
-
+      <div className="absolute top-0 right-0 z-10 mt-5 mr-4 flex gap-2 md:mt-2 md:mr-12">
+        {Object.keys(validParameters).length > 0 && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="overlay"
                 size="icon"
                 className="text-muted-foreground transition-colors hover:text-foreground"
-                aria-expanded={allExpanded}
-                onClick={toggleAllGroups}
+                onClick={resetAllParameters}
               >
-                <ChevronRight
-                  className={cn('size-4 transition-transform duration-300 ease-in-out', allExpanded && 'rotate-90')}
-                />
+                <RefreshCcw />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{allExpanded ? 'Collapse all' : 'Expand all'}</TooltipContent>
+            <TooltipContent>Reset all parameters</TooltipContent>
           </Tooltip>
-        </div>
+        )}
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="overlay"
+              size="icon"
+              className="text-muted-foreground transition-colors hover:text-foreground"
+              aria-expanded={allExpanded}
+              onClick={toggleAllGroups}
+            >
+              <ChevronRight
+                className={cn('size-4 transition-transform duration-300 ease-in-out', allExpanded && 'rotate-90')}
+              />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{allExpanded ? 'Collapse all' : 'Expand all'}</TooltipContent>
+        </Tooltip>
       </div>
 
       {!hasSearchResults && searchTerm ? (
-        <div className="py-4 text-center text-sm text-muted-foreground">
+        <div className={cn('py-4 text-center text-sm text-muted-foreground', containerPadding)}>
           No parameters matching &quot;{searchTerm}&quot;
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className={cn('space-y-3 overflow-y-auto', containerPadding, 'pt-3 md:pt-3')}>
           {Object.entries(filteredGroups).map(([groupName, entries]) => (
             <Collapsible
               key={groupName}
@@ -372,7 +374,7 @@ export const ChatParameters = memo(function () {
       )}
     </>
   ) : (
-    <div className="flex h-full flex-col items-center justify-center rounded-md border border-dashed p-8 text-center">
+    <div className="m-4 flex h-full flex-col items-center justify-center rounded-md border border-dashed text-center md:m-2">
       <div className="mb-3 rounded-full bg-muted/50 p-2">
         <Info className="size-6 text-muted-foreground" strokeWidth={1.5} />
       </div>

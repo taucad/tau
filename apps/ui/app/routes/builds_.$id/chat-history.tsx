@@ -12,6 +12,7 @@ import { useAiChat } from '~/components/chat/ai-chat-provider.js';
 import { AnimatedShinyText } from '~/components/magicui/animated-shiny-text.js';
 import { When } from '~/components/ui/utils/when.js';
 import { cn } from '~/utils/ui.js';
+import { ChatSelector } from '~/routes/builds_.$id/chat-selector.js';
 
 export const ChatHistory = memo(function () {
   const { append, messages, reload, setMessages, status } = useAiChat();
@@ -65,6 +66,9 @@ export const ChatHistory = memo(function () {
 
   return (
     <div className="relative flex h-full flex-col">
+      <div className="flex items-center justify-between border-b p-2 pl-12">
+        <ChatSelector />
+      </div>
       <div ref={chatContainerReference} className="-mb-3 flex-1 overflow-y-auto pb-10">
         <div className="space-y-4 p-4 pb-0">
           {messages.map((message, index) => (

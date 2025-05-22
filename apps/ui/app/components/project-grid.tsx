@@ -60,6 +60,7 @@ function ProjectCard({
   thumbnail,
   stars,
   forks,
+  chats,
   author,
   tags,
   assets,
@@ -135,7 +136,7 @@ function ProjectCard({
       createdAt: Date.now(),
       updatedAt: Date.now(),
       forkedFrom: id,
-      messages: [], // Initialize with empty messages array
+      chats,
     };
 
     const createdBuild = await storage.createBuild(newBuild);

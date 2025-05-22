@@ -27,7 +27,7 @@ export const sampleBuilds: Build[] = mockModels.map((model) => ({
   stars: 0,
   forks: 0,
   thumbnail: '',
-  messages: [],
+  chats: [],
 }));
 
 // Export const mockBuilds: Build[] = [

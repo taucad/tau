@@ -15,6 +15,8 @@ import { AiChatProvider } from '~/components/chat/ai-chat-provider.js';
 import { Separator } from '~/components/ui/separator.js';
 import { InteractiveHoverButton } from '~/components/magicui/interactive-hover-button.js';
 import { toast } from '~/components/ui/sonner.js';
+import { generatePrefixedId } from '~/utils/id.js';
+import { idPrefix } from '~/constants/id.js';
 
 export default function ChatStart(): JSX.Element {
   const navigate = useNavigate();
@@ -32,6 +34,7 @@ export default function ChatStart(): JSX.Element {
           imageUrls,
         });
 
+        const chatId = generatePrefixedId(idPrefix.chat);
         const build = await storage.createBuild({
           name: defaultBuildName,
           description: '',
@@ -43,7 +46,16 @@ export default function ChatStart(): JSX.Element {
           },
           tags: [],
           thumbnail: '',
-          messages: [userMessage],
+          chats: [
+            {
+              id: chatId,
+              name: 'New Chat',
+              messages: [userMessage],
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+          ],
+          lastChatId: chatId,
           assets: {
             mechanical: {
               // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
@@ -77,7 +89,7 @@ export default function ChatStart(): JSX.Element {
         },
         tags: [],
         thumbnail: '',
-        messages: [],
+        chats: [],
         assets: {
           mechanical: {
             // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions

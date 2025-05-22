@@ -3,7 +3,7 @@ import type { JSX, ReactNode } from 'react';
 import { createContext, useContext, useMemo } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { storage } from '~/db/storage.js';
-import type { Build } from '~/types/build.js';
+import type { Build, Chat } from '~/types/build.js';
 import { createBuildMutations } from '~/hooks/build-mutations.js';
 
 // Function to fetch builds
@@ -23,12 +23,19 @@ type BuildContextType = {
   error: unknown;
   code: string;
   parameters: Record<string, unknown>;
+  activeChat: Chat | undefined;
+  activeChatId: string | undefined;
   setCode: (code: string) => void;
   setParameters: (parameters: Record<string, unknown>) => void;
-  setMessages: (messages: Message[]) => void;
+  setChatMessages: (chatId: string, messages: Message[]) => void;
   setCodeParameters: (code: string, parameters: Record<string, unknown>) => void;
   updateName: (name: string) => void;
   updateThumbnail: (thumbnail: string) => void;
+  // Chat related functions
+  addChat: (initialMessages?: Message[]) => Promise<Chat>;
+  setActiveChat: (chatId: string) => void;
+  updateChatName: (chatId: string, name: string) => void;
+  deleteChat: (chatId: string) => Promise<void>;
 };
 
 const BuildContext = createContext<BuildContextType | undefined>(undefined);
@@ -52,19 +59,40 @@ export function BuildProvider({
   const value = useMemo(() => {
     const { data, isLoading, error } = buildQuery;
 
+    const activeChatId = data?.lastChatId;
+    const activeChat = data?.chats?.find((chat) => chat.id === activeChatId);
+
     return {
       build: data,
       isLoading,
       error,
-      code: data?.assets.mechanical?.files[data.assets.mechanical.main]?.content ?? '',
+      code: data?.assets.mechanical?.files[data?.assets.mechanical.main]?.content ?? '',
       parameters: data?.assets.mechanical?.parameters ?? {},
+      activeChatId,
+      activeChat,
       setCode: async (code: string) => mutations.updateCode(buildId, code),
       setParameters: async (parameters: Record<string, unknown>) => mutations.updateParameters(buildId, parameters),
-      setMessages: async (messages: Message[]) => mutations.updateMessages(buildId, messages),
+      async setChatMessages(chatId: string, messages: Message[]) {
+        await mutations.updateChatMessages(buildId, chatId, messages);
+      },
       setCodeParameters: async (code: string, parameters: Record<string, unknown>) =>
         mutations.updateCodeParameters(buildId, code, parameters),
       updateName: async (name: string) => mutations.updateName(buildId, name),
       updateThumbnail: async (thumbnail: string) => mutations.updateThumbnail(buildId, thumbnail),
+      // Chat related functions
+      async addChat(initialMessages?: Message[]) {
+        const newChat = await mutations.addChat(buildId, initialMessages);
+        return newChat;
+      },
+      setActiveChat(chatId: string) {
+        void mutations.setActiveChat(buildId, chatId);
+      },
+      async updateChatName(chatId: string, name: string) {
+        return mutations.updateChatName(buildId, chatId, name);
+      },
+      async deleteChat(chatId: string) {
+        return mutations.deleteChat(buildId, chatId);
+      },
     };
   }, [buildQuery, mutations, buildId]);
 

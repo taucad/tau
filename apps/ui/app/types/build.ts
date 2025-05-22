@@ -5,6 +5,14 @@ type File = {
   content: string;
 };
 
+export type Chat = {
+  id: string;
+  name: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type Build = {
   id: string;
   name: string;
@@ -17,7 +25,8 @@ export type Build = {
   };
   tags: string[];
   thumbnail: string;
-  messages: Message[];
+  chats: Chat[];
+  lastChatId?: string; // Reference to the last active chat
   createdAt: number;
   updatedAt: number;
   forkedFrom?: string;

@@ -39,10 +39,12 @@ function BuildNameEditor() {
   useEffect(() => {
     if (isLoading || !build) return;
 
-    if (build.name === defaultBuildName && build.messages[0]) {
+    const activeChat = build.chats?.find((chat) => chat.id === build.lastChatId);
+
+    if (build.name === defaultBuildName && activeChat?.messages[0]) {
       // Create and send message for name generation
       const message = {
-        ...build.messages[0],
+        ...activeChat.messages[0],
         model: 'name-generator',
         metadata: {
           toolChoice: 'none',
@@ -53,6 +55,7 @@ function BuildNameEditor() {
       setName(build.name);
       setDisplayName(build.name);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run after loading completes
   }, [build?.name, isLoading]);
 
   const handleSubmit = (event: React.FormEvent) => {
@@ -134,7 +137,9 @@ function Chat() {
   const {
     build,
     isLoading,
-    setMessages: setBuildMessages,
+    activeChat,
+    activeChatId,
+    setChatMessages: setBuildChatMessages,
     setCode: setBuildCode,
     setCodeParameters: setBuildCodeParameters,
   } = useBuild();
@@ -211,9 +216,10 @@ function Chat() {
     };
   }, [setBuildCodeParameters]);
 
-  // Load and respond to build changes
   useEffect(() => {
+    // On init, set the code and parameters
     if (!build || isLoading) return;
+
     // Set code
     cadActor.send({
       type: 'setCode',
@@ -223,28 +229,42 @@ function Chat() {
     // Set parameters
     const parameters = build.assets.mechanical?.parameters;
     cadActor.send({ type: 'setParameters', parameters: parameters ?? {} });
-
-    // Set initial messages
-    if (!build || isLoading) return;
-    setMessages(build.messages);
-
-    // Reload when the last message is not an assistant message.
-    // This can happen when the user is offline when sending the initial message.
-    if (build.messages.length > 0 && build.messages.at(-1)?.role !== 'assistant') {
-      void reload();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on init
   }, [id, isLoading]);
 
   useEffect(() => {
+    if (!build || isLoading) return;
+
+    // Set initial messages based on active chat or legacy messages
+    if (activeChat) {
+      setMessages(activeChat.messages);
+
+      // Reload when the last message is not an assistant message
+      if (activeChat.messages.length > 0 && activeChat.messages.at(-1)?.role !== 'assistant') {
+        void reload();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run when build, activeChat, or loading state changes
+  }, [id, isLoading, activeChatId]);
+
+  // Persist message changes to the active build chat
+  useEffect(() => {
+    if (!activeChatId || !activeChat) return;
+
     if (status === 'submitted') {
       // A message just got submitted, set the build messages to include the new message.
-      setBuildMessages(messages as Message[]);
-    } else if (status === 'ready' && build?.messages.length !== messages.length) {
+      setBuildChatMessages(activeChatId, messages as Message[]);
+    } else if (
+      status === 'ready' &&
+      messages.length > 0 &&
+      activeChat.messages.length > 0 &&
+      activeChat.messages.length !== messages.length
+    ) {
       // The chat became ready again, set the build messages to include the new messages.
-      setBuildMessages(messages as Message[]);
+      setBuildChatMessages(activeChatId, messages as Message[]);
     }
-  }, [status, setBuildMessages, messages, build?.messages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- this is effectively a subscription to useChat, so we only respond to status & message changes
+  }, [status, setBuildChatMessages, messages]);
 
   return <ChatInterface />;
 }

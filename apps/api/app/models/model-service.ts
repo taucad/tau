@@ -177,7 +177,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
         cost: {
           inputTokens: 2,
           outputTokens: 8,
-          cachedReadTokens: 37.5,
+          cachedReadTokens: 0.5,
           cachedWriteTokens: 0,
         },
       },

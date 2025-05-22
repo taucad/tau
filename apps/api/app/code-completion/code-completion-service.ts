@@ -12,7 +12,7 @@ export class CodeCompletionService {
     this.copilot = new CompletionCopilot(undefined, {
       async model(prompt) {
         const { text } = await generateText({
-          model: openai('gpt-4o-mini'),
+          model: openai('gpt-4.1-nano'),
           system: prompt.context,
           prompt: `${prompt.instruction}\n\n${prompt.fileContent}`,
           temperature: 0.2,

@@ -140,7 +140,7 @@ function ProjectCard({
 
     const createdBuild = await storage.createBuild(newBuild);
     // Navigate to the new build
-    void navigate(`/builds/${createdBuild.id}`);
+    await navigate(`/builds/${createdBuild.id}`);
   };
 
   return (

@@ -12,14 +12,6 @@ type CadViewerProperties = Omit<ThreeViewerProperties, 'enableCameraControls'> &
 };
 
 export function CadViewer({ shapes, zoomLevel, ...properties }: CadViewerProperties): JSX.Element {
-  if (!shapes || shapes.length === 0) {
-    return (
-      <div className="flex size-full items-center justify-center text-2xl font-bold">
-        <LoaderPinwheel className="size-20 animate-spin stroke-1 text-primary ease-in-out" />
-      </div>
-    );
-  }
-
   const svgShapes = shapes.filter((shape) => shape.type === '2d');
 
   // If there are any SVG shapes, we render them in a SVG viewer

@@ -134,14 +134,7 @@ export const handle: Handle = {
 
 function Chat() {
   const { id } = useParams();
-  const {
-    build,
-    isLoading,
-    activeChat,
-    activeChatId,
-    setChatMessages: setBuildChatMessages,
-    setCodeParameters: setBuildCodeParameters,
-  } = useBuild();
+  const { build, isLoading, activeChat, activeChatId, setChatMessages, setCodeParameters } = useBuild();
 
   const { setMessages, messages, reload, status, addToolResult } = useAiChat({
     onToolCall: new Map([
@@ -203,14 +196,14 @@ function Chat() {
   useEffect(() => {
     const subscription = cadActor.subscribe((state) => {
       if (state.value === 'rendering') {
-        setBuildCodeParameters(state.context.code, state.context.parameters);
+        setCodeParameters(state.context.code, state.context.parameters);
       }
     });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [setBuildCodeParameters]);
+  }, [setCodeParameters]);
 
   useEffect(() => {
     // On init, set the code and parameters
@@ -249,7 +242,7 @@ function Chat() {
 
     if (status === 'submitted') {
       // A message just got submitted, set the build messages to include the new message.
-      setBuildChatMessages(activeChatId, messages as Message[]);
+      setChatMessages(activeChatId, messages as Message[]);
     } else if (
       status === 'ready' &&
       messages.length > 0 &&
@@ -257,10 +250,10 @@ function Chat() {
       activeChat.messages.length !== messages.length
     ) {
       // The chat became ready again, set the build messages to include the new messages.
-      setBuildChatMessages(activeChatId, messages as Message[]);
+      setChatMessages(activeChatId, messages as Message[]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- this is effectively a subscription to useChat, so we only respond to status & message changes
-  }, [status, setBuildChatMessages, messages]);
+  }, [status, setChatMessages, messages]);
 
   return <ChatInterface />;
 }

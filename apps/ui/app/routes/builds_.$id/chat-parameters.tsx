@@ -1,5 +1,5 @@
 import { RefreshCcw, RefreshCcwDot, ChevronRight, Search, X, Info } from 'lucide-react';
-import { useCallback, useMemo, memo, useState } from 'react';
+import React, { useCallback, useMemo, memo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { categorizeParameters } from '~/routes/builds_.$id/chat-parameters-sorter.js';
 import { camelCaseToSentenceCase } from '~/utils/string.js';
@@ -141,12 +141,24 @@ export const ChatParameters = memo(function () {
     setSearchTerm('');
   }, []);
 
-  // Determine if a parameter name matches the search term for highlighting
-  const isParameterMatch = useCallback(
-    (key: string): boolean => {
-      if (!searchTerm) return false;
-      const prettyKey = camelCaseToSentenceCase(key).toLowerCase();
-      return prettyKey.includes(searchTerm);
+  // Replace the isParameterMatch function with getHighlightedText
+  const getHighlightedText = useCallback(
+    (text: string): React.ReactNode => {
+      if (!searchTerm) return text;
+
+      const searchTermLower = searchTerm.toLowerCase();
+      const textLower = text.toLowerCase();
+      const index = textLower.indexOf(searchTermLower);
+
+      if (index === -1) return text;
+
+      return (
+        <>
+          {text.slice(0, Math.max(0, index))}
+          <span className="font-medium text-primary">{text.slice(index, index + searchTermLower.length)}</span>
+          {text.slice(Math.max(0, index + searchTermLower.length))}
+        </>
+      );
     },
     [searchTerm],
   );
@@ -310,7 +322,6 @@ export const ChatParameters = memo(function () {
                 {entries.map(([key, value], index, parameterArray) => {
                   const prettyKey = camelCaseToSentenceCase(key);
                   const isLast = index === parameterArray.length - 1;
-                  const isMatch = isParameterMatch(key);
 
                   return (
                     <div key={key}>
@@ -321,13 +332,8 @@ export const ChatParameters = memo(function () {
                       >
                         <div className="flex h-auto min-h-6 flex-row justify-between gap-2">
                           <div className="flex flex-row items-baseline gap-2">
-                            <span
-                              className={cn(
-                                parameters[key] === undefined ? 'font-normal' : 'font-medium',
-                                isMatch && 'font-medium text-primary',
-                              )}
-                            >
-                              {prettyKey}
+                            <span className={cn(parameters[key] === undefined ? 'font-normal' : 'font-medium')}>
+                              {getHighlightedText(prettyKey)}
                             </span>
                             <span className="hidden text-xs text-muted-foreground @[10rem]/parameter:block">
                               {typeof value}

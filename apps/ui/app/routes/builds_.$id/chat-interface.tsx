@@ -202,7 +202,6 @@ export const ChatInterface = memo(function () {
         )}
         id="chat-parameters"
       >
-        <span className="p-2 pb-0 text-lg font-medium">Parameters</span>
         <ChatParameters />
       </ResizablePanel>
 
@@ -210,7 +209,6 @@ export const ChatInterface = memo(function () {
       {isMobile && !isChatOpen ? (
         <Drawer open={isParametersOpen} onOpenChange={setIsParametersOpen}>
           <DrawerContent className={cn('flex h-[60dvh] flex-col text-sm', 'md:hidden')}>
-            <span className="px-4 text-lg font-medium">Parameters</span>
             <ChatParameters />
           </DrawerContent>
         </Drawer>

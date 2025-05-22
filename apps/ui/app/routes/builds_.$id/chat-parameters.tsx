@@ -237,18 +237,23 @@ export const ChatParameters = memo(function () {
     [handleParameterChange, defaultParameters],
   );
 
-  const containerPadding = 'p-4 md:p-2';
+  const containerXpadding = 'px-4 md:px-2';
+  const containerYpadding = 'py-4 md:py-2';
 
   return allParameters && Object.keys(allParameters).length > 0 ? (
     <>
-      <div className={cn('flex flex-col', containerPadding, 'pt-3 pb-0 md:pt-4 md:pb-0')}>
-        <div className="relative">
+      <h1 className={cn('flex h-10 w-full flex-row items-center gap-2 text-lg font-medium', containerXpadding, 'pt-2')}>
+        Parameters
+        <span className="text-muted-foreground/50">({Object.keys(allParameters).length})</span>
+      </h1>
+      <div className={cn('flex w-full flex-row gap-2', containerXpadding, 'pt-2 pb-0 md:pt-4')}>
+        <div className="relative w-full">
           <Input
             autoComplete="off"
             type="text"
             placeholder="Search parameters..."
             value={searchTerm}
-            className="h-8 bg-background pr-8 pl-8 text-sm"
+            className="h-8 w-full bg-background pr-8 pl-8 text-sm"
             onChange={handleSearchChange}
           />
           <Search className="absolute top-2 left-2 size-4 text-muted-foreground" />
@@ -263,9 +268,6 @@ export const ChatParameters = memo(function () {
             </Button>
           ) : null}
         </div>
-      </div>
-
-      <div className="absolute top-0 right-0 z-10 mt-5 mr-4 flex gap-2 md:mt-2 md:mr-12">
         {Object.keys(validParameters).length > 0 && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -301,11 +303,11 @@ export const ChatParameters = memo(function () {
       </div>
 
       {!hasSearchResults && searchTerm ? (
-        <div className={cn('py-4 text-center text-sm text-muted-foreground', containerPadding)}>
+        <div className={cn('py-4 text-center text-sm text-muted-foreground', containerXpadding)}>
           No parameters matching &quot;{searchTerm}&quot;
         </div>
       ) : (
-        <div className={cn('space-y-3 overflow-y-auto', containerPadding, 'pt-3 md:pt-3')}>
+        <div className={cn('space-y-2 overflow-y-auto', containerXpadding, containerYpadding, 'pt-3 md:pt-3')}>
           {Object.entries(filteredGroups).map(([groupName, entries]) => (
             <Collapsible
               key={groupName}
@@ -316,7 +318,9 @@ export const ChatParameters = memo(function () {
               }}
             >
               <CollapsibleTrigger className="group/collapsible flex w-full items-center justify-between bg-muted/70 p-2 transition-colors hover:bg-muted">
-                <h3 className="text-sm font-medium">{groupName}</h3>
+                <h3 className="text-sm font-medium">
+                  {groupName} <span className="text-muted-foreground/50">({entries.length})</span>
+                </h3>
                 <ChevronRight className="size-4 text-muted-foreground transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
               </CollapsibleTrigger>
 
@@ -374,7 +378,13 @@ export const ChatParameters = memo(function () {
       )}
     </>
   ) : (
-    <div className="m-4 flex h-full flex-col items-center justify-center rounded-md border border-dashed text-center md:m-2">
+    <div
+      className={cn(
+        'm-4 flex h-full flex-col items-center justify-center rounded-md border border-dashed text-center',
+        containerXpadding,
+        containerYpadding,
+      )}
+    >
       <div className="mb-3 rounded-full bg-muted/50 p-2">
         <Info className="size-6 text-muted-foreground" strokeWidth={1.5} />
       </div>

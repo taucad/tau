@@ -643,13 +643,10 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
   useEffect(() => {
     if (showPreview) {
       send({ type: 'initializeKernel' });
-      if (code) {
-        send({ type: 'setCode', code });
-      }
-
-      if (parameters) {
-        send({ type: 'setParameters', parameters });
-      }
+      setTimeout(() => {
+        // TODO: Remove this once the CAD machine waits for initialization before rendering.
+        send({ type: 'initializeModel', code: code ?? '', parameters: parameters ?? {} });
+      }, 1000);
     }
   }, [code, parameters, showPreview, send]);
 

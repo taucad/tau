@@ -15,6 +15,7 @@ import { categories } from '~/types/cad.js';
 import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
 import { storage } from '~/db/storage.js';
 import { cadMachine } from '~/machines/cad.js';
+import { HammerAnimation } from '~/components/hammer-animation.js';
 
 // Placeholder for language icons
 const languageIcons: Record<CadKernelProvider, ComponentType<{ className?: string }>> = {
@@ -72,6 +73,7 @@ function ProjectCard({
   // Create a unique instance of the CAD machine for this card using the card's ID
   const [_, send, actorRef] = useActor(cadMachine, { input: { shouldInitializeKernelOnStart: false } });
   const shapes = useSelector(actorRef, (state) => state.context.shapes);
+  const status = useSelector(actorRef, (state) => state.value);
 
   const navigate = useNavigate();
 
@@ -115,7 +117,10 @@ function ProjectCard({
   useEffect(() => {
     if (isVisible && showPreview && replicadCode) {
       send({ type: 'initializeKernel' });
-      send({ type: 'setCode', code: replicadCode });
+      // TODO: Remove this once the CAD machine waits for initialization before rendering.
+      setTimeout(() => {
+        send({ type: 'initializeModel', code: replicadCode, parameters: {} });
+      }, 1000);
     }
   }, [isVisible, showPreview, replicadCode, send]);
 
@@ -158,6 +163,11 @@ function ProjectCard({
         )}
         {showPreview ? (
           <div className="absolute inset-0">
+            {status === 'initializing' ? (
+              <div className="flex size-full items-center justify-center">
+                <HammerAnimation className="size-10" />
+              </div>
+            ) : null}
             <CadViewer
               shapes={shapes}
               className="bg-muted"

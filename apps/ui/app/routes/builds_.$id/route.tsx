@@ -209,15 +209,12 @@ function Chat() {
     // On init, set the code and parameters
     if (!build || isLoading) return;
 
-    // Set code
+    // Initialize model
     cadActor.send({
-      type: 'setCode',
+      type: 'initializeModel',
       code: build.assets.mechanical?.files[build.assets.mechanical.main]?.content ?? '',
+      parameters: build.assets.mechanical?.parameters ?? {},
     });
-
-    // Set parameters
-    const parameters = build.assets.mechanical?.parameters;
-    cadActor.send({ type: 'setParameters', parameters: parameters ?? {} });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on init
   }, [id, isLoading]);
 

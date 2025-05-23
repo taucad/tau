@@ -1,4 +1,3 @@
-import { LoaderPinwheel } from 'lucide-react';
 import type { JSX } from 'react';
 import { ReplicadMesh } from '~/components/geometry/kernel/replicad/replicad-mesh.js';
 import { ThreeProvider } from '~/components/geometry/graphics/three/three-context.js';

@@ -191,8 +191,10 @@ export const kernelMachine = setup({
   initial: 'initializing',
   states: {
     initializing: {
-      entry: 'createWorker',
       on: {
+        initialize: {
+          actions: 'createWorker',
+        },
         initialized: {
           target: 'ready',
         },

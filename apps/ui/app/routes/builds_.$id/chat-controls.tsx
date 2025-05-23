@@ -30,21 +30,6 @@ export function ChatControls(): JSX.Element {
 
   const { screenshot } = useGraphics();
 
-  const getStlBlob = useCallback(async () => {
-    return new Promise<Blob>((resolve, reject) => {
-      cadActor.send({ type: 'exportGeometry', format: 'stl' });
-      const subscription = cadActor.subscribe((state) => {
-        if (state.context.exportedBlob) {
-          subscription.unsubscribe();
-          resolve(state.context.exportedBlob);
-        } else if (state.matches('error') && typeof state.context.error === 'string') {
-          subscription.unsubscribe();
-          reject(new Error(state.context.error));
-        }
-      });
-    });
-  }, []);
-
   const getPngBlob = useCallback(async () => {
     const dataUrl = screenshot.capture({
       output: {
@@ -56,14 +41,24 @@ export function ChatControls(): JSX.Element {
     return response.blob();
   }, [screenshot]);
 
-  const handleDownloadStl = useCallback(
-    async (filename: string) => {
-      toast.promise(getStlBlob(), {
+  const handleDownloadStl = useCallback(async (filename: string) => {
+    toast.promise(
+      new Promise<Blob>((resolve, reject) => {
+        cadActor.send({ type: 'exportGeometry', format: 'stl' });
+        const subscription = cadActor.subscribe((state) => {
+          if (state.context.exportedBlob) {
+            subscription.unsubscribe();
+            downloadBlob(state.context.exportedBlob, filename);
+            resolve(state.context.exportedBlob);
+          } else if (state.matches('error') && typeof state.context.error === 'string') {
+            subscription.unsubscribe();
+            reject(new Error(state.context.error));
+          }
+        });
+      }),
+      {
         loading: `Downloading ${filename}...`,
-        success(blob) {
-          downloadBlob(blob, filename);
-          return `Downloaded ${filename}`;
-        },
+        success: `Downloaded ${filename}`,
         error(error) {
           let message = `Failed to download ${filename}`;
           if (error instanceof Error) {
@@ -72,10 +67,9 @@ export function ChatControls(): JSX.Element {
 
           return message;
         },
-      });
-    },
-    [getStlBlob],
-  );
+      },
+    );
+  }, []);
 
   const handleDownloadCode = useCallback(async () => {
     toast.promise(

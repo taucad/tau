@@ -680,7 +680,6 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
               className="bg-muted"
               stageOptions={{
                 zoomLevel: 1.5,
-                rotation: { side: -Math.PI / 6 },
               }}
             />
           </div>

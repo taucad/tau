@@ -152,7 +152,7 @@ function ProjectCard({
           <img
             src={thumbnail || '/placeholder.svg'}
             alt={name}
-            className="size-full object-cover transition-transform group-hover:scale-105"
+            className="size-full scale-110 object-cover transition-transform group-hover:scale-120"
             loading="lazy"
           />
         )}
@@ -163,7 +163,6 @@ function ProjectCard({
               className="bg-muted"
               stageOptions={{
                 zoomLevel: 1.5,
-                rotation: { side: -Math.PI / 6 },
               }}
             />
           </div>

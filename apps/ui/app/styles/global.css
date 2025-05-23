@@ -328,6 +328,20 @@
       transform: translateY(-4px);
     }
   }
+
+  @keyframes hammer-animated-effect {
+    0% { transform: rotate(0deg) translateY(0px); }
+    15% { transform: rotate(35deg) translateY(-2.5px); } /* Hit overshoot */
+    30% { transform: rotate(28deg) translateY(-1.8px); } /* Recoil */
+    40% { transform: rotate(30deg) translateY(-2px); }    /* Settled hit / Start of return phase */
+    70% { transform: rotate(-8deg) translateY(1px); }   /* Return overshoot */
+    100% { transform: rotate(0deg) translateY(0px); }
+  }
+
+  .hammer-animated-effect-class {
+    animation: hammer-animated-effect 1s infinite ease-in-out;
+    /* transform-origin will be set by inline style in the component */
+  }
 }
 
 /* END ANIMATION UTILITIES */

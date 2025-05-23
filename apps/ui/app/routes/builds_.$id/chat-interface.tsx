@@ -14,6 +14,7 @@ import { Drawer, DrawerContent } from '~/components/ui/drawer.js';
 import { useIsMobile } from '~/hooks/use-mobile.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import type { KeyCombination } from '~/utils/keys.js';
+import { ChatControls } from '~/routes/builds_.$id/chat-controls.js';
 
 export const chatHistoryOpenCookieName = 'chat-history-open';
 export const chatParametersOpenCookieName = 'chat-parameters-open';
@@ -190,6 +191,7 @@ export const ChatInterface = memo(function () {
           </KeyShortcut>
         </TooltipContent>
       </Tooltip>
+      <ChatControls />
 
       <ResizablePanel
         order={3}

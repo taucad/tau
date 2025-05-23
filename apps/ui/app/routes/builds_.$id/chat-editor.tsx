@@ -9,8 +9,6 @@ import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.
 import '~/routes/builds_.$id/chat-config.js';
 import { CodeEditor } from '~/components/code-editor.js';
 import { cn } from '~/utils/ui.js';
-import { CopyButton } from '~/components/copy-button.js';
-import { DownloadButton } from '~/components/download-button.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }) {
@@ -65,37 +63,13 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
   }, [monaco]);
 
   return (
-    <>
-      <div className="absolute top-0 right-0 z-10 my-2 mr-12 flex flex-row items-center justify-between gap-2 group-data-[view-mode=split]/chat-layout:mr-52 md:mr-22 md:group-data-[view-mode=split]/chat-layout:mr-62">
-        <CopyButton
-          variant="overlay"
-          size="icon"
-          getText={() => code}
-          className="text-muted-foreground"
-          tooltip="Copy code"
-        />
-        <DownloadButton
-          variant="overlay"
-          size="icon"
-          title="main.ts"
-          getBlob={async () =>
-            new Promise((resolve) => {
-              const blob = new Blob([code], { type: 'text/plain' });
-              resolve(blob);
-            })
-          }
-          className="text-muted-foreground"
-          tooltip="Download code"
-        />
-      </div>
-      <CodeEditor
-        loading={<LoaderPinwheel className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
-        className={cn('bg-background text-xs', className)}
-        defaultLanguage="typescript"
-        value={code}
-        onChange={handleCodeChange}
-        onValidate={handleValidate}
-      />
-    </>
+    <CodeEditor
+      loading={<LoaderPinwheel className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
+      className={cn('bg-background text-xs', className)}
+      defaultLanguage="typescript"
+      value={code}
+      onChange={handleCodeChange}
+      onValidate={handleValidate}
+    />
   );
 });

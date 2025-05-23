@@ -32,6 +32,7 @@ export function ComboBoxResponsive<T>({
   searchPlaceHolder = 'Filter items...',
   asChildLabel = false,
   labelClassName,
+  isDisabled,
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
   readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
@@ -46,6 +47,7 @@ export function ComboBoxResponsive<T>({
   readonly searchPlaceHolder?: string;
   readonly asChildLabel?: boolean;
   readonly labelClassName?: string;
+  readonly isDisabled?: (item: T) => boolean;
 }): JSX.Element {
   const [open, setOpen] = React.useState(false);
   const isMobile = useIsMobile();
@@ -91,6 +93,7 @@ export function ComboBoxResponsive<T>({
               searchPlaceHolder={searchPlaceHolder}
               asChildLabel={asChildLabel}
               labelClassName={labelClassName}
+              isDisabled={isDisabled}
             />
           </div>
         </DrawerContent>
@@ -111,6 +114,7 @@ export function ComboBoxResponsive<T>({
           searchPlaceHolder={searchPlaceHolder}
           asChildLabel={asChildLabel}
           labelClassName={labelClassName}
+          isDisabled={isDisabled}
         />
       </PopoverContent>
     </Popover>
@@ -126,6 +130,7 @@ function ItemList<T>({
   searchPlaceHolder,
   asChildLabel: labelAsChild,
   labelClassName,
+  isDisabled,
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
   readonly setSelectedItem: (item: T) => void;
@@ -135,6 +140,7 @@ function ItemList<T>({
   readonly searchPlaceHolder: string;
   readonly asChildLabel?: boolean;
   readonly labelClassName?: string;
+  readonly isDisabled?: (item: T) => boolean;
 }) {
   return (
     <Command>
@@ -152,6 +158,7 @@ function ItemList<T>({
                   value={value}
                   keywords={[group.name]}
                   className={cn('cursor-pointer', labelClassName)}
+                  disabled={isDisabled?.(item)}
                   onSelect={() => {
                     setSelectedItem(item);
                   }}

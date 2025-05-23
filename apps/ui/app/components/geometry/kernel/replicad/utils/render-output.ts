@@ -211,11 +211,11 @@ function renderMesh(shapeConfig: MeshableConfiguration) {
 
   try {
     shapeInfo.faces = shape.mesh({
-      tolerance: 0.01,
+      tolerance: 0.1,
       angularTolerance: 30,
     });
     shapeInfo.edges = shape.meshEdges({
-      tolerance: 0.01,
+      tolerance: 0.1,
       angularTolerance: 30,
     });
   } catch (error) {

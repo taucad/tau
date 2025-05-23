@@ -79,9 +79,7 @@ function ColorPicker({
         <ThreeProvider
           className={cn(className, 'p-0')}
           stageOptions={{
-            perspective: {
-              zoomLevel: 1.75,
-            },
+            zoomLevel: 1.75,
             rotation: {
               side: -(Math.PI * 4) / 6,
               vertical: Math.PI / 6,

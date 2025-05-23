@@ -104,7 +104,7 @@ export const categorizeParameters = (
   // Create a category for each significant primary term
   // A term is significant if it appears as the primary term in at least one parameter
   // and is not a descriptor or common general term
-  const groups: Record<string, Array<[string, unknown]>> = {};
+  let groups: Record<string, Array<[string, unknown]>> = {};
 
   // Create categories for each significant primary term
   for (const [term, count] of primaryTermCount.entries()) {
@@ -114,8 +114,8 @@ export const categorizeParameters = (
     }
   }
 
-  // Add "Other" group for anything that doesn't match
-  groups.Other = [];
+  // Add "General" group for anything that doesn't match
+  const generalGroup: Array<[string, unknown]> = [];
 
   // Assign parameters to groups based on their primary term
   for (const entry of parameterEntries) {
@@ -128,14 +128,20 @@ export const categorizeParameters = (
       if (groups[groupName]) {
         groups[groupName].push(entry);
       } else {
-        // If no category exists for this primary term, assign to "Other"
-        groups.Other.push(entry);
+        // If no category exists for this primary term, assign to "General"
+        generalGroup.push(entry);
       }
     } else {
-      // If no primary term, assign to "Other"
-      groups.Other.push(entry);
+      // If no primary term, assign to "General"
+      generalGroup.push(entry);
     }
   }
+
+  groups = {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- naming convention.
+    General: generalGroup,
+    ...groups,
+  };
 
   // Remove empty groups
   return Object.fromEntries(Object.entries(groups).filter(([_, entries]) => entries.length > 0));

@@ -248,7 +248,7 @@ export const ChatParameters = memo(function () {
         className={cn(
           'flex h-10 w-full flex-row items-center gap-2 text-lg font-medium',
           containerXpadding,
-          'pt-2 pb-0 md:pt-2.5',
+          'pt-2 pb-0 md:pt-3',
         )}
       >
         <span>Parameters</span>

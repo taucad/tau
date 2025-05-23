@@ -12,6 +12,7 @@ export function resetCamera({
   setCurrentZoom,
   setSceneRadius,
   invalidate,
+  withConfiguredAngles,
 }: {
   camera: THREE.Camera;
   shapeRadius: number;
@@ -26,6 +27,7 @@ export function resetCamera({
   setCurrentZoom: (zoom: number) => void;
   setSceneRadius: (radius: number) => void;
   invalidate: () => void;
+  withConfiguredAngles?: boolean;
 }): void {
   if (!(camera instanceof THREE.PerspectiveCamera)) {
     console.error('resetCamera requires PerspectiveCamera');
@@ -39,23 +41,52 @@ export function resetCamera({
   // Reset zoom tracking state using the appropriate configured zoom level
   setCurrentZoom(perspective.zoomLevel);
 
-  // Get the FOV of the perspective camera
-  const { fov } = camera;
+  const useConfiguredAngles = withConfiguredAngles ?? true;
 
-  // Calculate a FOV-adjusted distance factor to maintain consistent framing
-  // Standard FOV for 3D views is often around 50-60 degrees
+  // Calculate the effective FOV that will be active after this reset, due to perspective.zoomLevel
+  // camera.fov is the FOV when zoom = 1.
+  let effectiveFovForAdjustment = camera.fov;
+  if (useConfiguredAngles) {
+    effectiveFovForAdjustment =
+      THREE.MathUtils.RAD2DEG *
+      2 *
+      Math.atan(Math.tan((THREE.MathUtils.DEG2RAD * camera.fov) / 2) / perspective.zoomLevel);
+  }
+
   const standardFov = 60;
   const fovAdjustmentFactor =
-    Math.tan(THREE.MathUtils.degToRad(standardFov / 2)) / Math.tan(THREE.MathUtils.degToRad(fov / 2));
+    Math.tan(THREE.MathUtils.degToRad(standardFov / 2)) /
+    Math.tan(THREE.MathUtils.degToRad(effectiveFovForAdjustment / 2));
 
-  // Adjust the offsetRatio based on the FOV to maintain consistent visual size
   const adjustedOffsetRatio = perspective.offsetRatio * fovAdjustmentFactor;
+  const newDistance = adjustedShapeRadius * adjustedOffsetRatio;
 
-  // Compute camera position using spherical coordinates
-  const [x, y] = getPositionOnCircle(adjustedShapeRadius * adjustedOffsetRatio, rotation.side);
-  const [, z] = getPositionOnCircle(adjustedShapeRadius * adjustedOffsetRatio, rotation.vertical);
+  if (useConfiguredAngles) {
+    // Use configured rotation angles (side and vertical) for positioning
+    const r = newDistance;
+    const phi = rotation.side;
+    const theta = rotation.vertical;
+    const cosTheta = Math.cos(theta);
+    const x = r * cosTheta * Math.cos(phi);
+    const y = r * cosTheta * Math.sin(phi);
+    const z = r * Math.sin(theta);
+    camera.position.set(x, y, z);
+  } else if (camera.position.lengthSq() >= 1e-9) {
+    // Maintain current viewing direction if not at origin, only adjust distance
+    const currentDirection = camera.position.clone().normalize();
+    camera.position.copy(currentDirection.multiplyScalar(newDistance));
+  } else {
+    // Fallback for non-configured angle mode: If at origin or too close, use configured angles to set an initial safe direction.
+    const r = newDistance;
+    const phi = rotation.side;
+    const theta = rotation.vertical;
+    const cosTheta = Math.cos(theta);
+    const x = r * cosTheta * Math.cos(phi);
+    const y = r * cosTheta * Math.sin(phi);
+    const z = r * Math.sin(theta);
+    camera.position.set(x, y, z);
+  }
 
-  camera.position.set(x, y, z);
   camera.zoom = perspective.zoomLevel;
   camera.near = perspective.nearPlane;
   camera.far = Math.max(perspective.minimumFarPlane, adjustedShapeRadius * perspective.farPlaneRadiusMultiplier);
@@ -68,14 +99,4 @@ export function resetCamera({
 
   camera.updateProjectionMatrix();
   invalidate();
-}
-
-/**
- * Get the position on the circumference of a circle given the radius and angle in radians.
- * @param radius - The radius of the circle.
- * @param angleInRadians - The angle in radians.
- * @returns The position on the circle.
- */
-function getPositionOnCircle(radius: number, angleInRadians: number): [number, number] {
-  return [radius * Math.cos(angleInRadians), radius * Math.sin(angleInRadians)];
 }

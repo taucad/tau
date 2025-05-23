@@ -37,7 +37,7 @@ export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBui
   return (
     <>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {builds.map((build) => (
+        {builds.slice(0, 6).map((build) => (
           <ProjectCard key={build.id} {...build} />
         ))}
       </div>
@@ -70,7 +70,7 @@ function ProjectCard({
   const cardReference = useRef<HTMLDivElement>(null);
 
   // Create a unique instance of the CAD machine for this card using the card's ID
-  const [_, send, actorRef] = useActor(cadMachine, { input: { id: `cad-card-${id}` } });
+  const [_, send, actorRef] = useActor(cadMachine, { input: { shouldInitializeKernelOnStart: false } });
   const shapes = useSelector(actorRef, (state) => state.context.shapes);
 
   const navigate = useNavigate();
@@ -114,6 +114,7 @@ function ProjectCard({
   // Only load the CAD model when the card is visible and preview is enabled
   useEffect(() => {
     if (isVisible && showPreview && replicadCode) {
+      send({ type: 'initializeKernel' });
       send({ type: 'setCode', code: replicadCode });
     }
   }, [isVisible, showPreview, replicadCode, send]);
@@ -155,24 +156,29 @@ function ProjectCard({
             loading="lazy"
           />
         )}
-        {replicadCode && showPreview ? (
+        {showPreview ? (
           <div className="absolute inset-0">
-            <CadViewer shapes={shapes} className="bg-muted" zoomLevel={1.8} />
+            <CadViewer
+              shapes={shapes}
+              className="bg-muted"
+              stageOptions={{
+                zoomLevel: 1.5,
+                rotation: { side: -Math.PI / 6 },
+              }}
+            />
           </div>
         ) : null}
-        {replicadCode ? (
-          <Button
-            variant="overlay"
-            size="icon"
-            className="absolute top-2 right-2 z-10"
-            onClick={(event) => {
-              event.stopPropagation();
-              setShowPreview(!showPreview);
-            }}
-          >
-            <Eye className={showPreview ? 'size-4 text-primary' : 'size-4'} />
-          </Button>
-        ) : null}
+        <Button
+          variant="overlay"
+          size="icon"
+          className="absolute top-2 right-2 z-10"
+          onClick={(event) => {
+            event.stopPropagation();
+            setShowPreview(!showPreview);
+          }}
+        >
+          <Eye className={showPreview ? 'size-4 text-primary' : 'size-4'} />
+        </Button>
       </div>
       <CardHeader>
         <div className="flex items-center justify-between">

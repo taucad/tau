@@ -619,7 +619,7 @@ type BuildLibraryCardProps = {
 };
 
 function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibraryCardProps) {
-  const [_, send, actorRef] = useActor(cadMachine, { input: { id: `cad-card-${build.id}` } });
+  const [_, send, actorRef] = useActor(cadMachine, { input: { shouldInitializeKernelOnStart: false } });
   const shapes = useSelector(actorRef, (state) => state.context.shapes);
   const code = build.assets.mechanical?.files[build.assets.mechanical?.main]?.content;
   const parameters = build.assets.mechanical?.parameters;
@@ -642,6 +642,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
 
   useEffect(() => {
     if (showPreview) {
+      send({ type: 'initializeKernel' });
       if (code) {
         send({ type: 'setCode', code });
       }
@@ -674,7 +675,14 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
               event.preventDefault();
             }}
           >
-            <CadViewer shapes={shapes} className="bg-muted" zoomLevel={1.8} />
+            <CadViewer
+              shapes={shapes}
+              className="bg-muted"
+              stageOptions={{
+                zoomLevel: 1.5,
+                rotation: { side: -Math.PI / 6 },
+              }}
+            />
           </div>
         ) : null}
         <Button

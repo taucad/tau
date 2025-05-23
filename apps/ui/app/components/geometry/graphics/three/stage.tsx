@@ -9,28 +9,26 @@ import { Grid } from '~/components/geometry/graphics/three/grid.js';
 import { useCameraReset } from '~/components/geometry/graphics/three/use-camera-reset.js';
 
 export type StageOptions = {
-  perspective?: {
-    /**
-     * The ratio of the scene's radius to offset the camera from the center. Adjusting this value will change the applied perspective of the scene.
-     */
-    offsetRatio?: number;
-    /**
-     * The near plane of the camera.
-     */
-    nearPlane?: number;
-    /**
-     * The minimum far plane of the camera.
-     */
-    minimumFarPlane?: number;
-    /**
-     * The multiplier for the camera's far plane.
-     */
-    farPlaneRadiusMultiplier?: number;
-    /**
-     * The zoom level of the camera.
-     */
-    zoomLevel?: number;
-  };
+  /**
+   * The ratio of the scene's radius to offset the camera from the center. Adjusting this value will change the applied perspective of the scene.
+   */
+  offsetRatio?: number;
+  /**
+   * The near plane of the camera.
+   */
+  nearPlane?: number;
+  /**
+   * The minimum far plane of the camera.
+   */
+  minimumFarPlane?: number;
+  /**
+   * The multiplier for the camera's far plane.
+   */
+  farPlaneRadiusMultiplier?: number;
+  /**
+   * The zoom level of the camera.
+   */
+  zoomLevel?: number;
   rotation?: {
     /**
      * The initial z-axis rotation of the camera in radians.
@@ -44,20 +42,18 @@ export type StageOptions = {
   };
 };
 
-const significantRadiusChangeRatio = 0.4;
+const significantRadiusChangeRatio = 0.1;
 
 // Default configuration constants
 export const defaultStageOptions = {
-  perspective: {
-    offsetRatio: 3,
-    nearPlane: 0.1,
-    minimumFarPlane: 10_000_000_000,
-    farPlaneRadiusMultiplier: 5,
-    zoomLevel: 1.25,
-  },
+  offsetRatio: 3,
+  nearPlane: 0.1,
+  minimumFarPlane: 10_000_000_000,
+  farPlaneRadiusMultiplier: 5,
+  zoomLevel: 1,
   rotation: {
     side: -Math.PI / 4, // Default rotation is 45 degrees counter-clockwise
-    vertical: Math.PI / 4, // Default rotation is 45 degrees upwards
+    vertical: Math.PI / 6, // Default rotation is 30 degrees upwards
   },
 } as const satisfies StageOptions;
 
@@ -96,6 +92,7 @@ export function Stage({
   // Add state for tracking zoom
   const [currentZoom, setCurrentZoom] = React.useState<number>(1);
   const originalDistanceReference = React.useRef<number | undefined>(undefined);
+  const isInitialResetDoneRef = React.useRef<boolean>(false);
 
   const [{ shapeRadius, sceneRadius }, set] = React.useState<{
     // The radius of the scene. Used to determine if the camera needs to be updated
@@ -107,9 +104,10 @@ export function Stage({
     shapeRadius: 0,
   });
 
-  const { perspective, rotation } = useMemo(() => {
+  const { offsetRatio, nearPlane, minimumFarPlane, farPlaneRadiusMultiplier, zoomLevel, rotation } = useMemo(() => {
     return {
-      perspective: { ...defaultStageOptions.perspective, ...stageOptions.perspective },
+      ...defaultStageOptions,
+      ...stageOptions,
       rotation: { ...defaultStageOptions.rotation, ...stageOptions.rotation },
     };
   }, [stageOptions]);
@@ -127,16 +125,15 @@ export function Stage({
     shapeRadius,
     // Explicitly provide the required properties
     rotation: {
-      side: rotation.side ?? defaultStageOptions.rotation.side,
-      vertical: rotation.vertical ?? defaultStageOptions.rotation.vertical,
+      side: rotation.side,
+      vertical: rotation.vertical,
     },
     perspective: {
-      offsetRatio: perspective.offsetRatio ?? defaultStageOptions.perspective.offsetRatio,
-      zoomLevel: perspective.zoomLevel ?? defaultStageOptions.perspective.zoomLevel,
-      nearPlane: perspective.nearPlane ?? defaultStageOptions.perspective.nearPlane,
-      minimumFarPlane: perspective.minimumFarPlane ?? defaultStageOptions.perspective.minimumFarPlane,
-      farPlaneRadiusMultiplier:
-        perspective.farPlaneRadiusMultiplier ?? defaultStageOptions.perspective.farPlaneRadiusMultiplier,
+      offsetRatio,
+      zoomLevel,
+      nearPlane,
+      minimumFarPlane,
+      farPlaneRadiusMultiplier,
     },
     setCurrentZoom,
     setSceneRadius,
@@ -206,13 +203,16 @@ export function Stage({
   React.useLayoutEffect(() => {
     // If the scene radius is undefined, we need to initialize the camera, so we default to true.
     // Force update when camera type changes
-    const isSignificantChange =
-      sceneRadius === undefined
-        ? true
-        : Math.abs(shapeRadius - sceneRadius) / sceneRadius > significantRadiusChangeRatio;
+    const changeRatio = sceneRadius === undefined ? 0 : Math.abs((shapeRadius - sceneRadius) / sceneRadius);
+    const isSignificantChange = sceneRadius === undefined ? true : changeRatio > significantRadiusChangeRatio;
 
     if (isSignificantChange) {
-      resetCamera();
+      if (isInitialResetDoneRef.current) {
+        resetCamera({ withConfiguredAngles: false }); // Subsequent resets without XY rotation
+      } else {
+        resetCamera(); // Initial reset with rotation
+        isInitialResetDoneRef.current = true;
+      }
     }
   }, [camera, resetCamera, sceneRadius, shapeRadius]);
 

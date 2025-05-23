@@ -11,7 +11,7 @@ export const ChatViewer = memo(function () {
   return (
     <>
       <div className="relative size-full">
-        <CadViewer enableGizmo enableGrid enableZoom enableAxesHelper shapes={shapes} zoomLevel={1.25} />
+        <CadViewer enableGizmo enableGrid enableZoom enableAxesHelper shapes={shapes} />
         <ChatViewerError />
       </div>
       <ChatViewerControls />

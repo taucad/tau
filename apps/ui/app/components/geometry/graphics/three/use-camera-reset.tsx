@@ -30,39 +30,36 @@ type ResetCameraParameters = {
 /**
  * Hook that provides camera reset functionality and registers it with the graphics context
  */
-export function useCameraReset(parameters: ResetCameraParameters): () => void {
+export function useCameraReset(
+  parameters: ResetCameraParameters,
+): (options?: { withConfiguredAngles?: boolean }) => void {
   const { camera, invalidate } = useThree();
   const { camera: graphicsCamera } = useGraphics();
   const isRegistered = useRef(false);
 
   const { shapeRadius, rotation, perspective, setCurrentZoom, setSceneRadius, originalDistanceReference } = parameters;
 
-  // Create the reset function
-  const resetCamera = useCallback(() => {
-    // Reset original distance reference if available
-    if (originalDistanceReference?.current !== undefined) {
-      originalDistanceReference.current = undefined;
-    }
+  // Create the reset function that now accepts an optional options object
+  const resetCamera = useCallback(
+    (options?: { withConfiguredAngles?: boolean }) => {
+      // Reset original distance reference if available
+      if (originalDistanceReference?.current !== undefined) {
+        originalDistanceReference.current = undefined;
+      }
 
-    resetCameraFn({
-      camera,
-      shapeRadius,
-      rotation,
-      perspective,
-      setCurrentZoom,
-      setSceneRadius,
-      invalidate,
-    });
-  }, [
-    camera,
-    invalidate,
-    shapeRadius,
-    rotation,
-    perspective,
-    setCurrentZoom,
-    setSceneRadius,
-    originalDistanceReference,
-  ]);
+      resetCameraFn({
+        camera,
+        shapeRadius,
+        rotation,
+        perspective,
+        setCurrentZoom,
+        setSceneRadius,
+        invalidate,
+        withConfiguredAngles: options?.withConfiguredAngles,
+      });
+    },
+    [camera, invalidate, shapeRadius, rotation, perspective, setCurrentZoom, setSceneRadius, originalDistanceReference],
+  );
 
   // Register the reset function with the graphics context only once
   useEffect(() => {

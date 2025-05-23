@@ -18,7 +18,7 @@ export function ResetCameraControl(): JSX.Element {
           <Focus />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Reset camera</TooltipContent>
+      <TooltipContent>Reset zoom</TooltipContent>
     </Tooltip>
   );
 }

@@ -1,5 +1,5 @@
 import { Clipboard, Download, GalleryThumbnails, ImageDown, Menu } from 'lucide-react';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import type { JSX } from 'react';
 import { useSelector } from '@xstate/react';
 import { BoxDown } from '~/components/icons/box-down.js';
@@ -225,66 +225,97 @@ export function ChatControls(): JSX.Element {
     );
   }, [screenshot]);
 
-  const buildItems: ViewerControlItem[] = [
-    {
-      id: 'update-thumbnail',
-      label: 'Update thumbnail',
-      group: 'Build',
-      icon: <GalleryThumbnails className="mr-2 size-4" />,
-      action: handleUpdateThumbnail,
-      disabled: !screenshot.isReady,
-    },
-    {
-      id: 'copy-png',
-      label: 'Copy PNG to clipboard',
-      group: 'Build',
-      icon: <Clipboard className="mr-2 size-4" />,
-      action: handleCopyPngToClipboard,
-      disabled: !screenshot.isReady,
-    },
-    {
-      id: 'copy-data-url',
-      label: 'Copy data URL to clipboard',
-      group: 'Build',
-      icon: <Clipboard className="mr-2 size-4" />,
-      action: handleCopyDataUrlToClipboard,
-      disabled: !screenshot.isReady,
-    },
-    {
-      id: 'download-png',
-      label: 'Download PNG',
-      group: 'Build',
-      icon: <ImageDown className="mr-2 size-4" />,
-      action: async () => handleDownloadPng(`${buildName}.png`),
-      disabled: !screenshot.isReady,
-    },
-    {
-      id: 'download-stl',
-      label: 'Download STL',
-      group: 'Build',
-      icon: <BoxDown className="mr-2" />,
-      action: async () => handleDownloadStl(`${buildName}.stl`),
-      disabled: shapes.length === 0,
-    },
-    {
-      id: 'copy-code',
-      label: 'Copy code to clipboard',
-      group: 'Code',
-      icon: <Clipboard className="mr-2 size-4" />,
-      action: handleCopyCodeToClipboard,
-      disabled: !code,
-    },
-    {
-      id: 'download-code',
-      label: 'Download code',
-      group: 'Code',
-      icon: <Download className="mr-2 size-4" />,
-      action: handleDownloadCode,
-      disabled: !code,
-    },
-  ];
+  const buildItems = useMemo(
+    (): ViewerControlItem[] => [
+      {
+        id: 'download-stl',
+        label: 'Download STL',
+        group: 'Export',
+        icon: <BoxDown className="mr-2" />,
+        action: async () => handleDownloadStl(`${buildName}.stl`),
+        disabled: shapes.length === 0,
+      },
+      {
+        id: 'update-thumbnail',
+        label: 'Update thumbnail',
+        group: 'Build',
+        icon: <GalleryThumbnails className="mr-2 size-4" />,
+        action: handleUpdateThumbnail,
+        disabled: !screenshot.isReady,
+      },
+      {
+        id: 'copy-png',
+        label: 'Copy PNG to clipboard',
+        group: 'Build',
+        icon: <Clipboard className="mr-2 size-4" />,
+        action: handleCopyPngToClipboard,
+        disabled: !screenshot.isReady,
+      },
+      {
+        id: 'copy-data-url',
+        label: 'Copy data URL to clipboard',
+        group: 'Build',
+        icon: <Clipboard className="mr-2 size-4" />,
+        action: handleCopyDataUrlToClipboard,
+        disabled: !screenshot.isReady,
+      },
+      {
+        id: 'download-png',
+        label: 'Download PNG',
+        group: 'Build',
+        icon: <ImageDown className="mr-2 size-4" />,
+        action: async () => handleDownloadPng(`${buildName}.png`),
+        disabled: !screenshot.isReady,
+      },
+      {
+        id: 'copy-code',
+        label: 'Copy code to clipboard',
+        group: 'Code',
+        icon: <Clipboard className="mr-2 size-4" />,
+        action: handleCopyCodeToClipboard,
+        disabled: !code,
+      },
+      {
+        id: 'download-code',
+        label: 'Download code',
+        group: 'Code',
+        icon: <Download className="mr-2 size-4" />,
+        action: handleDownloadCode,
+        disabled: !code,
+      },
+    ],
+    [
+      handleUpdateThumbnail,
+      screenshot.isReady,
+      handleCopyPngToClipboard,
+      handleCopyDataUrlToClipboard,
+      handleDownloadPng,
+      buildName,
+      handleDownloadStl,
+      shapes,
+      code,
+      handleCopyCodeToClipboard,
+      handleDownloadCode,
+    ],
+  );
 
-  const groupedControlItems = [{ name: 'Build', items: buildItems }];
+  const groupedControlItems = useMemo(() => {
+    const groupedControlItemsMap: Record<string, { name: string; items: ViewerControlItem[] }> = {};
+    const groupOrder: string[] = [];
+
+    for (const item of buildItems) {
+      if (!groupedControlItemsMap[item.group]) {
+        groupedControlItemsMap[item.group] = { name: item.group, items: [] };
+        groupOrder.push(item.group);
+      }
+
+      groupedControlItemsMap[item.group].items.push(item);
+    }
+
+    return Object.values(groupedControlItemsMap).sort(
+      (a, b) => groupOrder.indexOf(a.name) - groupOrder.indexOf(b.name),
+    );
+  }, [buildItems]);
 
   const renderControlItemLabel = (item: ViewerControlItem, _selectedItem: ViewerControlItem | undefined) => (
     <div className="flex items-center">

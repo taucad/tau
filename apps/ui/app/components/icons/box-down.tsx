@@ -1,6 +1,7 @@
+import type { JSX } from 'react';
 import { cn } from '~/utils/ui.js';
 
-export function BoxDown(properties: React.SVGProps<SVGSVGElement>) {
+export function BoxDown(properties: React.SVGProps<SVGSVGElement>): JSX.Element {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -15,13 +16,11 @@ export function BoxDown(properties: React.SVGProps<SVGSVGElement>) {
       className={cn('lucide lucide-box-down', properties.className)}
       {...properties}
     >
-      <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+      <path d="M12 15v-3" />
+      <path d="m14 18 3 3v-5.5" />
+      <path d="m17 21 3-3" />
+      <path d="M21 14.5V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 1.5.198" />
       <path d="m3.3 7 8.7 5 8.7-5" />
-      <path d="M12 22V12" />
-      <path d="m14 19 3 3v-5.5" strokeWidth="8" className="stroke-muted group-hover:stroke-accent" />
-      <path d="m17 22 3-3" strokeWidth="8" className="stroke-muted group-hover:stroke-accent" />
-      <path d="m14 19 3 3v-5.5" />
-      <path d="m17 22 3-3" />
     </svg>
   );
 }

@@ -37,11 +37,11 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
   },
 
   anthropic: {
-    'claude-3.7-sonnet-thinking': {
-      id: 'anthropic-claude-3.7-sonnet-thinking',
-      name: 'Claude 3.7 Sonnet (Thinking)',
+    'claude-4-sonnet-thinking': {
+      id: 'anthropic-claude-4-sonnet-thinking',
+      name: 'Claude 4 Sonnet (Thinking)',
       provider: 'anthropic',
-      model: 'claude-3-7-sonnet-20250219',
+      model: 'claude-sonnet-4-20250514',
       support: {
         toolChoice: false,
       },
@@ -71,11 +71,45 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
         },
       },
     },
-    'claude-3.7-sonnet': {
-      id: 'anthropic-claude-3.7-sonnet',
-      name: 'Claude 3.7 Sonnet',
+    'claude-4-opus': {
+      id: 'anthropic-claude-4-opus',
+      name: 'Claude 4 Opus',
       provider: 'anthropic',
-      model: 'claude-3-7-sonnet-20250219',
+      model: 'claude-opus-4-20250514',
+      support: {
+        toolChoice: false,
+      },
+      details: {
+        family: 'Claude',
+        families: ['Claude'],
+        contextWindow: 200_000,
+        // Extended thinking mode supports up to 64000 tokens
+        maxTokens: 64_000,
+        cost: {
+          inputTokens: 15,
+          outputTokens: 75,
+          cachedReadTokens: 1.5,
+          cachedWriteTokens: 18.75,
+        },
+      },
+      configuration: {
+        streaming: true,
+        maxTokens: 20_000,
+        // @ts-expect-error: FIXME - some models use camelCase
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
+        max_tokens: 20_000,
+        thinking: {
+          type: 'enabled',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
+          budget_tokens: 5000,
+        },
+      },
+    },
+    'claude-4-sonnet': {
+      id: 'anthropic-claude-4-sonnet',
+      name: 'Claude 4 Sonnet',
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-20250514',
       details: {
         family: 'Claude',
         families: ['Claude'],
@@ -86,75 +120,6 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
           outputTokens: 15,
           cachedReadTokens: 3.75,
           cachedWriteTokens: 0.3,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-    },
-    'claude-3.5-sonnet': {
-      id: 'anthropic-claude-3.5-sonnet',
-      name: 'Claude 3.5 Sonnet',
-      provider: 'anthropic',
-      model: 'claude-3-5-sonnet-20241022',
-      details: {
-        family: 'Claude',
-        families: ['Claude'],
-        contextWindow: 200_000,
-        maxTokens: 8192,
-        cost: {
-          inputTokens: 3,
-          outputTokens: 15,
-          cachedReadTokens: 3.75,
-          cachedWriteTokens: 0.3,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-    },
-    'claude-3-5-haiku': {
-      id: 'anthropic-claude-3-5-haiku',
-      name: 'Claude 3.5 Haiku',
-      provider: 'anthropic',
-      model: 'claude-3-5-haiku-20241022',
-      details: {
-        family: 'Claude',
-        families: ['Claude'],
-        contextWindow: 200_000,
-        maxTokens: 8192,
-        cost: {
-          inputTokens: 0.8,
-          outputTokens: 4,
-          cachedReadTokens: 1,
-          cachedWriteTokens: 0.08,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-    },
-  },
-  sambanova: {
-    'llama-3.3': {
-      id: 'sambanova-llama3.3',
-      name: 'Llama 3.3',
-      provider: 'sambanova',
-      model: 'Meta-Llama-3.3-70B-Instruct',
-      details: {
-        family: 'Llama 3.3',
-        families: ['Llama 3.3'],
-        parameterSize: '70B',
-        contextWindow: 128_000,
-        maxTokens: 16_384,
-        cost: {
-          inputTokens: 0,
-          outputTokens: 0,
-          cachedReadTokens: 0,
-          cachedWriteTokens: 0,
         },
       },
       configuration: {
@@ -204,70 +169,6 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       },
       configuration: {
         streaming: true,
-      },
-    },
-    'gpt-o4-mini': {
-      id: 'openai-gpt-o4-mini',
-      name: 'GPT-o4 Mini',
-      provider: 'openai',
-      model: 'o4-mini',
-      details: {
-        family: 'GPT-O4',
-        families: ['GPT-O4'],
-        contextWindow: 200_000,
-        maxTokens: 100_000,
-        cost: {
-          inputTokens: 1.1,
-          outputTokens: 4.4,
-          cachedReadTokens: 0.55,
-          cachedWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-      },
-    },
-    'gpt-o3-mini': {
-      id: 'openai-gpt-o3-mini',
-      name: 'GPT-o3 Mini',
-      provider: 'openai',
-      model: 'o3-mini',
-      details: {
-        family: 'GPT-O3',
-        families: ['GPT-O3'],
-        contextWindow: 200_000,
-        maxTokens: 100_000,
-        cost: {
-          inputTokens: 1.1,
-          outputTokens: 4.4,
-          cachedReadTokens: 0.55,
-          cachedWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-      },
-    },
-    'gpt-4o-mini': {
-      id: 'openai-gpt-4o-mini',
-      name: 'GPT-4o Mini',
-      provider: 'openai',
-      model: 'gpt-4o-mini',
-      details: {
-        family: 'GPT-4o',
-        families: ['GPT-4o'],
-        contextWindow: 128_000,
-        maxTokens: 16_384,
-        cost: {
-          inputTokens: 0.15,
-          outputTokens: 0.6,
-          cachedReadTokens: 0.075,
-          cachedWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
       },
     },
     'gpt-4o': {

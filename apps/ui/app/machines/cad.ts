@@ -11,7 +11,7 @@ export type CadContext = {
   defaultParameters: Record<string, unknown>;
   shapes: Shape[];
   kernelError: string | undefined;
-  monacoErrors: Array<{
+  codeErrors: Array<{
     message: string;
     startLineNumber: number;
     endLineNumber: number;
@@ -31,7 +31,7 @@ type CadEvent =
   | { type: 'initializeModel'; code: string; parameters: Record<string, unknown> }
   | { type: 'setCode'; code: string }
   | { type: 'setParameters'; parameters: Record<string, unknown> }
-  | { type: 'setMonacoErrors'; errors: CadContext['monacoErrors'] }
+  | { type: 'setCodeErrors'; errors: CadContext['codeErrors'] }
   | { type: 'exportGeometry'; format: 'stl' | 'stl-binary' | 'step' | 'step-assembly' }
   | KernelEventExternal;
 
@@ -123,9 +123,9 @@ export const cadMachine = setup({
         return event.error;
       },
     }),
-    setMonacoErrors: assign({
-      monacoErrors({ event }) {
-        assertEvent(event, 'setMonacoErrors');
+    setCodeErrors: assign({
+      codeErrors({ event }) {
+        assertEvent(event, 'setCodeErrors');
         return event.errors;
       },
     }),
@@ -193,7 +193,7 @@ export const cadMachine = setup({
     defaultParameters: {},
     shapes: [],
     kernelError: undefined,
-    monacoErrors: [],
+    codeErrors: [],
     kernelRef: undefined,
     exportedBlob: undefined,
     shouldInitializeKernelOnStart: input.shouldInitializeKernelOnStart,
@@ -279,8 +279,8 @@ export const cadMachine = setup({
           target: 'buffering',
           actions: 'setParameters',
         },
-        setMonacoErrors: {
-          actions: 'setMonacoErrors',
+        setCodeErrors: {
+          actions: 'setCodeErrors',
         },
         exportGeometry: {
           actions: 'exportGeometry',
@@ -340,8 +340,8 @@ export const cadMachine = setup({
           actions: 'setParameters',
           target: 'buffering',
         },
-        setMonacoErrors: {
-          actions: 'setMonacoErrors',
+        setCodeErrors: {
+          actions: 'setCodeErrors',
         },
         exportGeometry: {
           actions: 'exportGeometry',
@@ -365,8 +365,8 @@ export const cadMachine = setup({
           target: 'buffering',
           actions: 'setParameters',
         },
-        setMonacoErrors: {
-          actions: 'setMonacoErrors',
+        setCodeErrors: {
+          actions: 'setCodeErrors',
         },
         exportGeometry: {
           actions: 'exportGeometry',

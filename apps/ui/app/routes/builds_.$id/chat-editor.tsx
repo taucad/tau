@@ -46,7 +46,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
     if (errors?.length) {
       // Send errors to the CAD actor
       cadActor.send({
-        type: 'setMonacoErrors',
+        type: 'setCodeErrors',
         errors: errors.map((error) => ({
           startLineNumber: error.startLineNumber,
           startColumn: error.startColumn,
@@ -58,7 +58,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       });
     } else {
       // Clear errors when there are none
-      cadActor.send({ type: 'setMonacoErrors', errors: [] });
+      cadActor.send({ type: 'setCodeErrors', errors: [] });
     }
   }, [monaco]);
 

@@ -73,8 +73,8 @@ function Chat() {
               }
 
               // Add Monaco/TS errors if any
-              if (state.context.monacoErrors && state.context.monacoErrors.length > 0) {
-                for (const error of state.context.monacoErrors) {
+              if (state.context.codeErrors && state.context.codeErrors.length > 0) {
+                for (const error of state.context.codeErrors) {
                   errorMessages.push(`Line ${error.startLineNumber}: ${error.message}`);
                 }
               }

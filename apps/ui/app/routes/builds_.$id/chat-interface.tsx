@@ -10,7 +10,6 @@ import { ChatParameters } from '~/routes/builds_.$id/chat-parameters.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
-import { Drawer, DrawerContent } from '~/components/ui/drawer.js';
 import { useIsMobile } from '~/hooks/use-mobile.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import type { KeyCombination } from '~/utils/keys.js';
@@ -127,7 +126,20 @@ export const ChatInterface = memo(function () {
         )}
         id="chat-main"
       >
-        {viewMode === 'tabs' ? <ChatViewTabs /> : <ChatViewSplit />}
+        {viewMode === 'tabs' ? (
+          <>
+            <div className={cn('relative h-full', isParametersOpen && 'max-md:h-[40%] max-md:border-b')}>
+              <ChatViewTabs />
+            </div>
+            {isParametersOpen ? (
+              <div className="hidden max-md:block max-md:h-[60%] max-md:overflow-y-auto">
+                <ChatParameters />
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <ChatViewSplit />
+        )}
 
         <Tooltip>
           <TooltipTrigger asChild>
@@ -206,15 +218,6 @@ export const ChatInterface = memo(function () {
       >
         <ChatParameters />
       </ResizablePanel>
-
-      {/* TODO: revisit if a drawer is the best UX here. */}
-      {isMobile && !isChatOpen ? (
-        <Drawer open={isParametersOpen} onOpenChange={setIsParametersOpen}>
-          <DrawerContent className={cn('flex h-[60dvh] flex-col text-sm', 'md:hidden')}>
-            <ChatParameters />
-          </DrawerContent>
-        </Drawer>
-      ) : null}
     </ResizablePanelGroup>
   );
 });

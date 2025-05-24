@@ -72,9 +72,9 @@ export class ChatService {
       agents: [researchAgent, cadAgent],
       llm: unboundModel,
       prompt:
-        'You are a team supervisor managing a research expert and a CAD agent. ' +
-        'For queries that need external information or specific tool operations, use research_expert. ' +
-        'For queries that list a 3D object, use cad_agent. ' +
+        'You are a team supervisor managing a research expert and a CAD agent. You always transfer to one of your team members who has access to the right tool. You only ever use the transfer tools, never using other tools directly. ' +
+        'When the user asks a question or requests a change to a 3D model, ALWAYS use the `transfer_to_cad_agent` tool immediately. ' +
+        'For queries that need external information or specific tool operations, use the `transfer_to_research_expert` tool. ' +
         'When you receive a transfer back, be concise and end the conversation.',
       outputMode: 'full_history', // Include full agent message history
     }).compile();

@@ -16,7 +16,7 @@ export const sampleBuilds: Build[] = mockModels.map((model) => ({
   name: model.name,
   description: `A 3D ${model.name} model built with Replicad`,
   author: {
-    name: 'Replicad Team',
+    name: 'Tau Team',
     avatar: '/avatar-sample.png',
   },
   version: '1.0.0',

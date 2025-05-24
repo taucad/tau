@@ -24,26 +24,22 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
         fileName?: string;
       };
       return (
-        <div className="border-neutral-200 @container/code overflow-hidden rounded-md border bg-neutral/10">
-          <div className="sticky top-0 flex flex-row items-center justify-between py-1 pr-1 pl-3 text-foreground/50">
-            <div className="flex flex-row items-center gap-1 text-xs text-muted-foreground">
-              <LoaderCircle className="size-3 animate-spin" />
-              <AnimatedShinyText>{fileName}</AnimatedShinyText>
-            </div>
-          </div>
+        <div className="border-neutral-200 @container/code flex h-8 w-full flex-row items-center gap-1 overflow-hidden rounded-md border bg-neutral/10 pr-1 pl-3 text-xs text-foreground/50 text-muted-foreground">
+          <LoaderCircle className="size-3 animate-spin" />
+          <AnimatedShinyText>{fileName}</AnimatedShinyText>
         </div>
       );
     }
 
     case 'call':
     case 'result': {
-      const { content = '', fileName = '' } = (part.toolInvocation.args ?? {}) as {
+      const { fileName = '', content = '' } = (part.toolInvocation.args ?? {}) as {
         content?: string;
         fileName?: string;
       };
       return (
         <div className="border-neutral-200 @container/code overflow-hidden rounded-md border bg-neutral/10">
-          <div className="sticky top-0 flex flex-row items-center justify-between border-b border-neutral/20 py-1 pr-1 pl-3 text-foreground/50">
+          <div className="sticky top-0 flex flex-row items-center justify-between py-1 pr-1 pl-3 text-foreground/50">
             <div className="flex flex-row items-center gap-1 text-xs text-muted-foreground">
               <File className={cn('hidden size-3', part.toolInvocation.state === 'result' && 'block')} />
               <span>{fileName}</span>
@@ -72,7 +68,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
               </Tooltip>
             </div>
           </div>
-          <div className={cn('relative max-h-32', isExpanded ? 'max-h-none' : 'overflow-y-auto')}>
+          {/* <div className={cn('relative max-h-32', isExpanded ? 'max-h-none' : 'overflow-y-auto')}>
             <div className={cn('leading-0')}>
               <CodeViewer language="typescript" text={content} className="overflow-x-auto p-3 text-xs" />
               <Button
@@ -85,7 +81,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
                 <ChevronDown className={cn('transition-transform', isExpanded ? 'rotate-x-180' : '')} />
               </Button>
             </div>
-          </div>
+          </div> */}
         </div>
       );
     }

@@ -41,35 +41,37 @@ export function ChatControls(): JSX.Element {
     return response.blob();
   }, [screenshot]);
 
-  const handleDownloadStl = useCallback(async (filename: string) => {
-    toast.promise(
-      new Promise<Blob>((resolve, reject) => {
-        cadActor.send({ type: 'exportGeometry', format: 'stl' });
-        const subscription = cadActor.subscribe((state) => {
-          if (state.context.exportedBlob) {
+  const handleExport = useCallback(
+    async (filename: string, format: 'stl' | 'stl-binary' | 'step' | 'step-assembly') => {
+      const fileExtension =
+        format === 'stl' ? 'stl' : format === 'stl-binary' ? 'stl' : format === 'step' ? 'step' : 'step-assembly';
+      const filenameWithExtension = `${filename}.${fileExtension}`;
+      toast.promise(
+        new Promise<Blob>((resolve, reject) => {
+          cadActor.send({ type: 'exportGeometry', format });
+          const subscription = cadActor.on('geometryExported', (event) => {
             subscription.unsubscribe();
-            downloadBlob(state.context.exportedBlob, filename);
-            resolve(state.context.exportedBlob);
-          } else if (state.matches('error') && typeof state.context.error === 'string') {
-            subscription.unsubscribe();
-            reject(new Error(state.context.error));
-          }
-        });
-      }),
-      {
-        loading: `Downloading ${filename}...`,
-        success: `Downloaded ${filename}`,
-        error(error) {
-          let message = `Failed to download ${filename}`;
-          if (error instanceof Error) {
-            message = `${message}: ${error.message}`;
-          }
+            downloadBlob(event.blob, filenameWithExtension);
+            resolve(event.blob);
+          });
+          // TODO: handle error case
+        }),
+        {
+          loading: `Downloading ${filenameWithExtension}...`,
+          success: `Downloaded ${filenameWithExtension}`,
+          error(error) {
+            let message = `Failed to download ${filenameWithExtension}`;
+            if (error instanceof Error) {
+              message = `${message}: ${error.message}`;
+            }
 
-          return message;
+            return message;
+          },
         },
-      },
-    );
-  }, []);
+      );
+    },
+    [],
+  );
 
   const handleDownloadCode = useCallback(async () => {
     toast.promise(
@@ -119,7 +121,7 @@ export function ChatControls(): JSX.Element {
   );
 
   const updateThumbnailScreenshot = useCallback(() => {
-    if (shapes.length > 0 && screenshot.isReady) {
+    if (screenshot.isReady) {
       try {
         const dataUrl = screenshot.capture({
           output: {
@@ -134,8 +136,10 @@ export function ChatControls(): JSX.Element {
       } catch (error) {
         console.error('Error updating thumbnail:', error);
       }
+    } else {
+      console.log('Screenshot is not ready, skipping thumbnail update');
     }
-  }, [shapes, screenshot, updateThumbnail]);
+  }, [screenshot, updateThumbnail]);
 
   const handleUpdateThumbnail = useCallback(() => {
     toast.promise(
@@ -152,10 +156,10 @@ export function ChatControls(): JSX.Element {
 
   // Subscribe to the cadActor to update the thumbnail when the shapes change
   useEffect(() => {
-    const subscription = cadActor.subscribe((state) => {
-      if (state.value === 'rendered' && state.context.shapes.length > 0) {
+    const subscription = cadActor.on('geometryEvaluated', (event) => {
+      if (event.shapes.length > 0) {
         console.log('updating thumbnail');
-        // TODO: remove this timeout after refining the cad state machine to provide a more accurate signal
+        // TODO: remove this timeout after refining the canvas state to provide a more accurate signal after painting completes
         const timeout = setTimeout(() => {
           updateThumbnailScreenshot();
           clearTimeout(timeout);
@@ -232,7 +236,15 @@ export function ChatControls(): JSX.Element {
         label: 'Download STL',
         group: 'Export',
         icon: <BoxDown className="mr-2" />,
-        action: async () => handleDownloadStl(`${buildName}.stl`),
+        action: async () => handleExport(buildName, 'stl'),
+        disabled: shapes.length === 0,
+      },
+      {
+        id: 'download-step',
+        label: 'Download STEP',
+        group: 'Export',
+        icon: <BoxDown className="mr-2" />,
+        action: async () => handleExport(buildName, 'step'),
         disabled: shapes.length === 0,
       },
       {
@@ -291,7 +303,7 @@ export function ChatControls(): JSX.Element {
       handleCopyDataUrlToClipboard,
       handleDownloadPng,
       buildName,
-      handleDownloadStl,
+      handleExport,
       shapes,
       code,
       handleCopyCodeToClipboard,

@@ -1,6 +1,7 @@
-import { assign, assertEvent, setup } from 'xstate';
+import { assign, assertEvent, setup, sendTo, emit, not, enqueueActions } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { kernelMachine } from '~/machines/kernel.js';
+import type { KernelEventExternal } from '~/machines/kernel.js';
 import type { Shape } from '~/types/cad.js';
 
 // Interface defining the context for the CAD machine
@@ -9,7 +10,7 @@ export type CadContext = {
   parameters: Record<string, unknown>;
   defaultParameters: Record<string, unknown>;
   shapes: Shape[];
-  error: string | undefined;
+  kernelError: string | undefined;
   monacoErrors: Array<{
     message: string;
     startLineNumber: number;
@@ -19,7 +20,9 @@ export type CadContext = {
   }>;
   kernelRef: ActorRefFrom<typeof kernelMachine> | undefined;
   exportedBlob: Blob | undefined;
-  shouldInitializeKernelOnStart?: boolean;
+  shouldInitializeKernelOnStart: boolean;
+  isKernelInitializing: boolean;
+  isKernelInitialized: boolean;
 };
 
 // Define the types of events the machine can receive
@@ -29,11 +32,13 @@ type CadEvent =
   | { type: 'setCode'; code: string }
   | { type: 'setParameters'; parameters: Record<string, unknown> }
   | { type: 'setMonacoErrors'; errors: CadContext['monacoErrors'] }
+  | { type: 'exportGeometry'; format: 'stl' | 'stl-binary' | 'step' | 'step-assembly' }
+  | KernelEventExternal;
+
+type CadEmitted =
+  | { type: 'modelUpdated'; code: string; parameters: Record<string, unknown> }
   | { type: 'geometryEvaluated'; shapes: Shape[] }
-  | { type: 'kernelError'; error: string }
-  | { type: 'setDefaultParameters'; parameters: Record<string, unknown> }
-  | { type: 'exportGeometry'; format: string }
-  | { type: 'shapeExported'; blob: Blob };
+  | { type: 'geometryExported'; blob: Blob; format: string };
 
 type CadInput = {
   shouldInitializeKernelOnStart: boolean;
@@ -60,22 +65,30 @@ export const cadMachine = setup({
     events: {} as CadEvent,
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
     input: {} as CadInput,
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
+    emitted: {} as CadEmitted,
   },
   actions: {
-    computeGeometry({ context }) {
-      context.kernelRef?.send({
-        type: 'computeGeometry',
-        code: context.code,
-        parameters: context.parameters,
-      });
-    },
-    exportGeometry({ event, context }) {
-      assertEvent(event, 'exportGeometry');
-      context.kernelRef?.send({
-        type: 'exportGeometry',
-        format: event.format,
-      });
-    },
+    computeGeometry: sendTo(
+      ({ context }) => context.kernelRef!,
+      ({ context }) => {
+        return {
+          type: 'computeGeometry',
+          code: context.code,
+          parameters: context.parameters,
+        };
+      },
+    ),
+    exportGeometry: sendTo(
+      ({ context }) => context.kernelRef!,
+      ({ event }) => {
+        assertEvent(event, 'exportGeometry');
+        return {
+          type: 'exportGeometry',
+          format: event.format,
+        };
+      },
+    ),
     setCode: assign({
       code({ event }) {
         assertEvent(event, 'setCode');
@@ -88,14 +101,24 @@ export const cadMachine = setup({
         return event.parameters;
       },
     }),
-    setShapes: assign({
-      shapes({ event }) {
-        assertEvent(event, 'geometryEvaluated');
-        return event.shapes;
-      },
+    modelUpdated: emit(({ context }) => ({
+      type: 'modelUpdated' as const,
+      code: context.code,
+      parameters: context.parameters,
+    })),
+    setShapes: enqueueActions(({ enqueue, event }) => {
+      assertEvent(event, 'geometryComputed');
+      enqueue.assign({
+        shapes: event.shapes,
+        kernelError: undefined,
+      });
+      enqueue.emit({
+        type: 'geometryEvaluated' as const,
+        shapes: event.shapes,
+      });
     }),
-    setError: assign({
-      error({ event }) {
+    setKernelError: assign({
+      kernelError({ event }) {
         assertEvent(event, 'kernelError');
         return event.error;
       },
@@ -108,19 +131,45 @@ export const cadMachine = setup({
     }),
     setDefaultParameters: assign({
       defaultParameters({ event }) {
-        assertEvent(event, 'setDefaultParameters');
+        assertEvent(event, 'parametersParsed');
+        return event.defaultParameters;
+      },
+    }),
+    setExportedBlob: enqueueActions(({ enqueue, event }) => {
+      assertEvent(event, 'geometryExported');
+      enqueue.assign({
+        exportedBlob: event.blob,
+        kernelError: undefined,
+      });
+      enqueue.emit({
+        type: 'geometryExported' as const,
+        blob: event.blob,
+        format: event.format,
+      });
+    }),
+    initializeKernel: enqueueActions(({ enqueue, context, self }) => {
+      enqueue.assign({ isKernelInitializing: true });
+      enqueue.sendTo(context.kernelRef!, {
+        type: 'initializeKernel' as const,
+        kernelType: 'replicad' as const,
+        parentRef: self,
+      });
+    }),
+    initializeModel: assign({
+      code({ event }) {
+        assertEvent(event, 'initializeModel');
+        return event.code;
+      },
+      parameters({ event }) {
+        assertEvent(event, 'initializeModel');
         return event.parameters;
       },
     }),
-    setExportedBlob: assign({
-      exportedBlob({ event }) {
-        assertEvent(event, 'shapeExported');
-        return event.blob;
-      },
-    }),
-    initializeKernel({ context }) {
-      context.kernelRef?.send({ type: 'initialize', kernelType: 'replicad' });
-    },
+  },
+  guards: {
+    isKernelInitialized: ({ context }) => context.isKernelInitialized,
+    isKernelInitializing: ({ context }) => context.isKernelInitializing,
+    hasModel: ({ context }) => context.code !== '',
   },
 }).createMachine({
   /** @xstate-layout N4IgpgJg5mDOIC5QGMCGEB0AnM6CeAxLGAC4DCA9hGANoAMAuoqAA4WwCWJHFAdsyAAeiAJwAWAGwYJAdgCMADgl0RMkQGY5IgDQg8iMQCYFGAKwiJ60-MN0x62QF9HutJhz4ipAAqosqAFtSMCxYeiYkEDZObj4BYQRxKVlFZVUNLV19BFNDUww7cRFDETlFOVMJZ1d0bFwIQmISAFk+VGQKAFEsLApQ8IForh5+SISZSwx7GTELOzoZRcMsgzE6aUrjORk6QzEFQ3VqkDc6zzBBNiwSAHEwCiCSLDwByKHY0dBxiSk6CT2LKY5Oo6HI6OoVgh1GIxBhbJoxOYymDocdTh4GkQABaoFhgTqXPokSCvVjsYZxMaICYiAoVCRyBkwwyWUyQvYyDAyUx0UGgrQyPbqBRo2oAIwArgAzKUhDi8KBechUWiMQbkj7xRBlIFwmTQsoODSyCF6RDmfIiDTFWamRElGSizCSmVyhVK3z+R4hMJqt4akZahCGuRw6xqFmg62Q2a0u0LBSlSwVBamJ0YF2yrDyxWCWAkVDEjCoKXErAACh5dAAlARTpm3VBSVEA5SvqIFOtDCz42pTAoB3JIXJjGZebyJKYgcVzGJ0zheNRs+6YA9SM9OgA3VAAGwlhZJfrJMUDVKhhym6hmc1TIj+bLNCFmnLv-31EityZFLhOtQXS5zAgAGsQl4MAd26XosGbd5T3bc91Eva9lFve9h22QwzAHBl1EMGZNBEecwEXRslUoagYNbT4hEQXDEOmWYUO5V8H2yH4TEWZRlE7bk6CBIiSOXRUmk9QJgn6I8WxPNsaIQpDGN5Zi0MfCZ8m7UpAREAcFDEOQBIA90mlaXh2i6Ho+l9CJjwpajvgwMF6SnaFchhIdHzBXSuRkBR3wkHykzTH90WIgzhNIAARMApVQCUdxIUTvQkqypJsoNzAKDR8JmHZuJ0yFxHyXDKl5RNJyvOcgr-ELSIuK5bnuR5nko6TbOpDiex+CduRmZZHx0kwfL2ScwSBfsKpqdxqqE7FcXxQlrkPZLYJkhIFFDWQLAUSphT5eRIUFfJJH+EqP0FQ59JCSACDzAsixLMtyxrOsqsExb1RaoMJH2KYSlkHZvN0oFIVMKwMC28RdgBKcKnTEIoLIlVmtSs8kmkeQlBUNQCOHOhEzB3YKmclQ7HG39MDhvoPT8MSy0s97kfg1GUgx9Jsfc1Iw1yRM9m7BRcNh8ysCVYzTMgiykc1M8Jno8q5jWRZBXQ0EweOhwFn1TQqkq8nBYIWqiTuNcnheSTltahAJl+f5GKBEEwV67IwT4qZcbvXZwdyQKJowCmhdgHE8QJOq3v9D6pY-OlKkZORmVZfLcYwEQpwmGECv1QKf14FV4EiNx6cl+CAFo3OyQvfnHCvK+MIj8HzuDZJ4qZ7QsPDzE0EvzSMeyVF069hRw9MGyEuuVu1Qn7O2RldKsdIHcQU6m5yhZETvJQLuH0OGdksQZHQ+w4U0Qad+KJPSeC16IBH82uamHSHAHNZcg7nJoTB2c7TUAcQUI7WfcFq+gxrS7JtL6p9OzCmHPCDAmggToz8vIP4zhnBAA */
@@ -134,35 +183,6 @@ export const cadMachine = setup({
           self.send({ type: 'initializeKernel' });
         }
 
-        // Subscribe to the kernel actor's state changes
-        kernelRef.subscribe((state) => {
-          // When kernel completes enters parsing state, send default parameters to cad machine
-          if (state.value === 'evaluating' && state.context.defaultParameters) {
-            self.send({
-              type: 'setDefaultParameters',
-              parameters: state.context.defaultParameters,
-            });
-          }
-
-          // When kernel completes evaluation, send success event to cad machine
-          if (state.value === 'evaluated') {
-            self.send({ type: 'geometryEvaluated', shapes: state.context.shapes });
-          }
-
-          // When kernel reaches error state, send error event to cad machine
-          if (state.value === 'error' && state.context.error !== undefined) {
-            self.send({ type: 'kernelError', error: state.context.error });
-          }
-
-          // When a blob has been exported
-          if (state.value === 'exported' && state.context.exportedBlob) {
-            self.send({
-              type: 'shapeExported',
-              blob: state.context.exportedBlob,
-            });
-          }
-        });
-
         return kernelRef;
       },
     }),
@@ -172,55 +192,76 @@ export const cadMachine = setup({
     parameters: {},
     defaultParameters: {},
     shapes: [],
-    error: undefined,
+    kernelError: undefined,
     monacoErrors: [],
     kernelRef: undefined,
     exportedBlob: undefined,
     shouldInitializeKernelOnStart: input.shouldInitializeKernelOnStart,
+    isKernelInitializing: false,
+    isKernelInitialized: false,
   }),
-  initial: 'initializing',
+  initial: 'booting',
   states: {
-    initializing: {
+    // The booting state is used when booting the kernel.
+    booting: {
       on: {
-        initializeModel: {
-          actions: [
-            assign({
-              code({ event }) {
-                assertEvent(event, 'initializeModel');
-                return event.code;
-              },
-              parameters({ event }) {
-                assertEvent(event, 'initializeModel');
-                return event.parameters;
-              },
-            }),
-            'computeGeometry',
-          ],
-          // Stays in 'initializing' state
-        },
         initializeKernel: {
           actions: 'initializeKernel',
         },
-        geometryEvaluated: {
-          target: 'rendered',
-          actions: ['setShapes', assign({ error: undefined })],
+        initializeModel: [
+          {
+            guard: 'isKernelInitializing',
+            // If the kernel is still initializing, only initialize the model.
+            actions: ['initializeModel'],
+          },
+          {
+            guard: not('isKernelInitialized'),
+            // If the kernel isn't already initialized, initialize it.
+            actions: ['initializeModel', 'initializeKernel'],
+          },
+          {
+            // We're ready to initialize the model and transition to the initializing state.
+            target: 'initializing',
+            actions: 'initializeModel',
+          },
+        ],
+        kernelInitialized: [
+          {
+            // If we have a model, move to initialize the model.
+            guard: 'hasModel',
+            target: 'initializing',
+            actions: assign({ isKernelInitialized: true, isKernelInitializing: false }),
+          },
+          {
+            // Otherwise just set the kernel to initialized.
+            actions: assign({ isKernelInitialized: true, isKernelInitializing: false }),
+          },
+        ],
+        kernelError: {
+          target: 'error',
+          actions: 'setKernelError',
+        },
+      },
+    },
+
+    // The initialization state is used when a new model is loaded.
+    initializing: {
+      entry: 'computeGeometry',
+      on: {
+        initializeModel: {
+          target: 'initializing',
+          actions: 'initializeModel',
         },
         kernelError: {
           target: 'error',
-          actions: 'setError',
+          actions: 'setKernelError',
         },
-        setDefaultParameters: {
+        geometryComputed: {
+          target: 'ready',
+          actions: 'setShapes',
+        },
+        parametersParsed: {
           actions: 'setDefaultParameters',
-        },
-        // Added to handle potential setMonacoErrors during initialization if needed
-        setMonacoErrors: {
-          actions: 'setMonacoErrors',
-        },
-        exportGeometry: {
-          actions: 'exportGeometry',
-        },
-        shapeExported: {
-          actions: ['setExportedBlob', assign({ error: undefined })],
         },
       },
     },
@@ -228,20 +269,7 @@ export const cadMachine = setup({
       on: {
         initializeModel: {
           target: 'initializing',
-          actions: [
-            assign({
-              code({ event }) {
-                assertEvent(event, 'initializeModel');
-                return event.code;
-              },
-              parameters({ event }) {
-                assertEvent(event, 'initializeModel');
-                return event.parameters;
-              },
-            }),
-            'computeGeometry',
-          ],
-          // The event will be processed by the 'initializing' state's handler
+          actions: 'initializeModel',
         },
         setCode: {
           target: 'buffering',
@@ -257,16 +285,23 @@ export const cadMachine = setup({
         exportGeometry: {
           actions: 'exportGeometry',
         },
-        shapeExported: {
+        geometryExported: {
           actions: 'setExportedBlob',
         },
       },
     },
     buffering: {
       after: {
-        [debounceDelay]: 'rendering',
+        [debounceDelay]: {
+          target: 'rendering',
+          actions: 'modelUpdated',
+        },
       },
       on: {
+        initializeModel: {
+          target: 'initializing',
+          actions: 'initializeModel',
+        },
         setCode: {
           target: 'buffering',
           actions: 'setCode',
@@ -282,13 +317,20 @@ export const cadMachine = setup({
     rendering: {
       entry: 'computeGeometry',
       on: {
-        geometryEvaluated: {
-          target: 'rendered',
-          actions: ['setShapes', assign({ error: undefined })],
+        initializeModel: {
+          target: 'initializing',
+          actions: 'initializeModel',
+        },
+        geometryComputed: {
+          target: 'ready',
+          actions: 'setShapes',
+        },
+        parametersParsed: {
+          actions: 'setDefaultParameters',
         },
         kernelError: {
           target: 'error',
-          actions: 'setError',
+          actions: 'setKernelError',
         },
         setCode: {
           actions: 'setCode',
@@ -301,30 +343,23 @@ export const cadMachine = setup({
         setMonacoErrors: {
           actions: 'setMonacoErrors',
         },
-        setDefaultParameters: {
-          actions: 'setDefaultParameters',
-        },
         exportGeometry: {
           actions: 'exportGeometry',
         },
-        shapeExported: {
-          actions: ['setExportedBlob', assign({ error: undefined })],
-        },
-      },
-    },
-    rendered: {
-      after: {
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- xstate setup
-        0: {
-          target: 'ready',
+        geometryExported: {
+          actions: 'setExportedBlob',
         },
       },
     },
     error: {
       on: {
+        initializeModel: {
+          target: 'initializing',
+          actions: 'initializeModel',
+        },
         setCode: {
           target: 'buffering',
-          actions: ['setCode'],
+          actions: 'setCode',
         },
         setParameters: {
           target: 'buffering',
@@ -336,7 +371,7 @@ export const cadMachine = setup({
         exportGeometry: {
           actions: 'exportGeometry',
         },
-        shapeExported: {
+        geometryExported: {
           actions: 'setExportedBlob',
         },
       },

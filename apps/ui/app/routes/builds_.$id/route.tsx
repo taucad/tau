@@ -61,15 +61,15 @@ function Chat() {
           cadActor.send({ type: 'setCode', code: toolCallArgs.content });
 
           // We now track the CAD actor state to determine success/failure
-          const unsubscribe = cadActor.subscribe((state) => {
+          const subscription = cadActor.subscribe((state) => {
             // Check if processing completed
-            if (state.value === 'rendered' || state.value === 'error') {
+            if (state.value === 'ready' || state.value === 'error') {
               // Format CAD and Monaco errors for AI
               const errorMessages = [];
 
               // Add CAD kernel errors if any
-              if (state.context.error) {
-                errorMessages.push(`CAD Error: ${state.context.error}`);
+              if (state.context.kernelError) {
+                errorMessages.push(`CAD Error: ${state.context.kernelError}`);
               }
 
               // Add Monaco/TS errors if any
@@ -81,7 +81,7 @@ function Chat() {
 
               // Prepare the result
               const result = {
-                success: state.value === 'rendered' && errorMessages.length === 0,
+                success: state.value === 'ready' && errorMessages.length === 0,
                 message:
                   errorMessages.length > 0
                     ? `Code updated but has errors:\n${errorMessages.join('\n')}`
@@ -95,7 +95,7 @@ function Chat() {
               });
 
               // Clean up the subscription
-              unsubscribe.unsubscribe();
+              subscription.unsubscribe();
             }
           });
 
@@ -108,10 +108,8 @@ function Chat() {
 
   // Subscribe the build to persist code & parameters changes
   useEffect(() => {
-    const subscription = cadActor.subscribe((state) => {
-      if (state.value === 'rendering') {
-        setCodeParameters(state.context.code, state.context.parameters);
-      }
+    const subscription = cadActor.on('modelUpdated', ({ code, parameters }) => {
+      setCodeParameters(code, parameters);
     });
 
     return () => {

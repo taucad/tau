@@ -13,7 +13,7 @@ export const ChatViewer = memo(function () {
   return (
     <>
       <div className="relative size-full">
-        {status === 'initializing' ? (
+        {['initializing', 'booting'].includes(status) ? (
           <div className="flex size-full items-center justify-center">
             <div className="rounded-4xl border bg-neutral/20 p-5 pl-3">
               <HammerAnimation className="size-25" />

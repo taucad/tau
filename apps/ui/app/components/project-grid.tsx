@@ -115,14 +115,10 @@ function ProjectCard({
 
   // Only load the CAD model when the card is visible and preview is enabled
   useEffect(() => {
-    if (isVisible && showPreview && replicadCode) {
-      send({ type: 'initializeKernel' });
-      // TODO: Remove this once the CAD machine waits for initialization before rendering.
-      setTimeout(() => {
-        send({ type: 'initializeModel', code: replicadCode, parameters: {} });
-      }, 1000);
+    if (isVisible && showPreview && replicadCode && shapes.length === 0) {
+      send({ type: 'initializeModel', code: replicadCode, parameters: {} });
     }
-  }, [isVisible, showPreview, replicadCode, send]);
+  }, [isVisible, showPreview, replicadCode, send, shapes]);
 
   const handleStar = () => {
     // TODO: Implement star functionality
@@ -163,7 +159,7 @@ function ProjectCard({
         )}
         {showPreview ? (
           <div className="absolute inset-0">
-            {status === 'initializing' ? (
+            {['initializing', 'booting'].includes(status) ? (
               <div className="flex size-full items-center justify-center">
                 <HammerAnimation className="size-10" />
               </div>

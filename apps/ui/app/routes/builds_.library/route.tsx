@@ -75,6 +75,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '~
 import { camelCaseToSentenceCase } from '~/utils/string.js';
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
 import { cadMachine } from '~/machines/cad.js';
+import { HammerAnimation } from '~/components/hammer-animation.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -623,6 +624,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
   const shapes = useSelector(actorRef, (state) => state.context.shapes);
   const code = build.assets.mechanical?.files[build.assets.mechanical?.main]?.content;
   const parameters = build.assets.mechanical?.parameters;
+  const status = useSelector(actorRef, (state) => state.value);
   const [showPreview, setShowPreview] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(build.name);
@@ -642,11 +644,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
 
   useEffect(() => {
     if (showPreview) {
-      send({ type: 'initializeKernel' });
-      setTimeout(() => {
-        // TODO: Remove this once the CAD machine waits for initialization before rendering.
-        send({ type: 'initializeModel', code: code ?? '', parameters: parameters ?? {} });
-      }, 1000);
+      send({ type: 'initializeModel', code: code ?? '', parameters: parameters ?? {} });
     }
   }, [code, parameters, showPreview, send]);
 
@@ -672,6 +670,11 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
               event.preventDefault();
             }}
           >
+            {['initializing', 'booting'].includes(status) ? (
+              <div className="flex size-full items-center justify-center">
+                <HammerAnimation className="size-10" />
+              </div>
+            ) : null}
             <CadViewer
               shapes={shapes}
               className="bg-muted"

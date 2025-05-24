@@ -1,14 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import type { JSX } from 'react';
-import { Globe, ArrowUp, Image, X, Square, CircuitBoard, ChevronDown, AtSign } from 'lucide-react';
+import { Globe, ArrowUp, Image, X, Square, CircuitBoard, ChevronDown } from 'lucide-react';
 import type { Attachment } from 'ai';
 import type { ClassValue } from 'clsx';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '~/components/ui/dropdown-menu.js';
 import { useAiChat } from '~/components/chat/ai-chat-provider.js';
 import { ChatModelSelector } from '~/components/chat/chat-model-selector.js';
 import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '~/components/ui/hover-card.js';
@@ -24,7 +18,7 @@ import { useCookie } from '~/hooks/use-cookie.js';
 import { cn } from '~/utils/ui.js';
 import type { MessagePart } from '~/types/chat.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
-import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
+import { ChatContextActions } from '~/components/chat/chat-context-actions.js';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
@@ -93,7 +87,6 @@ export const ChatTextarea = memo(function ({
   const textareaReference = useRef<HTMLTextAreaElement>(null);
   const { selectedModel } = useModels();
   const { stop, status } = useAiChat();
-  const { screenshot } = useGraphics();
 
   const handleSubmit = async () => {
     // If there is no text or images, do not submit
@@ -253,31 +246,21 @@ export const ChatTextarea = memo(function ({
     }
   }, []);
 
-  // Add a new function to capture model screenshot
-  const handleAddModelScreenshot = useCallback(() => {
-    if (screenshot.isReady) {
-      try {
-        const dataUrl = screenshot.capture({
-          output: {
-            format: 'image/png',
-            quality: 0.92,
-          },
-          zoomLevel: 1.5,
-        });
+  const handleAddText = useCallback(
+    (text: string) => {
+      setInputText((previous) => previous + text);
+      focusInput();
+    },
+    [focusInput],
+  );
 
-        // Add the screenshot to images state
-        setImages((previous) => [...previous, dataUrl]);
-
-        // Focus the textarea after adding
-        focusInput();
-      } catch (error) {
-        toast.error('Failed to capture model screenshot');
-        console.error('Screenshot error:', error);
-      }
-    } else {
-      toast.error('Renderer not ready');
-    }
-  }, [screenshot, focusInput]);
+  const handleAddImage = useCallback(
+    (image: string) => {
+      setImages((previous) => [...previous, image]);
+      focusInput();
+    },
+    [focusInput],
+  );
 
   useEffect(() => {
     if (autoFocus) {
@@ -334,30 +317,12 @@ export const ChatTextarea = memo(function ({
 
       {/* Context */}
       <div className="absolute top-0 left-0 m-4 flex flex-wrap gap-1">
-        {withContextActions ? (
-          <Tooltip>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon" className="size-6">
-                    <AtSign className="size-3" />
-                  </Button>
-                </TooltipTrigger>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" side="top">
-                <DropdownMenuItem onSelect={handleAddModelScreenshot}>
-                  <Image /> Add model screenshot
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <TooltipContent>Add context</TooltipContent>
-          </Tooltip>
-        ) : null}
+        {withContextActions ? <ChatContextActions addImage={handleAddImage} addText={handleAddText} /> : null}
         {images.map((image, index) => (
           <div key={image} className="relative">
             <HoverCard openDelay={100} closeDelay={100}>
               <HoverCardTrigger asChild>
-                <div className="flex h-6 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border bg-muted object-cover">
+                <div className="flex h-6 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border bg-background object-cover">
                   <img src={image} alt="Uploaded" className="size-6 border-r object-cover" />
                   <span className="px-1 text-xs">Image</span>
                 </div>

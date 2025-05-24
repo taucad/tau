@@ -205,26 +205,6 @@ function ProjectCard({
         </div>
         <CardDescription className="line-clamp-2">{description}</CardDescription>
       </CardHeader>
-      <CardContent className="flex-grow">
-        <div className="mb-2 flex flex-wrap gap-2">
-          {Object.keys(assets).map((category) => {
-            const { icon: Icon, color } = categories[category as Category];
-            return (
-              <span key={category} className={`flex items-center gap-1 text-sm ${color}`}>
-                <Icon className="size-4" />
-                {category}
-              </span>
-            );
-          })}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {tags.map((tag) => (
-            <Badge key={tag} variant="outline">
-              {tag}
-            </Badge>
-          ))}
-        </div>
-      </CardContent>
       <CardFooter className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Avatar className="h-6 w-6">
@@ -233,23 +213,35 @@ function ProjectCard({
           </Avatar>
           <span className="text-sm text-muted-foreground">{author.name}</span>
         </div>
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-yellow"
-            onClick={handleStar}
-          >
-            <Star className="size-4" />
-            {stars}
-          </button>
-          <button
-            type="button"
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-blue"
-            onClick={handleFork}
-          >
-            <GitFork className="size-4" />
-            {forks}
-          </button>
+        <div className="flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger>
+              <Button
+                variant="outline"
+                size="sm"
+                className="group flex items-center gap-1 text-sm text-muted-foreground hover:text-yellow"
+                onClick={handleStar}
+              >
+                <Star />
+                {stars}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Star this project</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger>
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex items-center gap-1 text-sm text-muted-foreground hover:text-blue"
+                onClick={handleFork}
+              >
+                <GitFork />
+                {forks}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Fork this project</TooltipContent>
+          </Tooltip>
         </div>
       </CardFooter>
     </Card>

@@ -13,6 +13,7 @@
   "include": [
     "vite.config.ts",
     "vitest.config.ts",
+    "react-router.config.ts",
     "app/**/*.ts",
     "app/**/*.tsx",
     "app/**/*.js",

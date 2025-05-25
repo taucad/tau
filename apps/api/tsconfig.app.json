@@ -6,11 +6,11 @@
     "types": ["node"],
     "target": "ESNext"
   },
-  "include": ["src/**/*.ts"],
+  "include": ["app/**/*.ts"],
   "exclude": [
     "jest.config.ts",
-    "src/**/*.spec.ts",
-    "src/**/*.test.ts",
+    "app/**/*.spec.ts",
+    "app/**/*.test.ts",
     "vite.config.ts"
   ]
 }

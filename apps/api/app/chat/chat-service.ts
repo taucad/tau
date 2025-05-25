@@ -4,12 +4,12 @@ import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import { createSupervisor } from '@langchain/langgraph-supervisor';
 import { streamText } from 'ai';
 import type { CoreMessage } from 'ai';
-import { ModelService } from '../models/model-service.js';
-import type { ToolChoiceWithCategory } from '../tools/tool-service.js';
-import { ToolService } from '../tools/tool-service.js';
-import { nameGenerationSystemPrompt } from './prompts/chat-prompt-name.js';
-import type { LangGraphAdapterCallbacks } from './utils/langgraph-adapter.js';
-import { replicadSystemPrompt } from './prompts/chat-prompt-replicad.js';
+import { ModelService } from '~/models/model-service.js';
+import type { ToolChoiceWithCategory } from '~/tools/tool-service.js';
+import { ToolService } from '~/tools/tool-service.js';
+import { nameGenerationSystemPrompt } from '~/chat/prompts/chat-prompt-name.js';
+import type { LangGraphAdapterCallbacks } from '~/chat/utils/langgraph-adapter.js';
+import { replicadSystemPrompt } from '~/chat/prompts/chat-prompt-replicad.js';
 
 @Injectable()
 export class ChatService {

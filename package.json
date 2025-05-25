@@ -151,7 +151,7 @@
     "nx": "20.8.1",
     "prettier": "3.4.2",
     "prettier-plugin-tailwindcss": "^0.6.11",
-    "tailwind-merge": "^3.0.1",
+    "tailwind-merge": "^3.3.0",
     "tailwind-scrollbar": "^4.0.0",
     "tailwindcss": "4.0.6",
     "ts-jest": "^29.2.5",

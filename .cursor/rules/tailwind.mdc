@@ -1,0 +1,8 @@
+---
+description: 
+globs: *.tsx
+alwaysApply: false
+---
+See [global.css](mdc:app/styles/global.css) for the list of available colors to use.
+
+Opacity modifiers are applied with the suffix of a slash followed by opacity. Valid values are in the range [5, 10, 20, 30, 40, 50, 60, 70, 80, 90]. For example, a subtle neutral background would use bg-neutral/30.

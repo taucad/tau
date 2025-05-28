@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
+import { useSelector } from '@xstate/react';
 import { InfiniteGrid } from '~/components/geometry/graphics/three/infinite-grid.js';
-import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
+import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 
 // Grid size calculation constants
 export const gridSizeConstants = {
@@ -30,7 +31,7 @@ export function useGridSizes(currentZoom: number): GridSizes {
   // Only subscribe to the specific properties you need
   const cameraPosition = useThree((state) => state.camera.position.length());
   const cameraFov = useThree((state) => (state.camera instanceof THREE.PerspectiveCamera ? state.camera.fov : 75));
-  const { gridUnitSystem, gridUnitFactor } = useGraphics();
+  const gridUnitSystem = useSelector(graphicsActor, (state) => state.context.gridUnitSystem);
 
   return useMemo(() => {
     // Calculate grid sizes based on these specific values
@@ -84,7 +85,10 @@ type GridProps = {
  */
 function GridComponent({ currentZoom }: GridProps) {
   const calculatedGridSizes = useGridSizes(currentZoom);
-  const { setGridSizes, gridSizes, gridUnitFactor, gridUnitSystem } = useGraphics();
+  const gridSizes = useSelector(graphicsActor, (state) => state.context.gridSizes);
+  const gridUnitFactor = useSelector(graphicsActor, (state) => state.context.gridUnitFactor);
+  const gridUnitSystem = useSelector(graphicsActor, (state) => state.context.gridUnitSystem);
+
   const previousGridSizesRef = React.useRef(calculatedGridSizes);
   const previousUnitSystemRef = React.useRef(gridUnitSystem);
   const previousUnitFactorRef = React.useRef(gridUnitFactor);
@@ -104,9 +108,9 @@ function GridComponent({ currentZoom }: GridProps) {
       previousUnitFactorRef.current = gridUnitFactor;
 
       // Update with the calculated grid sizes based on the current unit system
-      setGridSizes(calculatedGridSizes);
+      graphicsActor.send({ type: 'updateGridSize', payload: calculatedGridSizes });
     }
-  }, [calculatedGridSizes, setGridSizes, gridUnitFactor, gridUnitSystem]);
+  }, [calculatedGridSizes, gridUnitFactor, gridUnitSystem]);
 
   // Render the grid using the current grid sizes
   return <InfiniteGrid smallSize={gridSizes.smallSize} largeSize={gridSizes.largeSize} />;

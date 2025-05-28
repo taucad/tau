@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
+import { screenshotCapabilityActor } from '~/routes/builds_.$id/graphics-actor.js';
 
 /**
  * Options for configuring screenshot capture
@@ -21,30 +21,16 @@ export type ScreenshotOptions = {
   zoomLevel?: number;
 
   /**
-   * Quality settings for rendering
+   * Theta angle of the camera
+   * @default 0
    */
-  quality?: {
-    /**
-     * Super-sampling factor for higher resolution rendering
-     * Higher values increase quality but require more memory
-     * @default 1
-     */
-    supersamplingFactor?: number;
+  theta?: number;
 
-    /**
-     * Number of samples for multi-sample anti-aliasing
-     * Use 0 to disable MSAA
-     * @default 0
-     */
-    antiAliasingSamples?: number;
-
-    /**
-     * Line width enhancement factor for line objects
-     * Set to 0 to disable line enhancement
-     * @default 2
-     */
-    lineWidthEnhancement?: number;
-  };
+  /**
+   * Phi angle of the camera
+   * @default 0
+   */
+  phi?: number;
 
   /**
    * Output format settings
@@ -52,7 +38,7 @@ export type ScreenshotOptions = {
   output?: {
     /**
      * File format for the output image
-     * @default 'png'
+     * @default 'image/png'
      */
     format?: 'image/png' | 'image/jpeg' | 'image/webp';
 
@@ -74,278 +60,190 @@ export type ScreenshotOptions = {
 };
 
 /**
- * Hook that configures screenshot capabilities directly using Three.js context
- *
- * @param onRegistered Optional callback that's called when screenshot capability is registered
+ * Hook that configures screenshot capabilities using Canvas toBlob API
  */
-export function useScreenCapture(): (options?: ScreenshotOptions) => string {
-  // Access Three.js context directly
+export function useScreenCapture(): (options?: ScreenshotOptions) => Promise<string> {
   const { gl, scene, camera } = useThree();
 
-  // Create screenshot capture function
   const captureScreenshot = useCallback(
-    // eslint-disable-next-line complexity -- allowable, but should be refactored
-    (options?: ScreenshotOptions): string => {
+    async (options?: ScreenshotOptions): Promise<string> => {
       if (!gl.domElement) {
         throw new Error('Screenshot attempted before renderer was ready');
+      }
+
+      // Additional validation to ensure canvas is still valid
+      if (!gl.domElement.isConnected) {
+        throw new Error('Screenshot attempted on disconnected canvas - canvas may have been recreated');
       }
 
       // Setup default options
       const defaultOptions = {
         aspectRatio: 16 / 9,
         zoomLevel: 1.25,
-        quality: {
-          supersamplingFactor: 1,
-          antiAliasingSamples: 0,
-          lineWidthEnhancement: 2,
-        },
+        theta: undefined,
+        phi: undefined,
         output: {
-          format: 'image/png',
+          format: 'image/png' as const,
           quality: 0.92,
           isPreview: true,
         },
-      } as const satisfies ScreenshotOptions;
+      } satisfies ScreenshotOptions;
 
       // Merge provided options with defaults
-      const config = options
-        ? {
-            ...defaultOptions,
-            ...options,
-            quality: {
-              ...defaultOptions.quality,
-              ...options?.quality,
-            },
-            output: {
-              ...defaultOptions.output,
-              ...options?.output,
-            },
-          }
-        : defaultOptions;
+      const config = {
+        ...defaultOptions,
+        ...options,
+        output: {
+          ...defaultOptions.output,
+          ...options?.output,
+        },
+      };
+      console.log('config', config);
 
-      const removedObjects: THREE.Object3D[] = [];
+      // Create a copy of the camera for the screenshot so we don't modify the original
+      const screenshotCamera = (camera as THREE.PerspectiveCamera).clone();
+      screenshotCamera.zoom = config.zoomLevel;
+      screenshotCamera.aspect = config.aspectRatio;
 
-      // If we are in preview mode, remove all objects that are not for preview only
+      // Apply spherical coordinate positioning only if both phi and theta are specified
+      if (config.phi !== undefined && config.theta !== undefined) {
+        // Get the current camera distance from the target (assuming target is at origin)
+        const currentPosition = screenshotCamera.position.clone();
+        const distance = currentPosition.length();
+
+        // Convert phi and theta to radians
+        const phiRad = (config.phi * Math.PI) / 180;
+        const thetaRad = (config.theta * Math.PI) / 180;
+
+        // Get the current up vector to determine coordinate system
+        const upVector = THREE.Object3D.DEFAULT_UP.clone();
+
+        // Calculate position using standard spherical coordinates
+        // Standard convention: phi is polar angle from up axis, theta is azimuthal angle
+        let x: number;
+        let y: number;
+        let z: number;
+
+        if (upVector.z === 1) {
+          // Z-up coordinate system (current app configuration)
+          x = distance * Math.sin(phiRad) * Math.cos(thetaRad);
+          y = distance * Math.sin(phiRad) * Math.sin(thetaRad);
+          z = distance * Math.cos(phiRad);
+        } else if (upVector.y === 1) {
+          // Y-up coordinate system (Three.js default)
+          x = distance * Math.sin(phiRad) * Math.cos(thetaRad);
+          z = distance * Math.sin(phiRad) * Math.sin(thetaRad);
+          y = distance * Math.cos(phiRad);
+        } else {
+          // X-up coordinate system (less common)
+          y = distance * Math.sin(phiRad) * Math.cos(thetaRad);
+          z = distance * Math.sin(phiRad) * Math.sin(thetaRad);
+          x = distance * Math.cos(phiRad);
+        }
+
+        // Set the new camera position
+        screenshotCamera.position.set(x, y, z);
+
+        // Make the camera look at the origin (or the scene center)
+        screenshotCamera.lookAt(0, 0, 0);
+
+        console.log(
+          `Screenshot camera positioned at phi=${config.phi}°, theta=${config.theta}° -> position(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}) [up=${upVector.x},${upVector.y},${upVector.z}]`,
+        );
+      }
+
+      screenshotCamera.updateProjectionMatrix();
+
+      // Create a copy of the scene for the screenshot so we don't modify the original
+      const screenshotScene = scene.clone();
+
+      // Handle preview mode - hide non-preview objects in the cloned scene
       if (config.output.isPreview) {
-        scene.traverse((object) => {
-          // Check if the object is for preview only
+        screenshotScene.traverse((object) => {
           if (object.userData?.isPreviewOnly) {
             object.visible = false;
-            removedObjects.push(object);
           }
         });
       }
 
-      // Store original canvas size for aspect ratio calculations
-      const originalWidth = gl.domElement.width;
       const originalHeight = gl.domElement.height;
-
-      // Store original camera properties
-      const originalZoom = camera.zoom;
-      let originalAspect: number | undefined;
-      let originalFov: number | undefined;
-      let originalLeft: number | undefined;
-      let originalRight: number | undefined;
-      let originalTop: number | undefined;
-      let originalBottom: number | undefined;
-
-      if (camera instanceof THREE.PerspectiveCamera) {
-        originalAspect = camera.aspect;
-        originalFov = camera.fov;
-      } else if (camera instanceof THREE.OrthographicCamera) {
-        originalLeft = camera.left;
-        originalRight = camera.right;
-        originalTop = camera.top;
-        originalBottom = camera.bottom;
-      }
-
-      // Get target aspect ratio from config
-      const targetAspect = config.aspectRatio;
-
-      // Use super-sampling for higher quality
-      const { supersamplingFactor } = config.quality;
-      const width = Math.round(originalHeight * targetAspect) * supersamplingFactor;
-      const height = originalHeight * supersamplingFactor;
-
-      // Store original pixel ratio and set a higher one for rendering
       const originalPixelRatio = gl.getPixelRatio();
-      gl.setPixelRatio(Math.max(window.devicePixelRatio, 2) * supersamplingFactor);
 
-      // Create a WebGLRenderTarget with correct settings for proper color and anti-aliasing
-      const renderTarget = new THREE.WebGLRenderTarget(width, height, {
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat,
-        type: THREE.UnsignedByteType,
-        colorSpace: THREE.SRGBColorSpace, // Use sRGB color space for correct colors
-        samples: config.quality.antiAliasingSamples, // Enable MSAA if specified
-      });
+      try {
+        // Calculate target dimensions based on aspect ratio
+        const targetAspect = config.aspectRatio;
+        const width = Math.round(originalHeight * targetAspect);
+        const height = originalHeight;
 
-      // Store renderer's initial state
-      const originalRenderTarget = gl.getRenderTarget();
-      const originalColorSpace = gl.outputColorSpace;
+        // Create a temporary canvas for the screenshot
+        const screenshotCanvas = document.createElement('canvas');
+        screenshotCanvas.width = width;
+        screenshotCanvas.height = height;
 
-      // Set correct color space for output
-      gl.outputColorSpace = THREE.SRGBColorSpace;
-
-      // Apply zoom level from config
-      camera.zoom = config.zoomLevel;
-
-      // Temporarily adjust camera to match the target aspect ratio
-      if (camera instanceof THREE.PerspectiveCamera) {
-        camera.aspect = targetAspect;
-      } else if (
-        camera instanceof THREE.OrthographicCamera &&
-        originalLeft !== undefined &&
-        originalRight !== undefined
-      ) {
-        // For orthographic camera, adjust the viewport
-        const halfWidth = (originalRight - originalLeft) / 2;
-        const newHalfWidth = halfWidth * (targetAspect / (originalWidth / originalHeight));
-        camera.left = -newHalfWidth;
-        camera.right = newHalfWidth;
-      }
-
-      camera.updateProjectionMatrix();
-
-      // Enhance line width for better detail if specified
-      const lineWidthEnhancement = config.quality?.lineWidthEnhancement || 0;
-
-      if (lineWidthEnhancement > 0) {
-        scene.traverse((object) => {
-          if (
-            (object instanceof THREE.Line || object instanceof THREE.LineSegments) &&
-            object.material && // Check if material has linewidth property and ensure proper typing
-            'linewidth' in object.material
-          ) {
-            const material = object.material as THREE.LineBasicMaterial;
-            // Store original line width with proper typing
-            const originalLineWidth = material.linewidth ?? 1;
-
-            // Update line width for the screenshot
-            if (material.linewidth !== undefined) {
-              material.linewidth = Math.max(originalLineWidth, lineWidthEnhancement);
-            }
-
-            // Restore after rendering
-            setTimeout(() => {
-              if (material.linewidth !== undefined) {
-                material.linewidth = originalLineWidth;
-              }
-            }, 0);
-          }
+        // Create a temporary WebGL renderer for the screenshot
+        const screenshotRenderer = new THREE.WebGLRenderer({
+          canvas: screenshotCanvas,
+          alpha: true,
+          antialias: true,
+          preserveDrawingBuffer: true,
         });
-      }
 
-      // Render to the offscreen buffer
-      gl.setRenderTarget(renderTarget);
-      gl.render(scene, camera);
+        // Copy settings from the main renderer
+        screenshotRenderer.setSize(width, height, false);
+        screenshotRenderer.setPixelRatio(gl.getPixelRatio());
+        screenshotRenderer.outputColorSpace = gl.outputColorSpace;
+        screenshotRenderer.shadowMap.enabled = gl.shadowMap.enabled;
+        screenshotRenderer.shadowMap.type = gl.shadowMap.type;
 
-      // Create a temporary canvas to convert the render target to an image
-      const temporaryCanvas = document.createElement('canvas');
-      temporaryCanvas.width = width / supersamplingFactor;
-      temporaryCanvas.height = height / supersamplingFactor;
-      const context = temporaryCanvas.getContext('2d', { alpha: true, willReadFrequently: true });
+        // Render the scene to the temporary canvas
+        screenshotRenderer.render(screenshotScene, screenshotCamera);
 
-      if (!context) {
-        throw new Error('Could not get 2D context for screenshot');
-      }
+        // Use toBlob API on the temporary canvas
+        const blob = await new Promise<Blob | undefined>((resolve) => {
+          const mimeType = config.output.format;
+          const quality = mimeType === 'image/jpeg' || mimeType === 'image/webp' ? config.output.quality : undefined;
 
-      // Read pixels from the render target
-      const buffer = new Uint8Array(width * height * 4);
-      gl.readRenderTargetPixels(renderTarget, 0, 0, width, height, buffer);
+          screenshotCanvas.toBlob(
+            (result) => {
+              resolve(result ?? undefined);
+            },
+            mimeType,
+            quality,
+          );
+        });
 
-      // Create a higher resolution canvas for the raw data
-      const highResolutionCanvas = document.createElement('canvas');
-      highResolutionCanvas.width = width;
-      highResolutionCanvas.height = height;
-      const highResolutionContext = highResolutionCanvas.getContext('2d', { alpha: true });
-
-      if (!highResolutionContext) {
-        throw new Error('Could not get high resolution 2D context for screenshot');
-      }
-
-      // Create ImageData at full resolution
-      const imageData = highResolutionContext.createImageData(width, height);
-
-      // Process pixels with optional vertical flipping
-      for (let y = 0; y < height; y++) {
-        // Apply vertical flip, as WebGL renders upside down
-        const destinationY = height - 1 - y;
-
-        for (let x = 0; x < width; x++) {
-          // Source indices
-          const sourceIndex = (y * width + x) * 4;
-
-          // Destination indices
-          const destinationIndex = (destinationY * width + x) * 4;
-
-          // Copy and assign RGBA values
-          imageData.data[destinationIndex] = buffer[sourceIndex]; // R
-          imageData.data[destinationIndex + 1] = buffer[sourceIndex + 1]; // G
-          imageData.data[destinationIndex + 2] = buffer[sourceIndex + 2]; // B
-          imageData.data[destinationIndex + 3] = buffer[sourceIndex + 3]; // A
+        if (!blob) {
+          throw new Error('Failed to create blob from canvas');
         }
+
+        // Convert blob to data URL
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.addEventListener('load', () => {
+            resolve(reader.result as string);
+          });
+          reader.addEventListener('error', reject);
+          reader.readAsDataURL(blob);
+        });
+
+        // Cleanup the temporary renderer
+        screenshotRenderer.dispose();
+
+        // Additional cleanup to prevent WebGL context accumulation
+        screenshotRenderer.forceContextLoss();
+
+        // Remove the canvas from memory
+        screenshotCanvas.width = 0;
+        screenshotCanvas.height = 0;
+
+        return dataUrl;
+      } finally {
+        // Restore all original state
+        gl.setPixelRatio(originalPixelRatio);
+
+        // Re-render to ensure everything is visible
+        gl.render(scene, camera);
       }
-
-      // Put the processed image data onto the high-res canvas
-      highResolutionContext.putImageData(imageData, 0, 0);
-
-      // Draw the high-res canvas onto the final canvas, downsampling with better quality
-      context.drawImage(
-        highResolutionCanvas,
-        0,
-        0,
-        width,
-        height,
-        0,
-        0,
-        width / supersamplingFactor,
-        height / supersamplingFactor,
-      );
-
-      // Get the data URL with the specified format and quality
-      const mimeType = config.output?.format;
-
-      // Only use quality for lossy formats
-      const outputQuality = mimeType === 'image/jpeg' || mimeType === 'image/webp' ? config.output.quality : undefined;
-
-      const dataUrl = temporaryCanvas.toDataURL(mimeType, outputQuality);
-
-      // Clean up
-      renderTarget.dispose();
-      highResolutionCanvas.remove();
-
-      // Restore renderer state
-      gl.setRenderTarget(originalRenderTarget);
-      gl.outputColorSpace = originalColorSpace;
-      gl.setPixelRatio(originalPixelRatio);
-
-      // Restore camera settings
-      camera.zoom = originalZoom;
-
-      if (camera instanceof THREE.PerspectiveCamera && originalAspect !== undefined) {
-        camera.aspect = originalAspect;
-        if (originalFov !== undefined) {
-          camera.fov = originalFov;
-        }
-      } else if (camera instanceof THREE.OrthographicCamera) {
-        if (originalLeft !== undefined) camera.left = originalLeft;
-        if (originalRight !== undefined) camera.right = originalRight;
-        if (originalTop !== undefined) camera.top = originalTop;
-        if (originalBottom !== undefined) camera.bottom = originalBottom;
-      }
-
-      camera.updateProjectionMatrix();
-
-      // Restore the objects
-      for (const object of removedObjects) {
-        object.visible = true;
-      }
-
-      // Render the scene again to ensure everything is visible
-      gl.render(scene, camera);
-
-      return dataUrl;
     },
     [gl, scene, camera],
   );
@@ -356,12 +254,20 @@ export function useScreenCapture(): (options?: ScreenshotOptions) => string {
 // Simple component to setup the screenshot capability
 export function ScreenshotSetup(): ReactNode {
   const capture = useScreenCapture();
-  const { screenshot } = useGraphics();
 
   useEffect(() => {
-    screenshot.registerCapture(capture);
-  }, [capture, screenshot]);
+    console.log('ScreenshotSetup: registering screenshot capability', {
+      captureFunction: capture,
+      timestamp: new Date().toISOString(),
+    });
+    screenshotCapabilityActor.send({ type: 'registerCapture', capture });
 
-  // Return a simple node that doesn't render anything visual
+    // Cleanup function to unregister on unmount
+    return () => {
+      console.log('ScreenshotSetup: unregistering screenshot capability on unmount');
+      screenshotCapabilityActor.send({ type: 'unregisterCapture' });
+    };
+  }, [capture]);
+
   return null;
 }

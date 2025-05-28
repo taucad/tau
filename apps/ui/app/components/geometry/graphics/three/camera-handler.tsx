@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { JSX } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
-import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
+import { useSelector } from '@xstate/react';
+import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 
 /**
  * Internal component that handles the camera matrix manipulation.
@@ -11,7 +12,7 @@ import { useGraphics } from '~/components/geometry/graphics/graphics-context.js'
 export function CameraHandler(): JSX.Element {
   const camera = useThree((state) => state.camera);
   const { invalidate } = useThree();
-  const { cameraAngle } = useGraphics();
+  const cameraAngle = useSelector(graphicsActor, (state) => state.context.cameraAngle);
 
   // Store original camera settings to maintain consistent view
   const cameraState = useRef({

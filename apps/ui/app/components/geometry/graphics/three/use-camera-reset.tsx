@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
 import type { RefObject } from 'react';
 import { resetCamera as resetCameraFn } from '~/components/geometry/graphics/three/camera-reset.js';
-import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
+import { cameraCapabilityActor } from '~/routes/builds_.$id/graphics-actor.js';
 
 // Define the specific types needed for camera reset
 type ResetRotation = {
@@ -34,7 +34,6 @@ export function useCameraReset(
   parameters: ResetCameraParameters,
 ): (options?: { withConfiguredAngles?: boolean }) => void {
   const { camera, invalidate } = useThree();
-  const { camera: graphicsCamera } = useGraphics();
   const isRegistered = useRef(false);
 
   const { shapeRadius, rotation, perspective, setCurrentZoom, setSceneRadius, originalDistanceReference } = parameters;
@@ -61,13 +60,13 @@ export function useCameraReset(
     [camera, invalidate, shapeRadius, rotation, perspective, setCurrentZoom, setSceneRadius, originalDistanceReference],
   );
 
-  // Register the reset function with the graphics context only once
+  // Register the reset function with the camera capability actor only once
   useEffect(() => {
     if (!isRegistered.current) {
-      graphicsCamera.registerReset(resetCamera);
+      cameraCapabilityActor.send({ type: 'registerReset', reset: resetCamera });
       isRegistered.current = true;
     }
-  }, [graphicsCamera, resetCamera]);
+  }, [resetCamera]);
 
   // Return the reset function for direct use if needed
   return resetCamera;

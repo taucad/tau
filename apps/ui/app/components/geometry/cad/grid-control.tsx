@@ -1,9 +1,12 @@
 import React, { useCallback, useState } from 'react';
 import type { ClassValue } from 'clsx';
 import { LockIcon } from 'lucide-react';
+import { useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { Button } from '~/components/ui/button.js';
-import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
+import { useCookie } from '~/hooks/use-cookie.js';
+import { formatNumber } from '~/utils/number.js';
+import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -15,8 +18,6 @@ import {
 } from '~/components/ui/dropdown-menu.js';
 import { Switch } from '~/components/ui/switch.js';
 import { cn } from '~/utils/ui.js';
-import { formatNumber } from '~/utils/number.js';
-import useCookie from '~/hooks/use-cookie.js';
 
 type GridSizeIndicatorProps = {
   /**
@@ -51,30 +52,32 @@ type GridUnitOption = (typeof gridUnitOptions)[number]['value'];
  * Component that displays the current grid size from the GraphicsProvider
  */
 export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.ReactNode {
-  const { gridSizes, isGridSizeLocked, setIsGridSizeLocked, setGridUnit, gridUnitSystem } = useGraphics();
+  const gridSizes = useSelector(graphicsActor, (state) => state.context.gridSizes);
+  const isGridSizeLocked = useSelector(graphicsActor, (state) => state.context.isGridSizeLocked);
+  const gridUnitSystem = useSelector(graphicsActor, (state) => state.context.gridUnitSystem);
+
   const [isOpen, setIsOpen] = useState(false);
 
   // Use the current gridUnitSystem to select an appropriate default unit
   const defaultUnit = gridUnitSystem === 'imperial' ? 'in' : 'mm';
   const [unit, setUnit] = useCookie<GridUnitOption>('cad-unit', defaultUnit as GridUnitOption);
 
-  const handleLockToggle = useCallback(
-    (checked: boolean) => {
-      setIsGridSizeLocked(checked);
-    },
-    [setIsGridSizeLocked],
-  );
+  const handleLockToggle = useCallback((checked: boolean) => {
+    graphicsActor.send({ type: 'setGridSizeLocked', payload: checked });
+  }, []);
 
-  const handleUnitSelect = useCallback(
+  const handleUnitChange = useCallback(
     (selectedUnit: GridUnitOption) => {
       const selectedOption = gridUnitOptions.find((option) => option.value === selectedUnit);
-      if (selectedOption) {
-        setUnit(selectedUnit);
-        // Update the unit in the graphics context
-        setGridUnit(selectedOption.value, selectedOption.factor, selectedOption.system);
-      }
+      if (!selectedOption) return;
+
+      setUnit(selectedUnit);
+      graphicsActor.send({
+        type: 'setGridUnit',
+        payload: { unit: selectedOption.value, factor: selectedOption.factor, system: selectedOption.system },
+      });
     },
-    [setUnit, setGridUnit],
+    [setUnit],
   );
 
   const preventClose = useCallback((event: Event) => {
@@ -128,7 +131,7 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
             key={option.value}
             checked={unit === option.value}
             onCheckedChange={() => {
-              handleUnitSelect(option.value);
+              handleUnitChange(option.value);
             }}
             onSelect={preventClose}
           >

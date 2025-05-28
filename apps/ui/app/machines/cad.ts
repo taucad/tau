@@ -3,6 +3,7 @@ import type { ActorRefFrom } from 'xstate';
 import { kernelMachine } from '~/machines/kernel.js';
 import type { KernelEventExternal } from '~/machines/kernel.js';
 import type { Shape } from '~/types/cad.js';
+import type { graphicsMachine } from '~/machines/graphics.js';
 
 // Interface defining the context for the CAD machine
 export type CadContext = {
@@ -23,6 +24,7 @@ export type CadContext = {
   shouldInitializeKernelOnStart: boolean;
   isKernelInitializing: boolean;
   isKernelInitialized: boolean;
+  graphicsRef: ActorRefFrom<typeof graphicsMachine> | undefined;
 };
 
 // Define the types of events the machine can receive
@@ -42,6 +44,7 @@ type CadEmitted =
 
 type CadInput = {
   shouldInitializeKernelOnStart: boolean;
+  graphicsRef?: ActorRefFrom<typeof graphicsMachine>;
 };
 
 // Debounce delay for code changes in milliseconds
@@ -106,7 +109,7 @@ export const cadMachine = setup({
       code: context.code,
       parameters: context.parameters,
     })),
-    setShapes: enqueueActions(({ enqueue, event }) => {
+    setShapes: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'geometryComputed');
       enqueue.assign({
         shapes: event.shapes,
@@ -116,6 +119,13 @@ export const cadMachine = setup({
         type: 'geometryEvaluated' as const,
         shapes: event.shapes,
       });
+      // Send shapes to graphics machine
+      if (context.graphicsRef) {
+        enqueue.sendTo(context.graphicsRef, {
+          type: 'updateShapes',
+          shapes: event.shapes,
+        });
+      }
     }),
     setKernelError: assign({
       kernelError({ event }) {
@@ -191,6 +201,7 @@ export const cadMachine = setup({
     shouldInitializeKernelOnStart: input.shouldInitializeKernelOnStart,
     isKernelInitializing: false,
     isKernelInitialized: false,
+    graphicsRef: input.graphicsRef,
   }),
   initial: 'booting',
   states: {

@@ -41,7 +41,7 @@ export function ThreeProvider({
   zoomSpeed = 1,
   ...properties
 }: ThreeContextProperties): JSX.Element {
-  const dpr = Math.min(globalThis.devicePixelRatio, 2);
+  const dpr = Math.min(globalThis.devicePixelRatio, 1);
   const [isCanvasReady, setIsCanvasReady] = useState(false);
 
   useEffect(() => {

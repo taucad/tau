@@ -11,7 +11,6 @@ import { Button } from '~/components/ui/button.js';
 import type { Handle } from '~/types/matches.js';
 import { useChatConstants } from '~/utils/chat.js';
 import { AiChatProvider, useAiChat } from '~/components/chat/ai-chat-provider.js';
-import { GraphicsProvider } from '~/components/geometry/graphics/graphics-context.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { BuildNameEditor } from '~/routes/builds_.$id/build-name-editor.js';
@@ -177,9 +176,7 @@ export default function ChatRoute(): JSX.Element {
   return (
     <BuildProvider buildId={id}>
       <AiChatProvider value={{ ...useChatConstants, id }}>
-        <GraphicsProvider defaultCameraAngle={60}>
-          <Chat />
-        </GraphicsProvider>
+        <Chat />
       </AiChatProvider>
     </BuildProvider>
   );

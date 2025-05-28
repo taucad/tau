@@ -8,8 +8,8 @@ import { useBuildSelector } from '~/hooks/use-build.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { toast } from '~/components/ui/sonner.js';
 import { cn } from '~/utils/ui.js';
-import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
+import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
 import { downloadBlob } from '~/utils/file.js';
 
@@ -27,19 +27,39 @@ export function ChatControls(): JSX.Element {
   const buildName = useBuildSelector((state) => state.build?.name) ?? 'file';
   const updateThumbnail = useBuildSelector((state) => state.updateThumbnail);
   const code = useSelector(cadActor, (state) => state.context.code);
-
-  const { screenshot } = useGraphics();
+  const isScreenshotReady = useSelector(graphicsActor, (state) => state.context.isScreenshotReady);
 
   const getPngBlob = useCallback(async () => {
-    const dataUrl = screenshot.capture({
-      output: {
-        format: 'image/png',
-        quality: 0.92,
-      },
+    return new Promise<Blob>((resolve, reject) => {
+      const requestId = crypto.randomUUID();
+
+      // Subscribe to screenshot completion
+      const subscription = graphicsActor.on('screenshotCompleted', async (event) => {
+        if (event.requestId === requestId) {
+          subscription.unsubscribe();
+          try {
+            const response = await fetch(event.dataUrl);
+            const blob = await response.blob();
+            resolve(blob);
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error('Failed to fetch screenshot'));
+          }
+        }
+      });
+
+      // Request screenshot
+      graphicsActor.send({
+        type: 'takeScreenshot',
+        requestId,
+        options: {
+          output: {
+            format: 'image/png',
+            quality: 0.92,
+          },
+        },
+      });
     });
-    const response = await fetch(dataUrl);
-    return response.blob();
-  }, [screenshot]);
+  }, []);
 
   const handleExport = useCallback(
     async (filename: string, format: 'stl' | 'stl-binary' | 'step' | 'step-assembly') => {
@@ -121,25 +141,33 @@ export function ChatControls(): JSX.Element {
   );
 
   const updateThumbnailScreenshot = useCallback(() => {
-    if (screenshot.isReady) {
-      try {
-        const dataUrl = screenshot.capture({
-          output: {
-            format: 'image/webp',
-            quality: 0.92,
-          },
-          zoomLevel: 1.8,
-        });
+    const requestId = crypto.randomUUID();
 
-        updateThumbnail(dataUrl);
+    // Subscribe to screenshot completion
+    const subscription = graphicsActor.on('screenshotCompleted', (event) => {
+      console.log('screenshotCompleted', event);
+      if (event.requestId === requestId) {
+        subscription.unsubscribe();
+        updateThumbnail(event.dataUrl);
         console.log('Thumbnail updated successfully');
-      } catch (error) {
-        console.error('Error updating thumbnail:', error);
       }
-    } else {
-      console.log('Screenshot is not ready, skipping thumbnail update');
-    }
-  }, [screenshot, updateThumbnail]);
+    });
+
+    // Request screenshot
+    graphicsActor.send({
+      type: 'takeScreenshot',
+      requestId,
+      options: {
+        output: {
+          format: 'image/webp',
+          quality: 0.92,
+        },
+        zoomLevel: 1.8,
+        phi: 60,
+        theta: 45,
+      },
+    });
+  }, [updateThumbnail]);
 
   const handleUpdateThumbnail = useCallback(() => {
     toast.promise(
@@ -158,12 +186,7 @@ export function ChatControls(): JSX.Element {
   useEffect(() => {
     const subscription = cadActor.on('geometryEvaluated', (event) => {
       if (event.shapes.length > 0) {
-        console.log('updating thumbnail');
-        // TODO: remove this timeout after refining the canvas state to provide a more accurate signal after painting completes
-        const timeout = setTimeout(() => {
-          updateThumbnailScreenshot();
-          clearTimeout(timeout);
-        }, 100);
+        updateThumbnailScreenshot();
       }
     });
 
@@ -175,25 +198,44 @@ export function ChatControls(): JSX.Element {
   const handleCopyPngToClipboard = useCallback(async () => {
     toast.promise(
       async () => {
-        // Get the screenshot as a blob
-        const dataUrl = screenshot.capture({
-          output: {
-            format: 'image/png',
-            quality: 0.92,
-            isPreview: false,
-          },
+        const requestId = crypto.randomUUID();
+
+        return new Promise<void>((resolve, reject) => {
+          // Subscribe to screenshot completion
+          const subscription = graphicsActor.on('screenshotCompleted', async (event) => {
+            if (event.requestId === requestId) {
+              subscription.unsubscribe();
+              try {
+                // Convert dataURL to Blob
+                const response = await fetch(event.dataUrl);
+                const blob = await response.blob();
+
+                // Copy to clipboard
+                await navigator.clipboard.write([
+                  new ClipboardItem({
+                    [blob.type]: blob,
+                  }),
+                ]);
+                resolve();
+              } catch (error) {
+                reject(error instanceof Error ? error : new Error('Failed to copy to clipboard'));
+              }
+            }
+          });
+
+          // Request screenshot
+          graphicsActor.send({
+            type: 'takeScreenshot',
+            requestId,
+            options: {
+              output: {
+                format: 'image/png',
+                quality: 0.92,
+                isPreview: false,
+              },
+            },
+          });
         });
-
-        // Convert dataURL to Blob
-        const response = await fetch(dataUrl);
-        const blob = await response.blob();
-
-        // Copy to clipboard
-        await navigator.clipboard.write([
-          new ClipboardItem({
-            [blob.type]: blob,
-          }),
-        ]);
       },
       {
         loading: `Copying ${buildName}.png to clipboard...`,
@@ -201,25 +243,46 @@ export function ChatControls(): JSX.Element {
         error: `Failed to copy ${buildName}.png to clipboard`,
       },
     );
-  }, [buildName, screenshot]);
+  }, [buildName]);
 
   const handleCopyDataUrlToClipboard = useCallback(async () => {
     toast.promise(
       async () => {
-        const dataUrl = screenshot.capture({
-          output: {
-            format: 'image/webp',
-            quality: 0.2,
-            isPreview: true,
-          },
-        });
+        const requestId = crypto.randomUUID();
 
-        // Copy to clipboard
-        if (globalThis.isSecureContext) {
-          void navigator.clipboard.writeText(dataUrl);
-        } else {
-          console.warn('Clipboard operations are only allowed in secure contexts.');
-        }
+        return new Promise<void>((resolve, reject) => {
+          // Subscribe to screenshot completion
+          const subscription = graphicsActor.on('screenshotCompleted', async (event) => {
+            if (event.requestId === requestId) {
+              subscription.unsubscribe();
+              try {
+                // Copy to clipboard
+                if (globalThis.isSecureContext) {
+                  await navigator.clipboard.writeText(event.dataUrl);
+                  resolve();
+                } else {
+                  console.warn('Clipboard operations are only allowed in secure contexts.');
+                  reject(new Error('Clipboard operations are only allowed in secure contexts.'));
+                }
+              } catch (error) {
+                reject(error instanceof Error ? error : new Error('Failed to copy data URL'));
+              }
+            }
+          });
+
+          // Request screenshot
+          graphicsActor.send({
+            type: 'takeScreenshot',
+            requestId,
+            options: {
+              output: {
+                format: 'image/webp',
+                quality: 0.2,
+                isPreview: true,
+              },
+            },
+          });
+        });
       },
       {
         loading: `Copying data URL to clipboard...`,
@@ -227,7 +290,7 @@ export function ChatControls(): JSX.Element {
         error: `Failed to copy data URL to clipboard`,
       },
     );
-  }, [screenshot]);
+  }, []);
 
   const buildItems = useMemo(
     (): ViewerControlItem[] => [
@@ -253,7 +316,7 @@ export function ChatControls(): JSX.Element {
         group: 'Build',
         icon: <GalleryThumbnails className="mr-2 size-4" />,
         action: handleUpdateThumbnail,
-        disabled: !screenshot.isReady,
+        disabled: !isScreenshotReady,
       },
       {
         id: 'copy-png',
@@ -261,7 +324,7 @@ export function ChatControls(): JSX.Element {
         group: 'Build',
         icon: <Clipboard className="mr-2 size-4" />,
         action: handleCopyPngToClipboard,
-        disabled: !screenshot.isReady,
+        disabled: !isScreenshotReady,
       },
       {
         id: 'copy-data-url',
@@ -269,7 +332,7 @@ export function ChatControls(): JSX.Element {
         group: 'Build',
         icon: <Clipboard className="mr-2 size-4" />,
         action: handleCopyDataUrlToClipboard,
-        disabled: !screenshot.isReady,
+        disabled: !isScreenshotReady,
       },
       {
         id: 'download-png',
@@ -277,7 +340,7 @@ export function ChatControls(): JSX.Element {
         group: 'Build',
         icon: <ImageDown className="mr-2 size-4" />,
         action: async () => handleDownloadPng(`${buildName}.png`),
-        disabled: !screenshot.isReady,
+        disabled: !isScreenshotReady,
       },
       {
         id: 'copy-code',
@@ -298,7 +361,7 @@ export function ChatControls(): JSX.Element {
     ],
     [
       handleUpdateThumbnail,
-      screenshot.isReady,
+      isScreenshotReady,
       handleCopyPngToClipboard,
       handleCopyDataUrlToClipboard,
       handleDownloadPng,

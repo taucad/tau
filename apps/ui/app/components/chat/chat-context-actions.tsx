@@ -1,11 +1,11 @@
 import { useCallback, useMemo } from 'react';
 import type { JSX } from 'react';
-import { AtSign, Image, Code, AlertTriangle, AlertCircle } from 'lucide-react';
+import { AtSign, Image, Code, AlertTriangle, AlertCircle, Camera } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { TooltipTrigger, TooltipContent, Tooltip } from '~/components/ui/tooltip.js';
 import { Button } from '~/components/ui/button.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
-import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
+import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { toast } from '~/components/ui/sonner.js';
 import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
 
@@ -23,34 +23,235 @@ type ContextActionItem = {
   disabled?: boolean;
 };
 
+// Define the 6 orthographic views with their phi/theta angles
+const orthographicViews = [
+  { name: 'top', phi: 0, theta: 0 },
+  { name: 'bottom', phi: 180, theta: 0 },
+  { name: 'front', phi: 90, theta: 0 },
+  { name: 'back', phi: 90, theta: 180 },
+  { name: 'right', phi: 90, theta: 90 },
+  { name: 'left', phi: 90, theta: 270 },
+] as const;
+
 export function ChatContextActions({ addImage, addText }: ChatContextActionsProperties): JSX.Element {
   const kernelError = useSelector(cadActor, (state) => state.context.kernelError);
   const codeErrors = useSelector(cadActor, (state) => state.context.codeErrors);
   const code = useSelector(cadActor, (state) => state.context.code);
-  const { screenshot } = useGraphics();
+  const isScreenshotReady = useSelector(graphicsActor, (state) => state.context.isScreenshotReady);
 
-  // Add a new function to capture model screenshot
   const handleAddModelScreenshot = useCallback(() => {
-    if (screenshot.isReady) {
-      try {
-        const dataUrl = screenshot.capture({
+    if (isScreenshotReady) {
+      const requestId = crypto.randomUUID();
+
+      // Subscribe to screenshot completion
+      const subscription = graphicsActor.on('screenshotCompleted', (event) => {
+        if (event.requestId === requestId) {
+          subscription.unsubscribe();
+          // Add the screenshot to images state
+          addImage(event.dataUrl);
+          toast.success('Model screenshot added');
+        }
+      });
+
+      // Request screenshot
+      graphicsActor.send({
+        type: 'takeScreenshot',
+        requestId,
+        options: {
           output: {
-            format: 'image/png',
+            format: 'image/webp',
             quality: 0.92,
           },
           zoomLevel: 1.5,
-        });
-
-        // Add the screenshot to images state
-        addImage(dataUrl);
-      } catch (error) {
-        toast.error('Failed to capture model screenshot');
-        console.error('Screenshot error:', error);
-      }
+        },
+      });
     } else {
       toast.error('Renderer not ready');
     }
-  }, [screenshot, addImage]);
+  }, [isScreenshotReady, addImage]);
+
+  const handleAddAllViewsScreenshots = useCallback(() => {
+    if (!isScreenshotReady) {
+      toast.error('Renderer not ready');
+      return;
+    }
+
+    const screenshots: Array<{ name: string; dataUrl: string }> = [];
+    let currentIndex = 0;
+
+    const processNextScreenshot = () => {
+      if (currentIndex >= orthographicViews.length) {
+        // All screenshots completed - now stitch them together
+        console.log('All screenshots completed, creating composite image');
+        void createCompositeImage(screenshots);
+        return;
+      }
+
+      const view = orthographicViews[currentIndex];
+      const requestId = `ortho-composite-${currentIndex}-${crypto.randomUUID()}`;
+
+      console.log(
+        `Requesting screenshot ${currentIndex + 1}/${orthographicViews.length} for ${view.name} with ID: ${requestId}`,
+      );
+
+      // Subscribe to screenshot completion for this specific request
+      const subscription = graphicsActor.on('screenshotCompleted', (event) => {
+        if (event.requestId === requestId) {
+          console.log(`Screenshot completed for view: ${view.name}`);
+          subscription.unsubscribe();
+          clearTimeout(timeoutId);
+
+          // Store the screenshot
+          screenshots.push({ name: view.name, dataUrl: event.dataUrl });
+
+          // Move to next screenshot
+          currentIndex++;
+          processNextScreenshot();
+        }
+      });
+
+      // Request the screenshot with square aspect ratio for better grid layout
+      graphicsActor.send({
+        type: 'takeScreenshot',
+        requestId,
+        options: {
+          output: {
+            format: 'image/webp',
+            quality: 0.92,
+          },
+          aspectRatio: 1, // Square images for better grid layout
+          zoomLevel: 1.5,
+          phi: view.phi,
+          theta: view.theta,
+        },
+      });
+
+      // Add a timeout for this specific screenshot
+      const timeoutId = setTimeout(() => {
+        subscription.unsubscribe();
+        console.error(`Screenshot timeout for ${view.name}`);
+        toast.error(`Screenshot failed for ${view.name}`);
+      }, 5000); // 5 second timeout per screenshot
+    };
+
+    // Function to create composite image from all screenshots
+    const createCompositeImage = async (screenshots: Array<{ name: string; dataUrl: string }>) => {
+      try {
+        // Create a canvas for the composite image
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        if (!context) {
+          throw new Error('Could not get canvas context');
+        }
+
+        // Load all images first
+        const images = await Promise.all(
+          screenshots.map(async (screenshot) => {
+            return new Promise<{ name: string; image: HTMLImageElement }>((resolve, reject) => {
+              const img = new globalThis.Image();
+              img.addEventListener('load', () => {
+                resolve({ name: screenshot.name, image: img });
+              });
+              img.addEventListener('error', reject);
+              img.src = screenshot.dataUrl;
+            });
+          }),
+        );
+
+        // Calculate dimensions for 3x2 grid layout
+        const imageWidth = images[0].image.width;
+        const imageHeight = images[0].image.height;
+        const padding = 20;
+        const labelHeight = 30;
+        const cols = 3;
+        const rows = 2;
+
+        canvas.width = cols * imageWidth + (cols + 1) * padding;
+        canvas.height = rows * (imageHeight + labelHeight) + (rows + 1) * padding;
+
+        // Set background color
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Set text properties
+        context.fillStyle = '#000000';
+        context.font = 'bold 96px Arial';
+        context.textAlign = 'center';
+
+        // Draw images in 3x2 grid with labels
+        for (const [index, item] of images.entries()) {
+          const col = index % cols;
+          const row = Math.floor(index / cols);
+
+          const x = padding + col * (imageWidth + padding);
+          const y = padding + row * (imageHeight + labelHeight + padding);
+
+          // Draw the image
+          context.drawImage(item.image, x, y, imageWidth, imageHeight);
+
+          // Draw the label below the image
+          const labelX = x + imageWidth / 2;
+          const labelY = y + imageHeight + 20;
+          context.fillText(item.name.toUpperCase(), labelX, labelY);
+        }
+
+        // Draw divider lines
+        context.strokeStyle = '#cccccc';
+        context.lineWidth = 2;
+
+        // Vertical dividers (between columns)
+        for (let col = 1; col < cols; col++) {
+          const dividerX = padding + col * (imageWidth + padding) - padding / 2;
+          context.beginPath();
+          context.moveTo(dividerX, padding);
+          context.lineTo(dividerX, canvas.height - padding);
+          context.stroke();
+        }
+
+        // Horizontal divider (between rows)
+        const dividerY = padding + (imageHeight + labelHeight + padding) - padding / 2;
+        context.beginPath();
+        context.moveTo(padding, dividerY);
+        context.lineTo(canvas.width - padding, dividerY);
+        context.stroke();
+
+        // Convert canvas to blob, then to data URL for consistency with screenshot implementation
+        const blob = await new Promise<Blob | undefined>((resolve) => {
+          canvas.toBlob(
+            (result) => {
+              resolve(result ?? undefined);
+            },
+            'image/png',
+            0.95,
+          );
+        });
+
+        if (!blob) {
+          throw new Error('Failed to create blob from composite canvas');
+        }
+
+        // Convert blob to data URL
+        const compositeDataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.addEventListener('load', () => {
+            resolve(reader.result as string);
+          });
+          reader.addEventListener('error', reject);
+          reader.readAsDataURL(blob);
+        });
+
+        // Add the composite image to chat context
+        addImage(compositeDataUrl);
+        toast.success('Added composite orthographic views');
+      } catch (error) {
+        console.error('Failed to create composite image:', error);
+        toast.error('Failed to create composite image');
+      }
+    };
+
+    // Start the sequential process
+    processNextScreenshot();
+  }, [isScreenshotReady, addImage]);
 
   const handleAddCode = useCallback(() => {
     const markdownCode = `
@@ -68,14 +269,9 @@ ${code}
     const markdownErrors = `
 # Code errors
 ${errors.join('\n')}
-
-# Code
-\`\`\`python
-${code}
-\`\`\`
-    `;
+`;
     addText(markdownErrors);
-  }, [addText, code, codeErrors]);
+  }, [addText, codeErrors]);
 
   const handleAddKernelError = useCallback(() => {
     if (kernelError) {
@@ -100,7 +296,15 @@ ${code}
         group: 'Visual',
         icon: <Image className="mr-2 size-4" />,
         action: handleAddModelScreenshot,
-        disabled: !screenshot.isReady,
+        disabled: !isScreenshotReady,
+      },
+      {
+        id: 'add-all-views-screenshots',
+        label: 'Add all views screenshots',
+        group: 'Visual',
+        icon: <Camera className="mr-2 size-4" />,
+        action: handleAddAllViewsScreenshots,
+        disabled: !isScreenshotReady,
       },
       {
         id: 'add-code',
@@ -129,7 +333,8 @@ ${code}
     ],
     [
       handleAddModelScreenshot,
-      screenshot.isReady,
+      isScreenshotReady,
+      handleAddAllViewsScreenshots,
       handleAddCode,
       code,
       handleAddCodeErrors,

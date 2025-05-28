@@ -1,10 +1,10 @@
-import type { JSX } from 'react';
 import { useEffect } from 'react';
+import type { JSX } from 'react';
 import { Slider } from '~/components/ui/slider.js';
 import { buttonVariants } from '~/components/ui/button.js';
 import { cn } from '~/utils/ui.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { useGraphics } from '~/components/geometry/graphics/graphics-context.js';
+import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 
 // Cookie name constant - same as in the ThreeContext
@@ -33,13 +33,12 @@ type CameraControlProps = {
  * You must use CameraHandler inside the Canvas separately.
  */
 export function CameraControl({ defaultAngle = 90, className }: Omit<CameraControlProps, 'onChange'>): JSX.Element {
-  const { setCameraAngle } = useGraphics();
   const [angle, setAngle] = useCookie<number>(cameraAngleCookieName, defaultAngle);
 
   // Update camera angle directly in the Graphics context when angle changes
   useEffect(() => {
-    setCameraAngle(angle);
-  }, [angle, setCameraAngle]);
+    graphicsActor.send({ type: 'setCameraAngle', payload: angle });
+  }, [angle]);
 
   return (
     <Tooltip>

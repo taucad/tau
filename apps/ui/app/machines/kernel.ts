@@ -276,6 +276,7 @@ export const kernelMachine = setup({
 
     creatingWorker: {
       invoke: {
+        id: 'createWorkerActor',
         src: 'createWorkerActor',
         input: ({ context }) => ({ context }),
         onDone: {
@@ -308,6 +309,7 @@ export const kernelMachine = setup({
 
     parsing: {
       invoke: {
+        id: 'parseParametersActor',
         src: 'parseParametersActor',
         input({ context, event }) {
           assertEvent(event, 'computeGeometry');
@@ -338,6 +340,7 @@ export const kernelMachine = setup({
 
     evaluating: {
       invoke: {
+        id: 'evaluateCodeActor',
         src: 'evaluateCodeActor',
         input({ context, event }) {
           // The parseParametersActor returns an object without typing. There might be a better way to do this.
@@ -370,6 +373,7 @@ export const kernelMachine = setup({
 
     exporting: {
       invoke: {
+        id: 'exportGeometryActor',
         src: 'exportGeometryActor',
         input: ({ context, event }) => ({
           context,

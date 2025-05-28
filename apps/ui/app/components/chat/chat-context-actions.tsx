@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useEffect } from 'react';
 import type { JSX } from 'react';
 import { AtSign, Image, Code, AlertTriangle, AlertCircle, Camera } from 'lucide-react';
 import { useSelector } from '@xstate/react';
@@ -12,6 +12,12 @@ import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
 type ChatContextActionsProperties = {
   readonly addImage: (image: string) => void;
   readonly addText: (text: string) => void;
+  readonly asPopoverMenu?: boolean;
+  readonly onClose?: () => void;
+  readonly searchQuery?: string;
+  readonly selectedIndex?: number;
+  readonly onSelectedIndexChange?: (index: number) => void;
+  readonly onSelectItem?: (text: string) => void;
 };
 
 type ContextActionItem = {
@@ -33,49 +39,53 @@ const orthographicViews = [
   { name: 'left', phi: 90, theta: 270 },
 ] as const;
 
-export function ChatContextActions({ addImage, addText }: ChatContextActionsProperties): JSX.Element {
+export function ChatContextActions({
+  addImage,
+  addText,
+  asPopoverMenu,
+  onClose,
+  searchQuery = '',
+  selectedIndex,
+  onSelectedIndexChange,
+  onSelectItem,
+}: ChatContextActionsProperties): JSX.Element {
   const kernelError = useSelector(cadActor, (state) => state.context.kernelError);
   const codeErrors = useSelector(cadActor, (state) => state.context.codeErrors);
   const code = useSelector(cadActor, (state) => state.context.code);
   const isScreenshotReady = useSelector(graphicsActor, (state) => state.context.isScreenshotReady);
 
   const handleAddModelScreenshot = useCallback(() => {
-    if (isScreenshotReady) {
-      const requestId = crypto.randomUUID();
-
-      // Subscribe to screenshot completion
-      const subscription = graphicsActor.on('screenshotCompleted', (event) => {
-        if (event.requestId === requestId) {
-          subscription.unsubscribe();
-          // Add the screenshot to images state
-          addImage(event.dataUrl);
-          toast.success('Model screenshot added');
-        }
-      });
-
-      // Request screenshot
-      graphicsActor.send({
-        type: 'takeScreenshot',
-        requestId,
-        options: {
-          output: {
-            format: 'image/webp',
-            quality: 0.92,
-          },
-          zoomLevel: 1.5,
-        },
-      });
-    } else {
-      toast.error('Renderer not ready');
+    if (asPopoverMenu) {
+      onClose?.();
     }
-  }, [isScreenshotReady, addImage]);
+
+    const requestId = crypto.randomUUID();
+
+    // Subscribe to screenshot completion
+    const subscription = graphicsActor.on('screenshotCompleted', (event) => {
+      if (event.requestId === requestId) {
+        subscription.unsubscribe();
+        // Add the screenshot to images state
+        addImage(event.dataUrl);
+        toast.success('Model screenshot added');
+      }
+    });
+
+    // Request screenshot
+    graphicsActor.send({
+      type: 'takeScreenshot',
+      requestId,
+      options: {
+        output: {
+          format: 'image/webp',
+          quality: 0.92,
+        },
+        zoomLevel: 1.5,
+      },
+    });
+  }, [addImage, asPopoverMenu, onClose]);
 
   const handleAddAllViewsScreenshots = useCallback(() => {
-    if (!isScreenshotReady) {
-      toast.error('Renderer not ready');
-      return;
-    }
-
     const screenshots: Array<{ name: string; dataUrl: string }> = [];
     let currentIndex = 0;
 
@@ -239,6 +249,9 @@ export function ChatContextActions({ addImage, addText }: ChatContextActionsProp
         // Add the composite image to chat context
         addImage(compositeDataUrl);
         toast.success('Added composite orthographic views');
+        if (asPopoverMenu) {
+          onClose?.();
+        }
       } catch (error) {
         console.error('Failed to create composite image:', error);
         toast.error('Failed to create composite image');
@@ -247,7 +260,7 @@ export function ChatContextActions({ addImage, addText }: ChatContextActionsProp
 
     // Start the sequential process
     processNextScreenshot();
-  }, [isScreenshotReady, addImage]);
+  }, [addImage, asPopoverMenu, onClose]);
 
   const handleAddCode = useCallback(() => {
     const markdownCode = `
@@ -257,7 +270,10 @@ ${code}
 \`\`\`
     `;
     addText(markdownCode);
-  }, [addText, code]);
+    if (asPopoverMenu) {
+      onClose?.();
+    }
+  }, [addText, code, asPopoverMenu, onClose]);
 
   const handleAddCodeErrors = useCallback(() => {
     const errors = codeErrors.map((error) => `- (${error.startLineNumber}:${error.startColumn}): ${error.message}`);
@@ -267,28 +283,29 @@ ${code}
 ${errors.join('\n')}
 `;
     addText(markdownErrors);
-  }, [addText, codeErrors]);
+    if (asPopoverMenu) {
+      onClose?.();
+    }
+  }, [addText, codeErrors, asPopoverMenu, onClose]);
 
   const handleAddKernelError = useCallback(() => {
     if (kernelError) {
       const markdownKernelError = `
 # Kernel error
 ${kernelError}
-
-# Code
-\`\`\`python
-${code}
-\`\`\`
-      `;
+`;
       addText(markdownKernelError);
+      if (asPopoverMenu) {
+        onClose?.();
+      }
     }
-  }, [addText, code, kernelError]);
+  }, [addText, kernelError, asPopoverMenu, onClose]);
 
   const contextItems = useMemo(
     (): ContextActionItem[] => [
       {
         id: 'add-model-screenshot',
-        label: 'Add model screenshot',
+        label: 'Model screenshot',
         group: 'Visual',
         icon: <Image className="mr-2 size-4" />,
         action: handleAddModelScreenshot,
@@ -296,7 +313,7 @@ ${code}
       },
       {
         id: 'add-all-views-screenshots',
-        label: 'Add all views screenshots',
+        label: 'All views screenshots',
         group: 'Visual',
         icon: <Camera className="mr-2 size-4" />,
         action: handleAddAllViewsScreenshots,
@@ -304,7 +321,7 @@ ${code}
       },
       {
         id: 'add-code',
-        label: 'Add code',
+        label: 'Code',
         group: 'Code',
         icon: <Code className="mr-2 size-4" />,
         action: handleAddCode,
@@ -312,7 +329,7 @@ ${code}
       },
       {
         id: 'add-code-errors',
-        label: 'Add code errors',
+        label: 'Code errors',
         group: 'Code',
         icon: <AlertTriangle className="mr-2 size-4" />,
         action: handleAddCodeErrors,
@@ -320,7 +337,7 @@ ${code}
       },
       {
         id: 'add-kernel-error',
-        label: 'Add kernel error',
+        label: 'Kernel error',
         group: 'Code',
         icon: <AlertCircle className="mr-2 size-4" />,
         action: handleAddKernelError,
@@ -367,6 +384,128 @@ ${code}
 
   const getContextItemValue = (item: ContextActionItem) => item.id;
   const isContextItemDisabled = (item: ContextActionItem) => Boolean(item.disabled);
+
+  // Filter items based on search query when in popover mode
+  const filteredGroupedItems = useMemo(() => {
+    if (!asPopoverMenu || !searchQuery) {
+      return groupedContextItems;
+    }
+
+    const query = searchQuery.toLowerCase();
+    return groupedContextItems
+      .map((group) => ({
+        ...group,
+        items: group.items.filter(
+          (item) => item.label.toLowerCase().includes(query) || item.group.toLowerCase().includes(query),
+        ),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [groupedContextItems, asPopoverMenu, searchQuery]);
+
+  // Flatten filtered items for keyboard navigation
+  const flattenedItems = useMemo(() => {
+    return filteredGroupedItems.flatMap((group) => group.items.filter((item) => !item.disabled));
+  }, [filteredGroupedItems]);
+
+  // Update selected index bounds when items change
+  useEffect(() => {
+    if (
+      asPopoverMenu &&
+      selectedIndex !== undefined &&
+      onSelectedIndexChange &&
+      selectedIndex >= flattenedItems.length
+    ) {
+      onSelectedIndexChange(Math.max(0, flattenedItems.length - 1));
+    }
+  }, [asPopoverMenu, selectedIndex, onSelectedIndexChange, flattenedItems.length]);
+
+  // Handle keyboard selection
+  // @ts-expect-error: todo: separate into multiple components
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!asPopoverMenu || selectedIndex === undefined || !onSelectedIndexChange) return;
+
+      switch (event.key) {
+        case 'ArrowDown': {
+          event.preventDefault();
+          onSelectedIndexChange(Math.min(flattenedItems.length - 1, selectedIndex + 1));
+
+          break;
+        }
+
+        case 'ArrowUp': {
+          event.preventDefault();
+          onSelectedIndexChange(Math.max(0, selectedIndex - 1));
+
+          break;
+        }
+
+        case 'Enter': {
+          event.preventDefault();
+          const selectedItem = flattenedItems[selectedIndex];
+          if (selectedItem && onSelectItem) {
+            selectedItem.action();
+          }
+
+          break;
+        }
+        // No default
+      }
+    };
+
+    if (asPopoverMenu) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => {
+        document.removeEventListener('keydown', handleKeyDown);
+      };
+    }
+  }, [asPopoverMenu, selectedIndex, onSelectedIndexChange, flattenedItems, onSelectItem]);
+
+  // If used as a popover menu, return just the menu content
+  if (asPopoverMenu) {
+    let currentFlatIndex = 0;
+
+    return (
+      <div className="max-h-64 overflow-y-auto">
+        {filteredGroupedItems.map((group) => (
+          <div key={group.name}>
+            <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">{group.name}</div>
+            {group.items.map((item) => {
+              const isSelected = selectedIndex === currentFlatIndex && !item.disabled;
+              const itemFlatIndex = currentFlatIndex;
+              if (!item.disabled) {
+                currentFlatIndex++;
+              }
+
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`hover:text-accent-foreground flex w-full items-center px-2 py-1.5 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50 ${
+                    isSelected ? 'text-accent-foreground bg-accent' : ''
+                  }`}
+                  disabled={isContextItemDisabled(item)}
+                  onClick={() => {
+                    item.action();
+                  }}
+                  onMouseEnter={() => {
+                    if (!item.disabled && onSelectedIndexChange) {
+                      onSelectedIndexChange(itemFlatIndex);
+                    }
+                  }}
+                >
+                  {renderContextItemLabel(item, undefined)}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+        {filteredGroupedItems.length === 0 && (
+          <div className="px-2 py-4 text-center text-sm text-muted-foreground">No results found</div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <Tooltip>

@@ -9,6 +9,7 @@ import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '
 import { Button } from '~/components/ui/button.js';
 import { Textarea } from '~/components/ui/textarea.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
 import { useModels } from '~/hooks/use-models.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import { formatKeyCombination } from '~/utils/keys.js';
@@ -83,6 +84,10 @@ export const ChatTextarea = memo(function ({
   const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [atSymbolPosition, setAtSymbolPosition] = useState<number>(-1);
+  const [contextSearchQuery, setContextSearchQuery] = useState<string>('');
+  const [selectedMenuIndex, setSelectedMenuIndex] = useState<number>(0);
   const fileInputReference = useRef<HTMLInputElement>(null);
   const textareaReference = useRef<HTMLTextAreaElement>(null);
   const { selectedModel } = useModels();
@@ -117,6 +122,20 @@ export const ChatTextarea = memo(function ({
   });
 
   const handleTextareaKeyDown = (event: React.KeyboardEvent) => {
+    if (showContextMenu && (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter')) {
+      // Let the ChatContextActions component handle these keys
+      return;
+    }
+
+    if (showContextMenu && event.key === 'Escape') {
+      // Close the context menu if it's open
+      event.preventDefault();
+      setShowContextMenu(false);
+      setAtSymbolPosition(-1);
+      setSelectedMenuIndex(0);
+      return;
+    }
+
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       void handleSubmit();
@@ -262,6 +281,109 @@ export const ChatTextarea = memo(function ({
     [focusInput],
   );
 
+  const handleTextChange = useCallback(
+    (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const newValue = event.target.value;
+      const cursorPosition = event.target.selectionStart;
+
+      // Check if the user just typed an @ symbol
+      if (newValue.length > inputText.length && newValue[cursorPosition - 1] === '@') {
+        setShowContextMenu(true);
+        setAtSymbolPosition(cursorPosition - 1);
+        setContextSearchQuery('');
+        setSelectedMenuIndex(0);
+      } else if (atSymbolPosition >= 0) {
+        // Check if we're still after the @ symbol
+        if (cursorPosition > atSymbolPosition && newValue[atSymbolPosition] === '@') {
+          const textAfterAt = newValue.slice(atSymbolPosition + 1, cursorPosition);
+
+          // If there's a space after @, close the menu
+          if (textAfterAt.includes(' ')) {
+            setShowContextMenu(false);
+            setContextSearchQuery('');
+            setSelectedMenuIndex(0);
+          } else {
+            // Update the search query for filtering and show menu if not already shown
+            setContextSearchQuery(textAfterAt);
+            setSelectedMenuIndex(0); // Reset selection when search changes
+            if (!showContextMenu) {
+              setShowContextMenu(true);
+            }
+          }
+        } else {
+          // Cursor moved before the @ symbol or @ was deleted
+          setShowContextMenu(false);
+          setAtSymbolPosition(-1);
+          setContextSearchQuery('');
+          setSelectedMenuIndex(0);
+        }
+      } else {
+        // Look for @ symbol at current cursor position - 1 (for backspace scenarios)
+        const atIndex = newValue.lastIndexOf('@', cursorPosition - 1);
+        if (atIndex !== -1 && cursorPosition > atIndex) {
+          const textAfterAt = newValue.slice(atIndex + 1, cursorPosition);
+          // If there's no space and we're right after @, reopen the menu
+          if (!textAfterAt.includes(' ')) {
+            setShowContextMenu(true);
+            setAtSymbolPosition(atIndex);
+            setContextSearchQuery(textAfterAt);
+            setSelectedMenuIndex(0);
+          }
+        }
+      }
+
+      setInputText(newValue);
+    },
+    [inputText, showContextMenu, atSymbolPosition],
+  );
+
+  const handleContextMenuSelect = useCallback(
+    (text: string) => {
+      if (atSymbolPosition >= 0) {
+        // Replace the @ symbol and any text after it with the selected text
+        const beforeAt = inputText.slice(0, atSymbolPosition);
+        const afterAtAndQuery = inputText.slice(atSymbolPosition + 1 + contextSearchQuery.length);
+        const newText = beforeAt + text + afterAtAndQuery;
+        setInputText(newText);
+
+        // Close the menu
+        setShowContextMenu(false);
+        setAtSymbolPosition(-1);
+        setContextSearchQuery('');
+
+        // Focus back to textarea
+        setTimeout(() => {
+          if (textareaReference.current) {
+            const newCursorPosition = beforeAt.length + text.length;
+            textareaReference.current.focus();
+            textareaReference.current.setSelectionRange(newCursorPosition, newCursorPosition);
+          }
+        }, 0);
+      }
+    },
+    [inputText, atSymbolPosition, contextSearchQuery],
+  );
+
+  const handleContextImageAdd = useCallback(
+    (image: string) => {
+      setImages((previous) => [...previous, image]);
+      // Close the menu
+      setShowContextMenu(false);
+      setAtSymbolPosition(-1);
+      setContextSearchQuery('');
+
+      // Remove the @ symbol and any query text from text
+      if (atSymbolPosition >= 0) {
+        const beforeAt = inputText.slice(0, atSymbolPosition);
+        const afterAtAndQuery = inputText.slice(atSymbolPosition + 1 + contextSearchQuery.length);
+        setInputText(beforeAt + afterAtAndQuery);
+      }
+
+      focusInput();
+    },
+    [inputText, atSymbolPosition, contextSearchQuery, focusInput],
+  );
+
   useEffect(() => {
     if (autoFocus) {
       focusInput();
@@ -277,6 +399,24 @@ export const ChatTextarea = memo(function ({
       document.removeEventListener('paste', handlePaste);
     };
   }, [handlePaste]);
+
+  useEffect(() => {
+    // Handle clicking outside the context menu to close it
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showContextMenu && textareaReference.current && !textareaReference.current.contains(event.target as Node)) {
+        setShowContextMenu(false);
+        setAtSymbolPosition(-1);
+      }
+    };
+
+    if (showContextMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showContextMenu]);
 
   return (
     <div className={cn('@container relative h-full rounded-2xl bg-background', className)}>
@@ -308,12 +448,33 @@ export const ChatTextarea = memo(function ({
           onBlur={() => {
             setIsFocused(false);
           }}
-          onChange={(event) => {
-            setInputText(event.target.value);
-          }}
+          onChange={handleTextChange}
           onKeyDown={handleTextareaKeyDown}
         />
       </div>
+
+      {/* Context Menu */}
+      {showContextMenu ? (
+        <div className="absolute bottom-full left-4 z-50 mb-2 w-60 rounded-md border bg-popover p-0 text-popover-foreground shadow-md">
+          <ChatContextActions
+            asPopoverMenu
+            addImage={handleContextImageAdd}
+            addText={handleContextMenuSelect}
+            searchQuery={contextSearchQuery}
+            selectedIndex={selectedMenuIndex}
+            onSelectedIndexChange={setSelectedMenuIndex}
+            onSelectItem={(text: string) => {
+              handleContextMenuSelect(text);
+            }}
+            onClose={() => {
+              setShowContextMenu(false);
+              setAtSymbolPosition(-1);
+              setContextSearchQuery('');
+              setSelectedMenuIndex(0);
+            }}
+          />
+        </div>
+      ) : null}
 
       {/* Context */}
       <div className="absolute top-0 left-0 m-4 flex flex-wrap gap-1">

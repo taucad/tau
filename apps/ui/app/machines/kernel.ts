@@ -1,10 +1,146 @@
-import { assign, assertEvent, setup, sendTo } from 'xstate';
-import type { Snapshot, ActorRef } from 'xstate';
+import { assign, assertEvent, setup, sendTo, fromPromise } from 'xstate';
+import type { Snapshot, ActorRef, OutputFrom } from 'xstate';
 import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import type { Shape } from '~/types/cad.js';
 import type { BuilderWorkerInterface } from '~/components/geometry/kernel/replicad/replicad-builder.worker.js';
 import BuilderWorker from '~/components/geometry/kernel/replicad/replicad-builder.worker.js?worker';
+
+const createWorkerActor = fromPromise<{ type: 'kernelInitialized' }, { context: KernelContext }>(async ({ input }) => {
+  const { context } = input;
+
+  // In non-browser environments, fake an initialization
+  if (!isBrowser) {
+    return { type: 'kernelInitialized' };
+  }
+
+  // Clean up any existing worker
+  if (context.worker) {
+    context.worker.terminate();
+  }
+
+  try {
+    // Create a new worker based on the kernel type
+    const worker = new BuilderWorker();
+
+    // Wrap the worker with comlink
+    const wrappedWorker = wrap<BuilderWorkerInterface>(worker);
+
+    // Initialize the worker with the default exception handling mode
+    await wrappedWorker.initialize(false);
+
+    // Store references to worker and wrappedWorker
+    context.worker = worker;
+    context.wrappedWorker = wrappedWorker;
+
+    // Return success result
+    return { type: 'kernelInitialized' };
+  } catch (error) {
+    // Handle initialization errors
+    const errorMessage = error instanceof Error ? error.message : 'Failed to initialize worker';
+    throw new Error(errorMessage);
+  }
+});
+
+const parseParametersActor = fromPromise(
+  async ({
+    input,
+  }: {
+    input: { context: KernelContext; event: { code: string; parameters: Record<string, unknown> } };
+  }) => {
+    const { context, event } = input;
+
+    // Skip in non-browser environments
+    if (!isBrowser) {
+      throw new Error('Not in browser environment');
+    }
+
+    if (!context.wrappedWorker) {
+      throw new Error('Worker not initialized');
+    }
+
+    try {
+      const defaultParameters = (await context.wrappedWorker.extractDefaultParametersFromCode(event.code)) ?? {};
+      return {
+        type: 'parametersParsed' as const,
+        defaultParameters,
+        code: event.code,
+        parameters: event.parameters,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Error extracting parameters';
+      console.error('Error extracting parameters:', errorMessage);
+      // Don't throw error here to avoid disrupting the main flow
+      // Just return with empty parameters
+      return {
+        type: 'parametersParsed' as const,
+        defaultParameters: {},
+        code: event.code,
+        parameters: {},
+      };
+    }
+  },
+);
+
+const evaluateCodeActor = fromPromise<
+  {
+    type: 'geometryComputed';
+    shapes: Shape[];
+  },
+  {
+    context: KernelContext;
+    event: { defaultParameters: Record<string, unknown>; parameters: Record<string, unknown>; code: string };
+  }
+>(async ({ input }) => {
+  const { context, event } = input;
+
+  if (!isBrowser) {
+    throw new Error('Not in browser environment');
+  }
+
+  if (!context.wrappedWorker) {
+    throw new Error('Worker not initialized');
+  }
+
+  // Merge default parameters with provided parameters
+  const mergedParameters = {
+    ...event.defaultParameters,
+    ...event.parameters,
+  };
+
+  const shapes = await context.wrappedWorker.buildShapesFromCode(event.code, mergedParameters);
+
+  // Check if the result is an error or actual shapes
+  if (shapes && typeof shapes === 'object' && 'error' in shapes) {
+    throw new Error((shapes as { message?: string }).message ?? 'Error building shapes');
+  }
+
+  return { type: 'geometryComputed' as const, shapes: shapes as Shape[] };
+});
+
+const exportGeometryActor = fromPromise(
+  async ({ input }: { input: { context: KernelContext; event: { format: string } } }) => {
+    const { context, event } = input;
+
+    // Skip in non-browser environments
+    if (!isBrowser) {
+      throw new Error('Not in browser environment');
+    }
+
+    if (!context.wrappedWorker) {
+      throw new Error('Worker not initialized');
+    }
+
+    const format = event.format as 'stl' | 'stl-binary' | 'step' | 'step-assembly';
+    const result = await context.wrappedWorker.exportShape(format);
+
+    if (result && result.length > 0 && result[0].blob) {
+      return { type: 'geometryExported' as const, blob: result[0].blob, format };
+    }
+
+    throw new Error('Failed to export shape');
+  },
+);
 
 // Check if we're in a browser environment
 const isBrowser = globalThis.window !== undefined && typeof Worker !== 'undefined';
@@ -58,6 +194,15 @@ export const kernelMachine = setup({
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
     events: {} as KernelEvent,
   },
+  actors: {
+    createWorkerActor,
+
+    parseParametersActor,
+
+    evaluateCodeActor,
+
+    exportGeometryActor,
+  },
   actions: {
     registerParentRef: assign({
       parentRef({ event }) {
@@ -65,127 +210,6 @@ export const kernelMachine = setup({
         return event.parentRef;
       },
     }),
-    async createWorker({ context, self }) {
-      // In non-browser environments, return and remain in the initializing state
-      if (!isBrowser) {
-        return;
-      }
-
-      // Clean up any existing worker
-      if (context.worker) {
-        context.worker.terminate();
-      }
-
-      try {
-        // Create a new worker based on the kernel type
-        const worker = new BuilderWorker();
-
-        // Wrap the worker with comlink
-        const wrappedWorker = wrap<BuilderWorkerInterface>(worker);
-
-        try {
-          // Initialize the worker with the default exception handling mode
-          await wrappedWorker.initialize(false);
-
-          // Store references to worker and wrappedWorker
-          context.worker = worker;
-          context.wrappedWorker = wrappedWorker;
-
-          // Signal that initialization is complete
-          self.send({ type: 'kernelInitialized' });
-        } catch (error) {
-          // Handle initialization errors
-          const errorMessage = error instanceof Error ? error.message : 'Failed to initialize worker';
-          self.send({ type: 'kernelError', error: errorMessage });
-        }
-      } catch (error) {
-        // Handle the case where worker creation fails
-        const errorMessage = error instanceof Error ? error.message : 'Failed to create worker';
-        self.send({ type: 'kernelError', error: errorMessage });
-      }
-    },
-    async parseParameters({ context, event, self }) {
-      assertEvent(event, 'computeGeometry');
-      // Skip in non-browser environments
-      if (!isBrowser) return;
-
-      if (!context.wrappedWorker) {
-        self.send({ type: 'kernelError', error: 'Worker not initialized' });
-        return;
-      }
-
-      try {
-        const defaultParameters = (await context.wrappedWorker.extractDefaultParametersFromCode(event.code)) ?? {};
-        self.send({ type: 'parametersParsed', defaultParameters, code: event.code, parameters: event.parameters });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Error extracting parameters';
-        console.error('Error extracting parameters:', errorMessage);
-        // Don't send an error event here to avoid disrupting the main flow
-        // Just update with empty parameters
-        self.send({ type: 'parametersParsed', defaultParameters: {}, code: event.code, parameters: {} });
-      }
-    },
-    async evaluateCode({ context, event, self }) {
-      assertEvent(event, 'parametersParsed');
-
-      if (!isBrowser) return;
-
-      if (!context.wrappedWorker) {
-        self.send({ type: 'kernelError', error: 'Worker not initialized' });
-        return;
-      }
-
-      try {
-        // Merge default parameters with provided parameters
-        const mergedParameters = {
-          ...event.defaultParameters,
-          ...event.parameters,
-        };
-
-        const shapes = await context.wrappedWorker.buildShapesFromCode(event.code, mergedParameters);
-
-        // Check if the result is an error or actual shapes
-        if (shapes && typeof shapes === 'object' && 'error' in shapes) {
-          self.send({
-            type: 'kernelError',
-            error: (shapes as { message?: string }).message ?? 'Error building shapes',
-          });
-        } else {
-          self.send({ type: 'geometryComputed', shapes: shapes as Shape[] });
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Error evaluating code';
-        self.send({ type: 'kernelError', error: errorMessage });
-      }
-    },
-    async exportGeometry({ context, event, self }) {
-      // Skip in non-browser environments
-      if (!isBrowser) return;
-
-      if (!context.wrappedWorker) {
-        self.send({ type: 'kernelError', error: 'Worker not initialized' });
-        return;
-      }
-
-      if (event.type === 'exportGeometry') {
-        try {
-          const format = event.format as 'stl' | 'stl-binary' | 'step' | 'step-assembly';
-          const result = await context.wrappedWorker.exportShape(format);
-          if (result && result.length > 0 && result[0].blob) {
-            // Send the geometryExported event to self
-            self.send({ type: 'geometryExported', blob: result[0].blob, format });
-          } else {
-            self.send({
-              type: 'kernelError',
-              error: 'Failed to export shape',
-            });
-          }
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Error exporting shape';
-          self.send({ type: 'kernelError', error: errorMessage });
-        }
-      }
-    },
     async destroyWorker({ context }) {
       console.log('destroying worker');
       if (!context.worker) return;
@@ -244,15 +268,29 @@ export const kernelMachine = setup({
     initializing: {
       on: {
         initializeKernel: {
-          actions: ['registerParentRef', 'createWorker'],
+          target: 'creatingWorker',
+          actions: 'registerParentRef',
         },
-        kernelInitialized: {
+      },
+    },
+
+    creatingWorker: {
+      invoke: {
+        src: 'createWorkerActor',
+        input: ({ context }) => ({ context }),
+        onDone: {
           target: 'ready',
-          actions: 'sendKernelInitialized',
+          actions: sendTo(({ context }) => context.parentRef!, { type: 'kernelInitialized' }),
         },
-        kernelError: {
-          target: 'error',
-          actions: 'sendError',
+        onError: {
+          target: 'ready',
+          actions: sendTo(
+            ({ context }) => context.parentRef!,
+            ({ event }) => ({
+              type: 'kernelError',
+              error: event.error instanceof Error ? event.error.message : 'Unknown error occurred',
+            }),
+          ),
         },
       },
     },
@@ -261,67 +299,100 @@ export const kernelMachine = setup({
       on: {
         computeGeometry: {
           target: 'parsing',
-          actions: 'parseParameters',
         },
         exportGeometry: {
           target: 'exporting',
-          actions: 'exportGeometry',
-        },
-      },
-    },
-
-    exporting: {
-      on: {
-        geometryExported: {
-          target: 'ready',
-          actions: 'sendGeometryExported',
-        },
-        kernelError: {
-          target: 'error',
-          actions: 'sendError',
         },
       },
     },
 
     parsing: {
-      on: {
-        parametersParsed: {
-          target: 'evaluating',
-          actions: 'sendParametersParsed',
+      invoke: {
+        src: 'parseParametersActor',
+        input({ context, event }) {
+          assertEvent(event, 'computeGeometry');
+          return {
+            context,
+            event,
+          };
         },
-        kernelError: {
-          target: 'error',
-          actions: 'sendError',
+        onDone: {
+          target: 'evaluating',
+          actions: sendTo(
+            ({ context }) => context.parentRef!,
+            ({ event }) => event.output,
+          ),
+        },
+        onError: {
+          target: 'ready',
+          actions: sendTo(
+            ({ context }) => context.parentRef!,
+            ({ event }) => ({
+              type: 'kernelError',
+              error: event.error instanceof Error ? event.error.message : 'Unknown error occurred',
+            }),
+          ),
         },
       },
     },
 
     evaluating: {
-      entry: 'evaluateCode',
-      on: {
-        geometryComputed: {
-          target: 'ready',
-          actions: 'sendGeometryComputed',
+      invoke: {
+        src: 'evaluateCodeActor',
+        input({ context, event }) {
+          // The parseParametersActor returns an object without typing. There might be a better way to do this.
+          const typedEvent = event as { type: string; output: OutputFrom<typeof parseParametersActor> };
+          assertEvent(typedEvent.output, 'parametersParsed');
+          return {
+            context,
+            event: typedEvent.output,
+          };
         },
-        kernelError: {
-          target: 'error',
-          actions: 'sendError',
+        onDone: {
+          target: 'ready',
+          actions: sendTo(
+            ({ context }) => context.parentRef!,
+            ({ event }) => event.output,
+          ),
+        },
+        onError: {
+          target: 'ready',
+          actions: sendTo(
+            ({ context }) => context.parentRef!,
+            ({ event }) => ({
+              type: 'kernelError',
+              error: event.error instanceof Error ? event.error.message : 'Unknown error occurred',
+            }),
+          ),
         },
       },
     },
 
-    error: {
-      on: {
-        computeGeometry: {
-          target: 'parsing',
-          actions: 'parseParameters',
+    exporting: {
+      invoke: {
+        src: 'exportGeometryActor',
+        input: ({ context, event }) => ({
+          context,
+          event: {
+            format: (event as { format: string }).format,
+          },
+        }),
+        onDone: {
+          target: 'ready',
+          actions: sendTo(
+            ({ context }) => context.parentRef!,
+            ({ event }) => event.output,
+          ),
         },
-        exportGeometry: {
-          target: 'exporting',
-          actions: 'exportGeometry',
-        },
-        initializeKernel: {
-          actions: ['registerParentRef', 'createWorker'],
+        onError: {
+          target: 'ready',
+          actions: sendTo(
+            ({ context }) => context.parentRef!,
+            ({ event }) => ({
+              type: 'kernelError',
+              error: event.error instanceof Error ? event.error.message : 'Unknown error occurred',
+            }),
+          ),
         },
       },
     },

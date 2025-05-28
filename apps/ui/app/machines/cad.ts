@@ -18,7 +18,7 @@ export type CadContext = {
     startColumn: number;
     endColumn: number;
   }>;
-  kernelRef: ActorRefFrom<typeof kernelMachine> | undefined;
+  kernelRef: ActorRefFrom<typeof kernelMachine>;
   exportedBlob: Blob | undefined;
   shouldInitializeKernelOnStart: boolean;
   isKernelInitializing: boolean;
@@ -70,7 +70,7 @@ export const cadMachine = setup({
   },
   actions: {
     computeGeometry: sendTo(
-      ({ context }) => context.kernelRef!,
+      ({ context }) => context.kernelRef,
       ({ context }) => {
         return {
           type: 'computeGeometry',
@@ -80,7 +80,7 @@ export const cadMachine = setup({
       },
     ),
     exportGeometry: sendTo(
-      ({ context }) => context.kernelRef!,
+      ({ context }) => context.kernelRef,
       ({ event }) => {
         assertEvent(event, 'exportGeometry');
         return {
@@ -149,7 +149,7 @@ export const cadMachine = setup({
     }),
     initializeKernel: enqueueActions(({ enqueue, context, self }) => {
       enqueue.assign({ isKernelInitializing: true });
-      enqueue.sendTo(context.kernelRef!, {
+      enqueue.sendTo(context.kernelRef, {
         type: 'initializeKernel' as const,
         kernelType: 'replicad' as const,
         parentRef: self,
@@ -174,27 +174,19 @@ export const cadMachine = setup({
 }).createMachine({
   /** @xstate-layout N4IgpgJg5mDOIC5QGMCGEB0AnM6CeAxLGAC4DCA9hGANoAMAuoqAA4WwCWJHFAdsyAAeiAJwAWAGwYJAdgCMADgl0RMkQGY5IgDQg8iMQCYFGAKwiJ60-MN0x62QF9HutJhz4ipAAqosqAFtSMCxYeiYkEDZObj4BYQRxKVlFZVUNLV19BFNDUww7cRFDETlFOVMJZ1d0bFwIQmISAFk+VGQKAFEsLApQ8IForh5+SISZSwx7GTELOzoZRcMsgzE6aUrjORk6QzEFQ3VqkDc6zzBBNiwSAHEwCiCSLDwByKHY0dBxiSk6CT2LKY5Oo6HI6OoVgh1GIxBhbJoxOYymDocdTh4GkQABaoFhgTqXPokSCvVjsYZxMaICYiAoVCRyBkwwyWUyQvYyDAyUx0UGgrQyPbqBRo2oAIwArgAzKUhDi8KBechUWiMQbkj7xRBlIFwmTQsoODSyCF6RDmfIiDTFWamRElGSizCSmVyhVK3z+R4hMJqt4akZahCGuRw6xqFmg62Q2a0u0LBSlSwVBamJ0YF2yrDyxWCWAkVDEjCoKXErAACh5dAAlARTpm3VBSVEA5SvqIFOtDCz42pTAoB3JIXJjGZebyJKYgcVzGJ0zheNRs+6YA9SM9OgA3VAAGwlhZJfrJMUDVKhhym6hmc1TIj+bLNCFmnLv-31EityZFLhOtQXS5zAgAGsQl4MAd26XosGbd5T3bc91Eva9lFve9h22QwzAHBl1EMGZNBEecwEXRslUoagYNbT4hEQXDEOmWYUO5V8H2yH4TEWZRlE7bk6CBIiSOXRUmk9QJgn6I8WxPNsaIQpDGN5Zi0MfCZ8m7UpAREAcFDEOQBIA90mlaXh2i6Ho+l9CJjwpajvgwMF6SnaFchhIdHzBXSuRkBR3wkHykzTH90WIgzhNIAARMApVQCUdxIUTvQkqypJsoNzAKDR8JmHZuJ0yFxHyXDKl5RNJyvOcgr-ELSIuK5bnuR5nko6TbOpDiex+CduRmZZHx0kwfL2ScwSBfsKpqdxqqE7FcXxQlrkPZLYJkhIFFDWQLAUSphT5eRIUFfJJH+EqP0FQ59JCSACDzAsixLMtyxrOsqsExb1RaoMJH2KYSlkHZvN0oFIVMKwMC28RdgBKcKnTEIoLIlVmtSs8kmkeQlBUNQCOHOhEzB3YKmclQ7HG39MDhvoPT8MSy0s97kfg1GUgx9Jsfc1Iw1yRM9m7BRcNh8ysCVYzTMgiykc1M8Jno8q5jWRZBXQ0EweOhwFn1TQqkq8nBYIWqiTuNcnheSTltahAJl+f5GKBEEwV67IwT4qZcbvXZwdyQKJowCmhdgHE8QJOq3v9D6pY-OlKkZORmVZfLcYwEQpwmGECv1QKf14FV4EiNx6cl+CAFo3OyQvfnHCvK+MIj8HzuDZJ4qZ7QsPDzE0EvzSMeyVF069hRw9MGyEuuVu1Qn7O2RldKsdIHcQU6m5yhZETvJQLuH0OGdksQZHQ+w4U0Qad+KJPSeC16IBH82uamHSHAHNZcg7nJoTB2c7TUAcQUI7WfcFq+gxrS7JtL6p9OzCmHPCDAmggToz8vIP4zhnBAA */
   id: 'cad',
-  entry: [
-    assign({
-      kernelRef({ spawn, self, context }) {
-        const kernelRef = spawn(kernelMachine);
-
-        if (context.shouldInitializeKernelOnStart) {
-          self.send({ type: 'initializeKernel' });
-        }
-
-        return kernelRef;
-      },
-    }),
-  ],
-  context: ({ input }) => ({
+  entry: enqueueActions(({ enqueue, context, self }) => {
+    if (context.shouldInitializeKernelOnStart) {
+      enqueue.sendTo(self, { type: 'initializeKernel' });
+    }
+  }),
+  context: ({ input, spawn }) => ({
     code: '',
     parameters: {},
     defaultParameters: {},
     shapes: [],
     kernelError: undefined,
     codeErrors: [],
-    kernelRef: undefined,
+    kernelRef: spawn(kernelMachine),
     exportedBlob: undefined,
     shouldInitializeKernelOnStart: input.shouldInitializeKernelOnStart,
     isKernelInitializing: false,

@@ -145,7 +145,6 @@ export function ChatControls(): JSX.Element {
 
     // Subscribe to screenshot completion
     const subscription = graphicsActor.on('screenshotCompleted', (event) => {
-      console.log('screenshotCompleted', event);
       if (event.requestId === requestId) {
         subscription.unsubscribe();
         updateThumbnail(event.dataUrl);

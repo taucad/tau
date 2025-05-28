@@ -55,10 +55,8 @@ export const screenshotCapabilityMachine = setup({
       (async () => {
         try {
           const dataUrl = await capture(options);
-          console.log('Screenshot captured successfully');
           sendBack({ type: 'screenshotCompleted', dataUrl, requestId });
         } catch (error: unknown) {
-          console.error('Screenshot capture failed:', error);
           sendBack({
             type: 'screenshotFailed',
             error: error instanceof Error ? error.message : 'Screenshot failed',
@@ -71,7 +69,6 @@ export const screenshotCapabilityMachine = setup({
   actions: {
     registerWithGraphics: enqueueActions(({ enqueue, context, event, self }) => {
       assertEvent(event, 'registerCapture');
-      console.log('Screenshot capability: registering new capture function');
       context.captureFunction = event.capture;
       enqueue.sendTo(context.graphicsRef, {
         type: 'registerScreenshotCapability',
@@ -80,7 +77,6 @@ export const screenshotCapabilityMachine = setup({
     }),
     unregisterFromGraphics: sendTo(({ context }) => context.graphicsRef, { type: 'unregisterScreenshotCapability' }),
     unregisterCapture: enqueueActions(({ enqueue, context }) => {
-      console.log('Screenshot capability: unregistering capture function');
       enqueue.assign({
         captureFunction: undefined,
         isRegistered: false,

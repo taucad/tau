@@ -5,7 +5,8 @@
   "scripts": {
     "start": "nx run-many -t dev",
     "lint": "nx run-many -t lint",
-    "test": "nx run-many -t test"
+    "test": "nx run-many -t test",
+    "mcp:browser": "npx -y @agentdeskai/browser-tools-mcp@1.2.0"
   },
   "dependencies": {
     "@ai-sdk/openai": "^1.3.22",

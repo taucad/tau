@@ -145,10 +145,6 @@ export function useScreenCapture(): (options?: ScreenshotOptions) => Promise<str
 
         // Make the camera look at the origin (or the scene center)
         screenshotCamera.lookAt(0, 0, 0);
-
-        console.log(
-          `Screenshot camera positioned at phi=${config.phi}°, theta=${config.theta}° -> position(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}) [up=${upVector.x},${upVector.y},${upVector.z}]`,
-        );
       }
 
       screenshotCamera.updateProjectionMatrix();

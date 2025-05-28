@@ -90,10 +90,6 @@ export function ChatContextActions({ addImage, addText }: ChatContextActionsProp
       const view = orthographicViews[currentIndex];
       const requestId = `ortho-composite-${currentIndex}-${crypto.randomUUID()}`;
 
-      console.log(
-        `Requesting screenshot ${currentIndex + 1}/${orthographicViews.length} for ${view.name} with ID: ${requestId}`,
-      );
-
       // Subscribe to screenshot completion for this specific request
       const subscription = graphicsActor.on('screenshotCompleted', (event) => {
         if (event.requestId === requestId) {

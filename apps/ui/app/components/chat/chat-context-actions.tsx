@@ -221,7 +221,7 @@ export function ChatContextActions({ addImage, addText }: ChatContextActionsProp
             (result) => {
               resolve(result ?? undefined);
             },
-            'image/png',
+            'image/webp',
             0.95,
           );
         });

@@ -98,7 +98,6 @@ export function useScreenCapture(): (options?: ScreenshotOptions) => Promise<str
           ...options?.output,
         },
       };
-      console.log('config', config);
 
       // Create a copy of the camera for the screenshot so we don't modify the original
       const screenshotCamera = (camera as THREE.PerspectiveCamera).clone();
@@ -256,15 +255,10 @@ export function ScreenshotSetup(): ReactNode {
   const capture = useScreenCapture();
 
   useEffect(() => {
-    console.log('ScreenshotSetup: registering screenshot capability', {
-      captureFunction: capture,
-      timestamp: new Date().toISOString(),
-    });
     screenshotCapabilityActor.send({ type: 'registerCapture', capture });
 
     // Cleanup function to unregister on unmount
     return () => {
-      console.log('ScreenshotSetup: unregistering screenshot capability on unmount');
       screenshotCapabilityActor.send({ type: 'unregisterCapture' });
     };
   }, [capture]);

@@ -28,39 +28,28 @@ export class ChatService {
 
   // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- This is a complex generic that can be left inferred.
   public createGraph(modelId: string, selectedToolChoice: ToolChoiceWithCategory) {
-    const { tools, resolvedToolChoice } = this.toolService.getTools(selectedToolChoice);
+    const { tools } = this.toolService.getTools(selectedToolChoice);
 
     const researchTools = [tools.web_search, tools.web_browser];
-    const { model: unboundModel, support } = this.modelService.buildModel(modelId);
-    const model =
-      support?.tools === false
-        ? unboundModel
-        : (unboundModel.bindTools?.(
-            researchTools,
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case
-            support?.toolChoice === false ? undefined : { tool_choice: resolvedToolChoice },
-          ) ?? unboundModel);
+    const { model: supervisorModel } = this.modelService.buildModel(modelId);
+    const { model: cadModel, support: cadSupport } = this.modelService.buildModel(modelId);
+    const { model: researchModel, support: researchSupport } = this.modelService.buildModel(modelId);
 
     // Create specialized agents for tool usage
     const researchAgent = createReactAgent({
-      llm: model,
+      llm:
+        researchSupport?.tools === false ? researchModel : (researchModel.bindTools?.(researchTools) ?? researchModel),
       tools: researchTools,
       name: 'research_expert',
       prompt:
-        'You are a research expert that can use specialized tools to accomplish tasks. Always use the web_search tool, and only the web_browser tool if the web_search tool does not supply enough information.',
+        'You are a research expert that can use specialized tools to accomplish tasks. ' +
+        'Always use the web_search tool, and only the web_browser tool if the web_search tool does not supply enough information.',
     });
 
     // Create a general agent for handling direct responses
     const cadTools = [tools.file_edit];
     const cadAgent = createReactAgent({
-      llm:
-        support?.tools === false
-          ? unboundModel
-          : (unboundModel.bindTools?.(
-              cadTools,
-              // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case
-              support?.toolChoice === false ? undefined : { tool_choice: 'file_edit' },
-            ) ?? unboundModel),
+      llm: cadSupport?.tools === false ? cadModel : (cadModel.bindTools?.(cadTools) ?? cadModel),
       tools: cadTools,
       name: 'cad_agent',
       prompt: replicadSystemPrompt,
@@ -70,9 +59,11 @@ export class ChatService {
     const supervisor = createSupervisor({
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- TODO: fix types
       agents: [researchAgent, cadAgent],
-      llm: unboundModel,
+      llm: supervisorModel,
       prompt:
-        'You are a team supervisor managing a research expert and a CAD agent. You always transfer to one of your team members who has access to the right tool. You only ever use the transfer tools, never using other tools directly. ' +
+        'You are a team supervisor managing a research expert and a CAD agent. ' +
+        'You always transfer to one of your team members who has access to the right tool. ' +
+        'You only ever use the transfer tools, never using other tools directly. ' +
         'When the user asks a question or requests a change to a 3D model, ALWAYS use the `transfer_to_cad_agent` tool immediately. ' +
         'For queries that need external information or specific tool operations, use the `transfer_to_research_expert` tool. ' +
         'When you receive a transfer back, be concise and end the conversation.',

@@ -7,7 +7,7 @@ import { CameraHandler } from '~/components/geometry/graphics/three/camera-handl
 import { Scene } from '~/components/geometry/graphics/three/scene.js';
 import type { StageOptions } from '~/components/geometry/graphics/three/stage.js';
 import rotateIconBase64 from '~/components/geometry/graphics/rotate-icon.svg?base64';
-import { ScreenshotSetup } from '~/components/geometry/graphics/three/screenshot.js';
+import { ActorBridge } from '~/components/geometry/graphics/three/actor-bridge.js';
 import { cn } from '~/utils/ui.js';
 
 export type ThreeViewerProperties = {
@@ -82,7 +82,7 @@ export function ThreeProvider({
       >
         {children}
         <CameraHandler />
-        {isCanvasReady ? <ScreenshotSetup /> : null}
+        {isCanvasReady ? <ActorBridge /> : null}
       </Scene>
     </Canvas>
   );

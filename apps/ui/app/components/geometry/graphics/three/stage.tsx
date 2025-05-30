@@ -1,8 +1,6 @@
 import React, { useMemo, useCallback } from 'react';
 import type { JSX, ReactNode } from 'react';
 import * as THREE from 'three';
-import { useThree } from '@react-three/fiber';
-import type { RootState } from '@react-three/fiber';
 import { PerspectiveCamera } from '@react-three/drei';
 import { AxesHelper } from '~/components/geometry/graphics/three/axes-helper.js';
 import { Grid } from '~/components/geometry/graphics/three/grid.js';
@@ -57,10 +55,6 @@ export const defaultStageOptions = {
   },
 } as const satisfies StageOptions;
 
-// Grid size calculation constants moved to grid.tsx
-
-// GridSizes type moved to grid.tsx
-
 type StageProperties = {
   readonly children: ReactNode;
   readonly isCentered?: boolean;
@@ -75,21 +69,10 @@ export function Stage({
   stageOptions = defaultStageOptions,
   ...properties
 }: StageProperties): JSX.Element {
-  const camera = useThree((state) => state.camera);
-  const controls = useThree((state) => state.controls) as RootState['controls'] & {
-    /**
-     * Get the distance between the camera and the target.
-     *
-     * @returns The distance between the camera and the target.
-     *
-     * @note this does exist, it's just not typed
-     */
-    getDistance: () => number;
-  };
   const outer = React.useRef<THREE.Group>(null);
   const inner = React.useRef<THREE.Group>(null);
 
-  // Add state for tracking zoom
+  // State for camera reset functionality
   const [currentZoom, setCurrentZoom] = React.useState<number>(1);
   const originalDistanceReference = React.useRef<number | undefined>(undefined);
   const isInitialResetDoneRef = React.useRef<boolean>(false);
@@ -174,29 +157,6 @@ export function Stage({
     });
   }, [isCentered, children]);
 
-  // Add effect to track zoom changes
-  React.useEffect(() => {
-    if (!controls) return;
-
-    const handleControlsChange = () => {
-      originalDistanceReference.current ??= controls.getDistance?.();
-
-      const distance = controls.getDistance?.();
-      if (distance && originalDistanceReference.current) {
-        const zoom = originalDistanceReference.current / distance;
-        setCurrentZoom(zoom);
-      }
-    };
-
-    // @ts-expect-error addEventListener exists on OrbitControls
-    controls.addEventListener?.('change', handleControlsChange);
-
-    return () => {
-      // @ts-expect-error removeEventListener exists on OrbitControls
-      controls.removeEventListener?.('change', handleControlsChange);
-    };
-  }, [camera.type, camera.zoom, controls]);
-
   /**
    * Position the camera based on the scene's bounding box.
    */
@@ -214,14 +174,14 @@ export function Stage({
         isInitialResetDoneRef.current = true;
       }
     }
-  }, [camera, resetCamera, sceneRadius, shapeRadius]);
+  }, [resetCamera, sceneRadius, shapeRadius]);
 
   return (
     <group {...properties}>
       <PerspectiveCamera makeDefault />
       <group ref={outer}>
         {properties.hasAxesHelper ? <AxesHelper /> : null}
-        {properties.hasGrid ? <Grid currentZoom={currentZoom} /> : null}
+        {properties.hasGrid ? <Grid /> : null}
         <group ref={inner}>{children}</group>
       </group>
     </group>

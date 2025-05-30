@@ -1,0 +1,62 @@
+export type GridSizes = {
+  smallSize: number;
+  largeSize: number;
+  effectiveSize?: number;
+  baseSize?: number;
+  fov?: number;
+};
+
+/**
+ * Options for configuring screenshot capture
+ */
+export type ScreenshotOptions = {
+  /**
+   * Aspect ratio of the screenshot (width/height)
+   * @default 16/9
+   */
+  aspectRatio?: number;
+
+  /**
+   * Zoom level multiplier (1.0 = no change, 2.0 = 2x zoom in, 0.5 = 2x zoom out)
+   * @default 1.25
+   */
+  zoomLevel?: number;
+
+  /**
+   * Theta angle of the camera
+   * @default 0
+   */
+  theta?: number;
+
+  /**
+   * Phi angle of the camera
+   * @default 0
+   */
+  phi?: number;
+
+  /**
+   * Output format settings
+   */
+  output?: {
+    /**
+     * File format for the output image
+     * @default 'image/png'
+     */
+    format?: 'image/png' | 'image/jpeg' | 'image/webp';
+
+    /**
+     * Quality level for lossy formats (0.0 to 1.0)
+     * Only applies to jpeg and webp formats
+     * @default 0.92
+     */
+    quality?: number;
+
+    /**
+     * Whether to screenshot the scene as a preview.
+     *
+     * When true, the scene will be rendered without gizmos, grid, or zoom.
+     * @default true
+     */
+    isPreview?: boolean;
+  };
+};

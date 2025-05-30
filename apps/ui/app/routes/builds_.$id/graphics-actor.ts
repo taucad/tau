@@ -13,7 +13,6 @@ export const graphicsActor = createActor(graphicsMachine, {
 graphicsActor.start();
 
 export const screenshotCapabilityActor = createActor(screenshotCapabilityMachine, {
-  inspect,
   input: {
     graphicsRef: graphicsActor,
   },
@@ -21,7 +20,6 @@ export const screenshotCapabilityActor = createActor(screenshotCapabilityMachine
 screenshotCapabilityActor.start();
 
 export const cameraCapabilityActor = createActor(cameraCapabilityMachine, {
-  inspect,
   input: {
     graphicsRef: graphicsActor,
   },

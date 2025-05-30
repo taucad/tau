@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import type { ClassValue } from 'clsx';
 import { LockIcon } from 'lucide-react';
 import { useSelector } from '@xstate/react';
@@ -63,6 +63,21 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
   const defaultUnit = gridUnitSystem === 'imperial' ? 'in' : 'mm';
   const [unit, setUnit] = useCookie<GridUnitOption>('cad-unit', defaultUnit as GridUnitOption);
 
+  // Sync graphics machine with cookie value on change
+  useEffect(() => {
+    const currentUnitOption = gridUnitOptions.find((option) => option.value === unit);
+    if (currentUnitOption) {
+      graphicsActor.send({
+        type: 'setGridUnit',
+        payload: {
+          unit: currentUnitOption.value,
+          factor: currentUnitOption.factor,
+          system: currentUnitOption.system,
+        },
+      });
+    }
+  }, [unit]);
+
   const handleLockToggle = useCallback((checked: boolean) => {
     graphicsActor.send({ type: 'setGridSizeLocked', payload: checked });
   }, []);
@@ -73,10 +88,6 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
       if (!selectedOption) return;
 
       setUnit(selectedUnit);
-      graphicsActor.send({
-        type: 'setGridUnit',
-        payload: { unit: selectedOption.value, factor: selectedOption.factor, system: selectedOption.system },
-      });
     },
     [setUnit],
   );

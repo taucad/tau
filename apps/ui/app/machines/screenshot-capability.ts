@@ -1,11 +1,14 @@
 import { setup, sendTo, fromCallback, assertEvent, enqueueActions, assign } from 'xstate';
 import type { AnyActorRef } from 'xstate';
-import type { ScreenshotOptions } from '~/components/geometry/graphics/three/screenshot.js';
+import * as THREE from 'three';
+import type { ScreenshotOptions } from '~/types/graphics.js';
 
 // Context type
 type ScreenshotCapabilityContext = {
   graphicsRef: AnyActorRef;
-  captureFunction?: (options?: ScreenshotOptions) => Promise<string>;
+  gl?: THREE.WebGLRenderer;
+  scene?: THREE.Scene;
+  camera?: THREE.Camera;
   queuedCaptureRequests: Array<{ options?: ScreenshotOptions; requestId: string }>;
   isRegistered: boolean;
   registrationError?: string;
@@ -13,7 +16,7 @@ type ScreenshotCapabilityContext = {
 
 // Event types
 type ScreenshotCapabilityEvent =
-  | { type: 'registerCapture'; capture: (options?: ScreenshotOptions) => Promise<string> }
+  | { type: 'registerCapture'; gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.Camera }
   | { type: 'unregisterCapture' }
   | { type: 'capture'; options?: ScreenshotOptions; requestId: string }
   | { type: 'screenshotCompleted'; dataUrl: string; requestId: string }
@@ -48,14 +51,191 @@ export const screenshotCapabilityMachine = setup({
     captureScreenshot: fromCallback<
       | { type: 'screenshotCompleted'; dataUrl: string; requestId: string }
       | { type: 'screenshotFailed'; error: string; requestId: string },
-      { capture: (options?: ScreenshotOptions) => Promise<string>; options?: ScreenshotOptions; requestId: string }
+      {
+        gl: THREE.WebGLRenderer;
+        scene: THREE.Scene;
+        camera: THREE.Camera;
+        options?: ScreenshotOptions;
+        requestId: string;
+      }
     >(({ input, sendBack }) => {
-      const { capture, options, requestId } = input;
+      const { gl, scene, camera, options, requestId } = input;
 
       (async () => {
         try {
-          const dataUrl = await capture(options);
-          sendBack({ type: 'screenshotCompleted', dataUrl, requestId });
+          if (!gl.domElement) {
+            throw new Error('Screenshot attempted before renderer was ready');
+          }
+
+          // Additional validation to ensure canvas is still valid
+          if (!gl.domElement.isConnected) {
+            throw new Error('Screenshot attempted on disconnected canvas - canvas may have been recreated');
+          }
+
+          // Setup default options
+          const defaultOptions = {
+            aspectRatio: 16 / 9,
+            zoomLevel: 1.25,
+            theta: undefined,
+            phi: undefined,
+            output: {
+              format: 'image/png' as const,
+              quality: 0.92,
+              isPreview: true,
+            },
+          } satisfies ScreenshotOptions;
+
+          // Merge provided options with defaults
+          const config = {
+            ...defaultOptions,
+            ...options,
+            output: {
+              ...defaultOptions.output,
+              ...options?.output,
+            },
+          };
+
+          // Create a copy of the camera for the screenshot so we don't modify the original
+          const screenshotCamera = (camera as THREE.PerspectiveCamera).clone();
+          screenshotCamera.zoom = config.zoomLevel;
+          screenshotCamera.aspect = config.aspectRatio;
+
+          // Apply spherical coordinate positioning only if both phi and theta are specified
+          if (config.phi !== undefined && config.theta !== undefined) {
+            // Get the current camera distance from the target (assuming target is at origin)
+            const currentPosition = screenshotCamera.position.clone();
+            const distance = currentPosition.length();
+
+            // Convert phi and theta to radians
+            const phiRad = (config.phi * Math.PI) / 180;
+            const thetaRad = (config.theta * Math.PI) / 180;
+
+            // Get the current up vector to determine coordinate system
+            const upVector = THREE.Object3D.DEFAULT_UP.clone();
+
+            // Calculate position using standard spherical coordinates
+            // Standard convention: phi is polar angle from up axis, theta is azimuthal angle
+            let x: number;
+            let y: number;
+            let z: number;
+
+            if (upVector.z === 1) {
+              // Z-up coordinate system (current app configuration)
+              x = distance * Math.sin(phiRad) * Math.cos(thetaRad);
+              y = distance * Math.sin(phiRad) * Math.sin(thetaRad);
+              z = distance * Math.cos(phiRad);
+            } else if (upVector.y === 1) {
+              // Y-up coordinate system (Three.js default)
+              x = distance * Math.sin(phiRad) * Math.cos(thetaRad);
+              z = distance * Math.sin(phiRad) * Math.sin(thetaRad);
+              y = distance * Math.cos(phiRad);
+            } else {
+              // X-up coordinate system (less common)
+              y = distance * Math.sin(phiRad) * Math.cos(thetaRad);
+              z = distance * Math.sin(phiRad) * Math.sin(thetaRad);
+              x = distance * Math.cos(phiRad);
+            }
+
+            // Set the new camera position
+            screenshotCamera.position.set(x, y, z);
+
+            // Make the camera look at the origin (or the scene center)
+            screenshotCamera.lookAt(0, 0, 0);
+          }
+
+          screenshotCamera.updateProjectionMatrix();
+
+          // Create a copy of the scene for the screenshot so we don't modify the original
+          const screenshotScene = scene.clone();
+
+          // Handle preview mode - hide non-preview objects in the cloned scene
+          if (config.output.isPreview) {
+            screenshotScene.traverse((object) => {
+              if (object.userData?.isPreviewOnly) {
+                object.visible = false;
+              }
+            });
+          }
+
+          const originalHeight = gl.domElement.height;
+          const originalPixelRatio = gl.getPixelRatio();
+
+          try {
+            // Calculate target dimensions based on aspect ratio
+            const targetAspect = config.aspectRatio;
+            const width = Math.round(originalHeight * targetAspect);
+            const height = originalHeight;
+
+            // Create a temporary canvas for the screenshot
+            const screenshotCanvas = document.createElement('canvas');
+            screenshotCanvas.width = width;
+            screenshotCanvas.height = height;
+
+            // Create a temporary WebGL renderer for the screenshot
+            const screenshotRenderer = new THREE.WebGLRenderer({
+              canvas: screenshotCanvas,
+              alpha: true,
+              antialias: true,
+              preserveDrawingBuffer: true,
+            });
+
+            // Copy settings from the main renderer
+            screenshotRenderer.setSize(width, height, false);
+            screenshotRenderer.setPixelRatio(gl.getPixelRatio());
+            screenshotRenderer.outputColorSpace = gl.outputColorSpace;
+            screenshotRenderer.shadowMap.enabled = gl.shadowMap.enabled;
+            screenshotRenderer.shadowMap.type = gl.shadowMap.type;
+
+            // Render the scene to the temporary canvas
+            screenshotRenderer.render(screenshotScene, screenshotCamera);
+
+            // Use toBlob API on the temporary canvas
+            const blob = await new Promise<Blob | undefined>((resolve) => {
+              const mimeType = config.output.format;
+              const quality =
+                mimeType === 'image/jpeg' || mimeType === 'image/webp' ? config.output.quality : undefined;
+
+              screenshotCanvas.toBlob(
+                (result) => {
+                  resolve(result ?? undefined);
+                },
+                mimeType,
+                quality,
+              );
+            });
+
+            if (!blob) {
+              throw new Error('Failed to create blob from canvas');
+            }
+
+            // Convert blob to data URL
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.addEventListener('load', () => {
+                resolve(reader.result as string);
+              });
+              reader.addEventListener('error', reject);
+              reader.readAsDataURL(blob);
+            });
+
+            // Cleanup the temporary renderer
+            screenshotRenderer.dispose();
+
+            // Additional cleanup to prevent WebGL context accumulation
+            screenshotRenderer.forceContextLoss();
+
+            // Remove the canvas from memory
+            screenshotCanvas.width = 0;
+            screenshotCanvas.height = 0;
+
+            sendBack({ type: 'screenshotCompleted', dataUrl, requestId });
+          } finally {
+            // Restore all original state
+            gl.setPixelRatio(originalPixelRatio);
+
+            // Re-render to ensure everything is visible
+            gl.render(scene, camera);
+          }
         } catch (error: unknown) {
           sendBack({
             type: 'screenshotFailed',
@@ -69,7 +249,12 @@ export const screenshotCapabilityMachine = setup({
   actions: {
     registerWithGraphics: enqueueActions(({ enqueue, context, event, self }) => {
       assertEvent(event, 'registerCapture');
-      context.captureFunction = event.capture;
+      enqueue.assign({
+        gl: event.gl,
+        scene: event.scene,
+        camera: event.camera,
+        isRegistered: true,
+      });
       enqueue.sendTo(context.graphicsRef, {
         type: 'registerScreenshotCapability',
         actorRef: self,
@@ -78,7 +263,9 @@ export const screenshotCapabilityMachine = setup({
     unregisterFromGraphics: sendTo(({ context }) => context.graphicsRef, { type: 'unregisterScreenshotCapability' }),
     unregisterCapture: enqueueActions(({ enqueue, context }) => {
       enqueue.assign({
-        captureFunction: undefined,
+        gl: undefined,
+        scene: undefined,
+        camera: undefined,
         isRegistered: false,
       });
       enqueue.sendTo(context.graphicsRef, { type: 'unregisterScreenshotCapability' });
@@ -133,7 +320,9 @@ export const screenshotCapabilityMachine = setup({
   id: 'screenshotCapability',
   context: ({ input }) => ({
     graphicsRef: input.graphicsRef,
-    captureFunction: undefined,
+    gl: undefined,
+    scene: undefined,
+    camera: undefined,
     queuedCaptureRequests: [],
     isRegistered: false,
     registrationError: undefined,
@@ -187,7 +376,9 @@ export const screenshotCapabilityMachine = setup({
         input({ context, event }) {
           assertEvent(event, 'capture');
           return {
-            capture: context.captureFunction!,
+            gl: context.gl!,
+            scene: context.scene!,
+            camera: context.camera!,
             options: event.options,
             requestId: event.requestId,
           };

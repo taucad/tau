@@ -1,7 +1,6 @@
 import { assign, assertEvent, setup, sendTo, emit, enqueueActions } from 'xstate';
 import type { AnyActorRef } from 'xstate';
-import type { GridSizes } from '~/components/geometry/graphics/three/grid.js';
-import type { ScreenshotOptions } from '~/components/geometry/graphics/three/screenshot.js';
+import type { GridSizes, ScreenshotOptions } from '~/types/graphics.js';
 import type { Shape } from '~/types/cad.js';
 
 // Context type definition
@@ -14,7 +13,7 @@ export type GraphicsContext = {
   gridUnitFactor: number;
   gridUnitSystem: 'metric' | 'imperial';
 
-  // Camera state
+  // Camera state (library-agnostic)
   cameraAngle: number;
   cameraPosition: number;
   cameraFov: number;
@@ -48,9 +47,12 @@ export type GraphicsEvent =
   | { type: 'setGridUnit'; payload: { unit: string; factor: number; system: 'metric' | 'imperial' } }
   // Camera events
   | { type: 'setCameraAngle'; payload: number }
-  | { type: 'updateCameraState'; position: number; fov: number; zoom: number }
   | { type: 'resetCamera'; options?: { withConfiguredAngles?: boolean } }
   | { type: 'cameraResetCompleted' }
+  // Controls events
+  | { type: 'controlsInteractionStart' }
+  | { type: 'controlsChanged'; zoom: number; position: number; fov: number }
+  | { type: 'controlsInteractionEnd' }
   // Screenshot events
   | { type: 'takeScreenshot'; options: ScreenshotOptions; requestId: string }
   | { type: 'screenshotCompleted'; dataUrl: string; requestId: string }
@@ -61,9 +63,7 @@ export type GraphicsEvent =
   | { type: 'unregisterScreenshotCapability' }
   | { type: 'unregisterCameraCapability' }
   // Shape updates from CAD
-  | { type: 'updateShapes'; shapes: Shape[] }
-  // Frame tracking
-  | { type: 'frameRendered'; timestamp: number };
+  | { type: 'updateShapes'; shapes: Shape[] };
 
 // Emitted events
 export type GraphicsEmitted =
@@ -77,35 +77,55 @@ export type GraphicsInput = {
   defaultCameraAngle?: number;
 };
 
+/**
+ * Grid size calculation logic with unit system handling
+ *
+ * Metric Units (mm, cm, m, etc.):
+ * - Visual grid spacing is ALWAYS the same baseline calculation regardless of unit
+ * - Returned GridSizes values are in base metric units (no factor applied)
+ * - Display layer must apply gridUnitFactor when showing grid labels to user
+ * - Grid recalculation only happens on camera/controls changes, not unit factor changes
+ *
+ * Imperial Units (inches, feet):
+ * - Visual grid spacing changes when switching from metric to imperial (applies /25.4 conversion)
+ * - Fixed scaling factors applied to produce reasonable grid sizes
+ * - Inches (factor=1): scaled by 0.5 to produce reasonable inch values
+ * - Feet (factor=12): scaled by 0.6/factor to produce reasonable foot values
+ * - Returned GridSizes values include all conversions and factors applied
+ */
 // Grid size calculation logic (ported from React)
 function calculateGridSizes(
   cameraPosition: number,
   cameraFov: number,
-  currentZoom: number,
   gridUnitSystem: 'metric' | 'imperial',
+  gridUnitFactor: number,
 ): GridSizes {
   const visibleWidthAtDistance = 2 * cameraPosition * Math.tan((cameraFov * Math.PI) / 360);
-
   let baseGridSize = visibleWidthAtDistance / 5; // BaseGridSizeCoefficient
 
+  let scalingFactor;
   if (gridUnitSystem === 'imperial') {
-    baseGridSize /= 25.4; // MetricToImperial conversion
+    // For imperial: convert to imperial units AND scale appropriately
+    baseGridSize /= gridUnitFactor;
+    scalingFactor = gridUnitFactor;
+  } else {
+    // For metric: calculate grid spacing normally, then apply factor only to display values
+    scalingFactor = 1;
   }
 
+  // For metric: calculate grid spacing normally, then apply factor only to display values
   const exponent = Math.floor(Math.log10(baseGridSize));
   const mantissa = baseGridSize / 10 ** exponent;
-
   const largeSize = mantissa < Math.sqrt(10) ? 10 ** exponent : 5 * 10 ** exponent;
-
-  const safeSize = Math.max(1, largeSize);
+  const safeSize = Math.max(1, largeSize) * scalingFactor;
   const smallSize = safeSize / 10;
 
+  // For metric: visual spacing stays the same, factor is just metadata for display
   return {
     smallSize,
     largeSize: safeSize,
     effectiveSize: baseGridSize,
     baseSize: cameraPosition,
-    zoomFactor: 1 / currentZoom,
     fov: cameraFov,
   };
 }
@@ -165,13 +185,36 @@ export const graphicsMachine = setup({
       },
     }),
 
-    setGridUnit: assign(({ event }) => {
+    setGridUnit: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'setGridUnit');
-      return {
+
+      const isSystemChange = context.gridUnitSystem !== event.payload.system;
+      const isImperialFactorChange =
+        event.payload.system === 'imperial' && context.gridUnitFactor !== event.payload.factor;
+
+      enqueue.assign({
         gridUnit: event.payload.unit,
         gridUnitFactor: event.payload.factor,
         gridUnitSystem: event.payload.system,
-      };
+      });
+
+      // Only recalculate grid spacing when:
+      // 1. Switching between metric/imperial systems (visual spacing changes)
+      // 2. Changing factor in imperial units (affects visual spacing)
+      // For metric units, factor changes only affect display numbers, not visual spacing
+      if (isSystemChange || isImperialFactorChange) {
+        const newGridSizes = calculateGridSizes(
+          context.cameraPosition,
+          context.cameraFov,
+          event.payload.system,
+          event.payload.factor,
+        );
+
+        enqueue.sendTo(({ self }) => self, {
+          type: 'updateGridSize',
+          payload: newGridSizes,
+        });
+      }
     }),
 
     setCameraAngle: assign({
@@ -181,23 +224,36 @@ export const graphicsMachine = setup({
       },
     }),
 
-    updateCameraState: enqueueActions(({ enqueue, event, context }) => {
-      assertEvent(event, 'updateCameraState');
+    handleControlsChange: enqueueActions(({ enqueue, event, context }) => {
+      assertEvent(event, 'controlsChanged');
 
       enqueue.assign({
+        currentZoom: event.zoom,
         cameraPosition: event.position,
         cameraFov: event.fov,
-        currentZoom: event.zoom,
       });
 
-      // Recalculate grid sizes based on new camera state
-      const newGridSizes = calculateGridSizes(event.position, event.fov, event.zoom, context.gridUnitSystem);
+      // Recalculate grid sizes based on new controls state
+      const newGridSizes = calculateGridSizes(
+        event.position,
+        event.fov,
+        context.gridUnitSystem,
+        context.gridUnitFactor,
+      );
 
       enqueue.sendTo(({ self }) => self, {
         type: 'updateGridSize',
         payload: newGridSizes,
       });
     }),
+
+    handleControlsInteractionStart() {
+      // Could add loading state or disable certain actions during interaction
+    },
+
+    handleControlsInteractionEnd() {
+      // Could emit completion events or re-enable actions after interaction
+    },
 
     updateShapes: enqueueActions(({ enqueue, event }) => {
       assertEvent(event, 'updateShapes');
@@ -356,17 +412,23 @@ export const graphicsMachine = setup({
         setCameraAngle: {
           actions: 'setCameraAngle',
         },
-        updateCameraState: {
-          actions: 'updateCameraState',
-        },
         resetCamera: {
-          // Target: 'resettingCamera',
           actions: 'requestCameraReset',
+        },
+
+        // Controls events
+        controlsInteractionStart: {
+          actions: 'handleControlsInteractionStart',
+        },
+        controlsChanged: {
+          actions: 'handleControlsChange',
+        },
+        controlsInteractionEnd: {
+          actions: 'handleControlsInteractionEnd',
         },
 
         // Screenshot events
         takeScreenshot: {
-          // Target: 'takingScreenshot',
           actions: 'requestScreenshot',
         },
         screenshotCompleted: {
@@ -394,9 +456,6 @@ export const graphicsMachine = setup({
         updateShapes: {
           actions: 'updateShapes',
         },
-
-        // Frame tracking (no action needed, just for tracking)
-        frameRendered: {},
       },
     },
   },

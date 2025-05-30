@@ -3,7 +3,6 @@ import { Canvas } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
-import { CameraHandler } from '~/components/geometry/graphics/three/camera-handler.js';
 import { Scene } from '~/components/geometry/graphics/three/scene.js';
 import type { StageOptions } from '~/components/geometry/graphics/three/stage.js';
 import rotateIconBase64 from '~/components/geometry/graphics/rotate-icon.svg?base64';
@@ -81,7 +80,6 @@ export function ThreeProvider({
         zoomSpeed={zoomSpeed}
       >
         {children}
-        <CameraHandler />
         {isCanvasReady ? <ActorBridge /> : null}
       </Scene>
     </Canvas>

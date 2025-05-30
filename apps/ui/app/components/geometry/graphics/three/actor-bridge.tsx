@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useThree } from '@react-three/fiber';
-import { useActorRef } from '@xstate/react';
+import { useActorRef, useSelector } from '@xstate/react';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { graphicsActor, screenshotCapabilityActor } from '~/routes/builds_.$id/graphics-actor.js';
+import { useCameraProjection } from '~/components/geometry/graphics/three/use-camera-projection.js';
 import { controlsListenerMachine } from '~/machines/controls-listener.js';
+import { graphicsActor, screenshotCapabilityActor } from '~/routes/builds_.$id/graphics-actor.js';
 
 /**
  * Component that bridges Three.js context with XState actors
@@ -12,7 +13,8 @@ import { controlsListenerMachine } from '~/machines/controls-listener.js';
  * Acts as the integration layer between Three.js and the graphics state machine
  */
 export function ActorBridge(): ReactNode {
-  const { gl, scene, camera, controls } = useThree();
+  const { gl, scene, camera, controls, invalidate } = useThree();
+  const cameraAngle = useSelector(graphicsActor, (state) => state.context.cameraAngle);
 
   // Setup screenshot capability
   useEffect(() => {
@@ -35,6 +37,9 @@ export function ActorBridge(): ReactNode {
       controls: controls as OrbitControls,
     },
   });
+
+  // Handle camera projection updates
+  useCameraProjection(camera, cameraAngle, invalidate);
 
   return null;
 }

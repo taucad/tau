@@ -46,9 +46,8 @@ export const cameraCapabilityMachine = setup({
         console.log('Camera reset completed');
         sendBack({ type: 'cameraResetCompleted' });
       } catch (error) {
-        // Camera reset doesn't typically fail, but handle errors gracefully
         console.error('Camera reset failed:', error);
-        sendBack({ type: 'cameraResetCompleted' });
+        sendBack({ type: 'cameraResetFailed', error });
       }
     }),
   },

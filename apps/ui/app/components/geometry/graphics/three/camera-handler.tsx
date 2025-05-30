@@ -6,7 +6,7 @@ import { useSelector } from '@xstate/react';
 import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 
 /**
- * Internal component that handles the camera matrix manipulation.
+ * Internal component that handles the camera matrix manipulation in response to changing field of view.
  * This MUST be used inside a Canvas/R3F component tree.
  */
 export function CameraHandler(): JSX.Element {
@@ -31,7 +31,7 @@ export function CameraHandler(): JSX.Element {
 
       // Apply a FOV change based on angle
       const minFov = 1; // Very narrow FOV at 0 degrees (nearly orthographic)
-      const maxFov = 120; // Very wide FOV at 90 degrees (extreme perspective)
+      const maxFov = 90; // Very wide FOV at 90 degrees (extreme perspective)
 
       // Store old FOV before changing
       const oldFov = camera.fov;

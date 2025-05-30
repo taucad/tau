@@ -22,7 +22,6 @@ type ResetCameraParameters = {
   shapeRadius: number;
   rotation: ResetRotation;
   perspective: ResetPerspective;
-  setCurrentZoom: (zoom: number) => void;
   setSceneRadius: (radius: number) => void;
   originalDistanceReference?: RefObject<number | undefined>;
 };
@@ -36,7 +35,7 @@ export function useCameraReset(
   const { camera, invalidate } = useThree();
   const isRegistered = useRef(false);
 
-  const { shapeRadius, rotation, perspective, setCurrentZoom, setSceneRadius, originalDistanceReference } = parameters;
+  const { shapeRadius, rotation, perspective, setSceneRadius, originalDistanceReference } = parameters;
 
   // Create the reset function that now accepts an optional options object
   const resetCamera = useCallback(
@@ -51,13 +50,12 @@ export function useCameraReset(
         shapeRadius,
         rotation,
         perspective,
-        setCurrentZoom,
         setSceneRadius,
         invalidate,
         withConfiguredAngles: options?.withConfiguredAngles,
       });
     },
-    [camera, invalidate, shapeRadius, rotation, perspective, setCurrentZoom, setSceneRadius, originalDistanceReference],
+    [camera, invalidate, shapeRadius, rotation, perspective, setSceneRadius, originalDistanceReference],
   );
 
   // Register the reset function with the camera capability actor only once

@@ -9,7 +9,6 @@ export function resetCamera({
   shapeRadius,
   rotation,
   perspective,
-  setCurrentZoom,
   setSceneRadius,
   invalidate,
   withConfiguredAngles,
@@ -24,7 +23,6 @@ export function resetCamera({
     minimumFarPlane: number;
     farPlaneRadiusMultiplier: number;
   };
-  setCurrentZoom: (zoom: number) => void;
   setSceneRadius: (radius: number) => void;
   invalidate: () => void;
   withConfiguredAngles?: boolean;
@@ -37,9 +35,6 @@ export function resetCamera({
   // If the shape radius is less than or requal to 0, we didn't get an object to render.
   // Leaving it at 0 or less results in undefined camera behavior, so we set it to 1000.
   const adjustedShapeRadius = shapeRadius <= 0 ? 1000 : shapeRadius;
-
-  // Reset zoom tracking state using the appropriate configured zoom level
-  setCurrentZoom(perspective.zoomLevel);
 
   const useConfiguredAngles = withConfiguredAngles ?? true;
 

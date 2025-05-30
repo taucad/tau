@@ -73,7 +73,6 @@ export function Stage({
   const inner = React.useRef<THREE.Group>(null);
 
   // State for camera reset functionality
-  const [currentZoom, setCurrentZoom] = React.useState<number>(1);
   const originalDistanceReference = React.useRef<number | undefined>(undefined);
   const isInitialResetDoneRef = React.useRef<boolean>(false);
 
@@ -118,7 +117,6 @@ export function Stage({
       minimumFarPlane,
       farPlaneRadiusMultiplier,
     },
-    setCurrentZoom,
     setSceneRadius,
     originalDistanceReference,
   });

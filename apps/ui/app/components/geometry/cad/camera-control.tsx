@@ -14,7 +14,7 @@ type CameraControlProps = {
   /**
    * Default camera angle in degrees (0 = orthographic, 90 = perspective)
    */
-  readonly defaultAngle?: number;
+  readonly defaultAngle: number;
   /**
    * Callback when camera angle changes
    */
@@ -32,7 +32,7 @@ type CameraControlProps = {
  * Note: This component DOES NOT directly use Three.js hooks.
  * You must use CameraHandler inside the Canvas separately.
  */
-export function CameraControl({ defaultAngle = 90, className }: Omit<CameraControlProps, 'onChange'>): JSX.Element {
+export function CameraControl({ defaultAngle, className }: Omit<CameraControlProps, 'onChange'>): JSX.Element {
   const [angle, setAngle] = useCookie<number>(cameraAngleCookieName, defaultAngle);
 
   // Update camera angle directly in the Graphics context when angle changes
@@ -79,7 +79,7 @@ export function CameraControl({ defaultAngle = 90, className }: Omit<CameraContr
         </div>
       </TooltipTrigger>
       <TooltipContent>
-        <span>Adjust camera angle</span>
+        <span>Adjust field of view angle</span>
         <br />
         <span className="text-neutral-foreground/60 dark:text-foreground/50">Tip: Set to 0° for orthographic view</span>
       </TooltipContent>

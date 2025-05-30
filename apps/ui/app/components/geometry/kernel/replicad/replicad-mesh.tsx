@@ -5,6 +5,7 @@ import { BufferGeometry } from 'three';
 import * as r3js from 'replicad-threejs-helper';
 import { MatcapMaterial } from '~/components/geometry/graphics/three/matcap-material.js';
 import { useColor } from '~/hooks/use-color.js';
+import type { Shape3D } from '~/types/cad.js';
 
 export const useApplyHighlights = (geometry: BufferGeometry, highlight: number | number[]) => {
   const { invalidate } = useThree();
@@ -34,8 +35,8 @@ export const useFaceEvent = (onEvent: (event: ThreeEvent<MouseEvent>, faceIndex:
 };
 
 type ReplicadMeshProperties = {
-  readonly faces?: any; // Using any for now since we don't have the replicad types
-  readonly edges?: any; // Using any for now since we don't have the replicad types
+  readonly faces?: Shape3D['faces'];
+  readonly edges?: Shape3D['edges'];
   readonly onFaceClick?: (event: ThreeEvent<MouseEvent>, faceIndex: number) => void;
   readonly selected?: number;
   readonly faceHover?: boolean;

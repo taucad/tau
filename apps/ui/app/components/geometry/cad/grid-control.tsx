@@ -42,8 +42,9 @@ const gridUnitOptions = [
   { label: 'Millimeter', value: 'mm', system: 'metric', factor: 1 },
   { label: 'Centimeter', value: 'cm', system: 'metric', factor: 10 },
   { label: 'Meter', value: 'm', system: 'metric', factor: 1000 },
-  { label: 'Inch', value: 'in', system: 'imperial', factor: 1 }, // Base unit for imperial
-  { label: 'Foot', value: 'ft', system: 'imperial', factor: 12 }, // 1 foot = 12 inches
+  { label: 'Inch', value: 'in', system: 'imperial', factor: 25.4 }, // Base unit for imperial
+  { label: 'Foot', value: 'ft', system: 'imperial', factor: 304.8 }, // 1 foot = 12 inches
+  { label: 'Yard', value: 'yd', system: 'imperial', factor: 914.4 }, // 1 yard = 3 feet
 ] as const;
 
 type GridUnitOption = (typeof gridUnitOptions)[number]['value'];

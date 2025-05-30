@@ -5,13 +5,11 @@ import { useNavigate } from 'react-router';
 import { useActor, useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { Button } from '~/components/ui/button.js';
-import { Badge } from '~/components/ui/badge.js';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar.js';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '~/components/ui/card.js';
+import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '~/components/ui/card.js';
 import { SvgIcon } from '~/components/icons/svg-icon.js';
 import type { Build } from '~/types/build.js';
-import type { CadKernelProvider, Category } from '~/types/cad.js';
-import { categories } from '~/types/cad.js';
+import type { CadKernelProvider } from '~/types/cad.js';
 import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
 import { storage } from '~/db/storage.js';
 import { cadMachine } from '~/machines/cad.js';
@@ -215,7 +213,7 @@ function ProjectCard({
         </div>
         <div className="flex items-center gap-2">
           <Tooltip>
-            <TooltipTrigger>
+            <TooltipTrigger asChild>
               <Button
                 variant="outline"
                 size="sm"
@@ -229,7 +227,7 @@ function ProjectCard({
             <TooltipContent>Star this project</TooltipContent>
           </Tooltip>
           <Tooltip>
-            <TooltipTrigger>
+            <TooltipTrigger asChild>
               <Button
                 variant="outline"
                 size="sm"

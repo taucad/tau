@@ -263,7 +263,7 @@ export const ChatParameters = memo(function () {
                 type="text"
                 placeholder="Search parameters..."
                 value={searchTerm}
-                className="h-8 w-full bg-background pr-8 pl-8 text-sm"
+                className="h-8 w-full bg-background pr-8 pl-8"
                 onChange={handleSearchChange}
               />
               <Search className="absolute top-2 left-2 size-4 text-muted-foreground" />
@@ -313,7 +313,7 @@ export const ChatParameters = memo(function () {
           </div>
 
           {!hasSearchResults && searchTerm ? (
-            <div className={cn('py-4 text-center text-sm text-muted-foreground', containerXpadding)}>
+            <div className={cn('py-4 text-center text-muted-foreground', containerXpadding)}>
               No parameters matching &quot;{searchTerm}&quot;
             </div>
           ) : (
@@ -328,7 +328,7 @@ export const ChatParameters = memo(function () {
                   }}
                 >
                   <CollapsibleTrigger className="group/collapsible flex w-full items-center justify-between bg-muted/70 p-2 transition-colors hover:bg-muted">
-                    <h3 className="text-sm font-medium">
+                    <h3 className="font-medium">
                       {groupName} <span className="text-muted-foreground/50">({entries.length})</span>
                     </h3>
                     <ChevronRight className="size-4 text-muted-foreground transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
@@ -343,18 +343,13 @@ export const ChatParameters = memo(function () {
                         <div key={key}>
                           <div
                             className={cn(
-                              '@container/parameter flex flex-col gap-1.5 rounded-md p-2 transition-colors hover:bg-muted/30',
+                              '@container/parameter flex flex-col rounded-md p-1 transition-colors hover:bg-muted/30 md:p-2',
                             )}
                           >
                             <div className="flex h-auto min-h-6 flex-row justify-between gap-2">
-                              <div className="flex flex-row items-baseline gap-2">
-                                <span className={cn(parameters[key] === undefined ? 'font-normal' : 'font-medium')}>
-                                  {getHighlightedText(prettyKey)}
-                                </span>
-                                <span className="hidden text-xs text-muted-foreground @[10rem]/parameter:block">
-                                  {typeof value}
-                                </span>
-                              </div>
+                              <span className={cn(parameters[key] === undefined ? 'font-normal' : 'font-medium')}>
+                                {getHighlightedText(prettyKey)}
+                              </span>
                               {parameters[key] !== undefined && (
                                 <Tooltip>
                                   <TooltipTrigger asChild>
@@ -399,9 +394,7 @@ export const ChatParameters = memo(function () {
             <Info className="size-6 text-muted-foreground" strokeWidth={1.5} />
           </div>
           <h3 className="mb-1 text-base font-medium">No parameters available</h3>
-          <p className="text-sm text-muted-foreground">
-            Parameters will appear here when they become available for this model
-          </p>
+          <p className="text-muted-foreground">Parameters will appear here when they become available for this model</p>
         </div>
       )}
     </div>

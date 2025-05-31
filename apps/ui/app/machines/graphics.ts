@@ -69,6 +69,7 @@ export type GraphicsEvent =
 export type GraphicsEmitted =
   | { type: 'gridUpdated'; sizes: GridSizes }
   | { type: 'screenshotCompleted'; dataUrls: string[]; requestId: string }
+  | { type: 'screenshotFailed'; error: string; requestId: string }
   | { type: 'cameraResetCompleted' }
   | { type: 'shapeRadiusCalculated'; radius: number };
 
@@ -341,8 +342,18 @@ export const graphicsMachine = setup({
       });
     }),
 
-    failScreenshot: assign({
-      activeScreenshotRequest: undefined,
+    failScreenshot: enqueueActions(({ enqueue, event }) => {
+      assertEvent(event, 'screenshotFailed');
+
+      enqueue.assign({
+        activeScreenshotRequest: undefined,
+      });
+
+      enqueue.emit({
+        type: 'screenshotFailed' as const,
+        error: event.error,
+        requestId: event.requestId,
+      });
     }),
 
     requestCameraReset: sendTo(

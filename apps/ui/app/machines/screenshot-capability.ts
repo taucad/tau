@@ -105,8 +105,22 @@ export const screenshotCapabilityMachine = setup({
 
           // Calculate target dimensions based on aspect ratio
           const targetAspect = config.aspectRatio;
-          const width = Math.round(originalHeight * targetAspect);
-          const height = originalHeight;
+          let width = Math.round(originalHeight * targetAspect);
+          let height = originalHeight;
+
+          // Apply maxResolution constraint if specified
+          if (config.maxResolution) {
+            const maxDimension = Math.max(width, height);
+            if (maxDimension > config.maxResolution) {
+              const scale = config.maxResolution / maxDimension;
+              width = Math.round(width * scale);
+              height = Math.round(height * scale);
+            }
+          }
+
+          console.log(
+            `Screenshot dimensions: ${width}x${height} (aspect: ${targetAspect}, maxRes: ${config.maxResolution})`,
+          );
 
           // Create a single temporary canvas for all screenshots
           const screenshotCanvas = document.createElement('canvas');
@@ -123,7 +137,15 @@ export const screenshotCapabilityMachine = setup({
           try {
             // Copy settings from the main renderer
             screenshotRenderer.setSize(width, height, false);
-            screenshotRenderer.setPixelRatio(gl.getPixelRatio());
+
+            // For composite screenshots, use 1:1 pixel ratio to respect maxResolution
+            // For high-quality single screenshots, we could use the original pixel ratio
+            const useHighDpi = config.cameraAngles && config.cameraAngles.length === 1;
+            const pixelRatio = useHighDpi ? gl.getPixelRatio() : 1;
+            screenshotRenderer.setPixelRatio(pixelRatio);
+
+            console.log(`Using pixel ratio: ${pixelRatio} (original: ${gl.getPixelRatio()})`);
+
             screenshotRenderer.outputColorSpace = gl.outputColorSpace;
             screenshotRenderer.shadowMap.enabled = gl.shadowMap.enabled;
             screenshotRenderer.shadowMap.type = gl.shadowMap.type;

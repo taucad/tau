@@ -1,7 +1,7 @@
 import { Clipboard, Download, GalleryThumbnails, ImageDown, Menu } from 'lucide-react';
 import { useCallback, useEffect, useMemo } from 'react';
 import type { JSX } from 'react';
-import { useSelector } from '@xstate/react';
+import { useSelector, useActorRef } from '@xstate/react';
 import { BoxDown } from '~/components/icons/box-down.js';
 import { Button } from '~/components/ui/button.js';
 import { useBuildSelector } from '~/hooks/use-build.js';
@@ -12,6 +12,7 @@ import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
 import { downloadBlob } from '~/utils/file.js';
+import { screenshotRequestMachine } from '~/machines/screenshot-request.js';
 
 type ViewerControlItem = {
   id: string;
@@ -29,17 +30,24 @@ export function ChatControls(): JSX.Element {
   const code = useSelector(cadActor, (state) => state.context.code);
   const isScreenshotReady = useSelector(graphicsActor, (state) => state.context.isScreenshotReady);
 
+  // Create screenshot request machine instance
+  const screenshotActorRef = useActorRef(screenshotRequestMachine, {
+    input: { graphicsRef: graphicsActor },
+  });
+
   const getPngBlob = useCallback(async () => {
     return new Promise<Blob>((resolve, reject) => {
-      const requestId = crypto.randomUUID();
-
-      // Subscribe to screenshot completion
-      const subscription = graphicsActor.on('screenshotCompleted', async (event) => {
-        if (event.requestId === requestId) {
-          subscription.unsubscribe();
+      screenshotActorRef.send({
+        type: 'requestScreenshot',
+        options: {
+          output: {
+            format: 'image/png',
+            quality: 0.92,
+          },
+        },
+        async onSuccess(dataUrls) {
           try {
-            // Get the first (and only) data URL from the array
-            const dataUrl = event.dataUrls[0];
+            const dataUrl = dataUrls[0];
             if (!dataUrl) {
               throw new Error('No screenshot data received');
             }
@@ -50,22 +58,13 @@ export function ChatControls(): JSX.Element {
           } catch (error) {
             reject(error instanceof Error ? error : new Error('Failed to fetch screenshot'));
           }
-        }
-      });
-
-      // Request screenshot
-      graphicsActor.send({
-        type: 'takeScreenshot',
-        requestId,
-        options: {
-          output: {
-            format: 'image/png',
-            quality: 0.92,
-          },
+        },
+        onError(error) {
+          reject(new Error(error));
         },
       });
     });
-  }, []);
+  }, [screenshotActorRef]);
 
   const handleExport = useCallback(
     async (filename: string, format: 'stl' | 'stl-binary' | 'step' | 'step-assembly') => {
@@ -147,25 +146,8 @@ export function ChatControls(): JSX.Element {
   );
 
   const updateThumbnailScreenshot = useCallback(() => {
-    const requestId = crypto.randomUUID();
-
-    // Subscribe to screenshot completion
-    const subscription = graphicsActor.on('screenshotCompleted', (event) => {
-      if (event.requestId === requestId) {
-        subscription.unsubscribe();
-        // Get the first (and only) data URL from the array
-        const dataUrl = event.dataUrls[0];
-        if (dataUrl) {
-          updateThumbnail(dataUrl);
-          console.log('Thumbnail updated successfully');
-        }
-      }
-    });
-
-    // Request screenshot using cameraAngles format
-    graphicsActor.send({
-      type: 'takeScreenshot',
-      requestId,
+    screenshotActorRef.send({
+      type: 'requestScreenshot',
       options: {
         output: {
           format: 'image/webp',
@@ -174,8 +156,19 @@ export function ChatControls(): JSX.Element {
         zoomLevel: 1.8,
         cameraAngles: [{ phi: 60, theta: 45 }],
       },
+      onSuccess(dataUrls) {
+        const dataUrl = dataUrls[0];
+        if (dataUrl) {
+          updateThumbnail(dataUrl);
+          console.log('Thumbnail updated successfully');
+        }
+      },
+      onError(error) {
+        console.error('Thumbnail screenshot failed:', error);
+        // Let the calling promise handle the error display
+      },
     });
-  }, [updateThumbnail]);
+  }, [updateThumbnail, screenshotActorRef]);
 
   const handleUpdateThumbnail = useCallback(() => {
     toast.promise(
@@ -206,16 +199,19 @@ export function ChatControls(): JSX.Element {
   const handleCopyPngToClipboard = useCallback(async () => {
     toast.promise(
       async () => {
-        const requestId = crypto.randomUUID();
-
         return new Promise<void>((resolve, reject) => {
-          // Subscribe to screenshot completion
-          const subscription = graphicsActor.on('screenshotCompleted', async (event) => {
-            if (event.requestId === requestId) {
-              subscription.unsubscribe();
+          screenshotActorRef.send({
+            type: 'requestScreenshot',
+            options: {
+              output: {
+                format: 'image/png',
+                quality: 0.92,
+                isPreview: false,
+              },
+            },
+            async onSuccess(dataUrls) {
               try {
-                // Get the first (and only) data URL from the array
-                const dataUrl = event.dataUrls[0];
+                const dataUrl = dataUrls[0];
                 if (!dataUrl) {
                   throw new Error('No screenshot data received');
                 }
@@ -234,19 +230,9 @@ export function ChatControls(): JSX.Element {
               } catch (error) {
                 reject(error instanceof Error ? error : new Error('Failed to copy to clipboard'));
               }
-            }
-          });
-
-          // Request screenshot
-          graphicsActor.send({
-            type: 'takeScreenshot',
-            requestId,
-            options: {
-              output: {
-                format: 'image/png',
-                quality: 0.92,
-                isPreview: false,
-              },
+            },
+            onError(error) {
+              reject(new Error(error));
             },
           });
         });
@@ -257,21 +243,24 @@ export function ChatControls(): JSX.Element {
         error: `Failed to copy ${buildName}.png to clipboard`,
       },
     );
-  }, [buildName]);
+  }, [buildName, screenshotActorRef]);
 
   const handleCopyDataUrlToClipboard = useCallback(async () => {
     toast.promise(
       async () => {
-        const requestId = crypto.randomUUID();
-
         return new Promise<void>((resolve, reject) => {
-          // Subscribe to screenshot completion
-          const subscription = graphicsActor.on('screenshotCompleted', async (event) => {
-            if (event.requestId === requestId) {
-              subscription.unsubscribe();
+          screenshotActorRef.send({
+            type: 'requestScreenshot',
+            options: {
+              output: {
+                format: 'image/png',
+                quality: 0.2,
+                isPreview: true,
+              },
+            },
+            async onSuccess(dataUrls) {
               try {
-                // Get the first (and only) data URL from the array
-                const dataUrl = event.dataUrls[0];
+                const dataUrl = dataUrls[0];
                 if (!dataUrl) {
                   throw new Error('No screenshot data received');
                 }
@@ -287,19 +276,9 @@ export function ChatControls(): JSX.Element {
               } catch (error) {
                 reject(error instanceof Error ? error : new Error('Failed to copy data URL'));
               }
-            }
-          });
-
-          // Request screenshot
-          graphicsActor.send({
-            type: 'takeScreenshot',
-            requestId,
-            options: {
-              output: {
-                format: 'image/png',
-                quality: 0.2,
-                isPreview: true,
-              },
+            },
+            onError(error) {
+              reject(new Error(error));
             },
           });
         });
@@ -310,22 +289,30 @@ export function ChatControls(): JSX.Element {
         error: `Failed to copy data URL to clipboard`,
       },
     );
-  }, []);
+  }, [screenshotActorRef]);
 
   const handleDownloadMultipleAngles = useCallback(async () => {
     toast.promise(
       async () => {
-        const requestId = crypto.randomUUID();
-
         return new Promise<void>((resolve, reject) => {
-          // Subscribe to screenshot completion
-          const subscription = graphicsActor.on('screenshotCompleted', async (event) => {
-            if (event.requestId === requestId) {
-              subscription.unsubscribe();
+          screenshotActorRef.send({
+            type: 'requestScreenshot',
+            options: {
+              output: {
+                format: 'image/png',
+                quality: 0.92,
+              },
+              cameraAngles: [
+                { phi: 90, theta: 0 }, // Front view
+                { phi: 90, theta: 90 }, // Right view
+                { phi: 0, theta: 0 }, // Top view
+              ],
+            },
+            async onSuccess(dataUrls) {
               try {
                 // Download each screenshot with a descriptive filename
                 const angleNames = ['front', 'right', 'top'];
-                for (const [index, dataUrl] of event.dataUrls.entries()) {
+                for (const [index, dataUrl] of dataUrls.entries()) {
                   // eslint-disable-next-line no-await-in-loop -- we need to wait for the fetch to complete
                   const response = await fetch(dataUrl);
                   // eslint-disable-next-line no-await-in-loop -- we need to wait for the blob to be created
@@ -338,23 +325,9 @@ export function ChatControls(): JSX.Element {
               } catch (error) {
                 reject(error instanceof Error ? error : new Error('Failed to download screenshots'));
               }
-            }
-          });
-
-          // Request multiple camera angles
-          graphicsActor.send({
-            type: 'takeScreenshot',
-            requestId,
-            options: {
-              output: {
-                format: 'image/png',
-                quality: 0.92,
-              },
-              cameraAngles: [
-                { phi: 90, theta: 0 }, // Front view
-                { phi: 90, theta: 90 }, // Right view
-                { phi: 0, theta: 0 }, // Top view
-              ],
+            },
+            onError(error) {
+              reject(new Error(error));
             },
           });
         });
@@ -365,7 +338,7 @@ export function ChatControls(): JSX.Element {
         error: 'Failed to download multiple angle screenshots',
       },
     );
-  }, [buildName]);
+  }, [buildName, screenshotActorRef]);
 
   const buildItems = useMemo(
     (): ViewerControlItem[] => [

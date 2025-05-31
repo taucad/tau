@@ -34,6 +34,13 @@ export type ScreenshotOptions = {
   aspectRatio?: number;
 
   /**
+   * Maximum resolution (largest dimension) for the screenshot in pixels
+   * This will override the default canvas size when specified
+   * @default undefined (uses canvas size)
+   */
+  maxResolution?: number;
+
+  /**
    * Zoom level multiplier (1.0 = no change, 2.0 = 2x zoom in, 0.5 = 2x zoom out)
    * @default 1.25
    */

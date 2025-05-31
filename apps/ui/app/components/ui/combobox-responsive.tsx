@@ -1,5 +1,6 @@
 import type { JSX, ReactNode } from 'react';
 import React from 'react';
+import type { ClassValue } from 'clsx';
 import { useIsMobile } from '~/hooks/use-mobile.js';
 import {
   Command,
@@ -41,12 +42,12 @@ export function ComboBoxResponsive<T>({
   readonly defaultValue: T | undefined;
   readonly onSelect?: (value: string) => void;
   readonly onClose?: () => void;
-  readonly popoverContentClassName?: string;
+  readonly popoverContentClassName?: ClassValue;
   readonly popoverProperties?: React.ComponentProps<typeof PopoverContent>;
   readonly placeholder?: string;
   readonly searchPlaceHolder?: string;
   readonly asChildLabel?: boolean;
-  readonly labelClassName?: string;
+  readonly labelClassName?: ClassValue;
   readonly isDisabled?: (item: T) => boolean;
 }): JSX.Element {
   const [open, setOpen] = React.useState(false);
@@ -139,7 +140,7 @@ function ItemList<T>({
   readonly getValue: (item: T) => string;
   readonly searchPlaceHolder: string;
   readonly asChildLabel?: boolean;
-  readonly labelClassName?: string;
+  readonly labelClassName?: ClassValue;
   readonly isDisabled?: (item: T) => boolean;
 }) {
   return (

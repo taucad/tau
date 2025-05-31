@@ -13,6 +13,7 @@ import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
 import { downloadBlob } from '~/utils/file.js';
 import { screenshotRequestMachine } from '~/machines/screenshot-request.js';
+import { exportGeometryMachine } from '~/machines/export-geometry.js';
 
 type ViewerControlItem = {
   id: string;
@@ -33,6 +34,11 @@ export function ChatControls(): JSX.Element {
   // Create screenshot request machine instance
   const screenshotActorRef = useActorRef(screenshotRequestMachine, {
     input: { graphicsRef: graphicsActor },
+  });
+
+  // Create export geometry machine instance
+  const exportActorRef = useActorRef(exportGeometryMachine, {
+    input: { cadRef: cadActor },
   });
 
   const getPngBlob = useCallback(async () => {
@@ -73,13 +79,17 @@ export function ChatControls(): JSX.Element {
       const filenameWithExtension = `${filename}.${fileExtension}`;
       toast.promise(
         new Promise<Blob>((resolve, reject) => {
-          cadActor.send({ type: 'exportGeometry', format });
-          const subscription = cadActor.on('geometryExported', (event) => {
-            subscription.unsubscribe();
-            downloadBlob(event.blob, filenameWithExtension);
-            resolve(event.blob);
+          exportActorRef.send({
+            type: 'requestExport',
+            format,
+            onSuccess(blob) {
+              downloadBlob(blob, filenameWithExtension);
+              resolve(blob);
+            },
+            onError(error) {
+              reject(new Error(error));
+            },
           });
-          // TODO: handle error case
         }),
         {
           loading: `Downloading ${filenameWithExtension}...`,
@@ -95,7 +105,7 @@ export function ChatControls(): JSX.Element {
         },
       );
     },
-    [],
+    [exportActorRef],
   );
 
   const handleDownloadCode = useCallback(async () => {

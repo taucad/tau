@@ -55,7 +55,7 @@ export type GraphicsEvent =
   | { type: 'controlsInteractionEnd' }
   // Screenshot events
   | { type: 'takeScreenshot'; options: ScreenshotOptions; requestId: string }
-  | { type: 'screenshotCompleted'; dataUrl: string; requestId: string }
+  | { type: 'screenshotCompleted'; dataUrls: string[]; requestId: string }
   | { type: 'screenshotFailed'; error: string; requestId: string }
   // Capability registration
   | { type: 'registerScreenshotCapability'; actorRef: AnyActorRef }
@@ -68,7 +68,7 @@ export type GraphicsEvent =
 // Emitted events
 export type GraphicsEmitted =
   | { type: 'gridUpdated'; sizes: GridSizes }
-  | { type: 'screenshotCompleted'; dataUrl: string; requestId: string }
+  | { type: 'screenshotCompleted'; dataUrls: string[]; requestId: string }
   | { type: 'cameraResetCompleted' }
   | { type: 'shapeRadiusCalculated'; radius: number };
 
@@ -336,7 +336,7 @@ export const graphicsMachine = setup({
 
       enqueue.emit({
         type: 'screenshotCompleted' as const,
-        dataUrl: event.dataUrl,
+        dataUrls: event.dataUrls,
         requestId: event.requestId,
       });
     }),

@@ -1,7 +1,7 @@
 import { setup, sendTo, fromCallback, assertEvent, enqueueActions, assign } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import * as THREE from 'three';
-import type { ScreenshotOptions } from '~/types/graphics.js';
+import type { ScreenshotOptions, CameraAngle } from '~/types/graphics.js';
 
 // Context type
 type ScreenshotCapabilityContext = {
@@ -19,7 +19,7 @@ type ScreenshotCapabilityEvent =
   | { type: 'registerCapture'; gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.Camera }
   | { type: 'unregisterCapture' }
   | { type: 'capture'; options?: ScreenshotOptions; requestId: string }
-  | { type: 'screenshotCompleted'; dataUrl: string; requestId: string }
+  | { type: 'screenshotCompleted'; dataUrls: string[]; requestId: string }
   | { type: 'screenshotFailed'; error: string; requestId: string }
   | { type: 'registrationTimeout' };
 
@@ -37,6 +37,7 @@ const registrationTimeout = 5000;
  * Bridges Three.js screenshot functionality with the graphics machine.
  * Handles registration of screenshot capture function and proxies requests.
  * Queues capture requests until camera is registered with a 5-second timeout.
+ * Supports multiple camera angles in a single request for efficient batch operations.
  */
 export const screenshotCapabilityMachine = setup({
   types: {
@@ -49,7 +50,7 @@ export const screenshotCapabilityMachine = setup({
   },
   actors: {
     captureScreenshot: fromCallback<
-      | { type: 'screenshotCompleted'; dataUrl: string; requestId: string }
+      | { type: 'screenshotCompleted'; dataUrls: string[]; requestId: string }
       | { type: 'screenshotFailed'; error: string; requestId: string },
       {
         gl: THREE.WebGLRenderer;
@@ -76,8 +77,7 @@ export const screenshotCapabilityMachine = setup({
           const defaultOptions = {
             aspectRatio: 16 / 9,
             zoomLevel: 1.25,
-            theta: undefined,
-            phi: undefined,
+            cameraAngles: [{ phi: undefined, theta: undefined }] as CameraAngle[],
             output: {
               format: 'image/png' as const,
               quality: 0.92,
@@ -95,90 +95,32 @@ export const screenshotCapabilityMachine = setup({
             },
           };
 
-          // Create a copy of the camera for the screenshot so we don't modify the original
-          const screenshotCamera = (camera as THREE.PerspectiveCamera).clone();
-          screenshotCamera.zoom = config.zoomLevel;
-          screenshotCamera.aspect = config.aspectRatio;
-
-          // Apply spherical coordinate positioning only if both phi and theta are specified
-          if (config.phi !== undefined && config.theta !== undefined) {
-            // Get the current camera distance from the target (assuming target is at origin)
-            const currentPosition = screenshotCamera.position.clone();
-            const distance = currentPosition.length();
-
-            // Convert phi and theta to radians
-            const phiRad = (config.phi * Math.PI) / 180;
-            const thetaRad = (config.theta * Math.PI) / 180;
-
-            // Get the current up vector to determine coordinate system
-            const upVector = THREE.Object3D.DEFAULT_UP.clone();
-
-            // Calculate position using standard spherical coordinates
-            // Standard convention: phi is polar angle from up axis, theta is azimuthal angle
-            let x: number;
-            let y: number;
-            let z: number;
-
-            if (upVector.z === 1) {
-              // Z-up coordinate system (current app configuration)
-              x = distance * Math.sin(phiRad) * Math.cos(thetaRad);
-              y = distance * Math.sin(phiRad) * Math.sin(thetaRad);
-              z = distance * Math.cos(phiRad);
-            } else if (upVector.y === 1) {
-              // Y-up coordinate system (Three.js default)
-              x = distance * Math.sin(phiRad) * Math.cos(thetaRad);
-              z = distance * Math.sin(phiRad) * Math.sin(thetaRad);
-              y = distance * Math.cos(phiRad);
-            } else {
-              // X-up coordinate system (less common)
-              y = distance * Math.sin(phiRad) * Math.cos(thetaRad);
-              z = distance * Math.sin(phiRad) * Math.sin(thetaRad);
-              x = distance * Math.cos(phiRad);
-            }
-
-            // Set the new camera position
-            screenshotCamera.position.set(x, y, z);
-
-            // Make the camera look at the origin (or the scene center)
-            screenshotCamera.lookAt(0, 0, 0);
-          }
-
-          screenshotCamera.updateProjectionMatrix();
-
-          // Create a copy of the scene for the screenshot so we don't modify the original
-          const screenshotScene = scene.clone();
-
-          // Handle preview mode - hide non-preview objects in the cloned scene
-          if (config.output.isPreview) {
-            screenshotScene.traverse((object) => {
-              if (object.userData?.isPreviewOnly) {
-                object.visible = false;
-              }
-            });
+          // Ensure we have camera angles array
+          if (!config.cameraAngles || config.cameraAngles.length === 0) {
+            config.cameraAngles = defaultOptions.cameraAngles;
           }
 
           const originalHeight = gl.domElement.height;
           const originalPixelRatio = gl.getPixelRatio();
 
+          // Calculate target dimensions based on aspect ratio
+          const targetAspect = config.aspectRatio;
+          const width = Math.round(originalHeight * targetAspect);
+          const height = originalHeight;
+
+          // Create a single temporary canvas for all screenshots
+          const screenshotCanvas = document.createElement('canvas');
+          screenshotCanvas.width = width;
+          screenshotCanvas.height = height;
+
+          // Create a single temporary WebGL renderer for all screenshots
+          const screenshotRenderer = new THREE.WebGLRenderer({
+            canvas: screenshotCanvas,
+            alpha: true,
+            antialias: true,
+          });
+
           try {
-            // Calculate target dimensions based on aspect ratio
-            const targetAspect = config.aspectRatio;
-            const width = Math.round(originalHeight * targetAspect);
-            const height = originalHeight;
-
-            // Create a temporary canvas for the screenshot
-            const screenshotCanvas = document.createElement('canvas');
-            screenshotCanvas.width = width;
-            screenshotCanvas.height = height;
-
-            // Create a temporary WebGL renderer for the screenshot
-            const screenshotRenderer = new THREE.WebGLRenderer({
-              canvas: screenshotCanvas,
-              alpha: true,
-              antialias: true,
-              preserveDrawingBuffer: true,
-            });
-
             // Copy settings from the main renderer
             screenshotRenderer.setSize(width, height, false);
             screenshotRenderer.setPixelRatio(gl.getPixelRatio());
@@ -186,37 +128,109 @@ export const screenshotCapabilityMachine = setup({
             screenshotRenderer.shadowMap.enabled = gl.shadowMap.enabled;
             screenshotRenderer.shadowMap.type = gl.shadowMap.type;
 
-            // Render the scene to the temporary canvas
-            screenshotRenderer.render(screenshotScene, screenshotCamera);
+            const dataUrls: string[] = [];
 
-            // Use toBlob API on the temporary canvas
-            const blob = await new Promise<Blob | undefined>((resolve) => {
-              const mimeType = config.output.format;
-              const quality =
-                mimeType === 'image/jpeg' || mimeType === 'image/webp' ? config.output.quality : undefined;
+            // Create a copy of the scene for the screenshot so we don't modify the original
+            const screenshotScene = scene.clone();
 
-              screenshotCanvas.toBlob(
-                (result) => {
-                  resolve(result ?? undefined);
-                },
-                mimeType,
-                quality,
-              );
-            });
-
-            if (!blob) {
-              throw new Error('Failed to create blob from canvas');
+            // Handle preview mode - hide non-preview objects in the cloned scene
+            if (config.output.isPreview) {
+              screenshotScene.traverse((object) => {
+                if (object.userData?.isPreviewOnly) {
+                  object.visible = false;
+                }
+              });
             }
 
-            // Convert blob to data URL
-            const dataUrl = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.addEventListener('load', () => {
-                resolve(reader.result as string);
+            // Process each camera angle using the same canvas and renderer
+            for (const cameraAngle of config.cameraAngles) {
+              // Create a copy of the camera for the screenshot so we don't modify the original
+              const screenshotCamera = (camera as THREE.PerspectiveCamera).clone();
+              screenshotCamera.zoom = config.zoomLevel;
+              screenshotCamera.aspect = config.aspectRatio;
+
+              // Apply spherical coordinate positioning only if both phi and theta are specified
+              if (cameraAngle.phi !== undefined && cameraAngle.theta !== undefined) {
+                // Get the current camera distance from the target (assuming target is at origin)
+                const currentPosition = screenshotCamera.position.clone();
+                const distance = currentPosition.length();
+
+                // Convert phi and theta to radians
+                const phiRad = (cameraAngle.phi * Math.PI) / 180;
+                const thetaRad = (cameraAngle.theta * Math.PI) / 180;
+
+                // Get the current up vector to determine coordinate system
+                const upVector = THREE.Object3D.DEFAULT_UP.clone();
+
+                // Calculate position using standard spherical coordinates
+                // Standard convention: phi is polar angle from up axis, theta is azimuthal angle
+                let x: number;
+                let y: number;
+                let z: number;
+
+                // eslint-disable-next-line max-depth -- refactor this
+                if (upVector.z === 1) {
+                  // Z-up coordinate system (current app configuration)
+                  x = distance * Math.sin(phiRad) * Math.cos(thetaRad);
+                  y = distance * Math.sin(phiRad) * Math.sin(thetaRad);
+                  z = distance * Math.cos(phiRad);
+                } else if (upVector.y === 1) {
+                  // Y-up coordinate system (Three.js default)
+                  x = distance * Math.sin(phiRad) * Math.cos(thetaRad);
+                  z = distance * Math.sin(phiRad) * Math.sin(thetaRad);
+                  y = distance * Math.cos(phiRad);
+                } else {
+                  // X-up coordinate system (less common)
+                  y = distance * Math.sin(phiRad) * Math.cos(thetaRad);
+                  z = distance * Math.sin(phiRad) * Math.sin(thetaRad);
+                  x = distance * Math.cos(phiRad);
+                }
+
+                // Set the new camera position
+                screenshotCamera.position.set(x, y, z);
+
+                // Make the camera look at the origin (or the scene center)
+                screenshotCamera.lookAt(0, 0, 0);
+              }
+
+              screenshotCamera.updateProjectionMatrix();
+
+              // Render the scene to the canvas with this camera angle
+              screenshotRenderer.render(screenshotScene, screenshotCamera);
+
+              // Use toBlob API on the canvas
+              // eslint-disable-next-line no-await-in-loop -- sequential processing required for shared canvas
+              const blob = await new Promise<Blob | undefined>((resolve) => {
+                const mimeType = config.output.format;
+                const quality =
+                  mimeType === 'image/jpeg' || mimeType === 'image/webp' ? config.output.quality : undefined;
+
+                screenshotCanvas.toBlob(
+                  (result) => {
+                    resolve(result ?? undefined);
+                  },
+                  mimeType,
+                  quality,
+                );
               });
-              reader.addEventListener('error', reject);
-              reader.readAsDataURL(blob);
-            });
+
+              if (!blob) {
+                throw new Error('Failed to create blob from canvas');
+              }
+
+              // Convert blob to data URL
+              // eslint-disable-next-line no-await-in-loop -- sequential processing required for shared canvas
+              const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.addEventListener('load', () => {
+                  resolve(reader.result as string);
+                });
+                reader.addEventListener('error', reject);
+                reader.readAsDataURL(blob);
+              });
+
+              dataUrls.push(dataUrl);
+            }
 
             // Cleanup the temporary renderer
             screenshotRenderer.dispose();
@@ -228,7 +242,7 @@ export const screenshotCapabilityMachine = setup({
             screenshotCanvas.width = 0;
             screenshotCanvas.height = 0;
 
-            sendBack({ type: 'screenshotCompleted', dataUrl, requestId });
+            sendBack({ type: 'screenshotCompleted', dataUrls, requestId });
           } finally {
             // Restore all original state
             gl.setPixelRatio(originalPixelRatio);

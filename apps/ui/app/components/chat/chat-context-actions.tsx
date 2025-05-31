@@ -65,9 +65,12 @@ export function ChatContextActions({
     const subscription = graphicsActor.on('screenshotCompleted', (event) => {
       if (event.requestId === requestId) {
         subscription.unsubscribe();
-        // Add the screenshot to images state
-        addImage(event.dataUrl);
-        toast.success('Model screenshot added');
+        // Get the first (and only) data URL from the array
+        const dataUrl = event.dataUrls[0];
+        if (dataUrl) {
+          addImage(dataUrl);
+          toast.success('Model screenshot added');
+        }
       }
     });
 
@@ -86,59 +89,44 @@ export function ChatContextActions({
   }, [addImage, asPopoverMenu, onClose]);
 
   const handleAddAllViewsScreenshots = useCallback(() => {
-    const screenshots: Array<{ name: string; dataUrl: string }> = [];
-    let currentIndex = 0;
+    // Use the new cameraAngles format for efficiency - capture all views in one request
+    const requestId = crypto.randomUUID();
 
-    const processNextScreenshot = () => {
-      if (currentIndex >= orthographicViews.length) {
-        // All screenshots completed - now stitch them together
-        console.log('All screenshots completed, creating composite image');
-        void createCompositeImage(screenshots);
-        return;
-      }
-
-      const view = orthographicViews[currentIndex];
-      const requestId = `ortho-composite-${currentIndex}-${crypto.randomUUID()}`;
-
-      // Subscribe to screenshot completion for this specific request
-      const subscription = graphicsActor.on('screenshotCompleted', (event) => {
-        if (event.requestId === requestId) {
-          console.log(`Screenshot completed for view: ${view.name}`);
-          subscription.unsubscribe();
-          clearTimeout(timeoutId);
-
-          // Store the screenshot
-          screenshots.push({ name: view.name, dataUrl: event.dataUrl });
-
-          // Move to next screenshot
-          currentIndex++;
-          processNextScreenshot();
-        }
-      });
-
-      // Request the screenshot with square aspect ratio for better grid layout
-      graphicsActor.send({
-        type: 'takeScreenshot',
-        requestId,
-        options: {
-          output: {
-            format: 'image/webp',
-            quality: 0.92,
-          },
-          aspectRatio: 1, // Square images for better grid layout
-          zoomLevel: 1.5,
-          phi: view.phi,
-          theta: view.theta,
-        },
-      });
-
-      // Add a timeout for this specific screenshot
-      const timeoutId = setTimeout(() => {
+    // Subscribe to screenshot completion
+    const subscription = graphicsActor.on('screenshotCompleted', async (event) => {
+      if (event.requestId === requestId) {
         subscription.unsubscribe();
-        console.error(`Screenshot timeout for ${view.name}`);
-        toast.error(`Screenshot failed for ${view.name}`);
-      }, 5000); // 5 second timeout per screenshot
-    };
+
+        try {
+          // Create screenshots array from the dataUrls
+          const screenshots = event.dataUrls.map((dataUrl, index) => ({
+            name: orthographicViews[index].name,
+            dataUrl,
+          }));
+
+          console.log('All screenshots completed, creating composite image');
+          await createCompositeImage(screenshots);
+        } catch (error) {
+          console.error('Failed to process screenshots:', error);
+          toast.error('Failed to process all views screenshots');
+        }
+      }
+    });
+
+    // Request all orthographic views in a single screenshot request
+    graphicsActor.send({
+      type: 'takeScreenshot',
+      requestId,
+      options: {
+        output: {
+          format: 'image/png',
+          quality: 0.92,
+        },
+        aspectRatio: 1, // Square images for better grid layout
+        zoomLevel: 1.5,
+        cameraAngles: orthographicViews.map((view) => ({ phi: view.phi, theta: view.theta })),
+      },
+    });
 
     // Function to create composite image from all screenshots
     const createCompositeImage = async (screenshots: Array<{ name: string; dataUrl: string }>) => {
@@ -228,7 +216,7 @@ export function ChatContextActions({
               resolve(result ?? undefined);
             },
             'image/webp',
-            0.95,
+            0.92,
           );
         });
 
@@ -257,9 +245,6 @@ export function ChatContextActions({
         toast.error('Failed to create composite image');
       }
     };
-
-    // Start the sequential process
-    processNextScreenshot();
   }, [addImage, asPopoverMenu, onClose]);
 
   const handleAddCode = useCallback(() => {

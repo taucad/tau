@@ -7,6 +7,23 @@ export type GridSizes = {
 };
 
 /**
+ * Camera angle configuration for screenshots
+ */
+export type CameraAngle = {
+  /**
+   * Theta angle of the camera. This is the angle from the XZ plane.
+   * @default undefined (uses current camera angle)
+   */
+  theta?: number;
+
+  /**
+   * Phi angle of the camera. This is the angle from the top of the scene.
+   * @default undefined (uses current camera angle)
+   */
+  phi?: number;
+};
+
+/**
  * Options for configuring screenshot capture
  */
 export type ScreenshotOptions = {
@@ -23,16 +40,10 @@ export type ScreenshotOptions = {
   zoomLevel?: number;
 
   /**
-   * Theta angle of the camera
-   * @default 0
+   * Array of camera angles to capture. Each angle will result in a separate image.
+   * @default [{phi: undefined, theta: undefined}]
    */
-  theta?: number;
-
-  /**
-   * Phi angle of the camera
-   * @default 0
-   */
-  phi?: number;
+  cameraAngles?: CameraAngle[];
 
   /**
    * Output format settings

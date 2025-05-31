@@ -38,7 +38,13 @@ export function ChatControls(): JSX.Element {
         if (event.requestId === requestId) {
           subscription.unsubscribe();
           try {
-            const response = await fetch(event.dataUrl);
+            // Get the first (and only) data URL from the array
+            const dataUrl = event.dataUrls[0];
+            if (!dataUrl) {
+              throw new Error('No screenshot data received');
+            }
+
+            const response = await fetch(dataUrl);
             const blob = await response.blob();
             resolve(blob);
           } catch (error) {
@@ -147,12 +153,16 @@ export function ChatControls(): JSX.Element {
     const subscription = graphicsActor.on('screenshotCompleted', (event) => {
       if (event.requestId === requestId) {
         subscription.unsubscribe();
-        updateThumbnail(event.dataUrl);
-        console.log('Thumbnail updated successfully');
+        // Get the first (and only) data URL from the array
+        const dataUrl = event.dataUrls[0];
+        if (dataUrl) {
+          updateThumbnail(dataUrl);
+          console.log('Thumbnail updated successfully');
+        }
       }
     });
 
-    // Request screenshot
+    // Request screenshot using cameraAngles format
     graphicsActor.send({
       type: 'takeScreenshot',
       requestId,
@@ -162,8 +172,7 @@ export function ChatControls(): JSX.Element {
           quality: 0.92,
         },
         zoomLevel: 1.8,
-        phi: 60,
-        theta: 45,
+        cameraAngles: [{ phi: 60, theta: 45 }],
       },
     });
   }, [updateThumbnail]);
@@ -205,8 +214,14 @@ export function ChatControls(): JSX.Element {
             if (event.requestId === requestId) {
               subscription.unsubscribe();
               try {
+                // Get the first (and only) data URL from the array
+                const dataUrl = event.dataUrls[0];
+                if (!dataUrl) {
+                  throw new Error('No screenshot data received');
+                }
+
                 // Convert dataURL to Blob
-                const response = await fetch(event.dataUrl);
+                const response = await fetch(dataUrl);
                 const blob = await response.blob();
 
                 // Copy to clipboard
@@ -255,9 +270,15 @@ export function ChatControls(): JSX.Element {
             if (event.requestId === requestId) {
               subscription.unsubscribe();
               try {
+                // Get the first (and only) data URL from the array
+                const dataUrl = event.dataUrls[0];
+                if (!dataUrl) {
+                  throw new Error('No screenshot data received');
+                }
+
                 // Copy to clipboard
                 if (globalThis.isSecureContext) {
-                  await navigator.clipboard.writeText(event.dataUrl);
+                  await navigator.clipboard.writeText(dataUrl);
                   resolve();
                 } else {
                   console.warn('Clipboard operations are only allowed in secure contexts.');
@@ -275,7 +296,7 @@ export function ChatControls(): JSX.Element {
             requestId,
             options: {
               output: {
-                format: 'image/webp',
+                format: 'image/png',
                 quality: 0.2,
                 isPreview: true,
               },
@@ -290,6 +311,61 @@ export function ChatControls(): JSX.Element {
       },
     );
   }, []);
+
+  const handleDownloadMultipleAngles = useCallback(async () => {
+    toast.promise(
+      async () => {
+        const requestId = crypto.randomUUID();
+
+        return new Promise<void>((resolve, reject) => {
+          // Subscribe to screenshot completion
+          const subscription = graphicsActor.on('screenshotCompleted', async (event) => {
+            if (event.requestId === requestId) {
+              subscription.unsubscribe();
+              try {
+                // Download each screenshot with a descriptive filename
+                const angleNames = ['front', 'right', 'top'];
+                for (const [index, dataUrl] of event.dataUrls.entries()) {
+                  // eslint-disable-next-line no-await-in-loop -- we need to wait for the fetch to complete
+                  const response = await fetch(dataUrl);
+                  // eslint-disable-next-line no-await-in-loop -- we need to wait for the blob to be created
+                  const blob = await response.blob();
+                  const filename = `${buildName}-${angleNames[index] || `angle-${index}`}.png`;
+                  downloadBlob(blob, filename);
+                }
+
+                resolve();
+              } catch (error) {
+                reject(error instanceof Error ? error : new Error('Failed to download screenshots'));
+              }
+            }
+          });
+
+          // Request multiple camera angles
+          graphicsActor.send({
+            type: 'takeScreenshot',
+            requestId,
+            options: {
+              output: {
+                format: 'image/png',
+                quality: 0.92,
+              },
+              cameraAngles: [
+                { phi: 90, theta: 0 }, // Front view
+                { phi: 90, theta: 90 }, // Right view
+                { phi: 0, theta: 0 }, // Top view
+              ],
+            },
+          });
+        });
+      },
+      {
+        loading: 'Downloading multiple angle screenshots...',
+        success: 'Downloaded multiple angle screenshots',
+        error: 'Failed to download multiple angle screenshots',
+      },
+    );
+  }, [buildName]);
 
   const buildItems = useMemo(
     (): ViewerControlItem[] => [
@@ -342,6 +418,14 @@ export function ChatControls(): JSX.Element {
         disabled: !isScreenshotReady,
       },
       {
+        id: 'download-multiple-angles',
+        label: 'Download multiple angles',
+        group: 'Build',
+        icon: <ImageDown className="mr-2 size-4" />,
+        action: handleDownloadMultipleAngles,
+        disabled: !isScreenshotReady,
+      },
+      {
         id: 'copy-code',
         label: 'Copy code to clipboard',
         group: 'Code',
@@ -370,6 +454,7 @@ export function ChatControls(): JSX.Element {
       code,
       handleCopyCodeToClipboard,
       handleDownloadCode,
+      handleDownloadMultipleAngles,
     ],
   );
 

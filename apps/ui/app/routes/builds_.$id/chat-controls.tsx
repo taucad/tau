@@ -164,7 +164,7 @@ export function ChatControls(): JSX.Element {
           quality: 0.92,
         },
         zoomLevel: 1.8,
-        cameraAngles: [{ phi: 60, theta: 45 }],
+        cameraAngles: [{ phi: 60, theta: -45 }],
       },
       onSuccess(dataUrls) {
         const dataUrl = dataUrls[0];

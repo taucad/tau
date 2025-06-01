@@ -1,4 +1,3 @@
-import { LoaderPinwheel } from 'lucide-react';
 import { memo, useCallback, useEffect } from 'react';
 import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
@@ -10,6 +9,7 @@ import '~/routes/builds_.$id/chat-config.js';
 import { CodeEditor } from '~/components/code-editor.js';
 import { cn } from '~/utils/ui.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
+import { HammerAnimation } from '~/components/hammer-animation.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }) {
   const monaco = useMonaco();
@@ -64,8 +64,8 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
 
   return (
     <CodeEditor
-      loading={<LoaderPinwheel className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
-      className={cn('bg-background text-xs', className)}
+      loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
+      className={cn('bg-background', className)}
       defaultLanguage="typescript"
       value={code}
       onChange={handleCodeChange}

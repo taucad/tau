@@ -86,7 +86,6 @@ export function ChatContextActions({
         if (dataUrl) {
           console.log('Model screenshot completed successfully');
           addImage(dataUrl);
-          toast.success('Model screenshot added');
         } else {
           console.error('No screenshot data received');
           toast.error('Failed to capture model screenshot');
@@ -284,7 +283,6 @@ export function ChatContextActions({
 
         // Add the composite image to chat context
         addImage(compositeDataUrl);
-        toast.success('Added composite orthographic views');
         if (asPopoverMenu) {
           onClose?.();
         }

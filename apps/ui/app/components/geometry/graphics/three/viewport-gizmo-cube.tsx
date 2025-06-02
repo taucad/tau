@@ -237,8 +237,7 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
 
     // Configure the gizmo options
     const gizmoConfig: GizmoOptions = {
-      type: 'cube',
-      rounded: true,
+      type: 'rounded-cube',
       placement: 'bottom-right',
       size,
       font: {

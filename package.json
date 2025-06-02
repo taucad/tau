@@ -99,7 +99,7 @@
     "shiki": "^3.4.0",
     "sonner": "^1.7.4",
     "three": "^0.174.0",
-    "three-viewport-gizmo": "git://github.com/opensrchq/three-viewport-gizmo#8121c24a01bfcda01dfce58b369fcc74ecdef271",
+    "three-viewport-gizmo": "git://github.com/opensrchq/three-viewport-gizmo#6f0320abd7e3b5facfccb4c9442f07967703979d",
     "uint8array-extras": "^1.4.0",
     "vaul": "^1.1.2",
     "xstate": "^5.19.3",

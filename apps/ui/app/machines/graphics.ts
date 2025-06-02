@@ -118,7 +118,7 @@ function calculateGridSizes(
   const exponent = Math.floor(Math.log10(baseGridSize));
   const mantissa = baseGridSize / 10 ** exponent;
   const largeSize = mantissa < Math.sqrt(10) ? 10 ** exponent : 5 * 10 ** exponent;
-  const safeSize = Math.max(1, largeSize) * scalingFactor;
+  const safeSize = Math.max(1e-3, largeSize) * scalingFactor;
   const smallSize = safeSize / 10;
 
   // For metric: visual spacing stays the same, factor is just metadata for display

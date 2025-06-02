@@ -270,7 +270,6 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
     gizmo.addEventListener('end', handleEnd);
 
     gizmo.scale.multiplyScalar(0.7);
-    // Gizmo.add(roundedBoxMesh);
     gizmo.add(
       createAxesObject({
         axesSize: 2.1,

@@ -1,7 +1,7 @@
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
 import { useCallback, useState } from 'react';
 import type { JSX } from 'react';
-import { ChevronDown, File, LoaderCircle, Play } from 'lucide-react';
+import { File, LoaderCircle, Play, X } from 'lucide-react';
 import { CodeViewer } from '~/components/code-viewer.js';
 import { CopyButton } from '~/components/copy-button.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '~/components/ui/tooltip.js';
@@ -9,9 +9,45 @@ import { Button } from '~/components/ui/button.js';
 import { cn } from '~/utils/ui.js';
 import { AnimatedShinyText } from '~/components/magicui/animated-shiny-text.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
+import { useAiChat } from '~/components/chat/ai-chat-provider.js';
+
+function StatusIcon({
+  chatStatus,
+  toolStatus,
+}: {
+  readonly chatStatus: ReturnType<typeof useAiChat>['status'];
+  readonly toolStatus: ToolInvocationUIPart['toolInvocation']['state'];
+}): JSX.Element {
+  if (chatStatus === 'streaming' && ['partial-call', 'call'].includes(toolStatus)) {
+    return <LoaderCircle className="size-3 animate-spin" />;
+  }
+
+  if (['error', 'ready'].includes(chatStatus) && ['partial-call', 'call'].includes(toolStatus)) {
+    return <X className="size-3 text-destructive" />;
+  }
+
+  return <File className="size-3" />;
+}
+
+function Filename({
+  fileName,
+  chatStatus,
+  toolStatus,
+}: {
+  readonly fileName: string;
+  readonly chatStatus: ReturnType<typeof useAiChat>['status'];
+  readonly toolStatus: ToolInvocationUIPart['toolInvocation']['state'];
+}): JSX.Element {
+  if (chatStatus === 'streaming' && ['partial-call', 'call'].includes(toolStatus)) {
+    return <AnimatedShinyText>{fileName}</AnimatedShinyText>;
+  }
+
+  return <span>{fileName}</span>;
+}
 
 export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
+  const { status } = useAiChat();
 
   const setCode = useCallback((code: string) => {
     cadActor.send({ type: 'setCode', code });
@@ -25,8 +61,8 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
       };
       return (
         <div className="border-neutral-200 @container/code flex h-8 w-full flex-row items-center gap-1 overflow-hidden rounded-md border bg-neutral/10 pr-1 pl-3 text-xs text-foreground/50 text-muted-foreground">
-          <LoaderCircle className="size-3 animate-spin" />
-          <AnimatedShinyText>{fileName}</AnimatedShinyText>
+          <StatusIcon chatStatus={status} toolStatus={part.toolInvocation.state} />
+          <Filename fileName={fileName} chatStatus={status} toolStatus={part.toolInvocation.state} />
         </div>
       );
     }
@@ -41,8 +77,8 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
         <div className="border-neutral-200 @container/code overflow-hidden rounded-md border bg-neutral/10">
           <div className="sticky top-0 flex flex-row items-center justify-between py-1 pr-1 pl-3 text-foreground/50">
             <div className="flex flex-row items-center gap-1 text-xs text-muted-foreground">
-              <File className={cn('hidden size-3', part.toolInvocation.state === 'result' && 'block')} />
-              <span>{fileName}</span>
+              <StatusIcon chatStatus={status} toolStatus={part.toolInvocation.state} />
+              <Filename fileName={fileName} chatStatus={status} toolStatus={part.toolInvocation.state} />
             </div>
             <div className="flex flex-row gap-1">
               <CopyButton

@@ -43,11 +43,13 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
 
   const handleValidate = useCallback(() => {
     const errors = monaco?.editor.getModelMarkers({});
-    if (errors?.length) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison -- monaco has import issues. This is safe.
+    const filteredErrors = errors?.filter((error) => error.severity === 8);
+    if (filteredErrors?.length) {
       // Send errors to the CAD actor
       cadActor.send({
         type: 'setCodeErrors',
-        errors: errors.map((error) => ({
+        errors: filteredErrors.map((error) => ({
           startLineNumber: error.startLineNumber,
           startColumn: error.startColumn,
           message: error.message,

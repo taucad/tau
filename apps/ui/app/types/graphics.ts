@@ -21,6 +21,12 @@ export type CameraAngle = {
    * @default undefined (uses current camera angle)
    */
   phi?: number;
+
+  /**
+   * Label for the camera angle.
+   * @default `φ${phi}° θ${theta}°`
+   */
+  label?: string;
 };
 
 /**

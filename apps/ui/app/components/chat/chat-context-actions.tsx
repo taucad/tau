@@ -8,7 +8,7 @@ import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { toast } from '~/components/ui/sonner.js';
 import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
-import { screenshotRequestMachine } from '~/machines/screenshot-request.js';
+import { orthographicViews, screenshotRequestMachine } from '~/machines/screenshot-request.js';
 
 type ChatContextActionsProperties = {
   readonly addImage: (image: string) => void;
@@ -29,16 +29,6 @@ type ContextActionItem = {
   action: () => void;
   disabled?: boolean;
 };
-
-// Define the 6 orthographic views with their phi/theta angles
-const orthographicViews = [
-  { name: 'top', phi: 0, theta: 0 },
-  { name: 'bottom', phi: 180, theta: 0 },
-  { name: 'front', phi: 90, theta: 0 },
-  { name: 'back', phi: 90, theta: 180 },
-  { name: 'right', phi: 90, theta: 90 },
-  { name: 'left', phi: 90, theta: 270 },
-] as const;
 
 export function ChatContextActions({
   addImage,
@@ -100,37 +90,42 @@ export function ChatContextActions({
   }, [addImage, asPopoverMenu, onClose, screenshotActorRef]);
 
   const handleAddAllViewsScreenshots = useCallback(() => {
+    if (asPopoverMenu) {
+      onClose?.();
+    }
+
     // Use the screenshot machine for efficient multi-angle capture
     screenshotActorRef.send({
-      type: 'requestScreenshot',
+      type: 'requestCompositeScreenshot',
       options: {
         output: {
-          format: 'image/webp', // WebP is faster than PNG for composites
-          quality: 0.75, // Lower quality for smaller file sizes
+          format: 'image/webp', // Use PNG for transparent backgrounds
+          quality: 0.75,
+          isPreview: true,
         },
+        cameraAngles: orthographicViews,
         aspectRatio: 1, // Square images for better grid layout
         maxResolution: 800, // Reduced from 1000 for faster generation
         zoomLevel: 1.2, // Slightly lower zoom for smaller images
-        cameraAngles: orthographicViews.map((view) => ({ phi: view.phi, theta: view.theta })),
+        composite: {
+          enabled: true,
+          preferredRatio: { columns: 3, rows: 2 }, // Prefer 3x2 grid as requested
+          showLabels: true,
+          padding: 12, // Increase padding for better visual separation
+          labelHeight: 24,
+          backgroundColor: 'transparent',
+          dividerColor: '#666666', // Dark dividers for visibility on transparent background
+          dividerWidth: 1,
+        },
       },
-      async onSuccess(dataUrls) {
-        console.time('eventHandler');
-        try {
-          console.time('createScreenshotsArray');
-          // Create screenshots array from the dataUrls
-          const screenshots = dataUrls.map((dataUrl, index) => ({
-            name: orthographicViews[index].name,
-            dataUrl,
-          }));
-          console.timeEnd('createScreenshotsArray');
-
-          console.log('All screenshots completed, creating composite image');
-          await createCompositeImage(screenshots);
-          console.timeEnd('eventHandler');
-        } catch (error) {
-          console.error('Failed to process screenshots:', error);
-          toast.error('Failed to process all views screenshots');
-          console.timeEnd('eventHandler');
+      onSuccess(dataUrls) {
+        const compositeDataUrl = dataUrls[0];
+        if (compositeDataUrl) {
+          console.log('All views composite screenshot completed successfully');
+          addImage(compositeDataUrl);
+        } else {
+          console.error('No composite screenshot data received');
+          toast.error('Failed to capture all views screenshot');
         }
       },
       onError(error) {
@@ -138,159 +133,6 @@ export function ChatContextActions({
         toast.error(`All views screenshot failed: ${error}`);
       },
     });
-
-    // Function to create composite image from all screenshots
-    const createCompositeImage = async (screenshots: Array<{ name: string; dataUrl: string }>) => {
-      try {
-        console.time('createCompositeImage');
-        console.log('Starting composite image creation...');
-
-        // Create a canvas for the composite image
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        if (!context) {
-          throw new Error('Could not get canvas context');
-        }
-
-        console.time('loadImages');
-        // Load all images first
-        const images = await Promise.all(
-          screenshots.map(async (screenshot, index) => {
-            return new Promise<{ name: string; image: HTMLImageElement }>((resolve, reject) => {
-              const img = new globalThis.Image();
-              img.addEventListener('load', () => {
-                console.log(`Image ${index} loaded: ${img.width}x${img.height}`);
-                resolve({ name: screenshot.name, image: img });
-              });
-              img.addEventListener('error', reject);
-              img.src = screenshot.dataUrl;
-            });
-          }),
-        );
-        console.timeEnd('loadImages');
-
-        // Get original dimensions
-        const originalWidth = images[0].image.width;
-        const originalHeight = images[0].image.height;
-        console.log(`Original image dimensions: ${originalWidth}x${originalHeight}`);
-
-        // Scale down images if they're too large (optimize for composite view)
-        const maxImageSize = 600; // Reduced from 800px for faster operations
-        const scale = Math.min(1, maxImageSize / Math.max(originalWidth, originalHeight));
-        const imageWidth = Math.round(originalWidth * scale);
-        const imageHeight = Math.round(originalHeight * scale);
-
-        console.log(`Scaled image dimensions: ${imageWidth}x${imageHeight} (scale: ${scale})`);
-
-        // Calculate layout dimensions
-        const padding = Math.max(8, Math.round(imageWidth * 0.02)); // Reduced padding
-        const labelHeight = Math.max(16, Math.round(imageHeight * 0.06)); // Reduced label height
-        const cols = 3;
-        const rows = 2;
-
-        canvas.width = cols * imageWidth + (cols + 1) * padding;
-        canvas.height = rows * (imageHeight + labelHeight) + (rows + 1) * padding;
-
-        console.log(`Final canvas dimensions: ${canvas.width}x${canvas.height}`);
-
-        console.time('canvasOperations');
-
-        // Optimize canvas for performance
-        context.imageSmoothingEnabled = true;
-        context.imageSmoothingQuality = 'low'; // Use low quality for speed
-
-        // Set background color
-        context.fillStyle = '#ffffff';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-
-        // Set text properties (responsive font size)
-        const fontSize = Math.max(12, Math.round(imageHeight * 0.06));
-        context.fillStyle = '#000000';
-        context.font = `bold ${fontSize}px Arial`;
-        context.textAlign = 'center';
-
-        console.log(`Using font size: ${fontSize}px`);
-
-        // Draw images and labels in one pass for better performance
-        for (const [index, item] of images.entries()) {
-          const col = index % cols;
-          const row = Math.floor(index / cols);
-
-          const x = padding + col * (imageWidth + padding);
-          const y = padding + row * (imageHeight + labelHeight + padding);
-
-          // Draw the scaled image
-          context.drawImage(item.image, x, y, imageWidth, imageHeight);
-
-          // Draw the label below the image
-          const labelX = x + imageWidth / 2;
-          const labelY = y + imageHeight + labelHeight - 5;
-          context.fillText(item.name.toUpperCase(), labelX, labelY);
-        }
-
-        // Draw divider lines (simplified)
-        context.strokeStyle = '#cccccc';
-        context.lineWidth = 1; // Thinner lines for better performance
-
-        context.beginPath();
-        // Vertical dividers (between columns)
-        for (let col = 1; col < cols; col++) {
-          const dividerX = padding + col * (imageWidth + padding) - padding / 2;
-          context.moveTo(dividerX, padding);
-          context.lineTo(dividerX, canvas.height - padding);
-        }
-
-        // Horizontal divider (between rows)
-        const dividerY = padding + (imageHeight + labelHeight + padding) - padding / 2;
-        context.moveTo(padding, dividerY);
-        context.lineTo(canvas.width - padding, dividerY);
-
-        context.stroke();
-        console.timeEnd('canvasOperations');
-
-        console.time('blobGeneration');
-        // Convert canvas to blob with optimized settings for speed
-        const blob = await new Promise<Blob | undefined>((resolve) => {
-          canvas.toBlob(
-            (result) => {
-              resolve(result ?? undefined);
-            },
-            'image/webp', // Use WebP for final output too
-            0.75, // Reduced from 0.88 for faster generation
-          );
-        });
-
-        if (!blob) {
-          throw new Error('Failed to create blob from composite canvas');
-        }
-
-        console.timeEnd('blobGeneration');
-
-        console.time('dataUrlConversion');
-        // Convert blob to data URL
-        const compositeDataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.addEventListener('load', () => {
-            resolve(reader.result as string);
-          });
-          reader.addEventListener('error', reject);
-          reader.readAsDataURL(blob);
-        });
-        console.timeEnd('dataUrlConversion');
-
-        console.timeEnd('createCompositeImage');
-        console.log(`Composite image size: ${Math.round(blob.size / 1024)}KB`);
-
-        // Add the composite image to chat context
-        addImage(compositeDataUrl);
-        if (asPopoverMenu) {
-          onClose?.();
-        }
-      } catch (error) {
-        console.error('Failed to create composite image:', error);
-        toast.error('Failed to create composite image');
-      }
-    };
   }, [addImage, asPopoverMenu, onClose, screenshotActorRef]);
 
   const handleAddCode = useCallback(() => {

@@ -83,4 +83,67 @@ export type ScreenshotOptions = {
      */
     isPreview?: boolean;
   };
+  composite?: CompositeScreenshotOptions;
+};
+
+export type CompositeScreenshotOptions = {
+  /**
+   * Whether to enable the composite screenshot.
+   * @default true
+   */
+  enabled: boolean;
+
+  /**
+   * Maximum number of columns in the composite screenshot.
+   * @default undefined
+   */
+  maxColumns?: number;
+
+  /**
+   * Maximum number of rows in the composite screenshot.
+   * @default undefined
+   */
+  maxRows?: number;
+
+  /**
+   * Preferred ratio of columns to rows in the composite screenshot.
+   * @default undefined
+   */
+  preferredRatio?: { columns: number; rows: number };
+
+  /**
+   * Padding between the images in the composite screenshot in pixels.
+   * @default undefined
+   */
+  padding?: number;
+
+  /**
+   * Height of the labels in the composite screenshot in pixels.
+   * @default undefined
+   */
+  labelHeight?: number;
+
+  /**
+   * Whether to show the labels in the composite screenshot.
+   * @default true
+   */
+  showLabels?: boolean;
+
+  /**
+   * Background color of the composite screenshot.
+   * @default 'transparent'
+   */
+  backgroundColor?: string | 'transparent';
+
+  /**
+   * Color of the dividers in the composite screenshot.
+   * @default 'transparent'
+   */
+  dividerColor?: string | 'transparent';
+
+  /**
+   * Width of the dividers in the composite screenshot in pixels.
+   * @default 1
+   */
+  dividerWidth?: number;
 };

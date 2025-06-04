@@ -55,6 +55,11 @@ export type GraphicsEvent =
   | { type: 'controlsInteractionEnd' }
   // Screenshot events
   | { type: 'takeScreenshot'; options: ScreenshotOptions; requestId: string }
+  | {
+      type: 'takeCompositeScreenshot';
+      options: ScreenshotOptions;
+      requestId: string;
+    }
   | { type: 'screenshotCompleted'; dataUrls: string[]; requestId: string }
   | { type: 'screenshotFailed'; error: string; requestId: string }
   // Capability registration
@@ -282,8 +287,10 @@ export const graphicsMachine = setup({
 
       // If there's a pending screenshot request, send it now that capability is registered
       if (context.activeScreenshotRequest) {
+        const isComposite = 'composite' in context.activeScreenshotRequest.options;
+
         enqueue.sendTo(event.actorRef, {
-          type: 'capture',
+          type: isComposite ? 'captureComposite' : 'capture',
           options: context.activeScreenshotRequest.options,
           requestId: context.activeScreenshotRequest.requestId,
         });
@@ -322,6 +329,26 @@ export const graphicsMachine = setup({
       if (context.screenshotCapability) {
         enqueue.sendTo(context.screenshotCapability, {
           type: 'capture',
+          options: event.options,
+          requestId: event.requestId,
+        });
+      }
+    }),
+
+    requestCompositeScreenshot: enqueueActions(({ enqueue, event, context }) => {
+      assertEvent(event, 'takeCompositeScreenshot');
+
+      enqueue.assign({
+        activeScreenshotRequest: {
+          requestId: event.requestId,
+          options: event.options,
+        },
+      });
+
+      // Only send to capability if it's registered, otherwise it will be sent when capability registers
+      if (context.screenshotCapability) {
+        enqueue.sendTo(context.screenshotCapability, {
+          type: 'captureComposite',
           options: event.options,
           requestId: event.requestId,
         });
@@ -441,6 +468,9 @@ export const graphicsMachine = setup({
         // Screenshot events
         takeScreenshot: {
           actions: 'requestScreenshot',
+        },
+        takeCompositeScreenshot: {
+          actions: 'requestCompositeScreenshot',
         },
         screenshotCompleted: {
           actions: 'completeScreenshot',

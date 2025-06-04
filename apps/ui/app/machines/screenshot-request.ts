@@ -1,6 +1,6 @@
 import { setup, assertEvent, enqueueActions, assign, fromCallback } from 'xstate';
 import type { ActorRefFrom, AnyActorRef } from 'xstate';
-import type { ScreenshotOptions } from '~/types/graphics.js';
+import type { ScreenshotOptions, CameraAngle } from '~/types/graphics.js';
 import type { graphicsMachine } from '~/machines/graphics.js';
 
 // Context type
@@ -11,6 +11,7 @@ type ScreenshotRequestContext = {
     options: ScreenshotOptions;
     onSuccess?: (dataUrls: string[]) => void;
     onError?: (error: string) => void;
+    isComposite?: boolean;
   };
   error?: string;
 };
@@ -19,6 +20,12 @@ type ScreenshotRequestContext = {
 type ScreenshotRequestEvent =
   | {
       type: 'requestScreenshot';
+      options: ScreenshotOptions;
+      onSuccess?: (dataUrls: string[]) => void;
+      onError?: (error: string) => void;
+    }
+  | {
+      type: 'requestCompositeScreenshot';
       options: ScreenshotOptions;
       onSuccess?: (dataUrls: string[]) => void;
       onError?: (error: string) => void;
@@ -32,6 +39,32 @@ type ScreenshotRequestInput = {
   graphicsRef: ActorRefFrom<typeof graphicsMachine>;
 };
 
+// Predefined orthographic views for easy reference
+export const orthographicViews = [
+  { label: 'front', phi: 90, theta: 270 },
+  { label: 'back', phi: 90, theta: 90 },
+  { label: 'right', phi: 90, theta: 0 },
+  { label: 'left', phi: 90, theta: 180 },
+  { label: 'top', phi: 0, theta: 0 },
+  { label: 'bottom', phi: 180, theta: 0 },
+  { label: 'front-left', phi: 90, theta: 225 },
+  { label: 'front-right', phi: 90, theta: 315 },
+  { label: 'front-top', phi: 45, theta: 270 },
+  { label: 'front-bottom', phi: 135, theta: 270 },
+  { label: 'back-left', phi: 90, theta: 135 },
+  { label: 'back-right', phi: 90, theta: 225 },
+  { label: 'back-top', phi: 45, theta: 90 },
+  { label: 'back-bottom', phi: 135, theta: 90 },
+  { label: 'front-top-left', phi: 45, theta: 315 },
+  { label: 'front-top-right', phi: 45, theta: 45 },
+  { label: 'front-bottom-left', phi: 135, theta: 315 },
+  { label: 'front-bottom-right', phi: 135, theta: 45 },
+  { label: 'back-top-left', phi: 45, theta: 225 },
+  { label: 'back-top-right', phi: 45, theta: 135 },
+  { label: 'back-bottom-left', phi: 135, theta: 225 },
+  { label: 'back-bottom-right', phi: 135, theta: 135 },
+] satisfies readonly CameraAngle[];
+
 /**
  * Screenshot Request Machine
  *
@@ -39,6 +72,7 @@ type ScreenshotRequestInput = {
  * Manages the request lifecycle and provides callback-based results.
  * Eliminates duplicated request logic across components.
  * Handles its own subscriptions to graphics actor events.
+ * Supports composite screenshot requests with optimal camera angle generation.
  */
 export const screenshotRequestMachine = setup({
   types: {
@@ -94,6 +128,7 @@ export const screenshotRequestMachine = setup({
           options: event.options,
           onSuccess: event.onSuccess,
           onError: event.onError,
+          isComposite: false,
         },
         error: undefined,
       });
@@ -101,6 +136,32 @@ export const screenshotRequestMachine = setup({
       // Send request to graphics actor
       enqueue.sendTo(context.graphicsRef, {
         type: 'takeScreenshot',
+        requestId,
+        options: event.options,
+      });
+    }),
+
+    sendCompositeRequest: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'requestCompositeScreenshot');
+
+      const requestId = crypto.randomUUID();
+
+      // Store request details in context
+      enqueue.assign({
+        currentRequest: {
+          requestId,
+          options: event.options,
+          onSuccess: event.onSuccess,
+          onError: event.onError,
+          isComposite: true,
+        },
+        error: undefined,
+      });
+
+      // Send composite request directly to graphics actor
+      // The graphics actor will handle forwarding to its screenshot capability
+      enqueue.sendTo(context.graphicsRef, {
+        type: 'takeCompositeScreenshot',
         requestId,
         options: event.options,
       });
@@ -165,6 +226,10 @@ export const screenshotRequestMachine = setup({
           target: 'requesting',
           actions: 'sendRequest',
         },
+        requestCompositeScreenshot: {
+          target: 'requesting',
+          actions: 'sendCompositeRequest',
+        },
         // Handle events from graphics listener
         screenshotCompleted: {
           actions: 'handleSuccess',
@@ -191,6 +256,9 @@ export const screenshotRequestMachine = setup({
         // Allow new requests to override current one
         requestScreenshot: {
           actions: 'sendRequest',
+        },
+        requestCompositeScreenshot: {
+          actions: 'sendCompositeRequest',
         },
       },
     },

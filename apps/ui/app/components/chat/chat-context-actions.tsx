@@ -121,7 +121,6 @@ export function ChatContextActions({
       onSuccess(dataUrls) {
         const compositeDataUrl = dataUrls[0];
         if (compositeDataUrl) {
-          console.log('All views composite screenshot completed successfully');
           addImage(compositeDataUrl);
         } else {
           console.error('No composite screenshot data received');

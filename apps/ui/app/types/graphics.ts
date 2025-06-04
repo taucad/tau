@@ -17,7 +17,7 @@ export type CameraAngle = {
   theta?: number;
 
   /**
-   * Phi angle of the camera. This is the angle from the top of the scene.
+   * Phi angle of the camera. This is the angle from the XY plane.
    * @default undefined (uses current camera angle)
    */
   phi?: number;

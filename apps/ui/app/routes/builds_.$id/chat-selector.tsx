@@ -199,6 +199,9 @@ export function ChatSelector(): ReactNode {
               popoverContentClassName="w-[300px]"
               placeholder="Search chats"
               searchPlaceHolder="Search chats..."
+              popoverProperties={{
+                align: 'start',
+              }}
               onSelect={(chatId) => {
                 setActiveChat(chatId);
               }}

@@ -75,6 +75,7 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
       theme={theme === Theme.DARK ? 'github-dark' : 'github-light'}
       defaultLanguage="typescript"
       options={{
+        tabSize: 2,
         minimap: { enabled: false },
         // Disable horizontal scroll beyond last line
         scrollBeyondLastColumn: 1,

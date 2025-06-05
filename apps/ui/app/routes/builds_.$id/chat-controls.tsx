@@ -263,7 +263,7 @@ export function ChatControls(): JSX.Element {
             type: 'requestScreenshot',
             options: {
               output: {
-                format: 'image/png',
+                format: 'image/webp',
                 quality: 0.2,
                 isPreview: true,
               },

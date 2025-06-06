@@ -27,7 +27,7 @@ const createWorkerActor = fromPromise<{ type: 'kernelInitialized' }, { context: 
     const wrappedWorker = wrap<BuilderWorkerInterface>(worker);
 
     // Initialize the worker with the default exception handling mode
-    await wrappedWorker.initialize(false);
+    await wrappedWorker.initialize(true);
 
     // Store references to worker and wrappedWorker
     context.worker = worker;

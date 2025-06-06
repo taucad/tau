@@ -25,6 +25,32 @@ const validateParameters = (parameters: Record<string, unknown>, defaultParamete
   return Object.fromEntries(Object.entries(parameters).filter(([key]) => allowedParameters.includes(key)));
 };
 
+/**
+ * Calculate appropriate step value for slider based on the default parameter value
+ * Uses logarithmic scaling to ensure precision for values of different magnitudes
+ *
+ * @param defaultValue - The default value of the parameter
+ * @returns The calculated step value
+ */
+const calculateSliderStep = (defaultValue: number): number => {
+  if (defaultValue === 0) return 0.01;
+
+  const absoluteValue = Math.abs(defaultValue);
+
+  // Define step thresholds based on order of magnitude
+  if (absoluteValue >= 0.01) return 0.01;
+  if (absoluteValue >= 0.001) return 0.001;
+  if (absoluteValue >= 0.0001) return 0.0001;
+  if (absoluteValue >= 0.000_01) return 0.000_01;
+
+  // For very small values, continue the pattern
+  const orderOfMagnitude = Math.floor(Math.log10(absoluteValue));
+  const step = 10 ** orderOfMagnitude;
+
+  // Ensure step is never larger than 1 and never smaller than a reasonable minimum
+  return Math.min(1, Math.max(step, 0.000_001));
+};
+
 export const ChatParameters = memo(function () {
   const parameters = useSelector(cadActor, (state) => state.context.parameters);
   const defaultParameters = useSelector(cadActor, (state) => state.context.defaultParameters);
@@ -192,7 +218,7 @@ export const ChatParameters = memo(function () {
               value={[numericValue]}
               min={0}
               max={(defaultParameters[key] as number) * 4 || 100}
-              step={1}
+              step={calculateSliderStep(defaultParameters[key] as number)}
               className={cn(
                 'flex-1',
                 '[&_[data-slot="slider-track"]]:h-4',

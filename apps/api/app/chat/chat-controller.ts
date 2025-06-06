@@ -2,14 +2,19 @@ import { Body, Controller, Post, Req, Res } from '@nestjs/common';
 import { convertToCoreMessages } from 'ai';
 import type { UIMessage } from 'ai';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { generatePrefixedId, idPrefix } from '../utils/id.js';
-import { ToolService, toolChoiceFromToolName } from '../tools/tool-service.js';
-import type { ToolChoiceWithCategory } from '../tools/tool-service.js';
-import { ChatService } from './chat-service.js';
-import { LangGraphAdapter } from './utils/langgraph-adapter.js';
-import { convertAiSdkMessagesToLangchainMessages } from './utils/convert-messages.js';
+import { HumanMessage } from '@langchain/core/messages';
+import { generatePrefixedId, idPrefix } from '~/utils/id.js';
+import { ToolService, toolChoiceFromToolName } from '~/tools/tool-service.js';
+import type { ToolChoiceWithCategory } from '~/tools/tool-service.js';
+import { ChatService } from '~/chat/chat-service.js';
+import { LangGraphAdapter } from '~/chat/utils/langgraph-adapter.js';
+import { convertAiSdkMessagesToLangchainMessages } from '~/chat/utils/convert-messages.js';
 
 export type CreateChatBody = {
+  code: string;
+  codeErrors: string;
+  kernelError: string;
+  screenshot: string;
   messages: Array<
     UIMessage & {
       role: 'user';
@@ -32,6 +37,7 @@ export class ChatController {
     @Res() response: FastifyReply,
     @Req() request: FastifyRequest,
   ): Promise<void> {
+    console.log('body', body);
     const coreMessages = convertToCoreMessages(body.messages);
     const lastHumanMessage = body.messages.findLast((message) => message.role === 'user');
 
@@ -67,9 +73,40 @@ export class ChatController {
       }
     });
 
+    const resultMessage = new HumanMessage({
+      content: [
+        {
+          type: 'text',
+          text: `The following message is a result of a 3D modeling task. If code errors or kernel errors are present, use this information to fix the errors.
+  # Code Errors
+  ${body.codeErrors || '- No code errors'}
+  
+  # Kernel Errors
+  ${body.kernelError || '- No kernel errors'}
+  
+  # Code
+  ${body.code || 'function main(_, params) {}'}
+  `,
+        },
+        ...(body.screenshot
+          ? [
+              {
+                type: 'image_url',
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
+                image_url: {
+                  url: body.screenshot,
+                },
+              },
+            ]
+          : []),
+      ],
+    });
+
+    console.log('resultMessage', resultMessage);
+
     const eventStream = graph.streamEvents(
       {
-        messages: langchainMessages,
+        messages: [...langchainMessages, resultMessage],
       },
       {
         streamMode: 'values',

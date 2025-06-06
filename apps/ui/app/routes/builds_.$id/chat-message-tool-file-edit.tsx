@@ -10,6 +10,7 @@ import { cn } from '~/utils/ui.js';
 import { AnimatedShinyText } from '~/components/magicui/animated-shiny-text.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { useAiChat } from '~/components/chat/ai-chat-provider.js';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '~/components/ui/hover-card.js';
 
 function StatusIcon({
   chatStatus,
@@ -73,6 +74,9 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
         content?: string;
         fileName?: string;
       };
+
+      const result = part.toolInvocation.state === 'result' ? part.toolInvocation.result : undefined;
+
       return (
         <div className="border-neutral-200 @container/code overflow-hidden rounded-md border bg-neutral/10">
           <div className="sticky top-0 flex flex-row items-center justify-between py-1 pr-1 pl-3 text-foreground/50">
@@ -103,6 +107,20 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
                 <TooltipContent>Apply code</TooltipContent>
               </Tooltip>
             </div>
+          </div>
+          <div className="border-t text-xs">
+            {result?.codeErrors ? <div className="text-destructive">{result.codeErrors}</div> : null}
+            {result?.kernelError ? <div className="text-destructive">{result.kernelError}</div> : null}
+            {result?.screenshot ? (
+              <HoverCard>
+                <HoverCardTrigger asChild>
+                  <img src={result.screenshot} alt="Screenshot" />
+                </HoverCardTrigger>
+                <HoverCardContent asChild side="top" align="start" className="w-96">
+                  <img src={result.screenshot} alt="Screenshot" />
+                </HoverCardContent>
+              </HoverCard>
+            ) : null}
           </div>
           {/* <div className={cn('relative max-h-32', isExpanded ? 'max-h-none' : 'overflow-y-auto')}>
             <div className={cn('leading-0')}>

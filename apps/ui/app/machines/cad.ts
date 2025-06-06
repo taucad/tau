@@ -8,6 +8,7 @@ import type { graphicsMachine } from '~/machines/graphics.js';
 // Interface defining the context for the CAD machine
 export type CadContext = {
   code: string;
+  screenshot: string | undefined;
   parameters: Record<string, unknown>;
   defaultParameters: Record<string, unknown>;
   shapes: Shape[];
@@ -31,7 +32,7 @@ export type CadContext = {
 type CadEvent =
   | { type: 'initializeKernel' }
   | { type: 'initializeModel'; code: string; parameters: Record<string, unknown> }
-  | { type: 'setCode'; code: string }
+  | { type: 'setCode'; code: string; screenshot?: string }
   | { type: 'setParameters'; parameters: Record<string, unknown> }
   | { type: 'setCodeErrors'; errors: CadContext['codeErrors'] }
   | { type: 'exportGeometry'; format: 'stl' | 'stl-binary' | 'step' | 'step-assembly' }
@@ -96,6 +97,10 @@ export const cadMachine = setup({
       code({ event }) {
         assertEvent(event, 'setCode');
         return event.code;
+      },
+      screenshot({ event }) {
+        assertEvent(event, 'setCode');
+        return event.screenshot;
       },
     }),
     setParameters: assign({
@@ -165,15 +170,16 @@ export const cadMachine = setup({
         parentRef: self,
       });
     }),
-    initializeModel: assign({
-      code({ event }) {
-        assertEvent(event, 'initializeModel');
-        return event.code;
-      },
-      parameters({ event }) {
-        assertEvent(event, 'initializeModel');
-        return event.parameters;
-      },
+    initializeModel: assign(({ event }) => {
+      assertEvent(event, 'initializeModel');
+      return {
+        code: event.code,
+        parameters: event.parameters,
+        codeErrors: [],
+        kernelError: undefined,
+        shapes: [],
+        exportedBlob: undefined,
+      };
     }),
   },
   guards: {
@@ -191,6 +197,7 @@ export const cadMachine = setup({
   }),
   context: ({ input, spawn }) => ({
     code: '',
+    screenshot: undefined,
     parameters: {},
     defaultParameters: {},
     shapes: [],

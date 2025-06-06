@@ -55,9 +55,6 @@ export function ChatContextActions({
       onClose?.();
     }
 
-    console.time('modelScreenshot');
-    console.log('Starting model screenshot capture...');
-
     // Use the screenshot machine for simplified request handling
     screenshotActorRef.send({
       type: 'requestScreenshot',
@@ -71,10 +68,8 @@ export function ChatContextActions({
         zoomLevel: 1.4, // Optimized zoom level
       },
       onSuccess(dataUrls) {
-        console.timeEnd('modelScreenshot');
         const dataUrl = dataUrls[0];
         if (dataUrl) {
-          console.log('Model screenshot completed successfully');
           addImage(dataUrl);
         } else {
           console.error('No screenshot data received');
@@ -82,7 +77,6 @@ export function ChatContextActions({
         }
       },
       onError(error) {
-        console.timeEnd('modelScreenshot');
         console.error('Screenshot failed:', error);
         toast.error(`Screenshot failed: ${error}`);
       },
@@ -103,7 +97,7 @@ export function ChatContextActions({
           quality: 0.75,
           isPreview: true,
         },
-        cameraAngles: orthographicViews,
+        cameraAngles: orthographicViews.slice(0, 6),
         aspectRatio: 1, // Square images for better grid layout
         maxResolution: 800, // Reduced from 1000 for faster generation
         zoomLevel: 1.2, // Slightly lower zoom for smaller images

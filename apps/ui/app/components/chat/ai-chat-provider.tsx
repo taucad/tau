@@ -9,12 +9,14 @@
  */
 
 import { useChat } from '@ai-sdk/react';
-import { createContext, useContext, useEffect, useRef, useMemo } from 'react';
+import { useSelector } from '@xstate/react';
+import { createContext, useContext, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { JSX } from 'react';
+import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 
 type UseChatArgs = NonNullable<Parameters<typeof useChat>[0]>;
 
-const handlerNames = ['onFinish', 'onError', 'onResponse'] as const;
+const handlerNames = ['onFinish', 'onError', 'onResponse'] as const satisfies Array<keyof UseChatArgs>;
 export type UseChatHandlerName = (typeof handlerNames)[number];
 
 export type UseChatHandlers = {
@@ -112,6 +114,24 @@ export function AiChatProvider({
 
   const chat = useChat({
     ...value,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- experimental
+    experimental_prepareRequestBody(requestBody) {
+      const cadActorState = cadActor.getSnapshot();
+      const feedback = {
+        code: cadActorState.context.code,
+        codeErrors: cadActorState.context.codeErrors,
+        kernelError: cadActorState.context.kernelError,
+        // Screenshot: cadActorState.context.screenshot,
+      };
+
+      console.log('feedback', feedback);
+
+      console.log('Generating request body...', new Date().toISOString());
+      return {
+        ...requestBody,
+        ...feedback,
+      };
+    },
     onError(...args) {
       for (const handler of handlers.current.onError) {
         handler(...args);

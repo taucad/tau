@@ -1,7 +1,8 @@
 import { Link, useParams } from 'react-router';
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
+import { useActorRef } from '@xstate/react';
 import { PackagePlus } from 'lucide-react';
 // eslint-disable-next-line no-restricted-imports -- allowed for router types
 import type { Route } from './+types/route.js';
@@ -14,6 +15,8 @@ import { AiChatProvider, useAiChat } from '~/components/chat/ai-chat-provider.js
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { BuildNameEditor } from '~/routes/builds_.$id/build-name-editor.js';
+import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
+import { orthographicViews, screenshotRequestMachine } from '~/machines/screenshot-request.js';
 
 export const handle: Handle = {
   breadcrumb(match) {
@@ -49,57 +52,109 @@ function Chat() {
   const { id } = useParams();
   const { build, isLoading, activeChat, activeChatId, setChatMessages, setCodeParameters } = useBuild();
 
-  const { setMessages, messages, reload, status, addToolResult } = useAiChat({
+  // Create screenshot request machine instance
+  const screenshotActorRef = useActorRef(screenshotRequestMachine, {
+    input: { graphicsRef: graphicsActor },
+  });
+
+  // Function to capture screenshots
+  const captureScreenshots = useCallback(async (): Promise<{
+    compositeScreenshot?: string;
+  }> => {
+    return new Promise((resolve) => {
+      // Capture composite screenshot (all views)
+      screenshotActorRef.send({
+        type: 'requestCompositeScreenshot',
+        options: {
+          output: {
+            format: 'image/webp', // Use PNG for transparent backgrounds
+            quality: 0.75,
+            isPreview: true,
+          },
+          cameraAngles: orthographicViews.slice(0, 6),
+          aspectRatio: 1, // Square images for better grid layout
+          maxResolution: 800, // Reduced from 1000 for faster generation
+          zoomLevel: 1.2, // Slightly lower zoom for smaller images
+          composite: {
+            enabled: true,
+            preferredRatio: { columns: 3, rows: 2 }, // Prefer 3x2 grid as requested
+            showLabels: true,
+            padding: 12, // Increase padding for better visual separation
+            labelHeight: 24,
+            backgroundColor: 'transparent',
+            dividerColor: '#666666', // Dark dividers for visibility on transparent background
+            dividerWidth: 1,
+          },
+        },
+        async onSuccess(dataUrls) {
+          const compositeDataUrl = dataUrls[0];
+          if (compositeDataUrl) {
+            resolve({ compositeScreenshot: compositeDataUrl });
+          } else {
+            console.error('No composite screenshot data received');
+            resolve({ compositeScreenshot: undefined });
+          }
+        },
+        onError(error) {
+          console.error('Composite screenshot failed:', error);
+          resolve({ compositeScreenshot: undefined });
+        },
+      });
+    });
+  }, [screenshotActorRef]);
+
+  const { setMessages, messages, reload, status } = useAiChat({
     onToolCall: new Map([
       [
         'file_edit',
-        ({ toolCall }) => {
+        async ({ toolCall }) => {
+          console.log('Capturing screenshots...');
+          const screenshots = await captureScreenshots();
+          console.log('Captured screenshots:', screenshots);
+
           const toolCallArgs = toolCall.args as { content: string };
           // Instead of setting both, we just set the code in the CAD actor
           // which will handle all downstream updates
-          cadActor.send({ type: 'setCode', code: toolCallArgs.content });
+          cadActor.send({ type: 'setCode', code: toolCallArgs.content, screenshot: screenshots.compositeScreenshot });
 
-          // We now track the CAD actor state to determine success/failure
-          const subscription = cadActor.subscribe((state) => {
-            // Check if processing completed
-            if (state.value === 'ready' || state.value === 'error') {
-              // Format CAD and Monaco errors for AI
-              const errorMessages = [];
+          // Return a Promise that resolves when CAD actor processing is complete
+          return new Promise((resolve) => {
+            const subscription = cadActor.subscribe((state) => {
+              // Check if processing completed
+              if (state.value === 'ready' || state.value === 'error') {
+                // Format CAD and Monaco errors for AI
+                const errorMessages = [];
 
-              // Add CAD kernel errors if any
-              if (state.context.kernelError) {
-                errorMessages.push(`CAD Error: ${state.context.kernelError}`);
-              }
-
-              // Add Monaco/TS errors if any
-              if (state.context.codeErrors && state.context.codeErrors.length > 0) {
-                for (const error of state.context.codeErrors) {
-                  errorMessages.push(`Line ${error.startLineNumber}: ${error.message}`);
+                // Add CAD kernel errors if any
+                if (state.context.kernelError) {
+                  errorMessages.push(`CAD Error: ${state.context.kernelError}`);
                 }
+
+                // Add Monaco/TS errors if any
+                if (state.context.codeErrors && state.context.codeErrors.length > 0) {
+                  for (const error of state.context.codeErrors) {
+                    errorMessages.push(`Line ${error.startLineNumber}: ${error.message}`);
+                  }
+                }
+
+                // Prepare the result
+                const result = {
+                  success: state.value === 'ready' && errorMessages.length === 0,
+                  // Screenshot: screenshots.compositeScreenshot,
+                  message:
+                    errorMessages.length > 0
+                      ? `Code updated but has errors:\n${errorMessages.join('\n')}`
+                      : 'Code updated successfully',
+                };
+
+                // Clean up the subscription
+                subscription.unsubscribe();
+
+                // Resolve the Promise with the result
+                resolve(result);
               }
-
-              // Prepare the result
-              const result = {
-                success: state.value === 'ready' && errorMessages.length === 0,
-                message:
-                  errorMessages.length > 0
-                    ? `Code updated but has errors:\n${errorMessages.join('\n')}`
-                    : 'Code updated successfully',
-              };
-
-              // Send the result to the AI chat
-              addToolResult({
-                toolCallId: toolCall.toolCallId,
-                result,
-              });
-
-              // Clean up the subscription
-              subscription.unsubscribe();
-            }
+            });
           });
-
-          // Return a pending response to indicate we're handling it asynchronously
-          return { pending: true };
         },
       ],
     ]),

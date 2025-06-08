@@ -4,6 +4,7 @@ import { z } from 'zod';
 const environmentSchema = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  DATABASE_URL: z.string().default('postgres://dev_user:dev_password@localhost:5432/cad_rag'),
   PORT: z.string().default('3000'),
   OPENAI_API_KEY: z.string(),
   ANTHROPIC_API_KEY: z.string(),

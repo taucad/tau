@@ -71,7 +71,7 @@ export class ChatController {
     }
 
     const langchainMessages = convertAiSdkMessagesToLangchainMessages(body.messages, coreMessages);
-    const graph = this.chatService.createGraph(modelId, selectedToolChoice);
+    const graph = await this.chatService.createGraph(modelId, selectedToolChoice);
 
     // Abort the request if the client disconnects
     const abortController = new AbortController();

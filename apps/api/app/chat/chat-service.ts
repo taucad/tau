@@ -9,7 +9,7 @@ import type { ToolChoiceWithCategory } from '~/tools/tool-service.js';
 import { ToolService } from '~/tools/tool-service.js';
 import { nameGenerationSystemPrompt } from '~/chat/prompts/chat-prompt-name.js';
 import type { LangGraphAdapterCallbacks } from '~/chat/utils/langgraph-adapter.js';
-import { cadSystemPrompt } from '~/chat/prompts/chat-prompt-replicad.js';
+import { getCadSystemPrompt } from '~/chat/prompts/chat-prompt-replicad.js';
 
 @Injectable()
 export class ChatService {
@@ -27,7 +27,7 @@ export class ChatService {
   }
 
   // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- This is a complex generic that can be left inferred.
-  public createGraph(modelId: string, selectedToolChoice: ToolChoiceWithCategory) {
+  public async createGraph(modelId: string, selectedToolChoice: ToolChoiceWithCategory, userMessage?: string) {
     const { tools } = this.toolService.getTools(selectedToolChoice);
 
     const researchTools = [tools.web_search, tools.web_browser];
@@ -47,6 +47,7 @@ export class ChatService {
 
     // Create a general agent for handling direct responses
     const cadTools = [tools.file_edit];
+    const cadSystemPrompt = await getCadSystemPrompt(userMessage);
     const cadAgent = createReactAgent({
       llm: cadSupport?.tools === false ? cadModel : (cadModel.bindTools?.(cadTools) ?? cadModel),
       tools: cadTools,
@@ -113,7 +114,7 @@ Your goal is to ensure users receive expert-level assistance by connecting them 
         ]);
       },
       onEvent(parameters) {
-        console.log('onEvent', parameters.event);
+        // Console.log('onEvent', parameters.event);
       },
       onError(error) {
         if (error instanceof Error && error.message === 'Aborted') {

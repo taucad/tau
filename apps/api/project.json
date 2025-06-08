@@ -26,6 +26,41 @@
       "options": {
         "command": "fly launch --config ./apps/api/fly.toml"
       }
+    },
+    "import-replicad-chunks": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx apps/api/app/scripts/import-replicad-chunks.ts",
+        "cwd": "."
+      }
+    },
+    "build-replicad-chunks": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx apps/api/app/scripts/build-replicad-chunks.ts",
+        "cwd": "."
+      }
+    },
+    "test-embeddings": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx apps/api/app/scripts/test-embeddings.ts",
+        "cwd": "."
+      }
+    },
+    "test-database": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx apps/api/app/scripts/test-database.ts",
+        "cwd": "."
+      }
+    },
+    "test-rag": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx apps/api/app/scripts/test-rag.ts",
+        "cwd": "."
+      }
     }
   }
 }

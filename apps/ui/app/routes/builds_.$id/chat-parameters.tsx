@@ -38,6 +38,8 @@ const calculateSliderStep = (defaultValue: number): number => {
   const absoluteValue = Math.abs(defaultValue);
 
   // Define step thresholds based on order of magnitude
+  if (absoluteValue >= 1) return 1;
+  if (absoluteValue >= 0.1) return 0.1;
   if (absoluteValue >= 0.01) return 0.01;
   if (absoluteValue >= 0.001) return 0.001;
   if (absoluteValue >= 0.0001) return 0.0001;

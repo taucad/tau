@@ -73,7 +73,6 @@ function ErrorSection({
       <CollapsibleContent className="border-t">
         <div className="space-y-2 px-2 py-2 text-xs">
           {errors.map((error, index) => {
-            console.log(error, typeof error);
             // Handle both CodeError objects and string errors
             const isCodeError = typeof error === 'object' && 'startLineNumber' in error;
             const message = isCodeError ? error.message : error;
@@ -222,34 +221,38 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
                 ) : null}
 
                 {result.kernelError ? (
-                  <ErrorSection
-                    isInitiallyOpen
-                    type="kernel"
-                    errors={
-                      result.kernelError
-                        ? [
-                            {
-                              startLineNumber: 0,
-                              startColumn: 0,
-                              message: result.kernelError,
-                              endLineNumber: 0,
-                              endColumn: 0,
-                            },
-                          ]
-                        : []
-                    }
-                    icon={Bug}
-                  />
+                  <div className="border-t">
+                    <ErrorSection
+                      isInitiallyOpen
+                      type="kernel"
+                      errors={
+                        result.kernelError
+                          ? [
+                              {
+                                startLineNumber: 0,
+                                startColumn: 0,
+                                message: result.kernelError,
+                                endLineNumber: 0,
+                                endColumn: 0,
+                              },
+                            ]
+                          : []
+                      }
+                      icon={Bug}
+                    />
+                  </div>
                 ) : null}
 
-                <div className="border-t">
-                  <ErrorSection
-                    type="linter"
-                    errors={result.codeErrors ?? []}
-                    icon={AlertTriangle}
-                    isInitiallyOpen={(result.codeErrors?.length ?? 0) <= 3}
-                  />
-                </div>
+                {result.codeErrors && result.codeErrors.length > 0 ? (
+                  <div className="border-t">
+                    <ErrorSection
+                      type="linter"
+                      errors={result.codeErrors ?? []}
+                      icon={AlertTriangle}
+                      isInitiallyOpen={(result.codeErrors?.length ?? 0) <= 3}
+                    />
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>

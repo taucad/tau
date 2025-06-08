@@ -1,6 +1,43 @@
 import type { BaseMessageLike } from '@langchain/core/messages';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
-import type { CoreMessage, Message } from 'ai';
+import type { CoreMessage, Message, UIMessage } from 'ai';
+
+/**
+ * Preprocesses UI messages to handle partial tool calls by converting them to completed state
+ * with mock results. This prevents MessageConversionError when partial tool calls are present.
+ *
+ * @param messages - The UI messages that may contain partial tool calls
+ * @returns Processed messages with all tool calls in completed state
+ */
+export function sanitizeMessagesForConversion(messages: UIMessage[]): UIMessage[] {
+  return messages.map((message) => {
+    if (message.role !== 'assistant') {
+      return message;
+    }
+
+    // Handle parts array - convert partial tool calls to completed state
+    const sanitizedParts = message.parts?.map((part) => {
+      if (part.type === 'tool-invocation' && part.toolInvocation.state === 'partial-call') {
+        // Convert partial tool calls to completed state with mock result
+        return {
+          ...part,
+          toolInvocation: {
+            ...part.toolInvocation,
+            state: 'result' as const,
+            result: `[Tool execution in progress: ${part.toolInvocation.toolName}]`,
+          },
+        };
+      }
+
+      return part;
+    });
+
+    return {
+      ...message,
+      ...(sanitizedParts ? { parts: sanitizedParts } : {}),
+    };
+  });
+}
 
 /**
  * Convert a list of UI messages to a list of Langchain messages.

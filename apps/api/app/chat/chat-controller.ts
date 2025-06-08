@@ -9,10 +9,19 @@ import type { ToolChoiceWithCategory } from '~/tools/tool-service.js';
 import { ChatService } from '~/chat/chat-service.js';
 import { LangGraphAdapter } from '~/chat/utils/langgraph-adapter.js';
 import { convertAiSdkMessagesToLangchainMessages } from '~/chat/utils/convert-messages.js';
+import { objectToXml } from '~/utils/xml.js';
+
+export type CodeError = {
+  message: string;
+  startLineNumber: number;
+  endLineNumber: number;
+  startColumn: number;
+  endColumn: number;
+};
 
 export type CreateChatBody = {
   code: string;
-  codeErrors: string;
+  codeErrors: CodeError[];
   kernelError: string;
   screenshot: string;
   messages: Array<
@@ -77,16 +86,21 @@ export class ChatController {
       content: [
         {
           type: 'text',
-          text: `The following message is a result of a 3D modeling task. If code errors or kernel errors are present, use this information to fix the errors.
-  # Code Errors
-  ${body.codeErrors || '- No code errors'}
-  
-  # Kernel Errors
-  ${body.kernelError || '- No kernel errors'}
-  
-  # Code
-  ${body.code || 'function main(_, params) {}'}
-  `,
+          text: `# CAD Code Generation Information
+If code errors or kernel errors are present, use this information to fix the errors.
+
+${objectToXml({
+  codeErrors: (body.codeErrors || []).map((error) => ({
+    message: error.message,
+    startLineNum: error.startLineNumber,
+    endLineNum: error.endLineNumber,
+    startCol: error.startColumn,
+    endCol: error.endColumn,
+  })),
+  ...(body.kernelError ? { kernelError: body.kernelError } : {}),
+  currentCode: body.code,
+})}
+`,
         },
         ...(body.screenshot
           ? [

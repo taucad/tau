@@ -1,5 +1,5 @@
 // eslint-disable-next-line no-restricted-imports -- expected
-import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
+import replicadTypes from '../../../../../gen/api/replicad/replicad-clean.d.ts?raw';
 // eslint-disable-next-line no-restricted-imports -- expected
 import { mockModels } from '../../../../ui/app/constants/build-code-examples.js';
 

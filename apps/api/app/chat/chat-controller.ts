@@ -8,7 +8,10 @@ import { ToolService, toolChoiceFromToolName } from '~/tools/tool-service.js';
 import type { ToolChoiceWithCategory } from '~/tools/tool-service.js';
 import { ChatService } from '~/chat/chat-service.js';
 import { LangGraphAdapter } from '~/chat/utils/langgraph-adapter.js';
-import { convertAiSdkMessagesToLangchainMessages } from '~/chat/utils/convert-messages.js';
+import {
+  convertAiSdkMessagesToLangchainMessages,
+  sanitizeMessagesForConversion,
+} from '~/chat/utils/convert-messages.js';
 import { objectToXml } from '~/utils/xml.js';
 
 export type CodeError = {
@@ -46,7 +49,9 @@ export class ChatController {
     @Res() response: FastifyReply,
     @Req() request: FastifyRequest,
   ): Promise<void> {
-    const coreMessages = convertToCoreMessages(body.messages);
+    // Sanitize messages to handle partial tool calls before conversion
+    const sanitizedMessages = sanitizeMessagesForConversion(body.messages);
+    const coreMessages = convertToCoreMessages(sanitizedMessages);
     const lastHumanMessage = body.messages.findLast((message) => message.role === 'user');
 
     let modelId: string;
@@ -70,7 +75,7 @@ export class ChatController {
       return response.send(result.toDataStream());
     }
 
-    const langchainMessages = convertAiSdkMessagesToLangchainMessages(body.messages, coreMessages);
+    const langchainMessages = convertAiSdkMessagesToLangchainMessages(sanitizedMessages, coreMessages);
     const graph = await this.chatService.createGraph(modelId, selectedToolChoice);
 
     // Abort the request if the client disconnects

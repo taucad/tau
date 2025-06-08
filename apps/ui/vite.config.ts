@@ -70,7 +70,7 @@ export default defineConfig({
   },
 
   test: {
-    setupFiles: [],
+    setupFiles: ['./vitest.setup.ts'],
     watch: false,
     globals: true,
     environment: 'jsdom',
@@ -79,6 +79,12 @@ export default defineConfig({
     coverage: {
       reportsDirectory: '../../coverage/apps/ui',
       provider: 'v8',
+      include: ['app/**/*'],
+      exclude: [
+        'app/**/*.test.{ts,tsx}',
+        'app/**/*.spec.{ts,tsx}',
+        'app/**/index.ts',
+      ],
     },
   },
 });

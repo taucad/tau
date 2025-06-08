@@ -1,0 +1,21 @@
+diff --git a/dist/replicad.d.ts b/dist/replicad.d.ts
+index 3df730584d5434dd627d1a843c4e8c6dfcf619f1..ca9126fd4ad93fcbc460450b9553b9077259e0f9 100644
+--- a/dist/replicad.d.ts
++++ b/dist/replicad.d.ts
+@@ -1919,14 +1919,14 @@ export declare class Sketches {
+         extrusionProfile?: ExtrusionProfile;
+         twistAngle?: number;
+         origin?: Point;
+-    }): AnyShape;
++    }): Shape3D;
+     /**
+      * Revolves the drawing on an axis (defined by its direction and an origin
+      * (defaults to the sketch origin)
+      */
+     revolve(revolutionAxis?: Point, config?: {
+         origin?: Point;
+-    }): AnyShape;
++    }): Shape3D;
+ }
+ 
+ /**

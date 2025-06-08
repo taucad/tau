@@ -1,7 +1,8 @@
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
 import { useCallback, useState } from 'react';
 import type { JSX } from 'react';
-import { File, LoaderCircle, Play, X } from 'lucide-react';
+import { File, LoaderCircle, Play, X, ChevronDown, AlertTriangle, Bug, Camera } from 'lucide-react';
+import type { ToolResult } from 'ai';
 import { CodeViewer } from '~/components/code-viewer.js';
 import { CopyButton } from '~/components/copy-button.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '~/components/ui/tooltip.js';
@@ -11,6 +12,89 @@ import { AnimatedShinyText } from '~/components/magicui/animated-shiny-text.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { useAiChat } from '~/components/chat/ai-chat-provider.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '~/components/ui/hover-card.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
+import type { CodeError } from '~/types/cad.js';
+
+export type FileEditToolResult = ToolResult<
+  'file_edit',
+  {
+    fileName: string;
+    content: string;
+  },
+  {
+    codeErrors: CodeError[];
+    kernelError: string;
+    screenshot: string;
+  }
+>;
+
+type Test = FileEditToolResult;
+
+function ErrorSection({
+  type,
+  errors,
+  icon: Icon,
+  isInitiallyOpen = false,
+}: {
+  readonly type: string;
+  readonly errors: CodeError[];
+  readonly icon: typeof AlertTriangle;
+  readonly isInitiallyOpen?: boolean;
+}): JSX.Element | undefined {
+  const [isOpen, setIsOpen] = useState(isInitiallyOpen);
+
+  if (errors.length === 0) return undefined;
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <CollapsibleTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="group flex h-auto w-full justify-start gap-2 rounded-none p-2 text-warning hover:bg-transparent"
+        >
+          {/* Show ChevronDown only on hover, otherwise show Icon */}
+          <span className="relative flex items-center">
+            <ChevronDown
+              className={cn(
+                'absolute left-0 size-3 shrink-0 opacity-0 transition-[opacity,transform] duration-200 group-hover:opacity-100',
+                isOpen ? 'rotate-180' : '',
+              )}
+            />
+            <Icon
+              className={cn('size-3 shrink-0 transition-opacity duration-200', 'group-hover:opacity-0', 'opacity-100')}
+            />
+          </span>
+          <span className="text-left text-xs font-normal">
+            {Number(errors.length)} {type} error{errors.length > 1 ? 's' : ''}
+          </span>
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="border-t">
+        <div className="space-y-2 px-2 py-2 text-xs">
+          {errors.map((error, index) => {
+            console.log(error, typeof error);
+            // Handle both CodeError objects and string errors
+            const isCodeError = typeof error === 'object' && 'startLineNumber' in error;
+            const message = isCodeError ? error.message : error;
+            const key = isCodeError ? `${error.startLineNumber}-${error.message}` : error;
+
+            return (
+              <div key={key} className="flex items-start text-xs">
+                <div className="flex flex-row items-center gap-1 text-muted-foreground">
+                  <div className="flex-shrink-0 font-mono">
+                    {error.startLineNumber}:{error.startColumn}
+                  </div>
+                </div>
+                <div className="ml-2 flex-1 font-mono">{message}</div>
+              </div>
+            );
+          })}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
 
 function StatusIcon({
   chatStatus,
@@ -55,31 +139,34 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
   }, []);
 
   switch (part.toolInvocation.state) {
-    case 'partial-call': {
+    case 'partial-call':
+    case 'call': {
       const { fileName = '' } = (part.toolInvocation.args ?? {}) as {
         content?: string;
         fileName?: string;
       };
       return (
-        <div className="border-neutral-200 @container/code flex h-8 w-full flex-row items-center gap-1 overflow-hidden rounded-md border bg-neutral/10 pr-1 pl-3 text-xs text-foreground/50 text-muted-foreground">
+        <div className="@container/code flex h-8 w-full flex-row items-center gap-1 overflow-hidden rounded-md border bg-neutral/10 pr-1 pl-3 text-xs text-muted-foreground">
           <StatusIcon chatStatus={status} toolStatus={part.toolInvocation.state} />
           <Filename fileName={fileName} chatStatus={status} toolStatus={part.toolInvocation.state} />
         </div>
       );
     }
 
-    case 'call':
     case 'result': {
       const { fileName = '', content = '' } = (part.toolInvocation.args ?? {}) as {
         content?: string;
         fileName?: string;
       };
 
-      const result = part.toolInvocation.state === 'result' ? part.toolInvocation.result : undefined;
+      const result =
+        part.toolInvocation.state === 'result'
+          ? (part.toolInvocation.result as FileEditToolResult['result'])
+          : undefined;
 
       return (
-        <div className="border-neutral-200 @container/code overflow-hidden rounded-md border bg-neutral/10">
-          <div className="sticky top-0 flex flex-row items-center justify-between py-1 pr-1 pl-3 text-foreground/50">
+        <div className="@container/code overflow-hidden rounded-md border bg-neutral/10">
+          <div className="sticky top-0 flex flex-row items-center justify-between py-1 pr-1 pl-2 text-foreground/50">
             <div className="flex flex-row items-center gap-1 text-xs text-muted-foreground">
               <StatusIcon chatStatus={status} toolStatus={part.toolInvocation.state} />
               <Filename fileName={fileName} chatStatus={status} toolStatus={part.toolInvocation.state} />
@@ -108,18 +195,62 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
               </Tooltip>
             </div>
           </div>
-          <div className="border-t text-xs">
-            {result?.codeErrors ? <div className="text-destructive">{result.codeErrors}</div> : null}
-            {result?.kernelError ? <div className="text-destructive">{result.kernelError}</div> : null}
-            {result?.screenshot ? (
-              <HoverCard>
-                <HoverCardTrigger asChild>
-                  <img src={result.screenshot} alt="Screenshot" />
-                </HoverCardTrigger>
-                <HoverCardContent asChild side="top" align="start" className="w-96">
-                  <img src={result.screenshot} alt="Screenshot" />
-                </HoverCardContent>
-              </HoverCard>
+          <div>
+            {result ? (
+              <div className="space-y-2">
+                {result.screenshot ? (
+                  <div className="space-y-1 border-t px-2 pt-1 pb-0">
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Camera className="size-3" />
+                      <span>views</span>
+                    </div>
+                    <HoverCard>
+                      <HoverCardTrigger asChild>
+                        <div className="cursor-pointer rounded-md border bg-neutral/5 hover:bg-neutral/10">
+                          <img
+                            src={result.screenshot}
+                            alt="Generated screenshot"
+                            className="size-full rounded-sm object-cover object-top"
+                          />
+                        </div>
+                      </HoverCardTrigger>
+                      <HoverCardContent asChild side="top" align="start" className="w-96">
+                        <img src={result.screenshot} alt="Generated screenshot (full size)" className="max-w-full" />
+                      </HoverCardContent>
+                    </HoverCard>
+                  </div>
+                ) : null}
+
+                {result.kernelError ? (
+                  <ErrorSection
+                    isInitiallyOpen
+                    type="kernel"
+                    errors={
+                      result.kernelError
+                        ? [
+                            {
+                              startLineNumber: 0,
+                              startColumn: 0,
+                              message: result.kernelError,
+                              endLineNumber: 0,
+                              endColumn: 0,
+                            },
+                          ]
+                        : []
+                    }
+                    icon={Bug}
+                  />
+                ) : null}
+
+                <div className="border-t">
+                  <ErrorSection
+                    type="linter"
+                    errors={result.codeErrors ?? []}
+                    icon={AlertTriangle}
+                    isInitiallyOpen={(result.codeErrors?.length ?? 0) <= 3}
+                  />
+                </div>
+              </div>
             ) : null}
           </div>
           {/* <div className={cn('relative max-h-32', isExpanded ? 'max-h-none' : 'overflow-y-auto')}>

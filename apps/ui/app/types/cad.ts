@@ -1,5 +1,13 @@
 import { Cog, Zap, Cpu } from 'lucide-react';
 
+export type CodeError = {
+  message: string;
+  startLineNumber: number;
+  endLineNumber: number;
+  startColumn: number;
+  endColumn: number;
+};
+
 export type Shape2D = {
   type: '2d';
   color?: string;

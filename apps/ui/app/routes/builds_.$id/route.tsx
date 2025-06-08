@@ -17,6 +17,7 @@ import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { BuildNameEditor } from '~/routes/builds_.$id/build-name-editor.js';
 import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { orthographicViews, screenshotRequestMachine } from '~/machines/screenshot-request.js';
+import type { FileEditToolResult } from '~/routes/builds_.$id/chat-message-tool-file-edit.js';
 
 export const handle: Handle = {
   breadcrumb(match) {
@@ -139,13 +140,10 @@ function Chat() {
 
                 // Prepare the result
                 const result = {
-                  success: state.value === 'ready' && errorMessages.length === 0,
-                  // Screenshot: screenshots.compositeScreenshot,
-                  message:
-                    errorMessages.length > 0
-                      ? `Code updated but has errors:\n${errorMessages.join('\n')}`
-                      : 'Code updated successfully',
-                };
+                  codeErrors: state.context.codeErrors ?? [],
+                  kernelError: state.context.kernelError ?? '',
+                  screenshot: screenshots.compositeScreenshot ?? '',
+                } satisfies FileEditToolResult['result'];
 
                 // Clean up the subscription
                 subscription.unsubscribe();

@@ -46,7 +46,6 @@ export class ChatController {
     @Res() response: FastifyReply,
     @Req() request: FastifyRequest,
   ): Promise<void> {
-    console.log('body', body);
     const coreMessages = convertToCoreMessages(body.messages);
     const lastHumanMessage = body.messages.findLast((message) => message.role === 'user');
 
@@ -115,8 +114,6 @@ ${objectToXml({
           : []),
       ],
     });
-
-    console.log('resultMessage', resultMessage);
 
     const eventStream = graph.streamEvents(
       {

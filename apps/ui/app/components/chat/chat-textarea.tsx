@@ -48,6 +48,8 @@ const defaultAttachments: Attachment[] = [];
 const cancelKeyCombination = {
   key: 'Backspace',
   metaKey: true,
+  shiftKey: true,
+  requireAllModifiers: true,
 } satisfies KeyCombination;
 
 export const ChatTextarea = memo(function ({

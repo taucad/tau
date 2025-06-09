@@ -55,7 +55,7 @@ export class ChatController {
     const lastHumanMessage = body.messages.findLast((message) => message.role === 'user');
 
     let modelId: string;
-    let selectedToolChoice: ToolChoiceWithCategory = 'auto';
+    const selectedToolChoice: ToolChoiceWithCategory = 'auto';
     if (lastHumanMessage?.role === 'user') {
       modelId = lastHumanMessage.model;
       // If (lastHumanMessage.metadata.toolChoice) {

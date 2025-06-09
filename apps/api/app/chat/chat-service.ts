@@ -46,7 +46,7 @@ export class ChatService {
     });
 
     // Create a general agent for handling direct responses
-    const cadTools = [tools.file_edit];
+    const cadTools = [tools.edit_file];
     const cadSystemPrompt = await getCadSystemPrompt(userMessage);
     const cadAgent = createReactAgent({
       llm: cadSupport?.tools === false ? cadModel : (cadModel.bindTools?.(cadTools) ?? cadModel),

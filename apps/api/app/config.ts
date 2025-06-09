@@ -9,6 +9,7 @@ const environmentSchema = z.object({
   OPENAI_API_KEY: z.string(),
   ANTHROPIC_API_KEY: z.string(),
   SAMBA_API_KEY: z.string().optional(),
+  MORPH_API_KEY: z.string().optional(),
   GOOGLE_VERTEX_AI_CREDENTIALS: z
     .string()
     .transform((value) => JSON.parse(value) as Record<string, unknown>)

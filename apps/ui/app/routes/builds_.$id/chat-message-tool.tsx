@@ -16,7 +16,7 @@ export function ChatMessageTool({ part }: { readonly part: ToolInvocationUIPart 
       return <ChatMessageToolWebBrowser part={part} />;
     }
 
-    case 'file_edit': {
+    case 'edit_file': {
       return <ChatMessageToolFileEdit part={part} />;
     }
 

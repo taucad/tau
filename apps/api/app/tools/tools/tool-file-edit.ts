@@ -19,12 +19,34 @@ export const fileEditTool = tool(
     return result;
   },
   {
-    name: 'file_edit',
-    description:
-      'Edit a file. After a file is edited, the client will render the CAD model and return the result of the render, which may be either 1) a successful render, 2) a failed render with error details',
+    name: 'edit_file',
+    description: `Use this tool to propose an edit to an existing file.
+
+This will be read by a less intelligent model, which will quickly apply the edit. You should make it clear what the edit is, while also minimizing the unchanged code you write.
+
+When writing the edit, you should specify each edit in sequence, with the special comment // ... existing code ... to represent unchanged code in between edited lines.
+
+For example:
+
+// ... existing code ...
+FIRST_EDIT
+// ... existing code ...
+SECOND_EDIT
+// ... existing code ...
+THIRD_EDIT
+// ... existing code ...
+
+You should bias towards repeating as few lines of the original file as possible to convey the change.
+Each edit should contain sufficient context of unchanged lines around the code you're editing to resolve ambiguity.
+If you plan on deleting a section, you must provide surrounding context to indicate the deletion.
+DO NOT omit spans of pre-existing code without using the // ... existing code ... comment to indicate its absence.`,
     schema: z.object({
-      fileName: z.string(),
-      content: z.string(),
+      targetFile: z.string().describe('The target file to modify.'),
+      codeEdit: z
+        .string()
+        .describe(
+          'Specify ONLY the precise lines of code that you wish to edit. Use // ... existing code ... for unchanged sections.',
+        ),
     }),
   },
 );

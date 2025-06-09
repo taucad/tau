@@ -8,7 +8,7 @@ import { parseWebSearchResults, webSearchTool } from '~/tools/tools/tool-web-sea
 export const toolCategory = {
   webSearch: 'web_search',
   webBrowser: 'web_browser',
-  fileEdit: 'file_edit',
+  fileEdit: 'edit_file',
 } as const satisfies Record<string, string>;
 
 export const toolChoice = {

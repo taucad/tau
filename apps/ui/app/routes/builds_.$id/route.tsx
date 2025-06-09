@@ -2,6 +2,7 @@ import { Link, useParams } from 'react-router';
 import { useCallback, useEffect } from 'react';
 import type { JSX } from 'react';
 import { useActorRef } from '@xstate/react';
+import { createActor } from 'xstate';
 import { PackagePlus } from 'lucide-react';
 // eslint-disable-next-line no-restricted-imports -- allowed for router types
 import type { Route } from './+types/route.js';
@@ -16,6 +17,7 @@ import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { BuildNameEditor } from '~/routes/builds_.$id/build-name-editor.js';
 import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { orthographicViews, screenshotRequestMachine } from '~/machines/screenshot-request.js';
+import { fileEditMachine } from '~/machines/file-edit.js';
 import type { FileEditToolResult } from '~/routes/builds_.$id/chat-message-tool-file-edit.js';
 
 export const handle: Handle = {
@@ -180,26 +182,56 @@ export default function ChatRoute(): JSX.Element {
     async ({ toolCall }: { toolCall: { toolName: string; args: unknown } }) => {
       console.log('Tool call received:', toolCall);
 
-      if (toolCall.toolName === 'file_edit') {
-        console.log('Capturing screenshots...');
-        const screenshots = await captureScreenshots();
-        console.log('Captured screenshots:', screenshots);
+      if (toolCall.toolName === 'edit_file') {
+        const toolCallArgs = toolCall.args as { targetFile: string; codeEdit: string };
 
-        const toolCallArgs = toolCall.args as { content: string };
-        cadActor.send({ type: 'setCode', code: toolCallArgs.content, screenshot: screenshots.compositeScreenshot });
+        // Get current code from CAD actor
+        const currentCode = cadActor.getSnapshot().context.code;
 
-        return new Promise<FileEditToolResult['result']>((resolve) => {
-          const subscription = cadActor.subscribe((state) => {
-            if (state.value === 'ready' || state.value === 'error') {
-              const result = {
-                codeErrors: state.context.codeErrors ?? [],
-                kernelError: state.context.kernelError ?? '',
-                screenshot: screenshots.compositeScreenshot ?? '',
-              } satisfies FileEditToolResult['result'];
+        // Create file edit actor to process the edit through Morph
+        const fileEditActor = createActor(fileEditMachine).start();
 
-              subscription.unsubscribe();
-              resolve(result);
+        return new Promise<FileEditToolResult['result']>((resolve, reject) => {
+          // Subscribe to file edit actor state changes
+          const subscription = fileEditActor.subscribe((state) => {
+            if (state.matches('success') || state.matches('error')) {
+              const { result } = state.context;
+              if (result?.editedContent) {
+                // Set the processed code from Morph to the CAD actor
+                // On error, this will be the original content as fallback
+                cadActor.send({ type: 'setCode', code: result.editedContent });
+
+                // Wait for CAD processing to complete
+                const cadSubscription = cadActor.subscribe((cadState) => {
+                  if (cadState.value === 'ready' || cadState.value === 'error') {
+                    const toolResult = {
+                      codeErrors: cadState.context.codeErrors ?? [],
+                      kernelError: cadState.context.kernelError ?? '',
+                      screenshot: '',
+                    } satisfies FileEditToolResult['result'];
+
+                    cadSubscription.unsubscribe();
+                    subscription.unsubscribe();
+                    fileEditActor.stop();
+                    resolve(toolResult);
+                  }
+                });
+              } else {
+                subscription.unsubscribe();
+                fileEditActor.stop();
+                reject(new Error('No content received from file edit service'));
+              }
             }
+          });
+
+          // Send the edit request to Morph
+          fileEditActor.send({
+            type: 'applyEdit',
+            request: {
+              targetFile: toolCallArgs.targetFile,
+              originalContent: currentCode,
+              codeEdit: toolCallArgs.codeEdit,
+            },
           });
         });
       }
@@ -207,7 +239,7 @@ export default function ChatRoute(): JSX.Element {
       // Return undefined for unknown tools
       return undefined;
     },
-    [captureScreenshots],
+    [], // Removed captureScreenshots dependency
   );
 
   return (

@@ -1,8 +1,9 @@
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import type { JSX } from 'react';
-import { File, LoaderCircle, Play, X, ChevronDown, AlertTriangle, Bug, Camera } from 'lucide-react';
+import { File, LoaderCircle, Play, X, ChevronDown, AlertTriangle, Bug, Camera, Check, RotateCcw } from 'lucide-react';
 import type { ToolResult } from 'ai';
+import { useMachine } from '@xstate/react';
 import { CodeViewer } from '~/components/code-viewer.js';
 import { CopyButton } from '~/components/copy-button.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '~/components/ui/tooltip.js';
@@ -14,12 +15,13 @@ import { useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '~/components/ui/hover-card.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
 import type { CodeError } from '~/types/cad.js';
+import { fileEditMachine } from '~/machines/file-edit.js';
 
 export type FileEditToolResult = ToolResult<
-  'file_edit',
+  'edit_file',
   {
-    fileName: string;
-    content: string;
+    targetFile: string;
+    codeEdit: string;
   },
   {
     codeErrors: CodeError[];
@@ -112,49 +114,81 @@ function StatusIcon({
 }
 
 function Filename({
-  fileName,
+  targetFile,
   chatStatus,
   toolStatus,
 }: {
-  readonly fileName: string;
+  readonly targetFile: string;
   readonly chatStatus: 'error' | 'submitted' | 'streaming' | 'ready';
   readonly toolStatus: ToolInvocationUIPart['toolInvocation']['state'];
 }): JSX.Element {
   if (chatStatus === 'streaming' && ['partial-call', 'call'].includes(toolStatus)) {
-    return <AnimatedShinyText>{fileName}</AnimatedShinyText>;
+    return <AnimatedShinyText>{targetFile}</AnimatedShinyText>;
   }
 
-  return <span>{fileName}</span>;
+  return <span>{targetFile}</span>;
 }
 
 // eslint-disable-next-line complexity -- refactor later
 export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const status = useChatSelector((state) => state.context.status);
+  console.log(part);
+
+  // Create file edit machine
+  const [fileEditState, fileEditSend] = useMachine(fileEditMachine);
 
   const setCode = useCallback((code: string) => {
     cadActor.send({ type: 'setCode', code });
   }, []);
 
+  const handleApplyEdit = useCallback(
+    (targetFile: string, editInstructions: string) => {
+      // Get the current code from the CAD actor as the original codeEdit
+      const currentCode = cadActor.getSnapshot().context.code;
+
+      fileEditSend({
+        type: 'applyEdit',
+        request: {
+          targetFile,
+          originalContent: currentCode,
+          codeEdit: editInstructions,
+        },
+      });
+    },
+    [fileEditSend],
+  );
+
+  // When file edit is successful or failed with fallback content, set the code in the CAD actor
+  useEffect(() => {
+    if (fileEditState.matches('success') || fileEditState.matches('error')) {
+      const { result } = fileEditState.context;
+      if (result?.editedContent) {
+        // Set the edited content (which will be original content on error as fallback)
+        setCode(result.editedContent);
+      }
+    }
+  }, [fileEditState, setCode]);
+
   switch (part.toolInvocation.state) {
     case 'partial-call':
     case 'call': {
-      const { fileName = '' } = (part.toolInvocation.args ?? {}) as {
-        content?: string;
-        fileName?: string;
+      const { targetFile = '' } = (part.toolInvocation.args ?? {}) as {
+        codeEdit?: string;
+        targetFile?: string;
       };
       return (
         <div className="@container/code flex h-8 w-full flex-row items-center gap-1 overflow-hidden rounded-md border bg-neutral/10 pr-1 pl-3 text-xs text-muted-foreground">
           <StatusIcon chatStatus={status} toolStatus={part.toolInvocation.state} />
-          <Filename fileName={fileName} chatStatus={status} toolStatus={part.toolInvocation.state} />
+          <Filename targetFile={targetFile} chatStatus={status} toolStatus={part.toolInvocation.state} />
         </div>
       );
     }
 
     case 'result': {
-      const { fileName = '', content = '' } = (part.toolInvocation.args ?? {}) as {
-        content?: string;
-        fileName?: string;
+      const { targetFile = '', codeEdit = '' } = (part.toolInvocation.args ?? {}) as {
+        codeEdit?: string;
+        targetFile?: string;
       };
 
       const result =
@@ -167,13 +201,13 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
           <div className="sticky top-0 flex flex-row items-center justify-between py-1 pr-1 pl-2 text-foreground/50">
             <div className="flex flex-row items-center gap-1 text-xs text-muted-foreground">
               <StatusIcon chatStatus={status} toolStatus={part.toolInvocation.state} />
-              <Filename fileName={fileName} chatStatus={status} toolStatus={part.toolInvocation.state} />
+              <Filename targetFile={targetFile} chatStatus={status} toolStatus={part.toolInvocation.state} />
             </div>
             <div className="flex flex-row gap-1">
               <CopyButton
                 size="xs"
                 className="[&_[data-slot=label]]:hidden @xs/code:[&_[data-slot=label]]:flex"
-                getText={() => content}
+                getText={() => codeEdit}
               />
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -181,15 +215,40 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
                     size="xs"
                     variant="ghost"
                     className="flex"
+                    disabled={fileEditState.matches('applying')}
                     onClick={() => {
-                      setCode(content);
+                      handleApplyEdit(targetFile, codeEdit);
                     }}
                   >
-                    <span className="hidden @xs/code:block">Apply</span>
-                    <Play />
+                    <span className="hidden @xs/code:block">
+                      {fileEditState.matches('applying')
+                        ? 'Applying...'
+                        : fileEditState.matches('success')
+                          ? 'Applied'
+                          : fileEditState.matches('error')
+                            ? 'Retry'
+                            : 'Apply'}
+                    </span>
+                    {fileEditState.matches('applying') ? (
+                      <LoaderCircle className="size-3 animate-spin" />
+                    ) : fileEditState.matches('success') ? (
+                      <Check className="size-3" />
+                    ) : fileEditState.matches('error') ? (
+                      <RotateCcw className="size-3" />
+                    ) : (
+                      <Play />
+                    )}
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Apply code</TooltipContent>
+                <TooltipContent>
+                  {fileEditState.matches('applying')
+                    ? 'Applying file edit...'
+                    : fileEditState.matches('success')
+                      ? 'File edit applied successfully'
+                      : fileEditState.matches('error')
+                        ? `Edit failed: ${fileEditState.context.error}. Reverted to original content.`
+                        : 'Apply file edit using Morph'}
+                </TooltipContent>
               </Tooltip>
             </div>
           </div>
@@ -197,7 +256,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
             <div className={cn('leading-0')}>
               <CodeViewer
                 language="typescript"
-                text={isExpanded ? content : content.split('\n').slice(0, 5).join('\n')}
+                text={isExpanded ? codeEdit : codeEdit.split('\n').slice(0, 5).join('\n')}
                 className="overflow-x-auto p-3 text-xs"
               />
               <Button

@@ -1,18 +1,18 @@
 /* eslint-disable max-depth -- TODO: fix this */
-import type { IterableReadableStream } from '@langchain/core/dist/utils/stream';
+import type { IterableReadableStream } from '@langchain/core/utils/stream';
 import { formatDataStreamPart, createDataStream } from 'ai';
 import type { DataStreamWriter } from 'ai';
-import type { StreamEvent as LangchainStreamEvent } from '@langchain/core/tracers/log_stream.js';
-import { generatePrefixedId, idPrefix } from '../../utils/id.js';
-import type { ChatUsageTokens } from '../chat-schema.js';
-import { processContent } from './process-content.js';
+import type { StreamEvent as LangchainStreamEvent } from '@langchain/core/tracers/log_stream';
+import { generatePrefixedId, idPrefix } from '~/utils/id.js';
+import type { ChatUsageTokens } from '~/chat/chat-schema.js';
+import { processContent } from '~/chat/utils/process-content.js';
 import type {
   StreamEvent,
   ChatModelStreamEvent,
   ChatModelEndEvent,
   ToolStartEvent,
   ToolEndEvent,
-} from './langgraph-types.js';
+} from '~/chat/utils/langgraph-types.js';
 
 /**
  * Enhanced DataStream with a convenient write method for streaming content.
@@ -338,7 +338,6 @@ export class LangGraphAdapter {
     const { streamEvent, dataStream, callbacks, reasoningState, toolCallState, toolTypeMap } = parameters;
 
     if (streamEvent.data.chunk.tool_calls.length > 0) {
-      // TODO: support parallel tool calls?
       const toolCall = streamEvent.data.chunk.tool_calls[0];
       const originalToolCallId = toolCall.id;
       if (originalToolCallId) {

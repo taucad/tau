@@ -1,7 +1,7 @@
 /**
  * Type definitions for LangGraph events and content parts
  */
-import type { StreamEvent as LangchainStreamEvent, StreamEventData } from '@langchain/core/dist/tracers/event_stream';
+import type { StreamEvent as LangchainStreamEvent, StreamEventData } from '@langchain/core/tracers/log_stream';
 
 // ============================================================================
 // Content Part Types
@@ -39,7 +39,7 @@ export type ContentPart = TextPart | ThinkingPart | RedactedThinkingPart | ToolU
 
 type LangchainRunnable = 'llm' | 'chat_model' | 'prompt' | 'tool' | 'chain' | 'parser';
 type LangchainEvent = 'start' | 'stream' | 'end';
-export type LangGraphEventName = `on_${LangchainRunnable}_${LangchainEvent}`;
+export type LangGraphEventName = `on_${LangchainRunnable}_${LangchainEvent}` | 'on_custom_event';
 
 /**
  * Base metadata type that all events share

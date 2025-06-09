@@ -17,8 +17,6 @@ export type SourceOrigin = 'web' | 'notion' | 'history' | 'projects';
 export type MessagePart = UIMessage['parts'][number];
 
 export type MessageAnnotation = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- required for module augmentation
-  [key: string]: any;
   type: 'usage';
   usageTokens: ChatUsageTokens;
   usageCost: ChatUsageCost;

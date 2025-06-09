@@ -5,7 +5,7 @@ import type { Message } from '@ai-sdk/react';
 import { useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { ChatMessageReasoning } from '~/routes/builds_.$id/chat-message-reasoning.js';
 import { ChatMessageTool } from '~/routes/builds_.$id/chat-message-tool.js';
-import { ChatMessageAnnotation } from '~/routes/builds_.$id/chat-message-annotation.js';
+import { ChatMessageAnnotations } from '~/routes/builds_.$id/chat-message-annotation.js';
 import { ChatMessageText } from '~/routes/builds_.$id/chat-message-text.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '~/components/ui/tooltip.js';
 import { CopyButton } from '~/components/copy-button.js';
@@ -209,15 +209,9 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
               <TooltipContent side="bottom">Switch model</TooltipContent>
             </Tooltip>
             <div className="mx-1 flex flex-row items-center justify-end gap-1">
-              {message.annotations?.map((annotation, index) => {
-                return (
-                  <ChatMessageAnnotation
-                    // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                    key={`${message.id}-message-annotation-${index}`}
-                    annotation={annotation as MessageAnnotation}
-                  />
-                );
-              })}
+              {message.annotations && message.annotations.length > 0 ? (
+                <ChatMessageAnnotations annotations={message.annotations as MessageAnnotation[]} />
+              ) : null}
             </div>
           </div>
         </When>
@@ -245,15 +239,9 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
               </TooltipTrigger>
               <TooltipContent side="bottom">{isEditing ? 'Stop editing' : 'Edit message'}</TooltipContent>
             </Tooltip>
-            {message.annotations?.map((annotation, index) => {
-              return (
-                <ChatMessageAnnotation
-                  // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                  key={`${message.id}-message-annotation-${index}`}
-                  annotation={annotation as MessageAnnotation}
-                />
-              );
-            })}
+            {message.annotations && message.annotations.length > 0 ? (
+              <ChatMessageAnnotations annotations={message.annotations as MessageAnnotation[]} />
+            ) : null}
           </div>
         </When>
       </div>

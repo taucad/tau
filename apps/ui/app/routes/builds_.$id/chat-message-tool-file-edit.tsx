@@ -196,10 +196,10 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
           </div>
           <div>
             {result ? (
-              <div className="space-y-2">
+              <div>
                 {result.screenshot ? (
-                  <div className="space-y-1 border-t px-2 pt-1 pb-0">
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <div className="border-t p-2 pt-1">
+                    <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
                       <Camera className="size-3" />
                       <span>views</span>
                     </div>

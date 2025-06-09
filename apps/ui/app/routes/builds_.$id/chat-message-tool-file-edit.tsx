@@ -70,7 +70,7 @@ function ErrorSection({
       </CollapsibleTrigger>
       <CollapsibleContent className="border-t">
         <div className="space-y-2 px-2 py-2 text-xs">
-          {errors.map((error, index) => {
+          {errors.map((error) => {
             // Handle both CodeError objects and string errors
             const isCodeError = typeof error === 'object' && 'startLineNumber' in error;
             const message = isCodeError ? error.message : error;
@@ -127,6 +127,7 @@ function Filename({
   return <span>{fileName}</span>;
 }
 
+// eslint-disable-next-line complexity -- refactor later
 export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const status = useChatSelector((state) => state.context.status);
@@ -192,6 +193,24 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
               </Tooltip>
             </div>
           </div>
+          <div className={cn('relative max-h-32 border-t', isExpanded ? 'max-h-none' : 'overflow-y-auto')}>
+            <div className={cn('leading-0')}>
+              <CodeViewer
+                language="typescript"
+                text={isExpanded ? content : content.split('\n').slice(0, 5).join('\n')}
+                className="overflow-x-auto p-3 text-xs"
+              />
+              <Button
+                size="xs"
+                className="sticky bottom-0 h-4 w-full rounded-none bg-neutral/10 text-center text-foreground/50 hover:bg-neutral/40"
+                onClick={() => {
+                  setIsExpanded((previous) => !previous);
+                }}
+              >
+                <ChevronDown className={cn('transition-transform', isExpanded ? 'rotate-x-180' : '')} />
+              </Button>
+            </div>
+          </div>
           <div>
             {result ? (
               <div>
@@ -254,20 +273,6 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
               </div>
             ) : null}
           </div>
-          {/* <div className={cn('relative max-h-32', isExpanded ? 'max-h-none' : 'overflow-y-auto')}>
-            <div className={cn('leading-0')}>
-              <CodeViewer language="typescript" text={content} className="overflow-x-auto p-3 text-xs" />
-              <Button
-                size="xs"
-                className="sticky bottom-0 h-4 w-full rounded-none bg-neutral/10 text-center text-foreground/50 hover:bg-neutral/40"
-                onClick={() => {
-                  setIsExpanded((previous) => !previous);
-                }}
-              >
-                <ChevronDown className={cn('transition-transform', isExpanded ? 'rotate-x-180' : '')} />
-              </Button>
-            </div>
-          </div> */}
         </div>
       );
     }

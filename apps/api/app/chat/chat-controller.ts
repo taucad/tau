@@ -58,9 +58,9 @@ export class ChatController {
     let selectedToolChoice: ToolChoiceWithCategory = 'auto';
     if (lastHumanMessage?.role === 'user') {
       modelId = lastHumanMessage.model;
-      if (lastHumanMessage.metadata.toolChoice) {
-        selectedToolChoice = lastHumanMessage.metadata.toolChoice;
-      }
+      // If (lastHumanMessage.metadata.toolChoice) {
+      //   selectedToolChoice = lastHumanMessage.metadata.toolChoice;
+      // }
     } else {
       throw new Error('Last message is not a user message');
     }

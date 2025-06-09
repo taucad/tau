@@ -9,7 +9,7 @@ import type { ToolChoiceWithCategory } from '~/tools/tool-service.js';
 import { ToolService } from '~/tools/tool-service.js';
 import { nameGenerationSystemPrompt } from '~/chat/prompts/chat-prompt-name.js';
 import type { LangGraphAdapterCallbacks } from '~/chat/utils/langgraph-adapter.js';
-import { getCadSystemPrompt } from '~/chat/prompts/chat-prompt-replicad.js';
+import { getCadSystemPrompt } from '~/chat/prompts/chat-prompt-cad.js';
 
 @Injectable()
 export class ChatService {

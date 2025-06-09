@@ -95,6 +95,7 @@
     "react-resizable-panels": "^2.1.7",
     "react-router": "^7.5.3",
     "react-shiki": "^0.6.0",
+    "react-virtuoso": "^4.12.8",
     "reflect-metadata": "^0.2.2",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.0",

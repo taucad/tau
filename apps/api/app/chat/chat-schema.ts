@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 export const chatUsageTokensSchema = z.object({
   inputTokens: z.number().describe('The number of input tokens consumed'),

@@ -10,7 +10,7 @@ import { MemoryVectorStore } from 'langchain/vectorstores/memory';
 import { formatDocumentsAsString } from 'langchain/util/document';
 import type { DynamicStructuredTool } from '@langchain/core/tools';
 import { tool } from '@langchain/core/tools';
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 // Schema for tool input
 const webBrowserSchema = z.object({

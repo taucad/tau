@@ -1,5 +1,5 @@
 import { tool } from '@langchain/core/tools';
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import { interrupt } from '@langchain/langgraph';
 
 type FileEditResult =
@@ -11,16 +11,20 @@ type FileEditResult =
       error: string;
     };
 
-export const fileEditTool = tool(
-  (args) => {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- required.
-    const result = interrupt(args) as FileEditResult;
-    console.log('fileEditTool', result);
-    return result;
-  },
-  {
-    name: 'edit_file',
-    description: `Use this tool to propose an edit to an existing file.
+const fileEditSchema = z.object({
+  targetFile: z.string().describe('The target file to modify.'),
+  codeEdit: z
+    .string()
+    .describe(
+      'Specify ONLY the precise lines of code that you wish to edit. Use // ... existing code ... for unchanged sections.',
+    ),
+});
+
+const fileEditJsonSchema = z.toJSONSchema(fileEditSchema);
+
+export const fileEditToolDefinition = {
+  name: 'edit_file',
+  description: `Use this tool to propose an edit to an existing file.
 
 This will be read by a less intelligent model, which will quickly apply the edit. You should make it clear what the edit is, while also minimizing the unchanged code you write.
 
@@ -40,13 +44,12 @@ You should bias towards repeating as few lines of the original file as possible 
 Each edit should contain sufficient context of unchanged lines around the code you're editing to resolve ambiguity.
 If you plan on deleting a section, you must provide surrounding context to indicate the deletion.
 DO NOT omit spans of pre-existing code without using the // ... existing code ... comment to indicate its absence.`,
-    schema: z.object({
-      targetFile: z.string().describe('The target file to modify.'),
-      codeEdit: z
-        .string()
-        .describe(
-          'Specify ONLY the precise lines of code that you wish to edit. Use // ... existing code ... for unchanged sections.',
-        ),
-    }),
-  },
-);
+  schema: fileEditJsonSchema,
+} as const;
+
+export const fileEditTool = tool((args) => {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- required.
+  const result = interrupt(args) as FileEditResult;
+  console.log('fileEditTool', result);
+  return result;
+}, fileEditToolDefinition);

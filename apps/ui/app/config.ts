@@ -4,7 +4,7 @@
  * Uses Zod for validation
  */
 import process from 'node:process';
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 // Define the schema for environment variables
 const environmentSchema = z.object({

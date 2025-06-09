@@ -28,8 +28,6 @@ export type FileEditToolResult = ToolResult<
   }
 >;
 
-type Test = FileEditToolResult;
-
 function ErrorSection({
   type,
   errors,

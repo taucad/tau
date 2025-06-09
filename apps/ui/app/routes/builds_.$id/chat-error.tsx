@@ -1,11 +1,12 @@
 import { memo } from 'react';
 import { ChevronRight, RefreshCcw } from 'lucide-react';
 import { Button } from '~/components/ui/button.js';
-import { useAiChat } from '~/components/chat/ai-chat-provider.js';
+import { useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
 
 export const ChatError = memo(() => {
-  const { reload, error } = useAiChat({});
+  const error = useChatSelector((state) => state.context.error);
+  const { reload } = useChatActions();
 
   if (!error) return null;
 
@@ -24,7 +25,13 @@ export const ChatError = memo(() => {
           <ChevronRight className="size-4 transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
           <div className="flex w-full items-center justify-between">
             <p>Unable to send the message.</p>
-            <Button variant="outline" size="xs" onClick={async () => reload()}>
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={async () => {
+                reload();
+              }}
+            >
               <RefreshCcw className="size-3" />
               Retry
             </Button>

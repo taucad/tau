@@ -1,7 +1,6 @@
 import { Link, useParams } from 'react-router';
 import { useCallback, useEffect } from 'react';
 import type { JSX } from 'react';
-import type { Message } from '@ai-sdk/react';
 import { useActorRef } from '@xstate/react';
 import { PackagePlus } from 'lucide-react';
 // eslint-disable-next-line no-restricted-imports -- allowed for router types
@@ -11,7 +10,7 @@ import { BuildProvider, useBuild } from '~/hooks/use-build.js';
 import { Button } from '~/components/ui/button.js';
 import type { Handle } from '~/types/matches.js';
 import { useChatConstants } from '~/utils/chat.js';
-import { AiChatProvider, useAiChat } from '~/components/chat/ai-chat-provider.js';
+import { AiChatProvider, useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { BuildNameEditor } from '~/routes/builds_.$id/build-name-editor.js';
@@ -52,6 +51,78 @@ export const handle: Handle = {
 function Chat() {
   const { id } = useParams();
   const { build, isLoading, activeChat, activeChatId, setChatMessages, setCodeParameters } = useBuild();
+
+  const messages = useChatSelector((state) => state.context.messages);
+  const status = useChatSelector((state) => state.context.status);
+  const { setMessages, reload } = useChatActions();
+
+  // Subscribe the build to persist code & parameters changes
+  useEffect(() => {
+    const subscription = cadActor.on('modelUpdated', ({ code, parameters }) => {
+      setCodeParameters(code, parameters);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [setCodeParameters]);
+
+  useEffect(() => {
+    // On init, set the code and parameters
+    if (!build || isLoading) return;
+
+    // Initialize model
+    cadActor.send({
+      type: 'initializeModel',
+      code: build.assets.mechanical?.files[build.assets.mechanical.main]?.content ?? '',
+      parameters: build.assets.mechanical?.parameters ?? {},
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on init
+  }, [id, isLoading]);
+
+  useEffect(() => {
+    if (!build || isLoading) return;
+
+    // Set initial messages based on active chat or legacy messages
+    if (activeChat) {
+      setMessages(activeChat.messages);
+
+      // Reload when the last message is not an assistant message
+      if (activeChat.messages.length > 0 && activeChat.messages.at(-1)?.role !== 'assistant') {
+        reload();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run when build, activeChat, or loading state changes
+  }, [id, isLoading, activeChatId]);
+
+  // Persist message changes to the active build chat
+  useEffect(() => {
+    if (!activeChatId || !activeChat) return;
+
+    if (status === 'submitted') {
+      // A message just got submitted, set the build messages to include the new message.
+      setChatMessages(activeChatId, messages);
+    } else if (
+      status === 'ready' &&
+      messages.length > 0 &&
+      activeChat.messages.length > 0 &&
+      activeChat.messages.length !== messages.length
+    ) {
+      // The chat became ready again, set the build messages to include the new messages.
+      setChatMessages(activeChatId, messages);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- this is effectively a subscription to useChat, so we only respond to status & message changes
+  }, [status, setChatMessages, messages]);
+
+  return <ChatInterface />;
+}
+
+export default function ChatRoute(): JSX.Element {
+  const { id } = useParams();
+
+  if (!id) {
+    throw new Error('No build id provided');
+  }
 
   // Create screenshot request machine instance
   const screenshotActorRef = useActorRef(screenshotRequestMachine, {
@@ -104,131 +175,44 @@ function Chat() {
     });
   }, [screenshotActorRef]);
 
-  const { setMessages, messages, reload, status } = useAiChat({
-    onToolCall: new Map([
-      [
-        'file_edit',
-        async ({ toolCall }) => {
-          console.log('Capturing screenshots...');
-          const screenshots = await captureScreenshots();
-          console.log('Captured screenshots:', screenshots);
+  // Tool call handler that integrates with the new architecture
+  const onToolCall = useCallback(
+    async ({ toolCall }: { toolCall: { toolName: string; args: unknown } }) => {
+      console.log('Tool call received:', toolCall);
 
-          const toolCallArgs = toolCall.args as { content: string };
-          // Instead of setting both, we just set the code in the CAD actor
-          // which will handle all downstream updates
-          cadActor.send({ type: 'setCode', code: toolCallArgs.content, screenshot: screenshots.compositeScreenshot });
+      if (toolCall.toolName === 'file_edit') {
+        console.log('Capturing screenshots...');
+        const screenshots = await captureScreenshots();
+        console.log('Captured screenshots:', screenshots);
 
-          // Return a Promise that resolves when CAD actor processing is complete
-          return new Promise((resolve) => {
-            const subscription = cadActor.subscribe((state) => {
-              // Check if processing completed
-              if (state.value === 'ready' || state.value === 'error') {
-                // Format CAD and Monaco errors for AI
-                const errorMessages = [];
+        const toolCallArgs = toolCall.args as { content: string };
+        cadActor.send({ type: 'setCode', code: toolCallArgs.content, screenshot: screenshots.compositeScreenshot });
 
-                // Add CAD kernel errors if any
-                if (state.context.kernelError) {
-                  errorMessages.push(`CAD Error: ${state.context.kernelError}`);
-                }
+        return new Promise<FileEditToolResult['result']>((resolve) => {
+          const subscription = cadActor.subscribe((state) => {
+            if (state.value === 'ready' || state.value === 'error') {
+              const result = {
+                codeErrors: state.context.codeErrors ?? [],
+                kernelError: state.context.kernelError ?? '',
+                screenshot: screenshots.compositeScreenshot ?? '',
+              } satisfies FileEditToolResult['result'];
 
-                // Add Monaco/TS errors if any
-                if (state.context.codeErrors && state.context.codeErrors.length > 0) {
-                  for (const error of state.context.codeErrors) {
-                    errorMessages.push(`Line ${error.startLineNumber}: ${error.message}`);
-                  }
-                }
-
-                // Prepare the result
-                const result = {
-                  codeErrors: state.context.codeErrors ?? [],
-                  kernelError: state.context.kernelError ?? '',
-                  screenshot: screenshots.compositeScreenshot ?? '',
-                } satisfies FileEditToolResult['result'];
-
-                // Clean up the subscription
-                subscription.unsubscribe();
-
-                // Resolve the Promise with the result
-                resolve(result);
-              }
-            });
+              subscription.unsubscribe();
+              resolve(result);
+            }
           });
-        },
-      ],
-    ]),
-  });
-
-  // Subscribe the build to persist code & parameters changes
-  useEffect(() => {
-    const subscription = cadActor.on('modelUpdated', ({ code, parameters }) => {
-      setCodeParameters(code, parameters);
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [setCodeParameters]);
-
-  useEffect(() => {
-    // On init, set the code and parameters
-    if (!build || isLoading) return;
-
-    // Initialize model
-    cadActor.send({
-      type: 'initializeModel',
-      code: build.assets.mechanical?.files[build.assets.mechanical.main]?.content ?? '',
-      parameters: build.assets.mechanical?.parameters ?? {},
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on init
-  }, [id, isLoading]);
-
-  useEffect(() => {
-    if (!build || isLoading) return;
-
-    // Set initial messages based on active chat or legacy messages
-    if (activeChat) {
-      setMessages(activeChat.messages);
-
-      // Reload when the last message is not an assistant message
-      if (activeChat.messages.length > 0 && activeChat.messages.at(-1)?.role !== 'assistant') {
-        void reload();
+        });
       }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run when build, activeChat, or loading state changes
-  }, [id, isLoading, activeChatId]);
 
-  // Persist message changes to the active build chat
-  useEffect(() => {
-    if (!activeChatId || !activeChat) return;
-
-    if (status === 'submitted') {
-      // A message just got submitted, set the build messages to include the new message.
-      setChatMessages(activeChatId, messages as Message[]);
-    } else if (
-      status === 'ready' &&
-      messages.length > 0 &&
-      activeChat.messages.length > 0 &&
-      activeChat.messages.length !== messages.length
-    ) {
-      // The chat became ready again, set the build messages to include the new messages.
-      setChatMessages(activeChatId, messages as Message[]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- this is effectively a subscription to useChat, so we only respond to status & message changes
-  }, [status, setChatMessages, messages]);
-
-  return <ChatInterface />;
-}
-
-export default function ChatRoute(): JSX.Element {
-  const { id } = useParams();
-
-  if (!id) {
-    throw new Error('No build id provided');
-  }
+      // Return undefined for unknown tools
+      return undefined;
+    },
+    [captureScreenshots],
+  );
 
   return (
     <BuildProvider buildId={id}>
-      <AiChatProvider value={{ ...useChatConstants, id }}>
+      <AiChatProvider value={{ ...useChatConstants, id, onToolCall }}>
         <Chat />
       </AiChatProvider>
     </BuildProvider>

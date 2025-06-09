@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight, Edit, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
 import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
+import { useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { ChatMessageReasoning } from '~/routes/builds_.$id/chat-message-reasoning.js';
 import { ChatMessageTool } from '~/routes/builds_.$id/chat-message-tool.js';
 import { ChatMessageAnnotation } from '~/routes/builds_.$id/chat-message-annotation.js';
@@ -14,7 +15,6 @@ import type { MessageAnnotation } from '~/types/chat.js';
 import { cn } from '~/utils/ui.js';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '~/components/ui/hover-card.js';
 import { When } from '~/components/ui/utils/when.js';
-import type { ChatTextareaProperties } from '~/components/chat/chat-textarea.js';
 import { ChatTextarea } from '~/components/chat/chat-textarea.js';
 import {
   DropdownMenu,
@@ -27,9 +27,7 @@ import {
 import { ChatModelSelector } from '~/components/chat/chat-model-selector.js';
 
 type ChatMessageProperties = {
-  readonly message: Message;
-  readonly onEdit: ChatTextareaProperties['onSubmit'];
-  readonly onRetry: ({ modelId }: { modelId?: string }) => void;
+  readonly messageId: string;
 };
 
 const getMessageContent = (message: Message): string => {
@@ -43,9 +41,17 @@ const getMessageContent = (message: Message): string => {
   return content.join('\n\n');
 };
 
-export const ChatMessage = memo(function ({ message, onEdit, onRetry }: ChatMessageProperties): JSX.Element {
-  const isUser = message.role === MessageRole.User;
+export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties): JSX.Element {
+  const message = useChatSelector((state) => state.context.messagesById.get(messageId));
+  const { editMessage, retryMessage } = useChatActions();
   const [isEditing, setIsEditing] = useState(false);
+
+  // Early return if message not found (shouldn't happen in normal operation)
+  if (!message) {
+    return <div>Message not found</div>;
+  }
+
+  const isUser = message.role === MessageRole.User;
 
   return (
     <article
@@ -68,7 +74,7 @@ export const ChatMessage = memo(function ({ message, onEdit, onRetry }: ChatMess
             initialContent={message.parts}
             initialAttachments={message.experimental_attachments}
             onSubmit={async (event) => {
-              void onEdit(event);
+              editMessage(messageId, event.content, event.model, event.metadata, event.imageUrls);
               setIsEditing(false);
             }}
             onEscapePressed={() => {
@@ -176,7 +182,7 @@ export const ChatMessage = memo(function ({ message, onEdit, onRetry }: ChatMess
                     popoverProperties={{ side: 'right', align: 'start' }}
                     className="h-fit w-full p-2"
                     onSelect={(modelId) => {
-                      onRetry({ modelId });
+                      retryMessage(messageId, modelId);
                     }}
                   >
                     {({ selectedModel }) => (
@@ -192,7 +198,7 @@ export const ChatMessage = memo(function ({ message, onEdit, onRetry }: ChatMess
                   <DropdownMenuItem
                     className="flex justify-between"
                     onClick={() => {
-                      onRetry({});
+                      retryMessage(messageId);
                     }}
                   >
                     <p>Try again</p>

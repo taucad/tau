@@ -10,7 +10,7 @@ import { Button } from '~/components/ui/button.js';
 import { cn } from '~/utils/ui.js';
 import { AnimatedShinyText } from '~/components/magicui/animated-shiny-text.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
-import { useAiChat } from '~/components/chat/ai-chat-provider.js';
+import { useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '~/components/ui/hover-card.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
 import type { CodeError } from '~/types/cad.js';
@@ -97,7 +97,7 @@ function StatusIcon({
   chatStatus,
   toolStatus,
 }: {
-  readonly chatStatus: ReturnType<typeof useAiChat>['status'];
+  readonly chatStatus: 'error' | 'submitted' | 'streaming' | 'ready';
   readonly toolStatus: ToolInvocationUIPart['toolInvocation']['state'];
 }): JSX.Element {
   if (chatStatus === 'streaming' && ['partial-call', 'call'].includes(toolStatus)) {
@@ -117,7 +117,7 @@ function Filename({
   toolStatus,
 }: {
   readonly fileName: string;
-  readonly chatStatus: ReturnType<typeof useAiChat>['status'];
+  readonly chatStatus: 'error' | 'submitted' | 'streaming' | 'ready';
   readonly toolStatus: ToolInvocationUIPart['toolInvocation']['state'];
 }): JSX.Element {
   if (chatStatus === 'streaming' && ['partial-call', 'call'].includes(toolStatus)) {
@@ -129,7 +129,7 @@ function Filename({
 
 export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
-  const { status } = useAiChat();
+  const status = useChatSelector((state) => state.context.status);
 
   const setCode = useCallback((code: string) => {
     cadActor.send({ type: 'setCode', code });

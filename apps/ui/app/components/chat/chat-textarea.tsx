@@ -3,7 +3,7 @@ import type { JSX } from 'react';
 import { Globe, ArrowUp, Image, X, Square, CircuitBoard, ChevronDown } from 'lucide-react';
 import type { Attachment } from 'ai';
 import type { ClassValue } from 'clsx';
-import { useAiChat } from '~/components/chat/ai-chat-provider.js';
+import { useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { ChatModelSelector } from '~/components/chat/chat-model-selector.js';
 import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '~/components/ui/hover-card.js';
 import { Button } from '~/components/ui/button.js';
@@ -93,7 +93,8 @@ export const ChatTextarea = memo(function ({
   const fileInputReference = useRef<HTMLInputElement>(null);
   const textareaReference = useRef<HTMLTextAreaElement>(null);
   const { selectedModel } = useModels();
-  const { stop, status } = useAiChat();
+  const status = useChatSelector((state) => state.context.status);
+  const { stop } = useChatActions();
 
   const handleSubmit = async () => {
     // If there is no text or images, do not submit

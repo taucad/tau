@@ -8,6 +8,7 @@ import { Switch } from '~/components/ui/switch.js';
 import { Input } from '~/components/ui/input.js';
 import { ChatParametersInputNumber } from '~/routes/builds_.$id/chat-parameters-input-number.js';
 import { Button } from '~/components/ui/button.js';
+import { StringColorPicker, isValidColor } from '~/components/ui/string-color-picker.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { cn } from '~/utils/ui.js';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '~/components/ui/collapsible.js';
@@ -251,7 +252,41 @@ export const ChatParameters = memo(function () {
         );
       }
 
-      // For string values, render a text input
+      // For string values, check if it's a valid color first
+      if (type === 'string') {
+        const stringValue = String(value);
+        const defaultStringValue = String(defaultValue);
+
+        // Check if either the current value or default value is a valid color
+        // This ensures we show the color picker even when the value is cleared
+        const isColorParameter = isValidColor(defaultStringValue);
+
+        if (isColorParameter) {
+          return (
+            <StringColorPicker
+              value={stringValue}
+              onChange={(newValue) => {
+                handleParameterChange(key, newValue);
+              }}
+            />
+          );
+        }
+
+        // Otherwise, render a regular text input
+        return (
+          <Input
+            autoComplete="off"
+            type="text"
+            value={stringValue}
+            className="h-6 flex-1 bg-background p-1"
+            onChange={(event) => {
+              handleParameterChange(key, event.target.value);
+            }}
+          />
+        );
+      }
+
+      // For other types, render a text input as fallback
       return (
         <Input
           autoComplete="off"

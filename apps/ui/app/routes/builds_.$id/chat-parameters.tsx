@@ -257,7 +257,7 @@ export const ChatParameters = memo(function () {
           autoComplete="off"
           type="text"
           value={String(value)}
-          className="h-6 w-12 bg-background p-1"
+          className="h-6 flex-1 bg-background p-1"
           onChange={(event) => {
             handleParameterChange(key, event.target.value);
           }}
@@ -267,7 +267,7 @@ export const ChatParameters = memo(function () {
     [handleParameterChange, defaultParameters],
   );
 
-  const containerXpadding = 'px-4 md:px-2';
+  const containerXpadding = 'px-2';
   const containerYpadding = 'py-4 md:py-2';
 
   const hasParameters = allParameters && Object.keys(allParameters).length > 0;
@@ -357,7 +357,7 @@ export const ChatParameters = memo(function () {
                     toggleGroup(groupName);
                   }}
                 >
-                  <CollapsibleTrigger className="group/collapsible flex w-full items-center justify-between bg-muted/70 p-2 transition-colors hover:bg-muted">
+                  <CollapsibleTrigger className="group/collapsible flex h-8 w-full items-center justify-between bg-muted/70 px-2 transition-colors hover:bg-muted">
                     <h3 className="font-medium">
                       {groupName} <span className="text-muted-foreground/50">({entries.length})</span>
                     </h3>
@@ -373,7 +373,7 @@ export const ChatParameters = memo(function () {
                         <div key={key}>
                           <div
                             className={cn(
-                              '@container/parameter flex flex-col rounded-md p-1 transition-colors hover:bg-muted/30 md:p-2',
+                              '@container/parameter flex flex-col rounded-md p-1 transition-colors hover:bg-muted/30',
                             )}
                           >
                             <div className="flex h-auto min-h-6 flex-row justify-between gap-2">

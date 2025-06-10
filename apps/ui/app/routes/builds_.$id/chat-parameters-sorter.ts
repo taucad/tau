@@ -2,108 +2,17 @@
  * Common 3D descriptor terms that should not form their own categories
  * These should be associated with the feature they describe
  */
+import * as pluralize from 'pluralize';
 import { descriptorTerms, commonGeneralTerms } from '~/constants/build-parameters.js';
 
 /**
- * Common English plural suffixes that should be normalized to singular forms
- * Ordered by specificity (more specific patterns first)
- */
-const pluralSuffixes = [
-  'ies', // Cities -> city, stories -> story
-  'ves', // Knives -> knife, shelves -> shelf
-  'oes', // Tomatoes -> tomato, heroes -> hero
-  'ses', // Glasses -> glass, classes -> class
-  'xes', // Boxes -> box, foxes -> fox
-  'zes', // Quizzes -> quiz, prizes -> prize
-  'ches', // Benches -> bench, churches -> church
-  'shes', // Dishes -> dish, brushes -> brush
-  'es', // Handles -> handle (but be careful with words ending in 'e')
-  's', // Handrails -> handrail, ramps -> ramp
-];
-
-/**
- * Normalize a plural word to its singular form
+ * Normalize a plural word to its singular form using the pluralize library
  *
  * @param word - The word to normalize
  * @returns The normalized singular form
  */
 export const normalizePlural = (word: string): string => {
-  const lowerWord = word.toLowerCase();
-
-  // Handle specific irregular plurals that are common in architecture/construction
-  const irregularPlurals: Record<string, string> = {
-    children: 'child',
-    feet: 'foot',
-    teeth: 'tooth',
-    geese: 'goose',
-    mice: 'mouse',
-    men: 'man',
-    women: 'woman',
-    people: 'person',
-  };
-
-  if (irregularPlurals[lowerWord]) {
-    return irregularPlurals[lowerWord];
-  }
-
-  // Try each plural suffix in order of specificity
-  for (const suffix of pluralSuffixes) {
-    if (lowerWord.endsWith(suffix)) {
-      // Special handling for different suffix types
-      if (suffix === 'ies') {
-        // Cities -> city, stories -> story
-        return lowerWord.slice(0, -3) + 'y';
-      }
-
-      if (suffix === 'ves') {
-        // Handle f/fe -> ves (knives -> knife, shelves -> shelf)
-        const stem = lowerWord.slice(0, -3);
-        // If stem ends with 'l' or 'r', likely 'f' -> 'ves' (shelf -> shelves)
-        // Otherwise, likely 'fe' -> 'ves' (knife -> knives)
-        if (stem.endsWith('l') || stem.endsWith('r')) {
-          return stem + 'f';
-        }
-
-        return stem + 'fe';
-      }
-
-      if (suffix === 'es') {
-        // Be careful with 'es' - don't remove from words that naturally end in 'es'
-        const stem = lowerWord.slice(0, -2);
-        // If the word without 'es' ends in s, x, z, ch, sh, then it's likely a plural
-        if (
-          stem.endsWith('s') ||
-          stem.endsWith('x') ||
-          stem.endsWith('z') ||
-          stem.endsWith('ch') ||
-          stem.endsWith('sh')
-        ) {
-          return stem;
-        }
-
-        // For other words ending in 'es', remove just the 's'
-        return lowerWord.slice(0, -1);
-      }
-
-      if (suffix === 's') {
-        // Simple 's' removal, but avoid removing from words that naturally end in 's'
-        // Heuristic: if removing 's' results in a very short word (< 3 chars), keep it
-        const stem = lowerWord.slice(0, -1);
-        if (stem.length < 3) {
-          return lowerWord;
-        }
-
-        return stem;
-      }
-
-      // For compound suffixes like 'oes', 'ses', 'xes', 'zes', 'ches', 'shes'
-      // Remove the entire suffix
-      return lowerWord.slice(0, -suffix.length);
-    }
-  }
-
-  // If no plural suffix found, return the original word
-  return lowerWord;
+  return pluralize.singular(word.toLowerCase());
 };
 
 /**

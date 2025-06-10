@@ -163,6 +163,9 @@ importers:
       '@types/pg':
         specifier: ^8.15.4
         version: 8.15.4
+      '@types/pluralize':
+        specifier: ^0.0.33
+        version: 0.0.33
       '@xstate/react':
         specifier: ^5.0.4
         version: 5.0.4(@types/react@19.0.12)(react@19.0.0)(xstate@5.19.3)
@@ -241,6 +244,9 @@ importers:
       pgvector:
         specifier: ^0.2.1
         version: 0.2.1
+      pluralize:
+        specifier: ^8.0.0
+        version: 8.0.0
       react:
         specifier: ^19.0.0
         version: 19.0.0
@@ -5570,6 +5576,9 @@ packages:
 
   '@types/pg@8.15.4':
     resolution: {integrity: sha512-I6UNVBAoYbvuWkkU3oosC8yxqH21f4/Jc4DK71JLG3dT2mdlGe1z+ep/LQGXaKaOgcvUrsQoPRqfgtMcvZiJhg==}
+
+  '@types/pluralize@0.0.33':
+    resolution: {integrity: sha512-JOqsl+ZoCpP4e8TDke9W79FDcSgPAR0l6pixx2JHkhnRjvShyYiAYw2LVsnA7K08Y6DeOnaU6ujmENO4os/cYg==}
 
   '@types/prismjs@1.26.5':
     resolution: {integrity: sha512-AUZTa7hQ2KY5L7AmtSiqxlhWxb4ina0yd8hNbl4TWuqnv/pFP0nDMb3YrfSBf4hJVGLh2YEIBfKaBW/9UEl6IQ==}
@@ -18858,6 +18867,8 @@ snapshots:
       '@types/node': 22.12.0
       pg-protocol: 1.10.0
       pg-types: 2.2.0
+
+  '@types/pluralize@0.0.33': {}
 
   '@types/prismjs@1.26.5': {}
 

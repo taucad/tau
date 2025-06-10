@@ -28,6 +28,10 @@ const environmentSchema = z.object({
         universe_domain: z.string(),
       }),
     ),
+  LANGSMITH_TRACING: z.string().optional(),
+  LANGSMITH_ENDPOINT: z.string().optional(),
+  LANGSMITH_PROJECT: z.string().optional(),
+  LANGSMITH_API_KEY: z.string().optional(),
   /* eslint-enable @typescript-eslint/naming-convention -- renabling */
 });
 
@@ -35,7 +39,7 @@ export const getEnvironment = (): Environment => {
   const result = environmentSchema.safeParse(process.env);
 
   if (!result.success) {
-    const formattedError = result.error.flatten().fieldErrors;
+    const formattedError = z.treeifyError(result.error).errors;
     const errorMessage = `Invalid environment configuration: ${JSON.stringify(formattedError)}`;
     throw new Error(errorMessage);
   }

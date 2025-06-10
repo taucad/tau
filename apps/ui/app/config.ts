@@ -9,7 +9,7 @@ import { z } from 'zod/v4';
 // Define the schema for environment variables
 const environmentSchema = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
-  TAU_API_URL: z.string().url(),
+  TAU_API_URL: z.url(),
   NODE_ENV: z.enum(['development', 'production', 'test']),
   /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
 });
@@ -18,7 +18,7 @@ export const getEnvironment = async (): Promise<Environment> => {
   const result = environmentSchema.safeParse(process.env);
 
   if (!result.success) {
-    const formattedError = result.error.flatten().fieldErrors;
+    const formattedError = z.treeifyError(result.error).errors;
     const errorMessage = `Invalid environment configuration: ${JSON.stringify(formattedError)}`;
     console.error(errorMessage);
     throw new Error(errorMessage);

@@ -127,7 +127,6 @@ ${objectToXml({
       {
         streamMode: 'values',
         version: 'v2',
-        runId: generatePrefixedId(idPrefix.run),
         signal: abortController.signal,
       },
     );

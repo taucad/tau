@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { JSX } from 'react';
 import { RgbaColorPicker } from 'react-colorful';
 import type { RgbaColor } from 'react-colorful';
-import { parse, converter, formatCss } from 'culori';
+import { parse, converter } from 'culori';
 import { Check, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
 import { Button } from '~/components/ui/button.js';

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import type { JSX } from 'react';
 import { StringColorPicker, isValidColor } from '~/components/ui/string-color-picker.js';
 

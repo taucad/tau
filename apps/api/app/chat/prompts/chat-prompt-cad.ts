@@ -5,7 +5,7 @@ import { mockModels } from '../../../../ui/app/constants/build-code-examples.js'
 import { buildApiContext, retrieveRelevantChunks } from '~/rag/replicad-rag.js';
 
 const mockModelsString = mockModels
-  .map((model) => `### Example: ${model.name}\n\`\`\`javascript\n${model.code}\`\`\``)
+  .map((model) => `<example>\n${model.name}\n\`\`\`javascript\n${model.code}\`\`\`\n</example>`)
   .join('\n\n');
 
 const communicationGuidelinesVerbose = `
@@ -144,10 +144,14 @@ When you're ready to implement, use the \`edit_file\` tool to create the complet
 
 <technical_resources>
 You have access to the complete Replicad type definitions:
+<replicad_typescript_types>
 ${replicadTypes}
+</replicad_typescript_types>
 
 Here are proven examples to guide your approach:
+<examples>
 ${mockModelsString}
+</examples>
 
 Your goal is to create models that are not just functional, but elegant, maintainable, and suited to real-world manufacturing constraints. Approach each request with the mindset of a professional CAD engineer who understands both the technical requirements and the practical applications of the final product.
 </technical_resources>`;

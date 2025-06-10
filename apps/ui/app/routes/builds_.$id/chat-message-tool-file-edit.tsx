@@ -133,7 +133,6 @@ function Filename({
 export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const status = useChatSelector((state) => state.context.status);
-  console.log(part);
 
   // Create file edit machine
   const [fileEditState, fileEditSend] = useMachine(fileEditMachine);

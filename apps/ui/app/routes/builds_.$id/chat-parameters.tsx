@@ -355,7 +355,7 @@ export const ChatParameters = memo(function () {
                     <RefreshCcw />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Reset all parameters</TooltipContent>
+                <TooltipContent>Reset all ({Object.keys(validParameters).length}) parameters</TooltipContent>
               </Tooltip>
             )}
 

@@ -193,8 +193,10 @@ export const ChatParameters = memo(function () {
 
   const renderParameterInput = useCallback(
     (key: string, value: unknown) => {
-      // Determine the type of parameter
-      const type = typeof value;
+      // Determine the type of parameter from the default parameter, not the current value
+      // This ensures we maintain the correct input type even when the value is cleared
+      const defaultValue = defaultParameters[key];
+      const type = typeof defaultValue;
 
       // If it's a boolean, render a switch
       if (type === 'boolean') {

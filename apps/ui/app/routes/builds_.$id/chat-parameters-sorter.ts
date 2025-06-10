@@ -5,6 +5,108 @@
 import { descriptorTerms, commonGeneralTerms } from '~/constants/build-parameters.js';
 
 /**
+ * Common English plural suffixes that should be normalized to singular forms
+ * Ordered by specificity (more specific patterns first)
+ */
+const pluralSuffixes = [
+  'ies', // Cities -> city, stories -> story
+  'ves', // Knives -> knife, shelves -> shelf
+  'oes', // Tomatoes -> tomato, heroes -> hero
+  'ses', // Glasses -> glass, classes -> class
+  'xes', // Boxes -> box, foxes -> fox
+  'zes', // Quizzes -> quiz, prizes -> prize
+  'ches', // Benches -> bench, churches -> church
+  'shes', // Dishes -> dish, brushes -> brush
+  'es', // Handles -> handle (but be careful with words ending in 'e')
+  's', // Handrails -> handrail, ramps -> ramp
+];
+
+/**
+ * Normalize a plural word to its singular form
+ *
+ * @param word - The word to normalize
+ * @returns The normalized singular form
+ */
+export const normalizePlural = (word: string): string => {
+  const lowerWord = word.toLowerCase();
+
+  // Handle specific irregular plurals that are common in architecture/construction
+  const irregularPlurals: Record<string, string> = {
+    children: 'child',
+    feet: 'foot',
+    teeth: 'tooth',
+    geese: 'goose',
+    mice: 'mouse',
+    men: 'man',
+    women: 'woman',
+    people: 'person',
+  };
+
+  if (irregularPlurals[lowerWord]) {
+    return irregularPlurals[lowerWord];
+  }
+
+  // Try each plural suffix in order of specificity
+  for (const suffix of pluralSuffixes) {
+    if (lowerWord.endsWith(suffix)) {
+      // Special handling for different suffix types
+      if (suffix === 'ies') {
+        // Cities -> city, stories -> story
+        return lowerWord.slice(0, -3) + 'y';
+      }
+
+      if (suffix === 'ves') {
+        // Handle f/fe -> ves (knives -> knife, shelves -> shelf)
+        const stem = lowerWord.slice(0, -3);
+        // If stem ends with 'l' or 'r', likely 'f' -> 'ves' (shelf -> shelves)
+        // Otherwise, likely 'fe' -> 'ves' (knife -> knives)
+        if (stem.endsWith('l') || stem.endsWith('r')) {
+          return stem + 'f';
+        }
+
+        return stem + 'fe';
+      }
+
+      if (suffix === 'es') {
+        // Be careful with 'es' - don't remove from words that naturally end in 'es'
+        const stem = lowerWord.slice(0, -2);
+        // If the word without 'es' ends in s, x, z, ch, sh, then it's likely a plural
+        if (
+          stem.endsWith('s') ||
+          stem.endsWith('x') ||
+          stem.endsWith('z') ||
+          stem.endsWith('ch') ||
+          stem.endsWith('sh')
+        ) {
+          return stem;
+        }
+
+        // For other words ending in 'es', remove just the 's'
+        return lowerWord.slice(0, -1);
+      }
+
+      if (suffix === 's') {
+        // Simple 's' removal, but avoid removing from words that naturally end in 's'
+        // Heuristic: if removing 's' results in a very short word (< 3 chars), keep it
+        const stem = lowerWord.slice(0, -1);
+        if (stem.length < 3) {
+          return lowerWord;
+        }
+
+        return stem;
+      }
+
+      // For compound suffixes like 'oes', 'ses', 'xes', 'zes', 'ches', 'shes'
+      // Remove the entire suffix
+      return lowerWord.slice(0, -suffix.length);
+    }
+  }
+
+  // If no plural suffix found, return the original word
+  return lowerWord;
+};
+
+/**
  * Extract meaningful terms from a parameter name
  *
  * @param parameterName - The parameter name to analyze
@@ -25,9 +127,10 @@ export const extractTerms = (parameterName: string): string[] => {
 /**
  * Extract primary term from a parameter name (usually the first non-descriptor term)
  * This helps identify the main feature that a parameter belongs to
+ * Normalizes plural forms to singular to group related parameters together
  *
  * @param parameterName - The parameter name to analyze
- * @returns The primary term
+ * @returns The normalized primary term
  */
 export const extractPrimaryTerm = (parameterName: string): string | undefined => {
   const terms = extractTerms(parameterName);
@@ -35,19 +138,19 @@ export const extractPrimaryTerm = (parameterName: string): string | undefined =>
   // First look for a non-descriptor, non-common term
   for (const term of terms) {
     if (!isDescriptorTerm(term) && !isCommonGeneralTerm(term)) {
-      return term;
+      return normalizePlural(term);
     }
   }
 
   // If not found, take the first non-descriptor term
   for (const term of terms) {
     if (!isDescriptorTerm(term)) {
-      return term;
+      return normalizePlural(term);
     }
   }
 
   // Fallback to the first term
-  return terms[0];
+  return terms[0] ? normalizePlural(terms[0]) : undefined;
 };
 
 /**

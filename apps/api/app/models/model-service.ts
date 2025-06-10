@@ -324,8 +324,8 @@ export class ModelService implements OnModuleInit {
       const ollamaModelsWithToolSupport = ollamaModelList.filter((model) => model.support?.tools);
 
       return ollamaModelsWithToolSupport;
-    } catch (error) {
-      Logger.error('Error getting ollama models', error);
+    } catch {
+      // Logger.error('Error getting ollama models', error);
       return [];
     }
   }

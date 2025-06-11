@@ -5,6 +5,7 @@ import type { Remote } from 'comlink';
 import type { Shape } from '~/types/cad.js';
 import type { BuilderWorkerInterface } from '~/components/geometry/kernel/replicad/replicad-builder.worker.js';
 import BuilderWorker from '~/components/geometry/kernel/replicad/replicad-builder.worker.js?worker';
+import { jsonSchemaFromJson } from '~/utils/schema.js';
 
 const createWorkerActor = fromPromise<{ type: 'kernelInitialized' }, { context: KernelContext }>(async ({ input }) => {
   const { context } = input;
@@ -61,22 +62,26 @@ const parseParametersActor = fromPromise(
 
     try {
       const defaultParameters = (await context.wrappedWorker.extractDefaultParametersFromCode(event.code)) ?? {};
+      const jsonSchema = await jsonSchemaFromJson(JSON.stringify(defaultParameters));
+
       return {
         type: 'parametersParsed' as const,
         defaultParameters,
         code: event.code,
         parameters: event.parameters,
+        jsonSchema,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error extracting parameters';
       console.error('Error extracting parameters:', errorMessage);
-      // Don't throw error here to avoid disrupting the main flow
-      // Just return with empty parameters
+      const jsonSchema = await jsonSchemaFromJson(JSON.stringify({}));
+
       return {
         type: 'parametersParsed' as const,
         defaultParameters: {},
         code: event.code,
-        parameters: {},
+        parameters: event.parameters,
+        jsonSchema,
       };
     }
   },
@@ -162,6 +167,7 @@ export type KernelEventExternal =
       defaultParameters: Record<string, unknown>;
       parameters: Record<string, unknown>;
       code: string;
+      jsonSchema?: unknown;
     }
   | { type: 'geometryExported'; blob: Blob; format: 'stl' | 'stl-binary' | 'step' | 'step-assembly' }
   | { type: 'kernelError'; error: string };

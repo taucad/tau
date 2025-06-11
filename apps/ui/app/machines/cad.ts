@@ -26,6 +26,7 @@ export type CadContext = {
   isKernelInitializing: boolean;
   isKernelInitialized: boolean;
   graphicsRef: ActorRefFrom<typeof graphicsMachine> | undefined;
+  jsonSchema?: unknown;
 };
 
 // Define the types of events the machine can receive
@@ -149,6 +150,10 @@ export const cadMachine = setup({
         assertEvent(event, 'parametersParsed');
         return event.defaultParameters;
       },
+      jsonSchema({ event }) {
+        assertEvent(event, 'parametersParsed');
+        return event.jsonSchema;
+      },
     }),
     setExportedBlob: enqueueActions(({ enqueue, event }) => {
       assertEvent(event, 'geometryExported');
@@ -179,6 +184,7 @@ export const cadMachine = setup({
         kernelError: undefined,
         shapes: [],
         exportedBlob: undefined,
+        jsonSchema: undefined,
       };
     }),
   },
@@ -209,6 +215,7 @@ export const cadMachine = setup({
     isKernelInitializing: false,
     isKernelInitialized: false,
     graphicsRef: input.graphicsRef,
+    jsonSchema: undefined,
   }),
   initial: 'booting',
   states: {

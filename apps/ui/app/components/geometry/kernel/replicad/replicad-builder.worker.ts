@@ -51,9 +51,9 @@ export async function runAsModule(code: string, parameters: Record<string, unkno
   console.log(`Module building took ${buildTime - startTime}ms`);
 
   const execStartTime = performance.now();
-  const result = await (module.default
+  const result = module.default
     ? module.default(parameters || module.defaultParams)
-    : module.main(replicad, parameters || module.defaultParams || {}));
+    : module.main?.(replicad, parameters || module.defaultParams || {});
   const execEndTime = performance.now();
   console.log(`Module execution took ${execEndTime - execStartTime}ms`);
 
@@ -110,6 +110,27 @@ const extractDefaultNameFromCode = async (code: string): Promise<string | undefi
 ${code}
 try {
   return defaultName;
+} catch (e) {
+  return;
+}
+  `;
+
+  try {
+    return await runInContext(editedText, {});
+  } catch {}
+};
+
+const extractSchemaFromCode = async (code: string): Promise<unknown> => {
+  if (/^\s*export\s+/m.test(code)) {
+    const module = await buildModuleEvaluator(code);
+    console.log(module.schema);
+    return module.schema;
+  }
+
+  const editedText = `
+${code}
+try {
+  return schema;
 } catch (e) {
   return;
 }
@@ -370,6 +391,7 @@ const service = {
   buildShapesFromCode,
   extractDefaultParametersFromCode,
   extractDefaultNameFromCode,
+  extractSchemaFromCode,
   exportShape,
   edgeInfo,
   faceInfo,

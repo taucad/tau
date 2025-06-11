@@ -413,9 +413,6 @@ function ChatSyncWrapper({
         kernelError: cadActorState.context.kernelError,
       };
 
-      console.log('feedback', feedback);
-      console.log('Generating request body...', new Date().toISOString());
-
       return {
         ...requestBody,
         ...feedback,

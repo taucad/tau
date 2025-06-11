@@ -3,16 +3,15 @@ import React, { useCallback, useMemo, memo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { categorizeParameters } from '~/routes/builds_.$id/chat-parameters-sorter.js';
 import { camelCaseToSentenceCase } from '~/utils/string.js';
-import { Slider } from '~/components/ui/slider.js';
-import { Switch } from '~/components/ui/switch.js';
 import { Input } from '~/components/ui/input.js';
-import { ChatParametersInputNumber } from '~/routes/builds_.$id/chat-parameters-input-number.js';
 import { Button } from '~/components/ui/button.js';
-import { StringColorPicker, isValidColor } from '~/components/ui/string-color-picker.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { cn } from '~/utils/ui.js';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '~/components/ui/collapsible.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
+import { ChatParametersNumber } from '~/routes/builds_.$id/chat-parameters-number.js';
+import { ChatParametersString } from '~/routes/builds_.$id/chat-parameters-string.js';
+import { ChatParametersBoolean } from '~/routes/builds_.$id/chat-parameters-boolean.js';
 
 /**
  * Filter parameters to only include the allowed parameters - allowed parameters are the keys of the default parameters
@@ -24,34 +23,6 @@ import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 const validateParameters = (parameters: Record<string, unknown>, defaultParameters: Record<string, unknown>) => {
   const allowedParameters = Object.keys(defaultParameters || {});
   return Object.fromEntries(Object.entries(parameters).filter(([key]) => allowedParameters.includes(key)));
-};
-
-/**
- * Calculate appropriate step value for slider based on the default parameter value
- * Uses logarithmic scaling to ensure precision for values of different magnitudes
- *
- * @param defaultValue - The default value of the parameter
- * @returns The calculated step value
- */
-const calculateSliderStep = (defaultValue: number): number => {
-  if (defaultValue === 0) return 0.01;
-
-  const absoluteValue = Math.abs(defaultValue);
-
-  // Define step thresholds based on order of magnitude
-  if (absoluteValue >= 1) return 1;
-  if (absoluteValue >= 0.1) return 0.1;
-  if (absoluteValue >= 0.01) return 0.01;
-  if (absoluteValue >= 0.001) return 0.001;
-  if (absoluteValue >= 0.0001) return 0.0001;
-  if (absoluteValue >= 0.000_01) return 0.000_01;
-
-  // For very small values, continue the pattern
-  const orderOfMagnitude = Math.floor(Math.log10(absoluteValue));
-  const step = 10 ** orderOfMagnitude;
-
-  // Ensure step is never larger than 1 and never smaller than a reasonable minimum
-  return Math.min(1, Math.max(step, 0.000_001));
 };
 
 export const ChatParameters = memo(function () {
@@ -202,11 +173,10 @@ export const ChatParameters = memo(function () {
       // If it's a boolean, render a switch
       if (type === 'boolean') {
         return (
-          <Switch
-            size="lg"
-            checked={Boolean(value)}
-            onCheckedChange={(checkedValue) => {
-              handleParameterChange(key, checkedValue);
+          <ChatParametersBoolean
+            value={booleanValue}
+            onChange={(newValue) => {
+              handleParameterChange(key, newValue);
             }}
           />
         );
@@ -216,39 +186,16 @@ export const ChatParameters = memo(function () {
       if (type === 'number') {
         // Convert to number if it's a string that looks like a number
         const numericValue = Number.parseFloat(String(value));
+        const defaultNumericValue = Number.parseFloat(String(defaultValue));
 
         return (
-          <div className="flex w-full flex-row items-center gap-2">
-            <Slider
-              value={[numericValue]}
-              min={0}
-              max={(defaultParameters[key] as number) * 4 || 100}
-              step={calculateSliderStep(defaultParameters[key] as number)}
-              className={cn(
-                'flex-1',
-                '[&_[data-slot="slider-track"]]:h-4',
-                '[&_[data-slot="slider-track"]]:rounded-md',
-                '[&_[data-slot="slider-thumb"]]:size-5.5',
-                '[&_[data-slot="slider-thumb"]]:border-1',
-                '[&_[data-slot="slider-thumb"]]:transition-transform',
-                '[&_[data-slot="slider-thumb"]]:hover:scale-110',
-                '[&_[data-slot="slider-track"]]:bg-muted',
-              )}
-              onValueChange={([newValue]) => {
-                handleParameterChange(key, Number(newValue));
-              }}
-            />
-            <div className="flex flex-row items-center">
-              <ChatParametersInputNumber
-                value={numericValue}
-                className="h-6 w-12 bg-background p-1"
-                name={key}
-                onChange={(event) => {
-                  handleParameterChange(key, Number.parseFloat(event.target.value));
-                }}
-              />
-            </div>
-          </div>
+          <ChatParametersNumber
+            value={numericValue}
+            defaultValue={defaultNumericValue}
+            onChange={(newValue) => {
+              handleParameterChange(key, newValue);
+            }}
+          />
         );
       }
 
@@ -257,30 +204,12 @@ export const ChatParameters = memo(function () {
         const stringValue = String(value);
         const defaultStringValue = String(defaultValue);
 
-        // Check if either the current value or default value is a valid color
-        // This ensures we show the color picker even when the value is cleared
-        const isColorParameter = isValidColor(defaultStringValue);
-
-        if (isColorParameter) {
-          return (
-            <StringColorPicker
-              value={stringValue}
-              onChange={(newValue) => {
-                handleParameterChange(key, newValue);
-              }}
-            />
-          );
-        }
-
-        // Otherwise, render a regular text input
         return (
-          <Input
-            autoComplete="off"
-            type="text"
+          <ChatParametersString
             value={stringValue}
-            className="h-6 flex-1 bg-background p-1"
-            onChange={(event) => {
-              handleParameterChange(key, event.target.value);
+            defaultValue={defaultStringValue}
+            onChange={(newValue) => {
+              handleParameterChange(key, newValue);
             }}
           />
         );

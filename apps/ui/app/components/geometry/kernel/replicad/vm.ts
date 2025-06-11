@@ -1,13 +1,15 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 // Simple VM implementation for running user code in a sandboxed environment
 
+import type { CadModuleExports } from '~/types/cad.js';
+import { hashCode } from '~/utils/crypto.js';
+
 // Cache for module evaluators to avoid repeated compilation
-const moduleCache = new Map<string, any>();
+const moduleCache = new Map<string, CadModuleExports>();
 
 /**
  * Run code in a VM-like context with the provided context
  */
-export function runInContext(code: string, context: Record<string, any> = {}): any {
+export function runInContext<Context extends Record<string, unknown>, Result>(code: string, context: Context): Result {
   // Create context objects for the Function constructor
   const contextKeys = Object.keys(context);
   const contextValues = contextKeys.map((key) => context[key]);
@@ -15,8 +17,11 @@ export function runInContext(code: string, context: Record<string, any> = {}): a
   try {
     // Use Function constructor for faster execution (like original replicad)
     // This approach avoids using eval which is slower and has security implications
-    const runFunction = new Function(...contextKeys, code);
-    return runFunction(...contextValues);
+    // eslint-disable-next-line no-new-func -- TODO: review this
+    const runFunction = new Function(...contextKeys, code) as (...args: unknown[]) => unknown;
+    const functionResult = runFunction(...contextValues) as Result;
+
+    return functionResult;
   } catch (error) {
     console.error('Error running code in context:', error);
     throw error;
@@ -27,12 +32,12 @@ export function runInContext(code: string, context: Record<string, any> = {}): a
  * Builds a module evaluator for the given code
  * Caches modules to avoid repeated compilation
  */
-export async function buildModuleEvaluator(code: string): Promise<any> {
+export async function buildModuleEvaluator(code: string): Promise<CadModuleExports> {
   // Check cache first
   const cacheKey = hashCode(code);
   if (moduleCache.has(cacheKey)) {
     console.log('Using cached module evaluator');
-    return moduleCache.get(cacheKey);
+    return moduleCache.get(cacheKey)!;
   }
 
   console.log('Building new module evaluator');
@@ -44,7 +49,7 @@ export async function buildModuleEvaluator(code: string): Promise<any> {
     const url = URL.createObjectURL(blob);
 
     // Import the module dynamically
-    const module = await import(/* @vite-ignore */ url);
+    const module = (await import(/* @vite-ignore */ url)) as CadModuleExports;
 
     // Cache the module for future use
     moduleCache.set(cacheKey, module);
@@ -60,17 +65,4 @@ export async function buildModuleEvaluator(code: string): Promise<any> {
     console.error('Failed to build module evaluator:', error);
     throw error;
   }
-}
-
-/**
- * Simple string hash function for caching
- */
-function hashCode(string_: string): string {
-  let hash = 0;
-  for (let index = 0; index < string_.length; index++) {
-    const char = string_.charCodeAt(index);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return hash.toString(16);
 }

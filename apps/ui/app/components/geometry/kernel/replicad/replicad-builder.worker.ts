@@ -94,7 +94,7 @@ try {
   `;
 
   try {
-    return runInContext(editedText, {});
+    return await runInContext(editedText, {});
   } catch {
     return {};
   }
@@ -116,7 +116,7 @@ try {
   `;
 
   try {
-    return runInContext(editedText, {});
+    return await runInContext(editedText, {});
   } catch {}
 };
 
@@ -360,7 +360,6 @@ const initialize = async (withExceptions: boolean): Promise<void> => {
 const service = {
   async ready(): Promise<boolean> {
     try {
-      // Check that OC is initialized
       await OC;
       return true;
     } catch (error) {

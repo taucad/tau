@@ -10,12 +10,11 @@ import type { Model, ModelSupport } from '~/models/model-schema.js';
 type CloudProviderId = Exclude<ProviderId, 'ollama'>;
 
 const modelList: Record<CloudProviderId, Record<string, Model>> = {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- snake case format is preferred here
-  google_vertexai: {
+  google: {
     'gemini-2.5-pro': {
       id: 'google-gemini-2.5-pro',
       name: 'Gemini 2.5 Pro',
-      provider: 'google_vertexai',
+      provider: 'google',
       model: 'gemini-2.5-pro-preview-05-06',
       details: {
         family: 'Gemini',
@@ -150,20 +149,20 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
         streaming: true,
       },
     },
-    'gpt-o1': {
-      id: 'openai-gpt-o1',
-      name: 'GPT-o1',
+    'gpt-o3': {
+      id: 'openai-gpt-o3',
+      name: 'GPT-o3',
       provider: 'openai',
-      model: 'o1-2024-12-17',
+      model: 'o3-2025-04-16',
       details: {
         family: 'GPT-O3',
         families: ['GPT-O3'],
         contextWindow: 200_000,
         maxTokens: 100_000,
         cost: {
-          inputTokens: 15,
-          outputTokens: 60,
-          cachedReadTokens: 7.5,
+          inputTokens: 2,
+          outputTokens: 8,
+          cachedReadTokens: 0.5,
           cachedWriteTokens: 0,
         },
       },

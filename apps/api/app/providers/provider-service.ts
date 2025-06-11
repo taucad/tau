@@ -18,7 +18,7 @@ type ProviderOptionsMap = {
   ollama: ChatOllamaInput;
   anthropic: ChatAnthropicCallOptions;
   sambanova: ChatOpenAIFields;
-  google_vertexai: ChatVertexAIInput & { model: string };
+  google: ChatVertexAIInput & { model: string };
 };
 
 // Enhanced type that includes the createClass method
@@ -70,9 +70,8 @@ export const providers: {
       }),
   },
 
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- snake case format is preferred here
-  google_vertexai: {
-    provider: 'google_vertexai',
+  google: {
+    provider: 'google',
     configuration: {
       apiKey: process.env.GOOGLE_API_KEY,
     },

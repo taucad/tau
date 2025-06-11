@@ -74,11 +74,14 @@ const parseParametersActor = fromPromise(
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error extracting parameters';
       console.error('Error extracting parameters:', errorMessage);
-      const jsonSchema = await jsonSchemaFromJson(JSON.stringify({}));
+
+      // If the worker fails to extract default parameters, use an empty object
+      const defaultParameters = {};
+      const jsonSchema = await jsonSchemaFromJson(JSON.stringify(defaultParameters));
 
       return {
         type: 'parametersParsed' as const,
-        defaultParameters: {},
+        defaultParameters,
         code: event.code,
         parameters: event.parameters,
         jsonSchema,

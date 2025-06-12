@@ -19,7 +19,6 @@ export async function jsonSchemaFromJson(jsonString: string): Promise<unknown> {
 
   const joinedSchema = serializedData.lines.join('');
   const parsedSchema = JSON.parse(joinedSchema) as unknown;
-  console.log(parsedSchema);
 
   return parsedSchema;
 }

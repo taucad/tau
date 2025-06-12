@@ -128,7 +128,7 @@ export function createBuildMutations(queryClient: QueryClient): {
 
       const newChat: Chat = {
         id: chatId,
-        name: 'New Chat', // Will be updated by AI
+        name: 'New chat', // Will be updated by AI
         messages: initialMessages,
         createdAt: timestamp,
         updatedAt: timestamp,

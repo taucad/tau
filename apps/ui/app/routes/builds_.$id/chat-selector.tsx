@@ -89,7 +89,7 @@ export function ChatSelector(): ReactNode {
     if (isLoading || !activeChat) return;
 
     // Check if this chat needs a name
-    if (activeChat.name === 'New Chat' && activeChat.messages[0]) {
+    if (activeChat.name === 'New chat' && activeChat.messages[0]) {
       setIsGeneratingName(true);
 
       // Create and send message for name generation
@@ -218,7 +218,7 @@ export function ChatSelector(): ReactNode {
                     {isLoading
                       ? null
                       : !build?.chats || build.chats.length === 0
-                        ? 'New Chat'
+                        ? 'Initial design'
                         : (activeChat?.name ?? 'Select a chat')}
                   </span>
                   <Search className="size-4 shrink-0 opacity-0 group-hover:opacity-100" />
@@ -236,7 +236,7 @@ export function ChatSelector(): ReactNode {
                 <Plus className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>New Chat</TooltipContent>
+            <TooltipContent>New chat</TooltipContent>
           </Tooltip>
         </div>
       </div>

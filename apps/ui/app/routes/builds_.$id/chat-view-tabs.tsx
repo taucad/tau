@@ -6,7 +6,7 @@ import { ChatViewer } from '~/routes/builds_.$id/chat-viewer.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import type { KeyCombination } from '~/utils/keys.js';
 import { cn } from '~/utils/ui.js';
-import { Tabs, TabsList, TabsTrigger, TabsContent, TabsContents } from '~/components/ui/tabs.js';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '~/components/ui/tabs.js';
 
 const chatTabCookieName = 'chat-tab';
 type ChatTabs = (typeof tabs)[number]['value'];

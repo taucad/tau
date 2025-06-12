@@ -10,7 +10,6 @@ import { ChatParameters } from '~/routes/builds_.$id/chat-parameters.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
-import { useIsMobile } from '~/hooks/use-mobile.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import type { KeyCombination } from '~/utils/keys.js';
 import { ChatControls } from '~/routes/builds_.$id/chat-controls.js';
@@ -65,8 +64,6 @@ export const ChatInterface = memo(function () {
     toggleViewModeKeyCombination,
     toggleViewMode,
   );
-
-  const isMobile = useIsMobile();
 
   return (
     <ResizablePanelGroup

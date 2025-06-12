@@ -49,7 +49,7 @@ export default function ChatStart(): JSX.Element {
           chats: [
             {
               id: chatId,
-              name: 'New Chat',
+              name: 'Initial design',
               messages: [userMessage],
               createdAt: Date.now(),
               updatedAt: Date.now(),

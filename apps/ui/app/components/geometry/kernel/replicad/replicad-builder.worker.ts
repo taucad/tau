@@ -7,7 +7,7 @@ import {
   initOpenCascadeWithExceptions,
 } from '~/components/geometry/kernel/replicad/init-open-cascade.js';
 import { StudioHelper } from '~/components/geometry/kernel/replicad/utils/studio-helper.js';
-import { runInContext, buildModuleEvaluator } from '~/components/geometry/kernel/replicad/vm.js';
+import { runInCjsContext, buildEsModule } from '~/components/geometry/kernel/replicad/vm.js';
 import { renderOutput, ShapeStandardizer } from '~/components/geometry/kernel/replicad/utils/render-output.js';
 
 // Track whether we've already set OC in replicad to avoid repeated calls
@@ -32,7 +32,7 @@ try {
 return main(replicad, __inputParams || dp)
   `;
 
-  return runInContext(editedText, context);
+  return runInCjsContext(editedText, context);
 }
 
 async function runAsFunction(code: string, parameters: Record<string, unknown>): Promise<unknown> {
@@ -46,7 +46,7 @@ async function runAsFunction(code: string, parameters: Record<string, unknown>):
 
 export async function runAsModule(code: string, parameters: Record<string, unknown>): Promise<unknown> {
   const startTime = performance.now();
-  const module = await buildModuleEvaluator(code);
+  const module = await buildEsModule(code);
   const buildTime = performance.now();
   console.log(`Module building took ${buildTime - startTime}ms`);
 
@@ -80,7 +80,7 @@ const runCode = async (code: string, parameters: Record<string, unknown>): Promi
 
 const extractDefaultParametersFromCode = async (code: string): Promise<Record<string, unknown>> => {
   if (/^\s*export\s+/m.test(code)) {
-    const module = await buildModuleEvaluator(code);
+    const module = await buildEsModule(code);
     return module.defaultParams ?? {};
   }
 
@@ -94,7 +94,7 @@ try {
   `;
 
   try {
-    return await runInContext(editedText, {});
+    return await runInCjsContext(editedText, {});
   } catch {
     return {};
   }
@@ -102,7 +102,7 @@ try {
 
 const extractDefaultNameFromCode = async (code: string): Promise<string | undefined> => {
   if (/^\s*export\s+/m.test(code)) {
-    const module = await buildModuleEvaluator(code);
+    const module = await buildEsModule(code);
     return module.defaultName;
   }
 
@@ -116,13 +116,13 @@ try {
   `;
 
   try {
-    return await runInContext(editedText, {});
+    return await runInCjsContext(editedText, {});
   } catch {}
 };
 
 const extractSchemaFromCode = async (code: string): Promise<unknown> => {
   if (/^\s*export\s+/m.test(code)) {
-    const module = await buildModuleEvaluator(code);
+    const module = await buildEsModule(code);
     console.log(module.schema);
     return module.schema;
   }
@@ -137,7 +137,7 @@ try {
   `;
 
   try {
-    return await runInContext(editedText, {});
+    return await runInCjsContext(editedText, {});
   } catch {}
 };
 

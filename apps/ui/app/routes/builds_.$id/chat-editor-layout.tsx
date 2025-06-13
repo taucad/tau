@@ -60,7 +60,6 @@ export function ChatEditorLayout({ className }: { readonly className?: ClassValu
             variant="outline"
             size="icon"
             className="absolute bottom-4 left-4 z-50 flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background/80 backdrop-blur-sm transition-colors hover:bg-accent"
-            title={isExplorerOpen ? 'Hide Explorer' : 'Show Explorer'}
             onClick={toggleExplorer}
           >
             <ArrowRightToLine className={cn('transition-transform', isExplorerOpen && 'rotate-y-180')} />

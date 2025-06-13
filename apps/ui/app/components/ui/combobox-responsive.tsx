@@ -146,7 +146,7 @@ function ItemList<T>({
   return (
     <Command>
       <CommandInput placeholder={searchPlaceHolder} />
-      <CommandList>
+      <CommandList className="max-h-full">
         <CommandEmpty>No results found.</CommandEmpty>
         {groupedItems.map((group) => (
           <CommandGroup key={group.name} heading={group.name}>

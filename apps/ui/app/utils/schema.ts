@@ -11,10 +11,10 @@ type JsonSchemaProperty = {
 };
 
 type JsonSchema = {
+  [key: string]: unknown;
   $schema?: string;
   $ref?: string;
   definitions?: Record<string, JsonSchemaProperty>;
-  [key: string]: unknown;
 };
 
 /**

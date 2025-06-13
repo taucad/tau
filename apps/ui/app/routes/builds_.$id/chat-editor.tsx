@@ -23,31 +23,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
 
   useEffect(() => {
     if (monaco) {
-      monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
-        experimentalDecorators: true,
-        allowSyntheticDefaultImports: true,
-        moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
-        target: monaco.languages.typescript.ScriptTarget.ESNext,
-        noLib: false,
-        allowNonTsExtensions: true,
-        noEmit: true,
-        baseUrl: './',
-      });
-      monaco.languages.typescript.typescriptDefaults.setEagerModelSync(true);
-      monaco.languages.typescript.typescriptDefaults.setExtraLibs([
-        {
-          content: `declare module 'replicad' { ${replicadTypes} }`,
-          filePath: 'file:///node_modules/replicad/index.d.ts',
-        },
-        {
-          content: `
-    import * as replicadAll from 'replicad';
-    declare global {
-    declare var replicad = replicadAll;
-    }
-  `,
-        },
-      ]);
+      void registerMonaco(monaco);
     }
   }, [monaco]);
 

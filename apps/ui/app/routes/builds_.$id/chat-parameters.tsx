@@ -172,6 +172,8 @@ export const ChatParameters = memo(function () {
 
       // If it's a boolean, render a switch
       if (type === 'boolean') {
+        const booleanValue = Boolean(value);
+
         return (
           <ChatParametersBoolean
             value={booleanValue}

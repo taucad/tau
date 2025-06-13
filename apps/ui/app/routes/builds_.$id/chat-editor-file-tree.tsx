@@ -379,7 +379,7 @@ export function ChatEditorFileTree(): JSX.Element {
       </h3>
       <div className="flex-1 overflow-hidden">
         <Tree
-          className="my-2 h-full"
+          className="my-1 h-full"
           elements={treeElements}
           initialExpandedItems={['models', 'assemblies', 'scripts']}
         >
@@ -404,7 +404,7 @@ function TreeItem({ element, onSelect, activeFileId }: TreeItemProps): JSX.Eleme
       <Folder
         value={element.id}
         element={element.name}
-        className="rounded-md px-2 py-1.5 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        className="my-1 rounded-md px-2 py-1.5 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
       >
         {element.children.map((child) => (
           <TreeItem key={child.id} element={child} activeFileId={activeFileId} onSelect={onSelect} />

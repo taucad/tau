@@ -6,6 +6,7 @@ import { ChatParametersNumber } from '~/routes/builds_.$id/chat-parameters-numbe
 import { ChatParametersString } from '~/routes/builds_.$id/chat-parameters-string.js';
 
 export function ChatParameterWidget(props: WidgetProps): JSX.Element {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- RJSF is untyped
   const { value, onChange, name, schema } = props;
 
   const defaultValue = schema.default as string | number | boolean;

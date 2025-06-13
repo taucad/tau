@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
-import { Input } from '~/components/ui/input.js';
 import { Slider } from '~/components/ui/slider.js';
+import { ChatParametersInputNumber } from '~/routes/builds_.$id/chat-parameters-input-number.js';
 import { cn } from '~/utils/ui.js';
 
 /**
@@ -35,16 +35,17 @@ type ChatParametersNumberProps = {
   readonly value: number;
   readonly defaultValue: number;
   readonly onChange: (value: number) => void;
+  readonly name: string;
 };
 
-export function ChatParametersNumber({ value, defaultValue, onChange }: ChatParametersNumberProps): JSX.Element {
+export function ChatParametersNumber({ value, defaultValue, onChange, name }: ChatParametersNumberProps): JSX.Element {
   return (
     <div className="flex w-full flex-row items-center gap-2">
       <Slider
         value={[value]}
         min={0}
         max={defaultValue * 4 || 100}
-        step={calculateSliderStep(defaultValue)}
+        step={calculateSliderStep(defaultValue || 0)}
         className={cn(
           'flex-1',
           '[&_[data-slot="slider-track"]]:h-4',
@@ -60,8 +61,9 @@ export function ChatParametersNumber({ value, defaultValue, onChange }: ChatPara
         }}
       />
       <div className="flex flex-row items-center">
-        <Input
+        <ChatParametersInputNumber
           value={value}
+          name={name}
           className="h-6 w-12 bg-background p-1"
           onChange={(event) => {
             onChange(Number.parseFloat(event.target.value));

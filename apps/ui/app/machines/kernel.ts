@@ -62,7 +62,7 @@ const parseParametersActor = fromPromise(
 
     try {
       const defaultParameters = (await context.wrappedWorker.extractDefaultParametersFromCode(event.code)) ?? {};
-      const jsonSchema = await jsonSchemaFromJson(JSON.stringify(defaultParameters));
+      const jsonSchema = await jsonSchemaFromJson(defaultParameters);
 
       return {
         type: 'parametersParsed' as const,
@@ -77,7 +77,7 @@ const parseParametersActor = fromPromise(
 
       // If the worker fails to extract default parameters, use an empty object
       const defaultParameters = {};
-      const jsonSchema = await jsonSchemaFromJson(JSON.stringify(defaultParameters));
+      const jsonSchema = await jsonSchemaFromJson(defaultParameters);
 
       return {
         type: 'parametersParsed' as const,

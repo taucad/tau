@@ -47,8 +47,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     return null; // Hide field if it doesn't match search
   }
 
-  const defaultValue = schema.default;
-  const hasValue = formData !== defaultValue;
+  const hasValue = formData !== schema.default;
 
   const handleReset = () => {
     // TODO: fix me - this doesn't work
@@ -174,13 +173,13 @@ function CustomCheckboxWidget(props: WidgetProps): React.ReactNode {
 
 function SimpleInputWidget(props: WidgetProps & { readonly inputType: string }): React.ReactNode {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
-  const { value, onChange, inputType, defaultValue } = props;
+  const { value, onChange, inputType, schema } = props;
   return (
     <Input
       type={inputType}
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
       value={value}
-      defaultValue={defaultValue}
+      defaultValue={schema.default as string}
       className="h-6 flex-1 bg-background p-1"
       onChange={(event) => {
         onChange(event.target.value);
@@ -255,11 +254,11 @@ export const templates: TemplatesType = {
     </div>
   ),
   ArrayFieldTitleTemplate: ({ title }) => (title ? <h3 className="mb-2 font-medium">{title}</h3> : null),
-  BaseInputTemplate: ({ value, onChange, defaultValue }) => (
+  BaseInputTemplate: ({ value, onChange, schema }) => (
     <Input
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
       value={value}
-      defaultValue={defaultValue}
+      defaultValue={schema.default as string}
       className="h-6 flex-1 bg-background p-1"
       onChange={(event) => {
         onChange(event.target.value);

@@ -10,6 +10,7 @@ import { CodeEditor } from '~/components/code-editor.js';
 import { cn } from '~/utils/ui.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { HammerAnimation } from '~/components/hammer-animation.js';
+import { registerMonaco } from '~/routes/builds_.$id/chat-editor-config.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }) {
   const monaco = useMonaco();

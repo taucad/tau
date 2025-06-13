@@ -86,7 +86,7 @@ function addDefaultValues(
 export async function jsonSchemaFromJson(json: Record<string, unknown>): Promise<JsonSchema> {
   const jsonInput = jsonInputForTargetLanguage('json-schema');
   await jsonInput.addSource({
-    name: 'schema',
+    name: '',
     samples: [JSON.stringify(json)],
   });
 

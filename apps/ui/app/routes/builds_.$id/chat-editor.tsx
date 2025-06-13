@@ -11,6 +11,7 @@ import { cn } from '~/utils/ui.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { HammerAnimation } from '~/components/hammer-animation.js';
 import { registerMonaco } from '~/routes/builds_.$id/chat-editor-config.js';
+import { ChatEditorBreadcrumbs } from '~/routes/builds_.$id/chat-editor-breadcrumbs.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }): JSX.Element {
   const monaco = useMonaco();
@@ -70,6 +71,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
   return (
     <div className={cn('flex h-full flex-col bg-background', className)}>
       <ChatEditorTabs />
+      <ChatEditorBreadcrumbs />
       <div className="flex-1">
         <CodeEditor
           loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}

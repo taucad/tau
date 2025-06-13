@@ -1,5 +1,6 @@
 import { expose } from 'comlink';
 import * as replicad from 'replicad';
+import * as zod from 'zod/v4';
 import type { OpenCascadeInstance as OpenCascadeInstanceWithExceptions } from 'replicad-opencascadejs/src/replicad_with_exceptions.js';
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import {
@@ -15,6 +16,7 @@ let replicadHasOc = false;
 
 // Make replicad available in the global scope.
 (globalThis as unknown as { replicad: typeof replicad }).replicad = replicad;
+(globalThis as unknown as { zod: typeof zod }).zod = zod;
 
 /**
  * Run code in a VM with the OC context

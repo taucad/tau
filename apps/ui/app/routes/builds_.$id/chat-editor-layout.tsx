@@ -1,5 +1,5 @@
 import type { ClassValue } from 'clsx';
-import { ChevronLeft } from 'lucide-react';
+import { ArrowRightToLine } from 'lucide-react';
 import type { JSX } from 'react';
 import { Button } from '~/components/ui/button.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
@@ -63,7 +63,7 @@ export function ChatEditorLayout({ className }: { readonly className?: ClassValu
             title={isExplorerOpen ? 'Hide Explorer' : 'Show Explorer'}
             onClick={toggleExplorer}
           >
-            <ChevronLeft className={cn('transition-transform', isExplorerOpen ? 'rotate-180' : '')} />
+            <ArrowRightToLine className={cn('transition-transform', isExplorerOpen && 'rotate-y-180')} />
           </Button>
         </TooltipTrigger>
         <TooltipContent>

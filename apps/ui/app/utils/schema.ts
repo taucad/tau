@@ -104,8 +104,6 @@ export async function jsonSchemaFromJson(json: Record<string, unknown>): Promise
   // Add default values to the schema
   const schemaWithDefaults = addDefaultValuesToSchema(parsedSchema, json);
 
-  console.log({ schemaWithDefaults });
-
   return schemaWithDefaults;
 }
 

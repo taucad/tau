@@ -178,7 +178,7 @@ const TreeIndicator = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivEle
         ref={ref}
         dir={direction}
         className={cn(
-          'hover:bg-slate-300 absolute left-1.5 h-full w-px rounded-md bg-muted py-3 duration-300 ease-in-out rtl:right-1.5',
+          'absolute left-3.5 h-full w-px rounded-md bg-muted py-3 hover:bg-neutral/20 rtl:right-1.5',
           className,
         )}
         {...props}
@@ -225,7 +225,7 @@ const Folder = forwardRef<HTMLDivElement, FolderProps & React.HTMLAttributes<HTM
           <AccordionPrimitive.Root
             dir={direction}
             type="multiple"
-            className="ml-5 flex flex-col gap-1 py-1 rtl:mr-5"
+            className="ml-5 flex flex-col gap-1 rtl:mr-5"
             defaultValue={expandedItems}
             value={expandedItems}
             onValueChange={(value) => {
@@ -261,7 +261,7 @@ const File = forwardRef<
       type="button"
       disabled={!isSelectable}
       className={cn(
-        'flex w-fit items-center gap-1 rounded-md pr-1 text-sm duration-200 ease-in-out rtl:pr-0 rtl:pl-1',
+        'flex w-fit items-center gap-1 rounded-md pr-1 text-sm rtl:pr-0 rtl:pl-1',
         {
           'bg-muted': isSelected && isSelectable,
         },

@@ -373,13 +373,21 @@ export function ChatEditorFileTree(): JSX.Element {
   const treeElements = convertFileItemToTreeElement(mockFileSystem);
 
   return (
-    <div className={cn('h-full w-full bg-neutral/5')}>
-      <h3 className="mb-2 flex h-12 items-center border-b px-2 text-base font-medium text-muted-foreground">Files</h3>
-      <Tree className="h-full" elements={treeElements} initialExpandedItems={['models', 'assemblies', 'scripts']}>
-        {treeElements.map((element) => (
-          <TreeItem key={element.id} element={element} activeFileId={activeFileId} onSelect={handleFileSelect} />
-        ))}
-      </Tree>
+    <div className={cn('flex h-full w-full flex-col bg-sidebar select-none')}>
+      <h3 className="flex h-12 shrink-0 items-center border-b border-sidebar-border px-4 py-3 text-base font-medium text-sidebar-foreground/70">
+        Files
+      </h3>
+      <div className="flex-1 overflow-hidden">
+        <Tree
+          className="my-2 h-full"
+          elements={treeElements}
+          initialExpandedItems={['models', 'assemblies', 'scripts']}
+        >
+          {treeElements.map((element) => (
+            <TreeItem key={element.id} element={element} activeFileId={activeFileId} onSelect={handleFileSelect} />
+          ))}
+        </Tree>
+      </div>
     </div>
   );
 }
@@ -393,7 +401,11 @@ type TreeItemProps = {
 function TreeItem({ element, onSelect, activeFileId }: TreeItemProps): JSX.Element {
   if (element.children && element.children.length > 0) {
     return (
-      <Folder value={element.id} element={element.name}>
+      <Folder
+        value={element.id}
+        element={element.name}
+        className="rounded-md px-2 py-1.5 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      >
         {element.children.map((child) => (
           <TreeItem key={child.id} element={child} activeFileId={activeFileId} onSelect={onSelect} />
         ))}
@@ -406,12 +418,15 @@ function TreeItem({ element, onSelect, activeFileId }: TreeItemProps): JSX.Eleme
   return (
     <File
       value={element.id}
-      className={cn('w-fit truncate p-0.5', isActive && 'bg-neutral/10 text-primary')}
+      className={cn(
+        'w-full justify-start rounded-md px-2 py-1.5 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+        isActive && 'bg-sidebar-accent text-sidebar-accent-foreground',
+      )}
       onClick={() => {
         onSelect(element.id);
       }}
     >
-      <span>{element.name}</span>
+      <span className="truncate">{element.name}</span>
     </File>
   );
 }

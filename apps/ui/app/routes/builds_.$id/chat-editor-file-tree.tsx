@@ -241,7 +241,7 @@ export function ChatEditorFileTree(): JSX.Element {
 
   return (
     <div className={cn('h-full w-full bg-neutral/5')}>
-      <h3 className="mb-2 flex h-8 items-center border-b px-2 text-base font-medium text-muted-foreground">Files</h3>
+      <h3 className="mb-2 flex h-12 items-center border-b px-2 text-base font-medium text-muted-foreground">Files</h3>
       <Tree className="h-full" elements={treeElements} initialExpandedItems={['src', 'components', 'utils']}>
         {treeElements.map((element) => (
           <TreeItem key={element.id} element={element} activeFileId={activeFileId} onSelect={handleFileSelect} />

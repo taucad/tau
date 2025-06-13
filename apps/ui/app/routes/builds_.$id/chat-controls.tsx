@@ -7,7 +7,6 @@ import { Button } from '~/components/ui/button.js';
 import { useBuildSelector } from '~/hooks/use-build.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { toast } from '~/components/ui/sonner.js';
-import { cn } from '~/utils/ui.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
@@ -470,35 +469,28 @@ export function ChatControls(): JSX.Element {
   const isControlItemDisabled = (item: ViewerControlItem) => Boolean(item.disabled);
 
   return (
-    <div
-      className={cn(
-        'absolute top-0 right-0 z-50 m-2 mr-12 flex flex-row justify-end gap-2 md:mr-22',
-        'group-data-[parameters-open=true]/chat-layout:mr-12',
-      )}
-    >
-      <Tooltip>
-        <ComboBoxResponsive<ViewerControlItem>
-          groupedItems={groupedControlItems}
-          renderLabel={renderControlItemLabel}
-          getValue={getControlItemValue}
-          defaultValue={undefined}
-          isDisabled={isControlItemDisabled}
-          popoverContentClassName="w-60 z-50"
-          searchPlaceHolder="Search actions..."
-          placeholder="Actions"
-          onSelect={(itemId) => {
-            const selectedItem = buildItems.find((item) => item.id === itemId);
-            selectedItem?.action();
-          }}
-        >
-          <TooltipTrigger asChild>
-            <Button variant="overlay" size="icon" className="text-muted-foreground">
-              <Menu className="size-4" />
-            </Button>
-          </TooltipTrigger>
-        </ComboBoxResponsive>
-        <TooltipContent>More actions</TooltipContent>
-      </Tooltip>
-    </div>
+    <Tooltip>
+      <ComboBoxResponsive<ViewerControlItem>
+        groupedItems={groupedControlItems}
+        renderLabel={renderControlItemLabel}
+        getValue={getControlItemValue}
+        defaultValue={undefined}
+        isDisabled={isControlItemDisabled}
+        popoverContentClassName="w-60 z-50"
+        searchPlaceHolder="Search actions..."
+        placeholder="Actions"
+        onSelect={(itemId) => {
+          const selectedItem = buildItems.find((item) => item.id === itemId);
+          selectedItem?.action();
+        }}
+      >
+        <TooltipTrigger asChild>
+          <Button variant="overlay" size="icon" className="text-muted-foreground">
+            <Menu className="size-4" />
+          </Button>
+        </TooltipTrigger>
+      </ComboBoxResponsive>
+      <TooltipContent>More actions</TooltipContent>
+    </Tooltip>
   );
 }

@@ -19,6 +19,7 @@ import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { orthographicViews, screenshotRequestMachine } from '~/machines/screenshot-request.js';
 import { fileEditMachine } from '~/machines/file-edit.js';
 import type { FileEditToolResult } from '~/routes/builds_.$id/chat-message-tool-file-edit.js';
+import { ChatControls } from '~/routes/builds_.$id/chat-controls.js';
 
 export const handle: Handle = {
   breadcrumb(match) {
@@ -34,18 +35,23 @@ export const handle: Handle = {
       </BuildProvider>
     );
   },
-  actions() {
+  actions(match) {
+    const { id } = match.params as Route.LoaderArgs['params'];
+
     return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button asChild variant="outline" className="md:hidden" size="icon">
-            <Link to="/">
-              <PackagePlus className="size-4" />
-            </Link>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>New Build</TooltipContent>
-      </Tooltip>
+      <BuildProvider buildId={id}>
+        <ChatControls />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button asChild variant="outline" className="md:hidden" size="icon">
+              <Link to="/">
+                <PackagePlus className="size-4" />
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>New Build</TooltipContent>
+        </Tooltip>
+      </BuildProvider>
     );
   },
 };

@@ -199,7 +199,7 @@ type FolderProps = {
 } & FolderComponentProps;
 
 const Folder = forwardRef<HTMLDivElement, FolderProps & React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, element, value, isSelectable = true, isSelect, children, ...props }, ref) => {
+  ({ className, element, value, isSelectable = true, isSelect, children, ...props }, _ref) => {
     const { direction, handleExpand, expandedItems, indicator, setExpandedItems, openIcon, closeIcon } = useTree();
 
     return (

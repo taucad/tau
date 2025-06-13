@@ -8,6 +8,8 @@ import type { KeyCombination } from '~/utils/keys.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '~/components/ui/resizable.js';
+import { ChatEditorFileTree } from '~/routes/builds_.$id/chat-editor-file-tree.js';
+import { ChatEditorLayout } from '~/routes/builds_.$id/chat-editor-layout.js';
 
 const chatResizeViewerCookieName = 'chat-resize-viewer';
 const chatResizeCodeCookieName = 'chat-resize-editor';
@@ -54,8 +56,8 @@ export function ChatViewSplit(): JSX.Element {
       <ResizableHandle />
       <ResizablePanel order={2} defaultSize={codeSize[1]} minSize={30} id="chat-editor-container">
         <ResizablePanelGroup direction="vertical" autoSaveId={chatResizeCodeCookieName} onLayout={setConsoleSize}>
-          <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-editor" className="size-full pt-12">
-            <ChatEditor />
+          <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-editor" className="size-full">
+            <ChatEditorLayout />
           </ResizablePanel>
           <ResizableHandle />
           <ResizablePanel

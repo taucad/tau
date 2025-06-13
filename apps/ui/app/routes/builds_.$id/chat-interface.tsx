@@ -200,7 +200,6 @@ export const ChatInterface = memo(function () {
           </KeyShortcut>
         </TooltipContent>
       </Tooltip>
-      <ChatControls />
 
       <ResizablePanel
         order={3}

@@ -23,17 +23,19 @@ import { camelCaseToSentenceCase } from '~/utils/string.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { HighlightText } from '~/components/highlight-text.js';
 import { ChatParameterWidget } from '~/routes/builds_.$id/chat-parameter-widget.js';
+import { rjsfIdToJsonPath, hasCustomValue } from '~/routes/builds_.$id/rjsf-utils.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for formContext
 export type RJSFContext = {
   searchTerm: string;
   allExpanded: boolean;
+  resetSingleParameter: (fieldPath: string[]) => void;
   shouldShowField: (prettyLabel: string) => boolean;
 };
 
 // Custom Field Template with Reset Button and Search Filtering
 function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSchema, RJSFContext>): React.ReactNode {
-  const { label, help, required, description, errors, children, schema, formData, onChange, registry } = props;
+  const { label, help, required, description, errors, children, schema, formData, id, registry } = props;
 
   if (schema.type === 'object') {
     return <div className="my-1">{children}</div>;
@@ -43,25 +45,29 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   const formContext = registry?.formContext;
   const prettyLabel = camelCaseToSentenceCase(label);
 
-  if (!formContext.shouldShowField(prettyLabel)) {
+  if (!formContext?.shouldShowField(prettyLabel)) {
     return null; // Hide field if it doesn't match search
   }
 
-  const hasValue = formData !== schema.default;
+  // Convert RJSF ID to proper JSON path
+  const fieldPath = rjsfIdToJsonPath(id);
+
+  // Check if field has custom value
+  const defaultValue = schema.default;
+  const fieldHasValue = hasCustomValue(formData, defaultValue);
 
   const handleReset = () => {
-    // TODO: fix me - this doesn't work
-    onChange(undefined);
+    formContext.resetSingleParameter(fieldPath);
   };
 
   return (
     <div className="@container/parameter flex flex-col rounded-md p-1 transition-colors hover:bg-muted/30">
       <div className="flex h-auto min-h-6 flex-row justify-between gap-2">
-        <span className={cn(hasValue ? 'font-medium' : 'font-normal')}>
+        <span className={cn(fieldHasValue ? 'font-medium' : 'font-normal')}>
           <HighlightText text={prettyLabel} searchTerm={String(formContext?.searchTerm)} />
           {required ? <span className="text-destructive">*</span> : null}
         </span>
-        {hasValue ? (
+        {fieldHasValue ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

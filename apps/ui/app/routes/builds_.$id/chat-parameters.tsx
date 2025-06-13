@@ -14,6 +14,7 @@ import { cn } from '~/utils/ui.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { templates, uiSchema, widgets } from '~/routes/builds_.$id/rjsf-theme.js';
 import type { RJSFContext } from '~/routes/builds_.$id/rjsf-theme.js';
+import { deleteNestedValue, resetArrayItem } from '~/routes/builds_.$id/rjsf-utils.js';
 
 export const ChatParameters = memo(function () {
   const parameters = useSelector(cadActor, (state) => state.context.parameters);
@@ -25,6 +26,36 @@ export const ChatParameters = memo(function () {
   const setParameters = useCallback((newParameters: Record<string, unknown>) => {
     cadActor.send({ type: 'setParameters', parameters: newParameters });
   }, []);
+
+  // Enhanced reset function that handles nested paths and arrays
+  const resetSingleParameter = useCallback(
+    (fieldPath: string[]) => {
+      const currentParameters = { ...parameters };
+
+      if (fieldPath.length === 0) {
+        // Root level reset (shouldn't happen in normal usage)
+        setParameters({});
+        return;
+      }
+
+      // Check if this might be an array item by looking for numeric indices
+      const hasNumericIndex = fieldPath.some((segment) => /^\d+$/.test(segment));
+
+      let updatedParameters: Record<string, unknown>;
+
+      // eslint-disable-next-line unicorn/prefer-ternary -- better readability
+      if (hasNumericIndex) {
+        // Handle array item reset
+        updatedParameters = resetArrayItem(currentParameters, fieldPath);
+      } else {
+        // Handle regular property reset
+        updatedParameters = deleteNestedValue(currentParameters, fieldPath);
+      }
+
+      setParameters(updatedParameters);
+    },
+    [parameters, setParameters],
+  );
 
   const { hasSearchResults } = useMemo(() => {
     const parameterEntries = Object.entries(defaultParameters);
@@ -84,18 +115,18 @@ export const ChatParameters = memo(function () {
 
   const hasParameters = jsonSchema && Object.keys(jsonSchema).length > 0;
 
-  // Create formContext with search state for conditional rendering (always call hooks at top level)
   const formContext = useMemo(
     () => ({
       allExpanded,
       searchTerm: searchTerm.toLowerCase(),
+      resetSingleParameter,
       shouldShowField(prettyLabel: string) {
         if (!searchTerm) return true;
         const searchableLabel = prettyLabel.toLowerCase();
         return searchableLabel.includes(searchTerm.toLowerCase());
       },
     }),
-    [allExpanded, searchTerm],
+    [allExpanded, searchTerm, resetSingleParameter],
   );
 
   const mergedData = { ...defaultParameters, ...parameters };

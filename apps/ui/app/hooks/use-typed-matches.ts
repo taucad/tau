@@ -18,6 +18,7 @@ export function useTypedMatches<Selected>(
     const result: Record<keyof Handle, TypedUIMatch[]> = {
       breadcrumb: [],
       actions: [],
+      commandPalette: [],
     };
 
     // Get all possible handle properties from all matches

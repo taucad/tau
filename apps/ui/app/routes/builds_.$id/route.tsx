@@ -20,14 +20,11 @@ import { orthographicViews, screenshotRequestMachine } from '~/machines/screensh
 import { fileEditMachine } from '~/machines/file-edit.js';
 import type { FileEditToolResult } from '~/routes/builds_.$id/chat-message-tool-file-edit.js';
 import { ChatInterfaceControls, ViewContextProvider } from '~/routes/builds_.$id/chat-interface-controls.js';
+import { CommandPaletteTrigger } from '~/routes/builds_.$id/command-palette.js';
 
 export const handle: Handle = {
   breadcrumb(match) {
     const { id } = match.params as Route.LoaderArgs['params'];
-
-    if (!id) {
-      throw new Error('No build id provided');
-    }
 
     return (
       <BuildProvider buildId={id}>
@@ -53,6 +50,15 @@ export const handle: Handle = {
           </TooltipTrigger>
           <TooltipContent>New Build</TooltipContent>
         </Tooltip>
+      </BuildProvider>
+    );
+  },
+  commandPalette(match) {
+    const { id } = match.params as Route.LoaderArgs['params'];
+
+    return (
+      <BuildProvider buildId={id}>
+        <CommandPaletteTrigger />
       </BuildProvider>
     );
   },

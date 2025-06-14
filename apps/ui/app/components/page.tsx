@@ -21,11 +21,20 @@ import { useTypedMatches } from '~/hooks/use-typed-matches.js';
 export const headerHeight = '3rem';
 
 export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
-  const { breadcrumbItems, hasBreadcrumbItems, actionItems, hasActionItems } = useTypedMatches((handles) => ({
+  const {
+    breadcrumbItems,
+    hasBreadcrumbItems,
+    actionItems,
+    hasActionItems,
+    commandPaletteItems,
+    hasCommandPaletteItems,
+  } = useTypedMatches((handles) => ({
     breadcrumbItems: handles.breadcrumb,
     hasBreadcrumbItems: handles.breadcrumb.length > 0,
     actionItems: handles.actions,
     hasActionItems: handles.actions.length > 0,
+    commandPaletteItems: handles.commandPalette,
+    hasCommandPaletteItems: handles.commandPalette.length > 0,
   }));
 
   const isOnline = useNetworkConnectivity();
@@ -37,7 +46,7 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
         className="w-[calc(100dvw-var(--sidebar-width-current)-1px)]"
         style={{ '--header-height': headerHeight }}
       >
-        <header className="flex h-[var(--header-height)] shrink-0 items-center justify-between gap-2 border-b-[1px] border-border transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
+        <header className="relative flex h-[var(--header-height)] shrink-0 items-center justify-between gap-2 border-b-[1px] border-border transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
           <div className="flex items-center gap-1 px-4">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -66,6 +75,18 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
               </BreadcrumbList>
             </Breadcrumb>
           </div>
+
+          {/* Centered Command Palette */}
+          <div className="absolute top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2">
+            {hasCommandPaletteItems ? (
+              <div className="flex items-center gap-2">
+                {commandPaletteItems.map((match) => (
+                  <Fragment key={match.id}>{match.handle.commandPalette?.(match)}</Fragment>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
           <div className="flex items-center gap-2 px-2">
             {!isOnline && (
               <Tooltip>

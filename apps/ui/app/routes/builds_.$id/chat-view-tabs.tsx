@@ -41,7 +41,7 @@ const tabs = [
   {
     value: 'editor',
     icon: Code,
-    label: 'Editor',
+    label: 'Code',
     keyCombination: openCodeKeyCombination,
   },
   {

@@ -62,7 +62,7 @@ export function BuildNameEditor(): JSX.Element {
     <Popover open={isEditing} onOpenChange={setIsEditing}>
       <Tooltip>
         <PopoverTrigger asChild>
-          <TooltipTrigger>
+          <TooltipTrigger asChild>
             <Button variant="ghost" className="cursor-text justify-start p-2">
               <span
                 data-animate={displayName.length > 0 && !(!name || name === build?.name || isEditing)}

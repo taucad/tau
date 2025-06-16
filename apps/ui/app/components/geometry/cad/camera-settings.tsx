@@ -71,6 +71,7 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
         <TooltipContent>Camera settings</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
+        align="end"
         className="w-56"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
@@ -84,7 +85,7 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
           }}
           onSelect={preventClose}
         >
-          <span>Show Mesh</span>
+          <span>Mesh</span>
           <Switch variant="dropdown" checked={enableMesh} onCheckedChange={handleMeshToggle} />
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -94,7 +95,7 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
           }}
           onSelect={preventClose}
         >
-          <span>Show Lines</span>
+          <span>Lines</span>
           <Switch variant="dropdown" checked={enableLines} onCheckedChange={handleLinesToggle} />
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -104,7 +105,7 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
           }}
           onSelect={preventClose}
         >
-          <span>Show Gizmo</span>
+          <span>Gizmo</span>
           <Switch variant="dropdown" checked={enableGizmo} onCheckedChange={handleGizmoToggle} />
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -114,7 +115,7 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
           }}
           onSelect={preventClose}
         >
-          <span>Show Grid</span>
+          <span>Grid</span>
           <Switch variant="dropdown" checked={enableGrid} onCheckedChange={handleGridToggle} />
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -124,7 +125,7 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
           }}
           onSelect={preventClose}
         >
-          <span>Show Axes Helper</span>
+          <span>Axes Helper</span>
           <Switch variant="dropdown" checked={enableAxesHelper} onCheckedChange={handleAxesHelperToggle} />
         </DropdownMenuItem>
       </DropdownMenuContent>

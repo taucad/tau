@@ -2,7 +2,7 @@ import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import { FileIcon, FolderIcon, FolderOpenIcon } from 'lucide-react';
 import React, { createContext, forwardRef, useCallback, useContext, useEffect, useState, useMemo } from 'react';
 import { Button } from '~/components/ui/button.js';
-import { ScrollArea } from '~/components/ui/scroll-area.js';
+import { SidebarMenuButton } from '~/components/ui/sidebar.js';
 import { cn } from '~/utils/ui.js';
 
 type TreeViewElement = {
@@ -145,22 +145,20 @@ const Tree = forwardRef<HTMLDivElement, TreeViewProps>(
 
     return (
       <TreeContext.Provider value={contextValue}>
-        <div className={cn('size-full', className)}>
-          <ScrollArea ref={ref} className="relative h-full px-2" dir={dir as Direction}>
-            <AccordionPrimitive.Root
-              {...props}
-              type="multiple"
-              defaultValue={expandedItems}
-              value={expandedItems}
-              className="flex flex-col gap-1"
-              dir={dir as Direction}
-              onValueChange={(value) => {
-                setExpandedItems?.((previous) => [...(previous ?? []), value[0]]);
-              }}
-            >
-              {children}
-            </AccordionPrimitive.Root>
-          </ScrollArea>
+        <div className={cn('size-full px-2', className)}>
+          <AccordionPrimitive.Root
+            {...props}
+            type="multiple"
+            defaultValue={expandedItems}
+            value={expandedItems}
+            className="flex w-full flex-col gap-1"
+            dir={dir as Direction}
+            onValueChange={(value) => {
+              setExpandedItems?.((previous) => [...(previous ?? []), value[0]]);
+            }}
+          >
+            {children}
+          </AccordionPrimitive.Root>
         </div>
       </TreeContext.Provider>
     );
@@ -204,22 +202,24 @@ const Folder = forwardRef<HTMLDivElement, FolderProps & React.HTMLAttributes<HTM
 
     return (
       <AccordionPrimitive.Item {...props} value={value} className="relative flex h-full flex-col gap-1 overflow-hidden">
-        <AccordionPrimitive.Trigger
-          className={cn(`flex items-center gap-1 rounded-md text-sm`, className, {
-            'rounded-md bg-muted': isSelect && isSelectable,
-            'cursor-pointer': isSelectable,
-            'cursor-not-allowed opacity-50': !isSelectable,
-          })}
-          disabled={!isSelectable}
-          onClick={() => {
-            handleExpand(value);
-          }}
-        >
-          {expandedItems?.includes(value)
-            ? (openIcon ?? <FolderOpenIcon className="size-4" />)
-            : (closeIcon ?? <FolderIcon className="size-4" />)}
-          <span>{element}</span>
-        </AccordionPrimitive.Trigger>
+        <SidebarMenuButton asChild className="gap-1">
+          <AccordionPrimitive.Trigger
+            className={cn(`flex items-center rounded-md text-sm`, className, {
+              'rounded-md bg-muted': isSelect && isSelectable,
+              'cursor-pointer': isSelectable,
+              'cursor-not-allowed opacity-50': !isSelectable,
+            })}
+            disabled={!isSelectable}
+            onClick={() => {
+              handleExpand(value);
+            }}
+          >
+            {expandedItems?.includes(value)
+              ? (openIcon ?? <FolderOpenIcon className="size-4" />)
+              : (closeIcon ?? <FolderIcon className="size-4" />)}
+            <span>{element}</span>
+          </AccordionPrimitive.Trigger>
+        </SidebarMenuButton>
         <AccordionPrimitive.Content className="relative h-full overflow-hidden text-sm data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down">
           {element && indicator ? <TreeIndicator aria-hidden="true" /> : undefined}
           <AccordionPrimitive.Root
@@ -256,7 +256,7 @@ const File = forwardRef<
   const { direction, selectedId, selectItem } = useTree();
   const isSelected = isSelect ?? selectedId === value;
   return (
-    <button
+    <SidebarMenuButton
       ref={ref}
       type="button"
       disabled={!isSelectable}
@@ -276,7 +276,7 @@ const File = forwardRef<
     >
       {fileIcon ?? <FileIcon className="size-4" />}
       {children}
-    </button>
+    </SidebarMenuButton>
   );
 });
 

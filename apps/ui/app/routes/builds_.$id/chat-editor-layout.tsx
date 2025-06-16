@@ -57,16 +57,16 @@ export function ChatEditorLayout({ className }: { readonly className?: ClassValu
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            variant="outline"
+            variant="overlay"
             size="icon"
-            className="absolute bottom-4 left-4 z-50 flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background/80 backdrop-blur-sm transition-colors hover:bg-accent"
+            className={cn('absolute bottom-2 left-2', 'transition-transform', isExplorerOpen && 'rotate-y-180')}
             onClick={toggleExplorer}
           >
-            <ArrowRightToLine className={cn('transition-transform', isExplorerOpen && 'rotate-y-180')} />
+            <ArrowRightToLine />
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          {isExplorerOpen ? 'Hide Explorer' : 'Show Explorer'}
+          {isExplorerOpen ? 'Hide file tree' : 'Show file tree'}
           <KeyShortcut variant="tooltip" className="ml-1">
             {formattedKeyCombination}
           </KeyShortcut>

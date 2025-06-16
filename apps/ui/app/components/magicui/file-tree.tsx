@@ -203,7 +203,7 @@ const Folder = forwardRef<HTMLDivElement, FolderProps & React.HTMLAttributes<HTM
     const { direction, handleExpand, expandedItems, indicator, setExpandedItems, openIcon, closeIcon } = useTree();
 
     return (
-      <AccordionPrimitive.Item {...props} value={value} className="relative h-full overflow-hidden">
+      <AccordionPrimitive.Item {...props} value={value} className="relative flex h-full flex-col gap-1 overflow-hidden">
         <AccordionPrimitive.Trigger
           className={cn(`flex items-center gap-1 rounded-md text-sm`, className, {
             'rounded-md bg-muted': isSelect && isSelectable,

@@ -19,11 +19,9 @@ export const handle: Handle = {
             </Button>
           </TooltipTrigger>
         </Link>
-        <TooltipContent>
+        <TooltipContent className="flex items-center gap-2 align-baseline">
           View all builds{` `}
-          <KeyShortcut className="flex items-center gap-2 align-baseline" variant="tooltip">
-            {formatKeyCombination({ key: 'b', ctrlKey: true })}
-          </KeyShortcut>
+          <KeyShortcut variant="tooltip">{formatKeyCombination({ key: 'b', ctrlKey: true })}</KeyShortcut>
         </TooltipContent>
       </Tooltip>
     );

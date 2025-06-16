@@ -4,7 +4,7 @@ import { cn } from '~/utils/ui.js';
 
 const keyboardShortcutVariants = cva(
   // Font
-  'font-normal text-sm tracking-[0.2em] rounded-md h-5 p-0 pl-1 pr-0.5 hidden md:inline-flex',
+  'font-normal text-sm tracking-[0.2em] flex items-center rounded-md h-5 p-0 pl-1 pr-0.5 hidden md:inline-flex',
   {
     variants: {
       variant: {

@@ -4,15 +4,28 @@ import type { LoaderFunction } from 'react-router';
 import type { JSX } from 'react';
 import { Button } from '~/components/ui/button.js';
 import type { Handle } from '~/types/matches.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { KeyShortcut } from '~/components/ui/key-shortcut.js';
+import { formatKeyCombination } from '~/utils/keys.js';
 
 export const handle: Handle = {
   breadcrumb() {
     return (
-      <Link to="/builds/library" tabIndex={-1}>
-        <Button variant="ghost" className="p-2">
-          Builds
-        </Button>
-      </Link>
+      <Tooltip>
+        <Link to="/builds/library" tabIndex={-1}>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" className="p-2">
+              Builds
+            </Button>
+          </TooltipTrigger>
+        </Link>
+        <TooltipContent>
+          View all builds{` `}
+          <KeyShortcut className="flex items-center gap-2 align-baseline" variant="tooltip">
+            {formatKeyCombination({ key: 'b', ctrlKey: true })}
+          </KeyShortcut>
+        </TooltipContent>
+      </Tooltip>
     );
   },
 };

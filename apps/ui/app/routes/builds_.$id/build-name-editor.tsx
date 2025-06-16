@@ -8,6 +8,7 @@ import { Input } from '~/components/ui/input.js';
 import { defaultBuildName } from '~/constants/build-names.js';
 import { useBuild } from '~/hooks/use-build.js';
 import { useChatConstants } from '~/utils/chat.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 
 export function BuildNameEditor(): JSX.Element {
   const { build, updateName, isLoading } = useBuild();
@@ -59,16 +60,21 @@ export function BuildNameEditor(): JSX.Element {
 
   return (
     <Popover open={isEditing} onOpenChange={setIsEditing}>
-      <PopoverTrigger asChild>
-        <Button variant="ghost" className="cursor-text justify-start p-2">
-          <span
-            data-animate={displayName.length > 0 && !(!name || name === build?.name || isEditing)}
-            className="data-[animate=true]:animate-typewriter-20"
-          >
-            {displayName}
-          </span>
-        </Button>
-      </PopoverTrigger>
+      <Tooltip>
+        <PopoverTrigger asChild>
+          <TooltipTrigger>
+            <Button variant="ghost" className="cursor-text justify-start p-2">
+              <span
+                data-animate={displayName.length > 0 && !(!name || name === build?.name || isEditing)}
+                className="data-[animate=true]:animate-typewriter-20"
+              >
+                {displayName}
+              </span>
+            </Button>
+          </TooltipTrigger>
+        </PopoverTrigger>
+        <TooltipContent>Edit name</TooltipContent>
+      </Tooltip>
       <PopoverContent align="start" className="w-64 -translate-x-2 p-1">
         <form className="flex items-center gap-2 align-middle" onSubmit={handleSubmit}>
           <Input

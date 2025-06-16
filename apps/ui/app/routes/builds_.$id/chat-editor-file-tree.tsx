@@ -373,12 +373,12 @@ export function ChatEditorFileTree(): JSX.Element {
   const treeElements = convertFileItemToTreeElement(mockFileSystem);
 
   return (
-    <div className={cn('flex h-full w-full flex-col bg-sidebar select-none')}>
-      <h3 className="flex h-12 shrink-0 items-center border-b border-sidebar-border px-4 py-3 text-base font-medium text-sidebar-foreground/70">
+    <div className={cn('flex h-full flex-col bg-sidebar select-none')}>
+      <h3 className="flex h-12 items-center border-b px-4 py-3 text-base font-medium text-sidebar-foreground/70">
         Files
       </h3>
-      <div className="my-2 flex-1 overflow-hidden">
-        <Tree className="h-full" elements={treeElements} initialExpandedItems={['models', 'assemblies', 'scripts']}>
+      <div className="my-2">
+        <Tree elements={treeElements} initialExpandedItems={['models', 'assemblies', 'scripts']}>
           {treeElements.map((element) => (
             <TreeItem key={element.id} element={element} activeFileId={activeFileId} onSelect={handleFileSelect} />
           ))}

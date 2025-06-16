@@ -31,11 +31,11 @@ export function ChatEditorLayout({ className }: { readonly className?: ClassValu
   const { formattedKeyCombination } = useKeydown(keyCombinationFileExplorer, toggleExplorer);
 
   return (
-    <div className="relative flex h-full flex-1">
+    <div className="relative flex size-full">
       <ResizablePanelGroup
         direction="horizontal"
         autoSaveId={chatResizeExplorerCookieName}
-        className={cn('flex h-full flex-1', className)}
+        className={cn('h-full', className)}
         onLayout={setExplorerSize}
       >
         {/* File Explorer */}
@@ -51,27 +51,27 @@ export function ChatEditorLayout({ className }: { readonly className?: ClassValu
         <ResizablePanel order={2} defaultSize={isExplorerOpen ? explorerSize[1] : 100} minSize={15} id="file-editor">
           <ChatEditor />
         </ResizablePanel>
-      </ResizablePanelGroup>
 
-      {/* Toggle Button */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="overlay"
-            size="icon"
-            className={cn('absolute bottom-2 left-2', 'transition-transform', isExplorerOpen && 'rotate-y-180')}
-            onClick={toggleExplorer}
-          >
-            <ArrowRightToLine />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>
-          {isExplorerOpen ? 'Hide file tree' : 'Show file tree'}
-          <KeyShortcut variant="tooltip" className="ml-1">
-            {formattedKeyCombination}
-          </KeyShortcut>
-        </TooltipContent>
-      </Tooltip>
+        {/* Toggle Button */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="overlay"
+              size="icon"
+              className={cn('absolute bottom-2 left-2', 'transition-transform', isExplorerOpen && 'rotate-y-180')}
+              onClick={toggleExplorer}
+            >
+              <ArrowRightToLine />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {isExplorerOpen ? 'Hide file tree' : 'Show file tree'}
+            <KeyShortcut variant="tooltip" className="ml-1">
+              {formattedKeyCombination}
+            </KeyShortcut>
+          </TooltipContent>
+        </Tooltip>
+      </ResizablePanelGroup>
     </div>
   );
 }

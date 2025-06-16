@@ -377,12 +377,8 @@ export function ChatEditorFileTree(): JSX.Element {
       <h3 className="flex h-12 shrink-0 items-center border-b border-sidebar-border px-4 py-3 text-base font-medium text-sidebar-foreground/70">
         Files
       </h3>
-      <div className="flex-1 overflow-hidden">
-        <Tree
-          className="my-1 h-full"
-          elements={treeElements}
-          initialExpandedItems={['models', 'assemblies', 'scripts']}
-        >
+      <div className="my-2 flex-1 overflow-hidden">
+        <Tree className="h-full" elements={treeElements} initialExpandedItems={['models', 'assemblies', 'scripts']}>
           {treeElements.map((element) => (
             <TreeItem key={element.id} element={element} activeFileId={activeFileId} onSelect={handleFileSelect} />
           ))}

@@ -34,7 +34,7 @@ export const useFaceEvent = (onEvent: (event: ThreeEvent<MouseEvent>, faceIndex:
   }, []);
 };
 
-type ReplicadMeshProperties = {
+export type ReplicadMeshProperties = {
   readonly faces?: Shape3D['faces'];
   readonly edges?: Shape3D['edges'];
   readonly onFaceClick?: (event: ThreeEvent<MouseEvent>, faceIndex: number) => void;
@@ -42,6 +42,8 @@ type ReplicadMeshProperties = {
   readonly faceHover?: boolean;
   readonly color?: string;
   readonly opacity?: number;
+  readonly withMesh?: boolean;
+  readonly withLines?: boolean;
 };
 
 export const ReplicadMesh = React.memo(function ({
@@ -52,6 +54,8 @@ export const ReplicadMesh = React.memo(function ({
   onFaceClick,
   selected,
   faceHover,
+  withMesh = true,
+  withLines = true,
 }: ReplicadMeshProperties) {
   const { invalidate } = useThree();
   const colors = useColor();
@@ -102,28 +106,31 @@ export const ReplicadMesh = React.memo(function ({
 
   return (
     <group>
-      <mesh
-        // eslint-disable-next-line react/no-unknown-property -- TODO: make Three.js type available for linter
-        geometry={body.current}
-        onClick={onClick}
-        onPointerOver={onHover}
-        onPointerMove={onHover}
-        onPointerLeave={onHover}
-      >
-        <MatcapMaterial
-          polygonOffset
-          color={color ?? colors.serialized.hex}
-          opacity={opacity ?? 1}
-          transparent={opacity !== 1}
-          // The offsets are here to avoid z fighting between the mesh and the lines
-          polygonOffsetFactor={2}
-          polygonOffsetUnits={1}
-        />
-      </mesh>
-      {/* eslint-disable-next-line react/no-unknown-property -- TODO: make Three.js type available for linter */}
-      <lineSegments geometry={lines.current}>
-        <lineBasicMaterial color="#244224" />
-      </lineSegments>
+      {withMesh ? (
+        <mesh
+          // eslint-disable-next-line react/no-unknown-property -- TODO: make Three.js type available for linter
+          geometry={body.current}
+          onClick={onClick}
+          onPointerOver={onHover}
+          onPointerMove={onHover}
+          onPointerLeave={onHover}
+        >
+          <MatcapMaterial
+            polygonOffset
+            color={color ?? colors.serialized.hex}
+            opacity={opacity ?? 1}
+            transparent={opacity !== 1}
+            // The offsets are here to avoid z fighting between the mesh and the lines
+            polygonOffsetFactor={2}
+            polygonOffsetUnits={1}
+          />
+        </mesh>
+      ) : null}
+      {withLines ? (
+        <lineSegments geometry={lines.current}>
+          <lineBasicMaterial color="#244224" />
+        </lineSegments>
+      ) : null}
     </group>
   );
 });

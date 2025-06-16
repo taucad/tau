@@ -6,8 +6,11 @@ import type { Shape } from '~/types/cad.js';
 // Context type definition
 export type GraphicsContext = {
   // Grid state
+  /** The grid size that should be set based on the current camera position and fov */
   gridSizes: GridSizes;
+  /** The grid size that is currently being displayed */
   gridSizesComputed: GridSizes;
+  /** Whether the grid size should be locked to the computed value */
   isGridSizeLocked: boolean;
   gridUnit: string;
   gridUnitFactor: number;
@@ -20,6 +23,13 @@ export type GraphicsContext = {
   currentZoom: number;
   shapeRadius: number;
   sceneRadius: number | undefined;
+
+  // Visibility state
+  withMesh: boolean;
+  withLines: boolean;
+  withGizmo: boolean;
+  withGrid: boolean;
+  withAxesHelper: boolean;
 
   // Capability registrations
   screenshotCapability?: AnyActorRef;
@@ -49,6 +59,17 @@ export type GraphicsEvent =
   | { type: 'setCameraAngle'; payload: number }
   | { type: 'resetCamera'; options?: { withConfiguredAngles?: boolean } }
   | { type: 'cameraResetCompleted' }
+  // Visibility events
+  | { type: 'toggleMeshVisibility' }
+  | { type: 'toggleLinesVisibility' }
+  | { type: 'setMeshVisibility'; payload: boolean }
+  | { type: 'setLinesVisibility'; payload: boolean }
+  | { type: 'toggleGizmoVisibility' }
+  | { type: 'toggleGridVisibility' }
+  | { type: 'toggleAxesHelperVisibility' }
+  | { type: 'setGizmoVisibility'; payload: boolean }
+  | { type: 'setGridVisibility'; payload: boolean }
+  | { type: 'setAxesHelperVisibility'; payload: boolean }
   // Controls events
   | { type: 'controlsInteractionStart' }
   | { type: 'controlsChanged'; zoom: number; position: number; fov: number }
@@ -397,6 +418,61 @@ export const graphicsMachine = setup({
     completeCameraReset: emit({
       type: 'cameraResetCompleted' as const,
     }),
+
+    toggleMeshVisibility: assign({
+      withMesh: ({ context }) => !context.withMesh,
+    }),
+
+    toggleLinesVisibility: assign({
+      withLines: ({ context }) => !context.withLines,
+    }),
+
+    setMeshVisibility: assign({
+      withMesh({ event }) {
+        assertEvent(event, 'setMeshVisibility');
+        return event.payload;
+      },
+    }),
+
+    setLinesVisibility: assign({
+      withLines({ event }) {
+        assertEvent(event, 'setLinesVisibility');
+        return event.payload;
+      },
+    }),
+
+    toggleGizmoVisibility: assign({
+      withGizmo: ({ context }) => !context.withGizmo,
+    }),
+
+    toggleGridVisibility: assign({
+      withGrid: ({ context }) => !context.withGrid,
+    }),
+
+    toggleAxesHelperVisibility: assign({
+      withAxesHelper: ({ context }) => !context.withAxesHelper,
+    }),
+
+    setGizmoVisibility: assign({
+      withGizmo({ event }) {
+        assertEvent(event, 'setGizmoVisibility');
+        return event.payload;
+      },
+    }),
+
+    setGridVisibility: assign({
+      withGrid({ event }) {
+        assertEvent(event, 'setGridVisibility');
+        return event.payload;
+      },
+    }),
+
+    setAxesHelperVisibility: assign({
+      withAxesHelper({ event }) {
+        assertEvent(event, 'setAxesHelperVisibility');
+        return event.payload;
+      },
+    }),
   },
 }).createMachine({
   id: 'graphics',
@@ -416,6 +492,13 @@ export const graphicsMachine = setup({
     currentZoom: 1,
     shapeRadius: 0,
     sceneRadius: undefined,
+
+    // Visibility state
+    withMesh: true,
+    withLines: true,
+    withGizmo: true,
+    withGrid: true,
+    withAxesHelper: true,
 
     // Capabilities
     screenshotCapability: undefined,
@@ -452,6 +535,38 @@ export const graphicsMachine = setup({
         },
         resetCamera: {
           actions: 'requestCameraReset',
+        },
+
+        // Visibility events
+        toggleMeshVisibility: {
+          actions: 'toggleMeshVisibility',
+        },
+        toggleLinesVisibility: {
+          actions: 'toggleLinesVisibility',
+        },
+        setMeshVisibility: {
+          actions: 'setMeshVisibility',
+        },
+        setLinesVisibility: {
+          actions: 'setLinesVisibility',
+        },
+        toggleGizmoVisibility: {
+          actions: 'toggleGizmoVisibility',
+        },
+        toggleGridVisibility: {
+          actions: 'toggleGridVisibility',
+        },
+        toggleAxesHelperVisibility: {
+          actions: 'toggleAxesHelperVisibility',
+        },
+        setGizmoVisibility: {
+          actions: 'setGizmoVisibility',
+        },
+        setGridVisibility: {
+          actions: 'setGridVisibility',
+        },
+        setAxesHelperVisibility: {
+          actions: 'setAxesHelperVisibility',
         },
 
         // Controls events

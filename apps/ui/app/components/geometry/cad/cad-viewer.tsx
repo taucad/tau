@@ -7,9 +7,16 @@ import SvgViewer from '~/components/geometry/kernel/replicad/svg-viewer.js';
 
 type CadViewerProperties = Omit<ThreeViewerProperties, 'enableCameraControls'> & {
   readonly shapes: Shape[];
+  readonly withMesh?: boolean;
+  readonly withLines?: boolean;
 };
 
-export function CadViewer({ shapes, ...properties }: CadViewerProperties): JSX.Element {
+export function CadViewer({
+  shapes,
+  withMesh = true,
+  withLines = true,
+  ...properties
+}: CadViewerProperties): JSX.Element {
   const svgShapes = shapes.filter((shape) => shape.type === '2d');
 
   // If there are any SVG shapes, we render them in a SVG viewer
@@ -21,7 +28,7 @@ export function CadViewer({ shapes, ...properties }: CadViewerProperties): JSX.E
     <ThreeProvider enableCameraControls={false} {...properties}>
       {shapes.map((shape) => {
         if (shape.type === '3d') {
-          return <ReplicadMesh key={shape.name} {...shape} />;
+          return <ReplicadMesh key={shape.name} {...shape} withMesh={withMesh} withLines={withLines} />;
         }
 
         if (shape.type === '2d') {

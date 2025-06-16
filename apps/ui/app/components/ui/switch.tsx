@@ -5,7 +5,7 @@ import type { VariantProps } from 'class-variance-authority';
 import { cn } from '~/utils/ui.js';
 
 const switchVariants = cva(
-  'peer data-[state=checked]:bg-primary data-[state=unchecked]:bg-input focus-visible:border-ring focus-visible:ring-ring/50 dark:data-[state=unchecked]:bg-input/80 inline-flex shrink-0 items-center rounded-full border border-transparent shadow-xs outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50',
+  'peer data-[state=checked]:bg-primary focus-visible:border-ring focus-visible:ring-ring/50 inline-flex shrink-0 items-center rounded-full border border-transparent shadow-xs outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50',
   {
     variants: {
       size: {
@@ -14,9 +14,14 @@ const switchVariants = cva(
         md: 'h-4.15 w-8',
         lg: 'h-5.15 w-10',
       },
+      variant: {
+        default: 'data-[state=unchecked]:bg-input dark:data-[state=unchecked]:bg-input/80',
+        dropdown: 'data-[state=unchecked]:bg-muted-foreground! dark:data-[state=unchecked]:bg-muted-foreground/80',
+      },
     },
     defaultVariants: {
       size: 'md',
+      variant: 'default',
     },
   },
 );
@@ -40,10 +45,15 @@ const thumbVariants = cva(
 function Switch({
   className,
   size,
+  variant,
   ...properties
 }: React.ComponentProps<typeof SwitchPrimitive.Root> & VariantProps<typeof switchVariants>) {
   return (
-    <SwitchPrimitive.Root data-slot="switch" className={cn(switchVariants({ size, className }))} {...properties}>
+    <SwitchPrimitive.Root
+      data-slot="switch"
+      className={cn(switchVariants({ size, variant, className }))}
+      {...properties}
+    >
       <SwitchPrimitive.Thumb data-slot="switch-thumb" className={cn(thumbVariants({ size }))} />
     </SwitchPrimitive.Root>
   );

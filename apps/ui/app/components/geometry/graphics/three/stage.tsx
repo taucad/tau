@@ -57,15 +57,15 @@ export const defaultStageOptions = {
 
 type StageProperties = {
   readonly children: ReactNode;
-  readonly isCentered?: boolean;
+  readonly enableCentering?: boolean;
   readonly stageOptions?: StageOptions;
-  readonly hasGrid?: boolean;
-  readonly hasAxesHelper?: boolean;
+  readonly enableGrid?: boolean;
+  readonly enableAxesHelper?: boolean;
 } & Omit<React.HTMLAttributes<HTMLDivElement>, 'id'>;
 
 export function Stage({
   children,
-  isCentered = false,
+  enableCentering = false,
   stageOptions = defaultStageOptions,
   ...properties
 }: StageProperties): JSX.Element {
@@ -135,7 +135,7 @@ export function Stage({
 
     const box3 = new THREE.Box3().setFromObject(inner.current);
 
-    if (isCentered) {
+    if (enableCentering) {
       const centerPoint = new THREE.Vector3();
       box3.getCenter(centerPoint);
       if (outer.current) {
@@ -153,7 +153,7 @@ export function Stage({
     set((previous) => {
       return { shapeRadius: sphere.radius, sceneRadius: previous.sceneRadius };
     });
-  }, [isCentered, children]);
+  }, [enableCentering, children]);
 
   /**
    * Position the camera based on the scene's bounding box.
@@ -166,7 +166,7 @@ export function Stage({
 
     if (isSignificantChange) {
       if (isInitialResetDoneRef.current) {
-        resetCamera({ withConfiguredAngles: false }); // Subsequent resets without XY rotation
+        resetCamera({ enableConfiguredAngles: false }); // Subsequent resets without XY rotation
       } else {
         resetCamera(); // Initial reset with rotation
         isInitialResetDoneRef.current = true;
@@ -178,8 +178,8 @@ export function Stage({
     <group {...properties}>
       <PerspectiveCamera makeDefault />
       <group ref={outer}>
-        {properties.hasAxesHelper ? <AxesHelper /> : null}
-        {properties.hasGrid ? <Grid /> : null}
+        {properties.enableAxesHelper ? <AxesHelper /> : null}
+        {properties.enableGrid ? <Grid /> : null}
         <group ref={inner}>{children}</group>
       </group>
     </group>

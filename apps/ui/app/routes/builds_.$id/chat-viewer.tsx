@@ -13,11 +13,11 @@ export const ChatViewer = memo(function () {
   const status = useSelector(cadActor, (state) => state.value);
 
   // Get all visibility states from graphics machine
-  const withMesh = useSelector(graphicsActor, (state) => state.context.withMesh);
-  const withLines = useSelector(graphicsActor, (state) => state.context.withLines);
-  const withGizmo = useSelector(graphicsActor, (state) => state.context.withGizmo);
-  const withGrid = useSelector(graphicsActor, (state) => state.context.withGrid);
-  const withAxesHelper = useSelector(graphicsActor, (state) => state.context.withAxesHelper);
+  const enableMesh = useSelector(graphicsActor, (state) => state.context.enableMesh);
+  const enableLines = useSelector(graphicsActor, (state) => state.context.enableLines);
+  const enableGizmo = useSelector(graphicsActor, (state) => state.context.enableGizmo);
+  const enableGrid = useSelector(graphicsActor, (state) => state.context.enableGrid);
+  const enableAxesHelper = useSelector(graphicsActor, (state) => state.context.enableAxesHelper);
 
   return (
     <>
@@ -31,12 +31,12 @@ export const ChatViewer = memo(function () {
         ) : (
           <CadViewer
             enableZoom
-            enableGizmo={withGizmo}
-            enableGrid={withGrid}
-            enableAxesHelper={withAxesHelper}
+            enableGizmo={enableGizmo}
+            enableGrid={enableGrid}
+            enableAxesHelper={enableAxesHelper}
+            enableMesh={enableMesh}
+            enableLines={enableLines}
             shapes={shapes}
-            withMesh={withMesh}
-            withLines={withLines}
           />
         )}
         <CameraSettings className="absolute top-2 right-2" />

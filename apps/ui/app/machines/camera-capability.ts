@@ -4,13 +4,13 @@ import type { AnyActorRef } from 'xstate';
 // Context type
 type CameraCapabilityContext = {
   graphicsRef: AnyActorRef;
-  resetFunction?: (options?: { withConfiguredAngles?: boolean }) => void;
+  resetFunction?: (options?: { enableConfiguredAngles?: boolean }) => void;
 };
 
 // Event types
 type CameraCapabilityEvent =
-  | { type: 'registerReset'; reset: (options?: { withConfiguredAngles?: boolean }) => void }
-  | { type: 'reset'; options?: { withConfiguredAngles?: boolean } }
+  | { type: 'registerReset'; reset: (options?: { enableConfiguredAngles?: boolean }) => void }
+  | { type: 'reset'; options?: { enableConfiguredAngles?: boolean } }
   | { type: 'cameraResetCompleted' }
   | { type: 'cameraResetFailed'; error: unknown };
 
@@ -37,7 +37,7 @@ export const cameraCapabilityMachine = setup({
   actors: {
     resetCamera: fromCallback<
       { type: 'cameraResetCompleted' },
-      { options?: { withConfiguredAngles?: boolean }; reset: CameraCapabilityContext['resetFunction'] }
+      { options?: { enableConfiguredAngles?: boolean }; reset: CameraCapabilityContext['resetFunction'] }
     >(({ input, sendBack }) => {
       const { reset, options } = input;
 

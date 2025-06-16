@@ -114,7 +114,7 @@ export default function ChatStart(): JSX.Element {
         </div>
 
         <AiChatProvider value={{}}>
-          <ChatTextarea withContextActions={false} onSubmit={onSubmit} />
+          <ChatTextarea enableContextActions={false} onSubmit={onSubmit} />
           <div className="mx-auto my-6 flex w-20 items-center justify-center">
             <Separator />
             <div className="mx-4 text-sm font-light text-muted-foreground">or</div>

@@ -26,11 +26,11 @@ type CameraSettingsProps = {
  * Component that provides camera and visibility settings for the 3D viewer
  */
 export function CameraSettings({ className }: CameraSettingsProps): React.ReactNode {
-  const withMesh = useSelector(graphicsActor, (state) => state.context.withMesh);
-  const withLines = useSelector(graphicsActor, (state) => state.context.withLines);
-  const withGizmo = useSelector(graphicsActor, (state) => state.context.withGizmo);
-  const withGrid = useSelector(graphicsActor, (state) => state.context.withGrid);
-  const withAxesHelper = useSelector(graphicsActor, (state) => state.context.withAxesHelper);
+  const enableMesh = useSelector(graphicsActor, (state) => state.context.enableMesh);
+  const enableLines = useSelector(graphicsActor, (state) => state.context.enableLines);
+  const enableGizmo = useSelector(graphicsActor, (state) => state.context.enableGizmo);
+  const enableGrid = useSelector(graphicsActor, (state) => state.context.enableGrid);
+  const enableAxesHelper = useSelector(graphicsActor, (state) => state.context.enableAxesHelper);
 
   const [isOpen, setIsOpen] = useState(false);
 
@@ -80,52 +80,52 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
         <DropdownMenuItem
           className="flex w-full justify-between"
           onClick={() => {
-            handleMeshToggle(!withMesh);
+            handleMeshToggle(!enableMesh);
           }}
           onSelect={preventClose}
         >
           <span>Show Mesh</span>
-          <Switch variant="dropdown" checked={withMesh} onCheckedChange={handleMeshToggle} />
+          <Switch variant="dropdown" checked={enableMesh} onCheckedChange={handleMeshToggle} />
         </DropdownMenuItem>
         <DropdownMenuItem
           className="flex w-full justify-between"
           onClick={() => {
-            handleLinesToggle(!withLines);
+            handleLinesToggle(!enableLines);
           }}
           onSelect={preventClose}
         >
           <span>Show Lines</span>
-          <Switch variant="dropdown" checked={withLines} onCheckedChange={handleLinesToggle} />
+          <Switch variant="dropdown" checked={enableLines} onCheckedChange={handleLinesToggle} />
         </DropdownMenuItem>
         <DropdownMenuItem
           className="flex w-full justify-between"
           onClick={() => {
-            handleGizmoToggle(!withGizmo);
+            handleGizmoToggle(!enableGizmo);
           }}
           onSelect={preventClose}
         >
           <span>Show Gizmo</span>
-          <Switch variant="dropdown" checked={withGizmo} onCheckedChange={handleGizmoToggle} />
+          <Switch variant="dropdown" checked={enableGizmo} onCheckedChange={handleGizmoToggle} />
         </DropdownMenuItem>
         <DropdownMenuItem
           className="flex w-full justify-between"
           onClick={() => {
-            handleGridToggle(!withGrid);
+            handleGridToggle(!enableGrid);
           }}
           onSelect={preventClose}
         >
           <span>Show Grid</span>
-          <Switch variant="dropdown" checked={withGrid} onCheckedChange={handleGridToggle} />
+          <Switch variant="dropdown" checked={enableGrid} onCheckedChange={handleGridToggle} />
         </DropdownMenuItem>
         <DropdownMenuItem
           className="flex w-full justify-between"
           onClick={() => {
-            handleAxesHelperToggle(!withAxesHelper);
+            handleAxesHelperToggle(!enableAxesHelper);
           }}
           onSelect={preventClose}
         >
           <span>Show Axes Helper</span>
-          <Switch variant="dropdown" checked={withAxesHelper} onCheckedChange={handleAxesHelperToggle} />
+          <Switch variant="dropdown" checked={enableAxesHelper} onCheckedChange={handleAxesHelperToggle} />
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

@@ -5,31 +5,31 @@ import { Controls } from '~/components/geometry/graphics/three/controls.js';
 
 type SceneProperties = {
   readonly children: ReactNode;
-  readonly hasGizmo?: boolean;
-  readonly hasDamping?: boolean;
-  readonly hasZoom?: boolean;
-  readonly hasGrid?: boolean;
-  readonly hasAxesHelper?: boolean;
+  readonly enableGizmo?: boolean;
+  readonly enableDamping?: boolean;
+  readonly enableZoom?: boolean;
+  readonly enableGrid?: boolean;
+  readonly enableAxesHelper?: boolean;
   readonly stageOptions?: StageOptions;
-  readonly isCentered?: boolean;
+  readonly enableCentering?: boolean;
   readonly zoomSpeed: number;
 };
 
 export function Scene({
   children,
-  hasGizmo = false,
-  hasDamping = false,
-  hasZoom = false,
-  hasGrid = false,
-  hasAxesHelper = false,
+  enableGizmo = false,
+  enableDamping = false,
+  enableZoom = false,
+  enableGrid = false,
+  enableAxesHelper = false,
   stageOptions,
-  isCentered = true,
+  enableCentering = true,
   zoomSpeed,
 }: SceneProperties): JSX.Element {
   return (
     <>
-      <Controls enableGizmo={hasGizmo} enableDamping={hasDamping} enableZoom={hasZoom} zoomSpeed={zoomSpeed} />
-      <Stage stageOptions={stageOptions} isCentered={isCentered} hasGrid={hasGrid} hasAxesHelper={hasAxesHelper}>
+      <Controls enableGizmo={enableGizmo} enableDamping={enableDamping} enableZoom={enableZoom} zoomSpeed={zoomSpeed} />
+      <Stage stageOptions={stageOptions} enableCentering={enableCentering} enableGrid={enableGrid} enableAxesHelper={enableAxesHelper}>
         {children}
       </Stage>
     </>

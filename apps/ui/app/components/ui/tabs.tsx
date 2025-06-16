@@ -101,20 +101,20 @@ function TabsTrigger({ className, value, ...props }: TabsTriggerProps) {
 type TabsContentProps = React.ComponentProps<typeof TabsPrimitive.Content> &
   HTMLMotionProps<'div'> & {
     readonly transition?: Transition;
-    readonly withAnimation?: boolean;
+    readonly enableAnimation?: boolean;
   };
 
 function TabsContent({
   className,
   children,
-  withAnimation = true,
+  enableAnimation = true,
   transition = {
     duration: 0.5,
     ease: 'easeInOut',
   },
   ...props
 }: TabsContentProps) {
-  if (!withAnimation) {
+  if (!enableAnimation) {
     return (
       <TabsPrimitive.Content data-slot="tabs-content" className={cn('flex-1 outline-none', className)} {...props}>
         {children}

@@ -123,7 +123,7 @@ const config: Linter.Config[] = [
       'react/react-in-jsx-scope': 'off',
       'react/boolean-prop-naming': [
         'error',
-        { rule: '^(is|has|as|should|with)[A-Z]([A-Za-z0-9]?)+$', validateNested: true },
+        { rule: '^(is|has|as|should|enable)[A-Z]([A-Za-z0-9]?)+$', validateNested: true },
       ],
       // DefaultProps is deprecated and irrelevant when using functional components.
       'react/require-default-props': 'off',

@@ -114,12 +114,12 @@ const addMarginToViewbox = (viewbox: Viewbox, margin: number): Viewbox => {
 
 type SvgWindowProps = {
   readonly viewbox: Viewbox;
-  readonly withGrid?: boolean;
+  readonly enableGrid?: boolean;
   readonly defaultColor?: string;
   readonly children?: ReactNode;
 };
 
-function SvgWindow({ viewbox, withGrid, defaultColor, children }: SvgWindowProps): React.ReactElement {
+function SvgWindow({ viewbox, enableGrid, defaultColor, children }: SvgWindowProps): React.ReactElement {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [clientRect, setClientRect] = useState<DOMRect | undefined>(undefined);
   const [adaptedViewbox, setAdaptedViewbox] = useState<Viewbox>(viewbox);
@@ -191,7 +191,7 @@ function SvgWindow({ viewbox, withGrid, defaultColor, children }: SvgWindowProps
 
   return (
     <div ref={canvasRef} className="flex h-full w-full flex-1 bg-background">
-      <RawCanvas viewbox={adaptedViewbox} withGrid={withGrid} defaultColor={defaultColor}>
+      <RawCanvas viewbox={adaptedViewbox} enableGrid={enableGrid} defaultColor={defaultColor}>
         {children}
       </RawCanvas>
     </div>
@@ -200,12 +200,12 @@ function SvgWindow({ viewbox, withGrid, defaultColor, children }: SvgWindowProps
 
 type RawCanvasProps = {
   readonly viewbox: Viewbox;
-  readonly withGrid?: boolean;
+  readonly enableGrid?: boolean;
   readonly defaultColor?: string;
   readonly children?: ReactNode;
 };
 
-function RawCanvas({ viewbox, withGrid, defaultColor, children }: RawCanvasProps): React.ReactElement {
+function RawCanvas({ viewbox, enableGrid, defaultColor, children }: RawCanvasProps): React.ReactElement {
   return (
     <svg
       viewBox={stringifyViewbox(viewbox)}
@@ -215,7 +215,7 @@ function RawCanvas({ viewbox, withGrid, defaultColor, children }: RawCanvasProps
       className="h-full max-h-screen w-full max-w-screen bg-background [&>#raw-canvas]:stroke-foreground [&>line]:stroke-muted-foreground/20"
       preserveAspectRatio="xMidYMid meet"
     >
-      {withGrid ? <SvgGrid viewbox={viewbox} /> : null}
+      {enableGrid ? <SvgGrid viewbox={viewbox} /> : null}
       <g stroke={defaultColor} id="raw-canvas" vectorEffect="non-scaling-stroke" fill="none">
         {children}
       </g>
@@ -225,22 +225,22 @@ function RawCanvas({ viewbox, withGrid, defaultColor, children }: RawCanvasProps
 
 type SvgViewerProps = {
   readonly shapes: Shape2D | Shape2D[];
-  readonly withGrid?: boolean;
-  readonly withRawWindow?: boolean;
+  readonly enableGrid?: boolean;
+  readonly enableRawWindow?: boolean;
   readonly defaultColor?: string;
 };
 
 export default function SvgViewer({
   shapes: shape,
-  withGrid = true,
-  withRawWindow = false,
+  enableGrid = true,
+  enableRawWindow = false,
   defaultColor,
 }: SvgViewerProps): ReactNode {
-  const Window = withRawWindow ? RawCanvas : SvgWindow;
+  const Window = enableRawWindow ? RawCanvas : SvgWindow;
 
   if (shape && (shape as Shape2D).format === 'svg')
     return (
-      <Window viewbox={parseViewbox((shape as Shape2D).viewbox)} withGrid={withGrid} defaultColor={defaultColor}>
+      <Window viewbox={parseViewbox((shape as Shape2D).viewbox)} enableGrid={enableGrid} defaultColor={defaultColor}>
         <ShapePath shape={shape as Shape2D} />
       </Window>
     );
@@ -248,7 +248,7 @@ export default function SvgViewer({
   if (shape && Array.isArray(shape) && shape.length > 0 && shape[0].format === 'svg') {
     const viewbox = mergeViewboxes(shape.map((s) => s.viewbox ?? ''));
     return (
-      <Window viewbox={viewbox} withGrid={withGrid} defaultColor={defaultColor}>
+      <Window viewbox={viewbox} enableGrid={enableGrid} defaultColor={defaultColor}>
         {shape.map((s) => {
           if (s && s.format === 'svg') return <ShapePath key={s.name} shape={s} />;
           return null;

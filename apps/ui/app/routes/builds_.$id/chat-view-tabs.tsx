@@ -72,14 +72,14 @@ export function ChatViewTabs(): JSX.Element {
           ))}
         </TabsList>
       </div>
-      <TabsContent withAnimation={false} value="preview" className="mt-0 flex size-full flex-1">
+      <TabsContent enableAnimation={false} value="preview" className="mt-0 flex size-full flex-1">
         <ChatViewer />
       </TabsContent>
       {/* subtract 6rem for the chat history and chat input as they don't take the full height */}
-      <TabsContent withAnimation={false} value="editor" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
+      <TabsContent enableAnimation={false} value="editor" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
         <ChatEditorLayout className="mt-[3rem] border-t" />
       </TabsContent>
-      <TabsContent withAnimation={false} value="console" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
+      <TabsContent enableAnimation={false} value="console" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
         <ChatConsole data-view="tabs" className="mt-[3rem]" />
       </TabsContent>
     </Tabs>

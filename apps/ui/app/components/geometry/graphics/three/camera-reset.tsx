@@ -11,7 +11,7 @@ export function resetCamera({
   perspective,
   setSceneRadius,
   invalidate,
-  withConfiguredAngles,
+  enableConfiguredAngles,
 }: {
   camera: THREE.Camera;
   shapeRadius: number;
@@ -25,7 +25,7 @@ export function resetCamera({
   };
   setSceneRadius: (radius: number) => void;
   invalidate: () => void;
-  withConfiguredAngles?: boolean;
+  enableConfiguredAngles?: boolean;
 }): void {
   if (!(camera instanceof THREE.PerspectiveCamera)) {
     console.error('resetCamera requires PerspectiveCamera');
@@ -36,7 +36,7 @@ export function resetCamera({
   // Leaving it at 0 or less results in undefined camera behavior, so we set it to 1000.
   const adjustedShapeRadius = shapeRadius <= 0 ? 1000 : shapeRadius;
 
-  const useConfiguredAngles = withConfiguredAngles ?? true;
+  const useConfiguredAngles = enableConfiguredAngles ?? true;
 
   // Calculate the effective FOV that will be active after this reset, due to perspective.zoomLevel
   // camera.fov is the FOV when zoom = 1.

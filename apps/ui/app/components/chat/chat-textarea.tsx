@@ -38,7 +38,7 @@ export type ChatTextareaProperties = {
   readonly initialContent?: MessagePart[];
   readonly initialAttachments?: Attachment[];
   readonly className?: ClassValue;
-  readonly withContextActions?: boolean;
+  readonly enableContextActions?: boolean;
 };
 
 const defaultContent: MessagePart[] = [];
@@ -59,7 +59,7 @@ export const ChatTextarea = memo(function ({
   initialAttachments = defaultAttachments,
   onEscapePressed,
   className,
-  withContextActions = true,
+  enableContextActions = true,
 }: ChatTextareaProperties): JSX.Element {
   const { initialInputText, initialImageUrls } = useMemo(() => {
     let initialInputText = '';
@@ -440,7 +440,7 @@ export const ChatTextarea = memo(function ({
           ref={textareaReference}
           className={cn(
             'mt-2 mb-10 size-full max-h-48 min-h-14 resize-none border-none px-4 pt-1 pb-1 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
-            (images.length > 0 || withContextActions) && 'mt-6 pt-5',
+            (images.length > 0 || enableContextActions) && 'mt-6 pt-5',
           )}
           rows={3}
           value={inputText}
@@ -481,7 +481,7 @@ export const ChatTextarea = memo(function ({
 
       {/* Context */}
       <div className="absolute top-0 left-0 m-4 flex flex-wrap gap-1">
-        {withContextActions ? <ChatContextActions addImage={handleAddImage} addText={handleAddText} /> : null}
+        {enableContextActions ? <ChatContextActions addImage={handleAddImage} addText={handleAddText} /> : null}
         {images.map((image, index) => (
           <div key={image} className="relative">
             <HoverCard openDelay={100} closeDelay={100}>

@@ -31,7 +31,7 @@ type ResetCameraParameters = {
  */
 export function useCameraReset(
   parameters: ResetCameraParameters,
-): (options?: { withConfiguredAngles?: boolean }) => void {
+): (options?: { enableConfiguredAngles?: boolean }) => void {
   const { camera, invalidate } = useThree();
   const isRegistered = useRef(false);
 
@@ -39,7 +39,7 @@ export function useCameraReset(
 
   // Create the reset function that now accepts an optional options object
   const resetCamera = useCallback(
-    (options?: { withConfiguredAngles?: boolean }) => {
+    (options?: { enableConfiguredAngles?: boolean }) => {
       // Reset original distance reference if available
       if (originalDistanceReference?.current !== undefined) {
         originalDistanceReference.current = undefined;
@@ -52,7 +52,7 @@ export function useCameraReset(
         perspective,
         setSceneRadius,
         invalidate,
-        withConfiguredAngles: options?.withConfiguredAngles,
+        enableConfiguredAngles: options?.enableConfiguredAngles,
       });
     },
     [camera, invalidate, shapeRadius, rotation, perspective, setSceneRadius, originalDistanceReference],

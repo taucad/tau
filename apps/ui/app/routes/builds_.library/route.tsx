@@ -261,24 +261,24 @@ export default function PersonalCadProjects(): JSX.Element {
             </DropdownMenu>
           </div>
         </div>
-        <TabsContent withAnimation={false} value="all">
+        <TabsContent enableAnimation={false} value="all">
           <UnifiedBuildList projects={filteredBuilds} viewMode={viewMode} actions={actions} />
         </TabsContent>
-        <TabsContent withAnimation={false} value="mechanical">
+        <TabsContent enableAnimation={false} value="mechanical">
           <UnifiedBuildList
             projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('mechanical'))}
             viewMode={viewMode}
             actions={actions}
           />
         </TabsContent>
-        <TabsContent withAnimation={false} value="electrical">
+        <TabsContent enableAnimation={false} value="electrical">
           <UnifiedBuildList
             projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('electrical'))}
             viewMode={viewMode}
             actions={actions}
           />
         </TabsContent>
-        <TabsContent withAnimation={false} value="firmware">
+        <TabsContent enableAnimation={false} value="firmware">
           <UnifiedBuildList
             projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('firmware'))}
             viewMode={viewMode}

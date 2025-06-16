@@ -631,8 +631,8 @@ const defaultParams = {
   xSize: 2, // Width in Gridfinity units
   ySize: 1, // Length in Gridfinity units
   height: 0.5, // Height in Gridfinity units
-  withMagnet: false, // Include magnet holes
-  withScrew: false, // Include screw holes
+  enableMagnet: false, // Include magnet holes
+  enableScrew: false, // Include screw holes
   magnetRadius: 3.25, // Radius of magnet holes
   magnetHeight: 2, // Depth of magnet holes
   screwRadius: 1.5, // Radius of screw holes
@@ -692,8 +692,8 @@ function buildSocket({
   magnetRadius = 3.25,
   magnetHeight = 2,
   screwRadius = 1.5,
-  withScrew = true,
-  withMagnet = true,
+  enableScrew = true,
+  enableMagnet = true,
 } = {}) {
   const baseSocket = drawRoundedRectangle(
     SIZE - CLEARANCE,
@@ -715,11 +715,11 @@ function buildSocket({
     makeFace(assembleWire(new EdgeFinder().inPlane("XY", 0).find(slotSide))),
   ]);
 
-  if (withScrew || withMagnet) {
-    const magnetCutout = withMagnet
+  if (enableScrew || enableMagnet) {
+    const magnetCutout = enableMagnet
       ? drawCircle(magnetRadius).sketchOnPlane().extrude(magnetHeight)
       : null;
-    const screwCutout = withScrew
+    const screwCutout = enableScrew
       ? drawCircle(screwRadius).sketchOnPlane().extrude(SOCKET_HEIGHT)
       : null;
 
@@ -864,8 +864,8 @@ function main(_, params) {
   }).translateZ(stdHeight);
 
   const socket = buildSocket({
-    withMagnet: p.withMagnet,
-    withScrew: p.withScrew,
+    enableMagnet: p.enableMagnet,
+    enableScrew: p.enableScrew,
     magnetRadius: p.magnetRadius,
     magnetHeight: p.magnetHeight,
     screwRadius: p.screwRadius,
@@ -1649,7 +1649,7 @@ const defaultParams = {
   unit: 8.0,
   
   // Features
-  withTubes: true,      // Include bottom tubes
+  enableTubes: true,      // Include bottom tubes
   rounded: false,       // Simplified version without rounds
 };
 
@@ -1780,7 +1780,7 @@ function main(_, params) {
   );
   
   // Add bottom tubes
-  if (p.withTubes) {
+  if (p.enableTubes) {
     const tubePositions = calculateTubePositions(p.width, p.length);
     
     for (const [x, y] of tubePositions) {

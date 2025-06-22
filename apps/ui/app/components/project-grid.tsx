@@ -163,6 +163,7 @@ function ProjectCard({
               </div>
             ) : null}
             <CadViewer
+              enableLines={false}
               shapes={shapes}
               className="bg-muted"
               stageOptions={{

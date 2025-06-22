@@ -677,6 +677,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
             ) : null}
             <CadViewer
               shapes={shapes}
+              enableLines={false}
               className="bg-muted"
               stageOptions={{
                 zoomLevel: 1.5,

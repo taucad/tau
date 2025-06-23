@@ -39,7 +39,7 @@ export const getEnvironment = (): Environment => {
   const result = environmentSchema.safeParse(process.env);
 
   if (!result.success) {
-    const formattedError = z.treeifyError(result.error).errors;
+    const formattedError = z.treeifyError(result.error).properties;
     const errorMessage = `Invalid environment configuration: ${JSON.stringify(formattedError)}`;
     throw new Error(errorMessage);
   }

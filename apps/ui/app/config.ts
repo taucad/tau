@@ -18,7 +18,7 @@ export const getEnvironment = async (): Promise<Environment> => {
   const result = environmentSchema.safeParse(process.env);
 
   if (!result.success) {
-    const formattedError = z.treeifyError(result.error).errors;
+    const formattedError = z.treeifyError(result.error).properties;
     const errorMessage = `Invalid environment configuration: ${JSON.stringify(formattedError)}`;
     console.error(errorMessage);
     throw new Error(errorMessage);

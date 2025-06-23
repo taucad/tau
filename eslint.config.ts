@@ -108,6 +108,7 @@ const config: Linter.Config[] = [
             'Res',
             'Req',
             'Inject',
+            'Global',
           ],
         },
       ],

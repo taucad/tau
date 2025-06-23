@@ -109,6 +109,7 @@ const config: Linter.Config[] = [
             'Req',
             'Inject',
             'Global',
+            'UseGuards',
           ],
         },
       ],

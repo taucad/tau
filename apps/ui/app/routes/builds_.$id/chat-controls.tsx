@@ -485,7 +485,7 @@ export function ChatControls(): JSX.Element {
         }}
       >
         <TooltipTrigger asChild>
-          <Button variant="overlay" size="icon" className="text-muted-foreground">
+          <Button variant="overlay" size="icon" className="text-muted-foreground md:hidden">
             <Menu className="size-4" />
           </Button>
         </TooltipTrigger>

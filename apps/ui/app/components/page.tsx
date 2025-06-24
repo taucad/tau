@@ -17,6 +17,7 @@ import { useNetworkConnectivity } from '~/hooks/use-network-connectivity.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import { formatKeyCombination } from '~/utils/keys.js';
 import { useTypedMatches } from '~/hooks/use-typed-matches.js';
+import { NavUser } from '~/components/nav/nav-user.js';
 
 export const headerHeight = '3rem';
 
@@ -28,6 +29,7 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
     hasActionItems,
     commandPaletteItems,
     hasCommandPaletteItems,
+    noPageWrapper,
   } = useTypedMatches((handles) => ({
     breadcrumbItems: handles.breadcrumb,
     hasBreadcrumbItems: handles.breadcrumb.length > 0,
@@ -35,9 +37,14 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
     hasActionItems: handles.actions.length > 0,
     commandPaletteItems: handles.commandPalette,
     hasCommandPaletteItems: handles.commandPalette.length > 0,
+    noPageWrapper: handles.noPageWrapper.some((match) => match.handle.noPageWrapper === true),
   }));
 
   const isOnline = useNetworkConnectivity();
+
+  if (noPageWrapper) {
+    return <Outlet />;
+  }
 
   return (
     <SidebarProvider>
@@ -107,6 +114,8 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
                 ))}
               </div>
             ) : null}
+
+            <NavUser />
           </div>
         </header>
         <section className="h-[calc(100dvh-var(--header-height)-1px)] overflow-y-auto">

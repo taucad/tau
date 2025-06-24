@@ -5,6 +5,7 @@ export type Handle = {
   breadcrumb?: (match: UIMatch) => ReactNode;
   actions?: (match: UIMatch) => ReactNode;
   commandPalette?: (match: UIMatch) => ReactNode;
+  noPageWrapper?: boolean;
 };
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- keeping the convention from react-router

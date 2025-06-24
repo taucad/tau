@@ -19,6 +19,7 @@ import { ColorProvider, useColor } from '~/hooks/use-color.js';
 import { useFavicon } from '~/hooks/use-favicon.js';
 import { TooltipProvider } from '~/components/ui/tooltip.js';
 import { AppError } from '~/components/error-page.js';
+import { AuthConfigProvider } from '~/providers/auth-provider.js';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: globalStylesUrl },
@@ -77,15 +78,17 @@ function AppWithProviders({ error }: { readonly error?: ReactNode }): JSX.Elemen
   );
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider specifiedTheme={data?.theme} themeAction="/action/set-theme">
-        <ColorProvider>
-          <TooltipProvider>
-            <App error={error} ssrTheme={data?.theme} env={data?.env} />
-          </TooltipProvider>
-        </ColorProvider>
-      </ThemeProvider>
-    </QueryClientProvider>
+    <AuthConfigProvider>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider specifiedTheme={data?.theme} themeAction="/action/set-theme">
+          <ColorProvider>
+            <TooltipProvider>
+              <App error={error} ssrTheme={data?.theme} env={data?.env} />
+            </TooltipProvider>
+          </ColorProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </AuthConfigProvider>
   );
 }
 

@@ -6,7 +6,6 @@ import { NavHistory } from '~/components/nav/nav-history.js';
 import { headerHeight } from '~/components/page.js';
 import { NavMain } from '~/components/nav/nav-main.js';
 import { NavProjects } from '~/components/nav/nav-projects.js';
-import { NavUser } from '~/components/nav/nav-user.js';
 import {
   Sidebar,
   SidebarContent,
@@ -21,11 +20,6 @@ import { ModeToggle } from '~/components/nav/mode-toggle.js';
 
 // This is sample data.
 const data = {
-  user: {
-    name: 'rifont',
-    email: 'richard@fontein.co',
-    avatar: '/avatar-sample.png',
-  },
   navMain: [
     {
       title: 'Builds',
@@ -128,7 +122,6 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
       <SidebarFooter className="flex flex-col items-end transition-transform duration-200 ease-linear group-data-[collapsible=icon]:items-center">
         <ColorToggle />
         <ModeToggle />
-        <NavUser user={data.user} />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

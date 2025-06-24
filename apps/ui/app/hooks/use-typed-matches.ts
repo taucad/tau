@@ -19,6 +19,7 @@ export function useTypedMatches<Selected>(
       breadcrumb: [],
       actions: [],
       commandPalette: [],
+      noPageWrapper: [],
     };
 
     // Get all possible handle properties from all matches

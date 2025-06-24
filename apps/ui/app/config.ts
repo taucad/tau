@@ -10,6 +10,7 @@ import { z } from 'zod/v4';
 const environmentSchema = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
   TAU_API_URL: z.url(),
+  TAU_FRONTEND_URL: z.url(),
   NODE_ENV: z.enum(['development', 'production', 'test']),
   /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
 });

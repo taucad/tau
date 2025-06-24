@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createOpenAI } from '@ai-sdk/openai';
 import { generateText } from 'ai';
-import { getEnvironment } from '~/config.js';
+import { getEnvironment } from '~/config/environment.config.js';
 
 export type FileEditRequest = {
   targetFile: string;

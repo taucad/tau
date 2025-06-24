@@ -1,9 +1,8 @@
-import { Body, Controller, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { convertToCoreMessages } from 'ai';
 import type { UIMessage } from 'ai';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HumanMessage } from '@langchain/core/messages';
-import { generatePrefixedId, idPrefix } from '~/utils/id.js';
 import { ToolService, toolChoiceFromToolName } from '~/tools/tool-service.js';
 import type { ToolChoiceWithCategory } from '~/tools/tool-service.js';
 import { ChatService } from '~/chat/chat-service.js';
@@ -13,6 +12,7 @@ import {
   sanitizeMessagesForConversion,
 } from '~/chat/utils/convert-messages.js';
 import { objectToXml } from '~/utils/xml.js';
+import { AuthGuard } from '~/auth/auth.guard.js';
 
 export type CodeError = {
   message: string;
@@ -36,6 +36,7 @@ export type CreateChatBody = {
   >;
 };
 
+@UseGuards(AuthGuard)
 @Controller('chat')
 export class ChatController {
   public constructor(

@@ -15,8 +15,12 @@ const fastifyAdapter = new FastifyAdapter({
 });
 const globalPrefix = 'v1';
 const app = await NestFactory.create<NestFastifyApplication>(AppModule, fastifyAdapter);
+
 app.setGlobalPrefix(globalPrefix);
-app.enableCors();
+app.enableCors({
+  origin: true,
+  credentials: true,
+});
 
 if (import.meta.env.PROD) {
   async function bootstrap() {

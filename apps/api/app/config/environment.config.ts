@@ -4,8 +4,11 @@ import { z } from 'zod/v4';
 const environmentSchema = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  DATABASE_URL: z.string().default('postgres://dev_user:dev_password@localhost:5432/cad_rag'),
   PORT: z.string().default('3000'),
+  DATABASE_URL: z.string(),
+  TAU_FRONTEND_URL: z.string(),
+
+  // Chat & LLMs
   OPENAI_API_KEY: z.string(),
   ANTHROPIC_API_KEY: z.string(),
   SAMBA_API_KEY: z.string().optional(),
@@ -32,6 +35,12 @@ const environmentSchema = z.object({
   LANGSMITH_ENDPOINT: z.string().optional(),
   LANGSMITH_PROJECT: z.string().optional(),
   LANGSMITH_API_KEY: z.string().optional(),
+
+  // Authentication
+  AUTH_SECRET: z.string(),
+  AUTH_URL: z.string(),
+  GITHUB_CLIENT_ID: z.string(),
+  GITHUB_CLIENT_SECRET: z.string(),
   /* eslint-enable @typescript-eslint/naming-convention -- renabling */
 });
 

@@ -382,7 +382,6 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         icon: <BoxDown className="mr-2 size-4" />,
         action: async () => handleExport(buildName, 'stl'),
         disabled: shapes.length === 0,
-        link: '/',
       },
       {
         id: 'download-step',

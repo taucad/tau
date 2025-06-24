@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { ProviderModule } from '~/providers/provider.module.js';
-import { ModelController } from '~/models/model.controller.js';
-import { ModelService } from '~/models/model.service.js';
+import { ProviderModule } from '~/api/providers/provider.module.js';
+import { ModelController } from '~/api/models/model.controller.js';
+import { ModelService } from '~/api/models/model.service.js';
 
 @Module({
   imports: [ProviderModule],

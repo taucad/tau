@@ -1,8 +1,7 @@
 // eslint-disable-next-line no-restricted-imports -- expected
-import replicadTypes from '../../../../../gen/api/replicad/replicad-clean-with-jsdoc.d.ts?raw';
+import replicadTypes from '../../../../../../gen/api/replicad/replicad-clean-with-jsdoc.d.ts?raw';
 // eslint-disable-next-line no-restricted-imports -- expected
-import { mockModels } from '../../../../ui/app/constants/build-code-examples.js';
-import { buildApiContext, retrieveRelevantChunks } from '~/rag/replicad-rag.js';
+import { mockModels } from '../../../../../ui/app/constants/build-code-examples.js';
 
 const mockModelsString = mockModels
   .map((model) => `<example>\n${model.name}\n\`\`\`javascript\n${model.code}\`\`\`\n</example>`)

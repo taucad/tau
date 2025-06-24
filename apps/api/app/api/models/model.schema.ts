@@ -1,5 +1,5 @@
 import { z } from 'zod/v4';
-import { providerIdSchema } from '~/providers/provider.schema.js';
+import { providerIdSchema } from '~/api/providers/provider.schema.js';
 
 export const modelSupportSchema = z.object({
   tools: z.boolean().describe('Whether the model supports tools').optional(),

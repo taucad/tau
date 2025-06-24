@@ -1,6 +1,6 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import type { CompletionRequestBody } from 'monacopilot';
-import { CodeCompletionService } from '~/code-completion/code-completion.service.js';
+import { CodeCompletionService } from '~/api/code-completion/code-completion.service.js';
 
 @Controller('code-completion')
 export class CodeCompletionController {

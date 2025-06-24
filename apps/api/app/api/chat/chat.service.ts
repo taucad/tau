@@ -4,15 +4,16 @@ import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import { createSupervisor } from '@langchain/langgraph-supervisor';
 import { streamText } from 'ai';
 import type { CoreMessage } from 'ai';
-import { ModelService } from '~/models/model.service.js';
-import type { ToolChoiceWithCategory } from '~/tools/tool.service.js';
-import { ToolService } from '~/tools/tool.service.js';
-import { nameGenerationSystemPrompt } from '~/chat/prompts/chat-prompt-name.js';
-import type { LangGraphAdapterCallbacks } from '~/chat/utils/langgraph-adapter.js';
-import { getCadSystemPrompt } from '~/chat/prompts/chat-prompt-cad.js';
+import { ModelService } from '~/api/models/model.service.js';
+import type { ToolChoiceWithCategory } from '~/api/tools/tool.service.js';
+import { ToolService } from '~/api/tools/tool.service.js';
+import { nameGenerationSystemPrompt } from '~/api/chat/prompts/chat-prompt-name.js';
+import type { LangGraphAdapterCallbacks } from '~/api/chat/utils/langgraph-adapter.js';
+import { getCadSystemPrompt } from '~/api/chat/prompts/chat-prompt-cad.js';
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
   public constructor(
     private readonly modelService: ModelService,
     private readonly toolService: ToolService,
@@ -99,6 +100,7 @@ Your goal is to ensure users receive expert-level assistance by connecting them 
   }
 
   public getCallbacks(): LangGraphAdapterCallbacks {
+    const { logger } = this;
     return {
       onMessageComplete: ({ dataStream, modelId: id, usageTokens }) => {
         const normalizedUsageTokens = this.modelService.normalizeUsageTokens(id, usageTokens);
@@ -118,12 +120,12 @@ Your goal is to ensure users receive expert-level assistance by connecting them 
       },
       onError(error) {
         if (error instanceof Error && error.message === 'Aborted') {
-          Logger.warn('Request aborted');
+          logger.warn('Request aborted');
           return 'The request was aborted';
         }
 
-        Logger.error('Error in chat stream follows:');
-        Logger.error(error);
+        logger.error('Error in chat stream follows:');
+        logger.error(error);
         const errorMessage = error instanceof Error ? error.message : 'An error occurred while processing the request';
 
         return errorMessage;

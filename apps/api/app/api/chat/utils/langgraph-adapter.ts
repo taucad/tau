@@ -4,15 +4,15 @@ import { formatDataStreamPart, createDataStream } from 'ai';
 import type { DataStreamWriter } from 'ai';
 import type { StreamEvent as LangchainStreamEvent } from '@langchain/core/tracers/log_stream';
 import { generatePrefixedId, idPrefix } from '~/utils/id.js';
-import type { ChatUsageTokens } from '~/chat/chat.schema.js';
-import { processContent } from '~/chat/utils/process-content.js';
+import type { ChatUsageTokens } from '~/api/chat/chat.schema.js';
+import { processContent } from '~/api/chat/utils/process-content.js';
 import type {
   StreamEvent,
   ChatModelStreamEvent,
   ChatModelEndEvent,
   ToolStartEvent,
   ToolEndEvent,
-} from '~/chat/utils/langgraph-types.js';
+} from '~/api/chat/utils/langgraph-types.js';
 
 /**
  * Enhanced DataStream with a convenient write method for streaming content.

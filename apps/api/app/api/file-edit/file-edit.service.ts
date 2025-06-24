@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { createOpenAI } from '@ai-sdk/openai';
+import type { OpenAIProvider } from '@ai-sdk/openai';
 import { generateText } from 'ai';
-import { getEnvironment } from '~/config/environment.config.js';
+import type { ConfigService } from '@nestjs/config';
+import type { Environment } from '~/config/environment.config.js';
 
 export type FileEditRequest = {
   targetFile: string;
@@ -18,17 +20,17 @@ export type FileEditResult = {
 
 @Injectable()
 export class FileEditService {
-  private readonly openai;
+  private readonly openai: OpenAIProvider;
 
-  public constructor() {
-    const environment = getEnvironment();
+  public constructor(private readonly configService: ConfigService<Environment, true>) {
+    const morphApiKey = this.configService.get<string>('MORPH_API_KEY', { infer: true });
 
-    if (!environment.MORPH_API_KEY) {
+    if (!morphApiKey) {
       throw new Error('MORPH_API_KEY is required for file editing functionality');
     }
 
     this.openai = createOpenAI({
-      apiKey: environment.MORPH_API_KEY,
+      apiKey: morphApiKey,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- baseURL is the correct property name for OpenAI SDK
       baseURL: 'https://api.morphllm.com/v1',
     });

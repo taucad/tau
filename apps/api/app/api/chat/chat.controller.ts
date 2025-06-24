@@ -3,14 +3,14 @@ import { convertToCoreMessages } from 'ai';
 import type { UIMessage } from 'ai';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HumanMessage } from '@langchain/core/messages';
-import { ToolService, toolChoiceFromToolName } from '~/tools/tool.service.js';
-import type { ToolChoiceWithCategory } from '~/tools/tool.service.js';
-import { ChatService } from '~/chat/chat.service.js';
-import { LangGraphAdapter } from '~/chat/utils/langgraph-adapter.js';
+import { ToolService, toolChoiceFromToolName } from '~/api/tools/tool.service.js';
+import type { ToolChoiceWithCategory } from '~/api/tools/tool.service.js';
+import { ChatService } from '~/api/chat/chat.service.js';
+import { LangGraphAdapter } from '~/api/chat/utils/langgraph-adapter.js';
 import {
   convertAiSdkMessagesToLangchainMessages,
   sanitizeMessagesForConversion,
-} from '~/chat/utils/convert-messages.js';
+} from '~/api/chat/utils/convert-messages.js';
 import { objectToXml } from '~/utils/xml.js';
 import { AuthGuard } from '~/auth/auth.guard.js';
 

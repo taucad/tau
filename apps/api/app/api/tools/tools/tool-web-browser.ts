@@ -14,7 +14,7 @@ import { z } from 'zod/v4';
 
 // Schema for tool input
 const webBrowserSchema = z.object({
-  url: z.string().url().describe('A valid URL to browse including protocol (e.g., https://)'),
+  url: z.url().describe('A valid URL to browse including protocol (e.g., https://)'),
   query: z.string().optional().describe('What to find on the page, used for the Vector Search'),
 });
 

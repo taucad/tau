@@ -26,7 +26,7 @@ if (import.meta.env.PROD) {
   async function bootstrap() {
     const port = process.env.PORT;
     await app.listen(port, '0.0.0.0'); // Listen on all network interfaces
-    Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`);
+    Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`, 'Bootstrap');
   }
 
   await bootstrap();

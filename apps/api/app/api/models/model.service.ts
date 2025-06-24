@@ -2,10 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleInit } from '@nestjs/common';
 import ollama from 'ollama';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import type { ChatUsageCost, ChatUsageTokens } from '~/chat/chat.schema.js';
-import type { ProviderId } from '~/providers/provider.schema.js';
-import { ProviderService } from '~/providers/provider.service.js';
-import type { Model, ModelSupport } from '~/models/model.schema.js';
+import type { ChatUsageCost, ChatUsageTokens } from '~/api/chat/chat.schema.js';
+import type { ProviderId } from '~/api/providers/provider.schema.js';
+import { ProviderService } from '~/api/providers/provider.service.js';
+import type { Model, ModelSupport } from '~/api/models/model.schema.js';
 
 type CloudProviderId = Exclude<ProviderId, 'ollama'>;
 

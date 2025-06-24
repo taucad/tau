@@ -3,9 +3,9 @@ import { convertToCoreMessages } from 'ai';
 import type { UIMessage } from 'ai';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HumanMessage } from '@langchain/core/messages';
-import { ToolService, toolChoiceFromToolName } from '~/tools/tool-service.js';
-import type { ToolChoiceWithCategory } from '~/tools/tool-service.js';
-import { ChatService } from '~/chat/chat-service.js';
+import { ToolService, toolChoiceFromToolName } from '~/tools/tool.service.js';
+import type { ToolChoiceWithCategory } from '~/tools/tool.service.js';
+import { ChatService } from '~/chat/chat.service.js';
 import { LangGraphAdapter } from '~/chat/utils/langgraph-adapter.js';
 import {
   convertAiSdkMessagesToLangchainMessages,

@@ -2,10 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { OnModuleInit } from '@nestjs/common';
 import ollama from 'ollama';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import type { ChatUsageCost, ChatUsageTokens } from '~/chat/chat-schema.js';
-import type { ProviderId } from '~/providers/provider-schema.js';
-import { ProviderService } from '~/providers/provider-service.js';
-import type { Model, ModelSupport } from '~/models/model-schema.js';
+import type { ChatUsageCost, ChatUsageTokens } from '~/chat/chat.schema.js';
+import type { ProviderId } from '~/providers/provider.schema.js';
+import { ProviderService } from '~/providers/provider.service.js';
+import type { Model, ModelSupport } from '~/models/model.schema.js';
 
 type CloudProviderId = Exclude<ProviderId, 'ollama'>;
 
@@ -198,12 +198,13 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
 @Injectable()
 export class ModelService implements OnModuleInit {
   public models: Model[] = [];
+  private readonly logger = new Logger(ModelService.name);
 
   public constructor(private readonly providerService: ProviderService) {}
 
   public async onModuleInit(): Promise<void> {
     await this.getModels();
-    Logger.log(`Loaded ${this.models.length} models`);
+    this.logger.log(`Loaded ${this.models.length} models`);
   }
 
   public async getModels(): Promise<Model[]> {
@@ -324,7 +325,6 @@ export class ModelService implements OnModuleInit {
 
       return ollamaModelsWithToolSupport;
     } catch {
-      // Logger.error('Error getting ollama models', error);
       return [];
     }
   }

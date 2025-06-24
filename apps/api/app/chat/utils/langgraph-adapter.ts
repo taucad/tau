@@ -4,7 +4,7 @@ import { formatDataStreamPart, createDataStream } from 'ai';
 import type { DataStreamWriter } from 'ai';
 import type { StreamEvent as LangchainStreamEvent } from '@langchain/core/tracers/log_stream';
 import { generatePrefixedId, idPrefix } from '~/utils/id.js';
-import type { ChatUsageTokens } from '~/chat/chat-schema.js';
+import type { ChatUsageTokens } from '~/chat/chat.schema.js';
 import { processContent } from '~/chat/utils/process-content.js';
 import type {
   StreamEvent,

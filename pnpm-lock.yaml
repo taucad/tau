@@ -539,6 +539,9 @@ importers:
       vite-plugin-node:
         specifier: ^5.0.1
         version: 5.0.1(@swc/core@1.10.15(@swc/helpers@0.5.15))(vite@6.1.0(@types/node@22.12.0)(jiti@2.4.2)(less@4.1.3)(lightningcss@1.29.1)(sass-embedded@1.87.0)(sass@1.87.0)(stylus@0.64.0)(terser@5.38.2)(tsx@4.19.4)(yaml@2.7.0))
+      vite-plugin-static-copy:
+        specifier: ^3.0.2
+        version: 3.0.2(vite@6.1.0(@types/node@22.12.0)(jiti@2.4.2)(less@4.1.3)(lightningcss@1.29.1)(sass-embedded@1.87.0)(sass@1.87.0)(stylus@0.64.0)(terser@5.38.2)(tsx@4.19.4)(yaml@2.7.0))
       vite-svg-sprite-wrapper:
         specifier: ^1.4.1
         version: 1.4.1(vite@6.1.0(@types/node@22.12.0)(jiti@2.4.2)(less@4.1.3)(lightningcss@1.29.1)(sass-embedded@1.87.0)(sass@1.87.0)(stylus@0.64.0)(terser@5.38.2)(tsx@4.19.4)(yaml@2.7.0))
@@ -11147,6 +11150,10 @@ packages:
     resolution: {integrity: sha512-/bjOqmgETBYB5BoEeGVea8dmvHb2m9GLy1E9W43yeyfP6QQCZGFNa+XRceJEuDB6zqr+gKpIAmlLebMpykw/MQ==}
     engines: {node: '>=10'}
 
+  p-map@7.0.3:
+    resolution: {integrity: sha512-VkndIv2fIB99swvQoA65bm+fsmt6UNdGeIB0oxBs+WhAhdh08QA04JXpI7rbB9r08/nkbysKoya9rtDERYOYMA==}
+    engines: {node: '>=18'}
+
   p-queue@6.6.2:
     resolution: {integrity: sha512-RwFpb72c/BhQLEXIZ5K2e+AhgNVmIejGlTgiB9MzZ0e93GRvqZ7uSi0dvRF7/XIXDeNkra2fNHBxTyPDGySpjQ==}
     engines: {node: '>=8'}
@@ -13226,6 +13233,10 @@ packages:
     resolution: {integrity: sha512-mEwzpUgrLySlveBwEVDMKk5B57bhLPYovRfPAXD5gA/98Opn0rCDj3GtLwFvCvH5RK9uPCExUROW5NjDwvqkxw==}
     engines: {node: '>=12.0.0'}
 
+  tinyglobby@0.2.14:
+    resolution: {integrity: sha512-tX5e7OM1HnYr2+a2C/4V0htOcSQcoSTH9KgJnVvNm5zm/cyEWKJ7j7YutsH9CxMdtOkkLFy2AHrMci9IM8IPZQ==}
+    engines: {node: '>=12.0.0'}
+
   tinypool@1.0.2:
     resolution: {integrity: sha512-al6n+QEANGFOMf/dmUMsuS5/r9B06uwlyNjZZql/zv8J7ybHCgoihBNORZCY2mzUuAnomQa2JdhyHKzZxPCrFA==}
     engines: {node: ^18.0.0 || >=20.0.0}
@@ -13832,6 +13843,12 @@ packages:
     peerDependenciesMeta:
       '@swc/core':
         optional: true
+
+  vite-plugin-static-copy@3.0.2:
+    resolution: {integrity: sha512-/seLvhUg44s1oU9RhjTZZy/0NPbfNctozdysKcvPovxxXZdI5l19mGq6Ri3IaTf1Dy/qChS4BSR7ayxeu8o9aQ==}
+    engines: {node: ^18.0.0 || >=20.0.0}
+    peerDependencies:
+      vite: ^5.0.0 || ^6.0.0
 
   vite-svg-sprite-wrapper@1.4.1:
     resolution: {integrity: sha512-P6OYm6PCK/4cS5aHRZPku84OLJfuD75VH5O17rSgj8eec/cwg+9Zpzssx6ARorUessngfawfqKD4lzdyVMoq+A==}
@@ -26423,6 +26440,8 @@ snapshots:
     dependencies:
       aggregate-error: 3.1.0
 
+  p-map@7.0.3: {}
+
   p-queue@6.6.2:
     dependencies:
       eventemitter3: 4.0.7
@@ -28643,6 +28662,11 @@ snapshots:
       fdir: 6.4.4(picomatch@4.0.2)
       picomatch: 4.0.2
 
+  tinyglobby@0.2.14:
+    dependencies:
+      fdir: 6.4.4(picomatch@4.0.2)
+      picomatch: 4.0.2
+
   tinypool@1.0.2: {}
 
   tinyrainbow@2.0.0: {}
@@ -29336,6 +29360,15 @@ snapshots:
       '@swc/core': 1.10.15(@swc/helpers@0.5.15)
     transitivePeerDependencies:
       - supports-color
+
+  vite-plugin-static-copy@3.0.2(vite@6.1.0(@types/node@22.12.0)(jiti@2.4.2)(less@4.1.3)(lightningcss@1.29.1)(sass-embedded@1.87.0)(sass@1.87.0)(stylus@0.64.0)(terser@5.38.2)(tsx@4.19.4)(yaml@2.7.0)):
+    dependencies:
+      chokidar: 3.6.0
+      fs-extra: 11.3.0
+      p-map: 7.0.3
+      picocolors: 1.1.1
+      tinyglobby: 0.2.14
+      vite: 6.1.0(@types/node@22.12.0)(jiti@2.4.2)(less@4.1.3)(lightningcss@1.29.1)(sass-embedded@1.87.0)(sass@1.87.0)(stylus@0.64.0)(terser@5.38.2)(tsx@4.19.4)(yaml@2.7.0)
 
   vite-svg-sprite-wrapper@1.4.1(vite@6.1.0(@types/node@22.12.0)(jiti@2.4.2)(less@4.1.3)(lightningcss@1.29.1)(sass-embedded@1.87.0)(sass@1.87.0)(stylus@0.64.0)(terser@5.38.2)(tsx@4.19.4)(yaml@2.7.0)):
     dependencies:

@@ -5,6 +5,7 @@ import { defineConfig } from 'vite';
 import { VitePluginNode as vitePluginNode } from 'vite-plugin-node';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import tsconfigPaths from 'vite-tsconfig-paths';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,6 +22,14 @@ export default defineConfig({
   plugins: [
     nxViteTsPaths(),
     tsconfigPaths(),
+    viteStaticCopy({
+      targets: [
+        {
+          src: 'app/database/migrations/**/*',
+          dest: 'migrations',
+        },
+      ],
+    }),
     vitePluginNode({
       // Nodejs native Request adapter
       // currently this plugin support 'express', 'nest', 'koa' and 'fastify' out of box,

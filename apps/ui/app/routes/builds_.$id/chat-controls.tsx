@@ -477,7 +477,7 @@ export function ChatControls(): JSX.Element {
         defaultValue={undefined}
         isDisabled={isControlItemDisabled}
         popoverContentClassName="w-60 z-50"
-        searchPlaceHolder="Search actions..."
+        searchPlaceHolder="Search commands..."
         placeholder="Actions"
         onSelect={(itemId) => {
           const selectedItem = buildItems.find((item) => item.id === itemId);

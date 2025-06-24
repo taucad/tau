@@ -539,9 +539,8 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
 }
 
 const commandKeyCombination = {
-  key: 'p',
+  key: 'k',
   metaKey: true,
-  shiftKey: true,
 } as const satisfies KeyCombination;
 
 export function CommandPaletteTrigger(): JSX.Element {
@@ -561,7 +560,7 @@ export function CommandPaletteTrigger(): JSX.Element {
         }}
       >
         <Terminal className="mr-2 size-4" />
-        <span className="hidden lg:inline-flex">Search actions...</span>
+        <span className="hidden lg:inline-flex">Search commands...</span>
         <span className="inline-flex lg:hidden">Search...</span>
         <KeyShortcut className="absolute top-1/2 right-2 -translate-y-1/2">{formattedKeyCombination}</KeyShortcut>
       </Button>

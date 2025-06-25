@@ -1,4 +1,5 @@
-import { setup, fromPromise, assign } from 'xstate';
+import { setup, fromPromise, assign, assertEvent } from 'xstate';
+import type { DoneActorEvent } from 'xstate';
 import { ENV } from '~/config.js';
 
 // Types for the API request and response
@@ -91,13 +92,16 @@ export const fileEditMachine = setup({
   actions: {
     setRequest: assign({
       request({ event }) {
-        if (event.type !== 'applyEdit') return undefined;
+        assertEvent(event, 'applyEdit');
         return event.request;
       },
     }),
     setResult: assign({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- XState provides the result in event.output
-      result: ({ event }) => (event as any).output,
+      result({ event }) {
+        // We need to cast here because the event is not typed correctly in XState
+        const assertedEvent = event as unknown as DoneActorEvent<FileEditResult>;
+        return assertedEvent.output;
+      },
     }),
     setErrorFromResult: assign({
       error: ({ context }) => context.result?.error ?? 'Unknown error occurred',
@@ -135,7 +139,7 @@ export const fileEditMachine = setup({
           {
             target: 'error',
             guard({ event }) {
-              const result = (event as unknown).output as FileEditResult;
+              const result = event.output;
               return !result.success;
             },
             actions: ['setResult', 'setErrorFromResult'],
@@ -149,7 +153,7 @@ export const fileEditMachine = setup({
           target: 'error',
           actions: assign({
             error({ event }) {
-              const { error } = event as unknown;
+              const { error } = event;
               return error instanceof Error ? error.message : 'Unknown error occurred';
             },
           }),

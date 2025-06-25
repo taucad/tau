@@ -18,7 +18,7 @@ const app = await NestFactory.create<NestFastifyApplication>(AppModule, fastifyA
 
 app.setGlobalPrefix(globalPrefix);
 app.enableCors({
-  origin: true,
+  origin: [process.env.TAU_FRONTEND_URL],
   credentials: true,
 });
 

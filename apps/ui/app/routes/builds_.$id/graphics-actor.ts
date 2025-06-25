@@ -9,7 +9,7 @@ import { screenshotCapabilityMachine } from '~/machines/screenshot-capability.js
 export const graphicsActor = createActor(graphicsMachine, {
   inspect,
   input: {
-    defaultCameraAngle: 60,
+    defaultCameraFovAngle: 60,
   },
 });
 graphicsActor.start();

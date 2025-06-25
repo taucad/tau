@@ -17,9 +17,9 @@ export type GraphicsContext = {
   gridUnitSystem: 'metric' | 'imperial';
 
   // Camera state (library-agnostic)
-  cameraAngle: number;
+  cameraFovAngle: number; // The FOV set by the user
+  cameraFovAngleComputed: number; // The FOV computed from the camera position and fov
   cameraPosition: number;
-  cameraFov: number;
   currentZoom: number;
   shapeRadius: number;
   sceneRadius: number | undefined;
@@ -56,7 +56,7 @@ export type GraphicsEvent =
   | { type: 'setGridSizeLocked'; payload: boolean }
   | { type: 'setGridUnit'; payload: { unit: string; factor: number; system: 'metric' | 'imperial' } }
   // Camera events
-  | { type: 'setCameraAngle'; payload: number }
+  | { type: 'setFovAngle'; payload: number }
   | { type: 'resetCamera'; options?: { enableConfiguredAngles?: boolean } }
   | { type: 'cameraResetCompleted' }
   // Visibility events
@@ -101,7 +101,7 @@ export type GraphicsEmitted =
 
 // Input type
 export type GraphicsInput = {
-  defaultCameraAngle?: number;
+  defaultCameraFovAngle?: number;
 };
 
 /**
@@ -232,7 +232,7 @@ export const graphicsMachine = setup({
       if (isSystemChange || isImperialFactorChange) {
         const newGridSizes = calculateGridSizes(
           context.cameraPosition,
-          context.cameraFov,
+          context.cameraFovAngleComputed,
           event.payload.system,
           event.payload.factor,
         );
@@ -244,9 +244,9 @@ export const graphicsMachine = setup({
       }
     }),
 
-    setCameraAngle: assign({
-      cameraAngle({ event }) {
-        assertEvent(event, 'setCameraAngle');
+    setFovAngle: assign({
+      cameraFovAngle({ event }) {
+        assertEvent(event, 'setFovAngle');
         return event.payload;
       },
     }),
@@ -257,7 +257,7 @@ export const graphicsMachine = setup({
       enqueue.assign({
         currentZoom: event.zoom,
         cameraPosition: event.position,
-        cameraFov: event.fov,
+        cameraFovAngleComputed: event.fov,
       });
 
       // Recalculate grid sizes based on new controls state
@@ -486,9 +486,9 @@ export const graphicsMachine = setup({
     gridUnitSystem: 'metric' as const,
 
     // Camera state
-    cameraAngle: input.defaultCameraAngle ?? 60,
+    cameraFovAngle: input.defaultCameraFovAngle ?? 60,
+    cameraFovAngleComputed: 75,
     cameraPosition: 1000,
-    cameraFov: 75,
     currentZoom: 1,
     shapeRadius: 0,
     sceneRadius: undefined,
@@ -530,8 +530,8 @@ export const graphicsMachine = setup({
         },
 
         // Camera events
-        setCameraAngle: {
-          actions: 'setCameraAngle',
+        setFovAngle: {
+          actions: 'setFovAngle',
         },
         resetCamera: {
           actions: 'requestCameraReset',

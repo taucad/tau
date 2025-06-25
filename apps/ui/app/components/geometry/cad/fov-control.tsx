@@ -8,15 +8,15 @@ import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 
 // Cookie name constant - same as in the ThreeContext
-const cameraAngleCookieName = 'camera-angle';
+const fovAngleCookieName = 'fov-angle';
 
 type CameraControlProps = {
   /**
-   * Default camera angle in degrees (0 = orthographic, 90 = perspective)
+   * Default field of view angle in degrees (0 = orthographic, 90 = perspective)
    */
   readonly defaultAngle: number;
   /**
-   * Callback when camera angle changes
+   * Callback when field of view angle changes
    */
   readonly onChange?: (angle: number) => void;
   /**
@@ -32,13 +32,13 @@ type CameraControlProps = {
  * Note: This component DOES NOT directly use Three.js hooks.
  * You must use CameraHandler inside the Canvas separately.
  */
-export function CameraControl({ defaultAngle, className }: Omit<CameraControlProps, 'onChange'>): JSX.Element {
-  const [angle, setAngle] = useCookie<number>(cameraAngleCookieName, defaultAngle);
+export function FovControl({ defaultAngle, className }: Omit<CameraControlProps, 'onChange'>): JSX.Element {
+  const [fovAngle, setFovAngle] = useCookie<number>(fovAngleCookieName, defaultAngle);
 
-  // Update camera angle directly in the Graphics context when angle changes
+  // Synchronize fov angle to the Graphics context when angle changes
   useEffect(() => {
-    graphicsActor.send({ type: 'setCameraAngle', payload: angle });
-  }, [angle]);
+    graphicsActor.send({ type: 'setFovAngle', payload: fovAngle });
+  }, [fovAngle]);
 
   return (
     <Tooltip>
@@ -59,7 +59,7 @@ export function CameraControl({ defaultAngle, className }: Omit<CameraControlPro
           <div className="flex w-full justify-between px-1 text-xs leading-none transition-transform duration-300 group-hover:-translate-y-1.75 max-md:-translate-y-1.75">
             <span className="hidden md:block">Orthographic</span>
             <span className="md:hidden">Orth.</span>
-            <div className="font-bold text-primary">{angle}°</div>
+            <div className="font-bold text-primary">{fovAngle}°</div>
             <span className="hidden md:block">Perspective</span>
             <span className="md:hidden">Persp.</span>
           </div>
@@ -69,11 +69,11 @@ export function CameraControl({ defaultAngle, className }: Omit<CameraControlPro
             min={0}
             max={90}
             step={1}
-            value={[angle]}
+            value={[fovAngle]}
             // Inset-0 is used to make the entire button slideable for better UX
             className="absolute inset-0 h-full px-1 pt-8 opacity-0 duration-300 group-hover:pt-4 group-hover:opacity-100 max-md:pt-4 max-md:opacity-100 [&_[data-slot='slider-track']]:bg-neutral/20"
             onValueChange={(value) => {
-              setAngle(value[0]);
+              setFovAngle(value[0]);
             }}
           />
         </div>

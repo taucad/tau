@@ -68,7 +68,7 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Camera settings</TooltipContent>
+        <TooltipContent side="left">Camera settings</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
         align="end"

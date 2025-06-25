@@ -1,7 +1,9 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import type { CompletionRequestBody } from 'monacopilot';
 import { CodeCompletionService } from '~/api/code-completion/code-completion.service.js';
+import { AuthGuard } from '~/auth/auth.guard.js';
 
+@UseGuards(AuthGuard)
 @Controller('code-completion')
 export class CodeCompletionController {
   public constructor(private readonly codeCompletionService: CodeCompletionService) {}

@@ -1,7 +1,9 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { FileEditService } from '~/api/file-edit/file-edit.service.js';
 import type { FileEditRequest, FileEditResult } from '~/api/file-edit/file-edit.service.js';
+import { AuthGuard } from '~/auth/auth.guard.js';
 
+@UseGuards(AuthGuard)
 @Controller('file-edit')
 export class FileEditController {
   public constructor(private readonly fileEditService: FileEditService) {}

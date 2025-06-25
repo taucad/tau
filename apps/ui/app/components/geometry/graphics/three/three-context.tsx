@@ -13,7 +13,7 @@ import { cn } from '~/utils/ui.js';
 export type ThreeViewerProperties = {
   readonly enableGizmo?: boolean;
   readonly enableGrid?: boolean;
-  readonly enableAxesHelper?: boolean;
+  readonly enableAxes?: boolean;
   readonly enableZoom?: boolean;
   readonly enableDamping?: boolean;
   readonly className?: string;
@@ -29,7 +29,7 @@ export function ThreeProvider({
   children,
   enableGizmo = false,
   enableGrid = false,
-  enableAxesHelper = false,
+  enableAxes = false,
   enableZoom = false,
   enableDamping = false,
   className,
@@ -74,7 +74,7 @@ export function ThreeProvider({
         enableDamping={enableDamping}
         enableZoom={enableZoom}
         enableGrid={enableGrid}
-        enableAxesHelper={enableAxesHelper}
+        enableAxes={enableAxes}
         stageOptions={stageOptions}
         zoomSpeed={zoomSpeed}
       >

@@ -6,7 +6,7 @@ import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { ChatViewerStatus } from '~/routes/builds_.$id/chat-viewer-status.js';
 import { ChatViewerControls } from '~/routes/builds_.$id/chat-viewer-controls.js';
 import { HammerAnimation } from '~/components/hammer-animation.js';
-import { CameraSettings } from '~/components/geometry/cad/camera-settings.js';
+import { SettingsControl } from '~/components/geometry/cad/settings-control.js';
 
 export const ChatViewer = memo(function () {
   const shapes = useSelector(cadActor, (state) => state.context.shapes);
@@ -17,7 +17,7 @@ export const ChatViewer = memo(function () {
   const enableLines = useSelector(graphicsActor, (state) => state.context.enableLines);
   const enableGizmo = useSelector(graphicsActor, (state) => state.context.enableGizmo);
   const enableGrid = useSelector(graphicsActor, (state) => state.context.enableGrid);
-  const enableAxesHelper = useSelector(graphicsActor, (state) => state.context.enableAxesHelper);
+  const enableAxes = useSelector(graphicsActor, (state) => state.context.enableAxes);
 
   return (
     <>
@@ -33,13 +33,13 @@ export const ChatViewer = memo(function () {
             enableZoom
             enableGizmo={enableGizmo}
             enableGrid={enableGrid}
-            enableAxesHelper={enableAxesHelper}
+            enableAxes={enableAxes}
             enableSurface={enableSurface}
             enableLines={enableLines}
             shapes={shapes}
           />
         )}
-        <CameraSettings className="absolute top-2 right-2" />
+        <SettingsControl className="absolute top-2 right-2" />
         <ChatViewerStatus />
       </div>
       <ChatViewerControls />

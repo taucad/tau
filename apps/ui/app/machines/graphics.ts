@@ -29,7 +29,7 @@ export type GraphicsContext = {
   enableLines: boolean;
   enableGizmo: boolean;
   enableGrid: boolean;
-  enableAxesHelper: boolean;
+  enableAxes: boolean;
 
   // Capability registrations
   screenshotCapability?: AnyActorRef;
@@ -60,16 +60,11 @@ export type GraphicsEvent =
   | { type: 'resetCamera'; options?: { enableConfiguredAngles?: boolean } }
   | { type: 'cameraResetCompleted' }
   // Visibility events
-  | { type: 'toggleMeshVisibility' }
-  | { type: 'toggleLinesVisibility' }
   | { type: 'setSurfaceVisibility'; payload: boolean }
   | { type: 'setLinesVisibility'; payload: boolean }
-  | { type: 'toggleGizmoVisibility' }
-  | { type: 'toggleGridVisibility' }
-  | { type: 'toggleAxesHelperVisibility' }
   | { type: 'setGizmoVisibility'; payload: boolean }
   | { type: 'setGridVisibility'; payload: boolean }
-  | { type: 'setAxesHelperVisibility'; payload: boolean }
+  | { type: 'setAxesVisibility'; payload: boolean }
   // Controls events
   | { type: 'controlsInteractionStart' }
   | { type: 'controlsChanged'; zoom: number; position: number; fov: number }
@@ -419,14 +414,6 @@ export const graphicsMachine = setup({
       type: 'cameraResetCompleted' as const,
     }),
 
-    toggleMeshVisibility: assign({
-      enableSurface: ({ context }) => !context.enableSurface,
-    }),
-
-    toggleLinesVisibility: assign({
-      enableLines: ({ context }) => !context.enableLines,
-    }),
-
     setSurfaceVisibility: assign({
       enableSurface({ event }) {
         assertEvent(event, 'setSurfaceVisibility');
@@ -439,18 +426,6 @@ export const graphicsMachine = setup({
         assertEvent(event, 'setLinesVisibility');
         return event.payload;
       },
-    }),
-
-    toggleGizmoVisibility: assign({
-      enableGizmo: ({ context }) => !context.enableGizmo,
-    }),
-
-    toggleGridVisibility: assign({
-      enableGrid: ({ context }) => !context.enableGrid,
-    }),
-
-    toggleAxesHelperVisibility: assign({
-      enableAxesHelper: ({ context }) => !context.enableAxesHelper,
     }),
 
     setGizmoVisibility: assign({
@@ -467,9 +442,9 @@ export const graphicsMachine = setup({
       },
     }),
 
-    setAxesHelperVisibility: assign({
-      enableAxesHelper({ event }) {
-        assertEvent(event, 'setAxesHelperVisibility');
+    setAxesVisibility: assign({
+      enableAxes({ event }) {
+        assertEvent(event, 'setAxesVisibility');
         return event.payload;
       },
     }),
@@ -498,7 +473,7 @@ export const graphicsMachine = setup({
     enableLines: true,
     enableGizmo: true,
     enableGrid: true,
-    enableAxesHelper: true,
+    enableAxes: true,
 
     // Capabilities
     screenshotCapability: undefined,
@@ -538,26 +513,11 @@ export const graphicsMachine = setup({
         },
 
         // Visibility events
-        toggleMeshVisibility: {
-          actions: 'toggleMeshVisibility',
-        },
-        toggleLinesVisibility: {
-          actions: 'toggleLinesVisibility',
-        },
         setSurfaceVisibility: {
           actions: 'setSurfaceVisibility',
         },
         setLinesVisibility: {
           actions: 'setLinesVisibility',
-        },
-        toggleGizmoVisibility: {
-          actions: 'toggleGizmoVisibility',
-        },
-        toggleGridVisibility: {
-          actions: 'toggleGridVisibility',
-        },
-        toggleAxesHelperVisibility: {
-          actions: 'toggleAxesHelperVisibility',
         },
         setGizmoVisibility: {
           actions: 'setGizmoVisibility',
@@ -565,8 +525,8 @@ export const graphicsMachine = setup({
         setGridVisibility: {
           actions: 'setGridVisibility',
         },
-        setAxesHelperVisibility: {
-          actions: 'setAxesHelperVisibility',
+        setAxesVisibility: {
+          actions: 'setAxesVisibility',
         },
 
         // Controls events

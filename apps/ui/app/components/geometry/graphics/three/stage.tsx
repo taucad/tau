@@ -60,7 +60,7 @@ type StageProperties = {
   readonly enableCentering?: boolean;
   readonly stageOptions?: StageOptions;
   readonly enableGrid?: boolean;
-  readonly enableAxesHelper?: boolean;
+  readonly enableAxes?: boolean;
 } & Omit<React.HTMLAttributes<HTMLDivElement>, 'id'>;
 
 export function Stage({
@@ -178,7 +178,7 @@ export function Stage({
     <group {...properties}>
       <PerspectiveCamera makeDefault />
       <group ref={outer}>
-        {properties.enableAxesHelper ? <AxesHelper /> : null}
+        {properties.enableAxes ? <AxesHelper /> : null}
         {properties.enableGrid ? <Grid /> : null}
         <group ref={inner}>{children}</group>
       </group>

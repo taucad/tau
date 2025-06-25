@@ -61,7 +61,7 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       useSecureCookies: import.meta.env.PROD,
       defaultCookieAttributes: {
         httpOnly: true,
-        secure: true,
+        secure: import.meta.env.PROD, // Only secure cookies in production
         sameSite: 'lax',
       },
     },

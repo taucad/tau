@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import type { ClassValue } from 'clsx';
-import { LockIcon } from 'lucide-react';
+import { Lock, LockIcon, LockOpen } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { Button } from '~/components/ui/button.js';
@@ -9,10 +9,11 @@ import { formatNumber } from '~/utils/number.js';
 import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '~/components/ui/dropdown-menu.js';
@@ -83,11 +84,11 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
   }, []);
 
   const handleUnitChange = useCallback(
-    (selectedUnit: GridUnitOption) => {
+    (selectedUnit: string) => {
       const selectedOption = gridUnitOptions.find((option) => option.value === selectedUnit);
       if (!selectedOption) return;
 
-      setUnit(selectedUnit);
+      setUnit(selectedUnit as GridUnitOption);
     },
     [setUnit],
   );
@@ -137,19 +138,14 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
           event.preventDefault();
         }}
       >
-        <DropdownMenuLabel>Units</DropdownMenuLabel>
-        {gridUnitOptions.map((option) => (
-          <DropdownMenuCheckboxItem
-            key={option.value}
-            checked={unit === option.value}
-            onCheckedChange={() => {
-              handleUnitChange(option.value);
-            }}
-            onSelect={preventClose}
-          >
-            {option.label}
-          </DropdownMenuCheckboxItem>
-        ))}
+        <DropdownMenuLabel>Unit</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={unit} onValueChange={handleUnitChange}>
+          {gridUnitOptions.map((option) => (
+            <DropdownMenuRadioItem key={option.value} value={option.value} onSelect={preventClose}>
+              {option.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Grid</DropdownMenuLabel>
         <DropdownMenuItem
@@ -159,7 +155,9 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
           }}
           onSelect={preventClose}
         >
-          <span>
+          <span data-locked={isGridSizeLocked} className="group flex items-center gap-2">
+            <Lock className="hidden size-4 group-data-[locked=true]:block" />
+            <LockOpen className="block size-4 group-data-[locked=true]:hidden" />
             Lock Grid Size ({localizedSmallGridSize} {unit})
           </span>
           <Switch

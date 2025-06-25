@@ -35,6 +35,7 @@ const applyFileEditActor = fromPromise<FileEditResult, FileEditRequest>(async ({
   try {
     const response = await fetch(`${globalThis.window.ENV.TAU_API_URL}/v1/file-edit/apply`, {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
       },

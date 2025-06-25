@@ -20,6 +20,7 @@ export type Model = {
 export const getModels = async (): Promise<Model[]> => {
   try {
     const response = await fetch(`${ENV.TAU_API_URL}/v1/models`, {
+      credentials: 'include',
       headers: {
         'ngrok-skip-browser-warning': 'true',
       },

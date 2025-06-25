@@ -404,6 +404,7 @@ function ChatSyncWrapper({
   // Initialize useChat with sync callbacks
   const chat = useChat({
     ...value,
+    credentials: 'include',
     // eslint-disable-next-line @typescript-eslint/naming-convention -- experimental API
     experimental_prepareRequestBody(requestBody) {
       const cadActorState = cadActor.getSnapshot();

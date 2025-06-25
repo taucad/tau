@@ -73,6 +73,7 @@ export function ChatSelector(): ReactNode {
 
   const { append } = useChat({
     ...useChatConstants,
+    credentials: 'include',
     onFinish(message) {
       if (!activeChatId) return;
 

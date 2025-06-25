@@ -17,6 +17,7 @@ export function BuildNameEditor(): JSX.Element {
   const [displayName, setDisplayName] = useState<string>(build?.name ?? '');
   const { append } = useChat({
     ...useChatConstants,
+    credentials: 'include',
     onFinish(message) {
       const textPart = message.parts?.find((part) => part.type === 'text');
       if (textPart) {

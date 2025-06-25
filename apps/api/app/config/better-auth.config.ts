@@ -57,6 +57,13 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
         domain: undefined, // Will be set based on request
       },
       cookiePrefix: 'tau',
+      // Only use secure cookies in production. Note: this requires SSL.
+      useSecureCookies: import.meta.env.PROD,
+      defaultCookieAttributes: {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+      },
     },
 
     account: {

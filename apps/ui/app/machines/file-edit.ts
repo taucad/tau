@@ -1,4 +1,5 @@
 import { setup, fromPromise, assign } from 'xstate';
+import { ENV } from '~/config.js';
 
 // Types for the API request and response
 export type FileEditRequest = {
@@ -33,7 +34,7 @@ type FileEditEvent =
 // API call actor
 const applyFileEditActor = fromPromise<FileEditResult, FileEditRequest>(async ({ input }) => {
   try {
-    const response = await fetch(`${globalThis.window.ENV.TAU_API_URL}/v1/file-edit/apply`, {
+    const response = await fetch(`${ENV.TAU_API_URL}/v1/file-edit/apply`, {
       method: 'POST',
       credentials: 'include',
       headers: {

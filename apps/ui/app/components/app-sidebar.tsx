@@ -106,9 +106,11 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
     <Sidebar collapsible="icon" {...properties}>
       <SidebarHeader style={{ height: headerHeight }} className="border-b border-border">
         <Link to="/" tabIndex={-1}>
-          <SidebarMenuButton tooltip="Home" className="p-0! group-data-[collapsible=icon]:p-0! [&>svg]:size-8">
-            <Tau className="overflow-clip rounded-md bg-primary text-primary" />
-            <h1 className="font-mono text-2xl font-semibold tracking-wider">Tau</h1>
+          <SidebarMenuButton tooltip="Home" className="gap-0 p-0! group-data-[collapsible=icon]:p-0! [&>svg]:size-8">
+            <Tau className="overflow-clip rounded-md text-primary" />
+            <h1 className="-mb-0.5 -ml-1 font-mono text-2xl font-semibold tracking-wider text-primary italic group-data-[collapsible=icon]:hidden">
+              au
+            </h1>
             <span className="sr-only">Home</span>
           </SidebarMenuButton>
         </Link>

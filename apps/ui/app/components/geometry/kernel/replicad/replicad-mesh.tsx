@@ -42,7 +42,7 @@ export type ReplicadMeshProperties = {
   readonly faceHover?: boolean;
   readonly color?: string;
   readonly opacity?: number;
-  readonly enableMesh?: boolean;
+  readonly enableSurface?: boolean;
   readonly enableLines?: boolean;
 };
 
@@ -54,7 +54,7 @@ export const ReplicadMesh = React.memo(function ({
   onFaceClick,
   selected,
   faceHover,
-  enableMesh = true,
+  enableSurface = true,
   enableLines = true,
 }: ReplicadMeshProperties) {
   const { invalidate } = useThree();
@@ -106,7 +106,7 @@ export const ReplicadMesh = React.memo(function ({
 
   return (
     <group>
-      {enableMesh ? (
+      {enableSurface ? (
         <mesh
           // eslint-disable-next-line react/no-unknown-property -- TODO: make Three.js type available for linter
           geometry={body.current}

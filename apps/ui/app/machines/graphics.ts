@@ -25,7 +25,7 @@ export type GraphicsContext = {
   sceneRadius: number | undefined;
 
   // Visibility state
-  enableMesh: boolean;
+  enableSurface: boolean;
   enableLines: boolean;
   enableGizmo: boolean;
   enableGrid: boolean;
@@ -62,7 +62,7 @@ export type GraphicsEvent =
   // Visibility events
   | { type: 'toggleMeshVisibility' }
   | { type: 'toggleLinesVisibility' }
-  | { type: 'setMeshVisibility'; payload: boolean }
+  | { type: 'setSurfaceVisibility'; payload: boolean }
   | { type: 'setLinesVisibility'; payload: boolean }
   | { type: 'toggleGizmoVisibility' }
   | { type: 'toggleGridVisibility' }
@@ -420,16 +420,16 @@ export const graphicsMachine = setup({
     }),
 
     toggleMeshVisibility: assign({
-      enableMesh: ({ context }) => !context.enableMesh,
+      enableSurface: ({ context }) => !context.enableSurface,
     }),
 
     toggleLinesVisibility: assign({
       enableLines: ({ context }) => !context.enableLines,
     }),
 
-    setMeshVisibility: assign({
-      enableMesh({ event }) {
-        assertEvent(event, 'setMeshVisibility');
+    setSurfaceVisibility: assign({
+      enableSurface({ event }) {
+        assertEvent(event, 'setSurfaceVisibility');
         return event.payload;
       },
     }),
@@ -494,7 +494,7 @@ export const graphicsMachine = setup({
     sceneRadius: undefined,
 
     // Visibility state
-    enableMesh: true,
+    enableSurface: true,
     enableLines: true,
     enableGizmo: true,
     enableGrid: true,
@@ -544,8 +544,8 @@ export const graphicsMachine = setup({
         toggleLinesVisibility: {
           actions: 'toggleLinesVisibility',
         },
-        setMeshVisibility: {
-          actions: 'setMeshVisibility',
+        setSurfaceVisibility: {
+          actions: 'setSurfaceVisibility',
         },
         setLinesVisibility: {
           actions: 'setLinesVisibility',

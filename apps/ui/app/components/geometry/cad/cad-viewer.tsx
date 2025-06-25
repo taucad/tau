@@ -7,13 +7,13 @@ import SvgViewer from '~/components/geometry/kernel/replicad/svg-viewer.js';
 
 type CadViewerProperties = ThreeViewerProperties & {
   readonly shapes: Shape[];
-  readonly enableMesh?: boolean;
+  readonly enableSurface?: boolean;
   readonly enableLines?: boolean;
 };
 
 export function CadViewer({
   shapes,
-  enableMesh = true,
+  enableSurface = true,
   enableLines = true,
   ...properties
 }: CadViewerProperties): JSX.Element {
@@ -28,7 +28,7 @@ export function CadViewer({
     <ThreeProvider {...properties}>
       {shapes.map((shape) => {
         if (shape.type === '3d') {
-          return <ReplicadMesh key={shape.name} {...shape} enableMesh={enableMesh} enableLines={enableLines} />;
+          return <ReplicadMesh key={shape.name} {...shape} enableSurface={enableSurface} enableLines={enableLines} />;
         }
 
         if (shape.type === '2d') {

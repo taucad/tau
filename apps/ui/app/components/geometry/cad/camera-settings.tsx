@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import type { ClassValue } from 'clsx';
-import { Settings } from 'lucide-react';
+import { Axis3D, Box, Grid3X3, Rotate3D, Settings, PenLine } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { Button } from '~/components/ui/button.js';
@@ -10,6 +10,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '~/components/ui/dropdown-menu.js';
 import { Switch } from '~/components/ui/switch.js';
@@ -26,7 +27,7 @@ type CameraSettingsProps = {
  * Component that provides camera and visibility settings for the 3D viewer
  */
 export function CameraSettings({ className }: CameraSettingsProps): React.ReactNode {
-  const enableMesh = useSelector(graphicsActor, (state) => state.context.enableMesh);
+  const enableSurface = useSelector(graphicsActor, (state) => state.context.enableSurface);
   const enableLines = useSelector(graphicsActor, (state) => state.context.enableLines);
   const enableGizmo = useSelector(graphicsActor, (state) => state.context.enableGizmo);
   const enableGrid = useSelector(graphicsActor, (state) => state.context.enableGrid);
@@ -35,7 +36,7 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
   const [isOpen, setIsOpen] = useState(false);
 
   const handleMeshToggle = useCallback((checked: boolean) => {
-    graphicsActor.send({ type: 'setMeshVisibility', payload: checked });
+    graphicsActor.send({ type: 'setSurfaceVisibility', payload: checked });
   }, []);
 
   const handleLinesToggle = useCallback((checked: boolean) => {
@@ -77,16 +78,19 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
           event.preventDefault();
         }}
       >
-        <DropdownMenuLabel>Visibility</DropdownMenuLabel>
+        <DropdownMenuLabel>Model</DropdownMenuLabel>
         <DropdownMenuItem
           className="flex w-full justify-between"
           onClick={() => {
-            handleMeshToggle(!enableMesh);
+            handleMeshToggle(!enableSurface);
           }}
           onSelect={preventClose}
         >
-          <span>Mesh</span>
-          <Switch variant="dropdown" checked={enableMesh} onCheckedChange={handleMeshToggle} />
+          <span className="flex items-center gap-2">
+            <Box />
+            Surface
+          </span>
+          <Switch variant="dropdown" checked={enableSurface} onCheckedChange={handleMeshToggle} />
         </DropdownMenuItem>
         <DropdownMenuItem
           className="flex w-full justify-between"
@@ -95,9 +99,14 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
           }}
           onSelect={preventClose}
         >
-          <span>Lines</span>
+          <span className="flex items-center gap-2">
+            <PenLine />
+            Lines
+          </span>
           <Switch variant="dropdown" checked={enableLines} onCheckedChange={handleLinesToggle} />
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>Viewport</DropdownMenuLabel>
         <DropdownMenuItem
           className="flex w-full justify-between"
           onClick={() => {
@@ -105,7 +114,10 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
           }}
           onSelect={preventClose}
         >
-          <span>Gizmo</span>
+          <span className="flex items-center gap-2">
+            <Rotate3D />
+            Gizmo
+          </span>
           <Switch variant="dropdown" checked={enableGizmo} onCheckedChange={handleGizmoToggle} />
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -115,7 +127,10 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
           }}
           onSelect={preventClose}
         >
-          <span>Grid</span>
+          <span className="flex items-center gap-2">
+            <Grid3X3 />
+            Grid
+          </span>
           <Switch variant="dropdown" checked={enableGrid} onCheckedChange={handleGridToggle} />
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -125,7 +140,10 @@ export function CameraSettings({ className }: CameraSettingsProps): React.ReactN
           }}
           onSelect={preventClose}
         >
-          <span>Axes Helper</span>
+          <span className="flex items-center gap-2">
+            <Axis3D />
+            Axes
+          </span>
           <Switch variant="dropdown" checked={enableAxesHelper} onCheckedChange={handleAxesHelperToggle} />
         </DropdownMenuItem>
       </DropdownMenuContent>

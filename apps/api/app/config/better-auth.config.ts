@@ -1,6 +1,7 @@
 import type { BetterAuthOptions } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import type { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
 import type { DatabaseService } from '~/database/database.service.js';
 import type { AuthService } from '~/auth/auth.service.js';
 import type { Environment } from '~/config/environment.config.js';
@@ -12,6 +13,7 @@ type BetterAuthConfigOptions = {
 };
 
 export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAuthOptions {
+  const logger = new Logger('BetterAuth');
   const { databaseService, configService } = options;
 
   return {
@@ -29,6 +31,11 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
+      autoSignIn: true,
+      async sendResetPassword({ user, url, token }) {
+        logger.log('Sending reset password email to', user.email, 'with url', url, 'and token', token);
+      },
+      resetPasswordTokenExpiresIn: 3600,
     },
 
     socialProviders: {
@@ -48,6 +55,30 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       crossSubDomainCookies: {
         enabled: true,
         domain: undefined, // Will be set based on request
+      },
+      cookiePrefix: 'tau',
+    },
+
+    account: {
+      accountLinking: {
+        enabled: true,
+        trustedProviders: ['github', 'email-password'],
+        allowDifferentEmails: false, // Require same email for linking
+      },
+    },
+
+    rateLimit: {
+      enabled: true,
+      window: 10, // 10 seconds
+      max: 100, // 100 requests per window
+      storage: 'memory', // TODO: Change to Redis
+    },
+
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- onAPIError is a valid option
+    onAPIError: {
+      throw: false,
+      onError(error, ctx) {
+        logger.error('Auth error:', error, ctx);
       },
     },
   };

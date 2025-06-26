@@ -148,7 +148,7 @@ export const ChatParameters = memo(function () {
       {hasParameters ? (
         <>
           {/* Search and Controls Bar */}
-          <div className={cn('flex w-full flex-row gap-2', containerXpadding, 'pt-2 pb-0')}>
+          <div className={cn('flex w-full flex-row gap-2', containerXpadding, 'py-2')}>
             <div className="relative w-full">
               <Input
                 autoComplete="off"
@@ -220,7 +220,7 @@ export const ChatParameters = memo(function () {
               widgets={widgets}
               formData={mergedData}
               formContext={formContext}
-              className={cn('flex size-full flex-col gap-2 overflow-y-auto', containerXpadding)}
+              className={cn('flex size-full flex-col gap-2 overflow-y-auto pb-2', containerXpadding)}
               onChange={handleChange}
               onSubmit={handleSubmit}
             />

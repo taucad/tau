@@ -38,7 +38,8 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   const { label, help, required, description, errors, children, schema, formData, id, registry } = props;
 
   if (schema.type === 'object') {
-    return <div className="my-1">{children}</div>;
+    const isRoot = id === 'root';
+    return <div className={cn(!isRoot && 'my-2 first:mt-0 last:mb-0')}>{children}</div>;
   }
 
   // Always call hooks at the very top level
@@ -107,11 +108,7 @@ function ObjectFieldTemplate(
   }, [formContext.allExpanded]);
 
   if (isRoot) {
-    return (
-      <div className="[&>*]:not-last:border-b [&>*]:not-last:border-border/30">
-        {properties.map((element) => element.content)}
-      </div>
-    );
+    return <div>{properties.map((element) => element.content)}</div>;
   }
 
   const prettyTitle = camelCaseToSentenceCase(title);
@@ -123,7 +120,7 @@ function ObjectFieldTemplate(
       className="w-full overflow-hidden rounded-md border border-border/40"
       onOpenChange={setIsOpen}
     >
-      <CollapsibleTrigger className="group/collapsible flex h-7 w-full items-center justify-between bg-muted/70 px-2 transition-colors hover:bg-muted">
+      <CollapsibleTrigger className="group/collapsible flex h-7 w-full items-center justify-between bg-muted/70 pr-1.5 pl-2 transition-colors hover:bg-muted">
         <h3 className="font-medium">
           {prettyTitle} <span className="text-muted-foreground/50">({propertiesCount})</span>
         </h3>

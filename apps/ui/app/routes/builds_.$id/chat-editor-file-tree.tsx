@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback } from 'react';
 import type { JSX } from 'react';
 import { FileExplorerContext } from '~/routes/builds_.$id/graphics-actor.js';
 import { Tree, Folder, File } from '~/components/magicui/file-tree.js';
@@ -52,9 +52,9 @@ export function ChatEditorFileTree(): JSX.Element {
 
   return (
     <div className={cn('flex h-full flex-col bg-sidebar select-none')}>
-      <h3 className="flex h-11 items-center border-b px-4 py-3 text-base font-medium text-sidebar-foreground/70">
-        Files
-      </h3>
+      <div className="border-b px-4 text-base font-medium text-muted-foreground">
+        <h3 className="flex h-11 items-center">Files</h3>
+      </div>
       <div className="my-2">
         {treeElements.length > 0 ? (
           <Tree elements={treeElements} initialExpandedItems={treeElements.map((element) => element.id)}>

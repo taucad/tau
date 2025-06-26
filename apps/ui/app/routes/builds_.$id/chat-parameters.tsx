@@ -141,9 +141,9 @@ export const ChatParameters = memo(function () {
 
   return (
     <div className="flex h-full flex-col">
-      <h1 className={cn('border-b text-base font-medium text-muted-foreground', containerXpadding)}>
-        <span className="flex h-11 items-center">Parameters</span>
-      </h1>
+      <div className={cn('border-b text-base font-medium text-muted-foreground', containerXpadding)}>
+        <h2 className="flex h-11 items-center">Parameters</h2>
+      </div>
 
       {hasParameters ? (
         <>

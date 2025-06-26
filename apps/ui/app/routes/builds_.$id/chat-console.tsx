@@ -259,7 +259,7 @@ export const ChatConsole = memo(function ({
         </Tooltip>
         <Input
           autoComplete="off"
-          className="h-6 w-full group-data-[view=tabs]/console:h-8"
+          className="h-6 w-full group-data-[view=tabs]/console:h-7"
           placeholder="Filter..."
           value={filter}
           onChange={handleFilterChange}

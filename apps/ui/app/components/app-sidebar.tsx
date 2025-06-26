@@ -16,7 +16,7 @@ import {
 } from '~/components/ui/sidebar.js';
 import { Tau } from '~/components/icons/tau.js';
 import { NavChat } from '~/components/nav/nav-chat.js';
-import { ModeToggle } from '~/components/nav/mode-toggle.js';
+import { ThemeToggle } from '~/components/nav/theme-toggle.js';
 
 // This is sample data.
 const data = {
@@ -106,7 +106,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
     <Sidebar collapsible="icon" {...properties}>
       <SidebarHeader style={{ height: headerHeight }} className="border-b border-border">
         <Link to="/" tabIndex={-1}>
-          <SidebarMenuButton tooltip="Home" className="gap-0 p-0! group-data-[collapsible=icon]:p-0! [&>svg]:size-8">
+          <SidebarMenuButton tooltip="Home" className="gap-0 p-0! group-data-[collapsible=icon]:p-0! [&>svg]:size-7">
             <Tau className="overflow-clip rounded-md text-primary" />
             <h1 className="-mb-0.5 -ml-1 font-mono text-2xl font-semibold tracking-wider text-primary italic group-data-[collapsible=icon]:hidden">
               au
@@ -123,7 +123,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
       </SidebarContent>
       <SidebarFooter className="flex flex-col items-end transition-transform duration-200 ease-linear group-data-[collapsible=icon]:items-center">
         <ColorToggle />
-        <ModeToggle />
+        <ThemeToggle />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

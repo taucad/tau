@@ -553,7 +553,7 @@ export function CommandPaletteTrigger(): JSX.Element {
     <>
       <Button
         variant="outline"
-        className="relative h-8 w-full max-w-sm justify-start rounded-[0.5rem] bg-muted/50 text-sm font-normal text-muted-foreground shadow-none max-md:hidden sm:pr-12 md:w-40 lg:w-64"
+        className="relative h-7 w-full max-w-sm justify-start rounded-[0.5rem] bg-muted/50 text-sm font-normal text-muted-foreground shadow-none max-md:hidden sm:pr-12 md:w-40 lg:w-64"
         onClick={() => {
           setOpen(true);
         }}

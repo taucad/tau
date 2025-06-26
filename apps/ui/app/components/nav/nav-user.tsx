@@ -65,7 +65,7 @@ export function NavUser(): JSX.Element {
   //     <DropdownMenu>
   //       <DropdownMenuTrigger asChild>
   //         <TooltipTrigger asChild>
-  //           <Button variant="outline" size="icon" className="size-8 rounded-full select-none">
+  //           <Button variant="outline" size="icon" className="size-7 rounded-full select-none">
   //             <Avatar className="size-7.5">
   //               <AvatarImage src={user.avatar} alt={user.name} />
   //               <AvatarFallback className="rounded-lg">CN</AvatarFallback>

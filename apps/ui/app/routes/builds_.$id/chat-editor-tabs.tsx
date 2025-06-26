@@ -46,7 +46,7 @@ export function ChatEditorTabs(): JSX.Element {
   }, []);
 
   return (
-    <div className="h-12 border-b bg-muted/20">
+    <div className="h-11 border-b bg-muted/20">
       <div
         ref={scrollContainerRef}
         className="h-full overflow-x-auto overflow-y-hidden overscroll-x-none [scrollbar-width:none]"

@@ -189,7 +189,7 @@ export function ChatSelector(): ReactNode {
 
   return (
     <>
-      <div className="flex h-8 w-full items-center justify-between">
+      <div className="flex h-7 w-full items-center justify-between">
         <div className="group min-w-0 flex-1 opacity-70 hover:opacity-100">
           <Tooltip>
             <ComboBoxResponsive

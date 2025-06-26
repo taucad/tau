@@ -365,7 +365,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
           <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             autoComplete="off"
-            className="h-8 pl-10"
+            className="h-7 pl-10"
             placeholder="Search builds..."
             value={globalFilter}
             onChange={(event) => {
@@ -447,7 +447,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
                 table.setPageSize(Number(value));
               }}
             >
-              <SelectTrigger className="h-8 w-[70px]">
+              <SelectTrigger className="h-7 w-[70px]">
                 <SelectValue placeholder={table.getState().pagination.pageSize} />
               </SelectTrigger>
               <SelectContent side="top">
@@ -471,7 +471,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
           <div className="flex items-center space-x-2">
             <Button
               variant="outline"
-              className="hidden h-8 w-8 p-0 lg:flex"
+              className="hidden h-7 w-8 p-0 lg:flex"
               disabled={!table.getCanPreviousPage()}
               onClick={() => {
                 table.setPageIndex(0);
@@ -482,7 +482,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
             </Button>
             <Button
               variant="outline"
-              className="h-8 w-8 p-0"
+              className="h-7 w-8 p-0"
               disabled={!table.getCanPreviousPage()}
               onClick={() => {
                 table.previousPage();
@@ -493,7 +493,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
             </Button>
             <Button
               variant="outline"
-              className="h-8 w-8 p-0"
+              className="h-7 w-8 p-0"
               disabled={!table.getCanNextPage()}
               onClick={() => {
                 table.nextPage();
@@ -504,7 +504,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
             </Button>
             <Button
               variant="outline"
-              className="hidden h-8 w-8 p-0 lg:flex"
+              className="hidden h-7 w-8 p-0 lg:flex"
               disabled={!table.getCanNextPage()}
               onClick={() => {
                 table.setPageIndex(table.getPageCount() - 1);
@@ -712,7 +712,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
                   autoFocus
                   autoComplete="off"
                   value={name}
-                  className="h-8"
+                  className="h-7"
                   onChange={(event) => {
                     setName(event.target.value);
                   }}
@@ -804,7 +804,7 @@ function BulkActions({ table, deleteBuild }: BulkActionsProps) {
         <Button
           variant="outline"
           size="sm"
-          className="h-8 gap-1 border-destructive text-destructive hover:bg-destructive/10"
+          className="h-7 gap-1 border-destructive text-destructive hover:bg-destructive/10"
           onClick={() => {
             setShowDeleteDialog(true);
           }}

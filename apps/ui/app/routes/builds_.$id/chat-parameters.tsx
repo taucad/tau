@@ -142,7 +142,7 @@ export const ChatParameters = memo(function () {
   return (
     <div className="flex h-full flex-col">
       <h1 className={cn('border-b text-base font-medium text-muted-foreground', containerXpadding)}>
-        <span className="flex h-12 items-center">Parameters</span>
+        <span className="flex h-11 items-center">Parameters</span>
       </h1>
 
       {hasParameters ? (
@@ -155,10 +155,10 @@ export const ChatParameters = memo(function () {
                 type="text"
                 placeholder="Search parameters..."
                 value={searchTerm}
-                className="h-8 w-full bg-background pr-8 pl-8"
+                className="h-7 w-full bg-background pr-8 pl-8"
                 onChange={handleSearchChange}
               />
-              <Search className="absolute top-2 left-2 size-4 text-muted-foreground" />
+              <Search className="absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
               {searchTerm ? (
                 <Button
                   variant="ghost"

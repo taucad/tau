@@ -374,7 +374,7 @@ export function ChatEditorFileTree(): JSX.Element {
 
   return (
     <div className={cn('flex h-full flex-col bg-sidebar select-none')}>
-      <h3 className="flex h-12 items-center border-b px-4 py-3 text-base font-medium text-sidebar-foreground/70">
+      <h3 className="flex h-11 items-center border-b px-4 py-3 text-base font-medium text-sidebar-foreground/70">
         Files
       </h3>
       <div className="my-2">

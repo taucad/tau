@@ -82,7 +82,7 @@ export function BuildNameEditor(): JSX.Element {
             autoFocus
             autoComplete="off"
             value={name}
-            className="h-8"
+            className="h-7"
             onChange={(event) => {
               setName(event.target.value);
             }}

@@ -19,7 +19,7 @@ import { formatKeyCombination } from '~/utils/keys.js';
 import { useTypedMatches } from '~/hooks/use-typed-matches.js';
 import { NavUser } from '~/components/nav/nav-user.js';
 
-export const headerHeight = '3rem';
+export const headerHeight = 'calc(var(--spacing) * 11)';
 
 export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
   const {
@@ -53,7 +53,7 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
         className="w-[calc(100dvw-var(--sidebar-width-current)-1px)]"
         style={{ '--header-height': headerHeight }}
       >
-        <header className="relative flex h-[var(--header-height)] shrink-0 items-center justify-between gap-2 border-b-[1px] border-border transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
+        <header className="relative flex h-[var(--header-height)] shrink-0 items-center justify-between gap-2 border-b-[1px] border-border transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-11">
           <div className="flex items-center gap-1 px-4">
             <Tooltip>
               <TooltipTrigger asChild>

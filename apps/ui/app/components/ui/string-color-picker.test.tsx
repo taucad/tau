@@ -39,7 +39,7 @@ export default function ColorPickerTest(): JSX.Element {
                   {isValidColor(value) ? '✓ Valid' : '✗ Invalid'}
                 </span>
                 <div
-                  className="h-8 w-8 rounded border border-border"
+                  className="h-7 w-8 rounded border border-border"
                   style={{ backgroundColor: isValidColor(value) ? value : 'transparent' }}
                 />
               </div>

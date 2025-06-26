@@ -19,7 +19,7 @@ export default function AuthPage(): JSX.Element {
           <Tooltip>
             <Link to="/">
               <TooltipTrigger className="flex items-center gap-2 font-medium">
-                <Tau className="size-8 text-primary" />
+                <Tau className="size-7 text-primary" />
                 <h1 className="-mb-0.5 -ml-3 font-mono text-2xl font-semibold tracking-wider text-primary italic group-data-[collapsible=icon]:hidden">
                   au
                 </h1>

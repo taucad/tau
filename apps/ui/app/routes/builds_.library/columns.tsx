@@ -61,7 +61,7 @@ function BuildNameCell({ build, actions }: { readonly build: Build; readonly act
                 autoFocus
                 autoComplete="off"
                 value={name}
-                className="h-8"
+                className="h-7"
                 onChange={(event) => {
                   setName(event.target.value);
                 }}

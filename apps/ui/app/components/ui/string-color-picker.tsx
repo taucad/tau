@@ -298,7 +298,7 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
                 type="text"
                 value={temporaryColor}
                 placeholder="Pick a color"
-                className="h-8 pr-8 pl-10 font-mono"
+                className="h-7 pr-8 pl-10 font-mono"
                 onChange={handlePopoverInputChange}
               />
               <div className="absolute top-0 right-2 bottom-0 rounded-r">

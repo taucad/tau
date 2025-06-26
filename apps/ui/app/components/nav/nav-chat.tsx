@@ -37,11 +37,9 @@ export function NavChat(): JSX.Element {
               ),
             }}
             variant="outline"
-            // This padding hack is to ensure the icon is centered correctly when the sidebar is collapsed
-            className="pl-[7px]! whitespace-nowrap group-data-[collapsible=icon]:pl-[7px]!"
           >
             <PackagePlus className="size-4 shrink-0" />
-            <span className="flex-1">New Build</span>
+            <span className="flex-1 whitespace-nowrap">New Build</span>
             <KeyShortcut className="ml-2 shrink-0">{formattedKeyCombination}</KeyShortcut>
           </SidebarMenuButton>
         )}

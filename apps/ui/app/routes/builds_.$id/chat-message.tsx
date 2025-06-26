@@ -96,7 +96,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                     <img
                       src={attachment.url}
                       alt="Chat message"
-                      className="ml-auto h-8 w-auto cursor-zoom-in rounded-md border bg-muted object-cover"
+                      className="ml-auto h-7 w-auto cursor-zoom-in rounded-md border bg-muted object-cover"
                     />
                   </HoverCardTrigger>
                   <HoverCardContent className="size-auto max-w-screen overflow-hidden p-0">

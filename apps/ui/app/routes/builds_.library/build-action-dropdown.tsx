@@ -121,7 +121,7 @@ export function BuildActionDropdown({
               autoFocus
               autoComplete="off"
               value={newName}
-              className="h-8"
+              className="h-7"
               onChange={(event) => {
                 setNewName(event.target.value);
               }}

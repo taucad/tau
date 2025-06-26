@@ -77,10 +77,10 @@ export function ChatViewTabs(): JSX.Element {
       </TabsContent>
       {/* subtract 6rem for the chat history and chat input as they don't take the full height */}
       <TabsContent enableAnimation={false} value="editor" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
-        <ChatEditorLayout className="mt-[3rem] border-t" />
+        <ChatEditorLayout className="mt-11 border-t" />
       </TabsContent>
       <TabsContent enableAnimation={false} value="console" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
-        <ChatConsole data-view="tabs" className="mt-[3rem]" />
+        <ChatConsole data-view="tabs" className="mt-11" />
       </TabsContent>
     </Tabs>
   );

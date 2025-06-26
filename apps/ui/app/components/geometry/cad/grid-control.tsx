@@ -30,13 +30,13 @@ type GridSizeIndicatorProps = {
 const getTextSizeClass = (sizeText: string) => {
   const { length } = sizeText;
 
-  if (length > 8) return 'text-[0.3rem]';
-  if (length > 7) return 'text-[0.35rem]';
-  if (length > 6) return 'text-[0.4rem]';
-  if (length > 5) return 'text-[0.45rem]';
-  if (length > 4) return 'text-[0.5rem]';
-  if (length > 3) return 'text-[0.55rem]';
-  return 'text-xs';
+  if (length > 8) return 'text-[calc(var(--spacing)*1.2)]';
+  if (length > 7) return 'text-[calc(var(--spacing)*1.4)]';
+  if (length > 6) return 'text-[calc(var(--spacing)*1.6)]';
+  if (length > 5) return 'text-[calc(var(--spacing)*1.8)]';
+  if (length > 4) return 'text-[calc(var(--spacing)*2)]';
+  if (length > 3) return 'text-[calc(var(--spacing)*2.2)]';
+  return 'text-[calc(var(--spacing)*3)]';
 };
 
 const gridUnitOptions = [
@@ -117,13 +117,16 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="overlay"
-              size="icon"
-              className={cn('flex-col gap-0 font-mono text-xs [&>span]:leading-none', className)}
-            >
-              <span className={getTextSizeClass(localizedSmallGridSize)}>{localizedSmallGridSize}</span>
-              <span className="flex items-center gap-0.5">
+            <Button variant="overlay" size="icon" className={cn('relative font-mono [&>span]:leading-none', className)}>
+              <span
+                className={cn(
+                  getTextSizeClass(localizedSmallGridSize),
+                  'absolute top-[calc(var(--spacing)*2)] left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center',
+                )}
+              >
+                <span>{localizedSmallGridSize}</span>
+              </span>
+              <span className="absolute bottom-[calc(var(--spacing)*0.25)] left-1/2 flex -translate-x-1/2 items-center gap-0.5 text-[calc(var(--spacing)*3)]">
                 {unit}
                 {isGridSizeLocked ? <LockIcon className="size-2" /> : null}
               </span>

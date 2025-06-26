@@ -50,13 +50,13 @@ export function FovControl({ defaultAngle, className }: Omit<CameraControlProps,
               size: 'sm',
             }),
             className,
-            'group relative w-30 gap-0 overflow-hidden p-0 hover:overflow-visible max-md:overflow-visible md:w-50',
+            'group relative w-fit gap-0 overflow-hidden p-0 hover:overflow-visible max-md:overflow-visible',
             'flex items-center',
             'hover:cursor-pointer',
           )}
         >
           {/* Text labels that will move up on hover */}
-          <div className="flex w-full justify-between px-1 text-xs leading-none transition-transform duration-300 group-hover:-translate-y-1.75 max-md:-translate-y-1.75">
+          <div className="flex w-full justify-between gap-2 px-1 text-xs leading-none transition-transform duration-300 group-hover:-translate-y-1.75 max-md:-translate-y-1.75">
             <span className="hidden md:block">Orthographic</span>
             <span className="md:hidden">Orth.</span>
             <div className="font-bold text-primary">{fovAngle}°</div>

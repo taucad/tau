@@ -5,7 +5,6 @@
 @plugin '@tailwindcss/typography';
 
 :root {
-  --spacing: 0.25rem;
   /* Base color hues */
   --hue-primary: 266deg;
   --hue-secondary: calc(var(--hue-primary) - 230deg); /* Secondary color is nearly opposite of primary */

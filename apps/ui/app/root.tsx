@@ -113,7 +113,7 @@ export function App({
   }, [setFaviconColor, color]);
 
   return (
-    <html lang="en" className={cn(theme)} style={color.rootStyles}>
+    <html lang="en" className={cn(theme, '[--spacing:0.275rem] md:[--spacing:0.25rem]')} style={color.rootStyles}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

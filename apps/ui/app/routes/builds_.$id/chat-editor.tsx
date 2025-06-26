@@ -113,7 +113,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
 
   return (
     <div className={cn('flex h-full flex-col bg-background', className)}>
-      <ChatEditorTabs />
+      {/* <ChatEditorTabs /> */}
       <ChatEditorBreadcrumbs />
       <div className="flex-1">
         <CodeEditor

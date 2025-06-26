@@ -56,7 +56,7 @@ export function ChatEditorBreadcrumbs(): ReactNode {
             variant="ghost"
             className="size-7"
             getText={() => activeFile!.content}
-            tooltip="Copy file content"
+            tooltip="Copy"
           />
           <Tooltip>
             <TooltipTrigger asChild>
@@ -64,7 +64,7 @@ export function ChatEditorBreadcrumbs(): ReactNode {
                 <Download className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Download file</TooltipContent>
+            <TooltipContent>Download</TooltipContent>
           </Tooltip>
         </div>
       )}

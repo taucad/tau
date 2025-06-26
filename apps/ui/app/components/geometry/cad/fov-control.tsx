@@ -59,7 +59,7 @@ export function FovControl({ defaultAngle, className }: Omit<CameraControlProps,
           <div className="flex w-full justify-between gap-2 px-1 text-xs leading-none transition-transform duration-300 group-hover:-translate-y-1.75 max-md:-translate-y-1.75">
             <span className="hidden md:block">Orthographic</span>
             <span className="md:hidden">Orth.</span>
-            <div className="font-bold text-primary">{fovAngle}°</div>
+            <div className="w-[3ch] text-center font-bold text-primary">{fovAngle}°</div>
             <span className="hidden md:block">Perspective</span>
             <span className="md:hidden">Persp.</span>
           </div>

@@ -59,8 +59,8 @@ export default function ChatStart(): JSX.Element {
           assets: {
             mechanical: {
               // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-              files: { 'model.ts': { content: emptyCode } },
-              main: 'model.ts',
+              files: { 'main.ts': { content: emptyCode } },
+              main: 'main.ts',
               language: 'replicad',
               parameters: {},
             },
@@ -93,8 +93,8 @@ export default function ChatStart(): JSX.Element {
         assets: {
           mechanical: {
             // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-            files: { 'model.ts': { content: emptyCode } },
-            main: 'model.ts',
+            files: { 'main.ts': { content: emptyCode } },
+            main: 'main.ts',
             language: 'replicad',
             parameters: {},
           },

@@ -12,31 +12,74 @@ import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { HammerAnimation } from '~/components/hammer-animation.js';
 import { registerMonaco } from '~/routes/builds_.$id/chat-editor-config.js';
 import { ChatEditorBreadcrumbs } from '~/routes/builds_.$id/chat-editor-breadcrumbs.js';
+import { useBuild } from '~/hooks/use-build.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }): JSX.Element {
   const monaco = useMonaco();
+  const { build } = useBuild();
   const code = useSelector(cadActor, (state) => state.context.code);
   const openFiles = FileExplorerContext.useSelector((state) => state.context.openFiles);
   const activeFileId = FileExplorerContext.useSelector((state) => state.context.activeFileId);
   const fileExplorerActorRef = FileExplorerContext.useActorRef();
 
+  // Initialize file explorer with build files
+  useEffect(() => {
+    if (!build?.assets.mechanical) return;
+
+    const mechanicalAsset = build.assets.mechanical;
+    const mainFileName = mechanicalAsset.main;
+    const { files } = mechanicalAsset;
+
+    // Convert build files to file explorer format
+    const fileItems = Object.entries(files).map(([filename, file]) => ({
+      id: filename,
+      name: filename,
+      path: filename,
+      content: file.content,
+      language: mechanicalAsset.language === 'replicad' ? 'typescript' : mechanicalAsset.language,
+      isDirectory: false,
+    }));
+
+    // Initialize the file tree with build files
+    fileExplorerActorRef.send({ type: 'setFileTree', tree: fileItems });
+
+    // Open the main file if no files are open
+    if (openFiles.length === 0 && mainFileName && files[mainFileName]) {
+      const mainFile = {
+        id: mainFileName,
+        name: mainFileName,
+        path: mainFileName,
+        content: files[mainFileName].content,
+        language: mechanicalAsset.language === 'replicad' ? 'typescript' : mechanicalAsset.language,
+        isDirectory: false,
+      };
+
+      fileExplorerActorRef.send({ type: 'openFile', file: mainFile });
+    }
+  }, [build, fileExplorerActorRef, openFiles.length]);
+
   // Get the active file content if file explorer is available
   const activeFile = openFiles.find((file) => file.id === activeFileId);
-  const displayCode = activeFile ? activeFile.content : code;
+
+  // Fallback to build main file if no file explorer file is active
+  const fallbackFilename = build?.assets.mechanical?.main ?? 'main.ts';
+  const fallbackContent = build?.assets.mechanical?.files[fallbackFilename]?.content ?? code;
+
+  const displayCode = activeFile ? activeFile.content : fallbackContent;
+  const displayLanguage = activeFile?.language ?? 'typescript';
 
   const handleCodeChange = useCallback(
     (value: ComponentProps<typeof CodeEditor>['value']) => {
       if (value) {
-        if (activeFile) {
-          // Update the file content in the file explorer
-          fileExplorerActorRef.send({ type: 'updateFileContent', fileId: activeFile.id, content: value });
-        } else {
-          // Fallback to the original CAD actor behavior
-          cadActor.send({ type: 'setCode', code: value });
-        }
+        // Always update the file explorer (for persistence)
+        const fileId = activeFile?.id ?? fallbackFilename;
+        fileExplorerActorRef.send({ type: 'updateFileContent', fileId, content: value });
+
+        // Always update the CAD actor (for immediate feedback)
+        cadActor.send({ type: 'setCode', code: value });
       }
     },
-    [activeFile, fileExplorerActorRef],
+    [activeFile, fallbackFilename, fileExplorerActorRef],
   );
 
   useEffect(() => {
@@ -76,7 +119,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
         <CodeEditor
           loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
           className="h-full bg-background"
-          defaultLanguage={activeFile?.language ?? 'typescript'}
+          defaultLanguage={displayLanguage}
           value={displayCode}
           onChange={handleCodeChange}
           onValidate={handleValidate}

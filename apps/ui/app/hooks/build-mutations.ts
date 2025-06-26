@@ -94,6 +94,9 @@ export function createBuildMutations(queryClient: QueryClient): {
      * Update a build's code and parameters
      */
     async updateCodeParameters(buildId: string, code: string, parameters: Record<string, unknown>) {
+      const now = Date.now();
+      const contentSizeInBytes = new TextEncoder().encode(code).length;
+
       await storage.updateBuild(
         buildId,
         {
@@ -101,10 +104,13 @@ export function createBuildMutations(queryClient: QueryClient): {
             mechanical: {
               files: {
                 // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-                'model.ts': {
+                'main.ts': {
                   content: code,
+                  lastModified: now,
+                  size: contentSizeInBytes,
                 },
               },
+              main: 'main.ts',
               parameters,
             },
           },

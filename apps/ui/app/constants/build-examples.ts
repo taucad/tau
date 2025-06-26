@@ -7,8 +7,8 @@ export const sampleBuilds: Build[] = mockModels.map((model) => ({
   assets: {
     mechanical: {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-      files: { 'model.ts': { content: model.code } },
-      main: 'model.ts',
+      files: { 'main.ts': { content: model.code } },
+      main: 'main.ts',
       language: 'replicad' as const,
       parameters: {},
     },

@@ -8,16 +8,23 @@ export function ChatEditorBreadcrumbs(): ReactNode {
     state.context.openFiles.find((file) => file.id === state.context.activeFileId),
   );
 
+  // Keep empty string initially to avoid flickering
+  const displayPath = String(activeFile?.path ?? '');
+  const parts = displayPath.split('/');
+
   return (
-    <div className="flex flex-row items-center gap-0.5 px-4 py-3 text-sm text-muted-foreground">
-      {String(activeFile?.path)
-        .split('/')
-        .map((part, index) => (
+    <div className="flex flex-row items-center gap-0.5 px-4 py-0.25 text-sm text-muted-foreground">
+      {displayPath ? (
+        parts.map((part, index) => (
           <Fragment key={part}>
             <span className="font-medium">{part}</span>
-            {index < String(activeFile?.path).split('/').length - 1 && <ChevronRight className="size-4" />}
+            {index < parts.length - 1 && <ChevronRight className="size-4" />}
           </Fragment>
-        ))}
+        ))
+      ) : (
+        // Maintain height with invisible content when empty
+        <span className="opacity-0">placeholder</span>
+      )}
     </div>
   );
 }

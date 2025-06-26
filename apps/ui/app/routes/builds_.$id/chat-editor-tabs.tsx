@@ -46,10 +46,10 @@ export function ChatEditorTabs(): JSX.Element {
   }, []);
 
   return (
-    <div className="h-11 border-b bg-muted/20">
+    <div className="border-b bg-muted/20">
       <div
         ref={scrollContainerRef}
-        className="h-full overflow-x-auto overflow-y-hidden overscroll-x-none [scrollbar-width:none]"
+        className="h-11 overflow-x-auto overflow-y-hidden overscroll-x-none [scrollbar-width:none]"
       >
         <div className="flex h-full w-max">
           {openFiles.map((file) => (
@@ -76,7 +76,7 @@ export function ChatEditorTabs(): JSX.Element {
             >
               <span className="max-w-32 truncate">
                 {file.name}
-                {file.isDirty ? ' •' : ''}
+                {/* {file.isDirty ? ' •' : ''} */} {/* TODO: Add dirty indicator after adding "unsaved" state */}
               </span>
               <Button
                 size="icon"

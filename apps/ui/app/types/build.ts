@@ -3,6 +3,9 @@ import type { CadKernelProvider, Category } from '~/types/cad.js';
 
 type File = {
   content: string;
+  // Could add metadata in the future
+  lastModified?: number;
+  size?: number;
 };
 
 export type Chat = {
@@ -11,6 +14,17 @@ export type Chat = {
   messages: Message[];
   createdAt: number;
   updatedAt: number;
+};
+
+// Individual asset structure for a specific category
+export type Asset = {
+  files: Record<string, File>;
+  main: string; // Points to the main entry file
+  language: CadKernelProvider;
+  parameters: Record<string, unknown>;
+  // Could add additional metadata
+  version?: string;
+  dependencies?: string[];
 };
 
 export type Build = {
@@ -32,15 +46,5 @@ export type Build = {
   forkedFrom?: string;
   deletedAt?: number;
   // Status: 'draft' | 'review' | 'published' | 'completed' | 'archived';
-  assets: Partial<
-    Record<
-      Category,
-      {
-        files: Record<string, File>;
-        main: string;
-        language: CadKernelProvider;
-        parameters: Record<string, unknown>;
-      }
-    >
-  >;
+  assets: Partial<Record<Category, Asset>>;
 };

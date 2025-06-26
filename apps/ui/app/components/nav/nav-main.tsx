@@ -64,7 +64,7 @@ export function NavMain({
                         }
                       >
                         {item.icon ? <item.icon className="size-4 shrink-0" /> : null}
-                        <span className="flex-1">{item.title}</span>
+                        <span className="flex-1 truncate">{item.title}</span>
                         {hasItems ? (
                           <ChevronRight className="ml-2 shrink-0 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
                         ) : null}

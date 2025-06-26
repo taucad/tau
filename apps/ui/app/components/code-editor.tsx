@@ -63,6 +63,11 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         '[&_.monaco-editor]:![--vscode-multiDiffEditor-background:var(--background)]',
         '[&_.monaco-editor]:![--vscode-editorMarkerNavigation-background:var(--background)]',
         '[&_.monaco-editor]:![--vscode-editorGutter-background:var(--background)]',
+        // Hide the redundant text area cover element
+        '[&_.monaco-editor-background.textAreaCover.line-numbers]:!hidden',
+        // Scroll decoration appears after scrolling from top, replace shadow with top border
+        '[&_.scroll-decoration]:!border-t',
+        '[&_.scroll-decoration]:![box-shadow:none]',
         // Existing scrollbar styles
         '[&_.monaco-scrollable-element_>_.scrollbar]:!bg-(--scrollbar-track)',
         '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:!bg-(--scrollbar-thumb)/80',

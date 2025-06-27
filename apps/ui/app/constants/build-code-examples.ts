@@ -13,23 +13,14 @@ export const cubeCode = `/**
  * Parametric Cube with Filleted Edges
  * A simple cube with adjustable dimensions and rounded edges.
  */
-const { sketchRectangle, EdgeFinder, makePlane } = replicad;
+import { sketchRectangle, EdgeFinder, makePlane } from 'replicad';
 
-const defaultParams = {
+export const defaultParams = {
   length: 100,    // Length of cube sides in mm
   filletRadius: 5, // Radius for rounded edges in mm
 };
 
-/**
- * Creates a cube with filleted edges
- * @param _ Unused parameter (required by replicad)
- * @param params Custom parameters to override defaults
- * @returns The complete cube model
- */
-function main(_, params) {
-  // Merge default parameters with provided ones
-  const p = { ...defaultParams, ...params };
-  
+export default function main(p = defaultParams) {
   // Create base cube shape
   let shape = sketchRectangle(p.length, p.length, makePlane("XY"))
     .extrude(p.length)
@@ -46,7 +37,9 @@ export const hollowBoxCode = `/**
  * Parametric Box with Rounded Corners
  * A customizable box with adjustable dimensions and corner radii.
  */
-const defaultParams = {
+import { drawRoundedRectangle } from 'replicad';
+
+export const defaultParams = {
   width: 100,     // Width of the box in mm
   length: 150,    // Length of the box in mm
   height: 50,     // Height of the box in mm
@@ -54,18 +47,7 @@ const defaultParams = {
   cornerRadius: 5, // Radius for rounded corners
 };
 
-const { drawRoundedRectangle } = replicad;
-
-/**
- * Creates a parametric box with rounded corners
- * @param _ Unused parameter (required by replicad)
- * @param params Custom parameters to override defaults
- * @returns The complete box model
- */
-function main(_, params) {
-  // Merge default parameters with provided ones
-  const p = { ...defaultParams, ...params };
-  
+export default function main(p = defaultParams) {
   // Create outer shape
   const outer = drawRoundedRectangle(p.width, p.length, p.cornerRadius)
     .sketchOnPlane()
@@ -82,7 +64,9 @@ export const birdhouseCode = `/**
  * Parametric Birdhouse
  * A customizable birdhouse with adjustable dimensions and features.
  */
-const defaultParams = {
+import { drawCircle, draw, makePlane } from 'replicad';
+
+export const defaultParams = {
   height: 85.0, // Overall height of the birdhouse
   width: 120.0, // Width of the birdhouse
   thickness: 2.0, // Wall thickness
@@ -91,19 +75,9 @@ const defaultParams = {
   filletEdges: true, // Whether to add rounded edges
 };
 
-const { drawCircle, draw, makePlane } = replicad;
-
-/**
- * Creates a parametric birdhouse with a triangular prism shape
- * @param _ - Unused parameter
- * @param params - Custom parameters to override defaults
- * @returns The complete birdhouse model
- */
-function main(_, params) {
-  // Merge default parameters with provided ones
-  const p = { ...defaultParams, ...params };
+export default function main(p = defaultParams) {
   const length = p.width;
-  const width = p.width * 0.9;
+  const width = p.width * 0.9; // 90% of width for the triangular prism
 
   // Create triangular prism house shape
   let tobleroneShape = draw([-width / 2, 0])
@@ -156,7 +130,9 @@ export const drinkingGlassCode = `/**
  * Parametric Drinking Glass
  * A customizable glass with adjustable dimensions for height, radii, and thickness.
  */
-const defaultParams = {
+import { draw, FaceFinder, EdgeFinder } from 'replicad';
+
+export const defaultParams = {
   height: 140.0, // Overall height of the glass in mm
   topRadius: 45.0, // Radius of the top opening in mm
   baseRadius: 80.0, // Radius of the base in mm
@@ -168,17 +144,7 @@ const defaultParams = {
   baseFilletRadius: 40, // Radius for the base fillet
 };
 
-const { draw, FaceFinder, EdgeFinder } = replicad;
-
-/**
- * Creates a parametric drinking glass.
- * @param _ Unused Replicad API object
- * @param params Custom parameters to override defaults.
- * @returns The 3D model of the glass.
- */
-function main(_, params) {
-  const p = { ...defaultParams, ...params };
-
+export default function main(p = defaultParams) {
   // Validate parameters to prevent common issues
   if (p.topRadius <= 0) {
     console.warn("topRadius should be greater than 0 for a valid opening.");
@@ -204,7 +170,6 @@ function main(_, params) {
     p.wallThickness = 0.5; // Fallback thickness
   }
 
-
   // Create the 2D profile for revolution.
   // The sketch is on the XZ plane, so points are [x, z].
   // The glass will be revolved around the Z-axis.
@@ -218,8 +183,6 @@ function main(_, params) {
   let glassSolid = profile
     .sketchOnPlane("XZ")
     .revolve();
-
-
 
   // Hollow out the glass using the shell operation.
   // We remove the top face to create the opening.
@@ -261,30 +224,33 @@ function main(_, params) {
 }
 `;
 
-export const trayCode = `const { makeSolid, makeFace, assembleWire, EdgeFinder, genericSweep, Plane } =
-  replicad;
+export const trayCode = `import { makeSolid, makeFace, assembleWire, EdgeFinder, draw, drawRoundedRectangle } from 'replicad';
 
-const defaultParams = {
-  baseWidth: 30,
-  baseDepth: 20,
-  cornerRadius: 5,
-  profileLine1X: 5,
-  profileLine1Y: 5,
-  profileLine2X: 2,
-  profileLine2Y: 3,
-  brimWidth: 2,
-  brimHeight: 1,
-  profileBulgeArcX: 0,
-  profileBulgeArcY: 1,
-  profileBulgeFactor: 0.2,
+export const defaultParams = {
+  base: {
+    width: 30,
+    depth: 20,
+    cornerRadius: 5,
+  },
+  profile: {
+    line1X: 5,
+    line1Y: 5,
+    line2X: 2,
+    line2Y: 3,
+    bulgeArcX: 0,
+    bulgeArcY: 1,
+    bulgeFactor: 0.2,
+  },
+  brim: {
+    width: 2,
+    height: 1,
+  },
 };
 
 function profileBox(inputProfile, base) {
   const start = inputProfile.blueprint.firstPoint;
   const profile = inputProfile.translate(-start[0], -start[1]);
-
   const end = profile.blueprint.lastPoint;
-
   const baseSketch = base.sketchOnPlane();
 
   // We create the side of the box
@@ -307,41 +273,27 @@ function profileBox(inputProfile, base) {
   ]);
 }
 
-const { draw, drawRoundedRectangle } = replicad;
-
-function main(
-  r,
-  {
-    baseWidth,
-    baseDepth,
-    cornerRadius,
-    profileLine1X,
-    profileLine1Y,
-    profileLine2X,
-    profileLine2Y,
-    brimWidth,
-    brimHeight,
-    profileBulgeArcX,
-    profileBulgeArcY,
-    profileBulgeFactor,
-  } = defaultParams
-) {
-  const base = drawRoundedRectangle(baseWidth, baseDepth, cornerRadius);
+export default function main(p = defaultParams) {
+  const base = drawRoundedRectangle(p.base.width, p.base.depth, p.base.cornerRadius);
 
   const profile = draw()
-    .line(profileLine1X, profileLine1Y)
-    .line(profileLine2X, profileLine2Y)
-    .hLine(-brimWidth)
-    .vLine(-brimHeight)
-    .bulgeArcTo([profileBulgeArcX, profileBulgeArcY], profileBulgeFactor)
+    .line(p.profile.line1X, p.profile.line1Y)
+    .line(p.profile.line2X, p.profile.line2Y)
+    .hLine(-p.brim.width)
+    .vLine(-p.brim.height)
+    .bulgeArcTo([p.profile.bulgeArcX, p.profile.bulgeArcY], p.profile.bulgeFactor)
     .done();
 
   return profileBox(profile, base);
 }`;
 
-export const vaseCode = `const { draw } = replicad;
+export const vaseCode = `/**
+ * Parametric Vase
+ * A vase with adjustable dimensions and rounded edges.
+ */
+import { draw } from 'replicad';
 
-const defaultParams = {
+export const defaultParams = {
   height: 100,
   baseWidth: 20,
   wallThickness: 5,
@@ -354,35 +306,21 @@ const defaultParams = {
   bottomHeavy: true,
 };
 
-const main = (
-  _,
-  {
-    height,
-    baseWidth,
-    wallThickness,
-    lowerCirclePosition,
-    lowerCircleRadius,
-    higherCircleRadius,
-    higherCirclePosition,
-    topRadius,
-    topFillet,
-    bottomHeavy,
-  }
-) => {
+export default function main(p = defaultParams) {
   const splinesConfig = [
-    { position: lowerCirclePosition, radius: lowerCircleRadius },
+    { position: p.lowerCirclePosition, radius: p.lowerCircleRadius },
     {
-      position: higherCirclePosition,
-      radius: higherCircleRadius,
-      startFactor: bottomHeavy ? 3 : 1,
+      position: p.higherCirclePosition,
+      radius: p.higherCircleRadius,
+      startFactor: p.bottomHeavy ? 3 : 1,
     },
-    { position: 1, radius: topRadius, startFactor: bottomHeavy ? 3 : 1 },
+    { position: 1, radius: p.topRadius, startFactor: p.bottomHeavy ? 3 : 1 },
   ];
 
-  const sketchVaseProfile = draw().hLine(baseWidth);
+  const sketchVaseProfile = draw().hLine(p.baseWidth);
 
   splinesConfig.forEach(({ position, radius, startFactor, endFactor }) => {
-    sketchVaseProfile.smoothSplineTo([baseWidth * radius, height * position], {
+    sketchVaseProfile.smoothSplineTo([p.baseWidth * radius, p.height * position], {
       endTangent: [0, 1],
       startFactor,
       endFactor,
@@ -390,26 +328,30 @@ const main = (
   });
 
   let vase = sketchVaseProfile
-    .lineTo([0, height])
+    .lineTo([0, p.height])
     .close()
     .sketchOnPlane("XZ")
     .revolve();
 
-  if (wallThickness) {
-    vase = vase.shell(wallThickness, (f) => f.containsPoint([0, 0, height]));
+  if (p.wallThickness) {
+    vase = vase.shell(p.wallThickness, (f) => f.containsPoint([0, 0, p.height]));
   }
 
-  if (topFillet) {
-    vase = vase.fillet(wallThickness / 3, (e) => e.inPlane("XY", height));
+  if (p.topFillet) {
+    vase = vase.fillet(p.wallThickness / 3, (e) => e.inPlane("XY", p.height));
   }
 
   return vase;
-};
+}
 `;
 
-export const wavyVase = `const { drawCircle, drawPolysides, polysideInnerRadius } = replicad;
+export const wavyVase = `/**
+ * Parametric Wavy Vase
+ * A vase with adjustable dimensions and wavy edges.
+ */
+import { drawCircle, drawPolysides, polysideInnerRadius } from 'replicad';
 
-const defaultParams = {
+export const defaultParams = {
   height: 150,
   radius: 40,
   sidesCount: 12,
@@ -418,49 +360,34 @@ const defaultParams = {
   endFactor: 1.5,
   topFillet: 0,
   bottomFillet: 5,
-
   holeMode: 1,
   wallThickness: 2,
 };
 
-const main = (
-  _,
-  {
-    height,
-    radius,
-    sidesCount,
-    sideRadius,
-    sideTwist,
-    endFactor,
-    topFillet,
-    bottomFillet,
-    holeMode,
-    wallThickness,
-  }
-) => {
-  const extrusionProfile = endFactor
-    ? { profile: "s-curve", endFactor }
+export default function main(p = defaultParams) {
+  const extrusionProfile = p.endFactor
+    ? Object.freeze({ profile: "s-curve", endFactor: p.endFactor })
     : undefined;
-  const twistAngle = (360 / sidesCount) * sideTwist;
+  const twistAngle = (360 / p.sidesCount) * p.sideTwist;
 
-  let shape = drawPolysides(radius, sidesCount, -sideRadius)
+  let shape = drawPolysides(p.radius, p.sidesCount, -p.sideRadius)
     .sketchOnPlane()
-    .extrude(height, {
+    .extrude(p.height, {
       twistAngle,
       extrusionProfile,
     });
 
-  if (bottomFillet) {
-    shape = shape.fillet(bottomFillet, (e) => e.inPlane("XY"));
+  if (p.bottomFillet) {
+    shape = shape.fillet(p.bottomFillet, (e) => e.inPlane("XY"));
   }
 
-  if (holeMode === 1 || holeMode === 2) {
-    const holeHeight = height - wallThickness;
+  if (p.holeMode === 1 || p.holeMode === 2) {
+    const holeHeight = p.height - p.wallThickness;
 
     let hole;
-    if (holeMode === 1) {
+    if (p.holeMode === 1) {
       const insideRadius =
-        polysideInnerRadius(radius, sidesCount, sideRadius) - wallThickness;
+        polysideInnerRadius(p.radius, p.sidesCount, p.sideRadius) - p.wallThickness;
 
       hole = drawCircle(insideRadius).sketchOnPlane().extrude(holeHeight, {
         extrusionProfile,
@@ -469,36 +396,37 @@ const main = (
       shape = shape.cut(
         hole
           .fillet(
-            Math.max(wallThickness / 3, bottomFillet - wallThickness),
+            Math.max(p.wallThickness / 3, p.bottomFillet - p.wallThickness),
             (e) => e.inPlane("XY")
           )
-          .translate([0, 0, wallThickness])
+          .translate([0, 0, p.wallThickness])
       );
-    } else if (holeMode === 2) {
-      shape = shape.shell(wallThickness, (f) => f.inPlane("XY", height));
+    } else if (p.holeMode === 2) {
+      shape = shape.shell(p.wallThickness, (f) => f.inPlane("XY", p.height));
     }
   }
 
-  if (topFillet) {
-    shape = shape.fillet(topFillet, (e) => e.inPlane("XY", height));
+  if (p.topFillet) {
+    shape = shape.fillet(p.topFillet, (e) => e.inPlane("XY", p.height));
   }
+
   return shape;
-};
+}
 `;
 
 export const cycloidalGear = `/**
  * Parametric Cycloidal Gear
  * A customizable gear using hypocycloid and epicycloid curves.
  */
-const defaultParams = {
+import { drawCircle, drawParametricFunction } from 'replicad';
+
+export const defaultParams = {
   height: 40, // Height of the gear
   r1: 12, // Primary radius
   r2: 1, // Secondary radius
   circleDiameter: 2, // Diameter of the center hole
   twistAngle: 90, // Angle of twist for extrusion
 };
-
-const { drawCircle, drawParametricFunction } = replicad;
 
 /**
  * Creates a hypocycloid curve
@@ -541,16 +469,7 @@ function gear(t, r1 = defaultParams.r1, r2 = defaultParams.r2) {
   else return hypocycloid(t, r1, r2);
 }
 
-/**
- * Creates a cycloidal gear with customizable parameters
- * @param _ - Unused parameter
- * @param params - Custom parameters to override defaults
- * @returns The complete gear model
- */
-function main(_, params) {
-  // Merge default parameters with provided ones
-  const p = { ...defaultParams, ...params };
-  
+export default function main(p = defaultParams) {
   // Create gear using parametric function
   const base = drawParametricFunction((t) => gear(2 * Math.PI * t, p.r1, p.r2))
     .sketchOnPlane()
@@ -564,44 +483,45 @@ function main(_, params) {
 }
 `;
 
-export const bottle = `const defaultParams = {
+export const bottle = `/**
+ * Parametric Bottle
+ * A simple bottle with adjustable dimensions and rounded edges.
+ */
+import { draw, makeCylinder, makeOffset, FaceFinder } from 'replicad';
+
+export const defaultParams = {
   width: 50,
   height: 70,
   thickness: 30,
 };
 
-const { draw, makeCylinder, makeOffset, FaceFinder } = replicad;
-
-const main = (
-  _,
-  { width: myWidth, height: myHeight, thickness: myThickness }
-) => {
-  let shape = draw([-myWidth / 2, 0])
-    .vLine(-myThickness / 4)
-    .threePointsArc(myWidth, 0, myWidth / 2, -myThickness / 4)
-    .vLine(myThickness / 4)
+export default function main(p = defaultParams) {
+  let shape = draw([-p.width / 2, 0])
+    .vLine(-p.thickness / 4)
+    .threePointsArc(p.width, 0, p.width / 2, -p.thickness / 4)
+    .vLine(p.thickness / 4)
     .closeWithMirror()
     .sketchOnPlane()
-    .extrude(myHeight)
-    .fillet(myThickness / 12);
+    .extrude(p.height)
+    .fillet(p.thickness / 12);
 
-  const myNeckRadius = myThickness / 4;
-  const myNeckHeight = myHeight / 10;
+  const myNeckRadius = p.thickness / 4;
+  const myNeckHeight = p.height / 10;
   const neck = makeCylinder(
     myNeckRadius,
     myNeckHeight,
-    [0, 0, myHeight],
+    [0, 0, p.height],
     [0, 0, 1]
   );
 
   shape = shape.fuse(neck);
 
-  shape = shape.shell(myThickness / 50, (f) =>
-    f.inPlane("XY", [0, 0, myHeight + myNeckHeight])
+  shape = shape.shell(p.thickness / 50, (f) =>
+    f.inPlane("XY", [0, 0, p.height + myNeckHeight])
   );
 
   const neckFace = new FaceFinder()
-    .containsPoint([0, myNeckRadius, myHeight])
+    .containsPoint([0, myNeckRadius, p.height])
     .ofSurfaceType("CYLINDRE")
     .find(shape.clone(), { unique: true });
 
@@ -620,14 +540,14 @@ const main = (
   const thread = baseThreadSketch.loftWith(topThreadSketch);
 
   return shape.fuse(thread);
-};
+}
 `;
 
 export const gridfinityBox = `/**
  * Parametric Gridfinity Box
  * A customizable storage box compatible with the Gridfinity system.
  */
-const defaultParams = {
+export const defaultParams = {
   xSize: 2, // Width in Gridfinity units
   ySize: 1, // Length in Gridfinity units
   height: 0.5, // Height in Gridfinity units
@@ -640,15 +560,8 @@ const defaultParams = {
   wallThickness: 1.2, // Wall thickness
 };
 
-const {
-  draw,
-  drawRoundedRectangle,
-  drawCircle,
-  makeSolid,
-  assembleWire,
-  makeFace,
-  EdgeFinder,
-} = replicad;
+import {
+  draw, drawRoundedRectangle, drawCircle, makeSolid, assembleWire, makeFace, EdgeFinder } from 'replicad';
 
 // Gridfinity magic numbers
 const SIZE = 42.0;
@@ -832,16 +745,7 @@ function buildTopShape({
     );
 }
 
-/**
- * Creates a Gridfinity-compatible storage box with customizable parameters
- * @param _ - Unused parameter
- * @param params - Custom parameters to override defaults
- * @returns The complete Gridfinity box model
- */
-function main(_, params) {
-  // Merge default parameters with provided ones
-  const p = { ...defaultParams, ...params };
-  
+export default function main(p = defaultParams) {
   const stdHeight = p.height * SIZE;
 
   let box = drawRoundedRectangle(
@@ -888,7 +792,7 @@ export const decoratedBox = `/**
  * Decorated Box Model
  * A customizable box with decorative patterns.
  */
-const { sketchRectangle, EdgeFinder, FaceFinder, makePlane } = replicad;
+import { sketchRectangle, EdgeFinder, FaceFinder, makePlane } from 'replicad';
 import { addVoronoi, addGrid, addHoneycomb } from "https://cdn.jsdelivr.net/npm/replicad-decorate/dist/studio/replicad-decorate.js";
 
 export const defaultParams = {
@@ -905,46 +809,45 @@ export const defaultParams = {
   decorationSeed: 5,
 };
 
-export const main = (_, { height, depth, width, filletRadius, shellThickness, decorationStyle, decorationMargin, decorationPadding, decorationRadius, decorationCellCount, decorationSeed }) => {
-  let shape = sketchRectangle(depth, width, makePlane("XY"))
-    .extrude(height)
+export default function main(p = defaultParams) {
+  let shape = sketchRectangle(p.depth, p.width, makePlane("XY"))
+    .extrude(p.height)
     .fillet({
-      radius: filletRadius,
+      radius: p.filletRadius,
       filter: new EdgeFinder().inDirection("Z"),
     })
     .shell({
-      thickness: shellThickness,
-      filter: new FaceFinder().inPlane("XY", height),
+      thickness: p.shellThickness,
+      filter: new FaceFinder().inPlane("XY", p.height),
     });
 
-  const face = new FaceFinder().inPlane("XY", height)[0];
+  const face = new FaceFinder().inPlane("XY", p.height)[0];
 
-  const decorateParams = { faceIndex: 18, depth: -shellThickness, radius: decorationRadius, margin: decorationMargin, padding: decorationPadding, cellCount: decorationCellCount, seed: decorationSeed }
+  const decorateParams = { faceIndex: 18, depth: -p.shellThickness, radius: p.decorationRadius, margin: p.decorationMargin, padding: p.decorationPadding, cellCount: p.decorationCellCount, seed: p.decorationSeed }
 
-  if (decorationStyle === "voronoi") {
+  if (p.decorationStyle === "voronoi") {
     shape = addVoronoi(shape, decorateParams);
-  } else if (decorationStyle === "grid") {
+  } else if (p.decorationStyle === "grid") {
     shape = addGrid(shape, decorateParams);
-  } else if (decorationStyle === "honeycomb") {
+  } else if (p.decorationStyle === "honeycomb") {
     shape = addHoneycomb(shape, decorateParams);
   } else {
     shape = addHoneycomb(shape, decorateParams);
   }
 
   return shape;
-};
+}
 `;
 
 const cardHolderCode = `/**
  * Card Holder Model
  * A customizable card holder with a handle and a lock.
  */
-const { Sketcher, sketchRectangle, sketchCircle, Plane, makeSphere, FaceFinder, makePlane } = replicad;
+import { Sketcher, sketchRectangle, sketchCircle, Plane, makeSphere, FaceFinder, makePlane } from 'replicad';
 
-const defaultParams = {
-};
+export const defaultParams = {};
 
-const main = (_, params) => {
+export default function main(p = defaultParams) {
   const handleBase = new Sketcher("XY")
     .vLine(89.0)
     .hLine(20.5)
@@ -990,15 +893,13 @@ const main = (_, params) => {
 
   const cutFingerArea = handleBase.cut(fingerAreaNegative.translate([20.5, 89 - border, 2.0]));
   const filletFingerArea = cutFingerArea.fillet(1.4) // Here
-  // const filletFingerArea = cutFingerArea // Here
   const cutLock = filletFingerArea.cut(lockNegative.translate([2.0, 89.0 / 2, 0]));
   const cutLockTab = cutLock.cut(lockSmallTabSpaceNegative.translate([57 - 3, 89.0 / 2, 0]));
   const cutScrewHoleTop = cutLockTab.cut(screwHole.clone().translate([10.0, 6.0, 0.0]));
   const cutScrewHoleBottom = cutScrewHoleTop.cut(screwHole.translate([10.0, 89.0 - 6.0, 0.0]));
   
   const handle = cutScrewHoleBottom
- //  let marker = makeSphere(1).translate([57.0 - 20, 89 / 2, 2.0]);
- //  const handle = cutScrewHoleBottom.fuse(marker);
+
   return {shape: handle,  highlight: new FaceFinder().inPlane("XY", 9)};
 }
 `;
@@ -1007,7 +908,9 @@ export const iBeamCode = `/**
  * Parametric I-Beam (Universal Beam)
  * Customizable with beam dimensions and extrusion length.
  */
-const defaultParams = {
+import { draw } from 'replicad';
+
+export const defaultParams = {
   beamHeight: 200,
   beamWidth: 100,
   webThickness: 6,
@@ -1016,10 +919,7 @@ const defaultParams = {
   rootFilletRadius: 10
 };
 
-const { draw } = replicad;
-
-function main(_, params) {
-  const p = { ...defaultParams, ...params };
+export default function main(p = defaultParams) {
   const hw = p.beamWidth / 2; // half width
   const hh = p.beamHeight / 2; // half height
   const wt = p.webThickness;
@@ -1043,7 +943,7 @@ function main(_, params) {
   // Mirror on X axis
   const ibeamProfile = pen.fuse(pen.mirror([0,0]))
 
-  // extrude
+  // Extrude
   const ibeam = ibeamProfile.sketchOnPlane().extrude(p.length);
 
   return ibeam;
@@ -1053,7 +953,9 @@ export const tSlotRailCode = `/**
  * Parametric T-Slot Rail
  * A T-slotted framing rail, or T-slot extrusion, is a rectangular or square aluminum profile with a "T" shaped slot along one or more sides. These slots allow for easy attachment of various hardware components like brackets, connectors, and fasteners, making it a versatile and customizable framing system.
  */
-const defaultParams = {
+import { draw, sketchCircle, drawCircle } from 'replicad';
+
+export const defaultParams = {
   railHeight: 20,
   railLength: 1200,
   interiorRadius: 0.05,
@@ -1062,11 +964,7 @@ const defaultParams = {
   holeRadius: 0.4,
 };
 
-const { draw, sketchCircle, drawCircle } = replicad;
-
-function main(_, params) {
-  const p = { ...defaultParams, ...params };
-  
+export default function main(p = defaultParams) {
   // Convert to normalized units (rail height = 1.0 in normalized space)
   const ir = p.interiorRadius;
   const sd = p.scoreDepth;
@@ -1111,9 +1009,9 @@ export const staircaseCode = `/**
  * Parametric Staircase Model
  * A customizable staircase with adjustable dimensions, stringers, handrails, and balusters.
  */
-const { draw, drawRoundedRectangle, drawCircle } = replicad;
+import { draw, drawRoundedRectangle, drawCircle } from 'replicad';
 
-const defaultParams = {
+export const defaultParams = {
   // Main staircase dimensions
   staircaseHeight: 2700, // mm - typical floor-to-floor height
   staircaseRun: 3600,    // mm - horizontal length of staircase
@@ -1191,16 +1089,7 @@ function createHandrailSegment(x1, y1, z1, x2, y2, z2, p) {
     .translate([x1, y1, z1]); // Move to start position
 }
 
-/**
- * Creates a parametric staircase model
- * @param _ Unused parameter (required by replicad)
- * @param params Custom parameters to override defaults
- * @returns The complete staircase model
- */
-function main(_, params) {
-  // Merge default parameters with provided ones
-  const p = { ...defaultParams, ...params };
-  
+export default function main(p = defaultParams) {
   // Calculate derived dimensions
   const stepRise = p.staircaseHeight / p.stepCount; // Height of each step
   const stepRun = p.staircaseRun / p.stepCount;     // Depth of each step
@@ -1384,9 +1273,10 @@ function main(_, params) {
 const tableCode = `/**
  * Parametric Table
  * A customizable table with adjustable dimensions, leg style options, and optional features.
- * Suitable for 3D printing, woodworking plans, or visualization.
  */
-const defaultParams = {
+import { drawRoundedRectangle, drawCircle, draw } from 'replicad';
+
+export const defaultParams = {
   // Table dimensions
   width: 800,      // Width of the table in mm
   length: 1200,    // Length of the table in mm
@@ -1413,8 +1303,6 @@ const defaultParams = {
   shelfThickness: 15,  // Thickness of the shelf in mm
   shelfInset: 50,      // Inset of shelf from edges
 };
-
-const { drawRoundedRectangle, drawCircle, draw } = replicad;
 
 /**
  * Creates the tabletop of the table
@@ -1587,16 +1475,7 @@ function createShelf(p) {
   }
 }
 
-/**
- * Creates a parametric table with customizable features
- * @param _ - Unused parameter (required by replicad)
- * @param params - Custom parameters to override defaults
- * @returns The complete table model
- */
-function main(_, params) {
-  // Merge default parameters with provided ones
-  const p = { ...defaultParams, ...params };
-  
+export default function main(p = defaultParams) {
   // Create table components
   const tabletop = createTabletop(p);
   const legs = createLegs(p);
@@ -1627,8 +1506,9 @@ const legoCode = `
  * A simplified and more robust version with standard LEGO dimensions.
  * Features hollow bottom for connecting to other bricks.
  */
+import { drawCircle, drawRectangle, draw } from 'replicad';
 
-const defaultParams = {
+export const defaultParams = {
   // Basic brick dimensions in LEGO units
   width: 2,       // Number of studs wide
   length: 4,      // Number of studs long
@@ -1652,12 +1532,6 @@ const defaultParams = {
   enableTubes: true,      // Include bottom tubes
   rounded: false,       // Simplified version without rounds
 };
-
-const { 
-  drawCircle, 
-  drawRectangle,
-  draw
-} = replicad;
 
 /**
  * Creates a single stud
@@ -1701,15 +1575,6 @@ function calculateTubePositions(width, length) {
     return positions;
   }
   
-  // if (width === 2) {
-  //   // 2-wide bricks have tubes only in center line
-  //   const numTubes = length - 1;
-  //   for (let i = 0; i < numTubes; i++) {
-  //     positions.push([0, i - (numTubes - 1) / 2]);
-  //   }
-  //   return positions;
-  // }
-  
   // For wider bricks, create appropriate grid of tubes
   // Skip outer edges, place tubes in interior
   // For wider bricks, place tubes at intersection of 4 studs
@@ -1725,16 +1590,7 @@ function calculateTubePositions(width, length) {
   return positions;
 }
 
-/**
- * Creates a LEGO brick with hollow bottom
- * @param _ Unused parameter
- * @param params Custom parameters
- * @returns The LEGO brick model
- */
-function main(_, params) {
-  // Merge parameters
-  const p = { ...defaultParams, ...params };
-  
+export default function main(p = defaultParams) {
   // Calculate dimensions
   const totalWidth = p.width * p.unit;
   const totalLength = p.length * p.unit;
@@ -1802,10 +1658,9 @@ const simpleTrayCode = `
  * A customizable storage solution with adjustable compartments.
  * Designed for reliable 3D printing with proper tolerances.
  */
+import { draw, drawRoundedRectangle } from 'replicad';
 
-const { draw, drawRoundedRectangle } = replicad;
-
-const defaultParams = {
+export const defaultParams = {
   // Overall dimensions
   width: 200,         // mm - total width of the tray
   length: 300,        // mm - total height of the tray
@@ -1825,16 +1680,7 @@ const defaultParams = {
   filletRadius: 0.8   // mm - radius for fillets (keep small for stability)
 };
 
-/**
- * Creates the main storage tray with compartments
- * @param {*} _ Unused parameter (required by replicad)
- * @param {Object} params Custom parameters to override defaults
- * @returns {Shape} The complete storage tray model
- */
-function main(_, params) {
-  // Merge default parameters with provided ones
-  const p = { ...defaultParams, ...params };
-  
+export default function main(p = defaultParams) {
   try {
     // Validate parameters
     if (p.width < 20 || p.length < 20 || p.height < 10) {
@@ -1942,7 +1788,9 @@ const hexScrewdriverCode = `/**
  * Parametric M5 Allen Key Screwdriver
  * A customizable M5 Allen key screwdriver with adjustable hexagonal handle and shaft dimensions.
  */
-const defaultParams = {
+import { drawCircle, drawPolysides } from 'replicad';
+
+export const defaultParams = {
   handleLength: 100, // Length of the handle in mm
   handleSize: 20, // Size of the hexagonal handle in mm
   shaftLength: 75, // Length of the shaft in mm
@@ -1952,18 +1800,7 @@ const defaultParams = {
   filletRadius: 2, // Radius for filleting edges
 };
 
-const { drawCircle, drawPolysides } = replicad;
-
-/**
- * Creates a parametric M5 Allen key screwdriver
- * @param _ Unused parameter (required by replicad)
- * @param params Custom parameters to override defaults
- * @returns The complete screwdriver model
- */
-function main(_, params) {
-  // Merge default parameters with provided ones
-  const p = { ...defaultParams, ...params };
-
+export default function main(p = defaultParams) {
   // Create hexagonal handle
   let handle = drawPolysides(p.handleSize / 2, 6)
     .sketchOnPlane()
@@ -1993,9 +1830,9 @@ const chairCode = `/**
  * Parametric Chair Model
  * A customizable chair with adjustable dimensions.
  */
-const { drawRectangle, drawCircle, EdgeFinder } = replicad;
+import { drawRectangle, drawCircle, EdgeFinder } from 'replicad';
 
-const defaultParams = {
+export const defaultParams = {
   // Overall dimensions
   seatWidth: 450,    // mm - Width of the seat
   seatDepth: 420,    // mm - Depth of the seat
@@ -2012,23 +1849,14 @@ const defaultParams = {
   filletRadius: 5,   // mm - Radius for filleting edges (0 for sharp edges)
 };
 
-/**
- * Creates a parametric chair model
- * @param _ Unused parameter (required by replicad)
- * @param params Custom parameters to override defaults
- * @returns The complete chair model
- */
-function main(_, params) {
-  // Merge default parameters with provided ones
-  const p = { ...defaultParams, ...params };
-
-  // --- Create Seat ---
+export default function main(p = defaultParams) {
+  // Create Seat
   const seat = drawRectangle(p.seatWidth, p.seatDepth)
     .sketchOnPlane("XY")
     .extrude(p.seatThickness)
     .translateZ(p.seatHeight - p.seatThickness); // Position seat top at seatHeight
 
-  // --- Create Legs ---
+  // Create Legs
   const legProfile = drawRectangle(p.legThickness, p.legThickness).sketchOnPlane("XY");
   const legHeight = p.seatHeight - p.seatThickness;
   const singleLeg = legProfile.extrude(legHeight);
@@ -2043,7 +1871,7 @@ function main(_, params) {
   const legBL = singleLeg.clone().translate([-legOffsetX, -legOffsetY, 0]); // Back Left
   const legBR = singleLeg.clone().translate([legOffsetX, -legOffsetY, 0]); // Back Right
 
-  // --- Create Backrest ---
+  // Create Backrest
   const angleRadians = p.backrestAngle * Math.PI / 180;
   const zOffset = p.backrestThickness * Math.sin(angleRadians);
   // Create backrest vertically first, starting at the seat top
@@ -2063,7 +1891,7 @@ function main(_, params) {
     backrest = backrest.rotate(p.backrestAngle, rotationAxisOrigin, rotationAxisDirection);
   }
 
-  // --- Assemble Chair ---
+  // Assemble Chair
   let chair = seat
     .fuse(legFL)
     .fuse(legFR)
@@ -2071,7 +1899,7 @@ function main(_, params) {
     .fuse(legBR)
     .fuse(backrest);
 
-  // --- Apply Fillets (Optional) ---
+  // Apply Fillets (Optional)
   if (p.filletRadius > 0) {
     // Example: Fillet top edges of the seat and front/top edges of backrest
     // More specific filtering might be needed for a production model
@@ -2095,7 +1923,9 @@ const potPlantCode = `/**
  * Parametric Pot Plant Holder
  * A customizable pot plant holder with an optional attached saucer and drainage holes.
  */
-const defaultParams = {
+import { drawCircle, EdgeFinder, Vector } from 'replicad';
+
+export const defaultParams = {
   potInnerDiameter: 100,    // mm - Inner diameter for the plant pot
   potInnerHeight: 90,       // mm - Inner height for the plant pot
   wallThickness: 3,         // mm - Wall thickness of the pot holder
@@ -2119,11 +1949,7 @@ const defaultParams = {
   filletRadius: 1.5,        // mm - General radius for fillets (should be less than wallThickness)
 };
 
-const { drawCircle, EdgeFinder, Vector } = replicad;
-
-function main(_, params) {
-  const p = { ...defaultParams, ...params };
-
+export default function main(p = defaultParams) {
   // Validate parameters
   if (p.filletRadius >= p.wallThickness || (p.includeSaucer && p.filletRadius >= p.saucerWallThickness)) {
     console.warn("Fillet radius might be too large compared to wall thickness, potentially causing issues.");
@@ -2145,7 +1971,7 @@ function main(_, params) {
   };
   const filletTolerance = p.wallThickness * 0.2; // Tolerance for matching edge radius
 
-  // --- Pot Holder --- 
+  // Pot Holder 
   // (Base of the pot holder part is initially at Z=0)
   const potOuterRadius = p.potInnerDiameter / 2 + p.wallThickness;
   const potPartTotalHeight = p.potInnerHeight + p.baseThickness;
@@ -2161,7 +1987,7 @@ function main(_, params) {
 
   potHolderShape = potHolderShape.cut(potCavity);
 
-  // --- Drainage Holes for Pot Holder --- 
+  // Drainage Holes for Pot Holder 
   if (p.addDrainageHoles && p.drainageHoleCount > 0 && p.drainageHoleDiameter > 0) {
     const holeRadius = p.drainageHoleDiameter / 2;
     if (p.drainageHoleCount === 1 && p.drainageHoleOffset === 0) {
@@ -2202,7 +2028,7 @@ function main(_, params) {
   let finalShape = potHolderShape;
   let potHolderZOffset = 0;
 
-  // --- Saucer --- (Optional)
+  // Saucer (Optional)
   if (p.includeSaucer) {
     const potHolderOuterDiameter = p.potInnerDiameter + 2 * p.wallThickness;
     const saucerInnerDiameter = potHolderOuterDiameter + 2 * p.saucerGap;
@@ -2233,7 +2059,7 @@ function main(_, params) {
     finalShape = completeSaucer.fuse(translatedPotHolder);
   }
 
-  // --- Fillets --- (Applied to the final assembled shape)
+  // Fillets (Applied to the final assembled shape)
   if (p.filletRadius > 0) {
     try {
       // Top outer rim of pot holder

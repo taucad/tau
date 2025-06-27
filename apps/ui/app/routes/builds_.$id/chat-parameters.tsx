@@ -113,8 +113,6 @@ export const ChatParameters = memo(function () {
   const containerXpadding = 'px-2';
   const containerYpadding = 'py-4 md:py-2';
 
-  const hasParameters = jsonSchema && Object.keys(jsonSchema).length > 0;
-
   const formContext = useMemo(
     () => ({
       allExpanded,
@@ -130,6 +128,7 @@ export const ChatParameters = memo(function () {
   );
 
   const mergedData = { ...defaultParameters, ...parameters };
+  const hasParameters = jsonSchema && Object.keys(mergedData).length > 0;
 
   const handleChange = (event: IChangeEvent<Record<string, unknown>, RJSFSchema, RJSFContext>) => {
     setParameters(event.formData ?? {});

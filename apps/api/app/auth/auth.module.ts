@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { DiscoveryModule, DiscoveryService, HttpAdapterHost, MetadataScanner } from '@nestjs/core';
 import { betterAuth } from 'better-auth';
 import type { FastifyReply as Reply, FastifyRequest as Request } from 'fastify';
+import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { getBetterAuthConfig } from '~/config/better-auth.config.js';
 import { authInstanceKey, hookKey, beforeHookKey, afterHookKey } from '~/constants/auth.constant.js';
 import { DatabaseModule } from '~/database/database.module.js';
@@ -27,6 +28,34 @@ const hooks = [
   exports: [AuthService],
 })
 export class AuthModule implements NestModule, OnModuleInit {
+  public static forRootAsync(): DynamicModule {
+    return {
+      global: true,
+      module: AuthModule,
+      imports: [DatabaseModule],
+      providers: [
+        {
+          provide: authInstanceKey,
+          async useFactory(
+            databaseService: DatabaseService,
+            configService: ConfigService<Environment, true>,
+            authService: AuthService,
+          ): Promise<AuthInstance> {
+            const config = getBetterAuthConfig({
+              databaseService,
+              configService,
+              authService,
+            });
+            return betterAuth(config);
+          },
+          inject: [DatabaseService, ConfigService, AuthService],
+        },
+        BetterAuthService,
+      ],
+      exports: [authInstanceKey, BetterAuthService],
+    };
+  }
+
   private static routeConfigured = false;
   private readonly logger = new Logger(this.constructor.name);
 
@@ -69,8 +98,10 @@ export class AuthModule implements NestModule, OnModuleInit {
     const basePath = this.auth.options.basePath!;
 
     const { httpAdapter } = this.adapter;
+    const instance = httpAdapter.getInstance<FastifyAdapter>();
 
-    httpAdapter.all(`${basePath}/*`, async (request: Request, reply: Reply) => {
+    // Configure the auth routes
+    instance.all(`${basePath}/*`, async (request: Request, reply: Reply) => {
       try {
         const url = new URL(request.url, `${request.protocol}://${request.hostname}`);
 
@@ -109,35 +140,6 @@ export class AuthModule implements NestModule, OnModuleInit {
 
     AuthModule.routeConfigured = true;
     this.logger.log(`AuthModule initialized at '${basePath}/*'`);
-  }
-
-  // eslint-disable-next-line @typescript-eslint/member-ordering -- false positive
-  public static forRootAsync(): DynamicModule {
-    return {
-      global: true,
-      module: AuthModule,
-      imports: [DatabaseModule],
-      providers: [
-        {
-          provide: authInstanceKey,
-          async useFactory(
-            databaseService: DatabaseService,
-            configService: ConfigService<Environment, true>,
-            authService: AuthService,
-          ): Promise<AuthInstance> {
-            const config = getBetterAuthConfig({
-              databaseService,
-              configService,
-              authService,
-            });
-            return betterAuth(config);
-          },
-          inject: [DatabaseService, ConfigService, AuthService],
-        },
-        BetterAuthService,
-      ],
-      exports: [authInstanceKey, BetterAuthService],
-    };
   }
 
   private setupHooks(providerMethod: (context: unknown) => Promise<void>): void {

@@ -1,6 +1,6 @@
 import type { ComponentType, JSX } from 'react';
 import { Star, GitFork, Eye } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useActor, useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
@@ -75,16 +75,23 @@ function ProjectCard({
 
   const navigate = useNavigate();
 
-  const LanguageIcon = Object.values(assets)
-    .map((asset) => asset.language)
-    .map((language) => ({
-      Icon: languageIcons[language],
-      language,
-    }));
+  // Memoize the LanguageIcon computation to prevent re-creation on every render
+  const LanguageIcon = useMemo(
+    () =>
+      Object.values(assets)
+        .map((asset) => asset.language)
+        .map((language) => ({
+          Icon: languageIcons[language],
+          language,
+        })),
+    [assets],
+  );
 
-  // Get the replicad code if available
-  const replicadAsset = Object.values(assets).find((asset) => asset.language === 'replicad');
-  const replicadCode = replicadAsset?.files[replicadAsset.main]?.content;
+  // Memoize the replicad code computation
+  const replicadCode = useMemo(() => {
+    const replicadAsset = Object.values(assets).find((asset) => asset.language === 'replicad');
+    return replicadAsset?.files[replicadAsset.main]?.content;
+  }, [assets]);
 
   // Set up visibility observer
   useEffect(() => {
@@ -113,16 +120,16 @@ function ProjectCard({
 
   // Only load the CAD model when the card is visible and preview is enabled
   useEffect(() => {
-    if (isVisible && showPreview && replicadCode && shapes.length === 0) {
+    if (isVisible && showPreview && replicadCode) {
       send({ type: 'initializeModel', code: replicadCode, parameters: {} });
     }
-  }, [isVisible, showPreview, replicadCode, send, shapes]);
+  }, [isVisible, showPreview, replicadCode, send]);
 
-  const handleStar = () => {
+  const handleStar = useCallback(() => {
     // TODO: Implement star functionality
-  };
+  }, []);
 
-  const handleFork = async () => {
+  const handleFork = useCallback(async () => {
     // Create a new build with forked data
     const newBuild: Omit<Build, 'id'> = {
       name: `${name} (Fork)`,
@@ -142,7 +149,15 @@ function ProjectCard({
     const createdBuild = await storage.createBuild(newBuild);
     // Navigate to the new build
     await navigate(`/builds/${createdBuild.id}`);
-  };
+  }, [name, description, thumbnail, author, tags, assets, id, chats, navigate]);
+
+  const handlePreviewToggle = useCallback(
+    (event: React.MouseEvent) => {
+      event.stopPropagation();
+      setShowPreview(!showPreview);
+    },
+    [showPreview],
+  );
 
   return (
     <Card ref={cardReference} className="group relative flex flex-col overflow-hidden">
@@ -172,15 +187,7 @@ function ProjectCard({
             />
           </div>
         ) : null}
-        <Button
-          variant="overlay"
-          size="icon"
-          className="absolute top-2 right-2 z-10"
-          onClick={(event) => {
-            event.stopPropagation();
-            setShowPreview(!showPreview);
-          }}
-        >
+        <Button variant="overlay" size="icon" className="absolute top-2 right-2 z-10" onClick={handlePreviewToggle}>
           <Eye className={showPreview ? 'size-4 text-primary' : 'size-4'} />
         </Button>
       </div>

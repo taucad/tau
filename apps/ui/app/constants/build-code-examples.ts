@@ -6,7 +6,7 @@ type Model = {
   thumbnail: string;
 };
 
-export const emptyCode = `function main(_, params) {}
+export const emptyCode = `export default function main(params) {}
 `;
 
 export const cubeCode = `/**

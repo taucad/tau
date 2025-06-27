@@ -164,7 +164,13 @@ async function rewriteImports(code: string): Promise<string> {
 
     // Remove the import statement
     const importStart = imp.ss;
-    const importEnd = imp.se;
+    let importEnd = imp.se;
+
+    // Check for and remove trailing semicolon and whitespace
+    while (importEnd < rewrittenCode.length && /[;\s]/.test(rewrittenCode[importEnd])) {
+      importEnd++;
+    }
+
     rewrittenCode = rewrittenCode.slice(0, importStart) + rewrittenCode.slice(importEnd);
   }
 

@@ -27,6 +27,7 @@ const hooks = [
   exports: [AuthService],
 })
 export class AuthModule implements NestModule, OnModuleInit {
+  private static routeConfigured = false;
   private readonly logger = new Logger(this.constructor.name);
 
   public constructor(
@@ -59,6 +60,12 @@ export class AuthModule implements NestModule, OnModuleInit {
   }
 
   public configure(): void {
+    if (AuthModule.routeConfigured) {
+      // This only happens during hot module replacement.
+      this.logger.warn('Auth routes already configured, skipping configuration...');
+      return;
+    }
+
     const basePath = this.auth.options.basePath!;
 
     const { httpAdapter } = this.adapter;
@@ -100,6 +107,7 @@ export class AuthModule implements NestModule, OnModuleInit {
       }
     });
 
+    AuthModule.routeConfigured = true;
     this.logger.log(`AuthModule initialized at '${basePath}/*'`);
   }
 

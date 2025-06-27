@@ -16,9 +16,16 @@ export function ChatViewerStatus(): JSX.Element {
           </div>
         </div>
       ) : null}
-      <div className="absolute bottom-12 left-2">
+      <div className="absolute bottom-12 left-2 max-w-[60%]">
         {error ? (
-          <div className="rounded-md bg-destructive/10 px-3 py-0.5 text-xs text-destructive">{error}</div>
+          <div className="rounded-md bg-destructive/10 px-1 py-0.5 text-xs text-destructive">
+            {error.message}
+            {error.startLineNumber ? (
+              <span className="ml-1">
+                (Line {error.startLineNumber}:{error.startColumn})
+              </span>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </>

@@ -156,9 +156,12 @@ ${errors.join('\n')}
 
   const handleAddKernelError = useCallback(() => {
     if (kernelError) {
+      const locationInfo = ` (Line ${kernelError.startLineNumber}:${kernelError.startColumn}`;
+
       const markdownKernelError = `
-# Kernel error
-${kernelError}
+# Kernel error${locationInfo}
+${kernelError.message}
+${kernelError.stack ? `\n\`\`\`\n${kernelError.stack}\n\`\`\`` : ''}
 `;
       addText(markdownKernelError);
       if (asPopoverMenu) {

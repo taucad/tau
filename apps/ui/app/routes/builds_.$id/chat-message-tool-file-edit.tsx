@@ -15,6 +15,7 @@ import { useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '~/components/ui/hover-card.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
 import type { CodeError } from '~/types/cad.js';
+import type { KernelError } from '~/types/kernel.js';
 import { fileEditMachine } from '~/machines/file-edit.js';
 
 export type FileEditToolResult = ToolResult<
@@ -25,7 +26,7 @@ export type FileEditToolResult = ToolResult<
   },
   {
     codeErrors: CodeError[];
-    kernelError: string;
+    kernelError: KernelError;
     screenshot: string;
   }
 >;
@@ -37,7 +38,7 @@ function ErrorSection({
   isInitiallyOpen = false,
 }: {
   readonly type: string;
-  readonly errors: CodeError[];
+  readonly errors: Array<CodeError | KernelError>;
   readonly icon: typeof AlertTriangle;
   readonly isInitiallyOpen?: boolean;
 }): JSX.Element | undefined {
@@ -73,10 +74,7 @@ function ErrorSection({
       <CollapsibleContent className="border-t">
         <div className="space-y-2 px-2 py-2 text-xs">
           {errors.map((error) => {
-            // Handle both CodeError objects and string errors
-            const isCodeError = typeof error === 'object' && 'startLineNumber' in error;
-            const message = isCodeError ? error.message : error;
-            const key = isCodeError ? `${error.startLineNumber}-${error.message}` : error;
+            const key = `${error.startLineNumber}-${error.message}`;
 
             return (
               <div key={key} className="flex items-start text-xs">
@@ -85,7 +83,7 @@ function ErrorSection({
                     {error.startLineNumber}:{error.startColumn}
                   </div>
                 </div>
-                <div className="ml-2 flex-1 font-mono">{message}</div>
+                <div className="ml-2 flex-1 font-mono">{error.message}</div>
               </div>
             );
           })}
@@ -304,11 +302,9 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
                         result.kernelError
                           ? [
                               {
-                                startLineNumber: 0,
-                                startColumn: 0,
-                                message: result.kernelError,
-                                endLineNumber: 0,
-                                endColumn: 0,
+                                startLineNumber: result.kernelError.startLineNumber ?? 0,
+                                startColumn: result.kernelError.startColumn ?? 0,
+                                message: result.kernelError.message,
                               },
                             ]
                           : []

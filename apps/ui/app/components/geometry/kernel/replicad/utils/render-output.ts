@@ -45,6 +45,8 @@ type MeshableConfiguration = {
   highlight?: unknown;
 };
 
+export type MainResultShapes = Shape | Shape[] | InputShape | InputShape[];
+
 const isSvgable = (shape: unknown): shape is Svgable => {
   return Boolean((shape as Svgable).toSVGPaths) && Boolean((shape as Svgable).toSVGViewBox);
 };
@@ -58,7 +60,7 @@ const isInputShape = (shape: unknown): shape is InputShape => {
 };
 
 function createBasicShapeConfig(
-  inputShapes: Shape | Shape[] | InputShape | InputShape[],
+  inputShapes: MainResultShapes,
   baseName = 'Shape',
 ): Array<InputShape & { name: string }> {
   let shapes: Array<Shape | InputShape> = [];
@@ -244,7 +246,7 @@ export function render(shapes: CleanConfig[]): Array<Shape2D | Shape3D> {
 }
 
 export function renderOutput(
-  shapes: Shape | Shape[] | InputShape | InputShape[],
+  shapes: MainResultShapes,
   shapeStandardizer?: ShapeStandardizer,
   beforeRender?: (shapes: CleanConfig[]) => CleanConfig[],
   defaultName = 'Shape',

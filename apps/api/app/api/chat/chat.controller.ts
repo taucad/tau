@@ -22,10 +22,29 @@ export type CodeError = {
   endColumn: number;
 };
 
+export type KernelStackFrame = {
+  fileName?: string;
+  functionName?: string;
+  lineNumber?: number;
+  columnNumber?: number;
+  source?: string;
+};
+
+export type KernelError = {
+  message: string;
+  startLineNumber?: number;
+  endLineNumber?: number;
+  startColumn?: number;
+  endColumn?: number;
+  stack?: string;
+  stackFrames?: KernelStackFrame[];
+  type?: 'compilation' | 'runtime' | 'kernel' | 'unknown';
+};
+
 export type CreateChatBody = {
   code: string;
   codeErrors: CodeError[];
-  kernelError: string;
+  kernelError: KernelError;
   screenshot: string;
   messages: Array<
     UIMessage & {
@@ -102,7 +121,11 @@ ${objectToXml({
     startCol: error.startColumn,
     endCol: error.endColumn,
   })),
-  ...(body.kernelError ? { kernelError: body.kernelError } : {}),
+  ...(body.kernelError
+    ? {
+        kernelError: `${body.kernelError.message}${body.kernelError.startLineNumber ? ` (Line ${body.kernelError.startLineNumber}${body.kernelError.startColumn ? `:${body.kernelError.startColumn}` : ''})` : ''}${body.kernelError.stack ? `\n\nStack trace:\n${body.kernelError.stack}` : ''}`,
+      }
+    : {}),
   currentCode: body.code,
 })}
 `,

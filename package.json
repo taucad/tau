@@ -81,6 +81,7 @@
     "culori": "^4.0.1",
     "deepmerge": "^4.3.1",
     "drizzle-orm": "^0.44.2",
+    "error-stack-parser": "^2.1.4",
     "es-cookie": "^1.5.0",
     "es-module-lexer": "^1.7.0",
     "fastify": "^5.3.0",

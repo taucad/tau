@@ -2,7 +2,8 @@ import { assign, assertEvent, setup, sendTo, emit, not, enqueueActions } from 'x
 import type { ActorRefFrom } from 'xstate';
 import { kernelMachine } from '~/machines/kernel.js';
 import type { KernelEventExternal } from '~/machines/kernel.js';
-import type { Shape } from '~/types/cad.js';
+import type { CodeError, Shape } from '~/types/cad.js';
+import type { KernelError } from '~/types/kernel.js';
 import type { graphicsMachine } from '~/machines/graphics.js';
 
 // Interface defining the context for the CAD machine
@@ -12,14 +13,8 @@ export type CadContext = {
   parameters: Record<string, unknown>;
   defaultParameters: Record<string, unknown>;
   shapes: Shape[];
-  kernelError: string | undefined;
-  codeErrors: Array<{
-    message: string;
-    startLineNumber: number;
-    endLineNumber: number;
-    startColumn: number;
-    endColumn: number;
-  }>;
+  kernelError: KernelError | undefined;
+  codeErrors: CodeError[];
   kernelRef: ActorRefFrom<typeof kernelMachine>;
   exportedBlob: Blob | undefined;
   shouldInitializeKernelOnStart: boolean;

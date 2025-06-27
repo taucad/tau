@@ -1,8 +1,17 @@
 import { expose } from 'comlink';
 import * as replicad from 'replicad';
 import * as zod from 'zod/v4';
+import ErrorStackParser from 'error-stack-parser';
 import type { OpenCascadeInstance as OpenCascadeInstanceWithExceptions } from 'replicad-opencascadejs/src/replicad_with_exceptions.js';
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
+import type {
+  BuildShapesResult,
+  KernelStackFrame,
+  ExportGeometryResult,
+  ExtractParametersResult,
+  KernelError,
+} from '~/types/kernel.js';
+import { createKernelSuccess, createKernelError } from '~/types/kernel.js';
 import {
   initOpenCascade,
   initOpenCascadeWithExceptions,
@@ -10,6 +19,7 @@ import {
 import { StudioHelper } from '~/components/geometry/kernel/replicad/utils/studio-helper.js';
 import { runInCjsContext, buildEsModule } from '~/components/geometry/kernel/replicad/vm.js';
 import { renderOutput, ShapeStandardizer } from '~/components/geometry/kernel/replicad/utils/render-output.js';
+import type { MainResultShapes } from '~/components/geometry/kernel/replicad/utils/render-output.js';
 
 // Track whether we've already set OC in replicad to avoid repeated calls
 let replicadHasOc = false;
@@ -38,12 +48,12 @@ return main(replicad, __inputParams || dp)
 }
 
 async function runAsFunction(code: string, parameters: Record<string, unknown>): Promise<unknown> {
-  const oc = await OC;
-  return runInContextAsOc(code, {
-    oc,
-    replicad,
-    __inputParams: parameters,
-  });
+  const contextCode = `
+    ${code}
+    return main(replicad, __inputParams || {});
+  `;
+
+  return runInContextAsOc(contextCode, { __inputParams: parameters });
 }
 
 export async function runAsModule(code: string, parameters: Record<string, unknown>): Promise<unknown> {
@@ -80,25 +90,38 @@ const runCode = async (code: string, parameters: Record<string, unknown>): Promi
   return result;
 };
 
-const extractDefaultParametersFromCode = async (code: string): Promise<Record<string, unknown>> => {
-  if (/^\s*export\s+/m.test(code)) {
-    const module = await buildEsModule(code);
-    return module.defaultParams ?? {};
-  }
+const extractDefaultParametersFromCode = async (code: string): Promise<ExtractParametersResult> => {
+  try {
+    if (/^\s*export\s+/m.test(code)) {
+      const module = await buildEsModule(code);
+      return createKernelSuccess(module.defaultParams ?? {});
+    }
 
-  const editedText = `
+    const editedText = `
 ${code}
 try {
   return defaultParams;
 } catch (e) {
   return undefined;
 }
-  `;
+    `;
 
-  try {
-    return await runInCjsContext(editedText, {});
-  } catch {
-    return {};
+    try {
+      const result = await runInCjsContext(editedText, {});
+      return createKernelSuccess((result ?? {}) as Record<string, unknown>);
+    } catch {
+      return createKernelSuccess({} as Record<string, unknown>);
+    }
+  } catch (error) {
+    const kernelError = await formatKernelError(error);
+    return createKernelError({
+      message: kernelError.message,
+      startLineNumber: kernelError.startLineNumber ?? 0,
+      startColumn: kernelError.startColumn ?? 0,
+      stack: kernelError.stack,
+      stackFrames: kernelError.stackFrames,
+      type: kernelError.type,
+    });
   }
 };
 
@@ -143,7 +166,7 @@ try {
   } catch {}
 };
 
-const shapesMemory: Record<string, Array<{ shape: unknown; name: string }>> = {};
+const shapesMemory: Record<string, Array<{ shape: replicad.Shape3D; name: string }>> = {};
 
 const ocVersions: {
   withExceptions: Promise<OpenCascadeInstanceWithExceptions> | undefined;
@@ -157,7 +180,7 @@ const ocVersions: {
 
 // Initialize OC as a placeholder that will be set during initialization
 // eslint-disable-next-line @typescript-eslint/naming-convention -- FIXME
-let OC: Promise<OpenCascadeInstance> | undefined;
+let OC: Promise<OpenCascadeInstance | OpenCascadeInstanceWithExceptions> | undefined;
 
 let isInitializing = false;
 
@@ -222,36 +245,115 @@ async function disableExceptions() {
   return initializeOpenCascadeInstance(false);
 }
 
-async function toggleExceptions() {
+async function toggleExceptions(): Promise<'single' | 'withExceptions'> {
   await (ocVersions.current === 'single' ? enableExceptions() : disableExceptions());
   return ocVersions.current;
 }
 
-const formatException = (oc: unknown, error: unknown): { error: boolean; message: string; stack?: string } => {
+const formatException = (
+  oc: OpenCascadeInstanceWithExceptions,
+  error: unknown,
+): { error: boolean; message: string; stack?: string } => {
   let message = 'error';
 
   if (typeof error === 'number') {
     if (oc.OCJS) {
       const errorData = oc.OCJS.getStandard_FailureData(error);
+      // eslint-disable-next-line new-cap -- valid API in OCJS
       message = errorData.GetMessageString();
     } else {
       message = `Kernel error ${error}`;
     }
   } else {
-    message = error.message;
+    message = error instanceof Error ? error.message : 'Unknown error';
     console.error(error);
   }
 
   return {
     error: true,
     message,
-    stack: error.stack,
+    stack: error instanceof Error ? error.stack : undefined,
   };
 };
 
-const buildShapesFromCode = async (code: string, parameters: Record<string, unknown>): Promise<unknown> => {
+// Enhanced error formatting function using robust error-stack-parser
+const formatKernelError = async (error: unknown): Promise<KernelError> => {
+  console.log('Formatting kernel error:\n', error);
+  // Start with default values
+  let message = 'Unknown error occurred';
+  let stack: string | undefined;
+  let kernelStackFrames: KernelStackFrame[] = [];
+  let startLineNumber = 0;
+  let startColumn = 0;
+  let type: 'compilation' | 'runtime' | 'kernel' | 'unknown' = 'unknown';
+
+  // Handle OpenCascade kernel errors (numbers)
+  if (typeof error === 'number') {
+    try {
+      // Get the current OpenCascade instance for error message extraction
+      const ocInstance = await OC;
+      if (ocInstance) {
+        const exceptionResult = formatException(ocInstance as OpenCascadeInstanceWithExceptions, error);
+        message = exceptionResult.message;
+        type = 'kernel';
+      } else {
+        message = `Kernel error ${error}`;
+        type = 'kernel';
+      }
+    } catch (ocError) {
+      console.warn('Failed to format OpenCascade exception:', ocError);
+      message = `Kernel error ${error}`;
+      type = 'kernel';
+    }
+  }
+  // Handle JavaScript Error objects
+  else if (error instanceof Error) {
+    message = error.message;
+    stack = error.stack;
+    type = 'runtime';
+
+    try {
+      // Use ErrorStackParser for robust cross-browser stack parsing
+      const stackFrames = ErrorStackParser.parse(error);
+
+      // Convert error-stack-parser StackFrames to our KernelStackFrames
+      kernelStackFrames = stackFrames.map((frame) => ({
+        fileName: frame.fileName,
+        functionName: frame.functionName,
+        lineNumber: frame.lineNumber,
+        columnNumber: frame.columnNumber,
+        source: frame.source,
+      }));
+
+      // Find the first meaningful stack frame (not from this library)
+      const userFrame = stackFrames.find((frame) => frame.functionName === 'Module.main') ?? stackFrames[0];
+
+      startLineNumber = userFrame?.lineNumber ?? 0;
+      startColumn = userFrame?.columnNumber ?? 0;
+    } catch (parseError) {
+      // Fallback if stack parsing fails
+      console.warn('Failed to parse error stack:', parseError);
+    }
+  }
+  // Handle string errors
+  else if (typeof error === 'string') {
+    message = error;
+    type = 'runtime';
+  }
+
+  return {
+    message,
+    stack,
+    stackFrames: kernelStackFrames.length > 0 ? kernelStackFrames : undefined,
+    startLineNumber,
+    startColumn,
+    type,
+  };
+};
+
+const buildShapesFromCode = async (code: string, parameters: Record<string, unknown>): Promise<BuildShapesResult> => {
   const startTime = performance.now();
-  console.log('building shapes from code');
+  console.log('Building shapes from code');
 
   try {
     // Ensure font is loaded
@@ -261,8 +363,8 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
     // }
 
     // Prepare context and helpers
-    let shapes;
-    let defaultName;
+    let shapes: MainResultShapes;
+    let defaultName: string | undefined;
     const helper = new StudioHelper();
     const standardizer = new ShapeStandardizer();
 
@@ -274,7 +376,7 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
 
       // Run the code with measurements
       const runCodeStartTime = performance.now();
-      shapes = await runCode(code, parameters);
+      shapes = (await runCode(code, parameters)) as MainResultShapes;
       const runCodeEndTime = performance.now();
       console.log(`Code execution took ${runCodeEndTime - runCodeStartTime}ms`);
 
@@ -282,38 +384,38 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
     } catch (error) {
       const endTime = performance.now();
       console.log(`Error occurred after ${endTime - startTime}ms`);
-      return formatException(await OC, error);
+      return {
+        success: false,
+        error: await formatKernelError(error),
+      };
     }
 
     // Process shapes efficiently
     const renderStartTime = performance.now();
-    const result = renderOutput(
-      shapes,
-      standardizer,
-      (shapesArray) => {
-        const editedShapes = helper.apply(shapesArray);
-        shapesMemory.defaultShape = shapesArray;
-        return editedShapes;
-      },
-      defaultName,
-    );
+    const result = renderOutput(shapes, standardizer);
     const renderEndTime = performance.now();
     console.log(`Render output took ${renderEndTime - renderStartTime}ms`);
 
     const totalTime = performance.now() - startTime;
     console.log(`Total buildShapesFromCode time: ${totalTime}ms`);
 
-    return result;
+    return {
+      success: true,
+      data: result,
+    };
   } catch (error) {
     console.error('Error in buildShapesFromCode:', error);
-    return { error: true, message: error instanceof Error ? error.message : String(error) };
+    return {
+      success: false,
+      error: await formatKernelError(error),
+    };
   }
 };
 
 const defaultExportMeshConfig = { tolerance: 0.01, angularTolerance: 30 };
 
 const buildBlob = (
-  shape: unknown,
+  shape: replicad.Shape3D,
   fileType: string,
   meshConfig: { tolerance: number; angularTolerance: number },
 ): Blob => {
@@ -327,21 +429,43 @@ const exportShape = async (
   fileType: 'stl' | 'stl-binary' | 'step' | 'step-assembly' = 'stl',
   shapeId = 'defaultShape',
   meshConfig = defaultExportMeshConfig,
-): Promise<Array<{ blob: Blob; name: string }>> => {
-  if (!shapesMemory[shapeId]) throw new Error(`Shape ${shapeId} not computed yet`);
-  if (fileType === 'step-assembly') {
-    return [
-      {
-        blob: replicad.exportSTEP(shapesMemory[shapeId]),
-        name: shapeId,
-      },
-    ];
-  }
+): Promise<ExportGeometryResult> => {
+  try {
+    if (!shapesMemory[shapeId]) {
+      return createKernelError({
+        message: `Shape ${shapeId} not computed yet`,
+        startLineNumber: 0,
+        startColumn: 0,
+        type: 'runtime',
+      });
+    }
 
-  return shapesMemory[shapeId].map(({ shape, name }) => ({
-    blob: buildBlob(shape, fileType, meshConfig),
-    name,
-  }));
+    if (fileType === 'step-assembly') {
+      const result = [
+        {
+          blob: replicad.exportSTEP(shapesMemory[shapeId]),
+          name: shapeId,
+        },
+      ];
+      return createKernelSuccess(result);
+    }
+
+    const result = shapesMemory[shapeId].map(({ shape, name }) => ({
+      blob: buildBlob(shape, fileType, meshConfig),
+      name,
+    }));
+    return createKernelSuccess(result);
+  } catch (error) {
+    const kernelError = await formatKernelError(error);
+    return createKernelError({
+      message: kernelError.message,
+      startLineNumber: kernelError.startLineNumber ?? 0,
+      startColumn: kernelError.startColumn ?? 0,
+      stack: kernelError.stack,
+      stackFrames: kernelError.stackFrames,
+      type: kernelError.type,
+    });
+  }
 };
 
 const faceInfo = (subshapeIndex: number, faceIndex: number, shapeId = 'defaultShape'): unknown | undefined => {
@@ -402,6 +526,7 @@ const service = {
   isExceptionsEnabled: (): boolean => ocVersions.current === 'withExceptions',
 };
 
+// @ts-expect-error -- TODO: Investigate this. It's not causing any issues.
 expose(service, globalThis);
 
 export type BuilderWorkerInterface = typeof service;

@@ -1,3 +1,6 @@
+const xstateActorDoneEventPrefix = 'xstate.done.actor.';
+type XstateActorDoneEvent = `${typeof xstateActorDoneEventPrefix}${string}`;
+
 /**
  * Asserts that the event is a done event from an actor.
  *
@@ -7,8 +10,8 @@
  */
 export function assertActorDoneEvent<Event extends { type: string }>(
   event: Event,
-): asserts event is Extract<Event, { type: `xstate.done.actor.${string}` }> {
-  if (event.type.startsWith('xstate.done.actor.')) {
+): asserts event is Extract<Event, { type: XstateActorDoneEvent }> {
+  if (event.type.startsWith(xstateActorDoneEventPrefix)) {
     return;
   }
 

@@ -263,6 +263,7 @@ export const cadMachine = setup({
         initializeModel: {
           target: 'initializing',
           actions: 'initializeModel',
+          reenter: true, // When another model is loaded whilst another is being initialized, reenter the state to begin computing the new model
         },
         kernelError: {
           target: 'error',
@@ -302,6 +303,15 @@ export const cadMachine = setup({
         },
       },
     },
+    // The buffering state debounces rapid code/parameter changes
+    // When transitioning from initializing/rendering to buffering, XState automatically
+    // cancels any inflight kernel invocations, ensuring latest changes take precedence.
+    // Note: The worker may continue processing cancelled operations in the background,
+    // but their results will be ignored by the promise actors.
+    // Future improvements could include:
+    // - A more robust cancellation mechanism that ensures the worker job is properly terminated
+    // - A way to track the progress of the worker and display it to the user
+    // - A way to cancel the worker job if the user navigates away from the page
     buffering: {
       after: {
         [debounceDelay]: {

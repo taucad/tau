@@ -61,12 +61,18 @@ const parseParametersActor = fromPromise<
   | {
       type: 'parametersParsed';
       defaultParameters: Record<string, unknown>;
-      parameters: Record<string, unknown>;
       code: string;
-      jsonSchema?: unknown;
+      parameters: Record<string, unknown>;
+      jsonSchema: unknown;
     }
-  | { type: 'kernelError'; error: KernelError },
-  { context: KernelContext; event: { code: string; parameters: Record<string, unknown> } }
+  | {
+      type: 'kernelError';
+      error: KernelError;
+    },
+  {
+    context: KernelContext;
+    event: { code: string; parameters: Record<string, unknown> };
+  }
 >(async ({ input }) => {
   const { context, event } = input;
 
@@ -78,7 +84,7 @@ const parseParametersActor = fromPromise<
         message: 'Not in browser environment',
         startLineNumber: 0,
         startColumn: 0,
-        type: 'compilation',
+        type: 'runtime',
       },
     };
   }
@@ -184,7 +190,7 @@ const evaluateCodeActor = fromPromise<
 
   const result = await context.wrappedWorker.buildShapesFromCode(event.code, mergedParameters);
 
-  // Handle the new result pattern
+  // Handle the result pattern
   if (isKernelSuccess(result)) {
     return { type: 'geometryComputed', shapes: result.data };
   }
@@ -366,7 +372,10 @@ export const kernelMachine = setup({
       invoke: {
         id: 'createWorkerActor',
         src: 'createWorkerActor',
-        input: ({ context }) => ({ context }),
+        input({ context, event }) {
+          assertEvent(event, 'initializeKernel');
+          return { context, kernelType: event.kernelType };
+        },
         onDone: {
           target: 'ready',
           actions: sendTo(
@@ -389,6 +398,15 @@ export const kernelMachine = setup({
     },
 
     parsing: {
+      // Allow cancelling inflight operations
+      on: {
+        computeGeometry: {
+          target: 'parsing',
+        },
+        exportGeometry: {
+          target: 'exporting',
+        },
+      },
       invoke: {
         id: 'parseParametersActor',
         src: 'parseParametersActor',
@@ -420,6 +438,15 @@ export const kernelMachine = setup({
     },
 
     evaluating: {
+      // Allow cancelling inflight operations
+      on: {
+        computeGeometry: {
+          target: 'parsing',
+        },
+        exportGeometry: {
+          target: 'exporting',
+        },
+      },
       invoke: {
         id: 'evaluateCodeActor',
         src: 'evaluateCodeActor',
@@ -442,6 +469,15 @@ export const kernelMachine = setup({
     },
 
     exporting: {
+      // Allow cancelling inflight operations
+      on: {
+        computeGeometry: {
+          target: 'parsing',
+        },
+        exportGeometry: {
+          target: 'exporting',
+        },
+      },
       invoke: {
         id: 'exportGeometryActor',
         src: 'exportGeometryActor',

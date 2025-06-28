@@ -46,7 +46,7 @@ export function NavUser(): JSX.Element {
             trigger={
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="select-none">
-                  <UserAvatar user={session?.user} />
+                  <UserAvatar className="size-7" user={session?.user} />
                 </Button>
               </TooltipTrigger>
             }

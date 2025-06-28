@@ -1,5 +1,5 @@
 import { assign, assertEvent, setup, sendTo, fromPromise } from 'xstate';
-import type { Snapshot, ActorRef, OutputFrom } from 'xstate';
+import type { Snapshot, ActorRef, OutputFrom, DoneActorEvent } from 'xstate';
 import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import type { Shape } from '~/types/cad.js';
@@ -8,6 +8,7 @@ import { isKernelSuccess } from '~/types/kernel.js';
 import type { BuilderWorkerInterface } from '~/components/geometry/kernel/replicad/replicad-builder.worker.js';
 import BuilderWorker from '~/components/geometry/kernel/replicad/replicad-builder.worker.js?worker';
 import { jsonSchemaFromJson } from '~/utils/schema.js';
+import { assertActorDoneEvent } from '~/utils/xstate.js';
 
 const createWorkerActor = fromPromise<
   { type: 'kernelInitialized' } | { type: 'kernelError'; error: KernelError },
@@ -175,66 +176,23 @@ const evaluateCodeActor = fromPromise<
     };
   }
 
-  try {
-    // Merge default parameters with provided parameters
-    const mergedParameters = {
-      ...event.defaultParameters,
-      ...event.parameters,
-    };
+  // Merge default parameters with provided parameters
+  const mergedParameters = {
+    ...event.defaultParameters,
+    ...event.parameters,
+  };
 
-    const result = await context.wrappedWorker.buildShapesFromCode(event.code, mergedParameters);
+  const result = await context.wrappedWorker.buildShapesFromCode(event.code, mergedParameters);
 
-    // Handle the new result pattern
-    if (isKernelSuccess(result)) {
-      return { type: 'geometryComputed', shapes: result.data };
-    }
-
-    return {
-      type: 'kernelError',
-      error: result.error,
-    };
-  } catch (error) {
-    if (error instanceof Error) {
-      // Check if this error has a KernelError object attached (from worker)
-      if ('kernelError' in error && error.kernelError && typeof error.kernelError === 'object') {
-        return {
-          type: 'kernelError',
-          error: error.kernelError as KernelError,
-        };
-      }
-
-      // Try to extract location information from the error message
-      const locationMatch = /line (\d+)(?::(\d+))?/i.exec(error.message);
-      let startLineNumber = 0;
-      let startColumn = 0;
-
-      if (locationMatch) {
-        startLineNumber = Number.parseInt(locationMatch[1], 10);
-        startColumn = locationMatch[2] ? Number.parseInt(locationMatch[2], 10) : 0;
-      }
-
-      return {
-        type: 'kernelError',
-        error: {
-          message: error.message,
-          stack: error.stack,
-          startLineNumber,
-          startColumn,
-          type: 'runtime',
-        },
-      };
-    }
-
-    return {
-      type: 'kernelError',
-      error: {
-        message: typeof error === 'string' ? error : 'Unknown error occurred',
-        startLineNumber: 0,
-        startColumn: 0,
-        type: 'runtime',
-      },
-    };
+  // Handle the new result pattern
+  if (isKernelSuccess(result)) {
+    return { type: 'geometryComputed', shapes: result.data };
   }
+
+  return {
+    type: 'kernelError',
+    error: result.error,
+  };
 });
 
 const exportGeometryActor = fromPromise<
@@ -313,27 +271,27 @@ const isBrowser = globalThis.window !== undefined && typeof Worker !== 'undefine
 
 export type CadActor = ActorRef<Snapshot<unknown>, KernelEventExternal>;
 
+// Define the actors that the machine can invoke
+const kernelActors = {
+  createWorkerActor,
+  parseParametersActor,
+  evaluateCodeActor,
+  exportGeometryActor,
+} as const;
+type KernelActorNames = keyof typeof kernelActors;
+
+// Define the types of events the machine can receive
 type KernelEventInternal =
   | { type: 'initializeKernel'; kernelType: 'replicad' | 'openscad'; parentRef: CadActor }
   | { type: 'computeGeometry'; code: string; parameters: Record<string, unknown> }
   | { type: 'parseParameters'; code: string }
   | { type: 'exportGeometry'; format: string };
 
-// Define the types of events the machine can receive
-export type KernelEventExternal =
-  | { type: 'kernelInitialized' }
-  | { type: 'geometryComputed'; shapes: Shape[] }
-  | {
-      type: 'parametersParsed';
-      defaultParameters: Record<string, unknown>;
-      parameters: Record<string, unknown>;
-      code: string;
-      jsonSchema?: unknown;
-    }
-  | { type: 'geometryExported'; blob: Blob; format: 'stl' | 'stl-binary' | 'step' | 'step-assembly' }
-  | { type: 'kernelError'; error: KernelError };
+// The kernel machine simply sends the output of the actors to the parent machine.
+export type KernelEventExternal = OutputFrom<(typeof kernelActors)[KernelActorNames]>;
+type KernelEventExternalDone = DoneActorEvent<KernelEventExternal, KernelActorNames>;
 
-type KernelEvent = KernelEventExternal | KernelEventInternal;
+type KernelEvent = KernelEventExternalDone | KernelEventInternal;
 
 // Interface defining the context for the Kernel machine
 type KernelContext = {
@@ -361,12 +319,7 @@ export const kernelMachine = setup({
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
     events: {} as KernelEvent,
   },
-  actors: {
-    createWorkerActor,
-    parseParametersActor,
-    evaluateCodeActor,
-    exportGeometryActor,
-  },
+  actors: kernelActors,
   actions: {
     registerParentRef: assign({
       parentRef({ event }) {
@@ -380,6 +333,12 @@ export const kernelMachine = setup({
       context.worker.terminate();
       context.worker = undefined;
       context.wrappedWorker = undefined;
+    },
+  },
+  guards: {
+    isKernelError({ event }) {
+      assertActorDoneEvent(event);
+      return event.output.type === 'kernelError';
     },
   },
 }).createMachine({
@@ -440,13 +399,23 @@ export const kernelMachine = setup({
             event,
           };
         },
-        onDone: {
-          target: 'evaluating',
-          actions: sendTo(
-            ({ context }) => context.parentRef!,
-            ({ event }) => event.output,
-          ),
-        },
+        onDone: [
+          {
+            target: 'ready',
+            guard: 'isKernelError',
+            actions: sendTo(
+              ({ context }) => context.parentRef!,
+              ({ event }) => event.output,
+            ),
+          },
+          {
+            target: 'evaluating',
+            actions: sendTo(
+              ({ context }) => context.parentRef!,
+              ({ event }) => event.output,
+            ),
+          },
+        ],
       },
     },
 
@@ -455,12 +424,11 @@ export const kernelMachine = setup({
         id: 'evaluateCodeActor',
         src: 'evaluateCodeActor',
         input({ context, event }) {
-          // The parseParametersActor returns an object without typing. There might be a better way to do this.
-          const typedEvent = event as { type: string; output: OutputFrom<typeof parseParametersActor> };
-          assertEvent(typedEvent.output, 'parametersParsed');
+          assertEvent(event, 'xstate.done.actor.parseParametersActor');
+          assertEvent(event.output, 'parametersParsed');
           return {
             context,
-            event: typedEvent.output,
+            event: event.output,
           };
         },
         onDone: {

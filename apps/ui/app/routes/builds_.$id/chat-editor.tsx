@@ -60,7 +60,6 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       fileExplorerActorRef.send({ type: 'openFile', file: mainFile });
     }
 
-    console.log('setting up file explorer');
     // eslint-disable-next-line react-hooks/exhaustive-deps -- we only want to run this effect when the build changes
   }, [build?.id, fileExplorerActorRef]);
 

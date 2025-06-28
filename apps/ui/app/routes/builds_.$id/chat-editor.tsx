@@ -42,8 +42,12 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
     // Initialize the file tree with build files
     fileExplorerActorRef.send({ type: 'setFileTree', tree: fileItems });
 
-    // Open the main file if no files are open
-    if (openFiles.length === 0 && mainFileName && files[mainFileName]) {
+    // Clear existing open files and open the main file from the new build
+    for (const file of openFiles) {
+      fileExplorerActorRef.send({ type: 'closeFile', fileId: file.id });
+    }
+
+    if (mainFileName && files[mainFileName]) {
       const mainFile = {
         id: mainFileName,
         name: mainFileName,
@@ -55,7 +59,10 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
 
       fileExplorerActorRef.send({ type: 'openFile', file: mainFile });
     }
-  }, [build, fileExplorerActorRef, openFiles.length]);
+
+    console.log('setting up file explorer');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- we only want to run this effect when the build changes
+  }, [build?.id, fileExplorerActorRef]);
 
   // Get the active file content if file explorer is available
   const activeFile = openFiles.find((file) => file.id === activeFileId);

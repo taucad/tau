@@ -29,27 +29,17 @@ async function bootstrap() {
     Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`, 'Bootstrap');
   }
 
+  // Hot Module Replacement using Vite's HMR API
+  if (import.meta.hot) {
+    import.meta.hot.accept();
+    import.meta.hot.dispose(async () => {
+      await app.close();
+    });
+  }
+
   return app;
 }
 
-// Hot Module Replacement using Vite's HMR API
-let app!: NestFastifyApplication;
+const app = await bootstrap();
 
-if (import.meta.hot) {
-  const startApp = async () => {
-    app = await bootstrap();
-  };
-
-  await startApp();
-
-  import.meta.hot.accept();
-  import.meta.hot.dispose(async () => {
-    await app.close();
-  });
-} else {
-  // Production or non-HMR environment
-  app = await bootstrap();
-}
-
-// Export as const to satisfy linter
 export const viteNodeApp = app;

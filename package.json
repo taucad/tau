@@ -9,7 +9,16 @@
     "mcp:browser": "npx -y @agentdeskai/browser-tools-mcp@1.2.0",
     "build": "nx build",
     "extract-replicad-api": "tsx scripts/extract-replicad-api.ts",
-    "analyze-replicad-api": "tsx scripts/use-extracted-api.ts"
+    "analyze-replicad-api": "tsx scripts/use-extracted-api.ts",
+    "db:up": "docker compose -f infra/docker-compose.db.yml up -d",
+    "db:down": "docker compose -f infra/docker-compose.db.yml down",
+    "db:reset": "docker compose -f infra/docker-compose.db.yml down -v && docker compose -f infra/docker-compose.db.yml up -d",
+    "db:logs": "docker compose -f infra/docker-compose.db.yml logs -f postgres",
+    "db:generate": "nx run api:db-generate",
+    "db:migrate": "nx run api:db-migrate",
+    "db:studio": "nx run api:db-studio",
+    "db:push": "nx run api:db-push",
+    "db:drop": "nx run api:db-drop"
   },
   "dependencies": {
     "@ai-sdk/openai": "^1.3.22",

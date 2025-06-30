@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { generateId } from 'ai';
-import { encodeBytes } from './base62.js';
+import { encodeBytes } from '~/utils/base62.js';
 
 const idLength = 21;
 
@@ -32,6 +32,10 @@ export const idPrefix = {
    * An LLM chat run ID.
    */
   run: 'run',
+  /**
+   * A request ID.
+   */
+  request: 'req',
 } as const satisfies Record<string, string>;
 
 export type IdPrefix = (typeof idPrefix)[keyof typeof idPrefix];

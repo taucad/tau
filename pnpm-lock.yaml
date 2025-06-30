@@ -256,6 +256,9 @@ importers:
       motion:
         specifier: ^12.11.3
         version: 12.11.3(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      nestjs-pino:
+        specifier: ^4.4.0
+        version: 4.4.0(@nestjs/common@11.0.17(reflect-metadata@0.2.2)(rxjs@7.8.1))(pino-http@10.5.0)(pino@9.6.0)(rxjs@7.8.1)
       ollama:
         specifier: ^0.5.12
         version: 0.5.13
@@ -265,6 +268,12 @@ importers:
       pgvector:
         specifier: ^0.2.1
         version: 0.2.1
+      pino-http:
+        specifier: ^10.5.0
+        version: 10.5.0
+      pino-pretty:
+        specifier: ^13.0.0
+        version: 13.0.0
       pluralize:
         specifier: ^8.0.0
         version: 8.0.0
@@ -345,7 +354,7 @@ importers:
         version: 0.174.0
       three-viewport-gizmo:
         specifier: git://github.com/opensrchq/three-viewport-gizmo#9154497a6c01db5dcf64d6f403f9901cca304ef4
-        version: https://codeload.github.com/opensrchq/three-viewport-gizmo/tar.gz/9154497a6c01db5dcf64d6f403f9901cca304ef4(three@0.174.0)
+        version: git+https://git@github.com:opensrchq/three-viewport-gizmo.git#9154497a6c01db5dcf64d6f403f9901cca304ef4(three@0.174.0)
       uint8array-extras:
         specifier: ^1.4.0
         version: 1.4.0
@@ -7564,6 +7573,9 @@ packages:
     resolution: {integrity: sha512-39BOQLs9ZjKh0/patS9nrT8wc3ioX3/eA/zgbKNopnF2wCqJEoxywwwElATYvRsXdnOxA/OQeQoFZ3rFjVajhg==}
     engines: {node: '>=4.0'}
 
+  dateformat@4.6.3:
+    resolution: {integrity: sha512-2P0p0pFGzHS5EMnhdxQi7aJN+iMheud0UhG4dlE1DLAlvL8JHjJJTX/CSm4JXwV0Ka5nGk3zC5mcb5bUQUxxMA==}
+
   de-indent@1.0.2:
     resolution: {integrity: sha512-e/1zu3xH5MQryN2zdVaF0OrdNLUbvWxzMbi+iNA6Bky7l1RoP8a2fIbRocyHclXt/arDrrR6lL3TqFD9pMQTsg==}
 
@@ -8415,6 +8427,9 @@ packages:
   extend@3.0.2:
     resolution: {integrity: sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g==}
 
+  fast-copy@3.0.2:
+    resolution: {integrity: sha512-dl0O9Vhju8IrcLndv2eU4ldt1ftXMqqfgN4H1cpmGV7P6jeB9FwpN9a2c8DPGE1Ys88rNUJVYDHq73CGAGOPfQ==}
+
   fast-decode-uri-component@1.0.1:
     resolution: {integrity: sha512-WKgKWg5eUxvRZGwW8FvfbaH7AXSh2cL+3j5fMGzUMCxWBJ3dV3a7Wz8y2f/uQ0e3B6WmodD3oS54jTQ9HVTIIg==}
 
@@ -8994,6 +9009,9 @@ packages:
   he@1.2.0:
     resolution: {integrity: sha512-F/1DnUGPopORZi0ni+CvrCgHQ5FyEAHRLSApuYWMmrbSwoN2Mn/7k+Gl38gJnR7yyDZk6WLXwiGod1JOWNDKGw==}
     hasBin: true
+
+  help-me@5.0.0:
+    resolution: {integrity: sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg==}
 
   hls.js@1.5.20:
     resolution: {integrity: sha512-uu0VXUK52JhihhnN/MVVo1lvqNNuhoxkonqgO3IpjvQiGpJBdIXMGkofjQb/j9zvV7a1SW8U9g1FslWx/1HOiQ==}
@@ -9739,6 +9757,10 @@ packages:
 
   jose@5.10.0:
     resolution: {integrity: sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==}
+
+  joycon@3.1.1:
+    resolution: {integrity: sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw==}
+    engines: {node: '>=10'}
 
   js-base64@3.7.7:
     resolution: {integrity: sha512-7rCnleh0z2CkXhH67J8K1Ytz0b2Y+yxTPL+/KOJoa20hfnVQ/3/T6W/KflYI4bRHRagNeXeU2bkNGI3v1oS/lw==}
@@ -10883,6 +10905,15 @@ packages:
   neo-async@2.6.2:
     resolution: {integrity: sha512-Yd3UES5mWCSqR+qNT93S3UoYUkqAZ9lLg8a7g9rimsWmYGK8cVToA4/sF3RrshdyV3sAGMXVUmpMYOw+dLpOuw==}
 
+  nestjs-pino@4.4.0:
+    resolution: {integrity: sha512-+GMNlcNWDRrMtlQftfcxN+5pV2C25A4wsYIY7cfRJTMW4b8IFKYReDrG1lUp5LGql9fXemmnVJ2Ww10iIkCZPQ==}
+    engines: {node: '>= 14'}
+    peerDependencies:
+      '@nestjs/common': ^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0
+      pino: ^7.5.0 || ^8.0.0 || ^9.0.0
+      pino-http: ^6.4.0 || ^7.0.0 || ^8.0.0 || ^9.0.0 || ^10.0.0
+      rxjs: ^7.1.0
+
   no-case@3.0.4:
     resolution: {integrity: sha512-fgAN3jGAh+RoxUGZHTSOLJIqUc2wmoBwGR4tbpNAKmmovFoWq0OdRkb0VkldReO2a2iBT/OEulG9XSUc10r3zg==}
 
@@ -11384,6 +11415,13 @@ packages:
 
   pino-abstract-transport@2.0.0:
     resolution: {integrity: sha512-F63x5tizV6WCh4R6RHyi2Ml+M70DNRXt/+HANowMflpgGFMAym/VKm6G7ZOQRjqN7XbGxK1Lg9t6ZrtzOaivMw==}
+
+  pino-http@10.5.0:
+    resolution: {integrity: sha512-hD91XjgaKkSsdn8P7LaebrNzhGTdB086W3pyPihX0EzGPjq5uBJBXo4N5guqNaK6mUjg9aubMF7wDViYek9dRA==}
+
+  pino-pretty@13.0.0:
+    resolution: {integrity: sha512-cQBBIVG3YajgoUjo1FdKVRX6t9XPxwB9lcNJVD5GCnNM4Y6T12YYx8c6zEejxQsU0wrg9TwmDulcE9LR7qcJqA==}
+    hasBin: true
 
   pino-std-serializers@7.0.0:
     resolution: {integrity: sha512-e906FRY0+tV27iq4juKzSYPbUj2do2X2JX4EzSca1631EB2QJQUqGbDuERal7LCtOpxl6x3+nvo9NPZcmjkiFA==}
@@ -13200,8 +13238,8 @@ packages:
     peerDependencies:
       three: '>=0.128.0'
 
-  three-viewport-gizmo@https://codeload.github.com/opensrchq/three-viewport-gizmo/tar.gz/9154497a6c01db5dcf64d6f403f9901cca304ef4:
-    resolution: {tarball: https://codeload.github.com/opensrchq/three-viewport-gizmo/tar.gz/9154497a6c01db5dcf64d6f403f9901cca304ef4}
+  three-viewport-gizmo@git+https://git@github.com:opensrchq/three-viewport-gizmo.git#9154497a6c01db5dcf64d6f403f9901cca304ef4:
+    resolution: {commit: 9154497a6c01db5dcf64d6f403f9901cca304ef4, repo: git@github.com:opensrchq/three-viewport-gizmo.git, type: git}
     version: 2.2.0
     peerDependencies:
       three: '>=0.162.0 <1.0.0'
@@ -21847,6 +21885,8 @@ snapshots:
 
   date-format@4.0.14: {}
 
+  dateformat@4.6.3: {}
+
   de-indent@1.0.2: {}
 
   debug@2.6.9:
@@ -22925,6 +22965,8 @@ snapshots:
 
   extend@3.0.2: {}
 
+  fast-copy@3.0.2: {}
+
   fast-decode-uri-component@1.0.1: {}
 
   fast-deep-equal@2.0.1: {}
@@ -23650,6 +23692,8 @@ snapshots:
       space-separated-tokens: 2.0.2
 
   he@1.2.0: {}
+
+  help-me@5.0.0: {}
 
   hls.js@1.5.20: {}
 
@@ -24592,6 +24636,8 @@ snapshots:
   jju@1.4.0: {}
 
   jose@5.10.0: {}
+
+  joycon@3.1.1: {}
 
   js-base64@3.7.7: {}
 
@@ -26100,6 +26146,13 @@ snapshots:
 
   neo-async@2.6.2: {}
 
+  nestjs-pino@4.4.0(@nestjs/common@11.0.17(reflect-metadata@0.2.2)(rxjs@7.8.1))(pino-http@10.5.0)(pino@9.6.0)(rxjs@7.8.1):
+    dependencies:
+      '@nestjs/common': 11.0.17(reflect-metadata@0.2.2)(rxjs@7.8.1)
+      pino: 9.6.0
+      pino-http: 10.5.0
+      rxjs: 7.8.1
+
   no-case@3.0.4:
     dependencies:
       lower-case: 2.0.2
@@ -26656,6 +26709,29 @@ snapshots:
   pino-abstract-transport@2.0.0:
     dependencies:
       split2: 4.2.0
+
+  pino-http@10.5.0:
+    dependencies:
+      get-caller-file: 2.0.5
+      pino: 9.6.0
+      pino-std-serializers: 7.0.0
+      process-warning: 5.0.0
+
+  pino-pretty@13.0.0:
+    dependencies:
+      colorette: 2.0.20
+      dateformat: 4.6.3
+      fast-copy: 3.0.2
+      fast-safe-stringify: 2.1.1
+      help-me: 5.0.0
+      joycon: 3.1.1
+      minimist: 1.2.8
+      on-exit-leak-free: 2.1.2
+      pino-abstract-transport: 2.0.0
+      pump: 3.0.2
+      secure-json-parse: 2.7.0
+      sonic-boom: 4.2.0
+      strip-json-comments: 3.1.1
 
   pino-std-serializers@7.0.0: {}
 
@@ -28642,7 +28718,7 @@ snapshots:
       potpack: 1.0.2
       three: 0.174.0
 
-  three-viewport-gizmo@https://codeload.github.com/opensrchq/three-viewport-gizmo/tar.gz/9154497a6c01db5dcf64d6f403f9901cca304ef4(three@0.174.0):
+  three-viewport-gizmo@git+https://git@github.com:opensrchq/three-viewport-gizmo.git#9154497a6c01db5dcf64d6f403f9901cca304ef4(three@0.174.0):
     dependencies:
       three: 0.174.0
 

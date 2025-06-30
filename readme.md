@@ -8,7 +8,7 @@ Your AI-powered workshop companion - a free, open-source CAD platform that works
 
 ### Prerequisites
 
-- Node.js 22+
+- Node.js 24+
 - pnpm
 - Docker
 

@@ -1,5 +1,18 @@
 import { assertEvent, setup, enqueueActions } from 'xstate';
 
+// Helper function to find a file by path in the tree
+function findFileByPath(tree: FileItem[], path: string): FileItem | undefined {
+  for (const item of tree) {
+    if (item.path === path) return item;
+    if (item.children) {
+      const found = findFileByPath(item.children, path);
+      if (found) return found;
+    }
+  }
+
+  return undefined;
+}
+
 export type FileItem = {
   id: string;
   name: string;
@@ -28,11 +41,11 @@ type FileExplorerContext = {
 
 // Define the types of events the machine can receive
 type FileExplorerEvent =
-  | { type: 'openFile'; file: FileItem }
+  | { type: 'openFile'; path: string }
   | { type: 'closeFile'; fileId: string }
   | { type: 'setActiveFile'; fileId: string | undefined }
   | { type: 'updateFileContent'; fileId: string; content: string }
-  | { type: 'setFileTree'; tree: FileItem[] };
+  | { type: 'setFileTree'; tree: FileItem[]; openFiles: string[] };
 
 type FileExplorerEmitted =
   | { type: 'fileOpened'; file: OpenFile }
@@ -67,35 +80,39 @@ export const fileExplorerMachine = setup({
     openFile: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'openFile');
 
-      // Don't open directories
-      if (event.file.isDirectory) return;
+      // Find the file in the tree by path
+      const file = findFileByPath(context.fileTree, event.path);
+      if (!file) return;
 
-      const existingFile = context.openFiles.find((f) => f.id === event.file.id);
+      // Don't open directories
+      if (file.isDirectory) return;
+
+      const existingFile = context.openFiles.find((f) => f.id === file.id);
       if (existingFile) {
         // File already open, just set as active
         enqueue.assign({
-          activeFileId: event.file.id,
+          activeFileId: file.id,
         });
         enqueue.emit({
           type: 'activeFileChanged' as const,
-          fileId: event.file.id,
+          fileId: file.id,
         });
         return;
       }
 
       // Open new file
       const newFile: OpenFile = {
-        id: event.file.id,
-        name: event.file.name,
-        path: event.file.path,
-        content: event.file.content,
-        language: event.file.language,
+        id: file.id,
+        name: file.name,
+        path: file.path,
+        content: file.content,
+        language: file.language,
         isDirty: false,
       };
 
       enqueue.assign({
         openFiles: [...context.openFiles, newFile],
-        activeFileId: event.file.id,
+        activeFileId: file.id,
       });
 
       enqueue.emit({
@@ -105,7 +122,7 @@ export const fileExplorerMachine = setup({
 
       enqueue.emit({
         type: 'activeFileChanged' as const,
-        fileId: event.file.id,
+        fileId: file.id,
       });
     }),
 
@@ -185,12 +202,44 @@ export const fileExplorerMachine = setup({
 
       enqueue.assign({
         fileTree: event.tree,
+        openFiles: [],
+        activeFileId: undefined,
       });
 
       enqueue.emit({
         type: 'fileTreeUpdated' as const,
         tree: event.tree,
       });
+
+      // Open specified files
+      for (const filePath of event.openFiles) {
+        const file = findFileByPath(event.tree, filePath);
+        if (file && !file.isDirectory) {
+          const newFile: OpenFile = {
+            id: file.id,
+            name: file.name,
+            path: file.path,
+            content: file.content,
+            language: file.language,
+            isDirty: false,
+          };
+
+          enqueue.assign({
+            openFiles: ({ context }) => [...context.openFiles, newFile],
+            activeFileId: file.id, // Last file becomes active
+          });
+
+          enqueue.emit({
+            type: 'fileOpened' as const,
+            file: newFile,
+          });
+
+          enqueue.emit({
+            type: 'activeFileChanged' as const,
+            fileId: file.id,
+          });
+        }
+      }
     }),
   },
 }).createMachine({

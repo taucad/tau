@@ -41,7 +41,7 @@ export function ChatEditorFileTree(): JSX.Element {
     (fileId: string) => {
       const file = findFileById(fileTree, fileId);
       if (file && !file.isDirectory) {
-        actorRef.send({ type: 'openFile', file });
+        actorRef.send({ type: 'openFile', path: file.path });
       }
     },
     [actorRef, fileTree],

@@ -26,7 +26,7 @@ export type FileEditToolResult = ToolResult<
   },
   {
     codeErrors: CodeError[];
-    kernelError: KernelError;
+    kernelError?: KernelError;
     screenshot: string;
   }
 >;
@@ -36,18 +36,20 @@ function ErrorSection({
   errors,
   icon: Icon,
   isInitiallyOpen = false,
+  className,
 }: {
   readonly type: string;
   readonly errors: Array<CodeError | KernelError>;
   readonly icon: typeof AlertTriangle;
   readonly isInitiallyOpen?: boolean;
+  readonly className?: string;
 }): JSX.Element | undefined {
   const [isOpen, setIsOpen] = useState(isInitiallyOpen);
 
   if (errors.length === 0) return undefined;
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+    <Collapsible open={isOpen} className={className} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
         <Button
           variant="ghost"
@@ -293,37 +295,31 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
                   </div>
                 ) : null}
 
-                {result.kernelError ? (
-                  <div className="border-t">
-                    <ErrorSection
-                      isInitiallyOpen
-                      type="kernel"
-                      errors={
-                        result.kernelError
-                          ? [
-                              {
-                                startLineNumber: result.kernelError.startLineNumber ?? 0,
-                                startColumn: result.kernelError.startColumn ?? 0,
-                                message: result.kernelError.message,
-                              },
-                            ]
-                          : []
-                      }
-                      icon={Bug}
-                    />
-                  </div>
-                ) : null}
+                <ErrorSection
+                  isInitiallyOpen
+                  className="border-t"
+                  type="kernel"
+                  errors={
+                    result.kernelError
+                      ? [
+                          {
+                            startLineNumber: result.kernelError.startLineNumber ?? 0,
+                            startColumn: result.kernelError.startColumn ?? 0,
+                            message: result.kernelError.message,
+                          },
+                        ]
+                      : []
+                  }
+                  icon={Bug}
+                />
 
-                {result.codeErrors && result.codeErrors.length > 0 ? (
-                  <div className="border-t">
-                    <ErrorSection
-                      type="linter"
-                      errors={result.codeErrors ?? []}
-                      icon={AlertTriangle}
-                      isInitiallyOpen={(result.codeErrors?.length ?? 0) <= 3}
-                    />
-                  </div>
-                ) : null}
+                <ErrorSection
+                  className="border-t"
+                  type="linter"
+                  errors={result.codeErrors ?? []}
+                  icon={AlertTriangle}
+                  isInitiallyOpen={(result.codeErrors?.length ?? 0) <= 3}
+                />
               </div>
             ) : null}
           </div>

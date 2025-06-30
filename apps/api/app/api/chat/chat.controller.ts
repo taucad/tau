@@ -44,7 +44,7 @@ export type KernelError = {
 export type CreateChatBody = {
   code: string;
   codeErrors: CodeError[];
-  kernelError: KernelError;
+  kernelError?: KernelError;
   screenshot: string;
   messages: Array<
     UIMessage & {

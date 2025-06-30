@@ -65,13 +65,17 @@ function extractImportInfo(
     } {
   const fullImportText = code.slice(importStatement.ss, importStatement.se);
 
-  // Match different import patterns
-  const namedImportMatch = /import\s*{\s*([^}]+)\s*}\s*from\s*['"`]([^'"`]+)['"`]/.exec(fullImportText);
+  // Match different import patterns - handling empty imports
+  const namedImportMatch = /import\s*{\s*([^}]*)\s*}\s*from\s*['"`]([^'"`]+)['"`]/.exec(fullImportText);
   const defaultImportMatch = /import\s+(\w+)\s+from\s*['"`]([^'"`]+)['"`]/.exec(fullImportText);
   const namespaceImportMatch = /import\s*\*\s*as\s+(\w+)\s+from\s*['"`]([^'"`]+)['"`]/.exec(fullImportText);
 
   if (namedImportMatch) {
-    const imports = namedImportMatch[1].split(',').map((imp) => imp.trim());
+    // Handle empty imports by filtering out empty strings after split and trim
+    const imports = namedImportMatch[1]
+      .split(',')
+      .map((imp) => imp.trim())
+      .filter((imp) => imp.length > 0);
     const module = namedImportMatch[2];
     return { type: 'named', imports, module };
   }

@@ -6,6 +6,7 @@ import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import devtoolsJson from 'vite-plugin-devtools-json';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import tailwindcss from '@tailwindcss/vite';
+import { visualizer } from 'rollup-plugin-visualizer';
 // Import viteSvgSpriteWrapper from 'vite-svg-sprite-wrapper';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
@@ -41,6 +42,9 @@ export default defineConfig({
     // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
     tailwindcss(),
     devtoolsJson(),
+    visualizer({
+      exclude: [{ file: '**/*?raw' }], // ignore raw files that are used for editor typings
+    }),
     // TODO: add back after fixing the recrusive reload issue.
     // ViteSvgSpriteWrapper({
     //   icons: path.resolve(__dirname, './app/components/icons/raw/**/*.svg'),

@@ -6,7 +6,11 @@ type Model = {
   thumbnail: string;
 };
 
-export const emptyCode = `export default function main(params) {}
+export const emptyCode = `import {} from 'replicad';
+
+export const defaultParams = {};
+
+export default function main(p = defaultParams) {}
 `;
 
 export const cubeCode = `/**

@@ -52,6 +52,9 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
 
   useEffect(() => {
     if (monaco) {
+      // Register only the languages you want to use
+      monaco.languages.register({ id: 'javascript' });
+      monaco.languages.register({ id: 'typescript' });
       shikiToMonaco(highlighter, monaco);
     }
   }, [monaco]);

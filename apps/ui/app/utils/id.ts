@@ -6,7 +6,7 @@ import type { IdPrefix } from '~/constants/id.js';
  * @param prefix - The prefix to use for the ID
  * @returns A string in the format "prefix_<id>"
  */
-export function generatePrefixedId(prefix: IdPrefix): string {
+export function generatePrefixedId(prefix: IdPrefix): `${IdPrefix}_${string}` {
   return `${prefix}_${generateId(21)}`;
 }
 

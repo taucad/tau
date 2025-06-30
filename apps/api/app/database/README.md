@@ -68,7 +68,7 @@ Migrations run automatically during service initialization (`OnModuleInit`). The
 - All database connections use the same configuration
 - No duplicate connection logic
 
-Place your migration files in the `./drizzle` directory.
+Place your migration files in the `./migrations` directory.
 
 ## Architecture
 

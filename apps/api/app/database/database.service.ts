@@ -7,6 +7,7 @@ import postgres from 'postgres';
 import type { OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import type { Environment } from '~/config/environment.config.js';
 import * as schema from '~/database/schema.js';
+import { SqlLogger } from '~/database/database.logger.js';
 
 export type DatabaseType = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -16,12 +17,24 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
 
   private readonly logger = new Logger(DatabaseService.name);
   private readonly client: postgres.Sql;
+  private get isNoticeLogEnabled() {
+    // Toggle to enable/disable verbose postgres notices logging.
+    // Disabled by default as it is noisy during startup.
+    return false;
+  }
 
   public constructor(private readonly configService: ConfigService<Environment, true>) {
     const connectionString: string = this.configService.get<string>('DATABASE_URL', { infer: true });
 
-    this.client = postgres(connectionString, { prepare: false });
-    this.database = drizzle(this.client, { schema });
+    this.client = postgres(connectionString, {
+      prepare: false,
+      onnotice: (notice) => {
+        if (this.isNoticeLogEnabled) {
+          this.logger.log(`${notice.message}`);
+        }
+      },
+    });
+    this.database = drizzle(this.client, { schema, logger: new SqlLogger() });
   }
 
   public async onModuleDestroy(): Promise<void> {

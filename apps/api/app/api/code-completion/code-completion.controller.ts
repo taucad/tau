@@ -4,7 +4,7 @@ import { CodeCompletionService } from '~/api/code-completion/code-completion.ser
 import { AuthGuard } from '~/auth/auth.guard.js';
 
 @UseGuards(AuthGuard)
-@Controller('code-completion')
+@Controller({ path: 'code-completion', version: '1' })
 export class CodeCompletionController {
   public constructor(private readonly codeCompletionService: CodeCompletionService) {}
 

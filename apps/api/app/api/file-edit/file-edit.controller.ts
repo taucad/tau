@@ -4,7 +4,7 @@ import type { FileEditRequest, FileEditResult } from '~/api/file-edit/file-edit.
 import { AuthGuard } from '~/auth/auth.guard.js';
 
 @UseGuards(AuthGuard)
-@Controller('file-edit')
+@Controller({ path: 'file-edit', version: '1' })
 export class FileEditController {
   public constructor(private readonly fileEditService: FileEditService) {}
 

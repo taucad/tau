@@ -56,7 +56,7 @@ export type CreateChatBody = {
 };
 
 @UseGuards(AuthGuard)
-@Controller('chat')
+@Controller({ path: 'chat', version: '1' })
 export class ChatController {
   public constructor(
     private readonly chatService: ChatService,

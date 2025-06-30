@@ -2,7 +2,7 @@ import { Controller, Get } from '@nestjs/common';
 import type { Model } from '~/api/models/model.schema.js';
 import { ModelService } from '~/api/models/model.service.js';
 
-@Controller('models')
+@Controller({ path: 'models', version: '1' })
 export class ModelController {
   public constructor(private readonly modelService: ModelService) {}
 

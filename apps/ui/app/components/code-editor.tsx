@@ -4,17 +4,11 @@ import { Theme, useTheme } from 'remix-themes';
 import { useCallback, useEffect, useRef } from 'react';
 import type { JSX } from 'react';
 import { shikiToMonaco } from '@shikijs/monaco';
-import { createHighlighter } from 'shiki';
 import { registerCompletion } from 'monacopilot';
 import type { CompletionRegistration, Monaco, StandaloneCodeEditor, CompletionCopilot } from 'monacopilot';
 import { cn } from '~/utils/ui.js';
 import { ENV } from '~/config.js';
-
-// Create the highlighter, it can be reused
-const highlighter = await createHighlighter({
-  themes: ['github-light', 'github-dark'],
-  langs: ['javascript', 'typescript'],
-});
+import { highlighter } from '~/lib/shiki.js';
 
 type CodeEditorProperties = EditorProps & {
   readonly onChange: (value: string) => void;

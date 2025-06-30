@@ -158,7 +158,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
           </div>
         </When>
         <When shouldRender={!isUser}>
-          <div className="mt-1 flex flex-row items-start justify-start text-foreground/50">
+          <div className="mt-1 flex flex-row items-start justify-start text-muted-foreground">
             <CopyButton
               tooltipContentProperties={{ side: 'bottom' }}
               size="icon"
@@ -216,7 +216,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
           </div>
         </When>
         <When shouldRender={isUser}>
-          <div className="mt-1 flex flex-row items-center justify-end text-foreground/50">
+          <div className="mt-1 flex flex-row items-center justify-end text-muted-foreground">
             <CopyButton
               tooltipContentProperties={{ side: 'bottom' }}
               size="icon"

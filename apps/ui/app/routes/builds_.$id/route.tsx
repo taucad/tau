@@ -219,7 +219,7 @@ export default function ChatRoute(): JSX.Element {
                 if (cadState.value === 'ready' || cadState.value === 'error') {
                   const toolResult = {
                     codeErrors: cadState.context.codeErrors ?? [],
-                    kernelError: cadState.context.kernelError ?? '',
+                    kernelError: cadState.context.kernelError,
                     screenshot: '',
                   } satisfies FileEditToolResult['result'];
 

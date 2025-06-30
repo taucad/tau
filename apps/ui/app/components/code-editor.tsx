@@ -6,7 +6,7 @@ import type { JSX } from 'react';
 import { shikiToMonaco } from '@shikijs/monaco';
 import { createHighlighter } from 'shiki';
 import { registerCompletion } from 'monacopilot';
-import type { CompletionRegistration, Monaco, StandaloneCodeEditor } from 'monacopilot';
+import type { CompletionRegistration, Monaco, StandaloneCodeEditor, CompletionCopilot } from 'monacopilot';
 import { cn } from '~/utils/ui.js';
 import { ENV } from '~/config.js';
 
@@ -35,6 +35,16 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
       endpoint: `${ENV.TAU_API_URL}/v1/code-completion`,
       language: 'typescript',
       trigger: 'onTyping',
+      async requestHandler(request) {
+        const response = await fetch(`${ENV.TAU_API_URL}/v1/code-completion`, {
+          method: 'POST',
+          body: JSON.stringify(request.body),
+          credentials: 'include', // This sends cookies and auth credentials
+        });
+        const data = (await response.json()) as Awaited<ReturnType<CompletionCopilot['complete']>>;
+
+        return data;
+      },
     });
   }, []);
 

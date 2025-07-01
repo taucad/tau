@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { openai } from '@ai-sdk/openai';
 import { generateText } from 'ai';
 import { CompletionCopilot } from 'monacopilot';

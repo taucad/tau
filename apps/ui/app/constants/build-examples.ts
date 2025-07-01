@@ -2,8 +2,16 @@ import { mockModels } from '~/constants/build-code-examples.js';
 import type { Build } from '~/types/build.types.js';
 
 // Sample data
+type Model = {
+  id: string;
+  name: string;
+  code: string;
+  thumbnail: string;
+  language?: 'replicad' | 'openscad';
+};
+
 export const sampleBuilds: Build[] = mockModels.map((model: any) => {
-  const lang = model.language ?? 'replicad';
+  const lang = (model as Model).language ?? 'replicad';
   const mainFile = lang === 'openscad' ? 'main.scad' : 'main.ts';
   return {
     id: model.id,
@@ -11,7 +19,7 @@ export const sampleBuilds: Build[] = mockModels.map((model: any) => {
       mechanical: {
         files: { [mainFile]: { content: model.code } },
         main: mainFile,
-        language: lang,
+        language: lang as any,
         parameters: {},
       },
     },

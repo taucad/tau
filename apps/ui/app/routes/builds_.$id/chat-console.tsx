@@ -20,7 +20,7 @@ import {
   DropdownMenuTrigger,
 } from '~/components/ui/dropdown-menu.js';
 import { useCookie } from '~/hooks/use-cookie.js';
-import { logActor } from '~/machines/logs.js';
+import { logActor } from '~/machines/logs.machine.js';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   readonly onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;

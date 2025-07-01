@@ -1,6 +1,6 @@
 import { setup, fromCallback, assign } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import type { cadMachine } from '~/machines/cad.js';
+import type { cadMachine } from '~/machines/cad.machine.js';
 
 type ExportFormat = 'stl' | 'stl-binary' | 'step' | 'step-assembly';
 

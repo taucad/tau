@@ -12,7 +12,7 @@ import type { Build } from '~/types/build.js';
 import type { CadKernelProvider } from '~/types/cad.js';
 import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
 import { storage } from '~/db/storage.js';
-import { cadMachine } from '~/machines/cad.js';
+import { cadMachine } from '~/machines/cad.machine.js';
 import { HammerAnimation } from '~/components/hammer-animation.js';
 
 // Placeholder for language icons

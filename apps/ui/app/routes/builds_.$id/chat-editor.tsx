@@ -11,7 +11,7 @@ import { registerMonaco } from '~/routes/builds_.$id/chat-editor-config.js';
 import { ChatEditorBreadcrumbs } from '~/routes/builds_.$id/chat-editor-breadcrumbs.js';
 import { useBuild } from '~/hooks/use-build.js';
 import type { Build } from '~/types/build.js';
-import type { FileItem } from '~/machines/file-explorer.js';
+import type { FileItem } from '~/machines/file-explorer.machine.js';
 
 const getFileTree = (build: Build): FileItem[] => {
   if (!build?.assets.mechanical) return [];

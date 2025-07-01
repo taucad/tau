@@ -10,8 +10,8 @@ import { toast } from '~/components/ui/sonner.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { downloadBlob } from '~/utils/file.js';
-import { screenshotRequestMachine } from '~/machines/screenshot-request.js';
-import { exportGeometryMachine } from '~/machines/export-geometry.js';
+import { screenshotRequestMachine } from '~/machines/screenshot-request.machine.js';
+import { exportGeometryMachine } from '~/machines/export-geometry.machine.js';
 import {
   CommandDialog,
   CommandInput,

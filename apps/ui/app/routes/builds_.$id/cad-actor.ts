@@ -1,5 +1,5 @@
 import { createActor } from 'xstate';
-import { cadMachine } from '~/machines/cad.js';
+import { cadMachine } from '~/machines/cad.machine.js';
 import { inspect } from '~/machines/inspector.js';
 import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 

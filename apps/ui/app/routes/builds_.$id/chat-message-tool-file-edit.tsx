@@ -16,7 +16,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '~/components/ui/h
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
 import type { CodeError } from '~/types/cad.js';
 import type { KernelError } from '~/types/kernel.js';
-import { fileEditMachine } from '~/machines/file-edit.js';
+import { fileEditMachine } from '~/machines/file-edit.machine.js';
 
 export type FileEditToolResult = ToolResult<
   'edit_file',

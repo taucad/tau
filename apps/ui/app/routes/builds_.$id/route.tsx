@@ -16,8 +16,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { BuildNameEditor } from '~/routes/builds_.$id/build-name-editor.js';
 import { graphicsActor, FileExplorerContext } from '~/routes/builds_.$id/graphics-actor.js';
-import { orthographicViews, screenshotRequestMachine } from '~/machines/screenshot-request.js';
-import { fileEditMachine } from '~/machines/file-edit.js';
+import { orthographicViews, screenshotRequestMachine } from '~/machines/screenshot-request.machine.js';
+import { fileEditMachine } from '~/machines/file-edit.machine.js';
 import type { FileEditToolResult } from '~/routes/builds_.$id/chat-message-tool-file-edit.js';
 import { ChatInterfaceControls, ViewContextProvider } from '~/routes/builds_.$id/chat-interface-controls.js';
 import { CommandPaletteTrigger } from '~/routes/builds_.$id/command-palette.js';

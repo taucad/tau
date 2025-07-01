@@ -11,5 +11,9 @@
         "vitest.workspace.ts",
         "jest.config.ts",
         "scripts/**/*"
+    ],
+    "typeRoots": [
+      "./types",
+      "./node_modules/@types"
     ]
 }

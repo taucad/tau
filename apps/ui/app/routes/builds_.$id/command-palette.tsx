@@ -154,20 +154,6 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
     onOpenChange(false);
   }, [code, buildName, onOpenChange]);
 
-  const handleCopyCodeToClipboard = useCallback(async () => {
-    toast.promise(
-      async () => {
-        await navigator.clipboard.writeText(code);
-      },
-      {
-        loading: `Copying ${buildName}.ts to clipboard...`,
-        success: `Copied ${buildName}.ts to clipboard`,
-        error: `Failed to copy ${buildName}.ts to clipboard`,
-      },
-    );
-    onOpenChange(false);
-  }, [code, buildName, onOpenChange]);
-
   const handleDownloadPng = useCallback(
     async (filename: string) => {
       toast.promise(getPngBlob(), {
@@ -507,7 +493,6 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
       handleExport,
       shapes,
       code,
-      handleCopyCodeToClipboard,
       handleDownloadCode,
       handleDownloadMultipleAngles,
       authData,

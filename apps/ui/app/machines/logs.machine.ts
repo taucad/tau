@@ -1,6 +1,6 @@
 import { setup, assign, createActor } from 'xstate';
-import type { LogEntry, LogOptions } from '~/types/console.js';
-import { logLevels } from '~/types/console.js';
+import type { LogEntry, LogOptions } from '~/types/console.types.js';
+import { logLevels } from '~/types/console.types.js';
 import { generatePrefixedId } from '~/utils/id.js';
 import { idPrefix } from '~/constants/id.js';
 

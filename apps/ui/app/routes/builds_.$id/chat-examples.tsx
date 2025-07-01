@@ -5,7 +5,7 @@ import { Button } from '~/components/ui/button.js';
 import { useChatActions } from '~/components/chat/ai-chat-provider.js';
 import { useModels } from '~/hooks/use-models.js';
 import { createMessage } from '~/utils/chat.js';
-import { MessageRole, MessageStatus } from '~/types/chat.js';
+import { MessageRole, MessageStatus } from '~/types/chat.types.js';
 
 export const ChatExamples = memo(function () {
   // Use lazy initialization to ensure consistent examples across renders

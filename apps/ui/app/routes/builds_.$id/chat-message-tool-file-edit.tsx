@@ -14,8 +14,8 @@ import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '~/components/ui/hover-card.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
-import type { CodeError } from '~/types/cad.js';
-import type { KernelError } from '~/types/kernel.js';
+import type { CodeError } from '~/types/cad.types.js';
+import type { KernelError } from '~/types/kernel.types.js';
 import { fileEditMachine } from '~/machines/file-edit.machine.js';
 
 export type FileEditToolResult = ToolResult<

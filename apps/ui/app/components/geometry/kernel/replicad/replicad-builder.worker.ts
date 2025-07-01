@@ -10,8 +10,8 @@ import type {
   ExportGeometryResult,
   ExtractParametersResult,
   KernelError,
-} from '~/types/kernel.js';
-import { createKernelSuccess, createKernelError } from '~/types/kernel.js';
+} from '~/types/kernel.types.js';
+import { createKernelSuccess, createKernelError } from '~/types/kernel.types.js';
 import {
   initOpenCascade,
   initOpenCascadeWithExceptions,

@@ -3,7 +3,7 @@ import type { JSX, ReactNode } from 'react';
 import { createContext, useContext, useMemo } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { storage } from '~/db/storage.js';
-import type { Build, Chat } from '~/types/build.js';
+import type { Build, Chat } from '~/types/build.types.js';
 import { createBuildMutations } from '~/hooks/build-mutations.js';
 
 // Function to fetch builds

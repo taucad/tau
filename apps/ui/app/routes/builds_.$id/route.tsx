@@ -9,7 +9,7 @@ import type { Route } from './+types/route.js';
 import { ChatInterface } from '~/routes/builds_.$id/chat-interface.js';
 import { BuildProvider, useBuild } from '~/hooks/use-build.js';
 import { Button } from '~/components/ui/button.js';
-import type { Handle } from '~/types/matches.js';
+import type { Handle } from '~/types/matches.types.js';
 import { useChatConstants } from '~/utils/chat.js';
 import { AiChatProvider, useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';

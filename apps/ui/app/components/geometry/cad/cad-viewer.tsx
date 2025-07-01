@@ -2,7 +2,7 @@ import type { JSX } from 'react';
 import { ReplicadMesh } from '~/components/geometry/kernel/replicad/replicad-mesh.js';
 import { ThreeProvider } from '~/components/geometry/graphics/three/three-context.js';
 import type { ThreeViewerProperties } from '~/components/geometry/graphics/three/three-context.js';
-import type { Shape } from '~/types/cad.js';
+import type { Shape } from '~/types/cad.types.js';
 import SvgViewer from '~/components/geometry/kernel/replicad/svg-viewer.js';
 
 type CadViewerProperties = ThreeViewerProperties & {

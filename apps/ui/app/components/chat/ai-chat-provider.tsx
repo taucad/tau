@@ -15,7 +15,7 @@ import { useEffect } from 'react';
 import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
-import { MessageStatus } from '~/types/chat.js';
+import { MessageStatus } from '~/types/chat.types.js';
 
 type UseChatArgs = NonNullable<Parameters<typeof useChat>[0]>;
 type UseChatReturn = ReturnType<typeof useChat>;

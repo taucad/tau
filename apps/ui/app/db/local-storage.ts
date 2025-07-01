@@ -1,7 +1,7 @@
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge/index.js';
-import type { StorageProvider } from '../types/storage.js';
-import type { Build } from '~/types/build.js';
+import type { StorageProvider } from '../types/storage.types.js';
+import type { Build } from '~/types/build.types.js';
 import { metaConfig } from '~/config.js';
 import { idPrefix } from '~/constants/id.js';
 import { generatePrefixedId } from '~/utils/id.js';

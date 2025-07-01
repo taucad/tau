@@ -1,7 +1,7 @@
 import { assign, assertEvent, setup, sendTo, emit, enqueueActions } from 'xstate';
 import type { AnyActorRef } from 'xstate';
-import type { GridSizes, ScreenshotOptions } from '~/types/graphics.js';
-import type { Shape } from '~/types/cad.js';
+import type { GridSizes, ScreenshotOptions } from '~/types/graphics.types.js';
+import type { Shape } from '~/types/cad.types.js';
 
 // Context type definition
 export type GraphicsContext = {

@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import type { JSX } from 'react';
 import { Outlet, redirect, useLocation, useNavigate } from 'react-router';
 import type { LoaderFunction } from 'react-router';
-import type { Handle } from '~/types/matches.js';
+import type { Handle } from '~/types/matches.types.js';
 
 export const handle: Handle = {
   breadcrumb() {

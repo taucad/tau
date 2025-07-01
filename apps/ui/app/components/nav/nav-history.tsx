@@ -2,7 +2,7 @@ import { History, MoreHorizontal } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink, useMatch, useNavigate } from 'react-router';
-import type { Build } from '~/types/build.js';
+import type { Build } from '~/types/build.types.js';
 import {
   SidebarGroup,
   SidebarGroupLabel,

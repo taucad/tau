@@ -2,7 +2,7 @@ import type { Shape as ReplicadShape, Drawing, Face, Wire, AnyShape, Vertex } fr
 import { Sketch, EdgeFinder, FaceFinder, Sketches, CompoundSketch } from 'replicad';
 import type { SetRequired } from 'type-fest';
 import { normalizeColor } from '~/components/geometry/kernel/replicad/utils/normalize-color.js';
-import type { Shape2D, Shape3D } from '~/types/cad.js';
+import type { Shape2D, Shape3D } from '~/types/cad.types.js';
 
 type Shape = ReplicadShape<never>;
 type Meshable = SetRequired<Shape, 'mesh' | 'meshEdges'>;

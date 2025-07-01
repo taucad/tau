@@ -2,8 +2,8 @@ import { assign, assertEvent, setup, sendTo, emit, not, enqueueActions } from 'x
 import type { ActorRefFrom } from 'xstate';
 import { kernelMachine } from '~/machines/kernel.machine.js';
 import type { KernelEventExternal } from '~/machines/kernel.machine.js';
-import type { CodeError, Shape } from '~/types/cad.js';
-import type { KernelError } from '~/types/kernel.js';
+import type { CodeError, Shape } from '~/types/cad.types.js';
+import type { KernelError } from '~/types/kernel.types.js';
 import type { graphicsMachine } from '~/machines/graphics.machine.js';
 
 // Interface defining the context for the CAD machine

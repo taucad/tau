@@ -5,8 +5,8 @@ import { Badge } from '~/components/ui/badge.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '~/components/ui/hover-card.js';
 import { TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter, Table } from '~/components/ui/table.js';
 import { useModels } from '~/hooks/use-models.js';
-import type { ModelProvider } from '~/types/cad.js';
-import type { MessageAnnotation } from '~/types/chat.js';
+import type { ModelProvider } from '~/types/cad.types.js';
+import type { MessageAnnotation } from '~/types/chat.types.js';
 import { formatCurrency } from '~/utils/currency.js';
 import { formatNumber } from '~/utils/number.js';
 

@@ -17,7 +17,7 @@ import type { KeyCombination } from '~/utils/keys.js';
 import { toast } from '~/components/ui/sonner.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import { cn } from '~/utils/ui.js';
-import type { MessagePart } from '~/types/chat.js';
+import type { MessagePart } from '~/types/chat.types.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
 import { ChatContextActions } from '~/components/chat/chat-context-actions.js';
 

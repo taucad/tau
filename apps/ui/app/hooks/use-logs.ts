@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
-import type { LogOptions, LogOrigin, LogEntry } from '~/types/console.js';
-import { logLevels } from '~/types/console.js';
+import type { LogOptions, LogOrigin, LogEntry } from '~/types/console.types.js';
+import { logLevels } from '~/types/console.types.js';
 import { logActor } from '~/machines/logs.machine.js';
 
 /**

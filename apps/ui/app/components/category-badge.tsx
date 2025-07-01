@@ -1,6 +1,6 @@
 import { Cog, Cpu, Zap } from 'lucide-react';
 import type { JSX } from 'react';
-import type { Category } from '~/types/cad.js';
+import type { Category } from '~/types/cad.types.js';
 import { cn } from '~/utils/ui.js';
 
 export function CategoryBadge({ category }: { readonly category: Category }): JSX.Element {

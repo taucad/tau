@@ -5,7 +5,7 @@ import { BufferGeometry } from 'three';
 import * as r3js from 'replicad-threejs-helper';
 import { MatcapMaterial } from '~/components/geometry/graphics/three/matcap-material.js';
 import { useColor } from '~/hooks/use-color.js';
-import type { Shape3D } from '~/types/cad.js';
+import type { Shape3D } from '~/types/cad.types.js';
 
 export const useApplyHighlights = (geometry: BufferGeometry, highlight: number | number[]) => {
   const { invalidate } = useThree();

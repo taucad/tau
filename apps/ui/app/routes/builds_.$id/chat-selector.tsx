@@ -8,7 +8,7 @@ import { useBuild } from '~/hooks/use-build.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { cn } from '~/utils/ui.js';
 import { useChatConstants } from '~/utils/chat.js';
-import type { Chat } from '~/types/build.js';
+import type { Chat } from '~/types/build.types.js';
 import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
 import { formatRelativeTime } from '~/utils/date.js';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '~/components/ui/dialog.js';

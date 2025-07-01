@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router';
 import { Tau } from '~/components/icons/tau.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { ENV } from '~/config.js';
-import type { Handle } from '~/types/matches.js';
+import type { Handle } from '~/types/matches.types.js';
 
 export const handle: Handle = {
   noPageWrapper: true,

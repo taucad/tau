@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { ChatMessageAnnotationUsageAggregated } from '~/routes/builds_.$id/chat-message-annotation-usage.js';
-import type { MessageAnnotation } from '~/types/chat.js';
+import type { MessageAnnotation } from '~/types/chat.types.js';
 
 // Controller component that routes to appropriate annotation handlers
 export function ChatMessageAnnotation({ annotation }: { readonly annotation: MessageAnnotation }): JSX.Element {

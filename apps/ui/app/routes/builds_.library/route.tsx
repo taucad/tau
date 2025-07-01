@@ -48,13 +48,13 @@ import {
 } from '~/components/ui/dropdown-menu.js';
 import { cn } from '~/utils/ui.js';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '~/components/ui/tabs.js';
-import type { Category } from '~/types/cad.js';
-import { categories } from '~/types/cad.js';
-import type { Build } from '~/types/build.js';
+import type { Category } from '~/types/cad.types.js';
+import { categories } from '~/types/cad.types.js';
+import type { Build } from '~/types/build.types.js';
 import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
 import { useBuilds } from '~/hooks/use-builds.js';
 import { toast } from '~/components/ui/sonner.js';
-import type { Handle } from '~/types/matches.js';
+import type { Handle } from '~/types/matches.types.js';
 import {
   AlertDialog,
   AlertDialogAction,

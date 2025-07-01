@@ -8,7 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '~/components/ui/dropdown-menu.js';
 import { Button } from '~/components/ui/button.js';
-import type { Build } from '~/types/build.js';
+import type { Build } from '~/types/build.types.js';
 import type { BuildActions } from '~/routes/builds_.library/route.js';
 import { Popover, PopoverContent } from '~/components/ui/popover.js';
 import { Input } from '~/components/ui/input.js';

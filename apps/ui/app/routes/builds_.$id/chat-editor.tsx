@@ -3,8 +3,6 @@ import type { ComponentProps, JSX } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
 import { FileExplorerContext } from '~/routes/builds_.$id/graphics-actor.js';
-// eslint-disable-next-line import-x/no-unassigned-import -- setting up the Monaco editor web workers
-import '~/routes/builds_.$id/chat-config.js';
 import { CodeEditor } from '~/components/code-editor.js';
 import { cn } from '~/utils/ui.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';

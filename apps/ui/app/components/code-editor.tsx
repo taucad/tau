@@ -4,42 +4,23 @@ import { Theme, useTheme } from 'remix-themes';
 import { useCallback, useEffect, useRef } from 'react';
 import type { JSX } from 'react';
 import { shikiToMonaco } from '@shikijs/monaco';
-import { registerCompletion } from 'monacopilot';
-import type { CompletionRegistration, Monaco, StandaloneCodeEditor, CompletionCopilot } from 'monacopilot';
+import type { CompletionRegistration, Monaco, StandaloneCodeEditor } from 'monacopilot';
 import { cn } from '~/utils/ui.js';
-import { ENV } from '~/config.js';
 import { highlighter } from '~/lib/shiki.js';
+import { configureMonaco, registerCompletions } from '~/lib/monaco.js';
 
 type CodeEditorProperties = EditorProps & {
   readonly onChange: (value: string) => void;
 };
 
-// Const displayLanguageFromOriginalLanguage = {
-//   kcl: 'typescript',
-// };
-
-// type MappedLanguage = keyof typeof displayLanguageFromOriginalLanguage;
+await configureMonaco();
 
 export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.Element {
   const [theme] = useTheme();
   const completionRef = useRef<CompletionRegistration | undefined>(null);
 
   const handleMount = useCallback((editor: StandaloneCodeEditor, monaco: Monaco) => {
-    completionRef.current = registerCompletion(monaco, editor, {
-      endpoint: `${ENV.TAU_API_URL}/v1/code-completion`,
-      language: 'typescript',
-      trigger: 'onTyping',
-      async requestHandler(request) {
-        const response = await fetch(`${ENV.TAU_API_URL}/v1/code-completion`, {
-          method: 'POST',
-          body: JSON.stringify(request.body),
-          credentials: 'include', // This sends cookies and auth credentials
-        });
-        const data = (await response.json()) as Awaited<ReturnType<CompletionCopilot['complete']>>;
-
-        return data;
-      },
-    });
+    completionRef.current = registerCompletions(editor, monaco);
   }, []);
 
   useEffect(() => {
@@ -52,9 +33,6 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
 
   useEffect(() => {
     if (monaco) {
-      // Register only the languages you want to use
-      monaco.languages.register({ id: 'javascript' });
-      monaco.languages.register({ id: 'typescript' });
       shikiToMonaco(highlighter, monaco);
     }
   }, [monaco]);

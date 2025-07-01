@@ -212,7 +212,7 @@ export function consoleLoggingConfig(): Options {
     singleLine: true,
     colorize: true,
     ignore: 'pid,hostname,req,res,responseTime,context',
-    messageFormat: `${colors.bright}{if context}${colors.yellow}[{context}]${colors.reset} {end}{if msg}{msg}{end}`,
+    messageFormat: `${colors.bright}{if context}${colors.yellow}[{context}] {end}${colors.reset}{if msg}{msg}{end}`,
   };
 
   return {

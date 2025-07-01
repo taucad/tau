@@ -24,6 +24,39 @@ function getInstance(): Promise<any> {
   return openscadInstancePromise;
 }
 
+// Simple parser for OpenSCAD Customizer comments.
+// It supports lines like:
+//   // [radius] = 10
+//   // [name] = "foo"
+// Returns a map of parameter name -> default value parsed to JS types.
+function parseCustomizerParameters(source: string): Record<string, unknown> {
+  const params: Record<string, unknown> = {};
+  const paramRegex = /^\s*\/\/\s*\[(.+?)\]\s*=\s*(.+?)\s*$/;
+
+  source.split(/\r?\n/).forEach((line) => {
+    const match = line.match(paramRegex);
+    if (!match) return;
+
+    const [, rawKey, rawDefault] = match;
+    const key = rawKey.trim();
+    let value: unknown = rawDefault.trim();
+
+    // Try to JSON-parse to coerce numbers / booleans / arrays / objects
+    try {
+      // Wrap single quotes to double for JSON parse if needed
+      const toParse = (/^(?:true|false|null|[\d.-]+)$/i.test(value as string)) ? (value as string) : JSON.stringify(value);
+      value = JSON.parse(toParse);
+    } catch {
+      // Fallback, strip quotes if present
+      value = (value as string).replace(/^"|"$/g, '');
+    }
+
+    params[key] = value;
+  });
+
+  return params;
+}
+
 async function buildShapesFromCode(code: string): Promise<BuildShapesResult> {
   try {
     const inst = await getInstance();
@@ -68,12 +101,59 @@ async function buildShapesFromCode(code: string): Promise<BuildShapesResult> {
   }
 }
 
-const extractDefaultParametersFromCode = async (): Promise<ExtractParametersResult> => {
-  return createKernelSuccess({});
+const extractDefaultParametersFromCode = async (
+  code: string,
+): Promise<ExtractParametersResult> => {
+  try {
+    const params = parseCustomizerParameters(code);
+    return createKernelSuccess(params);
+  } catch (e) {
+    const err = (e as Error).message ?? 'Unknown error';
+    return createKernelError({ message: err, startColumn: 0, startLineNumber: 0 });
+  }
 };
 
-const exportShape = async (): Promise<ExportGeometryResult> => {
-  return createKernelError({ message: 'Not implemented', startColumn: 0, startLineNumber: 0 });
+const defaultExportConfig = {
+  binary: false,
+};
+
+const exportShape = async (
+  fileType: 'stl' | 'stl-binary' = 'stl',
+): Promise<ExportGeometryResult> => {
+  try {
+    const inst = await getInstance();
+
+    // We assume the last compiled model still exists at /output.stl if buildShapesFromCode was called.
+    // If not present, we simply fail with an informative error.
+    const asciiOut = '/output.stl';
+
+    let stlData: Uint8Array;
+
+    if (inst.FS.analyzePath(asciiOut).exists) {
+      stlData = inst.FS.readFile(asciiOut);
+    } else {
+      return createKernelError({
+        message: 'No previously built STL. Please build shapes before exporting.',
+        startColumn: 0,
+        startLineNumber: 0,
+      });
+    }
+
+    // If binary requested, we can simply return the bytes; if ascii requested, ensure ascii.
+    const blob = new Blob([stlData], {
+      type: 'model/stl' + (fileType === 'stl-binary' ? '' : '+ascii'),
+    });
+
+    return createKernelSuccess([
+      {
+        blob,
+        name: fileType === 'stl-binary' ? 'model-binary.stl' : 'model.stl',
+      },
+    ]);
+  } catch (e) {
+    const err = (e as Error).message ?? 'Unknown error';
+    return createKernelError({ message: err, startColumn: 0, startLineNumber: 0 });
+  }
 };
 
 const service = {

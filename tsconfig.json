@@ -4,14 +4,12 @@
         "paths": {
             // This path mapping exists to make ShadCN be happy with a default tsconfig.json, enabling seamless installs with the default component install command.
             "~/*": ["./apps/ui/app/*"]
-        },
-        // No extra compiler settings beyond paths
+        }
     },
     "include": [
         "eslint.config.ts",
         "vitest.workspace.ts",
         "jest.config.ts",
         "scripts/**/*"
-    ],
-    // Removed custom typeRoots, inherit defaults
+    ]
 }

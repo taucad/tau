@@ -5,8 +5,12 @@ import type { Remote } from 'comlink';
 import type { Shape } from '~/types/cad.types.js';
 import type { KernelError } from '~/types/kernel.types.js';
 import { isKernelSuccess } from '~/types/kernel.types.js';
-import type { BuilderWorkerInterface } from '~/components/geometry/kernel/replicad/replicad-builder.worker.js';
-import BuilderWorker from '~/components/geometry/kernel/replicad/replicad-builder.worker.js?worker';
+import type { BuilderWorkerInterface as ReplicadWorker } from '~/components/geometry/kernel/replicad/replicad-builder.worker.js';
+// @ts-expect-error -- Worker import
+import ReplicadBuilderWorker from '~/components/geometry/kernel/replicad/replicad-builder.worker.js?worker';
+import type { OpenSCADBuilderInterface } from '~/components/geometry/kernel/openscad/openscad-builder.worker.js';
+// @ts-expect-error -- Worker import
+import OpenSCADBuilderWorker from '~/components/geometry/kernel/openscad/openscad-builder.worker.js?worker';
 import { jsonSchemaFromJson } from '~/utils/schema.js';
 import { assertActorDoneEvent } from '~/utils/xstate.js';
 
@@ -28,10 +32,11 @@ const createWorkerActor = fromPromise<
 
   try {
     // Create a new worker based on the kernel type
-    const worker = new BuilderWorker();
+    const worker =
+      input.kernelType === 'openscad' ? new OpenSCADBuilderWorker() : new ReplicadBuilderWorker();
 
     // Wrap the worker with comlink
-    const wrappedWorker = wrap<BuilderWorkerInterface>(worker);
+    const wrappedWorker = wrap<ReplicadWorker | OpenSCADBuilderInterface>(worker);
 
     // Initialize the worker with the default exception handling mode
     await wrappedWorker.initialize(true);
@@ -302,7 +307,7 @@ type KernelEvent = KernelEventExternalDone | KernelEventInternal;
 // Interface defining the context for the Kernel machine
 type KernelContext = {
   worker?: Worker;
-  wrappedWorker?: Remote<BuilderWorkerInterface>;
+  wrappedWorker?: Remote<ReplicadWorker | OpenSCADBuilderInterface>;
   kernelType?: 'replicad' | 'openscad';
   parentRef?: CadActor;
 };

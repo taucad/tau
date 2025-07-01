@@ -22,6 +22,7 @@ export type CadContext = {
   isKernelInitialized: boolean;
   graphicsRef: ActorRefFrom<typeof graphicsMachine> | undefined;
   jsonSchema?: unknown;
+  kernelTypeSelected?: 'replicad' | 'openscad';
 };
 
 // Define the types of events the machine can receive
@@ -166,12 +167,16 @@ export const cadMachine = setup({
       enqueue.assign({ isKernelInitializing: true });
       enqueue.sendTo(context.kernelRef, {
         type: 'initializeKernel' as const,
-        kernelType: 'replicad' as const,
+        kernelType: (context.kernelTypeSelected ?? 'replicad') as 'replicad' | 'openscad',
         parentRef: self,
       });
     }),
     initializeModel: assign(({ event }) => {
       assertEvent(event, 'initializeModel');
+
+      const isScad = /\.scad$/.test(event.code) || (!/import\s+\{.*replicad/.test(event.code) && !/replicad/.test(event.code));
+      const kernelTypeSelected = isScad ? 'openscad' : 'replicad';
+
       return {
         code: event.code,
         parameters: event.parameters,
@@ -180,6 +185,7 @@ export const cadMachine = setup({
         shapes: [],
         exportedBlob: undefined,
         jsonSchema: undefined,
+        kernelTypeSelected,
       };
     }),
   },
@@ -211,6 +217,7 @@ export const cadMachine = setup({
     isKernelInitialized: false,
     graphicsRef: input.graphicsRef,
     jsonSchema: undefined,
+    kernelTypeSelected: undefined,
   }),
   initial: 'booting',
   states: {

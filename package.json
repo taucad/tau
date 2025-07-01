@@ -139,7 +139,9 @@
     "uint8array-extras": "^1.4.0",
     "vaul": "^1.1.2",
     "xstate": "^5.19.3",
-    "zod": "^3.25.56"
+    "zod": "^3.25.56",
+    "@amandaghassaei/stl-parser": "^1.7.0",
+    "openscad-wasm-prebuilt": "^1.2.0"
   },
   "devDependencies": {
     "@nestjs/schematics": "^11.0.5",

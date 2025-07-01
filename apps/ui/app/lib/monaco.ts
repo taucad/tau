@@ -15,7 +15,7 @@ import { ENV } from '~/config.js';
 export const configureMonaco = async (): Promise<void> => {
   if (globalThis.self !== undefined) {
     globalThis.self.MonacoEnvironment = {
-      getWorker(_, label) {
+      getWorker(_: unknown, label: string): Worker {
         if (label === 'json') {
           return new JsonWorker();
         }

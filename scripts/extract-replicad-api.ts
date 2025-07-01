@@ -145,8 +145,7 @@ function extractJsDoc(node: ts.Node): string | undefined {
 }
 
 // Check if a class member should be excluded
-function shouldExcludeMember(member: ts.ClassElement, sourceFile: ts.SourceFile): { exclude: boolean; reason: string } {
-  const memberText = member.getText(sourceFile);
+function shouldExcludeMember(member: ts.ClassElement, _sourceFile: ts.SourceFile): { exclude: boolean; reason: string } {
   const memberName = getMemberName(member);
 
   // Check for "oc" property

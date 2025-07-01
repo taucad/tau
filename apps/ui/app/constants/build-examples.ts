@@ -547,3 +547,14 @@ if (!mockModels.find((m: any) => m.id === 'openscad_cube')) {
     language: 'openscad',
   } as any);
 }
+
+// Ensure OpenSCAD parametric box example exists in mocks
+if (!mockModels.find((m: any) => m.id === 'openscad_param_box')) {
+  mockModels.push({
+    id: 'openscad_param_box',
+    name: 'Parametric Box (OpenSCAD)',
+    code: `// Parametric Hollow Box Example\n// Demonstrates OpenSCAD Customizer parameters\n// and basic CSG operations.\n\n// [size] = 40                // Overall box size (mm)\n// [wall] = 3                 // Wall thickness (mm)\n// [round] = 2                // Fillet radius on outer edges\n\n$fn = 48; // smooth circles for fillets\n\nmodule roundedCube(sz, r=0, center=true) {\n  if (r <= 0)\n    cube(sz, center=center);\n  else\n    minkowski() {\n      cube(sz - 2*r, center=center);\n      sphere(r = r);\n    }\n}\n\n// Outer shell\nroundedCube(size, round);\n\n// Subtract inner cavity\ntranslate([0,0,0])\n  roundedCube(size - 2*wall, round > wall ? round - wall : 0);`,
+    thumbnail: '/placeholder.svg',
+    language: 'openscad',
+  } as any);
+}

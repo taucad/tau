@@ -5,9 +5,7 @@
             // This path mapping exists to make ShadCN be happy with a default tsconfig.json, enabling seamless installs with the default component install command.
             "~/*": ["./apps/ui/app/*"]
         },
-        "types": [],
-        "module": "NodeNext",
-        "moduleResolution": "nodenext"
+        // No extra compiler settings beyond paths
     },
     "include": [
         "eslint.config.ts",
@@ -15,8 +13,5 @@
         "jest.config.ts",
         "scripts/**/*"
     ],
-    "typeRoots": [
-      "./types",
-      "./node_modules/@types"
-    ]
+    // Removed custom typeRoots, inherit defaults
 }

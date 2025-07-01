@@ -1,8 +1,20 @@
-import { Clipboard, Download, GalleryThumbnails, ImageDown, Plus, Terminal } from 'lucide-react';
+import {
+  Clipboard,
+  Cog,
+  Download,
+  GalleryThumbnails,
+  ImageDown,
+  List,
+  LogIn,
+  LogOut,
+  Plus,
+  Terminal,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { JSX } from 'react';
 import { useSelector, useActorRef } from '@xstate/react';
 import { Link } from 'react-router';
+import { useAuthenticate } from '@daveyplate/better-auth-ui';
 import { BoxDown } from '~/components/icons/box-down.js';
 import { Button } from '~/components/ui/button.js';
 import { useBuildSelector } from '~/hooks/use-build.js';
@@ -33,6 +45,7 @@ type CommandPaletteItem = {
   disabled?: boolean;
   shortcut?: string;
   link?: string;
+  visible?: boolean;
 };
 
 type CommandPaletteProperties = {
@@ -56,6 +69,8 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
   const exportActorRef = useActorRef(exportGeometryMachine, {
     input: { cadRef: cadActor },
   });
+
+  const { data: authData } = useAuthenticate({ enabled: false });
 
   const getPngBlob = useCallback(async () => {
     return new Promise<Blob>((resolve, reject) => {
@@ -394,7 +409,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
       {
         id: 'update-thumbnail',
         label: 'Update thumbnail',
-        group: 'Build',
+        group: 'Preview',
         icon: <GalleryThumbnails className="mr-2 size-4" />,
         action: handleUpdateThumbnail,
         disabled: !isScreenshotReady,
@@ -402,44 +417,36 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
       {
         id: 'copy-png',
         label: 'Copy PNG to clipboard',
-        group: 'Build',
+        group: 'Preview',
         icon: <Clipboard className="mr-2 size-4" />,
         action: handleCopyPngToClipboard,
         disabled: !isScreenshotReady,
+        visible: import.meta.env.DEV,
       },
       {
         id: 'copy-data-url',
         label: 'Copy data URL to clipboard',
-        group: 'Build',
+        group: 'Preview',
         icon: <Clipboard className="mr-2 size-4" />,
         action: handleCopyDataUrlToClipboard,
         disabled: !isScreenshotReady,
+        visible: import.meta.env.DEV,
       },
       {
         id: 'download-png',
         label: 'Download PNG',
-        group: 'Build',
+        group: 'Preview',
         icon: <ImageDown className="mr-2 size-4" />,
         action: async () => handleDownloadPng(`${buildName}.png`),
         disabled: !isScreenshotReady,
-        shortcut: '⌘I',
       },
       {
         id: 'download-multiple-angles',
         label: 'Download multiple angles',
-        group: 'Build',
+        group: 'Preview',
         icon: <ImageDown className="mr-2 size-4" />,
         action: handleDownloadMultipleAngles,
         disabled: !isScreenshotReady,
-      },
-      {
-        id: 'copy-code',
-        label: 'Copy code to clipboard',
-        group: 'Code',
-        icon: <Clipboard className="mr-2 size-4" />,
-        action: handleCopyCodeToClipboard,
-        disabled: !code,
-        shortcut: '⌘C',
       },
       {
         id: 'download-code',
@@ -448,15 +455,46 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         icon: <Download className="mr-2 size-4" />,
         action: handleDownloadCode,
         disabled: !code,
-        shortcut: '⌘D',
       },
       {
         id: 'new-build',
         label: 'New build',
-        group: 'Platform',
+        group: 'Builds',
         icon: <Plus className="mr-2 size-4" />,
         link: '/',
-        shortcut: '⌥N',
+        shortcut: '⌃N',
+      },
+      {
+        id: 'all-builds',
+        label: 'All builds',
+        group: 'Builds',
+        icon: <List className="mr-2 size-4" />,
+        link: '/builds/library',
+        shortcut: '⌃B',
+      },
+      {
+        id: 'open-settings',
+        label: 'Open settings',
+        group: 'Settings',
+        icon: <Cog className="mr-2 size-4" />,
+        link: '/settings',
+        visible: Boolean(authData),
+      },
+      {
+        id: 'sign-in',
+        label: 'Sign in',
+        group: 'Settings',
+        icon: <LogIn className="mr-2 size-4" />,
+        link: '/auth/sign-in',
+        visible: !authData,
+      },
+      {
+        id: 'sign-out',
+        label: 'Sign out',
+        group: 'Settings',
+        icon: <LogOut className="mr-2 size-4" />,
+        link: '/auth/sign-out',
+        visible: Boolean(authData),
       },
     ],
     [
@@ -472,6 +510,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
       handleCopyCodeToClipboard,
       handleDownloadCode,
       handleDownloadMultipleAngles,
+      authData,
     ],
   );
 
@@ -479,6 +518,10 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
     const groups: Record<string, CommandPaletteItem[]> = {};
 
     for (const item of commandItems) {
+      if (item.visible === false) {
+        continue;
+      }
+
       groups[item.group] ??= [];
 
       groups[item.group].push(item);

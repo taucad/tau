@@ -25,7 +25,7 @@ async function bootstrap() {
   const fastifyAdapter = new FastifyAdapter({
     bodyLimit: 50 * 1024 * 1024, // 50MB in bytes
     genReqId: () => generatePrefixedId(idPrefix.request),
-    disableRequestLogging: true,
+    disableRequestLogging: true, // Disables automatic 'incoming request'/'request completed' logs - these are handled by custom loggers.
     logger: envToLogger[process.env.NODE_ENV] as FastifyLoggerOptions,
   });
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, fastifyAdapter, {

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { openai } from '@ai-sdk/openai';
 import { generateText } from 'ai';
 import { CompletionCopilot } from 'monacopilot';
@@ -27,6 +27,6 @@ export class CodeCompletionService {
   }
 
   public async complete(body: CompletionRequestBody): Promise<unknown> {
-    return this.copilot.complete({ body });
+    return this.copilot.complete({ body: { completionMetadata: { ...body.completionMetadata, technologies: [] } } });
   }
 }

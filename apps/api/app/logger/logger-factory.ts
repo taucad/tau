@@ -208,7 +208,6 @@ function googleLoggingConfig(): Options {
 
 export function consoleLoggingConfig(): Options {
   const options: PrettyOptions = {
-    // HideObject: true,
     singleLine: true,
     colorize: true,
     ignore: 'pid,hostname,req,res,responseTime,context',

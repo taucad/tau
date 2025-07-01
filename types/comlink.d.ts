@@ -5,4 +5,7 @@ declare module 'comlink' {
 
   export function wrap<T>(endpoint: any): Remote<T>;
   export function expose<T>(obj: T, endpoint?: any): void;
+
+  export const transfer: <T>(obj: T, transfers: readonly Transferable[]) => T;
+  export const proxy: <T extends object>(obj: T) => T;
 }

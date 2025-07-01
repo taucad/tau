@@ -34,7 +34,6 @@ async function bootstrap() {
 
   const appConfig = app.get(ConfigService<Environment, true>);
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- PinoLogger has `any` typings that don't matter for Dependency-injection
   app.useLogger(app.get(PinoLogger));
   app.flushLogs(); // Standalone applications require flushing after configuring the logger - https://github.com/iamolegga/nestjs-pino/issues/553
 

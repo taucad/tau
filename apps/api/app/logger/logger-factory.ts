@@ -224,15 +224,13 @@ export function consoleLoggingConfig(): Options {
   };
 }
 
-async function useLoggerFactory(configService: ConfigService<Environment, true>): Promise<Params> {
+export async function useLoggerFactory(configService: ConfigService<Environment, true>): Promise<Params> {
   const logLevel = configService.get('LOG_LEVEL', { infer: true });
   const logService = configService.get('LOG_SERVICE', { infer: true });
   const isDebug = import.meta.env.DEV;
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Pino has `any` typings.
   const serviceOptions = logServiceConfig(logService);
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Pino has `any` typings.
   const pinoHttpOptions: Options = {
     level: logLevel,
     genReqId: isDebug ? genRequestId : undefined,
@@ -264,9 +262,6 @@ async function useLoggerFactory(configService: ConfigService<Environment, true>)
   };
 
   return {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Pino has `any` typings.
     pinoHttp: pinoHttpOptions,
   };
 }
-
-export default useLoggerFactory;

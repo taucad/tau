@@ -3,7 +3,7 @@ import { ReplicadMesh } from '~/components/geometry/kernel/replicad/replicad-mes
 import { ThreeProvider } from '~/components/geometry/graphics/three/three-context.js';
 import type { ThreeViewerProperties } from '~/components/geometry/graphics/three/three-context.js';
 import type { Shape } from '~/types/cad.types.js';
-import SvgViewer from '~/components/geometry/kernel/replicad/svg-viewer.js';
+import { SvgViewer } from '~/components/geometry/graphics/svg/svg-viewer.js';
 
 type CadViewerProperties = ThreeViewerProperties & {
   readonly shapes: Shape[];

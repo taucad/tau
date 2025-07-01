@@ -230,7 +230,7 @@ type SvgViewerProps = {
   readonly defaultColor?: string;
 };
 
-export default function SvgViewer({
+export function SvgViewer({
   shapes: shape,
   enableGrid = true,
   enableRawWindow = false,

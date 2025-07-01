@@ -19,7 +19,7 @@ import {
 import { StudioHelper } from '~/components/geometry/kernel/replicad/utils/studio-helper.js';
 import { runInCjsContext, buildEsModule } from '~/components/geometry/kernel/replicad/vm.js';
 import { renderOutput, ShapeStandardizer } from '~/components/geometry/kernel/replicad/utils/render-output.js';
-import type { MainResultShapes } from '~/components/geometry/kernel/replicad/utils/render-output.js';
+import type { MainResultShapes, ShapeConfig } from '~/components/geometry/kernel/replicad/utils/render-output.js';
 
 // Track whether we've already set OC in replicad to avoid repeated calls
 let replicadHasOc = false;
@@ -166,7 +166,7 @@ try {
   } catch {}
 };
 
-const shapesMemory: Record<string, Array<{ shape: replicad.Shape3D; name: string }>> = {};
+const shapesMemory: Record<string, ShapeConfig[]> = {};
 
 const ocVersions: {
   withExceptions: Promise<OpenCascadeInstanceWithExceptions> | undefined;
@@ -392,7 +392,16 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
 
     // Process shapes efficiently
     const renderStartTime = performance.now();
-    const result = renderOutput(shapes, standardizer);
+    const result = renderOutput(
+      shapes,
+      standardizer,
+      (shapesArray) => {
+        const editedShapes = helper.apply(shapesArray);
+        shapesMemory.defaultShape = shapesArray;
+        return editedShapes;
+      },
+      defaultName,
+    );
     const renderEndTime = performance.now();
     console.log(`Render output took ${renderEndTime - renderStartTime}ms`);
 
@@ -415,7 +424,7 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
 const defaultExportMeshConfig = { tolerance: 0.01, angularTolerance: 30 };
 
 const buildBlob = (
-  shape: replicad.Shape3D,
+  shape: replicad.AnyShape,
   fileType: string,
   meshConfig: { tolerance: number; angularTolerance: number },
 ): Blob => {
@@ -452,7 +461,7 @@ const exportShape = async (
 
     const result = shapesMemory[shapeId].map(({ shape, name }) => ({
       blob: buildBlob(shape, fileType, meshConfig),
-      name,
+      name: name ?? 'Shape',
     }));
     return createKernelSuccess(result);
   } catch (error) {

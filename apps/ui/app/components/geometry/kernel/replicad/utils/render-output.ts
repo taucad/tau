@@ -1,4 +1,4 @@
-import type { Shape as ReplicadShape, Drawing, Face, Wire, AnyShape, Vertex } from 'replicad';
+import type { Shape as ReplicadShape, Drawing, Face, Wire, AnyShape, Vertex, exportSTEP } from 'replicad';
 import { Sketch, EdgeFinder, FaceFinder, Sketches, CompoundSketch } from 'replicad';
 import type { SetRequired } from 'type-fest';
 import { normalizeColor } from '~/components/geometry/kernel/replicad/utils/normalize-color.js';
@@ -20,15 +20,6 @@ type InputShape = {
   strokeType?: string;
 };
 
-type CleanConfig = {
-  name: string;
-  shape: Meshable | Svgable;
-  color?: string;
-  opacity?: number;
-  highlight?: unknown;
-  strokeType?: string;
-};
-
 type SvgShapeConfiguration = {
   name: string;
   shape: Svgable;
@@ -44,6 +35,8 @@ type MeshableConfiguration = {
   opacity?: number;
   highlight?: unknown;
 };
+
+export type ShapeConfig = Exclude<Parameters<typeof exportSTEP>[0], undefined>[number];
 
 export type MainResultShapes = Shape | Shape[] | InputShape | InputShape[];
 
@@ -238,8 +231,8 @@ function renderMesh(shapeConfig: MeshableConfiguration) {
   return shapeInfo;
 }
 
-export function render(shapes: CleanConfig[]): Array<Shape2D | Shape3D> {
-  return shapes.map((shapeConfig: CleanConfig) => {
+export function render(shapes: ShapeConfig[]): Array<Shape2D | Shape3D> {
+  return shapes.map((shapeConfig: ShapeConfig) => {
     if (isSvgable(shapeConfig.shape)) return renderSvg(shapeConfig as SvgShapeConfiguration);
     return renderMesh(shapeConfig as MeshableConfiguration);
   });
@@ -248,7 +241,7 @@ export function render(shapes: CleanConfig[]): Array<Shape2D | Shape3D> {
 export function renderOutput(
   shapes: MainResultShapes,
   shapeStandardizer?: ShapeStandardizer,
-  beforeRender?: (shapes: CleanConfig[]) => CleanConfig[],
+  beforeRender?: (shapes: ShapeConfig[]) => ShapeConfig[],
   defaultName = 'Shape',
 ): Array<Shape2D | Shape3D> {
   const standardizer = shapeStandardizer ?? new ShapeStandardizer();

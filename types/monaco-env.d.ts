@@ -12,8 +12,9 @@ declare global {
     MonacoEnvironment?: Environment;
   }
 
-  // Web-worker context (`self` inside workers)
-  interface WorkerGlobalScope {
+  // Augment the globalThis type so both browser and worker contexts narrow correctly
+  // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
+  interface globalThis {
     MonacoEnvironment?: Environment;
   }
 }

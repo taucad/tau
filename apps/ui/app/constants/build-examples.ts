@@ -2,33 +2,36 @@ import { mockModels } from '~/constants/build-code-examples.js';
 import type { Build } from '~/types/build.types.js';
 
 // Sample data
-export const sampleBuilds: Build[] = mockModels.map((model) => ({
-  id: model.id,
-  assets: {
-    mechanical: {
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-      files: { 'main.ts': { content: model.code } },
-      main: 'main.ts',
-      language: 'replicad' as const,
-      parameters: {},
+export const sampleBuilds: Build[] = mockModels.map((model: any) => {
+  const lang = model.language ?? 'replicad';
+  const mainFile = lang === 'openscad' ? 'main.scad' : 'main.ts';
+  return {
+    id: model.id,
+    assets: {
+      mechanical: {
+        files: { [mainFile]: { content: model.code } },
+        main: mainFile,
+        language: lang,
+        parameters: {},
+      },
     },
-  },
-  name: model.name,
-  description: `A 3D ${model.name} model built with Replicad`,
-  author: {
-    name: 'Tau Team',
-    avatar: '/avatar-sample.png',
-  },
-  version: '1.0.0',
-  createdAt: 1_740_702_000_000,
-  updatedAt: 1_740_702_000_000,
-  tags: ['3d-printing', 'parametric', 'replicad'],
-  isFavorite: false,
-  stars: 0,
-  forks: 0,
-  thumbnail: model.thumbnail,
-  chats: [],
-}));
+    name: model.name,
+    description: `A 3D ${model.name} model built with ${lang}`,
+    author: {
+      name: 'Tau Team',
+      avatar: '/avatar-sample.png',
+    },
+    version: '1.0.0',
+    createdAt: 1_740_702_000_000,
+    updatedAt: 1_740_702_000_000,
+    tags: ['3d-printing', 'parametric', lang],
+    isFavorite: false,
+    stars: 0,
+    forks: 0,
+    thumbnail: model.thumbnail,
+    chats: [],
+  } as Build;
+});
 
 // Export const mockBuilds: Build[] = [
 //   {
@@ -525,3 +528,14 @@ export const sampleBuilds: Build[] = mockModels.map((model) => ({
 //     },
 //   },
 // ];
+
+// Ensure OpenSCAD cube example exists in mocks
+if (!mockModels.find((m: any) => m.id === 'openscad_cube')) {
+  mockModels.push({
+    id: 'openscad_cube',
+    name: 'OpenSCAD Cube',
+    code: 'cube(10);',
+    thumbnail: '/placeholder.svg',
+    language: 'openscad',
+  } as any);
+}

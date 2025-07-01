@@ -1,5 +1,5 @@
 // @ts-expect-error -- monaco-editor path types
-import type { Environment } from 'monaco-editor/esm/vs/editor/editor.api';
+import type { Environment } from 'monaco-editor';
 
 // Extend both Window and Worker global scopes so that assigning
 // `self.MonacoEnvironment = { getWorker: ... }` is type-safe in

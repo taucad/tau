@@ -1,5 +1,5 @@
 // @ts-expect-error -- typed import path not resolved in build setup, we just need the runtime types
-import type * as MonacoNamespace from 'monaco-editor/esm/vs/editor/editor.api';
+import type * as MonacoNamespace from 'monaco-editor';
 
 /**
  * Register a minimal OpenSCAD language in Monaco.
@@ -119,7 +119,9 @@ export function registerOpenSCAD(monaco: typeof MonacoNamespace): void {
   // Simple completions – return keyword list
   monaco.languages.registerCompletionItemProvider(LANGUAGE_ID, {
     triggerCharacters: ['.', '(', '$'],
-    provideCompletionItems: () => {
+    provideCompletionItems: (): MonacoNamespace.languages.ProviderResult<
+      MonacoNamespace.languages.CompletionList
+    > => {
       const suggestions: MonacoNamespace.languages.CompletionItem[] = KEYWORDS.map((kw) => ({
         label: kw,
         kind: monaco.languages.CompletionItemKind.Keyword,

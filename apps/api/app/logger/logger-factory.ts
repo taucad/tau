@@ -200,7 +200,7 @@ function googleLoggingConfig(): Options {
   };
 }
 
-function consoleLoggingConfig(): Options {
+export function consoleLoggingConfig(): Options {
   if (import.meta.env.PROD) {
     // In production, we don't want pretty logs. So we use the default pino-http options.
     return {
@@ -222,19 +222,6 @@ function consoleLoggingConfig(): Options {
       options,
     },
   };
-}
-
-export function getPinoLoggingConfig(): Options | boolean {
-  const envToLogger: Record<`${Environment['NODE_ENV']}`, Options | boolean> = {
-    development: consoleLoggingConfig(),
-    production: true, // In production, we don't want pretty logs. So we use the default pino-http options.
-    test: false, // In test mode, disable logs.
-  } as const;
-
-  // We use process.env here as the config service is not available when this function is called, during app bootstrap.
-  const environment = process.env.NODE_ENV;
-
-  return envToLogger[environment];
 }
 
 export async function useLoggerFactory(configService: ConfigService<Environment, true>): Promise<Params> {

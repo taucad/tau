@@ -8,11 +8,10 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { ConfigService } from '@nestjs/config';
 import { Logger as PinoLogger } from 'nestjs-pino';
-import type { FastifyLoggerOptions } from 'fastify';
 import { AppModule } from '~/app.module.js';
 import { generatePrefixedId, idPrefix } from '~/utils/id.js';
 import type { Environment } from '~/config/environment.config.js';
-import { getPinoLoggingConfig } from '~/logger/logger-factory.js';
+import { getFastifyLoggingConfig } from '~/logger/fastify.logger.js';
 import { httpHeader } from '~/constants/http-header.constant.js';
 
 async function bootstrap() {
@@ -20,7 +19,7 @@ async function bootstrap() {
     bodyLimit: 50 * 1024 * 1024, // 50MB in bytes
     genReqId: () => generatePrefixedId(idPrefix.request),
     disableRequestLogging: true, // Disables automatic 'incoming request'/'request completed' logs - these are handled by custom loggers.
-    logger: getPinoLoggingConfig() as FastifyLoggerOptions,
+    logger: getFastifyLoggingConfig(),
   });
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, fastifyAdapter, {
     bufferLogs: true, // Buffer logs until pino logger is ready. This ensures all logs are consistently formatted.

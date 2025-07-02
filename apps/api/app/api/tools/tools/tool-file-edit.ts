@@ -48,7 +48,6 @@ DO NOT omit spans of pre-existing code without using the // ... existing code ..
 } as const;
 
 export const fileEditTool = tool((args) => {
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- required.
-  const result = interrupt(args) as FileEditResult;
+  const result = interrupt<unknown, FileEditResult>(args);
   return result;
 }, fileEditToolDefinition);

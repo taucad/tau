@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { DynamicStructuredTool, Tool } from '@langchain/core/tools';
+import type { StructuredTool } from '@langchain/core/tools';
 import { OpenAI, OpenAIEmbeddings } from '@langchain/openai';
 import { createWebBrowserTool } from '~/api/tools/tools/tool-web-browser.js';
 import { fileEditTool } from '~/api/tools/tools/tool-file-edit.js';
@@ -29,13 +29,13 @@ export const toolChoiceFromToolName = {
 @Injectable()
 export class ToolService {
   public getTools(selectedToolChoice: ToolChoiceWithCategory): {
-    tools: Record<ToolCategory, Tool | DynamicStructuredTool>;
+    tools: Record<ToolCategory, StructuredTool>;
     resolvedToolChoice: string;
   } {
     const model = new OpenAI({ temperature: 0 });
     const embeddings = new OpenAIEmbeddings();
     // Define the tools for the agent to use
-    const toolCategoryToTool: Record<ToolCategory, Tool | DynamicStructuredTool> = {
+    const toolCategoryToTool: Record<ToolCategory, StructuredTool> = {
       [toolCategory.webSearch]: webSearchTool,
       [toolCategory.webBrowser]: createWebBrowserTool({
         model,

@@ -116,7 +116,7 @@ Your goal is to ensure users receive expert-level assistance by connecting them 
         ]);
       },
       onEvent(parameters) {
-        // Console.log('onEvent', parameters.event);
+        logger.debug(`onEvent: ${JSON.stringify(parameters.event)}`);
       },
       onError(error) {
         if (error instanceof Error && error.message === 'Aborted') {

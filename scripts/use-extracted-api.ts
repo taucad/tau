@@ -1,13 +1,14 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
 
-import { readFileSync } from 'fs';
+import { readFileSync } from 'node:fs';
+import process from 'node:process';
 
-interface ExtractedAPIData {
+type ExtractedApiData = {
   metadata: {
     extractionDate: string;
-    totalAPIs: number;
-    coreAPIs: number;
-    usedAPIs: number;
+    totalApis: number;
+    coreApis: number;
+    usedApis: number;
   };
   apis: Array<{
     name: string;
@@ -17,130 +18,152 @@ interface ExtractedAPIData {
     usageCount: number;
     isCore: boolean;
   }>;
-}
+};
 
 // Example usage functions for the extracted API data
-class ReplicadAPIHelper {
-  private apiData: ExtractedAPIData;
+class ReplicadApiHelper {
+  private readonly apiData: ExtractedApiData;
 
-  constructor(apiDataPath: string = './replicad-api-data.json') {
-    this.apiData = JSON.parse(readFileSync(apiDataPath, 'utf8'));
+  public constructor(private readonly apiDataPath = './replicad-api-data.json') {
+    this.apiData = JSON.parse(readFileSync(this.apiDataPath, 'utf8')) as ExtractedApiData;
   }
 
-  // Get the most frequently used APIs
-  getMostUsedAPIs(limit: number = 10) {
+  // Get the most frequently used Apis
+  public getMostUsedApis(limit = 10): ExtractedApiData['apis'] {
     return this.apiData.apis
-      .filter(api => api.usageCount > 0)
+      .filter((api) => api.usageCount > 0)
       .sort((a, b) => b.usageCount - a.usageCount)
       .slice(0, limit);
   }
 
-  // Get APIs by category
-  getAPIsByCategory(category: string) {
-    return this.apiData.apis.filter(api => api.category === category);
+  // Get Apis by category
+  public getApisByCategory(category: string): ExtractedApiData['apis'] {
+    return this.apiData.apis.filter((api) => api.category === category);
   }
 
-  // Get core APIs (most important for beginners)
-  getCoreAPIs() {
-    return this.apiData.apis.filter(api => api.isCore);
+  // Get core Apis (most important for beginners)
+  public getCoreApis(): ExtractedApiData['apis'] {
+    return this.apiData.apis.filter((api) => api.isCore);
   }
 
-  // Search APIs by name pattern
-  searchAPIs(pattern: string) {
+  // Search Apis by name pattern
+  public searchApis(pattern: string): ExtractedApiData['apis'] {
     const regex = new RegExp(pattern, 'i');
-    return this.apiData.apis.filter(api => 
-      regex.test(api.name) || regex.test(api.signature)
-    );
+    return this.apiData.apis.filter((api) => regex.test(api.name) || regex.test(api.signature));
   }
 
   // Get API categories summary
-  getCategorySummary() {
+  public getCategorySummary(): Record<string, { total: number; core: number; used: number }> {
     const summary: Record<string, { total: number; core: number; used: number }> = {};
-    
-    this.apiData.apis.forEach(api => {
-      if (!summary[api.category]) {
-        summary[api.category] = { total: 0, core: 0, used: 0 };
-      }
+
+    for (const api of this.apiData.apis) {
+      summary[api.category] ||= { total: 0, core: 0, used: 0 };
+
       summary[api.category].total++;
       if (api.isCore) summary[api.category].core++;
       if (api.usageCount > 0) summary[api.category].used++;
-    });
-    
+    }
+
     return summary;
   }
 
   // Generate autocomplete suggestions for IDE
-  generateAutocompleteData() {
-    return this.apiData.apis.map(api => ({
+  public generateAutocompleteData(): Array<{
+    name: string;
+    type: 'function' | 'class' | 'type' | 'constant' | 'interface';
+    category: string;
+    signature: string;
+    priority: string;
+    documentation: string;
+  }> {
+    return this.apiData.apis.map((api) => ({
       name: api.name,
       type: api.type,
       category: api.category,
       signature: api.signature,
       priority: api.isCore ? 'high' : api.usageCount > 0 ? 'medium' : 'low',
-      documentation: `${api.signature}\n\nCategory: ${api.category}\nUsage: ${api.usageCount} times in examples`
+      documentation: `${api.signature}\n\nCategory: ${api.category}\nUsage: ${api.usageCount} times in examples`,
     }));
   }
 
   // Get learning path for beginners
-  getLearningPath() {
+  public getLearningPath(): Array<{ category: string; apis: ExtractedApiData['apis'] }> {
     const categories = [
       'Drawing & Sketching',
-      'Primitives & Makers', 
+      'Primitives & Makers',
       '3D Operations',
       'Transformations',
       'Finders & Filters',
-      'Measurements'
+      'Measurements',
     ];
 
-    return categories.map(category => ({
+    return categories.map((category) => ({
       category,
-      apis: this.getAPIsByCategory(category)
-        .filter(api => api.isCore || api.usageCount > 0)
+      apis: this.getApisByCategory(category)
+        .filter((api) => api.isCore || api.usageCount > 0)
         .sort((a, b) => b.usageCount - a.usageCount)
-        .slice(0, 5)
+        .slice(0, 5),
     }));
   }
 
   // Get metadata
-  getMetadata() {
+  public getMetadata(): ExtractedApiData['metadata'] {
     return this.apiData.metadata;
   }
 }
 
 // Example usage
 function main() {
-  const helper = new ReplicadAPIHelper();
-  
+  const helper = new ReplicadApiHelper();
+
   console.log('🔍 Replicad API Analysis\n');
   console.log('📊 Metadata:', helper.getMetadata());
-  
-  console.log('\n🌟 Top 10 Most Used APIs:');
-  helper.getMostUsedAPIs(10).forEach((api, index) => {
+
+  console.log('\n🌟 Top 10 Most Used Apis:');
+  for (const [index, api] of helper.getMostUsedApis(10).entries()) {
     console.log(`${index + 1}. ${api.name} (${api.usageCount} uses) - ${api.category}`);
-  });
-  
+  }
+
   console.log('\n📚 Learning Path for Beginners:');
-  helper.getLearningPath().forEach(step => {
+  for (const step of helper.getLearningPath()) {
     console.log(`\n${step.category}:`);
-    step.apis.forEach(api => {
+    for (const api of step.apis) {
       console.log(`  - ${api.name} ${api.isCore ? '🌟' : ''}`);
-    });
-  });
-  
+    }
+  }
+
   console.log('\n🔍 Search Examples:');
-  console.log('Drawing functions:', helper.searchAPIs('^draw').map(api => api.name).slice(0, 5));
-  console.log('Sketch functions:', helper.searchAPIs('^sketch').map(api => api.name).slice(0, 5));
-  console.log('Make functions:', helper.searchAPIs('^make').map(api => api.name).slice(0, 5));
-  
+  console.log(
+    'Drawing functions:',
+    helper
+      .searchApis('^draw')
+      .map((api) => api.name)
+      .slice(0, 5),
+  );
+  console.log(
+    'Sketch functions:',
+    helper
+      .searchApis('^sketch')
+      .map((api) => api.name)
+      .slice(0, 5),
+  );
+  console.log(
+    'Make functions:',
+    helper
+      .searchApis('^make')
+      .map((api) => api.name)
+      .slice(0, 5),
+  );
+
   console.log('\n📋 Category Summary:');
   const summary = helper.getCategorySummary();
-  Object.entries(summary).forEach(([category, stats]) => {
+  for (const [category, stats] of Object.entries(summary)) {
     console.log(`${category}: ${stats.total} total (${stats.core} core, ${stats.used} used in examples)`);
-  });
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
 
-export { ReplicadAPIHelper }; 
+export { ReplicadApiHelper as ReplicadAPIHelper };

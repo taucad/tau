@@ -1,9 +1,9 @@
 {
   "metadata": {
-    "extractionDate": "2025-06-08T07:43:19.071Z",
+    "extractionDate": "2025-07-02T03:58:46.336Z",
     "extractionMethod": "TypeScript Compiler API (Filtered)",
     "totalApis": 202,
-    "usedApis": 32,
+    "usedApis": 30,
     "filtering": {
       "removedPrivateProtected": true,
       "removedOcProperties": true,
@@ -30,7 +30,7 @@
         }
       ],
       "returnType": "TopoDS_Shape",
-      "usageCount": 55
+      "usageCount": 54
     },
     {
       "name": "draw",
@@ -240,14 +240,6 @@
       "usageCount": 5
     },
     {
-      "name": "Plane",
-      "type": "class",
-      "category": "Geometry Types",
-      "signature": "export declare class Plane {\n    xDir: Vector;\n    yDir: Vector;\n    zDir: Vector;\n    constructor(origin: Point, xDirection?: Point | null, normal?: Point);\n    delete(): void;\n    clone(): Plane;\n    get origin(): Vector;\n    set origin(newOrigin: Vector);\n    translateTo(point: Point): Plane;\n    translate(xDist: number, yDist: number, zDist: number): Plane;\n    translate(vector: Point): Plane;\n    translateX(xDist: number): Plane;\n    translateY(yDist: number): Plane;\n    translateZ(zDist: number): Plane;\n    pivot(angle: number, direction?: Direction): Plane;\n    rotate2DAxes(angle: number): Plane;\n    setOrigin2d(x: number, y: number): void;\n    toLocalCoords(vec: Vector): Vector;\n    toWorldCoords(v: Point): Vector;\n}",
-      "signatureWithJSDoc": "export declare class Plane {\n    xDir: Vector;\n    yDir: Vector;\n    zDir: Vector;\n    constructor(origin: Point, xDirection?: Point | null, normal?: Point);\n    delete(): void;\n    clone(): Plane;\n    get origin(): Vector;\n    set origin(newOrigin: Vector);\n    translateTo(point: Point): Plane;\n    translate(xDist: number, yDist: number, zDist: number): Plane;\n    translate(vector: Point): Plane;\n    translateX(xDist: number): Plane;\n    translateY(yDist: number): Plane;\n    translateZ(zDist: number): Plane;\n    pivot(angle: number, direction?: Direction): Plane;\n    rotate2DAxes(angle: number): Plane;\n    setOrigin2d(x: number, y: number): void;\n    toLocalCoords(vec: Vector): Vector;\n    toWorldCoords(v: Point): Vector;\n}",
-      "usageCount": 5
-    },
-    {
       "name": "sketchCircle",
       "type": "constant",
       "category": "Drawing & Sketching",
@@ -300,6 +292,14 @@
       "usageCount": 4
     },
     {
+      "name": "Plane",
+      "type": "class",
+      "category": "Geometry Types",
+      "signature": "export declare class Plane {\n    xDir: Vector;\n    yDir: Vector;\n    zDir: Vector;\n    constructor(origin: Point, xDirection?: Point | null, normal?: Point);\n    delete(): void;\n    clone(): Plane;\n    get origin(): Vector;\n    set origin(newOrigin: Vector);\n    translateTo(point: Point): Plane;\n    translate(xDist: number, yDist: number, zDist: number): Plane;\n    translate(vector: Point): Plane;\n    translateX(xDist: number): Plane;\n    translateY(yDist: number): Plane;\n    translateZ(zDist: number): Plane;\n    pivot(angle: number, direction?: Direction): Plane;\n    rotate2DAxes(angle: number): Plane;\n    setOrigin2d(x: number, y: number): void;\n    toLocalCoords(vec: Vector): Vector;\n    toWorldCoords(v: Point): Vector;\n}",
+      "signatureWithJSDoc": "export declare class Plane {\n    xDir: Vector;\n    yDir: Vector;\n    zDir: Vector;\n    constructor(origin: Point, xDirection?: Point | null, normal?: Point);\n    delete(): void;\n    clone(): Plane;\n    get origin(): Vector;\n    set origin(newOrigin: Vector);\n    translateTo(point: Point): Plane;\n    translate(xDist: number, yDist: number, zDist: number): Plane;\n    translate(vector: Point): Plane;\n    translateX(xDist: number): Plane;\n    translateY(yDist: number): Plane;\n    translateZ(zDist: number): Plane;\n    pivot(angle: number, direction?: Direction): Plane;\n    rotate2DAxes(angle: number): Plane;\n    setOrigin2d(x: number, y: number): void;\n    toLocalCoords(vec: Vector): Vector;\n    toWorldCoords(v: Point): Vector;\n}",
+      "usageCount": 4
+    },
+    {
       "name": "makeOffset",
       "type": "constant",
       "category": "Primitives & Makers",
@@ -334,27 +334,11 @@
       "usageCount": 2
     },
     {
-      "name": "makeSphere",
-      "type": "constant",
-      "category": "Primitives & Makers",
-      "signature": "export declare const makeSphere: (radius: number) => Solid;",
-      "signatureWithJSDoc": "export declare const makeSphere: (radius: number) => Solid;",
-      "usageCount": 2
-    },
-    {
       "name": "polysideInnerRadius",
       "type": "constant",
       "category": "Utilities",
       "signature": "export declare const polysideInnerRadius: (outerRadius: number, sidesCount: number, sagitta?: number) => number;",
       "signatureWithJSDoc": "/**\n * Helper function to compute the inner radius of a polyside (even if a sagitta\n * is defined\n */\nexport declare const polysideInnerRadius: (outerRadius: number, sidesCount: number, sagitta?: number) => number;",
-      "usageCount": 2
-    },
-    {
-      "name": "Shape",
-      "type": "class",
-      "category": "Geometry Types",
-      "signature": "export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type> {\n    constructor(ocShape: Type);\n    clone(): this;\n    get hashCode(): number;\n    get isNull(): boolean;\n    isSame(other: AnyShape): boolean;\n    isEqual(other: AnyShape): boolean;\n    simplify(): this;\n    translate(xDist: number, yDist: number, zDist: number): this;\n    translate(vector: Point): this;\n    translateX(distance: number): this;\n    translateY(distance: number): this;\n    translateZ(distance: number): this;\n    rotate(angle: number, position?: Point, direction?: Point): this;\n    mirror(inputPlane?: Plane | PlaneName | Point, origin?: Point): this;\n    scale(scale: number, center?: Point): this;\n    get edges(): Edge[];\n    get faces(): Face[];\n    get wires(): Wire[];\n    get boundingBox(): BoundingBox;\n    mesh({ tolerance, angularTolerance }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n    }): ShapeMesh;\n    meshEdges({ tolerance, angularTolerance }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n    }): {\n        lines: number[];\n        edgeGroups: {\n            start: number;\n            count: number;\n            edgeId: number;\n        }[];\n    };\n    blobSTEP(): Blob;\n    blobSTL({ tolerance, angularTolerance, binary, }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n        binary?: boolean | undefined;\n    }): Blob;\n}",
-      "signatureWithJSDoc": "export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type> {\n    constructor(ocShape: Type);\n    clone(): this;\n    get hashCode(): number;\n    get isNull(): boolean;\n    isSame(other: AnyShape): boolean;\n    isEqual(other: AnyShape): boolean;\n    /**\n     * Simplifies the shape by removing unnecessary edges and faces\n     */\n    simplify(): this;\n    /**\n     * Translates the shape of an arbitrary vector\n     *\n     * @category Shape Transformations\n     */\n    translate(xDist: number, yDist: number, zDist: number): this;\n    translate(vector: Point): this;\n    /**\n     * Translates the shape on the X axis\n     *\n     * @category Shape Transformations\n     */\n    translateX(distance: number): this;\n    /**\n     * Translates the shape on the Y axis\n     *\n     * @category Shape Transformations\n     */\n    translateY(distance: number): this;\n    /**\n     * Translates the shape on the Z axis\n     *\n     * @category Shape Transformations\n     */\n    translateZ(distance: number): this;\n    /**\n     * Rotates the shape\n     *\n     * @category Shape Transformations\n     */\n    rotate(angle: number, position?: Point, direction?: Point): this;\n    /**\n     * Mirrors the shape through a plane\n     *\n     * @category Shape Transformations\n     */\n    mirror(inputPlane?: Plane | PlaneName | Point, origin?: Point): this;\n    /**\n     * Returns a scaled version of the shape\n     *\n     * @category Shape Transformations\n     */\n    scale(scale: number, center?: Point): this;\n    get edges(): Edge[];\n    get faces(): Face[];\n    get wires(): Wire[];\n    get boundingBox(): BoundingBox;\n    /**\n     * Exports the current shape as a set of triangle. These can be used by threejs\n     * for instance to represent the the shape\n     *\n     * @category Shape Export\n     */\n    mesh({ tolerance, angularTolerance }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n    }): ShapeMesh;\n    /**\n     * Exports the current shape as a set of lines. These can be used by threejs\n     * for instance to represent the edges of the shape\n     *\n     * @category Shape Export\n     */\n    meshEdges({ tolerance, angularTolerance }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n    }): {\n        lines: number[];\n        edgeGroups: {\n            start: number;\n            count: number;\n            edgeId: number;\n        }[];\n    };\n    /**\n     * Exports the current shape as a STEP file as a Blob\n     *\n     * @category Shape Export\n     */\n    blobSTEP(): Blob;\n    /**\n     * Exports the current shape as a STL file as a Blob\n     *\n     * In order to create a STL file, the shape needs to be meshed. The\n     * tolerances correspond to the values used to mesh the shape.\n     *\n     * @category Shape Export\n     */\n    blobSTL({ tolerance, angularTolerance, binary, }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n        binary?: boolean | undefined;\n    }): Blob;\n}",
       "usageCount": 2
     },
     {
@@ -374,65 +358,11 @@
       "usageCount": 2
     },
     {
-      "name": "genericSweep",
-      "type": "function",
-      "category": "Utilities",
-      "signature": "export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode: true): [\n    Shape3D,\n    Wire,\n    Wire\n];",
-      "signatureWithJSDoc": "export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode: true): [\n    Shape3D,\n    Wire,\n    Wire\n];",
-      "parameters": [
-        {
-          "name": "wire",
-          "type": "Wire",
-          "optional": false
-        },
-        {
-          "name": "spine",
-          "type": "Wire",
-          "optional": false
-        },
-        {
-          "name": "sweepConfig",
-          "type": "GenericSweepConfig",
-          "optional": false
-        },
-        {
-          "name": "shellMode",
-          "type": "true",
-          "optional": false
-        }
-      ],
-      "returnType": "[Shape3D, Wire, Wire]",
-      "usageCount": 1
-    },
-    {
-      "name": "genericSweep",
-      "type": "function",
-      "category": "Utilities",
-      "signature": "export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode?: false): Shape3D;",
-      "signatureWithJSDoc": "export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode?: false): Shape3D;",
-      "parameters": [
-        {
-          "name": "wire",
-          "type": "Wire",
-          "optional": false
-        },
-        {
-          "name": "spine",
-          "type": "Wire",
-          "optional": false
-        },
-        {
-          "name": "sweepConfig",
-          "type": "GenericSweepConfig",
-          "optional": false
-        },
-        {
-          "name": "shellMode",
-          "type": "false",
-          "optional": true
-        }
-      ],
-      "returnType": "Shape3D",
+      "name": "makeSphere",
+      "type": "constant",
+      "category": "Primitives & Makers",
+      "signature": "export declare const makeSphere: (radius: number) => Solid;",
+      "signatureWithJSDoc": "export declare const makeSphere: (radius: number) => Solid;",
       "usageCount": 1
     },
     {
@@ -467,6 +397,14 @@
         }
       ],
       "returnType": "TopoDS_Shape",
+      "usageCount": 1
+    },
+    {
+      "name": "Shape",
+      "type": "class",
+      "category": "Geometry Types",
+      "signature": "export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type> {\n    constructor(ocShape: Type);\n    clone(): this;\n    get hashCode(): number;\n    get isNull(): boolean;\n    isSame(other: AnyShape): boolean;\n    isEqual(other: AnyShape): boolean;\n    simplify(): this;\n    translate(xDist: number, yDist: number, zDist: number): this;\n    translate(vector: Point): this;\n    translateX(distance: number): this;\n    translateY(distance: number): this;\n    translateZ(distance: number): this;\n    rotate(angle: number, position?: Point, direction?: Point): this;\n    mirror(inputPlane?: Plane | PlaneName | Point, origin?: Point): this;\n    scale(scale: number, center?: Point): this;\n    get edges(): Edge[];\n    get faces(): Face[];\n    get wires(): Wire[];\n    get boundingBox(): BoundingBox;\n    mesh({ tolerance, angularTolerance }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n    }): ShapeMesh;\n    meshEdges({ tolerance, angularTolerance }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n    }): {\n        lines: number[];\n        edgeGroups: {\n            start: number;\n            count: number;\n            edgeId: number;\n        }[];\n    };\n    blobSTEP(): Blob;\n    blobSTL({ tolerance, angularTolerance, binary, }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n        binary?: boolean | undefined;\n    }): Blob;\n}",
+      "signatureWithJSDoc": "export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type> {\n    constructor(ocShape: Type);\n    clone(): this;\n    get hashCode(): number;\n    get isNull(): boolean;\n    isSame(other: AnyShape): boolean;\n    isEqual(other: AnyShape): boolean;\n    /**\n     * Simplifies the shape by removing unnecessary edges and faces\n     */\n    simplify(): this;\n    /**\n     * Translates the shape of an arbitrary vector\n     *\n     * @category Shape Transformations\n     */\n    translate(xDist: number, yDist: number, zDist: number): this;\n    translate(vector: Point): this;\n    /**\n     * Translates the shape on the X axis\n     *\n     * @category Shape Transformations\n     */\n    translateX(distance: number): this;\n    /**\n     * Translates the shape on the Y axis\n     *\n     * @category Shape Transformations\n     */\n    translateY(distance: number): this;\n    /**\n     * Translates the shape on the Z axis\n     *\n     * @category Shape Transformations\n     */\n    translateZ(distance: number): this;\n    /**\n     * Rotates the shape\n     *\n     * @category Shape Transformations\n     */\n    rotate(angle: number, position?: Point, direction?: Point): this;\n    /**\n     * Mirrors the shape through a plane\n     *\n     * @category Shape Transformations\n     */\n    mirror(inputPlane?: Plane | PlaneName | Point, origin?: Point): this;\n    /**\n     * Returns a scaled version of the shape\n     *\n     * @category Shape Transformations\n     */\n    scale(scale: number, center?: Point): this;\n    get edges(): Edge[];\n    get faces(): Face[];\n    get wires(): Wire[];\n    get boundingBox(): BoundingBox;\n    /**\n     * Exports the current shape as a set of triangle. These can be used by threejs\n     * for instance to represent the the shape\n     *\n     * @category Shape Export\n     */\n    mesh({ tolerance, angularTolerance }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n    }): ShapeMesh;\n    /**\n     * Exports the current shape as a set of lines. These can be used by threejs\n     * for instance to represent the edges of the shape\n     *\n     * @category Shape Export\n     */\n    meshEdges({ tolerance, angularTolerance }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n    }): {\n        lines: number[];\n        edgeGroups: {\n            start: number;\n            count: number;\n            edgeId: number;\n        }[];\n    };\n    /**\n     * Exports the current shape as a STEP file as a Blob\n     *\n     * @category Shape Export\n     */\n    blobSTEP(): Blob;\n    /**\n     * Exports the current shape as a STL file as a Blob\n     *\n     * In order to create a STL file, the shape needs to be meshed. The\n     * tolerances correspond to the values used to mesh the shape.\n     *\n     * @category Shape Export\n     */\n    blobSTL({ tolerance, angularTolerance, binary, }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n        binary?: boolean | undefined;\n    }): Blob;\n}",
       "usageCount": 1
     },
     {
@@ -1223,6 +1161,68 @@
       "jsDoc": "Sketching"
     },
     {
+      "name": "genericSweep",
+      "type": "function",
+      "category": "Utilities",
+      "signature": "export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode: true): [\n    Shape3D,\n    Wire,\n    Wire\n];",
+      "signatureWithJSDoc": "export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode: true): [\n    Shape3D,\n    Wire,\n    Wire\n];",
+      "parameters": [
+        {
+          "name": "wire",
+          "type": "Wire",
+          "optional": false
+        },
+        {
+          "name": "spine",
+          "type": "Wire",
+          "optional": false
+        },
+        {
+          "name": "sweepConfig",
+          "type": "GenericSweepConfig",
+          "optional": false
+        },
+        {
+          "name": "shellMode",
+          "type": "true",
+          "optional": false
+        }
+      ],
+      "returnType": "[Shape3D, Wire, Wire]",
+      "usageCount": 0
+    },
+    {
+      "name": "genericSweep",
+      "type": "function",
+      "category": "Utilities",
+      "signature": "export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode?: false): Shape3D;",
+      "signatureWithJSDoc": "export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode?: false): Shape3D;",
+      "parameters": [
+        {
+          "name": "wire",
+          "type": "Wire",
+          "optional": false
+        },
+        {
+          "name": "spine",
+          "type": "Wire",
+          "optional": false
+        },
+        {
+          "name": "sweepConfig",
+          "type": "GenericSweepConfig",
+          "optional": false
+        },
+        {
+          "name": "shellMode",
+          "type": "false",
+          "optional": true
+        }
+      ],
+      "returnType": "Shape3D",
+      "usageCount": 0
+    },
+    {
       "name": "GenericSweepConfig",
       "type": "interface",
       "category": "Utilities",
@@ -1957,8 +1957,8 @@
       "name": "Sketches",
       "type": "class",
       "category": "Utilities",
-      "signature": "export declare class Sketches {\n    sketches: Array<Sketch | CompoundSketch>;\n    constructor(sketches: Array<Sketch | CompoundSketch>);\n    wires(): AnyShape;\n    faces(): AnyShape;\n    extrude(extrusionDistance: number, extrusionConfig?: {\n        extrusionDirection?: Point;\n        extrusionProfile?: ExtrusionProfile;\n        twistAngle?: number;\n        origin?: Point;\n    }): AnyShape;\n    revolve(revolutionAxis?: Point, config?: {\n        origin?: Point;\n    }): AnyShape;\n}",
-      "signatureWithJSDoc": "export declare class Sketches {\n    sketches: Array<Sketch | CompoundSketch>;\n    constructor(sketches: Array<Sketch | CompoundSketch>);\n    wires(): AnyShape;\n    faces(): AnyShape;\n    /** Extrudes the sketch to a certain distance.(along the default direction\n     * and origin of the sketch).\n     *\n     * You can define another extrusion direction or origin,\n     *\n     * It is also possible to twist extrude with an angle (in degrees), or to\n     * give a profile to the extrusion (the endFactor will scale the face, and\n     * the profile will define how the scale is applied (either linarly or with\n     * a s-shape).\n     */\n    extrude(extrusionDistance: number, extrusionConfig?: {\n        extrusionDirection?: Point;\n        extrusionProfile?: ExtrusionProfile;\n        twistAngle?: number;\n        origin?: Point;\n    }): AnyShape;\n    /**\n     * Revolves the drawing on an axis (defined by its direction and an origin\n     * (defaults to the sketch origin)\n     */\n    revolve(revolutionAxis?: Point, config?: {\n        origin?: Point;\n    }): AnyShape;\n}",
+      "signature": "export declare class Sketches {\n    sketches: Array<Sketch | CompoundSketch>;\n    constructor(sketches: Array<Sketch | CompoundSketch>);\n    wires(): AnyShape;\n    faces(): AnyShape;\n    extrude(extrusionDistance: number, extrusionConfig?: {\n        extrusionDirection?: Point;\n        extrusionProfile?: ExtrusionProfile;\n        twistAngle?: number;\n        origin?: Point;\n    }): Shape3D;\n    revolve(revolutionAxis?: Point, config?: {\n        origin?: Point;\n    }): Shape3D;\n}",
+      "signatureWithJSDoc": "export declare class Sketches {\n    sketches: Array<Sketch | CompoundSketch>;\n    constructor(sketches: Array<Sketch | CompoundSketch>);\n    wires(): AnyShape;\n    faces(): AnyShape;\n    /** Extrudes the sketch to a certain distance.(along the default direction\n     * and origin of the sketch).\n     *\n     * You can define another extrusion direction or origin,\n     *\n     * It is also possible to twist extrude with an angle (in degrees), or to\n     * give a profile to the extrusion (the endFactor will scale the face, and\n     * the profile will define how the scale is applied (either linarly or with\n     * a s-shape).\n     */\n    extrude(extrusionDistance: number, extrusionConfig?: {\n        extrusionDirection?: Point;\n        extrusionProfile?: ExtrusionProfile;\n        twistAngle?: number;\n        origin?: Point;\n    }): Shape3D;\n    /**\n     * Revolves the drawing on an axis (defined by its direction and an origin\n     * (defaults to the sketch origin)\n     */\n    revolve(revolutionAxis?: Point, config?: {\n        origin?: Point;\n    }): Shape3D;\n}",
       "usageCount": 0
     },
     {

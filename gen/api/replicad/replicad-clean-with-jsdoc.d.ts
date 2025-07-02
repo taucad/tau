@@ -123,6 +123,19 @@ export declare const assembleWire: (listOfEdges: (Edge | Wire)[]) => Wire;
  */
 export declare function drawPolysides(radius: number, sidesCount: number, sagitta?: number): Drawing;
 export declare const makeFace: (wire: Wire, holes?: Wire[]) => Face;
+/**
+ * Creates the `Sketch` of a circle in a defined plane
+ *
+ * @category Sketching
+ */
+export declare const sketchCircle: (radius: number, planeConfig?: PlaneConfig) => Sketch;
+/** Welds faces and shells into a single shell and then makes a solid.
+ *
+ * @param facesOrShells - An array of faces and shells to be welded.
+ * @returns A solid that contains all the faces and shells.
+ **/
+export declare function makeSolid(facesOrShells: Array<Face | Shell>): Solid;
+export declare function mirror(shape: TopoDS_Shape, inputPlane?: Plane | PlaneName | Point, origin?: Point): TopoDS_Shape;
 export declare class Plane {
     xDir: Vector;
     yDir: Vector;
@@ -144,19 +157,6 @@ export declare class Plane {
     toLocalCoords(vec: Vector): Vector;
     toWorldCoords(v: Point): Vector;
 }
-/**
- * Creates the `Sketch` of a circle in a defined plane
- *
- * @category Sketching
- */
-export declare const sketchCircle: (radius: number, planeConfig?: PlaneConfig) => Sketch;
-/** Welds faces and shells into a single shell and then makes a solid.
- *
- * @param facesOrShells - An array of faces and shells to be welded.
- * @returns A solid that contains all the faces and shells.
- **/
-export declare function makeSolid(facesOrShells: Array<Face | Shell>): Solid;
-export declare function mirror(shape: TopoDS_Shape, inputPlane?: Plane | PlaneName | Point, origin?: Point): TopoDS_Shape;
 export declare const makeOffset: (face: Face, offset: number, tolerance?: number) => Shape3D;
 /**
  * The FaceSketcher allows you to sketch on a plane.
@@ -224,12 +224,43 @@ export declare const drawParametricFunction: (func: (t: number) => Point2D, { po
     stop?: number | undefined;
 }, approximationConfig?: BSplineApproximationConfig) => Drawing;
 export declare const makeCylinder: (radius: number, height: number, location?: Point, direction?: Point) => Solid;
-export declare const makeSphere: (radius: number) => Solid;
 /**
  * Helper function to compute the inner radius of a polyside (even if a sagitta
  * is defined
  */
 export declare const polysideInnerRadius: (outerRadius: number, sidesCount: number, sagitta?: number) => number;
+export declare class Shell extends _3DShape<TopoDS_Shell> {
+}
+export declare class Vector extends WrappingObj<gp_Vec> {
+    constructor(vector?: Point);
+    get repr(): string;
+    get x(): number;
+    get y(): number;
+    get z(): number;
+    get Length(): number;
+    toTuple(): [
+        number,
+        number,
+        number
+    ];
+    cross(v: Vector): Vector;
+    dot(v: Vector): number;
+    sub(v: Vector): Vector;
+    add(v: Vector): Vector;
+    multiply(scale: number): Vector;
+    normalized(): Vector;
+    normalize(): Vector;
+    getCenter(): Vector;
+    getAngle(v: Vector): number;
+    projectToPlane(plane: Plane): Vector;
+    equals(other: Vector): boolean;
+    toPnt(): gp_Pnt;
+    toDir(): gp_Dir;
+    rotate(angle: number, center?: Point, direction?: Point): Vector;
+}
+export declare const makeSphere: (radius: number) => Solid;
+export declare const revolution: (face: Face, center?: Point, direction?: Point, angle?: number) => Shape3D;
+export declare function scale(shape: TopoDS_Shape, center: Point, scale: number): TopoDS_Shape;
 export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type> {
     constructor(ocShape: Type);
     clone(): this;
@@ -335,43 +366,6 @@ export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type> 
         binary?: boolean | undefined;
     }): Blob;
 }
-export declare class Shell extends _3DShape<TopoDS_Shell> {
-}
-export declare class Vector extends WrappingObj<gp_Vec> {
-    constructor(vector?: Point);
-    get repr(): string;
-    get x(): number;
-    get y(): number;
-    get z(): number;
-    get Length(): number;
-    toTuple(): [
-        number,
-        number,
-        number
-    ];
-    cross(v: Vector): Vector;
-    dot(v: Vector): number;
-    sub(v: Vector): Vector;
-    add(v: Vector): Vector;
-    multiply(scale: number): Vector;
-    normalized(): Vector;
-    normalize(): Vector;
-    getCenter(): Vector;
-    getAngle(v: Vector): number;
-    projectToPlane(plane: Plane): Vector;
-    equals(other: Vector): boolean;
-    toPnt(): gp_Pnt;
-    toDir(): gp_Dir;
-    rotate(angle: number, center?: Point, direction?: Point): Vector;
-}
-export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode: true): [
-    Shape3D,
-    Wire,
-    Wire
-];
-export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode?: false): Shape3D;
-export declare const revolution: (face: Face, center?: Point, direction?: Point, angle?: number) => Shape3D;
-export declare function scale(shape: TopoDS_Shape, center: Point, scale: number): TopoDS_Shape;
 /**
  * A line drawing to be acted upon. It defines directions to be acted upon by
  * definition (extrusion direction for instance).
@@ -1488,6 +1482,12 @@ export declare interface GenericSketcher<ReturnType> {
      */
     closeWithMirror(): ReturnType;
 }
+export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode: true): [
+    Shape3D,
+    Wire,
+    Wire
+];
+export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode?: false): Shape3D;
 export declare interface GenericSweepConfig {
     frenet?: boolean;
     auxiliarySpine?: Wire | Edge;
@@ -1722,14 +1722,14 @@ export declare class Sketches {
         extrusionProfile?: ExtrusionProfile;
         twistAngle?: number;
         origin?: Point;
-    }): AnyShape;
+    }): Shape3D;
     /**
      * Revolves the drawing on an axis (defined by its direction and an origin
      * (defaults to the sketch origin)
      */
     revolve(revolutionAxis?: Point, config?: {
         origin?: Point;
-    }): AnyShape;
+    }): Shape3D;
 }
 /**
  * Creates the `Sketch` of an offset of a certain face. A negative offset will

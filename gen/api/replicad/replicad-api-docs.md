@@ -1052,7 +1052,7 @@ export declare class Wire extends _1DShape<TopoDS_Wire> {
 
 **Type:** class
 
-**Usage Count:** 5
+**Usage Count:** 4
 
 **Signature:**
 ```typescript
@@ -1076,60 +1076,6 @@ export declare class Plane {
     setOrigin2d(x: number, y: number): void;
     toLocalCoords(vec: Vector): Vector;
     toWorldCoords(v: Point): Vector;
-}
-```
-
----
-
-### Shape
-
-**Type:** class
-
-**Usage Count:** 2
-
-**Signature:**
-```typescript
-export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type> {
-    constructor(ocShape: Type);
-    clone(): this;
-    get hashCode(): number;
-    get isNull(): boolean;
-    isSame(other: AnyShape): boolean;
-    isEqual(other: AnyShape): boolean;
-    simplify(): this;
-    translate(xDist: number, yDist: number, zDist: number): this;
-    translate(vector: Point): this;
-    translateX(distance: number): this;
-    translateY(distance: number): this;
-    translateZ(distance: number): this;
-    rotate(angle: number, position?: Point, direction?: Point): this;
-    mirror(inputPlane?: Plane | PlaneName | Point, origin?: Point): this;
-    scale(scale: number, center?: Point): this;
-    get edges(): Edge[];
-    get faces(): Face[];
-    get wires(): Wire[];
-    get boundingBox(): BoundingBox;
-    mesh({ tolerance, angularTolerance }?: {
-        tolerance?: number | undefined;
-        angularTolerance?: number | undefined;
-    }): ShapeMesh;
-    meshEdges({ tolerance, angularTolerance }?: {
-        tolerance?: number | undefined;
-        angularTolerance?: number | undefined;
-    }): {
-        lines: number[];
-        edgeGroups: {
-            start: number;
-            count: number;
-            edgeId: number;
-        }[];
-    };
-    blobSTEP(): Blob;
-    blobSTL({ tolerance, angularTolerance, binary, }?: {
-        tolerance?: number | undefined;
-        angularTolerance?: number | undefined;
-        binary?: boolean | undefined;
-    }): Blob;
 }
 ```
 
@@ -1183,6 +1129,60 @@ export declare class Vector extends WrappingObj<gp_Vec> {
     toPnt(): gp_Pnt;
     toDir(): gp_Dir;
     rotate(angle: number, center?: Point, direction?: Point): Vector;
+}
+```
+
+---
+
+### Shape
+
+**Type:** class
+
+**Usage Count:** 1
+
+**Signature:**
+```typescript
+export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type> {
+    constructor(ocShape: Type);
+    clone(): this;
+    get hashCode(): number;
+    get isNull(): boolean;
+    isSame(other: AnyShape): boolean;
+    isEqual(other: AnyShape): boolean;
+    simplify(): this;
+    translate(xDist: number, yDist: number, zDist: number): this;
+    translate(vector: Point): this;
+    translateX(distance: number): this;
+    translateY(distance: number): this;
+    translateZ(distance: number): this;
+    rotate(angle: number, position?: Point, direction?: Point): this;
+    mirror(inputPlane?: Plane | PlaneName | Point, origin?: Point): this;
+    scale(scale: number, center?: Point): this;
+    get edges(): Edge[];
+    get faces(): Face[];
+    get wires(): Wire[];
+    get boundingBox(): BoundingBox;
+    mesh({ tolerance, angularTolerance }?: {
+        tolerance?: number | undefined;
+        angularTolerance?: number | undefined;
+    }): ShapeMesh;
+    meshEdges({ tolerance, angularTolerance }?: {
+        tolerance?: number | undefined;
+        angularTolerance?: number | undefined;
+    }): {
+        lines: number[];
+        edgeGroups: {
+            start: number;
+            count: number;
+            edgeId: number;
+        }[];
+    };
+    blobSTEP(): Blob;
+    blobSTL({ tolerance, angularTolerance, binary, }?: {
+        tolerance?: number | undefined;
+        angularTolerance?: number | undefined;
+        binary?: boolean | undefined;
+    }): Blob;
 }
 ```
 
@@ -1935,7 +1935,7 @@ export declare const makeCylinder: (radius: number, height: number, location?: P
 
 **Type:** constant
 
-**Usage Count:** 2
+**Usage Count:** 1
 
 **Signature:**
 ```typescript
@@ -2313,7 +2313,7 @@ export declare const makeVertex: (point: Point) => Vertex;
 
 **Type:** function
 
-**Usage Count:** 55
+**Usage Count:** 54
 
 **Signature:**
 ```typescript
@@ -2486,48 +2486,6 @@ export declare class Sketcher implements GenericSketcher<Sketch> {
 ```typescript
 export declare const polysideInnerRadius: (outerRadius: number, sidesCount: number, sagitta?: number) => number;
 ```
-
----
-
-### genericSweep
-
-**Type:** function
-
-**Usage Count:** 1
-
-**Signature:**
-```typescript
-export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode: true): [
-    Shape3D,
-    Wire,
-    Wire
-];
-```
-
-**Parameters:**
-- `wire: Wire`
-- `spine: Wire`
-- `sweepConfig: GenericSweepConfig`
-- `shellMode: true`
-
----
-
-### genericSweep
-
-**Type:** function
-
-**Usage Count:** 1
-
-**Signature:**
-```typescript
-export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode?: false): Shape3D;
-```
-
-**Parameters:**
-- `wire: Wire`
-- `spine: Wire`
-- `sweepConfig: GenericSweepConfig`
-- `shellMode?: false`
 
 ---
 
@@ -3154,6 +3112,48 @@ export declare interface GenericSketcher<ReturnType> {
 
 ---
 
+### genericSweep
+
+**Type:** function
+
+**Usage Count:** 0
+
+**Signature:**
+```typescript
+export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode: true): [
+    Shape3D,
+    Wire,
+    Wire
+];
+```
+
+**Parameters:**
+- `wire: Wire`
+- `spine: Wire`
+- `sweepConfig: GenericSweepConfig`
+- `shellMode: true`
+
+---
+
+### genericSweep
+
+**Type:** function
+
+**Usage Count:** 0
+
+**Signature:**
+```typescript
+export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode?: false): Shape3D;
+```
+
+**Parameters:**
+- `wire: Wire`
+- `spine: Wire`
+- `sweepConfig: GenericSweepConfig`
+- `shellMode?: false`
+
+---
+
 ### GenericSweepConfig
 
 **Type:** interface
@@ -3400,10 +3400,10 @@ export declare class Sketches {
         extrusionProfile?: ExtrusionProfile;
         twistAngle?: number;
         origin?: Point;
-    }): AnyShape;
+    }): Shape3D;
     revolve(revolutionAxis?: Point, config?: {
         origin?: Point;
-    }): AnyShape;
+    }): Shape3D;
 }
 ```
 

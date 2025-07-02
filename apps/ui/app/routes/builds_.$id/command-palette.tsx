@@ -534,6 +534,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
                   key={item.id}
                   value={item.label}
                   disabled={item.disabled}
+                  className="h-9"
                   onSelect={() => {
                     if (item.link) {
                       onOpenChange(false);

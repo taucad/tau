@@ -2,6 +2,7 @@ import type { ConstantRecord } from '~/types/constant.types.js';
 
 export const logServiceProvider = {
   console: 'console',
+  fly: 'fly',
   googleLogging: 'google-logging',
   awsCloudwatch: 'aws-cloudwatch',
 } as const satisfies Record<string, string>;

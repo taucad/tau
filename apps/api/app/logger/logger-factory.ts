@@ -154,28 +154,6 @@ const customErrorMessage = (request: IncomingMessage, response: ServerResponse, 
   return `${colors.bright}${colors.red}[ERR]:${formatRequestId(request.id as string)} ${methodColor}${request.method}${colors.reset} ${url} ${statusColor}${response.statusCode}${colors.reset} ${colors.red}${error.message}${colors.reset}`;
 };
 
-function logServiceConfig(logService: LogServiceProvider): Options {
-  switch (logService) {
-    case logServiceProvider.googleLogging: {
-      return googleLoggingConfig();
-    }
-
-    case logServiceProvider.awsCloudwatch: {
-      return cloudwatchLoggingConfig();
-    }
-
-    case logServiceProvider.console: {
-      return consoleLoggingConfig();
-    }
-
-    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive switch is required for exhaustive switch
-    default: {
-      const exhaustiveCheck: never = logService;
-      throw new Error(`Unknown log service: ${String(exhaustiveCheck)}`);
-    }
-  }
-}
-
 function cloudwatchLoggingConfig(): Options {
   // FIXME: Implement AWS CloudWatch logging configuration
   return {
@@ -197,6 +175,12 @@ function googleLoggingConfig(): Options {
         };
       },
     },
+  };
+}
+
+function flyLoggingConfig(): Options {
+  return {
+    messageKey: 'message',
   };
 }
 
@@ -222,6 +206,32 @@ export function consoleLoggingConfig(): Options {
       options,
     },
   };
+}
+
+export function logServiceConfig(logService: LogServiceProvider): Options {
+  switch (logService) {
+    case logServiceProvider.googleLogging: {
+      return googleLoggingConfig();
+    }
+
+    case logServiceProvider.awsCloudwatch: {
+      return cloudwatchLoggingConfig();
+    }
+
+    case logServiceProvider.fly: {
+      return flyLoggingConfig();
+    }
+
+    case logServiceProvider.console: {
+      return consoleLoggingConfig();
+    }
+
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive switch
+    default: {
+      const exhaustiveCheck: never = logService;
+      throw new Error(`Unknown log service: ${String(exhaustiveCheck)}`);
+    }
+  }
 }
 
 export async function useLoggerFactory(configService: ConfigService<Environment, true>): Promise<Params> {

@@ -7,8 +7,8 @@ const environmentSchema = z.object({
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
   TAU_FRONTEND_URL: z.string(),
-  LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
-  LOG_SERVICE: z.enum(['console', 'google-logging', 'aws-cloudwatch']).default('console'),
+  LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']),
+  LOG_SERVICE: z.enum(['console', 'fly', 'google-logging', 'aws-cloudwatch']).default('console'),
 
   // Chat & LLMs
   OPENAI_API_KEY: z.string(),

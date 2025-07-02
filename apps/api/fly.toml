@@ -11,11 +11,13 @@ primary_region = 'syd'
 
 [env]
   NODE_ENV = 'production'
-  TAU_FRONTEND_URL='https://taucad.dev'
-  LANGSMITH_TRACING=true
-  LANGSMITH_ENDPOINT='https://api.smith.langchain.com'
-  LANGSMITH_PROJECT='tau-api-dev'
-  AUTH_URL='https://api.taucad.dev'
+  TAU_FRONTEND_URL = 'https://taucad.dev'
+  LANGSMITH_TRACING = true
+  LANGSMITH_ENDPOINT = 'https://api.smith.langchain.com'
+  LANGSMITH_PROJECT = 'tau-api-dev'
+  AUTH_URL = 'https://api.taucad.dev'
+  LOG_SERVICE = 'fly'
+  LOG_LEVEL = 'info'
 
 [http_service]
   internal_port = 3000

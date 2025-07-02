@@ -5,7 +5,6 @@ import type { Options } from 'pino-http';
 import type { PrettyOptions } from 'pino-pretty';
 import { loggingRedactPaths, logServiceProvider } from '~/constants/app.constant.js';
 import type { LogServiceProvider } from '~/constants/app.constant.js';
-import { generatePrefixedId, idPrefix } from '~/utils/id.js';
 import type { Environment } from '~/config/environment.config.js';
 
 // https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#logseverity
@@ -19,7 +18,7 @@ const pinoLevelToGoogleLoggingSeverityLookup = Object.freeze({
 });
 
 // ANSI color codes for better formatting
-const colors = Object.freeze({
+const colors = {
   reset: '\u001B[0m',
   bright: '\u001B[1m',
   dim: '\u001B[2m',
@@ -33,7 +32,7 @@ const colors = Object.freeze({
   bgRed: '\u001B[41m',
   bgGreen: '\u001B[42m',
   bgYellow: '\u001B[43m',
-});
+} as const;
 
 const getMethodColor = (method: string) => {
   switch (method?.toUpperCase()) {
@@ -106,12 +105,6 @@ const formatUrl = (url: string, isDevMode = true) => {
     // Fallback for malformed URLs
     return isDevMode ? `${colors.white}${url}${colors.reset}` : url;
   }
-};
-
-const genRequestId = (request: IncomingMessage, response: ServerResponse) => {
-  const id = request.headers['x-request-id'] ?? generatePrefixedId(idPrefix.request);
-  response.setHeader('X-Request-Id', id);
-  return id;
 };
 
 const customSuccessMessage = (request: IncomingMessage, response: ServerResponse, responseTime: number) => {
@@ -207,6 +200,13 @@ function googleLoggingConfig(): Options {
 }
 
 export function consoleLoggingConfig(): Options {
+  if (import.meta.env.PROD) {
+    // In production, we don't want pretty logs. So we use the default pino-http options.
+    return {
+      messageKey: 'msg',
+    };
+  }
+
   const options: PrettyOptions = {
     singleLine: true,
     colorize: true,
@@ -226,24 +226,11 @@ export function consoleLoggingConfig(): Options {
 export async function useLoggerFactory(configService: ConfigService<Environment, true>): Promise<Params> {
   const logLevel = configService.get('LOG_LEVEL', { infer: true });
   const logService = configService.get('LOG_SERVICE', { infer: true });
-  const isDebug = import.meta.env.DEV;
 
   const serviceOptions = logServiceConfig(logService);
 
   const pinoHttpOptions: Options = {
     level: logLevel,
-    genReqId: isDebug ? genRequestId : undefined,
-    serializers: isDebug
-      ? {
-          req(request) {
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- TODO: add typings
-            request.body = request.raw.body;
-
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- TODO: add typings
-            return request;
-          },
-        }
-      : undefined,
     customSuccessMessage,
     customReceivedMessage,
     customErrorMessage,

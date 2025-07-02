@@ -14,6 +14,8 @@ export const orderBy = Object.freeze({
 // Redact value of these paths from logs
 export const loggingRedactPaths = [
   'req.headers.authorization',
+  'req.headers.cookie',
+  'req.headers["set-cookie"]',
   'req.body.token',
   'req.body.refreshToken',
   'req.body.email',

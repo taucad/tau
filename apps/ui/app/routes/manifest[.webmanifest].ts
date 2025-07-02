@@ -36,7 +36,6 @@ export const loader: LoaderFunction = () => {
       headers: {
         'Cache-Control': 'public, max-age=600',
         'Content-Type': 'application/manifest+json',
-        'ngrok-skip-browser-warning': 'true',
       },
     },
   );

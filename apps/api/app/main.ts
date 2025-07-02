@@ -14,6 +14,7 @@ import { AppModule } from '~/app.module.js';
 import { generatePrefixedId, idPrefix } from '~/utils/id.js';
 import type { Environment } from '~/config/environment.config.js';
 import { consoleLoggingConfig } from '~/logger/logger-factory.js';
+import { httpHeader } from '~/constants/http-header.constant.js';
 
 async function bootstrap() {
   const envToLogger: Record<`${Environment['NODE_ENV']}`, unknown> = {
@@ -39,6 +40,7 @@ async function bootstrap() {
 
   app.enableCors({
     origin: [appConfig.get('TAU_FRONTEND_URL', { infer: true })],
+    allowedHeaders: Object.values(httpHeader),
     credentials: true,
   });
   app.enableVersioning({

@@ -10,8 +10,10 @@ import type {
   ExportGeometryResult,
   ExtractParametersResult,
   KernelError,
+  ExtractNameResult,
+  ExtractSchemaResult,
 } from '~/types/kernel.types.js';
-import { createKernelSuccess, createKernelError } from '~/types/kernel.types.js';
+import { createKernelSuccess, createKernelError, isKernelError } from '~/types/kernel.types.js';
 import {
   initOpenCascade,
   initOpenCascadeWithExceptions,
@@ -125,10 +127,10 @@ try {
   }
 };
 
-const extractDefaultNameFromCode = async (code: string): Promise<string | undefined> => {
+const extractDefaultNameFromCode = async (code: string): Promise<ExtractNameResult> => {
   if (/^\s*export\s+/m.test(code)) {
     const module = await buildEsModule(code);
-    return module.defaultName;
+    return createKernelSuccess(module.defaultName ?? undefined);
   }
 
   const editedText = `
@@ -141,15 +143,22 @@ try {
   `;
 
   try {
-    return await runInCjsContext(editedText, {});
-  } catch {}
+    const result = await runInCjsContext(editedText, {});
+    return createKernelSuccess((result ?? {}) as string | undefined);
+  } catch {
+    return createKernelError({
+      message: 'Failed to extract default name from code',
+      startLineNumber: 0,
+      startColumn: 0,
+      type: 'runtime',
+    });
+  }
 };
 
-const extractSchemaFromCode = async (code: string): Promise<unknown> => {
+const extractSchemaFromCode = async (code: string): Promise<ExtractSchemaResult> => {
   if (/^\s*export\s+/m.test(code)) {
     const module = await buildEsModule(code);
-    console.log(module.schema);
-    return module.schema;
+    return createKernelSuccess(module.schema);
   }
 
   const editedText = `
@@ -162,8 +171,16 @@ try {
   `;
 
   try {
-    return await runInCjsContext(editedText, {});
-  } catch {}
+    const result = await runInCjsContext(editedText, {});
+    return createKernelSuccess(result ?? {});
+  } catch {
+    return createKernelError({
+      message: 'Failed to extract schema from code',
+      startLineNumber: 0,
+      startColumn: 0,
+      type: 'runtime',
+    });
+  }
 };
 
 const shapesMemory: Record<string, ShapeConfig[]> = {};
@@ -380,7 +397,8 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
       const runCodeEndTime = performance.now();
       console.log(`Code execution took ${runCodeEndTime - runCodeStartTime}ms`);
 
-      defaultName = code && (await extractDefaultNameFromCode(code));
+      const defaultNameResult = await extractDefaultNameFromCode(code);
+      defaultName = isKernelError(defaultNameResult) ? undefined : defaultNameResult.data;
     } catch (error) {
       const endTime = performance.now();
       console.log(`Error occurred after ${endTime - startTime}ms`);
@@ -398,7 +416,7 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
       (shapesArray) => {
         const editedShapes = helper.apply(shapesArray);
         shapesMemory.defaultShape = shapesArray;
-        return editedShapes;
+        return editedShapes as ShapeConfig[];
       },
       defaultName,
     );

@@ -25,6 +25,7 @@
     "@ai-sdk/react": "^1.2.12",
     "@ai-sdk/ui-utils": "^1.2.11",
     "@daveyplate/better-auth-ui": "^2.0.8",
+    "@fastify/helmet": "^13.0.1",
     "@hookform/resolvers": "^5.1.1",
     "@langchain/anthropic": "^0.3.23",
     "@langchain/community": "^0.3.47",

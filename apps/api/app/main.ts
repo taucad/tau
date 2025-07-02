@@ -8,6 +8,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { ConfigService } from '@nestjs/config';
 import { Logger as PinoLogger } from 'nestjs-pino';
+import helmet from '@fastify/helmet';
 import { AppModule } from '~/app.module.js';
 import { generatePrefixedId, idPrefix } from '~/utils/id.js';
 import type { Environment } from '~/config/environment.config.js';
@@ -39,6 +40,7 @@ async function bootstrap() {
   app.enableVersioning({
     type: VersioningType.URI,
   });
+  await app.register(helmet);
 
   if (import.meta.env.PROD) {
     const port = appConfig.get('PORT', { infer: true });

@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
+import type { MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { DatabaseModule } from '~/database/database.module.js';
 import { AuthModule } from '~/auth/auth.module.js';
 import { getEnvironment } from '~/config/environment.config.js';
 import { ApiModule } from '~/api/api.module.js';
 import { LoggerModule } from '~/logger/logger.module.js';
+import { RequestIdMiddleware } from '~/middlewares/request-id.middleware.js';
 
 @Module({
   imports: [
@@ -17,4 +19,8 @@ import { LoggerModule } from '~/logger/logger.module.js';
   controllers: [],
   providers: [],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  public configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestIdMiddleware).forRoutes('*');
+  }
+}

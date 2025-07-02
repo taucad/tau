@@ -159,7 +159,7 @@ function logServiceConfig(logService: LogServiceProvider): Options {
       return googleLoggingConfig();
     }
 
-    case logServiceProvider.awsCloudWatch: {
+    case logServiceProvider.awsCloudwatch: {
       return cloudwatchLoggingConfig();
     }
 

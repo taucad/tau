@@ -41,6 +41,7 @@ async function bootstrap() {
   app.enableCors({
     origin: [appConfig.get('TAU_FRONTEND_URL', { infer: true })],
     allowedHeaders: Object.values(httpHeader),
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
   });
   app.enableVersioning({

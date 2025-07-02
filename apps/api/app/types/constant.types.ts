@@ -20,7 +20,11 @@ type ValidatedConstants<T extends Record<string, string>> = {
  * Generic type for constants that validates camelCase keys match kebab-case values
  * and returns the union of all values. Shows compile-time errors at declaration site.
  *
- * This ensures constants are consistent and predictable.
+ * This utility ensures constants are consistent and predictable.
+ *
+ * The record MUST be declared as `as const`.
+ *
+ * @returns The union of all values.
  *
  * @example
  * // ✅ Valid - compiles successfully
@@ -29,7 +33,7 @@ type ValidatedConstants<T extends Record<string, string>> = {
  *   userAgent: 'user-agent',
  * } as const;
  *
- * type HeaderValues = Constants<typeof headers>; // 'request-id' | 'user-agent'
+ * type HeaderValues = ConstantRecord<typeof headers>; // 'request-id' | 'user-agent'
  *
  * @example
  * // ❌ Invalid - shows red squiggly at declaration
@@ -38,6 +42,6 @@ type ValidatedConstants<T extends Record<string, string>> = {
  *   userAgent: 'User-Agent', // Will cause compile error
  * } as const;
  *
- * type BadHeaderValues = Constants<typeof badHeaders>; // Compile error
+ * type BadHeaderValues = ConstantRecord<typeof badHeaders>; // Compile error
  */
 export type ConstantRecord<T extends ValidatedConstants<T> & Record<string, string>> = T[keyof T];

@@ -3,7 +3,7 @@ import { z } from 'zod/v4';
 
 const environmentSchema = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  NODE_ENV: z.enum(['development', 'production', 'test']),
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
   TAU_FRONTEND_URL: z.string(),

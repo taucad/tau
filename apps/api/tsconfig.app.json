@@ -4,7 +4,8 @@
     "outDir": "../../dist/out-tsc",
     "module": "NodeNext",
     "types": ["node"],
-    "target": "ESNext"
+    "target": "ESNext",
+    "erasableSyntaxOnly": false // Incompatible with NestJS dependency injection.
   },
   "include": ["app/**/*.ts"],
   "exclude": [

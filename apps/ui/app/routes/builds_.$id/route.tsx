@@ -1,7 +1,6 @@
 import { Link, useParams } from 'react-router';
 import { useCallback, useEffect } from 'react';
 import type { JSX } from 'react';
-import { useActorRef } from '@xstate/react';
 import { createActor } from 'xstate';
 import { PackagePlus } from 'lucide-react';
 // eslint-disable-next-line no-restricted-imports -- allowed for router types
@@ -15,8 +14,7 @@ import { AiChatProvider, useChatActions, useChatSelector } from '~/components/ch
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { BuildNameEditor } from '~/routes/builds_.$id/build-name-editor.js';
-import { graphicsActor, FileExplorerContext } from '~/routes/builds_.$id/graphics-actor.js';
-import { orthographicViews, screenshotRequestMachine } from '~/machines/screenshot-request.machine.js';
+import { FileExplorerContext } from '~/routes/builds_.$id/graphics-actor.js';
 import { fileEditMachine } from '~/machines/file-edit.machine.js';
 import type { FileEditToolResult } from '~/routes/builds_.$id/chat-message-tool-file-edit.js';
 import { ChatInterfaceControls, ViewContextProvider } from '~/routes/builds_.$id/chat-interface-controls.js';
@@ -139,57 +137,6 @@ export default function ChatRoute(): JSX.Element {
   if (!id) {
     throw new Error('No build id provided');
   }
-
-  // Create screenshot request machine instance
-  const screenshotActorRef = useActorRef(screenshotRequestMachine, {
-    input: { graphicsRef: graphicsActor },
-  });
-
-  // Function to capture screenshots
-  const captureScreenshots = useCallback(async (): Promise<{
-    compositeScreenshot?: string;
-  }> => {
-    return new Promise((resolve) => {
-      // Capture composite screenshot (all views)
-      screenshotActorRef.send({
-        type: 'requestCompositeScreenshot',
-        options: {
-          output: {
-            format: 'image/webp', // Use PNG for transparent backgrounds
-            quality: 0.75,
-            isPreview: true,
-          },
-          cameraAngles: orthographicViews.slice(0, 6),
-          aspectRatio: 1, // Square images for better grid layout
-          maxResolution: 800, // Reduced from 1000 for faster generation
-          zoomLevel: 1.2, // Slightly lower zoom for smaller images
-          composite: {
-            enabled: true,
-            preferredRatio: { columns: 3, rows: 2 }, // Prefer 3x2 grid as requested
-            showLabels: true,
-            padding: 12, // Increase padding for better visual separation
-            labelHeight: 24,
-            backgroundColor: 'transparent',
-            dividerColor: '#666666', // Dark dividers for visibility on transparent background
-            dividerWidth: 1,
-          },
-        },
-        async onSuccess(dataUrls) {
-          const compositeDataUrl = dataUrls[0];
-          if (compositeDataUrl) {
-            resolve({ compositeScreenshot: compositeDataUrl });
-          } else {
-            console.error('No composite screenshot data received');
-            resolve({ compositeScreenshot: undefined });
-          }
-        },
-        onError(error) {
-          console.error('Composite screenshot failed:', error);
-          resolve({ compositeScreenshot: undefined });
-        },
-      });
-    });
-  }, [screenshotActorRef]);
 
   // Tool call handler that integrates with the new architecture
   const onToolCall = useCallback(async ({ toolCall }: { toolCall: { toolName: string; args: unknown } }) => {

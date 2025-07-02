@@ -15,7 +15,7 @@ import { useEffect } from 'react';
 import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
-import { MessageStatus } from '~/types/chat.types.js';
+import { messageStatus } from '~/types/chat.types.js';
 
 type UseChatArgs = NonNullable<Parameters<typeof useChat>[0]>;
 type UseChatReturn = ReturnType<typeof useChat>;
@@ -179,7 +179,7 @@ const chatMachine = setup({
                 content: event.content,
                 createdAt: new Date(),
                 model: event.model,
-                status: MessageStatus.Pending,
+                status: messageStatus.pending,
               };
 
               // Update messages array - keep messages up to and including the edited one
@@ -322,7 +322,7 @@ const chatMachine = setup({
                 role: 'user',
                 content: event.content,
                 model: event.model,
-                status: MessageStatus.Pending,
+                status: messageStatus.pending,
                 createdAt: new Date(),
               };
 

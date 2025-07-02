@@ -28,7 +28,8 @@ function TabsList({
   },
   ...props
 }: TabsListProps) {
-  const localRef = React.useRef<HTMLDivElement | undefined>(null);
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- radix requires `null` ref
+  const localRef = React.useRef<HTMLDivElement | null>(null);
   React.useImperativeHandle(ref, () => localRef.current!);
 
   const [activeValue, setActiveValue] = React.useState<string | undefined>(undefined);

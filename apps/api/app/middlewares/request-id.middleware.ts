@@ -11,8 +11,10 @@ export class RequestIdMiddleware implements NestMiddleware {
   public use(request: FastifyRequest['raw'], reply: FastifyReply['raw'], next: () => void): void {
     const requestHeaderId = request.headers[httpHeader.requestId] as string;
     if (requestHeaderId) {
+      // If the request ID is already set, use it to support tracing across services.
       reply.setHeader(httpHeader.requestId, requestHeaderId);
     } else {
+      // If the request ID is not set, generate a new one.
       reply.setHeader(httpHeader.requestId, request.id as string);
     }
 

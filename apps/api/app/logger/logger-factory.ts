@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import process from 'node:process';
 import type { ConfigService } from '@nestjs/config';
 import type { Params } from 'nestjs-pino';
 import type { Options } from 'pino-http';
@@ -199,7 +200,7 @@ function googleLoggingConfig(): Options {
   };
 }
 
-export function consoleLoggingConfig(): Options {
+function consoleLoggingConfig(): Options {
   if (import.meta.env.PROD) {
     // In production, we don't want pretty logs. So we use the default pino-http options.
     return {
@@ -221,6 +222,19 @@ export function consoleLoggingConfig(): Options {
       options,
     },
   };
+}
+
+export function getPinoLoggingConfig(): Options | boolean {
+  const envToLogger: Record<`${Environment['NODE_ENV']}`, Options | boolean> = {
+    development: consoleLoggingConfig(),
+    production: true, // In production, we don't want pretty logs. So we use the default pino-http options.
+    test: false, // In test mode, disable logs.
+  } as const;
+
+  // We use process.env here as the config service is not available when this function is called, during app bootstrap.
+  const environment = process.env.NODE_ENV;
+
+  return envToLogger[environment];
 }
 
 export async function useLoggerFactory(configService: ConfigService<Environment, true>): Promise<Params> {

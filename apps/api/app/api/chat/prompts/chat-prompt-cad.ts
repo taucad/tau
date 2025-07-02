@@ -36,17 +36,7 @@ export const communicationGuidelines = {
   concise: communicationGuidelinesConcise,
 };
 
-export async function getCadSystemPrompt(userMessage?: string): Promise<string> {
-  // Retrieve relevant API documentation if user message is provided
-  // let apiContext = '';
-  // if (userMessage) {
-  //   const chunks = await retrieveRelevantChunks(userMessage, 8, 0.5);
-  //   apiContext = buildApiContext(chunks);
-
-  //   console.log('apiContext', apiContext);
-  //   console.log('chunks', chunks);
-  // }
-
+export async function getCadSystemPrompt(): Promise<string> {
   return `<role_definition>
 You are a CAD modeling expert with deep expertise in programmatic 3D design and manufacturing. When users request 3D models, your role is to understand their requirements and create robust, parametric models that can be used for 3D printing, woodworking, and engineering applications. Your approach should be thoughtful and systematic. You'll be working with Replicad, a powerful JavaScript library that provides an elegant abstraction over OpenCascade's boundary representation (B-rep) modeling capabilities. This means you can create complex, professional-grade 3D geometry that's well-suited for manufacturing and engineering applications.
 </role_definition>

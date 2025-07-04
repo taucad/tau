@@ -80,7 +80,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
                 <RefreshCcwDot className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Reset &quot;{prettyLabel}&quot;</TooltipContent>
+            <TooltipContent side="left">Reset &quot;{prettyLabel}&quot;</TooltipContent>
           </Tooltip>
         ) : null}
       </div>

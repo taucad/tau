@@ -15,7 +15,7 @@ import { ENV } from '~/config.js';
 export const configureMonaco = async (): Promise<void> => {
   if (globalThis.self !== undefined) {
     globalThis.self.MonacoEnvironment = {
-      getWorker(_: unknown, label: string): Worker {
+      getWorker(_, label) {
         if (label === 'json') {
           return new JsonWorker();
         }
@@ -43,10 +43,6 @@ export const configureMonaco = async (): Promise<void> => {
     await import('monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution');
     await import('monaco-editor/esm/vs/language/json/monaco.contribution');
     await import('monaco-editor/esm/vs/language/typescript/monaco.contribution');
-
-    // Register OpenSCAD language support (syntax & completions)
-    const { registerOpenSCAD } = await import('./openscad-language.js').catch(() => import('./openscad-language'));
-    registerOpenSCAD(monaco);
   }
 };
 

@@ -9,14 +9,14 @@ import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '~/components/ui/card.js';
 import { SvgIcon } from '~/components/icons/svg-icon.js';
 import type { Build } from '~/types/build.types.js';
-import type { CadKernelProvider } from '~/types/cad.types.js';
+import type { KernelProvider } from '~/types/kernel.types';
 import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
 import { storage } from '~/db/storage.js';
 import { cadMachine } from '~/machines/cad.machine.js';
 import { HammerAnimation } from '~/components/hammer-animation.js';
 
 // Placeholder for language icons
-const languageIcons: Record<CadKernelProvider, ComponentType<{ className?: string }>> = {
+const kernelIcons: Record<KernelProvider, ComponentType<{ className?: string }>> = {
   replicad: ({ className }) => <SvgIcon id="replicad" className={className} />,
   openscad: ({ className }) => <SvgIcon id="openscad" className={className} />,
   kicad: ({ className }) => <SvgIcon id="kicad" className={className} />,
@@ -75,14 +75,14 @@ function ProjectCard({
 
   const navigate = useNavigate();
 
-  // Memoize the LanguageIcon computation to prevent re-creation on every render
-  const LanguageIcon = useMemo(
+  // Memoize the KernelIcon computation to prevent re-creation on every render
+  const KernelIcon = useMemo(
     () =>
       Object.values(assets)
         .map((asset) => asset.language)
-        .map((language) => ({
-          Icon: languageIcons[language],
-          language,
+        .map((kernel) => ({
+          Icon: kernelIcons[kernel],
+          language: kernel,
         })),
     [assets],
   );
@@ -195,7 +195,7 @@ function ProjectCard({
         <div className="flex items-center justify-between">
           <CardTitle>{name}</CardTitle>
           <div className="flex flex-wrap gap-1">
-            {LanguageIcon.map(({ language, Icon }) => (
+            {KernelIcon.map(({ language, Icon }) => (
               <Tooltip key={language}>
                 <TooltipTrigger>
                   <Avatar className="h-5 w-5">

@@ -28,6 +28,9 @@ export type KernelErrorResult = {
   error: KernelError;
 };
 
+export const kernelProviders = ['replicad', 'openscad', 'kicad', 'kcl', 'cpp'] as const;
+export type KernelProvider = (typeof kernelProviders)[number];
+
 export type KernelResult<T> = KernelSuccessResult<T> | KernelErrorResult;
 
 // Specific result types for different kernel operations

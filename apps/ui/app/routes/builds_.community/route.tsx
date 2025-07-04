@@ -11,8 +11,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '~/components/ui/dropdown-menu.js';
-import type { CadKernelProvider } from '~/types/cad.types.js';
-import { cadKernelProviders } from '~/types/cad.types.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
+import { kernelProviders } from '~/types/kernel.types.js';
 import { sampleBuilds } from '~/constants/build-examples.js';
 import { CommunityBuildGrid } from '~/components/project-grid.js';
 import type { Handle } from '~/types/matches.types.js';
@@ -34,7 +34,7 @@ type SortOption = 'newest' | 'oldest' | 'stars' | 'forks';
 
 export default function CadCommunity(): JSX.Element {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedLanguage, setSelectedLanguage] = useState<CadKernelProvider | 'all'>('all');
+  const [selectedKernel, setSelectedKernel] = useState<KernelProvider | 'all'>('all');
   const [sortOption, setSortOption] = useState<SortOption>('newest');
   const [visibleProjects, setVisibleProjects] = useState(itemsPerPage);
 
@@ -46,10 +46,10 @@ export default function CadCommunity(): JSX.Element {
       project.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
       project.tags.some((tag) => tag.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    const matchesLanguage =
-      selectedLanguage === 'all' || Object.values(project.assets).some((asset) => asset.language === selectedLanguage);
+    const matchesKernel =
+      selectedKernel === 'all' || Object.values(project.assets).some((asset) => asset.language === selectedKernel);
 
-    return matchesSearch && matchesLanguage;
+    return matchesSearch && matchesKernel;
   });
 
   // Sort projects based on selected option
@@ -113,23 +113,23 @@ export default function CadCommunity(): JSX.Element {
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="w-[180px] justify-start">
                   <Code2 className="mr-2 size-4" />
-                  {selectedLanguage === 'all' ? 'All Languages' : selectedLanguage}
+                  {selectedKernel === 'all' ? 'All Kernels' : selectedKernel}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-[180px]">
                 <DropdownMenuGroup>
                   <DropdownMenuItem
                     onClick={() => {
-                      setSelectedLanguage('all');
+                      setSelectedKernel('all');
                     }}
                   >
-                    All Languages
+                    All Kernels
                   </DropdownMenuItem>
-                  {cadKernelProviders.map((key) => (
+                  {kernelProviders.map((key) => (
                     <DropdownMenuItem
                       key={key}
                       onClick={() => {
-                        setSelectedLanguage(key);
+                        setSelectedKernel(key);
                       }}
                     >
                       {key}

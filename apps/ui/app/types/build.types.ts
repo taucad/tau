@@ -1,5 +1,6 @@
 import type { Message } from '@ai-sdk/react';
-import type { CadKernelProvider, Category } from '~/types/cad.types.js';
+import type { Category } from '~/types/cad.types.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
 
 type File = {
   content: string;
@@ -20,7 +21,7 @@ export type Chat = {
 export type Asset = {
   files: Record<string, File>;
   main: string; // Points to the main entry file
-  language: CadKernelProvider;
+  language: KernelProvider;
   parameters: Record<string, unknown>;
   // Could add additional metadata
   version?: string;

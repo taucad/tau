@@ -25,7 +25,7 @@ function getDescriptor(name?: string): MeasurementDescriptor {
   return 'length';
 }
 
-const baseIndicatorClass = 'flex h-6 w-6 items-center justify-center border bg-muted text-muted-foreground select-none';
+const baseIndicatorClass = 'flex h-7 w-7 items-center justify-center border bg-muted text-muted-foreground select-none';
 
 type ChatParametersInputNumberProps = Omit<React.ComponentProps<'input'>, 'type'> & {
   readonly unit?: string;

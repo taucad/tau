@@ -10,55 +10,41 @@ export function ChatParameterWidget(props: WidgetProps): JSX.Element {
   const { value, onChange, name, schema } = props;
 
   const defaultValue = schema.default as string | number | boolean;
-  const type = schema.type as 'boolean' | 'integer' | 'string';
+  const type = schema.type as 'boolean' | 'integer' | 'number' | 'string';
 
   // If it's a boolean, render a switch
   if (type === 'boolean') {
     const booleanValue = Boolean(value);
 
-    return (
-      <ChatParametersBoolean
-        value={booleanValue}
-        onChange={(newValue) => {
-          onChange(newValue);
-        }}
-      />
-    );
+    return <ChatParametersBoolean value={booleanValue} onChange={onChange} />;
   }
 
   // If it's a number, render an appropriate numeric input
-  if (type === 'integer') {
-    // Convert to number if it's a string that looks like a number
+  if (type === 'integer' || type === 'number') {
     const numericValue = Number.parseFloat(String(value));
     const defaultNumericValue = Number.parseFloat(String(defaultValue));
+    const min = schema.minimum;
+    const max = schema.maximum;
+    const step = schema.multipleOf;
 
     return (
       <ChatParametersNumber
         value={numericValue}
         defaultValue={defaultNumericValue}
         name={name}
-        onChange={(newValue) => {
-          console.log('onChange', newValue);
-          onChange(newValue);
-        }}
+        min={min}
+        max={max}
+        step={step}
+        onChange={onChange}
       />
     );
   }
 
-  // For string values, check if it's a valid color first
   if (type === 'string') {
     const stringValue = String(value);
     const defaultStringValue = String(defaultValue);
 
-    return (
-      <ChatParametersString
-        value={stringValue}
-        defaultValue={defaultStringValue}
-        onChange={(newValue) => {
-          onChange(newValue);
-        }}
-      />
-    );
+    return <ChatParametersString value={stringValue} defaultValue={defaultStringValue} onChange={onChange} />;
   }
 
   // For other types, render a text input as fallback
@@ -67,7 +53,7 @@ export function ChatParameterWidget(props: WidgetProps): JSX.Element {
       autoComplete="off"
       type="text"
       value={String(value)}
-      className="h-6 flex-1 bg-background p-1"
+      className="h-7 flex-1 bg-background p-1"
       onChange={(event) => {
         onChange(event.target.value);
       }}

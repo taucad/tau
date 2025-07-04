@@ -30,7 +30,7 @@ export function ChatParametersString({ value, defaultValue, onChange }: ChatPara
       autoComplete="off"
       type="text"
       value={value}
-      className="h-6 flex-1 bg-background p-1"
+      className="h-7 flex-1 bg-background p-1"
       onChange={(event) => {
         onChange(event.target.value);
       }}

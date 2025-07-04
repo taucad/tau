@@ -1,1 +1,0 @@
-{"root":["./eslint.config.ts","./vitest.workspace.ts","./jest.config.ts","./scripts/extract-replicad-api.ts","./scripts/use-extracted-api.ts"],"version":"5.7.3"}

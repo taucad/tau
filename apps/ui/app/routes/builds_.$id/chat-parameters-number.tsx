@@ -75,7 +75,7 @@ export function ChatParametersNumber({
         <ChatParametersInputNumber
           value={value}
           name={name}
-          className="h-7 w-12 bg-background p-1"
+          className="h-7 w-12 bg-background px-2"
           onChange={(event) => {
             onChange(Number.parseFloat(event.target.value));
           }}

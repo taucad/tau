@@ -1,7 +1,8 @@
 import React, { useRef, useLayoutEffect, useCallback } from 'react';
 import { useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
-import { BufferGeometry } from 'three';
+import { BufferGeometry, EdgesGeometry } from 'three';
+import * as THREE from 'three';
 import * as r3js from 'replicad-threejs-helper';
 import { MatcapMaterial } from '~/components/geometry/graphics/three/matcap-material.js';
 import { useColor } from '~/hooks/use-color.js';
@@ -87,10 +88,24 @@ export const ReplicadMesh = React.memo(function ({
   }, [selected, invalidate]);
 
   useLayoutEffect(() => {
-    if (faces) r3js.syncFaces(body.current, faces);
+    if (faces) {
+      // Create geometry from OpenSCAD Shape3D faces data
+      const positions = new Float32Array(faces.vertices);
+      const indices = new Uint32Array(faces.triangles);
+      const normals = new Float32Array(faces.normals);
 
-    if (edges) r3js.syncLines(lines.current, edges);
-    else if (faces) r3js.syncLinesFromFaces(lines.current, body.current);
+      body.current.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      body.current.setIndex(new THREE.BufferAttribute(indices, 1));
+      body.current.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    }
+
+    if (edges?.lines.length) {
+      r3js.syncLines(lines.current, edges);
+    } else {
+      lines.current.clearGroups();
+      delete lines.current.userData.edgeGroups;
+      lines.current.copy(new EdgesGeometry(body.current, 2));
+    }
 
     invalidate();
   }, [faces, edges, invalidate]);

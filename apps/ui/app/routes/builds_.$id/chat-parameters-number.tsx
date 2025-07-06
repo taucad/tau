@@ -36,16 +36,27 @@ type ChatParametersNumberProps = {
   readonly defaultValue: number;
   readonly onChange: (value: number) => void;
   readonly name: string;
+  readonly min?: number;
+  readonly max?: number;
+  readonly step?: number;
 };
 
-export function ChatParametersNumber({ value, defaultValue, onChange, name }: ChatParametersNumberProps): JSX.Element {
+export function ChatParametersNumber({
+  value,
+  defaultValue,
+  onChange,
+  name,
+  min,
+  max,
+  step,
+}: ChatParametersNumberProps): JSX.Element {
   return (
     <div className="flex w-full flex-row items-center gap-2">
       <Slider
         value={[value]}
-        min={0}
-        max={defaultValue * 4 || 100}
-        step={calculateSliderStep(defaultValue || 0)}
+        min={min ?? 0}
+        max={max ?? defaultValue * 4}
+        step={step ?? calculateSliderStep(defaultValue)}
         className={cn(
           'flex-1',
           '[&_[data-slot="slider-track"]]:h-4',
@@ -64,7 +75,7 @@ export function ChatParametersNumber({ value, defaultValue, onChange, name }: Ch
         <ChatParametersInputNumber
           value={value}
           name={name}
-          className="h-6 w-12 bg-background p-1"
+          className="h-7 w-12 bg-background px-2"
           onChange={(event) => {
             onChange(Number.parseFloat(event.target.value));
           }}

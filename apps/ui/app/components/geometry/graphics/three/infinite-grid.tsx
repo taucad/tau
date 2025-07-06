@@ -246,7 +246,7 @@ export function InfiniteGrid({
   largeThickness = 2.5,
   axes = 'xyz',
   lineOpacity = 0.4,
-  minGridDistance = 1000,
+  minGridDistance = 10,
   gridDistanceMultiplier = 30,
   fadeStart = 0.05,
   fadeEnd = 0.3,

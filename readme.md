@@ -80,3 +80,20 @@ pnpm db:migrate
 # Open database studio. Useful for debugging database operations (a built-in alternative to pgAdmin)
 pnpm db:studio
 ```
+
+### Linting
+
+This project uses ESLint for linting. The linting configuration is intentionally very strict, this has the following benefits:
+
+- Open-source contributions must all adhere to the same code style.
+- AI Copilots have guardrails to ensure code is consistent.
+
+Here are some specific rules to be aware of, and why they are important:
+- `tsconfig.json`
+  - `strict`: required by libraries such as `zod`, enforcing TypeScript best practices.
+  - `erasableSyntaxOnly`: ensures that all Typescript code can be run on Node.js directly via type-stripping. The exception is NestJS apps, which require non-erasble syntax for dependency injection.
+- `eslint.config.ts`
+  - `@typescript-eslint/consistent-type-imports`: enforces separate type imports, supporting the Dependency Inversion Principle by making abstractions (types) explicit and separate from implementations.
+  - `@typescript-eslint/explicit-member-accessibility`: requires explicit accessibility modifiers for class members, enforcing the Single Responsibility Principle by making class member responsibilities and boundaries explicit.
+  - `@typescript-eslint/no-explicit-any`: prevents use of `any` type, enforcing the Liskov Substitution Principle by ensuring type safety and preventing unsafe substitutions.
+  - `@typescript-eslint/explicit-module-boundary-types`: all `export`ed functions and `public` methods must have a return type, including React components for the sake of consistency (even though it may seem overly verbose). This enforces the Interface Segregation Principle by making return types intentional and well-defined, with the additional benefit of reducing load on the TypeScript compiler by avoiding module-level type inference.

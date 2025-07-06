@@ -210,7 +210,7 @@ const getColorFormat = (color: string): string => {
 };
 
 // Base indicator class matching ChatParametersInputNumber styling
-const baseIndicatorClass = 'flex h-6 w-6 items-center justify-center border bg-muted text-muted-foreground select-none';
+const baseIndicatorClass = 'flex h-7 w-7 items-center justify-center border bg-muted text-muted-foreground select-none';
 
 /**
  * String Color Picker Component
@@ -273,7 +273,7 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
         <PopoverTrigger asChild>
           <Button
             variant="outline"
-            className="h-6 w-8 p-0"
+            className="h-7 w-7 p-0"
             style={{ backgroundColor: isValid ? value : 'transparent' }}
             aria-label="Open color picker"
           >
@@ -328,7 +328,7 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
           autoComplete="off"
           type="text"
           value={value}
-          className="h-6 flex-1 rounded-r-none border-r-0 bg-background p-1 font-mono text-sm focus-visible:ring-0"
+          className="h-7 flex-1 rounded-r-none border-r-0 bg-background px-3 font-mono text-sm focus-visible:ring-0"
           placeholder="Color value"
           onChange={handleMainInputChange}
         />

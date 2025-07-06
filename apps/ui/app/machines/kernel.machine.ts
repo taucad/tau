@@ -3,14 +3,20 @@ import type { Snapshot, ActorRef, OutputFrom, DoneActorEvent } from 'xstate';
 import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import type { Shape } from '~/types/cad.types.js';
-import type { KernelError } from '~/types/kernel.types.js';
+import type { KernelError, KernelProvider } from '~/types/kernel.types.js';
 import { isKernelSuccess } from '~/types/kernel.types.js';
-import type { BuilderWorkerInterface } from '~/components/geometry/kernel/replicad/replicad-builder.worker.js';
-import BuilderWorker from '~/components/geometry/kernel/replicad/replicad-builder.worker.js?worker';
-import { jsonSchemaFromJson } from '~/utils/schema.js';
+import type { BuilderWorkerInterface as ReplicadWorker } from '~/components/geometry/kernel/replicad/replicad-builder.worker.js';
+import ReplicadBuilderWorker from '~/components/geometry/kernel/replicad/replicad-builder.worker.js?worker';
+import type { OpenScadBuilderInterface as OpenSCADWorker } from '~/components/geometry/kernel/openscad/openscad-builder.worker.js';
+import OpenSCADBuilderWorker from '~/components/geometry/kernel/openscad/openscad-builder.worker.js?worker';
 import { assertActorDoneEvent } from '~/utils/xstate.js';
 
-const createWorkerActor = fromPromise<
+const workers = {
+  replicad: ReplicadBuilderWorker,
+  openscad: OpenSCADBuilderWorker,
+} as const satisfies Partial<Record<KernelProvider, new () => Worker>>;
+
+const createWorkersActor = fromPromise<
   { type: 'kernelInitialized' } | { type: 'kernelError'; error: KernelError },
   { context: KernelContext }
 >(async ({ input }) => {
@@ -21,30 +27,40 @@ const createWorkerActor = fromPromise<
     return { type: 'kernelInitialized' };
   }
 
-  // Clean up any existing worker
-  if (context.worker) {
-    context.worker.terminate();
+  // Clean up any existing workers
+  if (context.workers.replicad) {
+    context.workers.replicad.terminate();
+  }
+
+  if (context.workers.openscad) {
+    context.workers.openscad.terminate();
   }
 
   try {
-    // Create a new worker based on the kernel type
-    const worker = new BuilderWorker();
+    // Create both workers
+    // eslint-disable-next-line new-cap -- following type definitions
+    const replicadWorker = new workers.replicad();
+    // eslint-disable-next-line new-cap -- following type definitions
+    const openscadWorker = new workers.openscad();
 
-    // Wrap the worker with comlink
-    const wrappedWorker = wrap<BuilderWorkerInterface>(worker);
+    // Wrap both workers with comlink
+    const wrappedReplicadWorker = wrap<ReplicadWorker>(replicadWorker);
+    const wrappedOpenscadWorker = wrap<OpenSCADWorker>(openscadWorker);
 
-    // Initialize the worker with the default exception handling mode
-    await wrappedWorker.initialize(true);
+    // Initialize both workers with the default exception handling mode
+    await Promise.all([wrappedReplicadWorker.initialize(true), wrappedOpenscadWorker.initialize()]);
 
-    // Store references to worker and wrappedWorker
-    context.worker = worker;
-    context.wrappedWorker = wrappedWorker;
+    // Store references to both workers
+    context.workers.replicad = replicadWorker;
+    context.workers.openscad = openscadWorker;
+    context.wrappedWorkers.replicad = wrappedReplicadWorker;
+    context.wrappedWorkers.openscad = wrappedOpenscadWorker;
 
     // Return success result
     return { type: 'kernelInitialized' };
   } catch (error) {
     // Handle initialization errors
-    const errorMessage = error instanceof Error ? error.message : 'Failed to initialize worker';
+    const errorMessage = error instanceof Error ? error.message : 'Failed to initialize workers';
     return {
       type: 'kernelError',
       error: {
@@ -64,6 +80,7 @@ const parseParametersActor = fromPromise<
       code: string;
       parameters: Record<string, unknown>;
       jsonSchema: unknown;
+      kernelType: KernelProvider;
     }
   | {
       type: 'kernelError';
@@ -71,7 +88,7 @@ const parseParametersActor = fromPromise<
     },
   {
     context: KernelContext;
-    event: { code: string; parameters: Record<string, unknown> };
+    event: { code: string; parameters: Record<string, unknown>; kernelType: KernelProvider };
   }
 >(async ({ input }) => {
   const { context, event } = input;
@@ -89,11 +106,14 @@ const parseParametersActor = fromPromise<
     };
   }
 
-  if (!context.wrappedWorker) {
+  // Get the correct worker based on kernel type
+  const wrappedWorker = context.wrappedWorkers[event.kernelType];
+
+  if (!wrappedWorker) {
     return {
       type: 'kernelError',
       error: {
-        message: 'Worker not initialized',
+        message: `${event.kernelType} worker not initialized`,
         startLineNumber: 0,
         startColumn: 0,
         type: 'compilation',
@@ -102,42 +122,41 @@ const parseParametersActor = fromPromise<
   }
 
   try {
-    const parametersResult = await context.wrappedWorker.extractDefaultParametersFromCode(event.code);
+    const parametersResult = await wrappedWorker.extractParametersFromCode(event.code);
 
-    let defaultParameters: Record<string, unknown>;
     if (isKernelSuccess(parametersResult)) {
-      defaultParameters = parametersResult.data;
-    } else {
-      // If extraction fails, return error from the worker
+      const { defaultParameters, jsonSchema } = parametersResult.data as {
+        defaultParameters: Record<string, unknown>;
+        jsonSchema: unknown;
+      };
+
       return {
-        type: 'kernelError',
-        error: parametersResult.error,
+        type: 'parametersParsed',
+        defaultParameters,
+        code: event.code,
+        parameters: event.parameters,
+        jsonSchema,
+        kernelType: event.kernelType,
       };
     }
 
-    const jsonSchema = await jsonSchemaFromJson(defaultParameters);
-
+    // If extraction fails, return error from the worker
     return {
-      type: 'parametersParsed',
-      defaultParameters,
-      code: event.code,
-      parameters: event.parameters,
-      jsonSchema,
+      type: 'kernelError',
+      error: parametersResult.error,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Error extracting parameters';
     console.error('Error extracting parameters:', errorMessage);
 
     // If there's an unexpected error, use empty parameters as fallback
-    const defaultParameters = {};
-    const jsonSchema = await jsonSchemaFromJson(defaultParameters);
-
     return {
       type: 'parametersParsed',
-      defaultParameters,
+      defaultParameters: {},
       code: event.code,
       parameters: event.parameters,
-      jsonSchema,
+      jsonSchema: { type: 'object', properties: {} },
+      kernelType: event.kernelType,
     };
   }
 });
@@ -153,7 +172,12 @@ const evaluateCodeActor = fromPromise<
     },
   {
     context: KernelContext;
-    event: { defaultParameters: Record<string, unknown>; parameters: Record<string, unknown>; code: string };
+    event: {
+      defaultParameters: Record<string, unknown>;
+      parameters: Record<string, unknown>;
+      code: string;
+      kernelType: KernelProvider;
+    };
   }
 >(async ({ input }) => {
   const { context, event } = input;
@@ -170,11 +194,14 @@ const evaluateCodeActor = fromPromise<
     };
   }
 
-  if (!context.wrappedWorker) {
+  // Get the correct worker based on kernel type
+  const wrappedWorker = context.wrappedWorkers[event.kernelType];
+
+  if (!wrappedWorker) {
     return {
       type: 'kernelError',
       error: {
-        message: 'Worker not initialized',
+        message: `${event.kernelType} worker not initialized`,
         startLineNumber: 0,
         startColumn: 0,
         type: 'runtime',
@@ -188,7 +215,7 @@ const evaluateCodeActor = fromPromise<
     ...event.parameters,
   };
 
-  const result = await context.wrappedWorker.buildShapesFromCode(event.code, mergedParameters);
+  const result = await wrappedWorker.buildShapesFromCode(event.code, mergedParameters);
 
   // Handle the result pattern
   if (isKernelSuccess(result)) {
@@ -204,7 +231,7 @@ const evaluateCodeActor = fromPromise<
 const exportGeometryActor = fromPromise<
   | { type: 'geometryExported'; blob: Blob; format: 'stl' | 'stl-binary' | 'step' | 'step-assembly' }
   | { type: 'kernelError'; error: KernelError },
-  { context: KernelContext; event: { format: string } }
+  { context: KernelContext; event: { format: string; kernelType: KernelProvider } }
 >(async ({ input }) => {
   const { context, event } = input;
 
@@ -221,11 +248,14 @@ const exportGeometryActor = fromPromise<
     };
   }
 
-  if (!context.wrappedWorker) {
+  // Get the correct worker based on kernel type
+  const wrappedWorker = context.wrappedWorkers[event.kernelType];
+
+  if (!wrappedWorker) {
     return {
       type: 'kernelError',
       error: {
-        message: 'Worker not initialized',
+        message: `${event.kernelType} worker not initialized`,
         startLineNumber: 0,
         startColumn: 0,
         type: 'runtime',
@@ -235,11 +265,11 @@ const exportGeometryActor = fromPromise<
 
   try {
     const format = event.format as 'stl' | 'stl-binary' | 'step' | 'step-assembly';
-    const result = await context.wrappedWorker.exportShape(format);
+    const result = await wrappedWorker.exportShape(format as 'stl' | 'stl-binary');
 
     if (isKernelSuccess(result)) {
       const { data } = result;
-      if (data && data.length > 0 && data[0].blob) {
+      if (Array.isArray(data) && data.length > 0 && data[0].blob) {
         return { type: 'geometryExported', blob: data[0].blob, format };
       }
 
@@ -279,7 +309,7 @@ export type CadActor = ActorRef<Snapshot<unknown>, KernelEventExternal>;
 
 // Define the actors that the machine can invoke
 const kernelActors = {
-  createWorkerActor,
+  createWorkersActor,
   parseParametersActor,
   evaluateCodeActor,
   exportGeometryActor,
@@ -288,10 +318,10 @@ type KernelActorNames = keyof typeof kernelActors;
 
 // Define the types of events the machine can receive
 type KernelEventInternal =
-  | { type: 'initializeKernel'; kernelType: 'replicad' | 'openscad'; parentRef: CadActor }
-  | { type: 'computeGeometry'; code: string; parameters: Record<string, unknown> }
-  | { type: 'parseParameters'; code: string }
-  | { type: 'exportGeometry'; format: string };
+  | { type: 'initializeKernel'; parentRef: CadActor }
+  | { type: 'computeGeometry'; code: string; parameters: Record<string, unknown>; kernelType: KernelProvider }
+  | { type: 'parseParameters'; code: string; kernelType: KernelProvider }
+  | { type: 'exportGeometry'; format: string; kernelType: KernelProvider };
 
 // The kernel machine simply sends the output of the actors to the parent machine.
 export type KernelEventExternal = OutputFrom<(typeof kernelActors)[KernelActorNames]>;
@@ -301,21 +331,21 @@ type KernelEvent = KernelEventExternalDone | KernelEventInternal;
 
 // Interface defining the context for the Kernel machine
 type KernelContext = {
-  worker?: Worker;
-  wrappedWorker?: Remote<BuilderWorkerInterface>;
-  kernelType?: 'replicad' | 'openscad';
+  workers: Record<KernelProvider, Worker | undefined>;
+  wrappedWorkers: Record<KernelProvider, Remote<ReplicadWorker | OpenSCADWorker> | undefined>;
   parentRef?: CadActor;
+  currentKernelType?: KernelProvider;
 };
 
 /**
  * Kernel Machine
  *
- * This machine manages the WebWorker that runs the CAD operations:
- * - Initializes the worker
- * - Handles communication with the worker
+ * This machine manages the WebWorkers that run the CAD operations:
+ * - Initializes both replicad and openscad workers
+ * - Handles communication with the correct worker based on kernel type
  * - Processes results from CAD operations
  *
- * The machine's computation is purely stateless. It only manages the worker and the events it sends to the parent machine.
+ * The machine's computation is purely stateless. It only manages the workers and the events it sends to the parent machine.
  * The parent machine is responsible for the state of the CAD operations.
  */
 export const kernelMachine = setup({
@@ -333,12 +363,24 @@ export const kernelMachine = setup({
         return event.parentRef;
       },
     }),
-    async destroyWorker({ context }) {
-      console.log('destroying worker');
-      if (!context.worker) return;
-      context.worker.terminate();
-      context.worker = undefined;
-      context.wrappedWorker = undefined;
+    setCurrentKernelType: assign({
+      currentKernelType({ event }) {
+        assertEvent(event, 'computeGeometry');
+        return event.kernelType;
+      },
+    }),
+    async destroyWorkers({ context }) {
+      if (context.workers.replicad) {
+        context.workers.replicad.terminate();
+        context.workers.replicad = undefined;
+        context.wrappedWorkers.replicad = undefined;
+      }
+
+      if (context.workers.openscad) {
+        context.workers.openscad.terminate();
+        context.workers.openscad = undefined;
+        context.wrappedWorkers.openscad = undefined;
+      }
     },
   },
   guards: {
@@ -351,30 +393,35 @@ export const kernelMachine = setup({
   /** @xstate-layout N4IgpgJg5mDOIC5QGswCcB2YA2A6AlhvgC74CG2+AXoVAMSEnmVWQDaADALqKgAOAe1hMBGXiAAeiAEwA2AJy4AzBwCMqgCwrZ0gByzVSgDQgAnogCsujbmnyOG1bvlKlegOy6Avl5OpMOAREpBTUtHToaAJonDxIIILCpKLiUgiyWsrSSupy8hYq7u4m5ghu0riq7vIZ8qoc2dIWFj5+6Fh4aGBkEKZ0AMYCALZ8AK7EYADiYMNgxGimseKJImLxafIaFfYcsrsaGrLuByWILu64W1VFug1uukqtIP4duF09fWASgmjE07PzRbcZZCVapRCqbIWXAFSEaXSqfLVdyyU4IaqyGG6awWVR7QzHeRPF6BL4-UgYegwAELACi32iEwgS3iK2Sa1AaU0Gg4uGRSns0k08jkxjMiHuuBFNQFKg48ncSlkxPapIZv3CkWiLP4oPZ4IQ9QyuH0+gO6luejRTmhRQFegF+SVmxVATwZMZkDoElgxDIE1wZAAZhM0AAKDgASjoJPd6qZOoSevwKXWEKs0Ic5Q4uIs0hRxXFCHyFQFDwK0gO8qVrtefDIaGElLo9bQZCGc3QsAACg3YOxgazk6nORLeSjnSKlMdXEp9GihZjdO4OBwlXj4dda4FW036FqYoPdUkUxzJIhbhc4Qr5ccGhZUUWRSbCc55c5ZJ-vL5nqr3QA3ChRn9cJqQ7QEAGFhjGBMjyTE8R3PMpblwPYlFhDR3DzEVKzRZcLg4Fc8ycHMDAsDRtwAoCQObA9EzZU8DT2aE5AaWQrEaGU0S2RQLEIrCFB0AoOAeSjcDAQDsGAplvV9f0wEDEN0AjaNY3EyTpIHOJjzBNMEF0SspUVSFBUOeVpDwzwYSIppPE8GUxIPAZoPGKYZnAhZ6OHM80gnSpywsGo+OCsVSnhJQYWkOQEQRJoHFkR4fzUpyPV+f4PKBbT4N00dDQaGwinqfjFXI0KJSiyoMTnAyDgKb82jdcS0CiNAGGCZhqDALyEJ8yxAtQix3EhbQUUvBc8RfVcH3caRSPqb8fwwAQIDgcRYxBHqDQAWkRbZMMcQ4US2B40WhacNHkewtAUET9jExgQhYWgNpypCmgqG5mnxOpDmaBd8lsA59ErHQqk-MT3l6F79T0+oAcwlcXAUREGjwxEYXYtQeSiiikr-cT42eodNthuQl3Q-IFT2TZdjRdDVClXZZqqIVLt0QbHPjSBocY2GOJhWVVFxaqql0NFPwuZoHhmxVqluRKGrrPsiZ0mHcp2g4pX2zQjgyB1rSVE0Es8diLv0PZlTxxqJOoikoB5xC0kcXRKkRKp1GOOx2O4vNLmsFQ6lI6xDEcjT5IgB3evSVwjJcL6DDxZc0R2XAHBXawos-HkFd-a3muiSODQRaEJZlPZl3kE6iyUDRoSFnQ1Erci7PcHwfCAA */
   id: 'kernel',
   context: {
-    worker: undefined,
-    wrappedWorker: undefined,
-    kernelType: undefined,
+    workers: {
+      replicad: undefined,
+      openscad: undefined,
+    },
+    wrappedWorkers: {
+      replicad: undefined,
+      openscad: undefined,
+    },
     parentRef: undefined,
+    currentKernelType: undefined,
   },
   initial: 'initializing',
-  exit: ['destroyWorker'],
+  exit: ['destroyWorkers'],
   states: {
     initializing: {
       on: {
         initializeKernel: {
-          target: 'creatingWorker',
+          target: 'creatingWorkers',
           actions: 'registerParentRef',
         },
       },
     },
 
-    creatingWorker: {
+    creatingWorkers: {
       invoke: {
-        id: 'createWorkerActor',
-        src: 'createWorkerActor',
-        input({ context, event }) {
-          assertEvent(event, 'initializeKernel');
-          return { context, kernelType: event.kernelType };
+        id: 'createWorkersActor',
+        src: 'createWorkersActor',
+        input({ context }) {
+          return { context };
         },
         onDone: {
           target: 'ready',
@@ -481,12 +528,13 @@ export const kernelMachine = setup({
       invoke: {
         id: 'exportGeometryActor',
         src: 'exportGeometryActor',
-        input: ({ context, event }) => ({
-          context,
-          event: {
-            format: (event as { format: string }).format,
-          },
-        }),
+        input({ context, event }) {
+          assertEvent(event, 'exportGeometry');
+          return {
+            context,
+            event,
+          };
+        },
         onDone: {
           target: 'ready',
           actions: sendTo(

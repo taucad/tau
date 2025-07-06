@@ -1,0 +1,248 @@
+// Portions of this file are Copyright 2021 Google LLC, and licensed under GPL2+. See COPYING.
+
+import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+
+const builtInFunctionNames = [
+  'abs',
+  'acos',
+  'asin',
+  'atan',
+  'atan2',
+  'ceil',
+  'len',
+  'let',
+  'ln',
+  'log',
+  'lookup',
+  'max',
+  'min',
+  'sqrt',
+  'tan',
+  'rands',
+  'search',
+  'sign',
+  'sin',
+  'str',
+  'norm',
+  'pow',
+  'concat',
+  'cos',
+  'cross',
+  'floor',
+  'exp',
+  'chr',
+];
+const builtInModuleNames = [
+  'children',
+  'circle',
+  'color',
+  'cube',
+  'cylinder',
+  'diameter',
+  'difference',
+  'echo',
+  'extrude',
+  'for',
+  'function',
+  'hull',
+  'if',
+  'include',
+  'intersection_for',
+  'intersection',
+  'linear',
+  'minkowski',
+  'mirror',
+  'module',
+  'multmatrix',
+  'offset',
+  'polyhedron',
+  'projection',
+  'radius',
+  'render',
+  'resize',
+  'rotate',
+  'round',
+  'scale',
+  'sphere',
+  'square',
+  'surface',
+  'translate',
+  'union',
+  'use',
+  'value',
+  'version',
+];
+const builtInVarNames = [
+  'false',
+  'true',
+  'PI',
+  'undef',
+  '$children',
+  '$fa',
+  '$fn',
+  '$fs',
+  '$t',
+  '$vpd',
+  '$vpr',
+  '$vpt',
+];
+
+export const openscadLanguageConfiguration = {
+  colorizedBracketPairs: [
+    ['{', '}'],
+    ['(', ')'],
+    ['[', ']'],
+  ],
+
+  wordPattern: /(-?\d*\.\d\w*)|([^`~!@#%^&*()\-=+[{\]}\\|;:'",.<>/?\s]+)/g,
+  comments: {
+    lineComment: '//',
+    blockComment: ['/*', '*/'],
+  },
+  brackets: [
+    ['{', '}'],
+    ['[', ']'],
+    ['(', ')'],
+  ],
+  onEnterRules: [
+    {
+      beforeText: /^\s*\/\*\*(?!\/)([^*]|\*(?!\/))*$/,
+      afterText: /^\s*\*\/$/,
+      action: {
+        indentAction: monaco.languages.IndentAction.IndentOutdent,
+        appendText: ' * ',
+      },
+    },
+    {
+      beforeText: /^\s*\/\*\*(?!\/)([^*]|\*(?!\/))*$/,
+      action: {
+        indentAction: monaco.languages.IndentAction.None,
+        appendText: ' * ',
+      },
+    },
+    {
+      beforeText: /^(\t|( {2}))* \*( ([^*]|\*(?!\/))*)?$/,
+      action: {
+        indentAction: monaco.languages.IndentAction.None,
+        appendText: '* ',
+      },
+    },
+    {
+      beforeText: /^(\t|( {2}))* \*\/\s*$/,
+      action: {
+        indentAction: monaco.languages.IndentAction.None,
+        removeText: 1,
+      },
+    },
+  ],
+  autoClosingPairs: [
+    { open: '{', close: '}' },
+    { open: '[', close: ']' },
+    { open: '(', close: ')' },
+    { open: '"', close: '"', notIn: ['string'] },
+    { open: "'", close: "'", notIn: ['string', 'comment'] },
+    { open: '`', close: '`', notIn: ['string', 'comment'] },
+    { open: '/**', close: ' */', notIn: ['string'] },
+  ],
+  folding: {
+    markers: {
+      start: /^\s*\/\/\s*#?region\b/,
+      end: /^\s*\/\/\s*#?endregion\b/,
+    },
+  },
+} as const satisfies monaco.languages.LanguageConfiguration;
+
+export const openscadLanguage = {
+  defaultToken: 'invalid',
+  tokenPostfix: '.js',
+  keywords: [...builtInFunctionNames, ...builtInModuleNames, ...builtInVarNames, 'each'],
+  typeKeywords: [],
+  operators: [
+    '<=',
+    '>=',
+    '==',
+    '!=',
+    '=>',
+    '+',
+    '-',
+    '*',
+    '/',
+    '%',
+    '<<',
+    '>>',
+    '>>>',
+    '&',
+    '|',
+    '^',
+    '!',
+    '&&',
+    '||',
+    '?',
+    ':',
+    '=',
+  ],
+  symbols: /[=><!~?:&|+\-*/^%]+/,
+  escapes: /\\[abfnrtv\\"']/,
+  digits: /\d+/,
+  tokenizer: {
+    root: [[/[{}]/, 'delimiter.bracket'], { include: 'common' }],
+    common: [
+      [
+        /[a-z_$][\w$]*/,
+        {
+          cases: {
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- @keywords is a valid tokenizer case
+            '@keywords': 'keyword',
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- @default is a valid tokenizer case
+            '@default': 'identifier',
+          },
+        },
+      ],
+      [/[A-Z][\w$]*/, 'type.identifier'],
+      { include: '@whitespace' },
+      [/[()[\]]/, '@brackets'],
+      [/[<>](?!@symbols)/, '@brackets'],
+      [/!(?=([^=]|$))/, 'delimiter'],
+      [
+        /@symbols/,
+        {
+          cases: {
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- @operators is a valid tokenizer case
+            '@operators': 'delimiter',
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- @default is a valid tokenizer case
+            '@default': '',
+          },
+        },
+      ],
+      [/(@digits)[eE]([-+]?(@digits))?/, 'number.float'],
+      [/(@digits)\.(@digits)([eE][-+]?(@digits))?/, 'number.float'],
+      [/(@digits)n?/, 'number'],
+      [/[;,.]/, 'delimiter'],
+      [/"([^"\\]|\\.)*$/, 'string.invalid'],
+      [/'([^'\\]|\\.)*$/, 'string.invalid'],
+      [/"/, 'string', '@string_double'],
+    ],
+    whitespace: [
+      [/[ \t\r\n]+/, ''],
+      [/\/\*/, 'comment', '@comment'],
+      [/\/\/.*$/, 'comment'],
+    ],
+    comment: [
+      [/[^/*]+/, 'comment'],
+      [/\*\//, 'comment', '@pop'],
+      [/[/*]/, 'comment'],
+    ],
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- @string_double is a valid tokenizer case
+    string_double: [
+      [/[^\\"]+/, 'string'],
+      [/@escapes/, 'string.escape'],
+      [/\\./, 'string.escape.invalid'],
+      [/"/, 'string', '@pop'],
+    ],
+    bracketCounting: [
+      [/{/, 'delimiter.bracket', '@bracketCounting'],
+      [/}/, 'delimiter.bracket', '@pop'],
+      { include: 'common' },
+    ],
+  },
+} as const satisfies monaco.languages.IMonarchLanguage;

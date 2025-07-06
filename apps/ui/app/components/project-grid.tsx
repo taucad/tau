@@ -9,19 +9,16 @@ import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '~/components/ui/card.js';
 import { SvgIcon } from '~/components/icons/svg-icon.js';
 import type { Build } from '~/types/build.types.js';
-import type { CadKernelProvider } from '~/types/cad.types.js';
+import type { KernelProvider } from '~/types/kernel.types';
 import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
 import { storage } from '~/db/storage.js';
 import { cadMachine } from '~/machines/cad.machine.js';
 import { HammerAnimation } from '~/components/hammer-animation.js';
 
 // Placeholder for language icons
-const languageIcons: Record<CadKernelProvider, ComponentType<{ className?: string }>> = {
+const kernelIcons: Record<KernelProvider, ComponentType<{ className?: string }>> = {
   replicad: ({ className }) => <SvgIcon id="replicad" className={className} />,
   openscad: ({ className }) => <SvgIcon id="openscad" className={className} />,
-  kicad: ({ className }) => <SvgIcon id="kicad" className={className} />,
-  kcl: ({ className }) => <SvgIcon id="kcl" className={className} />,
-  cpp: ({ className }) => <SvgIcon id="cpp" className={className} />,
 };
 
 type CommunityBuildCardProperties = Build;
@@ -75,23 +72,17 @@ function ProjectCard({
 
   const navigate = useNavigate();
 
-  // Memoize the LanguageIcon computation to prevent re-creation on every render
-  const LanguageIcon = useMemo(
+  // Memoize the KernelIcon computation to prevent re-creation on every render
+  const KernelIcon = useMemo(
     () =>
       Object.values(assets)
         .map((asset) => asset.language)
-        .map((language) => ({
-          Icon: languageIcons[language],
-          language,
+        .map((kernel) => ({
+          Icon: kernelIcons[kernel],
+          language: kernel,
         })),
     [assets],
   );
-
-  // Memoize the replicad code computation
-  const replicadCode = useMemo(() => {
-    const replicadAsset = Object.values(assets).find((asset) => asset.language === 'replicad');
-    return replicadAsset?.files[replicadAsset.main]?.content;
-  }, [assets]);
 
   // Set up visibility observer
   useEffect(() => {
@@ -118,12 +109,20 @@ function ProjectCard({
     };
   }, []);
 
+  const mechanicalAsset = assets.mechanical;
+  if (!mechanicalAsset) throw new Error('Mechanical asset not found');
+
   // Only load the CAD model when the card is visible and preview is enabled
   useEffect(() => {
-    if (isVisible && showPreview && replicadCode) {
-      send({ type: 'initializeModel', code: replicadCode, parameters: {} });
+    if (isVisible && showPreview && mechanicalAsset) {
+      send({
+        type: 'initializeModel',
+        code: mechanicalAsset.files[mechanicalAsset.main].content,
+        parameters: mechanicalAsset.parameters,
+        kernelType: mechanicalAsset.language,
+      });
     }
-  }, [isVisible, showPreview, replicadCode, send]);
+  }, [isVisible, showPreview, mechanicalAsset, send]);
 
   const handleStar = useCallback(() => {
     // TODO: Implement star functionality
@@ -195,7 +194,7 @@ function ProjectCard({
         <div className="flex items-center justify-between">
           <CardTitle>{name}</CardTitle>
           <div className="flex flex-wrap gap-1">
-            {LanguageIcon.map(({ language, Icon }) => (
+            {KernelIcon.map(({ language, Icon }) => (
               <Tooltip key={language}>
                 <TooltipTrigger>
                   <Avatar className="h-5 w-5">

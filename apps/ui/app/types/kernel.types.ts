@@ -28,12 +28,18 @@ export type KernelErrorResult = {
   error: KernelError;
 };
 
+export const kernelProviders = ['replicad', 'openscad'] as const;
+export type KernelProvider = (typeof kernelProviders)[number];
+
 export type KernelResult<T> = KernelSuccessResult<T> | KernelErrorResult;
 
 // Specific result types for different kernel operations
 export type BuildShapesResult = KernelResult<Shape[]>;
 
-export type ExtractParametersResult = KernelResult<Record<string, unknown>>;
+export type ExtractParametersResult = KernelResult<{
+  defaultParameters: Record<string, unknown>;
+  jsonSchema: unknown;
+}>;
 
 export type ExtractNameResult = KernelResult<string | undefined>;
 

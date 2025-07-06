@@ -80,7 +80,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
                 <RefreshCcwDot className="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Reset &quot;{prettyLabel}&quot;</TooltipContent>
+            <TooltipContent side="left">Reset &quot;{prettyLabel}&quot;</TooltipContent>
           </Tooltip>
         ) : null}
       </div>
@@ -152,14 +152,19 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
 
   return (
     <Select value={String(value)} onValueChange={handleChange}>
-      <SelectTrigger className="h-6 flex-1 bg-background">
+      <SelectTrigger size="sm" className="flex-1 bg-background">
         <SelectValue placeholder={placeholder ?? 'Choose an option'} />
       </SelectTrigger>
       <SelectContent>
         {placeholder ? <SelectItem value="">{placeholder}</SelectItem> : null}
         {enumOptions.map((option) => (
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument -- value is untyped in RJSF
-          <SelectItem key={option.value} value={String(option.value)} disabled={enumDisabled?.includes(option.value)}>
+          <SelectItem
+            key={String(option.value)}
+            value={String(option.value)}
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- value is untyped in RJSF
+            disabled={enumDisabled?.includes(option.value)}
+            className="h-7"
+          >
             {option.label}
           </SelectItem>
         ))}

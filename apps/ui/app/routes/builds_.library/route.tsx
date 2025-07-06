@@ -622,8 +622,12 @@ type BuildLibraryCardProps = {
 function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibraryCardProps) {
   const [_, send, actorRef] = useActor(cadMachine, { input: { shouldInitializeKernelOnStart: false } });
   const shapes = useSelector(actorRef, (state) => state.context.shapes);
-  const code = build.assets.mechanical?.files[build.assets.mechanical?.main]?.content;
-  const parameters = build.assets.mechanical?.parameters;
+
+  const mechanicalAsset = build.assets.mechanical;
+  if (!mechanicalAsset) throw new Error('Mechanical asset not found');
+
+  const code = mechanicalAsset.files[mechanicalAsset.main].content;
+  const { parameters } = mechanicalAsset;
   const status = useSelector(actorRef, (state) => state.value);
   const [showPreview, setShowPreview] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -644,9 +648,9 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
 
   useEffect(() => {
     if (showPreview) {
-      send({ type: 'initializeModel', code: code ?? '', parameters: parameters ?? {} });
+      send({ type: 'initializeModel', code, parameters, kernelType: mechanicalAsset.language });
     }
-  }, [code, parameters, showPreview, send]);
+  }, [code, parameters, mechanicalAsset.language, showPreview, send]);
 
   return (
     <Card className={cn('group relative flex flex-col overflow-hidden', isSelected && 'ring-2 ring-primary')}>

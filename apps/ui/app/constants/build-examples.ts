@@ -1,34 +1,75 @@
 import { mockModels } from '~/constants/build-code-examples.js';
 import type { Build } from '~/types/build.types.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
 
 // Sample data
-export const sampleBuilds: Build[] = mockModels.map((model) => ({
-  id: model.id,
-  assets: {
-    mechanical: {
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-      files: { 'main.ts': { content: model.code } },
-      main: 'main.ts',
-      language: 'replicad' as const,
-      parameters: {},
+type Model = {
+  id: string;
+  name: string;
+  code: string;
+  thumbnail: string;
+  language?: 'replicad' | 'openscad';
+};
+
+const createBuild = (model: Model, mainFile: string, kernel: KernelProvider) => {
+  return {
+    id: model.id,
+    assets: {
+      mechanical: {
+        files: { [mainFile]: { content: model.code } },
+        main: mainFile,
+        language: kernel,
+        parameters: {},
+      },
     },
+    name: model.name,
+    description: `A 3D ${model.name} model built with ${kernel}`,
+    author: {
+      name: 'Tau Team',
+      avatar: '/avatar-sample.png',
+    },
+    version: '1.0.0',
+    createdAt: 1_740_702_000_000,
+    updatedAt: 1_740_702_000_000,
+    tags: ['3d-printing', 'parametric', kernel],
+    isFavorite: false,
+    stars: 0,
+    forks: 0,
+    thumbnail: model.thumbnail,
+    chats: [],
+  };
+};
+
+export const replicadBuilds: Build[] = mockModels.map((model) => {
+  const mainFile = 'main.ts';
+  const language = 'replicad';
+  return createBuild(model, mainFile, language);
+});
+
+const openScadModels: Model[] = [
+  {
+    id: 'openscad_param_box',
+    name: 'Parametric Box (OpenSCAD)',
+    code: `// Parametric Hollow Box Example\n// Demonstrates OpenSCAD Customizer parameters\n// and basic CSG operations.\n\n// [size] = 40                // Overall box size (mm)\n// [wall] = 3                 // Wall thickness (mm)\n// [round] = 2                // Fillet radius on outer edges\n\n$fn = 48; // smooth circles for fillets\n\nmodule roundedCube(sz, r=0, center=true) {\n  if (r <= 0)\n    cube(sz, center=center);\n  else\n    minkowski() {\n      cube(sz - 2*r, center=center);\n      sphere(r = r);\n    }\n}\n\n// Outer shell\nroundedCube(size, round);\n\n// Subtract inner cavity\ntranslate([0,0,0])\n  roundedCube(size - 2*wall, round > wall ? round - wall : 0);`,
+    thumbnail: '/placeholder.svg',
+    language: 'openscad',
   },
-  name: model.name,
-  description: `A 3D ${model.name} model built with Replicad`,
-  author: {
-    name: 'Tau Team',
-    avatar: '/avatar-sample.png',
+  {
+    id: 'openscad_cube',
+    name: 'OpenSCAD Cube',
+    code: 'cube(10);',
+    thumbnail: '/placeholder.svg',
+    language: 'openscad',
   },
-  version: '1.0.0',
-  createdAt: 1_740_702_000_000,
-  updatedAt: 1_740_702_000_000,
-  tags: ['3d-printing', 'parametric', 'replicad'],
-  isFavorite: false,
-  stars: 0,
-  forks: 0,
-  thumbnail: model.thumbnail,
-  chats: [],
-}));
+] as const;
+
+export const openscadBuilds: Build[] = openScadModels.map((model) => {
+  const mainFile = 'main.scad';
+  const language = 'openscad';
+  return createBuild(model, mainFile, language);
+});
+
+export const sampleBuilds: Build[] = [...replicadBuilds, ...openscadBuilds];
 
 // Export const mockBuilds: Build[] = [
 //   {

@@ -20,6 +20,7 @@ import { StudioHelper } from '~/components/geometry/kernel/replicad/utils/studio
 import { runInCjsContext, buildEsModule } from '~/components/geometry/kernel/replicad/vm.js';
 import { renderOutput, ShapeStandardizer } from '~/components/geometry/kernel/replicad/utils/render-output.js';
 import type { MainResultShapes } from '~/components/geometry/kernel/replicad/utils/render-output.js';
+import { jsonSchemaFromJson } from '~/utils/schema.js';
 
 // Track whether we've already set OC in replicad to avoid repeated calls
 let replicadHasOc = false;
@@ -90,28 +91,38 @@ const runCode = async (code: string, parameters: Record<string, unknown>): Promi
   return result;
 };
 
-const extractDefaultParametersFromCode = async (code: string): Promise<ExtractParametersResult> => {
+const extractParametersFromCode = async (code: string): Promise<ExtractParametersResult> => {
   try {
+    let defaultParameters: Record<string, unknown> = {};
+
     if (/^\s*export\s+/m.test(code)) {
       const module = await buildEsModule(code);
-      return createKernelSuccess(module.defaultParams ?? {});
-    }
-
-    const editedText = `
+      defaultParameters = module.defaultParams ?? {};
+    } else {
+      const editedText = `
 ${code}
 try {
   return defaultParams;
 } catch (e) {
   return undefined;
 }
-    `;
+      `;
 
-    try {
-      const result = await runInCjsContext(editedText, {});
-      return createKernelSuccess((result ?? {}) as Record<string, unknown>);
-    } catch {
-      return createKernelSuccess({} as Record<string, unknown>);
+      try {
+        const result = await runInCjsContext(editedText, {});
+        defaultParameters = (result ?? {}) as Record<string, unknown>;
+      } catch {
+        defaultParameters = {};
+      }
     }
+
+    // Generate JSON schema from the default parameters
+    const jsonSchema = await jsonSchemaFromJson(defaultParameters);
+
+    return createKernelSuccess({
+      defaultParameters,
+      jsonSchema,
+    });
   } catch (error) {
     const kernelError = await formatKernelError(error);
     return createKernelError({
@@ -515,7 +526,7 @@ const service = {
     }
   },
   buildShapesFromCode,
-  extractDefaultParametersFromCode,
+  extractParametersFromCode,
   extractDefaultNameFromCode,
   extractSchemaFromCode,
   exportShape,

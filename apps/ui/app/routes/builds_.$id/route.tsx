@@ -87,11 +87,15 @@ function Chat() {
     // On init, set the code and parameters
     if (!build || isLoading) return;
 
+    const mechanicalAsset = build.assets.mechanical;
+    if (!mechanicalAsset) throw new Error('Mechanical asset not found');
+
     // Initialize model
     cadActor.send({
       type: 'initializeModel',
-      code: build.assets.mechanical?.files[build.assets.mechanical.main]?.content ?? '',
-      parameters: build.assets.mechanical?.parameters ?? {},
+      code: mechanicalAsset.files[mechanicalAsset.main].content,
+      parameters: mechanicalAsset.parameters,
+      kernelType: mechanicalAsset.language,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on init
   }, [id, isLoading]);

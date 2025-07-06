@@ -20,6 +20,7 @@ send({
   type: 'initializeModel',
   code: `cube(10);`,
   parameters: {},
+  kernelType: 'openscad',
 });
 // cad.machine detects `.scad` → initializes OpenSCAD kernel
 ```

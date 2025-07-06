@@ -19,9 +19,6 @@ import { HammerAnimation } from '~/components/hammer-animation.js';
 const kernelIcons: Record<KernelProvider, ComponentType<{ className?: string }>> = {
   replicad: ({ className }) => <SvgIcon id="replicad" className={className} />,
   openscad: ({ className }) => <SvgIcon id="openscad" className={className} />,
-  kicad: ({ className }) => <SvgIcon id="kicad" className={className} />,
-  kcl: ({ className }) => <SvgIcon id="kcl" className={className} />,
-  cpp: ({ className }) => <SvgIcon id="cpp" className={className} />,
 };
 
 type CommunityBuildCardProperties = Build;
@@ -87,12 +84,6 @@ function ProjectCard({
     [assets],
   );
 
-  // Memoize the replicad code computation
-  const replicadCode = useMemo(() => {
-    const replicadAsset = Object.values(assets).find((asset) => asset.language === 'replicad');
-    return replicadAsset?.files[replicadAsset.main]?.content;
-  }, [assets]);
-
   // Set up visibility observer
   useEffect(() => {
     const currentElement = cardReference.current;
@@ -118,12 +109,20 @@ function ProjectCard({
     };
   }, []);
 
+  const mechanicalAsset = assets.mechanical;
+  if (!mechanicalAsset) throw new Error('Mechanical asset not found');
+
   // Only load the CAD model when the card is visible and preview is enabled
   useEffect(() => {
-    if (isVisible && showPreview && replicadCode) {
-      send({ type: 'initializeModel', code: replicadCode, parameters: {} });
+    if (isVisible && showPreview && mechanicalAsset) {
+      send({
+        type: 'initializeModel',
+        code: mechanicalAsset.files[mechanicalAsset.main].content,
+        parameters: mechanicalAsset.parameters,
+        kernelType: mechanicalAsset.language,
+      });
     }
-  }, [isVisible, showPreview, replicadCode, send]);
+  }, [isVisible, showPreview, mechanicalAsset, send]);
 
   const handleStar = useCallback(() => {
     // TODO: Implement star functionality

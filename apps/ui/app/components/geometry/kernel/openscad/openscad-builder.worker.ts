@@ -121,10 +121,57 @@ async function buildShapesFromCode(
     // Optimize the mesh
     mesh.mergeVertices?.();
 
-    // Extract geometry data
-    const vertices = [...mesh.vertices];
-    const triangles = [...mesh.facesIndices];
-    const normals = Array.from({ length: vertices.length }).fill(0) as number[];
+    // Extract original geometry data
+    const originalVertices = [...mesh.vertices];
+    const originalTriangles = [...mesh.facesIndices];
+
+    // Create new arrays with duplicate vertices per face (like replicad format)
+    const vertices: number[] = [];
+    const triangles: number[] = [];
+    const normals: number[] = [];
+
+    // For each triangle, create unique vertices with face normals
+    for (let i = 0; i < originalTriangles.length; i += 3) {
+      const i1 = originalTriangles[i];
+      const i2 = originalTriangles[i + 1];
+      const i3 = originalTriangles[i + 2];
+
+      // Get triangle vertices from original data
+      const v1 = [originalVertices[i1 * 3], originalVertices[i1 * 3 + 1], originalVertices[i1 * 3 + 2]];
+      const v2 = [originalVertices[i2 * 3], originalVertices[i2 * 3 + 1], originalVertices[i2 * 3 + 2]];
+      const v3 = [originalVertices[i3 * 3], originalVertices[i3 * 3 + 1], originalVertices[i3 * 3 + 2]];
+
+      // Compute edge vectors
+      const edge1 = [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]];
+      const edge2 = [v3[0] - v1[0], v3[1] - v1[1], v3[2] - v1[2]];
+
+      // Compute face normal using cross product
+      const normal = [
+        edge1[1] * edge2[2] - edge1[2] * edge2[1],
+        edge1[2] * edge2[0] - edge1[0] * edge2[2],
+        edge1[0] * edge2[1] - edge1[1] * edge2[0],
+      ];
+
+      // Normalize the normal vector
+      const length = Math.hypot(normal[0], normal[1], normal[2]);
+      if (length > 0) {
+        normal[0] /= length;
+        normal[1] /= length;
+        normal[2] /= length;
+      }
+
+      // Add duplicate vertices for this triangle
+      const newVertexIndex = vertices.length / 3;
+
+      // Add vertices
+      vertices.push(...v1, ...v2, ...v3);
+
+      // Add triangle indices (pointing to new duplicate vertices)
+      triangles.push(newVertexIndex, newVertexIndex + 1, newVertexIndex + 2);
+
+      // Add same face normal for all 3 vertices
+      normals.push(...normal, ...normal, ...normal);
+    }
 
     const shape: Shape3D = {
       type: '3d',

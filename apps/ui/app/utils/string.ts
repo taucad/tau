@@ -1,5 +1,11 @@
 /**
- * Convert a string from camelCase to Sentence Case
+ * Convert a string from camelCase to Sentence Case. Acronyms are preserved.
+ *
+ * @example
+ * camelCaseToSentenceCase('firstName') // 'First Name'
+ *
+ * @example
+ * camelCaseToSentenceCase('HTML') // 'HTML'
  *
  * @param string_ The camelCase string to convert
  * @returns The converted Sentence Case string

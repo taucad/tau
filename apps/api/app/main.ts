@@ -2,31 +2,25 @@
  * This is not a production server yet!
  * This is only a minimal backend to get started.
  */
-import process from 'node:process';
 import { Logger, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { ConfigService } from '@nestjs/config';
 import { Logger as PinoLogger } from 'nestjs-pino';
-import type { FastifyLoggerOptions } from 'fastify';
+import helmet from '@fastify/helmet';
 import { AppModule } from '~/app.module.js';
 import { generatePrefixedId, idPrefix } from '~/utils/id.js';
 import type { Environment } from '~/config/environment.config.js';
-import { consoleLoggingConfig } from '~/logger/logger-factory.js';
+import { getFastifyLoggingConfig } from '~/logger/fastify.logger.js';
+import { httpHeader } from '~/constants/http-header.constant.js';
 
 async function bootstrap() {
-  const envToLogger: Record<`${Environment['NODE_ENV']}`, unknown> = {
-    development: consoleLoggingConfig(),
-    production: true,
-    test: false,
-  } as const;
-  // Create Fastify adapter with custom options for body size limits and logger
   const fastifyAdapter = new FastifyAdapter({
     bodyLimit: 50 * 1024 * 1024, // 50MB in bytes
     genReqId: () => generatePrefixedId(idPrefix.request),
-    disableRequestLogging: true,
-    logger: envToLogger[process.env.NODE_ENV] as FastifyLoggerOptions,
+    disableRequestLogging: true, // Disables automatic 'incoming request'/'request completed' logs - these are handled by custom loggers.
+    logger: getFastifyLoggingConfig(),
   });
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, fastifyAdapter, {
     bufferLogs: true, // Buffer logs until pino logger is ready. This ensures all logs are consistently formatted.
@@ -39,11 +33,14 @@ async function bootstrap() {
 
   app.enableCors({
     origin: [appConfig.get('TAU_FRONTEND_URL', { infer: true })],
+    allowedHeaders: Object.values(httpHeader),
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
   });
   app.enableVersioning({
     type: VersioningType.URI,
   });
+  await app.register(helmet);
 
   if (import.meta.env.PROD) {
     const port = appConfig.get('PORT', { infer: true });

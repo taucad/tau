@@ -1,4 +1,4 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
 /* eslint-disable @typescript-eslint/naming-convention, no-bitwise, complexity -- This is a utility script for API extraction */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';

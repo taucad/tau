@@ -21,9 +21,6 @@ export const getModels = async (): Promise<Model[]> => {
   try {
     const response = await fetch(`${ENV.TAU_API_URL}/v1/models`, {
       credentials: 'include',
-      headers: {
-        'ngrok-skip-browser-warning': 'true',
-      },
     });
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- TODO: replace with SDK fetcher
     const data = await response.json();

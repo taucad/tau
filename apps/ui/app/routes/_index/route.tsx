@@ -5,7 +5,7 @@ import type { ChatTextareaProperties } from '~/components/chat/chat-textarea.js'
 import { ChatTextarea } from '~/components/chat/chat-textarea.js';
 import { Button } from '~/components/ui/button.js';
 import { storage } from '~/db/storage.js';
-import { MessageRole, MessageStatus } from '~/types/chat.types.js';
+import { messageRole, messageStatus } from '~/types/chat.types.js';
 import { createMessage } from '~/utils/chat.js';
 import { emptyCode } from '~/constants/build-code-examples.js';
 import { CommunityBuildGrid } from '~/components/project-grid.js';
@@ -27,9 +27,9 @@ export default function ChatStart(): JSX.Element {
         // Create the initial message as pending
         const userMessage = createMessage({
           content,
-          role: MessageRole.User,
+          role: messageRole.user,
           model,
-          status: MessageStatus.Pending, // Set as pending
+          status: messageStatus.pending, // Set as pending
           metadata: metadata ?? {},
           imageUrls,
         });

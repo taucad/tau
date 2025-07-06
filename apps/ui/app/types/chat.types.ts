@@ -1,16 +1,21 @@
 import type { UIMessage } from 'ai';
+import type { ConstantRecord } from '~/types/constant.types.js';
 
-export enum MessageRole {
-  User = 'user',
-  Assistant = 'assistant',
-}
+export const messageRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
 
-export enum MessageStatus {
-  Pending = 'pending',
-  Success = 'success',
-  Error = 'error',
-  Cancelled = 'cancelled',
-}
+export type MessageRole = ConstantRecord<typeof messageRole>;
+
+export const messageStatus = {
+  pending: 'pending',
+  success: 'success',
+  error: 'error',
+  cancelled: 'cancelled',
+} as const;
+
+export type MessageStatus = ConstantRecord<typeof messageStatus>;
 
 export type SourceOrigin = 'web' | 'notion' | 'history' | 'projects';
 

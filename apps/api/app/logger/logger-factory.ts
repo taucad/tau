@@ -1,11 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import process from 'node:process';
 import type { ConfigService } from '@nestjs/config';
 import type { Params } from 'nestjs-pino';
 import type { Options } from 'pino-http';
 import type { PrettyOptions } from 'pino-pretty';
 import { loggingRedactPaths, logServiceProvider } from '~/constants/app.constant.js';
 import type { LogServiceProvider } from '~/constants/app.constant.js';
-import { generatePrefixedId, idPrefix } from '~/utils/id.js';
 import type { Environment } from '~/config/environment.config.js';
 
 // https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#logseverity
@@ -19,7 +19,7 @@ const pinoLevelToGoogleLoggingSeverityLookup = Object.freeze({
 });
 
 // ANSI color codes for better formatting
-const colors = Object.freeze({
+const colors = {
   reset: '\u001B[0m',
   bright: '\u001B[1m',
   dim: '\u001B[2m',
@@ -33,7 +33,7 @@ const colors = Object.freeze({
   bgRed: '\u001B[41m',
   bgGreen: '\u001B[42m',
   bgYellow: '\u001B[43m',
-});
+} as const;
 
 const getMethodColor = (method: string) => {
   switch (method?.toUpperCase()) {
@@ -108,12 +108,6 @@ const formatUrl = (url: string, isDevMode = true) => {
   }
 };
 
-const genRequestId = (request: IncomingMessage, response: ServerResponse) => {
-  const id = request.headers['x-request-id'] ?? generatePrefixedId(idPrefix.request);
-  response.setHeader('X-Request-Id', id);
-  return id;
-};
-
 const customSuccessMessage = (request: IncomingMessage, response: ServerResponse, responseTime: number) => {
   const isDevMode = import.meta.env.DEV;
 
@@ -160,28 +154,6 @@ const customErrorMessage = (request: IncomingMessage, response: ServerResponse, 
   return `${colors.bright}${colors.red}[ERR]:${formatRequestId(request.id as string)} ${methodColor}${request.method}${colors.reset} ${url} ${statusColor}${response.statusCode}${colors.reset} ${colors.red}${error.message}${colors.reset}`;
 };
 
-function logServiceConfig(logService: LogServiceProvider): Options {
-  switch (logService) {
-    case logServiceProvider.googleLogging: {
-      return googleLoggingConfig();
-    }
-
-    case logServiceProvider.awsCloudWatch: {
-      return cloudwatchLoggingConfig();
-    }
-
-    case logServiceProvider.console: {
-      return consoleLoggingConfig();
-    }
-
-    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive switch is required for exhaustive switch
-    default: {
-      const exhaustiveCheck: never = logService;
-      throw new Error(`Unknown log service: ${String(exhaustiveCheck)}`);
-    }
-  }
-}
-
 function cloudwatchLoggingConfig(): Options {
   // FIXME: Implement AWS CloudWatch logging configuration
   return {
@@ -206,9 +178,21 @@ function googleLoggingConfig(): Options {
   };
 }
 
+function flyLoggingConfig(): Options {
+  return {
+    messageKey: 'message',
+  };
+}
+
 export function consoleLoggingConfig(): Options {
+  if (import.meta.env.PROD) {
+    // In production, we don't want pretty logs. So we use the default pino-http options.
+    return {
+      messageKey: 'msg',
+    };
+  }
+
   const options: PrettyOptions = {
-    // HideObject: true,
     singleLine: true,
     colorize: true,
     ignore: 'pid,hostname,req,res,responseTime,context',
@@ -224,27 +208,40 @@ export function consoleLoggingConfig(): Options {
   };
 }
 
+export function logServiceConfig(logService: LogServiceProvider): Options {
+  switch (logService) {
+    case logServiceProvider.googleLogging: {
+      return googleLoggingConfig();
+    }
+
+    case logServiceProvider.awsCloudwatch: {
+      return cloudwatchLoggingConfig();
+    }
+
+    case logServiceProvider.fly: {
+      return flyLoggingConfig();
+    }
+
+    case logServiceProvider.console: {
+      return consoleLoggingConfig();
+    }
+
+    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive switch
+    default: {
+      const exhaustiveCheck: never = logService;
+      throw new Error(`Unknown log service: ${String(exhaustiveCheck)}`);
+    }
+  }
+}
+
 export async function useLoggerFactory(configService: ConfigService<Environment, true>): Promise<Params> {
   const logLevel = configService.get('LOG_LEVEL', { infer: true });
   const logService = configService.get('LOG_SERVICE', { infer: true });
-  const isDebug = import.meta.env.DEV;
 
   const serviceOptions = logServiceConfig(logService);
 
   const pinoHttpOptions: Options = {
     level: logLevel,
-    genReqId: isDebug ? genRequestId : undefined,
-    serializers: isDebug
-      ? {
-          req(request) {
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- TODO: add typings
-            request.body = request.raw.body;
-
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- TODO: add typings
-            return request;
-          },
-        }
-      : undefined,
     customSuccessMessage,
     customReceivedMessage,
     customErrorMessage,

@@ -28,7 +28,7 @@ export class ChatService {
   }
 
   // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- This is a complex generic that can be left inferred.
-  public async createGraph(modelId: string, selectedToolChoice: ToolChoiceWithCategory, userMessage?: string) {
+  public async createGraph(modelId: string, selectedToolChoice: ToolChoiceWithCategory) {
     const { tools } = this.toolService.getTools(selectedToolChoice);
 
     const researchTools = [tools.web_search, tools.web_browser];
@@ -48,7 +48,7 @@ export class ChatService {
 
     // Create a general agent for handling direct responses
     const cadTools = [tools.edit_file];
-    const cadSystemPrompt = await getCadSystemPrompt(userMessage);
+    const cadSystemPrompt = await getCadSystemPrompt();
     const cadAgent = createReactAgent({
       llm: cadSupport?.tools === false ? cadModel : (cadModel.bindTools?.(cadTools) ?? cadModel),
       tools: cadTools,
@@ -116,7 +116,7 @@ Your goal is to ensure users receive expert-level assistance by connecting them 
         ]);
       },
       onEvent(parameters) {
-        // Console.log('onEvent', parameters.event);
+        logger.debug(`onEvent: ${JSON.stringify(parameters.event)}`);
       },
       onError(error) {
         if (error instanceof Error && error.message === 'Aborted') {

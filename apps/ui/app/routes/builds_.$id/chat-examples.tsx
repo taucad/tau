@@ -5,7 +5,7 @@ import { Button } from '~/components/ui/button.js';
 import { useChatActions } from '~/components/chat/ai-chat-provider.js';
 import { useModels } from '~/hooks/use-models.js';
 import { createMessage } from '~/utils/chat.js';
-import { MessageRole, MessageStatus } from '~/types/chat.types.js';
+import { messageRole, messageStatus } from '~/types/chat.types.js';
 
 export const ChatExamples = memo(function () {
   // Use lazy initialization to ensure consistent examples across renders
@@ -16,8 +16,8 @@ export const ChatExamples = memo(function () {
   const handleExampleClick = (prompt: string) => {
     const userMessage = createMessage({
       content: prompt,
-      role: MessageRole.User,
-      status: MessageStatus.Pending,
+      role: messageRole.user,
+      status: messageStatus.pending,
       metadata: {},
       model: selectedModel?.id ?? '',
     });

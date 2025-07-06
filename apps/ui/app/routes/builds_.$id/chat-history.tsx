@@ -8,7 +8,7 @@ import { ChatStatus } from '~/routes/builds_.$id/chat-status.js';
 import type { ChatTextareaProperties } from '~/components/chat/chat-textarea.js';
 import { ChatTextarea } from '~/components/chat/chat-textarea.js';
 import { createMessage } from '~/utils/chat.js';
-import { MessageRole, MessageStatus } from '~/types/chat.types.js';
+import { messageRole, messageStatus } from '~/types/chat.types.js';
 import { useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { cn } from '~/utils/ui.js';
 import { ChatSelector } from '~/routes/builds_.$id/chat-selector.js';
@@ -32,8 +32,8 @@ export const ChatHistory = memo(function () {
     async ({ content, model, metadata, imageUrls }) => {
       const userMessage = createMessage({
         content,
-        role: MessageRole.User,
-        status: MessageStatus.Pending,
+        role: messageRole.user,
+        status: messageStatus.pending,
         metadata: metadata ?? {},
         model,
         imageUrls,

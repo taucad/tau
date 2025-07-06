@@ -10,7 +10,7 @@ import { ChatMessageText } from '~/routes/builds_.$id/chat-message-text.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '~/components/ui/tooltip.js';
 import { CopyButton } from '~/components/copy-button.js';
 import { Button } from '~/components/ui/button.js';
-import { MessageRole } from '~/types/chat.types.js';
+import { messageRole } from '~/types/chat.types.js';
 import type { MessageAnnotation } from '~/types/chat.types.js';
 import { cn } from '~/utils/ui.js';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '~/components/ui/hover-card.js';
@@ -51,7 +51,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
     return <div>Message not found</div>;
   }
 
-  const isUser = message.role === MessageRole.User;
+  const isUser = message.role === messageRole.user;
 
   return (
     <article

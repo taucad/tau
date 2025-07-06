@@ -7,7 +7,6 @@ import type { LinkDescriptor } from 'react-router';
 import { memo } from 'react';
 import type { JSX } from 'react';
 import { CodeViewer } from '~/components/code-viewer.js';
-import { CopyButton } from '~/components/copy-button.js';
 import { cn } from '~/utils/ui.js';
 
 export const markdownViewerLinks: LinkDescriptor[] = [{ rel: 'stylesheet', href: katexUrl }];

@@ -9,7 +9,6 @@ import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '
 import { Button } from '~/components/ui/button.js';
 import { Textarea } from '~/components/ui/textarea.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
 import { useModels } from '~/hooks/use-models.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import { formatKeyCombination } from '~/utils/keys.js';

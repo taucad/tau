@@ -62,7 +62,7 @@ docker exec -it vector-postgres psql -U dev_user -d cad_rag -f /migrations/001_i
 
 Build clean API chunks:
 ```bash
-pnpm tsx scripts/build-replicad-chunks.ts
+node scripts/build-replicad-chunks.ts
 ```
 
 This extracts **168 API chunks** from the Replicad definitions, each containing:
@@ -75,7 +75,7 @@ This extracts **168 API chunks** from the Replicad definitions, each containing:
 
 Import chunks to pgvector:
 ```bash
-pnpm tsx scripts/import-replicad-chunks.ts
+node scripts/import-replicad-chunks.ts
 ```
 
 ### 4. RAG Integration
@@ -133,13 +133,13 @@ const gear = drawCircle(20)
 ### Manual Testing
 ```bash
 # Test RAG functionality
-pnpm tsx scripts/test-rag.ts
+node scripts/test-rag.ts
 
 # Generate fresh chunks  
-pnpm tsx scripts/build-replicad-chunks.ts
+node scripts/build-replicad-chunks.ts
 
 # Import to database
-pnpm tsx scripts/import-replicad-chunks.ts
+node scripts/import-replicad-chunks.ts
 ```
 
 ## 🔍 Technical Details
@@ -203,8 +203,8 @@ ON replicad_chunks USING gin (to_tsvector('english', signature || ' ' || jsdoc))
 ### Regular Updates
 ```bash
 # When Replicad API changes, regenerate chunks:
-pnpm tsx scripts/build-replicad-chunks.ts
-pnpm tsx scripts/import-replicad-chunks.ts
+node scripts/build-replicad-chunks.ts
+node scripts/import-replicad-chunks.ts
 ```
 
 ### Monitoring

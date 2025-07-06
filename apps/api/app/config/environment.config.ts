@@ -3,12 +3,12 @@ import { z } from 'zod/v4';
 
 const environmentSchema = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  NODE_ENV: z.enum(['development', 'production', 'test']),
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
   TAU_FRONTEND_URL: z.string(),
-  LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
-  LOG_SERVICE: z.enum(['console', 'google-logging', 'aws-cloudwatch']).default('console'),
+  LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']),
+  LOG_SERVICE: z.enum(['console', 'fly', 'google-logging', 'aws-cloudwatch']).default('console'),
 
   // Chat & LLMs
   OPENAI_API_KEY: z.string(),

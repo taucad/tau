@@ -13,8 +13,7 @@ export const defaultParams = {};
 export default function main(p = defaultParams) {}
 `;
 
-export const emptyOpenscadCode = `
-cube(10);
+export const emptyOpenscadCode = `cube(10);
 `;
 
 export const cubeCode = `/**

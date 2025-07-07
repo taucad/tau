@@ -121,8 +121,9 @@ function ObjectFieldTemplate(
       onOpenChange={setIsOpen}
     >
       <CollapsibleTrigger className="group/collapsible flex h-7 w-full items-center justify-between bg-muted/70 pr-1.5 pl-2 transition-colors hover:bg-muted">
-        <h3 className="font-medium">
-          {prettyTitle} <span className="text-muted-foreground/50">({propertiesCount})</span>
+        <h3 className="flex min-w-0 flex-1 items-center font-medium">
+          <span className="truncate">{prettyTitle}</span>
+          <span className="ml-1 flex-shrink-0 text-muted-foreground/50">({propertiesCount})</span>
         </h3>
         <ChevronRight className="size-4 text-muted-foreground transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
       </CollapsibleTrigger>
@@ -152,11 +153,15 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
 
   return (
     <Select value={String(value)} onValueChange={handleChange}>
-      <SelectTrigger size="sm" className="flex-1 bg-background">
+      <SelectTrigger size="sm" className="min-w-0 flex-1 bg-background">
         <SelectValue placeholder={placeholder ?? 'Choose an option'} />
       </SelectTrigger>
       <SelectContent>
-        {placeholder ? <SelectItem value="">{placeholder}</SelectItem> : null}
+        {placeholder ? (
+          <SelectItem value="" className="h-7">
+            <span className="truncate">{placeholder}</span>
+          </SelectItem>
+        ) : null}
         {enumOptions.map((option) => (
           <SelectItem
             key={String(option.value)}
@@ -165,7 +170,7 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
             disabled={enumDisabled?.includes(option.value)}
             className="h-7"
           >
-            {option.label}
+            <span className="truncate">{option.label}</span>
           </SelectItem>
         ))}
       </SelectContent>

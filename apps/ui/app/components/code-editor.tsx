@@ -67,6 +67,7 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
       theme={theme === Theme.DARK ? 'github-dark' : 'github-light'}
       defaultLanguage="typescript"
       options={{
+        fontSize: 14,
         tabSize: 2,
         minimap: { enabled: false },
         // Explicitly configure line numbers

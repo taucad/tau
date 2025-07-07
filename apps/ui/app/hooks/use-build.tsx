@@ -26,7 +26,7 @@ type BuildContextType = {
   activeChat: Chat | undefined;
   activeChatId: string | undefined;
   setChatMessages: (chatId: string, messages: Message[]) => void;
-  setCodeParameters: (code: string, parameters: Record<string, unknown>) => void;
+  setCodeParameters: (files: Record<string, { content: string }>, parameters: Record<string, unknown>) => void;
   updateName: (name: string) => void;
   updateThumbnail: (thumbnail: string) => void;
   // Chat related functions
@@ -71,8 +71,8 @@ export function BuildProvider({
       async setChatMessages(chatId: string, messages: Message[]) {
         await mutations.updateChatMessages(buildId, chatId, messages);
       },
-      setCodeParameters: async (code: string, parameters: Record<string, unknown>) =>
-        mutations.updateCodeParameters(buildId, code, parameters),
+      setCodeParameters: async (files: Record<string, { content: string }>, parameters: Record<string, unknown>) =>
+        mutations.updateCodeParameters(buildId, files, parameters),
       updateName: async (name: string) => mutations.updateName(buildId, name),
       updateThumbnail: async (thumbnail: string) => mutations.updateThumbnail(buildId, thumbnail),
       // Chat related functions

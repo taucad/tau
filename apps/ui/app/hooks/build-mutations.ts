@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { Message } from '@ai-sdk/react';
-import type { Build, Chat } from '~/types/build.types.js';
+import type { Build, Chat, File } from '~/types/build.types.js';
 import { storage } from '~/db/storage.js';
 import { generatePrefixedId } from '~/utils/id.js';
 import { idPrefix } from '~/constants/id.js';
@@ -14,7 +14,11 @@ export function createBuildMutations(queryClient: QueryClient): {
   duplicateBuild: (buildId: string) => Promise<Build>;
   updateName: (buildId: string, name: string) => Promise<void>;
   updateThumbnail: (buildId: string, thumbnail: string) => Promise<void>;
-  updateCodeParameters: (buildId: string, code: string, parameters: Record<string, unknown>) => Promise<void>;
+  updateCodeParameters: (
+    buildId: string,
+    files: Record<string, { content: string }>,
+    parameters: Record<string, unknown>,
+  ) => Promise<void>;
   // New chat-related mutations
   addChat: (buildId: string, initialMessages?: Message[]) => Promise<Chat>;
   updateChatMessages: (buildId: string, chatId: string, messages: Message[]) => Promise<void>;
@@ -93,24 +97,27 @@ export function createBuildMutations(queryClient: QueryClient): {
     /**
      * Update a build's code and parameters
      */
-    async updateCodeParameters(buildId: string, code: string, parameters: Record<string, unknown>) {
+    async updateCodeParameters(
+      buildId: string,
+      files: Record<string, { content: string }>,
+      parameters: Record<string, unknown>,
+    ) {
       const now = Date.now();
-      const contentSizeInBytes = new TextEncoder().encode(code).length;
+      const fileUpdates: Record<string, File> = {};
+      for (const [filename, { content }] of Object.entries(files)) {
+        fileUpdates[filename] = {
+          content,
+          lastModified: now,
+          size: new TextEncoder().encode(content).length,
+        };
+      }
 
       await storage.updateBuild(
         buildId,
         {
           assets: {
             mechanical: {
-              files: {
-                // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-                'main.ts': {
-                  content: code,
-                  lastModified: now,
-                  size: contentSizeInBytes,
-                },
-              },
-              main: 'main.ts',
+              files: fileUpdates,
               parameters,
             },
           },

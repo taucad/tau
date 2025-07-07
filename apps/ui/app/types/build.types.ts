@@ -2,7 +2,7 @@ import type { Message } from '@ai-sdk/react';
 import type { Category } from '~/types/cad.types.js';
 import type { KernelProvider } from '~/types/kernel.types.js';
 
-type File = {
+export type File = {
   content: string;
   // Could add metadata in the future
   lastModified?: number;

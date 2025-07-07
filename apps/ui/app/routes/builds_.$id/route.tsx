@@ -73,13 +73,16 @@ function Chat() {
   // Subscribe the build to persist code & parameters changes
   useEffect(() => {
     const subscription = cadActor.on('modelUpdated', ({ code, parameters }) => {
-      setCodeParameters(code, parameters);
+      const mainFile = build?.assets.mechanical?.main;
+      if (!mainFile) return;
+
+      setCodeParameters({ [mainFile]: { content: code } }, parameters);
     });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [setCodeParameters]);
+  }, [build?.assets.mechanical?.main, setCodeParameters]);
 
   useEffect(() => {
     // On init, set the code and parameters

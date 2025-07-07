@@ -84,9 +84,9 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
           </Tooltip>
         ) : null}
       </div>
-      {description ? <div className="mb-1 text-xs text-muted-foreground">{description}</div> : null}
+      {description}
       <div className="mt-auto flex w-full flex-row items-center gap-2">{children}</div>
-      {help ? <div className="mt-1 text-xs text-muted-foreground">{help}</div> : null}
+      {help}
       {errors}
     </div>
   );

@@ -6,11 +6,15 @@ type Model = {
   thumbnail: string;
 };
 
-export const emptyCode = `import {} from 'replicad';
+export const emptyReplicadCode = `import {} from 'replicad';
 
 export const defaultParams = {};
 
 export default function main(p = defaultParams) {}
+`;
+
+export const emptyOpenscadCode = `
+cube(10);
 `;
 
 export const cubeCode = `/**

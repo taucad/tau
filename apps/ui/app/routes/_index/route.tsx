@@ -7,7 +7,7 @@ import { Button } from '~/components/ui/button.js';
 import { storage } from '~/db/storage.js';
 import { messageRole, messageStatus } from '~/types/chat.types.js';
 import { createMessage } from '~/utils/chat.js';
-import { emptyCode } from '~/constants/build-code-examples.js';
+import { emptyReplicadCode } from '~/constants/build-code-examples.js';
 import { CommunityBuildGrid } from '~/components/project-grid.js';
 import { sampleBuilds } from '~/constants/build-examples.js';
 import { defaultBuildName } from '~/constants/build-names.js';
@@ -59,7 +59,7 @@ export default function ChatStart(): JSX.Element {
           assets: {
             mechanical: {
               // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-              files: { 'main.ts': { content: emptyCode } },
+              files: { 'main.ts': { content: emptyReplicadCode } },
               main: 'main.ts',
               language: 'replicad',
               parameters: {},
@@ -76,36 +76,6 @@ export default function ChatStart(): JSX.Element {
     [navigate],
   );
 
-  const handleStartFromScratch = useCallback(async () => {
-    try {
-      const build = await storage.createBuild({
-        name: defaultBuildName,
-        description: '',
-        stars: 0,
-        forks: 0,
-        author: {
-          name: 'You',
-          avatar: '/avatar-sample.png',
-        },
-        tags: [],
-        thumbnail: '',
-        chats: [],
-        assets: {
-          mechanical: {
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-            files: { 'main.ts': { content: emptyCode } },
-            main: 'main.ts',
-            language: 'replicad',
-            parameters: {},
-          },
-        },
-      });
-      await navigate(`/builds/${build.id}`);
-    } catch (error) {
-      console.error('Failed to create empty build:', error);
-    }
-  }, [navigate]);
-
   return (
     <>
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 pb-12 md:space-y-8 md:px-6 md:pt-32">
@@ -121,12 +91,11 @@ export default function ChatStart(): JSX.Element {
             <Separator />
           </div>
           <div className="flex justify-center">
-            <InteractiveHoverButton
-              className="flex items-center gap-2 font-light [&_svg]:size-6 [&_svg]:stroke-1"
-              onClick={handleStartFromScratch}
-            >
-              Build from code
-            </InteractiveHoverButton>
+            <Link to="/builds/new" tabIndex={-1}>
+              <InteractiveHoverButton className="flex items-center gap-2 font-light [&_svg]:size-6 [&_svg]:stroke-1">
+                Build from code
+              </InteractiveHoverButton>
+            </Link>
           </div>
         </AiChatProvider>
       </div>

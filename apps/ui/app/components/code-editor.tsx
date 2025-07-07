@@ -50,6 +50,8 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         '[&_.monaco-editor]:![--vscode-editorGutter-background:var(--background)]',
         // Hide the redundant text area cover element
         '[&_.monaco-editor-background.textAreaCover.line-numbers]:!hidden',
+        // Disable ::before pseudo-elements on line numbers
+        '[&_.line-numbers::before]:!hidden',
         // Scroll decoration appears after scrolling from top, replace shadow with top border
         '[&_.scroll-decoration]:!border-t',
         '[&_.scroll-decoration]:![box-shadow:none]',
@@ -57,7 +59,7 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         '[&_.monaco-scrollable-element_>_.scrollbar]:!bg-(--scrollbar-track)',
         '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:!bg-(--scrollbar-thumb)/80',
         // Apply rounded corners to scrollbar sliders
-        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:rounded-[4px]',
+        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:rounded-sm',
         // Ensure scrollbars don't overlap content
         '[&_.monaco-scrollable-element]:overflow-hidden',
         className,
@@ -67,6 +69,11 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
       options={{
         tabSize: 2,
         minimap: { enabled: false },
+        // Explicitly configure line numbers
+        lineNumbers: 'on',
+        lineNumbersMinChars: 3,
+        renderLineHighlight: 'line',
+        renderLineHighlightOnlyWhenFocus: false,
         // Disable horizontal scroll beyond last line
         scrollBeyondLastColumn: 1,
         // Disable vertical scroll beyond last line
@@ -80,6 +87,9 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         stickyScroll: {
           enabled: false,
         },
+        // Configure gutter and margin properly
+        glyphMargin: false,
+        folding: true,
         // Custom scrollbar styling to match global scrollbar styles
         scrollbar: {
           // Applying to ensure that other elements that use the scrollbar

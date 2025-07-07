@@ -43,7 +43,7 @@
   --c-primary: 0.1898;
   
   --l-secondary: 0.9;
-  --c-secondary: 0.15;
+  --c-secondary: 0.12;
 
   /* Base colors */
   --background: oklch(var(--l-base) 0.005 var(--hue-neutral));
@@ -121,6 +121,8 @@
   --l-high: 0.78;
   --l-intense: 0.88;
   --l-deepest: 0.95;
+  
+  --l-secondary: 0.8;
 
   --primary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
   --secondary-foreground: oklch(var(--l-base) 0.01 var(--hue-neutral));

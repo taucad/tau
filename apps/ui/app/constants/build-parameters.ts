@@ -94,6 +94,7 @@ export const commonGeneralTerms = [
   'standard',
   'general',
   'global',
+  'resolution',
 ];
 
 /**

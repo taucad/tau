@@ -165,7 +165,8 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
         {enumOptions.map((option) => (
           <SelectItem
             key={String(option.value)}
-            value={String(option.value)}
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
+            value={option.value}
             // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- value is untyped in RJSF
             disabled={enumDisabled?.includes(option.value)}
             className="h-7"

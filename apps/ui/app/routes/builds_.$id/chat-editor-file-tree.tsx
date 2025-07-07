@@ -51,7 +51,7 @@ export function ChatEditorFileTree(): JSX.Element {
   const treeElements = fileTree.length > 0 ? convertFileItemToTreeElement(fileTree) : [];
 
   return (
-    <div className={cn('flex h-full flex-col bg-sidebar select-none')}>
+    <div className={cn('flex h-full flex-col overflow-y-auto bg-sidebar select-none')}>
       <div className="border-b px-4 text-base font-medium text-muted-foreground">
         <h3 className="flex h-11 items-center">Files</h3>
       </div>

@@ -7,7 +7,7 @@
 :root {
   /* Base color hues */
   --hue-primary: 266deg;
-  --hue-secondary: calc(var(--hue-primary) - 230deg); /* Secondary color is nearly opposite of primary */
+  --hue-secondary: calc(var(--hue-primary) - 86deg); /* Results in ~180deg - true teal */
   --hue-neutral: calc(var(--hue-primary) - 10deg);
   --hue-destructive: 15deg;
   --hue-success: 150deg;
@@ -42,8 +42,8 @@
   --l-primary: 0.5719;
   --c-primary: 0.1898;
   
-  --l-secondary: 0.8;
-  --c-secondary: 0.1898;
+  --l-secondary: 0.9;
+  --c-secondary: 0.15;
 
   /* Base colors */
   --background: oklch(var(--l-base) 0.005 var(--hue-neutral));
@@ -123,7 +123,7 @@
   --l-deepest: 0.95;
 
   --primary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
-  --secondary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
+  --secondary-foreground: oklch(var(--l-base) 0.01 var(--hue-neutral));
 
   --highlighter: oklch(var(--l-secondary) var(--c-secondary) var(--hue-secondary) / 0.5);
   --highlighter-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral) / 0.85);

@@ -152,7 +152,8 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
   }
 
   return (
-    <Select value={String(value)} onValueChange={handleChange}>
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
+    <Select value={value} onValueChange={handleChange}>
       <SelectTrigger size="sm" className="min-w-0 flex-1 bg-background">
         <SelectValue placeholder={placeholder ?? 'Choose an option'} />
       </SelectTrigger>

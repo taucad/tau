@@ -159,7 +159,7 @@ function ProjectCard({
   );
 
   return (
-    <Card ref={cardReference} className="group relative flex flex-col overflow-hidden">
+    <Card ref={cardReference} className="group relative flex flex-col overflow-hidden pt-0">
       <div className="relative aspect-video overflow-hidden bg-muted">
         {!showPreview && (
           <img

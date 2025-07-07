@@ -653,7 +653,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
   }, [code, parameters, mechanicalAsset.language, showPreview, send]);
 
   return (
-    <Card className={cn('group relative flex flex-col overflow-hidden', isSelected && 'ring-2 ring-primary')}>
+    <Card className={cn('group relative flex flex-col overflow-hidden pt-0', isSelected && 'ring-2 ring-primary')}>
       <div className="absolute top-2 left-2 z-10">
         <Checkbox size="large" checked={isSelected} onCheckedChange={() => onSelect?.()} />
       </div>

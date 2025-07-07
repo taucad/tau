@@ -130,6 +130,10 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
     }
   }, [monaco]);
 
+  const language = build?.assets.mechanical?.language
+    ? languageFromKernel[build.assets.mechanical.language]
+    : undefined;
+
   return (
     <div className={cn('flex h-full flex-col bg-background', className)}>
       {/* <ChatEditorTabs /> */}
@@ -138,7 +142,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
         <CodeEditor
           loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
           className="h-full bg-background"
-          defaultLanguage={displayLanguage}
+          language={language}
           value={displayCode}
           onChange={handleCodeChange}
           onValidate={handleValidate}

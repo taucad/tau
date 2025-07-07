@@ -23,7 +23,7 @@ import { camelCaseToSentenceCase } from '~/utils/string.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { HighlightText } from '~/components/highlight-text.js';
 import { ChatParameterWidget } from '~/routes/builds_.$id/chat-parameter-widget.js';
-import { rjsfIdToJsonPath, hasCustomValue } from '~/routes/builds_.$id/rjsf-utils.js';
+import { rjsfIdToJsonPath, hasCustomValue, rjsfIdPrefix } from '~/routes/builds_.$id/rjsf-utils.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for formContext
 export type RJSFContext = {
@@ -38,7 +38,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   const { label, help, required, description, errors, children, schema, formData, id, registry } = props;
 
   if (schema.type === 'object') {
-    const isRoot = id === 'root';
+    const isRoot = id === rjsfIdPrefix;
     return <div className={cn(!isRoot && 'my-2 first:mt-0 last:mb-0')}>{children}</div>;
   }
 
@@ -101,7 +101,7 @@ function ObjectFieldTemplate(
   const { formContext } = registry;
 
   const [isOpen, setIsOpen] = useState<boolean | undefined>(true);
-  const isRoot = idSchema.$id === 'root';
+  const isRoot = idSchema.$id === rjsfIdPrefix;
 
   useEffect(() => {
     setIsOpen(formContext.allExpanded);

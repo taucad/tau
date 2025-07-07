@@ -12,6 +12,12 @@ import { ChatEditorBreadcrumbs } from '~/routes/builds_.$id/chat-editor-breadcru
 import { useBuild } from '~/hooks/use-build.js';
 import type { Build } from '~/types/build.types.js';
 import type { FileItem } from '~/machines/file-explorer.machine.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
+
+const languageFromKernel = {
+  replicad: 'typescript',
+  openscad: 'scad',
+} as const satisfies Record<KernelProvider, string>;
 
 const getFileTree = (build: Build): FileItem[] => {
   if (!build?.assets.mechanical) return [];
@@ -23,7 +29,7 @@ const getFileTree = (build: Build): FileItem[] => {
     name: filename,
     path: filename,
     content: file.content,
-    language: mechanicalAsset.language === 'replicad' ? 'typescript' : mechanicalAsset.language,
+    language: languageFromKernel[mechanicalAsset.language],
     isDirectory: false,
   }));
 };
@@ -86,7 +92,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
   const fallbackContent = build?.assets.mechanical?.files[fallbackFilename]?.content ?? code;
 
   const displayCode = activeFile ? activeFile.content : fallbackContent;
-  const displayLanguage = activeFile?.language ?? 'typescript';
+  const displayLanguage = activeFile?.language;
 
   const handleCodeChange = useCallback((value: ComponentProps<typeof CodeEditor>['value']) => {
     if (value) {

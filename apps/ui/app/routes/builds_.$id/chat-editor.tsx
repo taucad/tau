@@ -16,7 +16,7 @@ import type { KernelProvider } from '~/types/kernel.types.js';
 
 const languageFromKernel = {
   replicad: 'typescript',
-  openscad: 'scad',
+  openscad: 'openscad',
 } as const satisfies Record<KernelProvider, string>;
 
 const getFileTree = (build: Build): FileItem[] => {

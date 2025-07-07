@@ -71,7 +71,7 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         minimap: { enabled: false },
         // Explicitly configure line numbers
         lineNumbers: 'on',
-        lineNumbersMinChars: 3,
+        lineNumbersMinChars: 5,
         renderLineHighlight: 'line',
         renderLineHighlightOnlyWhenFocus: false,
         // Disable horizontal scroll beyond last line

@@ -51,14 +51,13 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   }
 
   // Convert RJSF ID to JSON path using schema-aware parsing
-  const fieldPath = rjsfIdToJsonPath(id, registry.rootSchema, formData);
+  const fieldPath = rjsfIdToJsonPath(id);
 
   // Check if field has custom value
   const defaultValue = schema.default;
   const fieldHasValue = hasCustomValue(formData, defaultValue);
 
   const handleReset = () => {
-    console.log('resetting', fieldPath);
     formContext.resetSingleParameter(fieldPath);
   };
 

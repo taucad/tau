@@ -14,7 +14,7 @@ import { cn } from '~/utils/ui.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { templates, uiSchema, widgets } from '~/routes/builds_.$id/rjsf-theme.js';
 import type { RJSFContext } from '~/routes/builds_.$id/rjsf-theme.js';
-import { deleteNestedValue, resetArrayItem } from '~/routes/builds_.$id/rjsf-utils.js';
+import { deleteNestedValue, rjsfIdSeparator, resetArrayItem, rjsfIdPrefix } from '~/routes/builds_.$id/rjsf-utils.js';
 
 export const ChatParameters = memo(function () {
   const parameters = useSelector(cadActor, (state) => state.context.parameters);
@@ -216,6 +216,8 @@ export const ChatParameters = memo(function () {
               schema={jsonSchema}
               // @ts-expect-error -- TODO: fix this
               uiSchema={uiSchema}
+              idPrefix={rjsfIdPrefix}
+              idSeparator={rjsfIdSeparator}
               widgets={widgets}
               formData={mergedData}
               formContext={formContext}

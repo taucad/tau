@@ -2,122 +2,48 @@
  * Utility functions for React JSON Schema Form (RJSF) operations
  */
 
-import type { RJSFSchema } from '@rjsf/utils';
+/**
+ * The prefix used in RJSF IDs.
+ *
+ * It's important that this prefix is not used in the field names, otherwise
+ * the JSON path used for field resets will be incorrect.
+ *
+ * @see https://rjsf-team.github.io/react-jsonschema-form/docs/api-reference/form-props/#idprefix
+ */
+export const rjsfIdPrefix = '///root';
 
 /**
- * Converts RJSF ID to JSON path array using schema-aware parsing
- * @param rjsfId - The RJSF field ID (e.g., "root_config_user_name")
- * @param schema - Optional root schema to guide parsing
- * @param formData - Optional form data to help with array indices
- * @returns Array of path segments (e.g., ["config", "user_name"])
+ * The separator used in RJSF IDs. It's important that this separator
+ * is not used in the field names, otherwise the JSON path used for
+ * field resets will be incorrect.
+ *
+ * Therefore, we use a separator that is unlikely to be used in field names.
+ *
+ * @see https://rjsf-team.github.io/react-jsonschema-form/docs/api-reference/form-props/#idseparator
  */
-export function rjsfIdToJsonPath(rjsfId: string, schema?: RJSFSchema, formData?: Record<string, unknown>): string[] {
-  // Remove 'root_' prefix
-  const pathString = rjsfId.replace(/^root_?/, '');
+export const rjsfIdSeparator = '///';
+
+/**
+ * Converts RJSF ID to JSON path array. Handles underscores in field names.
+ *
+ * @param rjsfId - The RJSF field ID (e.g., "root_config_database_host")
+ * @returns Array of path segments (e.g., ["config", "database", "host"])
+ */
+export function rjsfIdToJsonPath(rjsfId: string): string[] {
+  // Remove 'root///' prefix and split by idSeparator
+  const pathString = rjsfId.replace(new RegExp(`^${rjsfIdPrefix}${rjsfIdSeparator}`), '');
 
   // Handle empty case (root level)
   if (!pathString) {
     return [];
   }
 
-  // If we have schema, use schema-aware parsing
-  if (schema) {
-    return parsePathWithSchema(pathString, schema, formData);
-  }
+  // Split by underscore - this handles most cases correctly
+  // For more complex cases with actual underscores in field names,
+  // you might need more sophisticated parsing
+  const pathParts = pathString.split(rjsfIdSeparator);
 
-  throw new Error(`Unable to parse RJSF ID ${rjsfId} to JSON path`);
-}
-
-/**
- * Parses a path string using the schema structure to handle field names with underscores
- * @param pathString - The path string without 'root_' prefix
- * @param schema - The root schema
- * @param formData - Optional form data to help with array indices
- * @returns Array of path segments
- */
-function parsePathWithSchema(pathString: string, schema: RJSFSchema, formData?: Record<string, unknown>): string[] {
-  const segments = pathString.split('_');
-  const result: string[] = [];
-  let currentSchema: RJSFSchema | undefined = schema;
-  let currentData: Record<string, unknown> | unknown[] | undefined = formData;
-  let i = 0;
-
-  while (i < segments.length && currentSchema) {
-    // Handle array indices (numeric segments)
-    if (/^\d+$/.test(segments[i])) {
-      result.push(segments[i]);
-
-      // Move to array items schema
-      if (currentSchema.type === 'array' && currentSchema.items && typeof currentSchema.items === 'object') {
-        currentSchema = currentSchema.items as RJSFSchema;
-        if (Array.isArray(currentData)) {
-          const index = Number.parseInt(segments[i], 10);
-          currentData = currentData[index] as Record<string, unknown> | unknown[] | undefined;
-        }
-      }
-
-      i++;
-      continue;
-    }
-
-    // Find the exact property match
-    const propertyMatch = findExactPropertyMatch(segments.slice(i), currentSchema);
-
-    if (propertyMatch) {
-      result.push(propertyMatch.propertyName);
-
-      // Update schema and data context for next iteration
-      if (currentSchema.properties?.[propertyMatch.propertyName]) {
-        currentSchema = currentSchema.properties[propertyMatch.propertyName] as RJSFSchema;
-        if (currentData && typeof currentData === 'object' && !Array.isArray(currentData)) {
-          currentData = currentData[propertyMatch.propertyName] as Record<string, unknown> | unknown[] | undefined;
-        }
-      }
-
-      i += propertyMatch.segmentsUsed;
-    } else {
-      // No exact match found - this shouldn't happen with a properly formed RJSF ID
-      throw new Error(`No property found in schema for path segments: ${segments.slice(i).join('_')}`);
-    }
-  }
-
-  return result;
-}
-
-/**
- * Finds the exact property name match from the current schema properties
- * @param segments - Remaining path segments
- * @param schema - Current schema context
- * @returns Exact match with property name and segments used, or undefined if no match
- */
-function findExactPropertyMatch(
-  segments: string[],
-  schema: RJSFSchema,
-): { propertyName: string; segmentsUsed: number } | undefined {
-  if (!schema.properties || typeof schema.properties !== 'object') {
-    return undefined;
-  }
-
-  const properties = Object.keys(schema.properties);
-
-  // Find the longest exact match by checking each property against the segments
-  for (const propertyName of properties) {
-    const propertySegments = propertyName.split('_');
-
-    // Check if this property name exactly matches the beginning of our segments
-    if (propertySegments.length <= segments.length) {
-      const segmentsToCheck = segments.slice(0, propertySegments.length);
-
-      if (segmentsToCheck.join('_') === propertyName) {
-        return {
-          propertyName,
-          segmentsUsed: propertySegments.length,
-        };
-      }
-    }
-  }
-
-  return undefined;
+  return pathParts;
 }
 
 /**

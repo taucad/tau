@@ -2,7 +2,10 @@
 
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { buildOpenScadCompletionItemProvider } from '~/lib/openscad-language/openscad-completions.js';
+import { createDefinitionProvider } from '~/lib/openscad-language/openscad-definition.js';
+import { createHoverProvider } from '~/lib/openscad-language/openscad-hover.js';
 import { createOpenscadLanguageConfiguration } from '~/lib/openscad-language/openscad-language.js';
+import { openscadSymbols, openscadFunctions, openscadConstants } from '~/lib/openscad-language/openscad-symbols.js';
 
 // https://microsoft.github.io/monaco-editor/playground.html#extending-language-services-custom-languages
 export function registerOpenScadLanguage(monaco: typeof Monaco): void {
@@ -19,4 +22,8 @@ export function registerOpenScadLanguage(monaco: typeof Monaco): void {
 
   monaco.languages.setLanguageConfiguration('openscad', languageConfiguration);
   monaco.languages.registerCompletionItemProvider('openscad', completionProvider);
+  monaco.languages.registerHoverProvider('openscad', createHoverProvider(monaco));
+
+  // Register definition provider for Go to Definition (Cmd/Ctrl+click)
+  monaco.languages.registerDefinitionProvider('openscad', createDefinitionProvider(monaco));
 }

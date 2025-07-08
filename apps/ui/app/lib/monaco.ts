@@ -5,6 +5,7 @@ import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 import { registerCompletion } from 'monacopilot';
 import type { CompletionRegistration, Monaco, StandaloneCodeEditor, CompletionCopilot } from 'monacopilot';
 import { ENV } from '~/config.js';
+import { registerOpenScadLanguage } from '~/lib/openscad-language/openscad-register-language.js';
 
 /**
  * Configure the Monaco editor.
@@ -43,6 +44,8 @@ export const configureMonaco = async (): Promise<void> => {
     await import('monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution');
     await import('monaco-editor/esm/vs/language/json/monaco.contribution');
     await import('monaco-editor/esm/vs/language/typescript/monaco.contribution');
+
+    registerOpenScadLanguage(monaco);
   }
 };
 

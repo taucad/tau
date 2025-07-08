@@ -1,12 +1,12 @@
 // Portions of this file are Copyright 2021 Google LLC, and licensed under GPL2+. See COPYING.
 
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import type * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { parseOpenScad, stripComments } from '~/lib/openscad-language/openscad-pseudoparser.js';
 import { openscadBuiltins } from '~/lib/openscad-language/openscad-builtins.js';
-import { openscadLanguage } from '~/lib/openscad-language/openscad-language.js';
+import { openscadLanguageKeywords } from '~/lib/openscad-language/openscad-language.js';
 import type { ParsedFunctionoidDef } from '~/lib/openscad-language/openscad-pseudoparser.js';
 
-function makeFunctionoidSuggestion(name: string, mod: ParsedFunctionoidDef) {
+function makeFunctionoidSuggestion(name: string, mod: ParsedFunctionoidDef, monacoInstance: typeof monaco) {
   const argSnippets: string[] = [];
   const namedArgs: string[] = [];
   let collectingPosArgs = true;
@@ -38,26 +38,28 @@ function makeFunctionoidSuggestion(name: string, mod: ParsedFunctionoidDef) {
 
   return {
     label: mod.signature,
-    kind: monaco.languages.CompletionItemKind.Function,
+    kind: monacoInstance.languages.CompletionItemKind.Function,
     insertText,
-    insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+    insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
   };
 }
 
-const builtinCompletions = [
-  ...[true, false].map((v) => ({
-    label: `${v}`,
-    kind: monaco.languages.CompletionItemKind.Value,
-    insertText: `${v}`,
-    insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-  })),
-  ...openscadLanguage.keywords.map((v) => ({
-    label: v,
-    kind: monaco.languages.CompletionItemKind.Function,
-    insertText: v,
-    insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-  })),
-];
+function createBuiltinCompletions(monacoInstance: typeof monaco) {
+  return [
+    ...[true, false].map((v) => ({
+      label: `${v}`,
+      kind: monacoInstance.languages.CompletionItemKind.Value,
+      insertText: `${v}`,
+      insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+    })),
+    ...openscadLanguageKeywords.map((v: string) => ({
+      label: v,
+      kind: monacoInstance.languages.CompletionItemKind.Function,
+      insertText: v,
+      insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+    })),
+  ];
+}
 
 const keywordSnippets = [
   // eslint-disable-next-line no-template-curly-in-string -- This is a valid template
@@ -94,7 +96,11 @@ function mapObject<T, U>(
 // Parse built-in functions once
 const builtinsDefs = parseOpenScad('<builtins>', openscadBuiltins, false);
 
-export function buildOpenScadCompletionItemProvider(): monaco.languages.CompletionItemProvider {
+export function buildOpenScadCompletionItemProvider(
+  monacoInstance: typeof monaco,
+): monaco.languages.CompletionItemProvider {
+  const builtinCompletions = createBuiltinCompletions(monacoInstance);
+
   return {
     triggerCharacters: [],
     provideCompletionItems(model, position, context, token) {
@@ -121,22 +127,22 @@ export function buildOpenScadCompletionItemProvider(): monaco.languages.Completi
             ...builtinCompletions,
             ...mapObject(
               allModules ?? {},
-              (name, mod) => makeFunctionoidSuggestion(name, mod),
+              (name, mod) => makeFunctionoidSuggestion(name, mod, monacoInstance),
               (name) => name.includes(word),
             ),
             ...allVars
               .filter((name) => name.includes(word))
               .map((name) => ({
                 label: name,
-                kind: monaco.languages.CompletionItemKind.Variable,
+                kind: monacoInstance.languages.CompletionItemKind.Variable,
                 insertText: name.replaceAll('$', String.raw`\$`),
-                insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
               })),
             ...keywordSnippets.map((snippet) => ({
               label: cleanupVariables(snippet).replaceAll(' body', ''),
-              kind: monaco.languages.CompletionItemKind.Keyword,
+              kind: monacoInstance.languages.CompletionItemKind.Keyword,
               insertText: snippet,
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
             })),
           ];
 
@@ -148,7 +154,7 @@ export function buildOpenScadCompletionItemProvider(): monaco.languages.Completi
         // Function completions
         const functionSuggestions = mapObject(
           allFunctions ?? {},
-          (name, mod) => makeFunctionoidSuggestion(name, mod),
+          (name, mod) => makeFunctionoidSuggestion(name, mod, monacoInstance),
           (name) => name.includes(word),
         ) as monaco.languages.CompletionItem[];
 

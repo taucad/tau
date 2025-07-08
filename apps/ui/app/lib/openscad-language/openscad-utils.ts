@@ -179,9 +179,9 @@ function inferType(value: string): string {
     return 'string';
   }
 
-  // Check for arrays
+  // Check for vectors
   if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-    return 'array';
+    return 'vector';
   }
 
   // Default to expression

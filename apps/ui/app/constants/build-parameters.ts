@@ -50,6 +50,30 @@ export const countTerms = ['count', 'number', 'num', 'quantity', 'amount', 'freq
 export const angleTerms = ['angle', 'rotation', 'radians', 'degrees', 'tilt', 'orientation', 'slope', 'twist'];
 
 /**
+ * Terms that indicate a parameter is unitless (dimensionless values)
+ * These parameters should display a hash icon to indicate they are pure numbers
+ */
+export const unitlessTerms = [
+  'resolution',
+  'quality',
+  'detail',
+  'factor',
+  'ratio',
+  'multiplier',
+  'coefficient',
+  'level',
+  'grade',
+  'step',
+  'steps',
+  'segments',
+  'facets',
+  'subdivision',
+  'divisions',
+  'precision',
+  'sampling',
+];
+
+/**
  * Terms that indicate a parameter relates to positioning
  */
 export const positioningTerms = ['position', 'alignment', 'elevation', 'inset'];
@@ -94,7 +118,6 @@ export const commonGeneralTerms = [
   'standard',
   'general',
   'global',
-  'resolution',
 ];
 
 /**
@@ -105,6 +128,7 @@ export const descriptorTerms = [
   ...shapeModifierTerms,
   ...countTerms,
   ...angleTerms,
+  ...unitlessTerms,
   ...positioningTerms,
   ...directionTerms,
   ...materialTerms,
@@ -131,4 +155,15 @@ export const isCountParameter = (parameterName: string): boolean => {
 export const isAngleParameter = (parameterName: string): boolean => {
   const normalizedName = parameterName.toLowerCase();
   return angleTerms.some((term) => normalizedName.includes(term));
+};
+
+/**
+ * Check if a parameter name contains any unitless terms
+ *
+ * @param parameterName - The parameter name to check
+ * @returns Whether the parameter is a unitless parameter
+ */
+export const isUnitlessParameter = (parameterName: string): boolean => {
+  const normalizedName = parameterName.toLowerCase();
+  return unitlessTerms.some((term) => normalizedName.includes(term));
 };

@@ -1,10 +1,11 @@
 import * as React from 'react';
+import { Hash } from 'lucide-react';
 import { Angle } from '~/components/icons/angle.js';
 import { cn } from '~/utils/ui.js';
 import { Input } from '~/components/ui/input.js';
-import { isCountParameter, isAngleParameter } from '~/constants/build-parameters.js';
+import { isCountParameter, isAngleParameter, isUnitlessParameter } from '~/constants/build-parameters.js';
 
-type MeasurementDescriptor = 'length' | 'angle' | 'count';
+type MeasurementDescriptor = 'length' | 'angle' | 'count' | 'unitless';
 
 /**
  * Determine the descriptor type based on parameter name
@@ -20,6 +21,10 @@ function getDescriptor(name?: string): MeasurementDescriptor {
 
   if (isAngleParameter(name)) {
     return 'angle';
+  }
+
+  if (isUnitlessParameter(name)) {
+    return 'unitless';
   }
 
   return 'length';
@@ -44,6 +49,7 @@ export function ChatParametersInputNumber({
 
   const isCount = descriptor === 'count';
   const isAngle = descriptor === 'angle';
+  const isUnitless = descriptor === 'unitless';
 
   const handleIndicatorClick = () => {
     inputRef.current?.focus();
@@ -87,7 +93,13 @@ export function ChatParametersInputNumber({
           className={cn(baseIndicatorClass, 'rounded-r-md border-l-0', 'group-focus-within:border-ring', 'cursor-text')}
           onClick={handleIndicatorClick}
         >
-          {isAngle ? <Angle className="size-4" /> : <span className="font-mono text-xs">{unit}</span>}
+          {isAngle ? (
+            <Angle className="size-4" />
+          ) : isUnitless ? (
+            <Hash className="size-3" />
+          ) : (
+            <span className="font-mono text-xs">{unit}</span>
+          )}
         </span>
       )}
     </div>

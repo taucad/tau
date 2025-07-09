@@ -14,8 +14,8 @@ import { Skeleton } from '~/components/ui/skeleton.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import type { KeyCombination } from '~/utils/keys.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
-export const sidebarCookieName = 'sidebar-open';
 const sidebarDefaultOpen = false;
 const sidebarWidth = 'calc(var(--spacing) * 56)';
 const sidebarWidthMobile = 'calc(var(--spacing) * 72)';
@@ -58,7 +58,7 @@ function SidebarProvider({
 }) {
   const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
-  const [_open, _setOpen] = useCookie(sidebarCookieName, sidebarDefaultOpen);
+  const [_open, _setOpen] = useCookie(cookieName.sidebarOpen, sidebarDefaultOpen);
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.

@@ -246,7 +246,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
                       ? 'File edit applied successfully'
                       : fileEditState.matches('error')
                         ? `Edit failed: ${fileEditState.context.error}. Reverted to original content.`
-                        : 'Apply file edit using Morph'}
+                        : 'Apply edit'}
                 </TooltipContent>
               </Tooltip>
             </div>

@@ -9,12 +9,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip
 import { Button } from '~/components/ui/button.js';
 import { cn } from '~/utils/ui.js';
 import { ChatControls } from '~/routes/builds_.$id/chat-controls.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 export type ViewMode = 'tabs' | 'split';
-
-export const chatViewModeCookieName = 'chat-view-mode';
-export const chatHistoryOpenCookieName = 'chat-history-open';
-export const chatParametersOpenCookieName = 'chat-parameters-open';
 
 const toggleChatKeyCombination = {
   key: 'c',
@@ -52,9 +49,9 @@ export const useViewContext = (): ViewContextType => {
 };
 
 export function ViewContextProvider({ children }: { readonly children: React.ReactNode }): JSX.Element {
-  const [isChatOpen, setIsChatOpen] = useCookie(chatHistoryOpenCookieName, true);
-  const [isParametersOpen, setIsParametersOpen] = useCookie(chatParametersOpenCookieName, true);
-  const [viewMode, setViewMode] = useCookie<ViewMode>(chatViewModeCookieName, 'tabs');
+  const [isChatOpen, setIsChatOpen] = useCookie(cookieName.chatHistoryOpen, true);
+  const [isParametersOpen, setIsParametersOpen] = useCookie(cookieName.chatParametersOpen, true);
+  const [viewMode, setViewMode] = useCookie<ViewMode>(cookieName.chatViewMode, 'tabs');
 
   const toggleChatOpen = useCallback(() => {
     setIsChatOpen((previous) => !previous);

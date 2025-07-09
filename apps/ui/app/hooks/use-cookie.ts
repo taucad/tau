@@ -4,11 +4,12 @@ import { useRouteLoaderData } from 'react-router';
 import type { loader } from '~/root.js';
 import { metaConfig } from '~/config.js';
 import { isFunction } from '~/utils/function.js';
+import type { CookieName } from '~/constants/cookie.constants.js';
 
 type Listener = () => void;
 
 const cookieStore = () => {
-  const cache = new Map<string, any>();
+  const cache = new Map<string, unknown>();
   const listenerMap = new Map<string, Set<Listener>>();
 
   const subscribe = (cookieName: string, listener: Listener) => {
@@ -60,7 +61,7 @@ const cookieStore = () => {
 
 export const store = cookieStore();
 
-export const useCookie = <T>(name: string, defaultValue: T) => {
+export const useCookie = <T>(name: CookieName, defaultValue: T) => {
   const cookieName = `${metaConfig.cookiePrefix}${name}`;
   // Get the latest cookie value from route data on each render
   const data = useRouteLoaderData<typeof loader>('root');

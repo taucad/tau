@@ -17,6 +17,8 @@ import type { KernelProvider } from '~/types/kernel.types';
 import type { Handle } from '~/types/matches.types.js';
 import { cn } from '~/utils/ui.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
+import useCookie from '~/hooks/use-cookie.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -134,7 +136,7 @@ export default function BuildsNew(): JSX.Element {
   const navigate = useNavigate();
   const { createBuild, isCreating } = useBuildCreation();
 
-  const [selectedKernel, setSelectedKernel] = useState<KernelProvider>('openscad');
+  const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.kernel, 'openscad');
   const [buildName, setBuildName] = useState('');
   const [buildDescription, setBuildDescription] = useState('');
 

@@ -28,7 +28,7 @@ export class ChatService {
   }
 
   // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- This is a complex generic that can be left inferred.
-  public async createGraph(modelId: string, selectedToolChoice: ToolChoiceWithCategory) {
+  public async createGraph(modelId: string, selectedToolChoice: ToolChoiceWithCategory, selectedKernel: 'replicad' | 'openscad' = 'replicad') {
     const { tools } = this.toolService.getTools(selectedToolChoice);
 
     const researchTools = [tools.web_search, tools.web_browser];
@@ -48,7 +48,7 @@ export class ChatService {
 
     // Create a general agent for handling direct responses
     const cadTools = [tools.edit_file];
-    const cadSystemPrompt = await getCadSystemPrompt();
+    const cadSystemPrompt = await getCadSystemPrompt(selectedKernel);
     const cadAgent = createReactAgent({
       llm: cadSupport?.tools === false ? cadModel : (cadModel.bindTools?.(cadTools) ?? cadModel),
       tools: cadTools,
@@ -69,7 +69,7 @@ Your strength lies in thoughtful delegation rather than direct tool usage. You s
 # Task Routing Guidelines
 When users ask questions or make requests, you should:
 
-**For 3D modeling, CAD work, or file editing requests**: Immediately transfer to the CAD expert using the transfer_to_cad_expert tool. This includes any requests involving changes to 3D models, geometric modifications, design alterations, or file manipulation tasks. The CAD expert has specialized tools and knowledge for these technical operations.
+**For 3D modeling, CAD work, or file editing requests**: Immediately transfer to the CAD expert using the transfer_to_cad_expert tool. This includes any requests involving changes to 3D models, geometric modifications, design alterations, or file manipulation tasks. The CAD expert has specialized tools and knowledge for these technical operations and works with ${selectedKernel} as the selected CAD kernel.
 
 **For research, information gathering, or web-based queries**: Use the transfer_to_research_expert tool when the request requires external information, current data, or specialized research capabilities. The research expert can access web resources and gather comprehensive information to answer complex queries.
 
@@ -78,7 +78,7 @@ When users ask questions or make requests, you should:
 # Error Detection and Routing
 Pay special attention to messages that contain:
 - Code compilation errors or JavaScript errors
-- Kernel errors from the Replicad/OpenCascade system
+- Kernel errors from the ${selectedKernel} system
 - Geometric operation failures
 - Runtime exceptions from 3D modeling operations
 - Screenshots or visual feedback from rendered CAD models

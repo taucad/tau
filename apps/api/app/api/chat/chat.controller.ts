@@ -41,16 +41,28 @@ export type KernelError = {
   type?: 'compilation' | 'runtime' | 'kernel' | 'unknown';
 };
 
+export type FileInfo = {
+  content: string;
+  language: string;
+};
+
+export type FilesContext = {
+  currentFile: string;
+  files: Record<string, FileInfo>;
+};
+
 export type CreateChatBody = {
   code: string;
   codeErrors: CodeError[];
   kernelError?: KernelError;
   screenshot: string;
+  kernel?: 'replicad' | 'openscad';
+  files?: FilesContext;
   messages: Array<
     UIMessage & {
       role: 'user';
       model: string;
-      metadata: { toolChoice: ToolChoiceWithCategory };
+      metadata: { toolChoice: ToolChoiceWithCategory; kernel?: 'replicad' | 'openscad' };
     }
   >;
 };
@@ -76,8 +88,12 @@ export class ChatController {
 
     let modelId: string;
     const selectedToolChoice: ToolChoiceWithCategory = 'auto';
+    let selectedKernel: 'replicad' | 'openscad' = 'replicad';
+    
     if (lastHumanMessage?.role === 'user') {
       modelId = lastHumanMessage.model;
+      // Extract kernel from message metadata or use the one from body
+      selectedKernel = lastHumanMessage.metadata?.kernel || body.kernel || 'replicad';
       // If (lastHumanMessage.metadata.toolChoice) {
       //   selectedToolChoice = lastHumanMessage.metadata.toolChoice;
       // }
@@ -96,7 +112,7 @@ export class ChatController {
     }
 
     const langchainMessages = convertAiSdkMessagesToLangchainMessages(sanitizedMessages, coreMessages);
-    const graph = await this.chatService.createGraph(modelId, selectedToolChoice);
+    const graph = await this.chatService.createGraph(modelId, selectedToolChoice, selectedKernel);
 
     // Abort the request if the client disconnects
     const abortController = new AbortController();
@@ -105,6 +121,16 @@ export class ChatController {
         abortController.abort();
       }
     });
+
+    // Prepare files context for the system prompt
+    const filesContextXml = body.files ? objectToXml({
+      currentFile: body.files.currentFile,
+      files: Object.entries(body.files.files).map(([filename, file]) => ({
+        filename,
+        content: file.content,
+        language: file.language,
+      })),
+    }) : '';
 
     const resultMessage = new HumanMessage({
       content: [
@@ -127,6 +153,8 @@ ${objectToXml({
       }
     : {}),
   currentCode: body.code,
+  selectedKernel,
+  ...(filesContextXml ? { filesContext: filesContextXml } : {}),
 })}
 `,
         },

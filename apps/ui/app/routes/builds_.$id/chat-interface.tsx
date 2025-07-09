@@ -7,10 +7,15 @@ import { cn } from '~/utils/ui.js';
 import { ChatParameters } from '~/routes/builds_.$id/chat-parameters.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import { useViewContext } from '~/routes/builds_.$id/chat-interface-controls.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
 
 export const chatResizeMainCookieName = 'chat-resize-main';
 
-export const ChatInterface = memo(function () {
+type ChatInterfaceProps = {
+  readonly currentKernel?: KernelProvider;
+};
+
+export const ChatInterface = memo(function ({ currentKernel }: ChatInterfaceProps) {
   const [chatResizeMain, setChatResizeMain] = useCookie(chatResizeMainCookieName, [25, 60, 15]);
   const { isChatOpen, isParametersOpen, viewMode } = useViewContext();
 
@@ -32,7 +37,7 @@ export const ChatInterface = memo(function () {
         className={cn('group-data-[chat-open=false]/chat-layout:hidden')}
         id="chat-history"
       >
-        <ChatHistory />
+        <ChatHistory currentKernel={currentKernel} />
       </ResizablePanel>
 
       <ResizableHandle className={cn('hidden', 'group-data-[chat-open=true]/chat-layout:md:flex')} />

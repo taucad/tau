@@ -135,7 +135,7 @@ function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- this is effectively a subscription to useChat, so we only respond to status & message changes
   }, [status, setChatMessages, messages]);
 
-  return <ChatInterface />;
+  return <ChatInterface currentKernel={build?.assets.mechanical?.language} />;
 }
 
 export default function ChatRoute(): JSX.Element {

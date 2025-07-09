@@ -1,5 +1,6 @@
 import type { UIMessage } from 'ai';
 import type { ConstantRecord } from '~/types/constant.types.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
 
 export const messageRole = {
   user: 'user',
@@ -54,6 +55,12 @@ declare module '@ai-sdk/react' {
        * @default 'auto'
        */
       toolChoice?: 'web_search' | 'none' | 'auto' | 'any';
+      /**
+       * The CAD kernel to use for code generation and tool operations.
+       *
+       * @default 'replicad'
+       */
+      kernel?: KernelProvider;
     };
     /**
      * The annotations of the message.

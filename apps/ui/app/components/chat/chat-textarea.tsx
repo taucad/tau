@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import type { JSX } from 'react';
-import { Globe, ArrowUp, Image, X, Square, CircuitBoard, ChevronDown } from 'lucide-react';
+import { Globe, ArrowUp, Image, X, Square, CircuitBoard, ChevronDown, Code } from 'lucide-react';
 import type { Attachment } from 'ai';
 import type { ClassValue } from 'clsx';
 import { useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
@@ -19,6 +19,9 @@ import { cn } from '~/utils/ui.js';
 import type { MessagePart } from '~/types/chat.types.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
 import { ChatContextActions } from '~/components/chat/chat-context-actions.js';
+import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
+import { kernelProviders } from '~/types/kernel.types.js';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
@@ -29,7 +32,7 @@ export type ChatTextareaProperties = {
   }: {
     content: string;
     model: string;
-    metadata?: { toolChoice?: 'web_search' | 'none' | 'auto' | 'any' };
+    metadata?: { toolChoice?: 'web_search' | 'none' | 'auto' | 'any'; kernel?: KernelProvider };
     imageUrls?: string[];
   }) => Promise<void>;
   readonly onEscapePressed?: () => void;
@@ -38,6 +41,7 @@ export type ChatTextareaProperties = {
   readonly initialAttachments?: Attachment[];
   readonly className?: ClassValue;
   readonly enableContextActions?: boolean;
+  readonly currentKernel?: KernelProvider;
 };
 
 const defaultContent: MessagePart[] = [];
@@ -51,6 +55,13 @@ const cancelKeyCombination = {
   requireAllModifiers: true,
 } satisfies KeyCombination;
 
+// Kernel options for the selector
+const kernelOptions = kernelProviders.map((kernel) => ({
+  id: kernel,
+  name: kernel === 'replicad' ? 'Replicad' : 'OpenSCAD',
+  description: kernel === 'replicad' ? 'TypeScript-based 3D modeling' : 'Functional 3D modeling language',
+}));
+
 export const ChatTextarea = memo(function ({
   onSubmit,
   shouldAutoFocus: autoFocus = true,
@@ -59,6 +70,7 @@ export const ChatTextarea = memo(function ({
   onEscapePressed,
   className,
   enableContextActions = true,
+  currentKernel = 'replicad',
 }: ChatTextareaProperties): JSX.Element {
   const { initialInputText, initialImageUrls } = useMemo(() => {
     let initialInputText = '';
@@ -82,6 +94,7 @@ export const ChatTextarea = memo(function ({
   }, [initialContent, initialAttachments]);
   const [inputText, setInputText] = useState(initialInputText);
   const [isSearching, setIsSearching] = useCookie('chat-web-search', false);
+  const [selectedKernel, setSelectedKernel] = useState<KernelProvider>(currentKernel);
   const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);
@@ -95,6 +108,11 @@ export const ChatTextarea = memo(function ({
   const status = useChatSelector((state) => state.context.status);
   const { stop } = useChatActions();
 
+  // Update selected kernel when currentKernel prop changes
+  useEffect(() => {
+    setSelectedKernel(currentKernel);
+  }, [currentKernel]);
+
   const handleSubmit = async () => {
     // If there is no text or images, do not submit
     if (inputText.trim().length === 0) return;
@@ -107,6 +125,7 @@ export const ChatTextarea = memo(function ({
       model: selectedModel?.id ?? '',
       metadata: {
         toolChoice: isSearching ? 'web_search' : 'auto',
+        kernel: selectedKernel,
       },
       imageUrls: images,
     });
@@ -541,6 +560,45 @@ export const ChatTextarea = memo(function ({
           <TooltipContent>
             <span>Select model{` `}</span>
             <span>({selectedModel?.name ?? 'Offline'})</span>
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Kernel selector */}
+        <Tooltip>
+          <ComboBoxResponsive
+            groupedItems={[{ name: 'CAD Kernels', items: kernelOptions }]}
+            renderLabel={(option) => (
+              <div className="flex items-center gap-2">
+                <Code className="size-4" />
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium">{option.name}</span>
+                  <span className="text-xs text-muted-foreground">{option.description}</span>
+                </div>
+              </div>
+            )}
+            getValue={(option) => option.id}
+            defaultValue={kernelOptions.find((option) => option.id === selectedKernel)}
+            onSelect={(value) => setSelectedKernel(value as KernelProvider)}
+            onClose={focusInput}
+            popoverProperties={{ align: 'start' }}
+          >
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" className="rounded-full">
+                <span className="flex max-w-20 shrink-0 flex-row items-center gap-2 rounded-full group-data-[state=open]:text-primary @md:max-w-fit">
+                  <span className="hidden truncate text-xs @[22rem]:block">
+                    {kernelOptions.find((option) => option.id === selectedKernel)?.name ?? 'Replicad'}
+                  </span>
+                  <span className="relative flex size-4 items-center justify-center">
+                    <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100" />
+                    <Code className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0" />
+                  </span>
+                </span>
+              </Button>
+            </TooltipTrigger>
+          </ComboBoxResponsive>
+          <TooltipContent>
+            <span>Select CAD kernel{` `}</span>
+            <span>({kernelOptions.find((option) => option.id === selectedKernel)?.name ?? 'Replicad'})</span>
           </TooltipContent>
         </Tooltip>
 

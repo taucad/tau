@@ -24,6 +24,11 @@ export default function ChatStart(): JSX.Element {
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content, model, metadata, imageUrls }) => {
       try {
+        // Get the selected kernel from metadata, defaulting to replicad
+        const selectedKernel = metadata?.kernel || 'replicad';
+        const fileExtension = selectedKernel === 'replicad' ? '.ts' : '.scad';
+        const mainFileName = selectedKernel === 'replicad' ? 'main.ts' : 'main.scad';
+        
         // Create the initial message as pending
         const userMessage = createMessage({
           content,
@@ -59,9 +64,9 @@ export default function ChatStart(): JSX.Element {
           assets: {
             mechanical: {
               // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-              files: { 'main.ts': { content: emptyReplicadCode } },
-              main: 'main.ts',
-              language: 'replicad',
+              files: { [mainFileName]: { content: emptyReplicadCode } },
+              main: mainFileName,
+              language: selectedKernel,
               parameters: {},
             },
           },

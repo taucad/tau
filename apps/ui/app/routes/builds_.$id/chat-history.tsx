@@ -12,6 +12,7 @@ import { messageRole, messageStatus } from '~/types/chat.types.js';
 import { useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { cn } from '~/utils/ui.js';
 import { ChatSelector } from '~/routes/builds_.$id/chat-selector.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
 
 // Memoized individual message item component to prevent re-renders
 const MessageItem = memo(function ({ messageId }: { readonly messageId: string }) {
@@ -22,7 +23,11 @@ const MessageItem = memo(function ({ messageId }: { readonly messageId: string }
   );
 });
 
-export const ChatHistory = memo(function () {
+type ChatHistoryProps = {
+  readonly currentKernel?: KernelProvider;
+};
+
+export const ChatHistory = memo(function ({ currentKernel }: ChatHistoryProps) {
   const messageIds = useChatSelector((state) => state.context.messageOrder);
   const { append } = useChatActions();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -103,7 +108,7 @@ export const ChatHistory = memo(function () {
       </div>
       <div className={cn('relative mx-2 mb-2 rounded-2xl')}>
         <ChatStatus className="absolute inset-x-0 -top-9" />
-        <ChatTextarea onSubmit={onSubmit} />
+        <ChatTextarea onSubmit={onSubmit} currentKernel={currentKernel} />
       </div>
     </div>
   );

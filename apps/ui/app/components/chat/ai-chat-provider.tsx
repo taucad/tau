@@ -16,6 +16,7 @@ import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { messageStatus } from '~/types/chat.types.js';
+import { useBuild } from '~/hooks/use-build.js';
 
 type UseChatArgs = NonNullable<Parameters<typeof useChat>[0]>;
 type UseChatReturn = ReturnType<typeof useChat>;
@@ -400,6 +401,7 @@ function ChatSyncWrapper({
   readonly value: Omit<UseChatArgs, 'onFinish' | 'onError' | 'onResponse'>;
 }): JSX.Element {
   const actorRef = AiChatContext.useActorRef();
+  const { build } = useBuild();
 
   // Initialize useChat with sync callbacks
   const chat = useChat({
@@ -408,10 +410,40 @@ function ChatSyncWrapper({
     // eslint-disable-next-line @typescript-eslint/naming-convention -- experimental API
     experimental_prepareRequestBody(requestBody) {
       const cadActorState = cadActor.getSnapshot();
+      
+      // Get kernel information from the last user message or from the build context
+      const lastUserMessage = chat.messages.findLast((msg) => msg.role === 'user');
+      const selectedKernel = lastUserMessage?.metadata?.kernel || build?.assets.mechanical?.language || 'replicad';
+      
+      // Get files context for multi-file support from build
+      const mechanicalAsset = build?.assets.mechanical;
+      const filesContext = mechanicalAsset ? {
+        currentFile: mechanicalAsset.main,
+        files: Object.fromEntries(
+          Object.entries(mechanicalAsset.files).map(([filename, file]) => [
+            filename,
+            {
+              content: filename === mechanicalAsset.main ? cadActorState.context.code : file.content,
+              language: selectedKernel,
+            },
+          ])
+        ),
+      } : {
+        currentFile: selectedKernel === 'replicad' ? 'main.ts' : 'main.scad',
+        files: {
+          [selectedKernel === 'replicad' ? 'main.ts' : 'main.scad']: {
+            content: cadActorState.context.code,
+            language: selectedKernel,
+          },
+        },
+      };
+      
       const feedback = {
         code: cadActorState.context.code,
         codeErrors: cadActorState.context.codeErrors,
         kernelError: cadActorState.context.kernelError,
+        kernel: selectedKernel,
+        files: filesContext,
       };
 
       return {

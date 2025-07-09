@@ -31,6 +31,8 @@ export const cookieName = {
   chatResizeViewer: 'chat-resize-viewer',
   // The last selected chat main size.
   chatResizeMain: 'chat-resize-main',
+  // The last selected chat tab.
+  chatTab: 'chat-tab',
 
   /* CAD */
   // The last selected kernel.

@@ -329,7 +329,7 @@ function createVariableHover(
 
   // Variable signature - prefer built-in signature if available
   if (builtInSymbol && builtInSymbol.type === 'constant') {
-    const signature = `(const) ${builtInSymbol.name}: ${variableInfo.type}`;
+    const signature = `(constant) ${builtInSymbol.name}: ${variableInfo.type}`;
     contents.push({
       value: `\`\`\`openscad\n${signature}\n\`\`\``,
     });
@@ -732,7 +732,7 @@ export function createHoverProvider(monaco: typeof Monaco): Monaco.languages.Hov
         }
 
         case 'constant': {
-          signature = `constant ${symbol.name}`;
+          signature = `(constant) ${symbol.name}`;
 
           break;
         }

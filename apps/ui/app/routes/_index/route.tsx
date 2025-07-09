@@ -26,7 +26,6 @@ export default function ChatStart(): JSX.Element {
       try {
         // Get the selected kernel from metadata, defaulting to replicad
         const selectedKernel = metadata?.kernel || 'replicad';
-        const fileExtension = selectedKernel === 'replicad' ? '.ts' : '.scad';
         const mainFileName = selectedKernel === 'replicad' ? 'main.ts' : 'main.scad';
         
         // Create the initial message as pending

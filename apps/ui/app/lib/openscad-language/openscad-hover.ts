@@ -1,9 +1,13 @@
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import type { IMarkdownString } from 'monaco-editor/esm/vs/editor/editor.api';
 import { openscadConstants, openscadFunctions, openscadSymbols } from '~/lib/openscad-language/openscad-symbols.js';
 import {
   findVariableDeclaration,
   findModuleDeclaration,
   findFunctionDeclaration,
+  findCurrentModuleFunctionScope,
+  findGroupName,
+  isPositionInComment,
 } from '~/lib/openscad-language/openscad-utils.js';
 import type { VariableInfo, ModuleInfo, FunctionInfo } from '~/lib/openscad-language/openscad-utils.js';
 
@@ -38,6 +42,257 @@ function inferParameterType(defaultValue: string | undefined): string {
   return 'any';
 }
 
+function createGroupHover(
+  monaco: typeof Monaco,
+  groupName: string,
+  position: Monaco.Position,
+  word: Monaco.editor.IWordAtPosition,
+): Monaco.languages.Hover {
+  return {
+    contents: [
+      {
+        value: `_@group_ — ${groupName}`,
+      },
+    ],
+    range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+  };
+}
+
+function createParameterUsageHover(
+  monaco: typeof Monaco,
+  parameterName: string,
+  scopeInfo: { type: 'module' | 'function'; info: ModuleInfo | FunctionInfo },
+  position: Monaco.Position,
+  word: Monaco.editor.IWordAtPosition,
+): Monaco.languages.Hover {
+  const contents = [];
+
+  // Find the specific parameter
+  const parameter = scopeInfo.info.parameters.find((parameter_) => {
+    const [name] = parameter_.includes('=') ? parameter_.split('=').map((p) => p.trim()) : [parameter_.trim()];
+    return name === parameterName;
+  });
+
+  if (parameter) {
+    const parameterInfo = formatParameters({ userDefined: [parameter] }, { singleParameter: parameterName });
+
+    if (parameterInfo.singleParameterSignature) {
+      contents.push({
+        value: `\`\`\`openscad\n${parameterInfo.singleParameterSignature}\n\`\`\``,
+      });
+    }
+
+    // Add context about where this parameter is from
+    contents.push({
+      value: `Parameter of ${scopeInfo.type} \`${scopeInfo.info.name}\``,
+    });
+
+    if (parameterInfo.singleParameterDetails) {
+      for (const detail of parameterInfo.singleParameterDetails) {
+        contents.push({
+          value: detail,
+        });
+      }
+    }
+  }
+
+  return {
+    contents,
+    range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+  };
+}
+
+// Built-in parameter type from symbols
+type BuiltInParameter = {
+  name: string;
+  type: string;
+  description?: string;
+  required: boolean;
+  defaultValue?: string | number | boolean;
+};
+
+// Union type for parameter sources
+type ParameterSource =
+  | {
+      builtIn: BuiltInParameter[];
+    }
+  | {
+      userDefined: string[];
+    };
+
+type ParameterFormatOptions = {
+  includeTitle?: boolean;
+  includeDescription?: boolean;
+  singleParameter?: string;
+};
+
+function formatSingleBuiltInParameter(
+  parameter: BuiltInParameter,
+  options: { includeDescription?: boolean } = {},
+): {
+  signature: string;
+  details: string[];
+} {
+  const { includeDescription = true } = options;
+  const optional = parameter.required ? '' : '?';
+  const signature = `(parameter) ${parameter.name}${optional}: ${parameter.type}`;
+
+  const details: string[] = [];
+  if (parameter.description && includeDescription) {
+    details.push(parameter.description);
+  }
+
+  if (parameter.defaultValue !== undefined) {
+    const defaultValueString =
+      typeof parameter.defaultValue === 'string' ? parameter.defaultValue : JSON.stringify(parameter.defaultValue);
+    details.push(`(default: ${defaultValueString})`);
+  }
+
+  return { signature, details };
+}
+
+function formatSingleUserDefinedParameter(parameterString: string): {
+  signature: string;
+  details: string[];
+} {
+  const [name, defaultValue] = parameterString.includes('=')
+    ? parameterString.split('=').map((part) => part.trim())
+    : [parameterString.trim(), undefined];
+
+  const type = inferParameterType(defaultValue);
+  const optional = defaultValue === undefined ? '' : '?';
+  const signature = `(parameter) ${name}${optional}: ${type}`;
+
+  const details: string[] = [];
+  if (defaultValue) {
+    details.push(`(default: ${defaultValue})`);
+  }
+
+  return { signature, details };
+}
+
+function formatParameterSignature(source: ParameterSource): string {
+  if ('builtIn' in source) {
+    return source.builtIn
+      .map((parameter) => {
+        const optional = parameter.required ? '' : '?';
+        return `${parameter.name}${optional}: ${parameter.type}`;
+      })
+      .join(', ');
+  }
+
+  return source.userDefined
+    .map((parameter) => {
+      const [name, defaultValue] = parameter.includes('=')
+        ? parameter.split('=').map((p) => p.trim())
+        : [parameter.trim(), undefined];
+      const type = inferParameterType(defaultValue);
+      const optional = defaultValue === undefined ? '' : '?';
+      return `${name}${optional}: ${type}`;
+    })
+    .join(', ');
+}
+
+function formatParameterDetailedList(
+  source: ParameterSource,
+  options: { includeDescription?: boolean } = {},
+): string | undefined {
+  const { includeDescription = true } = options;
+
+  if ('builtIn' in source) {
+    if (source.builtIn.length === 0) return undefined;
+
+    return source.builtIn
+      .map((parameter) => {
+        const required = parameter.required ? '**required**' : 'optional';
+        const defaultValue = parameter.defaultValue ? ` (default: ${parameter.defaultValue})` : '';
+        const description = parameter.description && includeDescription ? ` — ${parameter.description}` : '';
+        return `\n\`${parameter.name}\`: _${parameter.type}_${description} _(${required})_${defaultValue}`;
+      })
+      .join('\n');
+  }
+
+  if (source.userDefined.length === 0) return undefined;
+
+  return source.userDefined
+    .map((parameter) => {
+      const [name, defaultValue] = parameter.includes('=')
+        ? parameter.split('=').map((p) => p.trim())
+        : [parameter.trim(), undefined];
+      const type = inferParameterType(defaultValue);
+      const required = defaultValue === undefined ? '**required**' : 'optional';
+      const defaultValueText = defaultValue ? ` (default: ${defaultValue})` : '';
+      return `\n\`${name}\`: ${type} _(${required})_${defaultValueText}`;
+    })
+    .join('\n');
+}
+
+function formatSingleParameter(
+  source: ParameterSource,
+  parameterName: string,
+  options: { includeDescription?: boolean } = {},
+): {
+  signature?: string;
+  details?: string[];
+} {
+  if ('builtIn' in source) {
+    const parameter = source.builtIn.find((p) => p.name === parameterName);
+    if (!parameter) return {};
+
+    const result = formatSingleBuiltInParameter(parameter, options);
+    return {
+      signature: result.signature,
+      details: result.details,
+    };
+  }
+
+  const parameter = source.userDefined.find((p) => {
+    const [name] = p.includes('=') ? p.split('=').map((part) => part.trim()) : [p.trim()];
+    return name === parameterName;
+  });
+
+  if (!parameter) return {};
+
+  const result = formatSingleUserDefinedParameter(parameter);
+  return {
+    signature: result.signature,
+    details: result.details,
+  };
+}
+
+function formatParameters(
+  source: ParameterSource,
+  options: ParameterFormatOptions = {},
+): {
+  signature: string;
+  detailedList?: string;
+  singleParameterSignature?: string;
+  singleParameterDetails?: string[];
+} {
+  const { includeTitle = false, includeDescription = true, singleParameter } = options;
+
+  // Handle single parameter formatting
+  if (singleParameter) {
+    const result = formatSingleParameter(source, singleParameter, { includeDescription });
+    return {
+      signature: '',
+      singleParameterSignature: result.signature,
+      singleParameterDetails: result.details,
+    };
+  }
+
+  // Handle multiple parameter formatting
+  const signature = formatParameterSignature(source);
+  const detailedList = formatParameterDetailedList(source, { includeDescription });
+
+  const finalDetailedList = detailedList && includeTitle ? `_@parameters_\n${detailedList}` : detailedList;
+
+  return {
+    signature,
+    detailedList: finalDetailedList,
+  };
+}
+
 function createVariableHover(
   monaco: typeof Monaco,
   variableInfo: VariableInfo,
@@ -46,23 +301,67 @@ function createVariableHover(
 ): Monaco.languages.Hover {
   const contents = [];
 
-  // Variable signature
-  const signature = `var ${variableInfo.name}: ${variableInfo.type}`;
-  contents.push({
-    value: `\`\`\`openscad\n${signature}\n\`\`\``,
-  });
+  // Check if this variable is also a built-in constant
+  const allSymbols = [...openscadSymbols, ...openscadFunctions, ...openscadConstants];
+  const builtInSymbol = allSymbols.find((sym) => sym.name === variableInfo.name);
 
-  // Description from comments
-  if (variableInfo.description) {
+  // Variable signature - prefer built-in signature if available
+  if (builtInSymbol && builtInSymbol.type === 'constant') {
+    const signature = `constant ${builtInSymbol.name}: ${variableInfo.type}`;
+    contents.push({
+      value: `\`\`\`openscad\n${signature}\n\`\`\``,
+    });
+  } else {
+    const signature = `var ${variableInfo.name}: ${variableInfo.type}`;
+    contents.push({
+      value: `\`\`\`openscad\n${signature}\n\`\`\``,
+    });
+  }
+
+  // Description - prefer built-in description if available
+  if (builtInSymbol?.description) {
+    contents.push({
+      value: builtInSymbol.description,
+    });
+  } else if (variableInfo.description) {
     contents.push({
       value: variableInfo.description,
     });
   }
 
-  // Show the assigned value
-  contents.push({
-    value: `**Value:** \`${variableInfo.value}\``,
-  });
+  // Show default value if this is a built-in constant with a default
+  if (builtInSymbol && 'defaultValue' in builtInSymbol && builtInSymbol.defaultValue !== undefined) {
+    contents.push({
+      value: `_@default_ — \`${builtInSymbol.defaultValue}\``,
+    });
+  } else {
+    // Otherwise, show the assigned value
+    contents.push({
+      value: `_@default_ — \`${variableInfo.value}\``,
+    });
+  }
+
+  // Show examples if this is a built-in constant
+  if (builtInSymbol?.examples && builtInSymbol.examples.length > 0) {
+    const examplesList = builtInSymbol.examples.map((example) => `\`\`\`openscad\n${example}\n\`\`\``).join('\n\n');
+    contents.push({
+      value: `_@examples_\n${examplesList}`,
+    });
+  }
+
+  // Show category if this is a built-in constant
+  if (builtInSymbol?.category) {
+    contents.push({
+      value: `_@category_ — ${builtInSymbol.category}`,
+    });
+  }
+
+  // Show group if available
+  if (variableInfo.group) {
+    contents.push({
+      value: `_@group_ — ${variableInfo.group}`,
+    });
+  }
 
   return {
     contents,
@@ -79,18 +378,8 @@ function createModuleHover(
   const contents = [];
 
   // Module signature with typed parameters
-  const parametersWithTypes = moduleInfo.parameters
-    .map((parameter) => {
-      const [name, defaultValue] = parameter.includes('=')
-        ? parameter.split('=').map((p) => p.trim())
-        : [parameter.trim(), undefined];
-      const type = inferParameterType(defaultValue);
-      const optional = defaultValue === undefined ? '' : '?';
-      return `${name}${optional}: ${type}`;
-    })
-    .join(', ');
-
-  const signature = `module ${moduleInfo.name}(${parametersWithTypes})`;
+  const parameterInfo = formatParameters({ userDefined: moduleInfo.parameters });
+  const signature = `module ${moduleInfo.name}(${parameterInfo.signature})`;
   contents.push({
     value: `\`\`\`openscad\n${signature}\n\`\`\``,
   });
@@ -103,21 +392,9 @@ function createModuleHover(
   }
 
   // Show parameters in detailed format if any
-  if (moduleInfo.parameters.length > 0) {
-    const parametersList = moduleInfo.parameters
-      .map((parameter) => {
-        const [name, defaultValue] = parameter.includes('=')
-          ? parameter.split('=').map((p) => p.trim())
-          : [parameter.trim(), undefined];
-        const type = inferParameterType(defaultValue);
-        const required = defaultValue === undefined ? '**required**' : 'optional';
-        const defaultValue_ = defaultValue ? ` (default: ${defaultValue})` : '';
-        return `- \`${name}\`: ${type} _(${required})_${defaultValue_}`;
-      })
-      .join('\n');
-
+  if (moduleInfo.parameters.length > 0 && parameterInfo.detailedList) {
     contents.push({
-      value: `**Parameters:**\n${parametersList}`,
+      value: `_@parameters_\n${parameterInfo.detailedList}`,
     });
   }
 
@@ -135,9 +412,11 @@ function createFunctionHover(
 ): Monaco.languages.Hover {
   const contents = [];
 
-  // Function signature
+  // Function signature with typed parameters
+  const parameterInfo = formatParameters({ userDefined: functionInfo.parameters });
+  const signature = `function ${functionInfo.name}(${parameterInfo.signature})`;
   contents.push({
-    value: `\`\`\`openscad\n${functionInfo.signature}\n\`\`\``,
+    value: `\`\`\`openscad\n${signature}\n\`\`\``,
   });
 
   // Description from comments
@@ -147,10 +426,10 @@ function createFunctionHover(
     });
   }
 
-  // Show parameters if any
-  if (functionInfo.parameters.length > 0) {
+  // Show parameters in detailed format if any
+  if (functionInfo.parameters.length > 0 && parameterInfo.detailedList) {
     contents.push({
-      value: `**Parameters:** \`${functionInfo.parameters.join(', ')}\``,
+      value: `_@parameters_\n${parameterInfo.detailedList}`,
     });
   }
 
@@ -238,30 +517,22 @@ function createParameterHover(
     const symbol = allSymbols.find((sym) => sym.name === parameterContext.functionName);
 
     if (symbol && 'parameters' in symbol && symbol.parameters) {
-      const parameter = symbol.parameters.find((p) => p.name === parameterContext.parameterName);
-      if (parameter) {
-        // Show only the specific parameter signature
-        const required = parameter.required ? '' : '?';
+      const parameterInfo = formatParameters(
+        { builtIn: symbol.parameters },
+        { singleParameter: parameterContext.parameterName },
+      );
+
+      if (parameterInfo.singleParameterSignature) {
         contents.push({
-          value: `\`\`\`openscad\n(property) ${parameter.name}${required}: ${parameter.type}\n\`\`\``,
+          value: `\`\`\`openscad\n${parameterInfo.singleParameterSignature}\n\`\`\``,
         });
 
-        // Parameter description
-        if (parameter.description) {
-          contents.push({
-            value: parameter.description,
-          });
-        }
-
-        // Show default value if any
-        if ('defaultValue' in parameter && parameter.defaultValue) {
-          const defaultValueString =
-            typeof parameter.defaultValue === 'string'
-              ? parameter.defaultValue
-              : JSON.stringify(parameter.defaultValue);
-          contents.push({
-            value: `(default: ${defaultValueString})`,
-          });
+        if (parameterInfo.singleParameterDetails) {
+          for (const detail of parameterInfo.singleParameterDetails) {
+            contents.push({
+              value: detail,
+            });
+          }
         }
       }
     }
@@ -272,28 +543,22 @@ function createParameterHover(
 
     const userDefinedInfo = moduleInfo ?? functionInfo;
     if (userDefinedInfo) {
-      const parameter = userDefinedInfo.parameters.find((p) => {
-        const [name] = p.includes('=') ? p.split('=').map((p) => p.trim()) : [p.trim()];
-        return name === parameterContext.parameterName;
-      });
+      const parameterInfo = formatParameters(
+        { userDefined: userDefinedInfo.parameters },
+        { singleParameter: parameterContext.parameterName },
+      );
 
-      if (parameter) {
-        const [name, defaultValue] = parameter.includes('=')
-          ? parameter.split('=').map((p) => p.trim())
-          : [parameter.trim(), undefined];
-        const type = inferParameterType(defaultValue);
-        const optional = defaultValue === undefined ? '' : '?';
-
-        // Show only the specific parameter signature
+      if (parameterInfo.singleParameterSignature) {
         contents.push({
-          value: `\`\`\`openscad\n(property) ${name}${optional}: ${type}\n\`\`\``,
+          value: `\`\`\`openscad\n${parameterInfo.singleParameterSignature}\n\`\`\``,
         });
 
-        // Show default value if any
-        if (defaultValue) {
-          contents.push({
-            value: `(default: ${defaultValue})`,
-          });
+        if (parameterInfo.singleParameterDetails) {
+          for (const detail of parameterInfo.singleParameterDetails) {
+            contents.push({
+              value: detail,
+            });
+          }
         }
       }
     }
@@ -320,12 +585,36 @@ export function createHoverProvider(monaco: typeof Monaco): Monaco.languages.Hov
 
       const wordText = word.word;
 
-      // First, check if we're hovering over a parameter in a function/module call
+      // First, check if we're hovering over a group name in a comment (this should work even in comments)
+      const groupName = findGroupName(model, position, word);
+      if (groupName) {
+        return createGroupHover(monaco, groupName, position, word);
+      }
+
+      // Don't show hover for other words inside comments
+      if (isPositionInComment(model, position)) {
+        return null;
+      }
+
+      // Check if we're hovering over a parameter in a function/module call
       const parameterContext = findParameterContext(model, position, word);
       if (parameterContext) {
         const parameterHover = createParameterHover(monaco, parameterContext, position, word, model);
         if (parameterHover) {
           return parameterHover;
+        }
+      }
+
+      // Check if we're hovering over a parameter usage within a module/function scope
+      const currentScope = findCurrentModuleFunctionScope(model, position);
+      if (currentScope) {
+        const parameterMatch = currentScope.info.parameters.find((parameter) => {
+          const [name] = parameter.includes('=') ? parameter.split('=').map((p) => p.trim()) : [parameter.trim()];
+          return name === wordText;
+        });
+
+        if (parameterMatch) {
+          return createParameterUsageHover(monaco, wordText, currentScope, position, word);
         }
       }
 
@@ -356,20 +645,17 @@ export function createHoverProvider(monaco: typeof Monaco): Monaco.languages.Hov
       }
 
       // Build hover content based on symbol type
-      const contents: Monaco.languages.MarkdownString[] = [];
+      const contents: IMarkdownString[] = [];
 
       // Build signature at the top
       let signature = '';
+      let parameterInfo: ReturnType<typeof formatParameters> | undefined;
+
       switch (symbol.type) {
         case 'module': {
           if ('parameters' in symbol && symbol.parameters && symbol.parameters.length > 0) {
-            const parametersWithTypes = symbol.parameters
-              .map((parameter) => {
-                const optional = parameter.required ? '' : '?';
-                return `${parameter.name}${optional}: ${parameter.type}`;
-              })
-              .join(', ');
-            signature = `module ${symbol.name}(${parametersWithTypes})`;
+            parameterInfo = formatParameters({ builtIn: symbol.parameters });
+            signature = `module ${symbol.name}(${parameterInfo.signature})`;
           } else {
             signature = `module ${symbol.name}()`;
           }
@@ -379,14 +665,9 @@ export function createHoverProvider(monaco: typeof Monaco): Monaco.languages.Hov
 
         case 'function': {
           if ('parameters' in symbol && symbol.parameters && symbol.parameters.length > 0) {
-            const parametersWithTypes = symbol.parameters
-              .map((parameter) => {
-                const optional = parameter.required ? '' : '?';
-                return `${parameter.name}${optional}: ${parameter.type}`;
-              })
-              .join(', ');
+            parameterInfo = formatParameters({ builtIn: symbol.parameters });
             const returnType = 'returnType' in symbol && symbol.returnType ? `: ${symbol.returnType}` : '';
-            signature = `function ${symbol.name}(${parametersWithTypes})${returnType}`;
+            signature = `function ${symbol.name}(${parameterInfo.signature})${returnType}`;
           } else {
             const returnType = 'returnType' in symbol && symbol.returnType ? `: ${symbol.returnType}` : '';
             signature = `function ${symbol.name}()${returnType}`;
@@ -418,24 +699,23 @@ export function createHoverProvider(monaco: typeof Monaco): Monaco.languages.Hov
       }
 
       // Parameters (for modules and functions)
-      if ('parameters' in symbol && symbol.parameters && symbol.parameters.length > 0) {
-        const parametersList = symbol.parameters
-          .map((parameter) => {
-            const required = parameter.required ? '**required**' : 'optional';
-            const defaultValue = parameter.defaultValue ? ` (default: ${parameter.defaultValue})` : '';
-            return `- \`${parameter.name}\`: ${parameter.type} - ${parameter.description} _(${required})_${defaultValue}`;
-          })
-          .join('\n');
-
+      if (parameterInfo?.detailedList) {
         contents.push({
-          value: `**Parameters:**\n${parametersList}`,
+          value: `_@parameters_\n${parameterInfo.detailedList}`,
+        });
+      }
+
+      // Default value (for constants)
+      if (symbol.type === 'constant' && 'defaultValue' in symbol && symbol.defaultValue !== undefined) {
+        contents.push({
+          value: `_@default_ — \`${symbol.defaultValue}\``,
         });
       }
 
       // Return type (for functions)
       if ('returnType' in symbol && symbol.returnType) {
         contents.push({
-          value: `**Returns:** ${symbol.returnType}`,
+          value: `_@returns_ — ${symbol.returnType}`,
         });
       }
 
@@ -443,21 +723,21 @@ export function createHoverProvider(monaco: typeof Monaco): Monaco.languages.Hov
       if (symbol.examples && symbol.examples.length > 0) {
         const examplesList = symbol.examples.map((example) => `\`\`\`openscad\n${example}\n\`\`\``).join('\n\n');
         contents.push({
-          value: `**Examples:**\n${examplesList}`,
+          value: `_@examples_\n${examplesList}`,
         });
       }
 
       // Additional documentation
       if ('documentation' in symbol && symbol.documentation) {
         contents.push({
-          value: `**Documentation:**\n${symbol.documentation}`,
+          value: `_@documentation_ —\n${symbol.documentation}`,
         });
       }
 
       // Category
       if (symbol.category) {
         contents.push({
-          value: `@category — ${symbol.category}`,
+          value: `_@category_ — ${symbol.category}`,
         });
       }
 

@@ -1,3 +1,4 @@
+/* eslint-disable max-params, max-depth  -- TODO: refactor */
 /**
  * An naive hover provider for OpenSCAD.
  *
@@ -736,7 +737,12 @@ export function createHoverProvider(monaco: typeof Monaco): Monaco.languages.Hov
 
           break;
         }
-        // No default
+
+        // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check
+        default: {
+          const neverSymbol: never = symbol;
+          throw new Error(`Unknown symbol type: ${String(neverSymbol)}`);
+        }
       }
 
       // Add signature as code block

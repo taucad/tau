@@ -1,171 +1,455 @@
-// Portions of this file are Copyright 2021 Google LLC, and licensed under GPL2+. See COPYING.
+/* eslint-disable max-params -- TODO: refactor */
+import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import {
+  documentationDescriptor,
+  requirementDescriptor,
+  signatureSymbolDescriptor,
+} from '~/lib/openscad-language/openscad-descriptions.js';
+import { openscadSymbols, openscadFunctions, openscadConstants } from '~/lib/openscad-language/openscad-symbols.js';
+import type {
+  OpenscadModuleSymbol,
+  OpenscadFunctionSymbol,
+  OpenscadConstantSymbol,
+} from '~/lib/openscad-language/openscad-symbols.js';
+import {
+  findCurrentModuleFunctionScope,
+  isPositionInComment,
+  findGroupName,
+  findUserDefinedItems,
+  inferParameterType,
+  findParameterCompletions,
+} from '~/lib/openscad-language/openscad-utils.js';
 
-import type * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import { parseOpenScad, stripComments } from '~/lib/openscad-language/openscad-pseudoparser.js';
-import { openscadBuiltins } from '~/lib/openscad-language/openscad-builtins.js';
-import { openscadLanguageKeywords } from '~/lib/openscad-language/openscad-language.js';
-import type { ParsedFunctionoidDef } from '~/lib/openscad-language/openscad-pseudoparser.js';
+function createDocumentationForSymbol(symbol: OpenscadModuleSymbol | OpenscadFunctionSymbol): string {
+  const parts: string[] = [];
 
-function makeFunctionoidSuggestion(name: string, mod: ParsedFunctionoidDef, monacoInstance: typeof monaco) {
-  const argSnippets: string[] = [];
-  const namedArgs: string[] = [];
-  let collectingPosArgs = true;
-  let i = 0;
-
-  for (const parameter of mod.params ?? []) {
-    if (collectingPosArgs) {
-      if (parameter.defaultValue === null) {
-        argSnippets.push(
-          `${parameter.name.replaceAll('$', String.raw`\$`)}=${'${' + ++i + ':' + parameter.name + '}'}`,
-        );
-        continue;
-      } else {
-        collectingPosArgs = false;
-      }
-    }
-
-    namedArgs.push(parameter.name);
+  // Description
+  if (symbol.description) {
+    parts.push(symbol.description);
   }
 
-  if (namedArgs.length > 0) {
-    argSnippets.push(`${'${' + ++i + ':' + namedArgs.join('|') + '=}'}`);
+  // Parameters
+  if ('parameters' in symbol && symbol.parameters && symbol.parameters.length > 0) {
+    const parameterList = symbol.parameters
+      .map((parameter) => {
+        const required = parameter.required ? requirementDescriptor.required : requirementDescriptor.optional;
+        const defaultValue =
+          'defaultValue' in parameter && parameter.defaultValue ? ` (default: ${parameter.defaultValue})` : '';
+        const description = parameter.description ? ` — ${parameter.description}` : '';
+        return `\n\`${parameter.name}\`: _${parameter.type}_ _(${required})_${defaultValue}${description}`;
+      })
+      .join('');
+    parts.push(`\n${documentationDescriptor.parameters}:${parameterList}`);
   }
 
-  let insertText = `${name.replaceAll('$', String.raw`\$`)}(${argSnippets.join(', ')})`;
-  if (mod.referencesChildren !== null) {
-    insertText += mod.referencesChildren ? ' ${' + ++i + ':children}' : ';';
+  // Return type (for functions)
+  if ('returnType' in symbol && symbol.returnType) {
+    parts.push(`\n${documentationDescriptor.returns}: ${symbol.returnType}`);
+  }
+
+  // Examples
+  if (symbol.examples && symbol.examples.length > 0) {
+    const examplesList = symbol.examples.map((example) => `\`\`\`openscad\n${example}\n\`\`\``).join('\n\n');
+    parts.push(`\n${documentationDescriptor.examples}:\n${examplesList}`);
+  }
+
+  // Additional documentation
+  if ('documentation' in symbol && symbol.documentation) {
+    parts.push(`\n${documentationDescriptor.documentation}:\n${symbol.documentation}`);
+  }
+
+  // Category
+  if (symbol.category) {
+    parts.push(`\n${documentationDescriptor.category}: ${symbol.category}`);
+  }
+
+  return parts.join('\n');
+}
+
+function createDocumentationForConstant(constant: OpenscadConstantSymbol): string {
+  const parts: string[] = [];
+
+  // Description
+  if (constant.description) {
+    parts.push(constant.description);
+  }
+
+  // Default value
+  if ('defaultValue' in constant && constant.defaultValue !== undefined) {
+    parts.push(`\n${documentationDescriptor.default}: \`${constant.defaultValue}\``);
+  }
+
+  // Examples
+  if (constant.examples && constant.examples.length > 0) {
+    const examplesList = constant.examples.map((example) => `\`\`\`openscad\n${example}\n\`\`\``).join('\n\n');
+    parts.push(`\n${documentationDescriptor.examples}:\n${examplesList}`);
+  }
+
+  // Additional documentation
+  if ('documentation' in constant && constant.documentation) {
+    parts.push(`\n${documentationDescriptor.documentation}:\n${constant.documentation}`);
+  }
+
+  // Category
+  if (constant.category) {
+    parts.push(`\n${documentationDescriptor.category}: ${constant.category}`);
+  }
+
+  return parts.join('\n');
+}
+
+function createInsertTextForSymbol(symbol: OpenscadModuleSymbol): string {
+  if ('parameters' in symbol && symbol.parameters && symbol.parameters.length > 0) {
+    // Create snippet with parameter placeholders - modules/functions with parameters get semicolon
+    const parameterSnippets = symbol.parameters
+      .map((parameter, index) => {
+        const placeholder = index + 1;
+        const defaultValue = 'defaultValue' in parameter ? (parameter.defaultValue ?? '') : '';
+        return `${parameter.name}=\${${placeholder}:${defaultValue}}`;
+      })
+      .join(', ');
+    return `${symbol.name}(${parameterSnippets});`;
+  }
+
+  // Modules without parameters are container modules that need curly braces
+  return `${symbol.name}() {\n\t\${1}\n}`;
+}
+
+function createInsertTextForFunction(func: OpenscadFunctionSymbol): string {
+  if ('parameters' in func && func.parameters && func.parameters.length > 0) {
+    // Create snippet with parameter placeholders - functions with parameters get semicolon
+    const parameterSnippets = func.parameters
+      .map((parameter, index) => {
+        const placeholder = index + 1;
+        return `\${${placeholder}:${parameter.name}}`;
+      })
+      .join(', ');
+    return `${func.name}(${parameterSnippets});`;
+  }
+
+  return `${func.name}();`;
+}
+
+function createUserDefinedModuleCompletion(
+  monaco: typeof Monaco,
+  name: string,
+  parameters: string[],
+  description: string | undefined,
+  position: Monaco.Position,
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- this is the Monaco API type
+  word: Monaco.editor.IWordAtPosition | null,
+): Monaco.languages.CompletionItem {
+  // Create snippet with parameter placeholders
+  let insertText = name;
+  if (parameters.length > 0) {
+    const parameterSnippets = parameters
+      .map((parameter, index) => {
+        const placeholder = index + 1;
+        const [parameterName, defaultValue] = parameter.includes('=')
+          ? parameter.split('=').map((p) => p.trim())
+          : [parameter.trim(), undefined];
+
+        if (defaultValue) {
+          return `${parameterName}=\${${placeholder}:${defaultValue}}`;
+        }
+
+        return `${parameterName}=\${${placeholder}}`;
+      })
+      .join(', ');
+    insertText = `${name}(${parameterSnippets});`;
+  } else {
+    insertText = `${name}() {\n\t\${${parameters.length + 1}}\n}`;
   }
 
   return {
-    label: mod.signature,
-    kind: monacoInstance.languages.CompletionItemKind.Function,
+    label: name,
+    kind: monaco.languages.CompletionItemKind.Module,
+    documentation: description ? { value: description } : undefined,
+    detail: `${signatureSymbolDescriptor.module} ${name}`,
     insertText,
-    insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+    insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+    range: {
+      startLineNumber: position.lineNumber,
+      endLineNumber: position.lineNumber,
+      startColumn: word?.startColumn ?? position.column,
+      endColumn: word?.endColumn ?? position.column,
+    },
   };
 }
 
-function createBuiltinCompletions(monacoInstance: typeof monaco) {
-  return [
-    ...[true, false].map((v) => ({
-      label: `${v}`,
-      kind: monacoInstance.languages.CompletionItemKind.Value,
-      insertText: `${v}`,
-      insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-    })),
-    ...openscadLanguageKeywords.map((v: string) => ({
-      label: v,
-      kind: monacoInstance.languages.CompletionItemKind.Function,
-      insertText: v,
-      insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-    })),
-  ];
-}
-
-const keywordSnippets = [
-  // eslint-disable-next-line no-template-curly-in-string -- This is a valid template
-  'for(${1:variable}=[${2:start}:${3:end}) ${4:body}',
-  // eslint-disable-next-line no-template-curly-in-string -- This is a valid template
-  'for(${1:variable}=[${2:start}:${3:increment}:${4:end}) ${5:body}',
-  // eslint-disable-next-line no-template-curly-in-string -- This is a valid template
-  'if (${1:condition}) {\n\t$0\n} else {\n\t\n}',
-];
-
-function cleanupVariables(snippet: string) {
-  return snippet
-    .replaceAll(/\${\d+:([$\w]+)}/g, '$1')
-    .replaceAll(/\$\d+/g, '')
-    .replaceAll(/\s+/g, ' ')
-    .trim();
-}
-
-function mapObject<T, U>(
-  object: Record<string, T>,
-  mapper: (name: string, value: T) => U,
-  filter?: (name: string) => boolean,
-): U[] {
-  const results: U[] = [];
-  for (const [name, value] of Object.entries(object)) {
-    if (!filter || filter(name)) {
-      results.push(mapper(name, value));
-    }
+function createUserDefinedFunctionCompletion(
+  monaco: typeof Monaco,
+  name: string,
+  parameters: string[],
+  description: string | undefined,
+  position: Monaco.Position,
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- this is the Monaco API type
+  word: Monaco.editor.IWordAtPosition | null,
+): Monaco.languages.CompletionItem {
+  // Create snippet with parameter placeholders
+  let insertText = name;
+  if (parameters.length > 0) {
+    const parameterSnippets = parameters
+      .map((parameter, index) => {
+        const placeholder = index + 1;
+        const [parameterName] = parameter.includes('=')
+          ? parameter.split('=').map((p) => p.trim())
+          : [parameter.trim()];
+        return `\${${placeholder}:${parameterName}}`;
+      })
+      .join(', ');
+    insertText = `${name}(${parameterSnippets});`;
+  } else {
+    insertText = `${name}();`;
   }
 
-  return results;
+  return {
+    label: name,
+    kind: monaco.languages.CompletionItemKind.Function,
+    documentation: description ? { value: description } : undefined,
+    detail: `${signatureSymbolDescriptor.function} ${name}`,
+    insertText,
+    insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+    range: {
+      startLineNumber: position.lineNumber,
+      endLineNumber: position.lineNumber,
+      startColumn: word?.startColumn ?? position.column,
+      endColumn: word?.endColumn ?? position.column,
+    },
+  };
 }
 
-// Parse built-in functions once
-const builtinsDefs = parseOpenScad('<builtins>', openscadBuiltins, false);
+function createUserDefinedVariableCompletion(
+  monaco: typeof Monaco,
+  name: string,
+  value: string,
+  type: string | undefined,
+  description: string | undefined,
+  position: Monaco.Position,
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- this is the Monaco API type
+  word: Monaco.editor.IWordAtPosition | null,
+): Monaco.languages.CompletionItem {
+  const documentationParts: string[] = [];
 
-export function buildOpenScadCompletionItemProvider(
-  monacoInstance: typeof monaco,
-): monaco.languages.CompletionItemProvider {
-  const builtinCompletions = createBuiltinCompletions(monacoInstance);
+  // Add description first if available
+  if (description) {
+    documentationParts.push(description);
+  }
+
+  // Add default value using the same pattern as hover provider
+  documentationParts.push(`${documentationDescriptor.default} — \`${value}\``);
 
   return {
-    triggerCharacters: [],
-    provideCompletionItems(model, position, context, token) {
-      try {
-        const { word } = model.getWordUntilPosition(position);
-        const offset = model.getOffsetAt(position);
-        const text = model.getValue();
-        const previous = text.slice(0, Math.max(0, offset));
+    label: name,
+    kind: monaco.languages.CompletionItemKind.Variable,
+    documentation: { value: documentationParts.join('\n\n') },
+    detail: `${signatureSymbolDescriptor.variable} ${name}: ${type ?? 'any'}`,
+    insertText: name,
+    range: {
+      startLineNumber: position.lineNumber,
+      endLineNumber: position.lineNumber,
+      startColumn: word?.startColumn ?? position.column,
+      endColumn: word?.endColumn ?? position.column,
+    },
+  };
+}
 
-        // Parse the current document to get user-defined functions, modules, and variables
-        const parsed = parseOpenScad('<current>', text, false);
+function createParameterCompletion(
+  monaco: typeof Monaco,
+  name: string,
+  defaultValue: string | undefined,
+  scopeType: 'module' | 'function',
+  position: Monaco.Position,
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- this is the Monaco API type
+  word: Monaco.editor.IWordAtPosition | null,
+): Monaco.languages.CompletionItem {
+  const inferredType = inferParameterType(defaultValue);
+  const defaultInfo = defaultValue ? ` = ${defaultValue}` : '';
+  const documentation = `Parameter of ${scopeType}${defaultInfo ? `\n\n**Default:** \`${defaultValue}\`\n**Type:** \`${inferredType}\`` : `\n\n**Type:** \`${inferredType}\``}`;
 
-        // Merge built-ins with current document definitions
-        const allFunctions = { ...builtinsDefs.functions, ...parsed.functions };
-        const allModules = { ...builtinsDefs.modules, ...parsed.modules };
-        const allVars = [...(builtinsDefs.vars ?? []), ...(parsed.vars ?? [])];
+  return {
+    label: {
+      label: name,
+      detail: `: ${inferredType}`,
+    },
+    kind: monaco.languages.CompletionItemKind.Property,
+    documentation: { value: documentation },
+    detail: `${signatureSymbolDescriptor.parameter} ${name}: ${inferredType}`,
+    insertText: name,
+    range: {
+      startLineNumber: position.lineNumber,
+      endLineNumber: position.lineNumber,
+      startColumn: word?.startColumn ?? position.column,
+      endColumn: word?.endColumn ?? position.column,
+    },
+  };
+}
 
-        const previousWithoutComments = stripComments(previous);
-        const statementMatch = /(^|.*?[{});]|>\s*\n)\s*([$\w]*)$/m.exec(previousWithoutComments);
+export function createCompletionItemProvider(monaco: typeof Monaco): Monaco.languages.CompletionItemProvider {
+  return {
+    // eslint-disable-next-line complexity -- TODO: refactor
+    provideCompletionItems(model, position) {
+      const completions: Monaco.languages.CompletionItem[] = [];
 
-        if (statementMatch) {
-          const start = statementMatch[1];
-          const suggestions = [
-            ...builtinCompletions,
-            ...mapObject(
-              allModules ?? {},
-              (name, mod) => makeFunctionoidSuggestion(name, mod, monacoInstance),
-              (name) => name.includes(word),
-            ),
-            ...allVars
-              .filter((name) => name.includes(word))
-              .map((name) => ({
-                label: name,
-                kind: monacoInstance.languages.CompletionItemKind.Variable,
-                insertText: name.replaceAll('$', String.raw`\$`),
-                insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              })),
-            ...keywordSnippets.map((snippet) => ({
-              label: cleanupVariables(snippet).replaceAll(' body', ''),
-              kind: monacoInstance.languages.CompletionItemKind.Keyword,
-              insertText: snippet,
-              insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-            })),
-          ];
+      // Get word at position to understand context
+      const word = model.getWordAtPosition(position);
 
-          suggestions.sort((a, b) => a.insertText.indexOf(start) - b.insertText.indexOf(start));
-          const result: monaco.languages.CompletionList = { suggestions };
-          return result;
-        }
+      // Check if we're hovering over a group name in a comment
+      const groupName = findGroupName(
+        model,
+        position,
+        word ?? { word: '', startColumn: position.column, endColumn: position.column },
+      );
 
-        // Function completions
-        const functionSuggestions = mapObject(
-          allFunctions ?? {},
-          (name, mod) => makeFunctionoidSuggestion(name, mod, monacoInstance),
-          (name) => name.includes(word),
-        ) as monaco.languages.CompletionItem[];
-
-        functionSuggestions.sort((a, b) => a.insertText.indexOf(word) - b.insertText.indexOf(word));
-        const result: monaco.languages.CompletionList = { suggestions: functionSuggestions };
-        return result;
-      } catch (error) {
-        console.error('OpenSCAD completion error:', error);
-        const result: monaco.languages.CompletionList = { suggestions: [] };
-        return result;
+      // Skip completions if we're in a comment (unless it's a group comment)
+      if (!groupName && isPositionInComment(model, position)) {
+        return { suggestions: [] };
       }
+
+      // If we're in a group comment, no completions needed
+      if (groupName) {
+        return { suggestions: [] };
+      }
+
+      // Check if we're inside function/module parameters
+      const parameterNames = findParameterCompletions(model, position);
+      if (parameterNames.length > 0) {
+        for (const parameterName of parameterNames) {
+          completions.push({
+            label: parameterName,
+            kind: monaco.languages.CompletionItemKind.Property,
+            detail: `${signatureSymbolDescriptor.parameter} ${parameterName}`,
+            insertText: `${parameterName}=`,
+            range: {
+              startLineNumber: position.lineNumber,
+              endLineNumber: position.lineNumber,
+              startColumn: word?.startColumn ?? position.column,
+              endColumn: word?.endColumn ?? position.column,
+            },
+          });
+        }
+      }
+
+      // Add built-in modules
+      for (const symbol of openscadSymbols) {
+        completions.push({
+          label: symbol.name,
+          kind: monaco.languages.CompletionItemKind.Module,
+          documentation: {
+            value: createDocumentationForSymbol(symbol),
+          },
+          detail: `${signatureSymbolDescriptor.module} ${symbol.name}`,
+          insertText: createInsertTextForSymbol(symbol),
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          range: {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: word?.startColumn ?? position.column,
+            endColumn: word?.endColumn ?? position.column,
+          },
+        });
+      }
+
+      // Add built-in functions
+      for (const func of openscadFunctions) {
+        completions.push({
+          label: func.name,
+          kind: monaco.languages.CompletionItemKind.Function,
+          documentation: {
+            value: createDocumentationForSymbol(func),
+          },
+          detail: `${signatureSymbolDescriptor.function} ${func.name}`,
+          insertText: createInsertTextForFunction(func),
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          range: {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: word?.startColumn ?? position.column,
+            endColumn: word?.endColumn ?? position.column,
+          },
+        });
+      }
+
+      // Add built-in constants
+      for (const constant of openscadConstants) {
+        completions.push({
+          label: constant.name,
+          kind: monaco.languages.CompletionItemKind.Constant,
+          documentation: {
+            value: createDocumentationForConstant(constant),
+          },
+          detail: `${signatureSymbolDescriptor.constant} ${constant.name}`,
+          insertText: constant.name,
+          range: {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: word?.startColumn ?? position.column,
+            endColumn: word?.endColumn ?? position.column,
+          },
+        });
+      }
+
+      // Check if we're inside a module/function scope to handle parameters
+      const currentScope = findCurrentModuleFunctionScope(model, position);
+
+      // Add user-defined items
+      const userDefined = findUserDefinedItems(model);
+
+      // Filter out current scope parameters from user variables if we're inside a scope
+      let filteredVariables = userDefined.variables;
+      if (currentScope) {
+        const parameterNames = new Set(
+          currentScope.info.parameters.map((parameter) => {
+            const [name] = parameter.includes('=') ? parameter.split('=').map((p) => p.trim()) : [parameter.trim()];
+            return name;
+          }),
+        );
+
+        // Filter out parameters from variables list
+        filteredVariables = userDefined.variables.filter((variable) => !parameterNames.has(variable.name));
+
+        // Add parameter completions for current scope
+        for (const parameter of currentScope.info.parameters) {
+          const [name, defaultValue] = parameter.includes('=')
+            ? parameter.split('=').map((p) => p.trim())
+            : [parameter.trim(), undefined];
+
+          completions.push(createParameterCompletion(monaco, name, defaultValue, currentScope.type, position, word));
+        }
+      }
+
+      // Add user-defined variables (excluding current scope parameters)
+      for (const variable of filteredVariables) {
+        completions.push(
+          createUserDefinedVariableCompletion(
+            monaco,
+            variable.name,
+            variable.value,
+            variable.type,
+            variable.description,
+            position,
+            word,
+          ),
+        );
+      }
+
+      // Add user-defined modules
+      for (const module of userDefined.modules) {
+        completions.push(
+          createUserDefinedModuleCompletion(monaco, module.name, module.parameters, module.description, position, word),
+        );
+      }
+
+      // Add user-defined functions
+      for (const func of userDefined.functions) {
+        completions.push(
+          createUserDefinedFunctionCompletion(monaco, func.name, func.parameters, func.description, position, word),
+        );
+      }
+
+      return {
+        suggestions: completions,
+      };
     },
   };
 }

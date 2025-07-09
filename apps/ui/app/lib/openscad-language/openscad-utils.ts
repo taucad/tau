@@ -1,4 +1,6 @@
+/* eslint-disable max-depth -- TODO: refactor */
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import { openscadFunctions, openscadSymbols } from '~/lib/openscad-language/openscad-symbols.js';
 
 export type VariableInfo = {
   name: string;
@@ -88,6 +90,7 @@ export function findGroupName(
   return undefined;
 }
 
+// eslint-disable-next-line complexity -- this is a complex function that needs to be refactored
 export function isPositionInComment(model: Monaco.editor.ITextModel, position: Monaco.Position): boolean {
   const line = model.getLineContent(position.lineNumber);
   const column = position.column - 1; // Convert to 0-based
@@ -479,4 +482,346 @@ export function findModuleDeclaration(model: Monaco.editor.ITextModel, moduleNam
   }
 
   return undefined;
+}
+
+export function findUserDefinedItems(model: Monaco.editor.ITextModel): {
+  variables: Array<{ name: string; value: string; type?: string; description?: string }>;
+  modules: Array<{ name: string; parameters: string[]; description?: string }>;
+  functions: Array<{ name: string; parameters: string[]; description?: string }>;
+} {
+  const lines = model.getLinesContent();
+  const variables: Array<{ name: string; value: string; type?: string; description?: string }> = [];
+  const modules: Array<{ name: string; parameters: string[]; description?: string }> = [];
+  const functions: Array<{ name: string; parameters: string[]; description?: string }> = [];
+
+  // Patterns for different declarations
+  const variablePattern = /^\s*([a-zA-Z_]\w*)\s*=\s*(.+)$/;
+  const modulePattern = /^\s*module\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)/;
+  const functionPattern = /^\s*function\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*=/;
+
+  for (const line of lines) {
+    // Check for variable declarations
+    const varMatch = variablePattern.exec(line);
+    if (varMatch) {
+      const name = varMatch[1];
+      const value = varMatch[2].trim();
+
+      // Don't duplicate if we already found this variable
+      if (!variables.some((v) => v.name === name)) {
+        const varInfo = findVariableDeclaration(model, name);
+        variables.push({
+          name,
+          value,
+          type: varInfo?.type,
+          description: varInfo?.description,
+        });
+      }
+    }
+
+    // Check for module declarations
+    const moduleMatch = modulePattern.exec(line);
+    if (moduleMatch) {
+      const name = moduleMatch[1];
+
+      if (!modules.some((m) => m.name === name)) {
+        const moduleInfo = findModuleDeclaration(model, name);
+        if (moduleInfo) {
+          modules.push({
+            name,
+            parameters: moduleInfo.parameters,
+            description: moduleInfo.description,
+          });
+        }
+      }
+    }
+
+    // Check for function declarations
+    const functionMatch = functionPattern.exec(line);
+    if (functionMatch) {
+      const name = functionMatch[1];
+
+      if (!functions.some((f) => f.name === name)) {
+        const functionInfo = findFunctionDeclaration(model, name);
+        if (functionInfo) {
+          functions.push({
+            name,
+            parameters: functionInfo.parameters,
+            description: functionInfo.description,
+          });
+        }
+      }
+    }
+  }
+
+  return { variables, modules, functions };
+}
+
+export function inferParameterType(
+  defaultValue: string | undefined,
+): 'number' | 'boolean' | 'string' | 'array' | 'any' {
+  if (!defaultValue) {
+    return 'any';
+  }
+
+  const trimmed = defaultValue.trim();
+
+  // Check for numbers
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+    return 'number';
+  }
+
+  // Check for booleans
+  if (trimmed === 'true' || trimmed === 'false') {
+    return 'boolean';
+  }
+
+  // Check for strings
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return 'string';
+  }
+
+  // Check for arrays
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    return 'array';
+  }
+
+  // Default to any for complex expressions
+  return 'any';
+}
+
+export function findFunctionCall(
+  model: Monaco.editor.ITextModel,
+  position: Monaco.Position,
+):
+  | { functionName: string; parameterIndex: number; startPosition: Pick<Monaco.Position, 'lineNumber' | 'column'> }
+  | undefined {
+  const lines = model.getLinesContent();
+  const currentLineIndex = position.lineNumber - 1;
+  let searchPos = position.column - 1; // Start from current position
+  let parenDepth = 0;
+  let functionName = '';
+
+  // Search backwards to find the opening parenthesis and function name
+  let currentLine = currentLineIndex;
+  while (currentLine >= 0) {
+    const line = lines[currentLine];
+    const startPos = currentLine === currentLineIndex ? searchPos : line.length;
+
+    for (let i = startPos - 1; i >= 0; i--) {
+      const char = line[i];
+
+      if (char === ')') {
+        parenDepth++;
+      } else if (char === '(') {
+        if (parenDepth === 0) {
+          // Found the opening parenthesis, now find the function name
+          let nameEnd = i - 1;
+          let nameLineIndex = currentLine;
+
+          // Skip whitespace
+          while (nameLineIndex >= 0) {
+            const nameLine = lines[nameLineIndex];
+            const searchStart = nameLineIndex === currentLine ? nameEnd : nameLine.length - 1;
+
+            let found = false;
+            for (let j = searchStart; j >= 0; j--) {
+              if (!/\s/.test(nameLine[j])) {
+                nameEnd = j;
+                found = true;
+                break;
+              }
+            }
+
+            if (found) break;
+            nameLineIndex--;
+            nameEnd = nameLineIndex >= 0 ? lines[nameLineIndex].length - 1 : -1;
+          }
+
+          if (nameLineIndex < 0) break;
+
+          // Extract function name
+          const nameLine = lines[nameLineIndex];
+          let nameStart = nameEnd;
+          while (nameStart >= 0 && /\w/.test(nameLine[nameStart])) {
+            nameStart--;
+          }
+
+          if (nameStart < nameEnd) {
+            functionName = nameLine.slice(nameStart + 1, nameEnd + 1);
+
+            // Count parameters by counting commas between opening paren and cursor
+            // Start from the opening parenthesis and count forward to current position
+            const parameterIndex = countParametersFromParenToCursor(
+              model,
+              { lineNumber: currentLine + 1, column: i + 1 },
+              position,
+            );
+
+            return {
+              functionName,
+              parameterIndex,
+              startPosition: { lineNumber: currentLine + 1, column: i + 1 },
+            };
+          }
+        } else {
+          parenDepth--;
+        }
+      }
+    }
+
+    if (functionName) break;
+    currentLine--;
+    searchPos = currentLine >= 0 ? lines[currentLine].length : 0;
+  }
+
+  return undefined;
+}
+
+function countParametersFromParenToCursor(
+  model: Monaco.editor.ITextModel,
+  openParenPosition: Pick<Monaco.Position, 'lineNumber' | 'column'>,
+  cursorPosition: Pick<Monaco.Position, 'lineNumber' | 'column'>,
+): number {
+  const text = model.getValueInRange({
+    startLineNumber: openParenPosition.lineNumber,
+    startColumn: openParenPosition.column + 1, // Skip the opening paren
+    endLineNumber: cursorPosition.lineNumber,
+    endColumn: cursorPosition.column,
+  });
+
+  let parameterIndex = 0;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let inString = false;
+  let stringChar = '';
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const previousChar = i > 0 ? text[i - 1] : '';
+
+    // Handle string literals
+    if (!inString && (char === '"' || char === "'")) {
+      inString = true;
+      stringChar = char;
+    } else if (inString && char === stringChar && previousChar !== '\\') {
+      inString = false;
+      stringChar = '';
+    } else if (inString) {
+      continue; // Skip everything inside strings
+    }
+    // Handle brackets and parentheses depth
+    else if (char === '(' || char === '[') {
+      if (char === '(') parenDepth++;
+      else bracketDepth++;
+    } else if (char === ')' || char === ']') {
+      if (char === ')') parenDepth--;
+      else bracketDepth--;
+    }
+    // Count commas only at depth 0 (not inside nested structures)
+    else if (char === ',' && parenDepth === 0 && bracketDepth === 0) {
+      parameterIndex++;
+    }
+  }
+
+  return parameterIndex;
+}
+
+// eslint-disable-next-line complexity -- TODO: refactor
+export function findParameterCompletions(model: Monaco.editor.ITextModel, position: Monaco.Position): string[] {
+  const lines = model.getLinesContent();
+  const currentLineIndex = position.lineNumber - 1;
+  let searchPos = position.column - 2; // Start before current position
+  let parenDepth = 0;
+  let functionName = '';
+
+  // Search backwards to find the opening parenthesis and function name
+  let currentLine = currentLineIndex;
+  while (currentLine >= 0) {
+    const line = lines[currentLine];
+    const startPos = currentLine === currentLineIndex ? searchPos : line.length - 1;
+
+    for (let i = startPos; i >= 0; i--) {
+      const char = line[i];
+
+      if (char === ')') {
+        parenDepth++;
+      } else if (char === '(') {
+        if (parenDepth === 0) {
+          // Found the opening parenthesis, extract function name
+          let nameEnd = i - 1;
+          let nameLineIndex = currentLine;
+
+          // Skip whitespace
+          while (nameLineIndex >= 0) {
+            const nameLine = lines[nameLineIndex];
+            const searchStart = nameLineIndex === currentLine ? nameEnd : nameLine.length - 1;
+
+            let found = false;
+            for (let j = searchStart; j >= 0; j--) {
+              if (!/\s/.test(nameLine[j])) {
+                nameEnd = j;
+                found = true;
+                break;
+              }
+            }
+
+            if (found) break;
+            nameLineIndex--;
+            nameEnd = nameLineIndex >= 0 ? lines[nameLineIndex].length - 1 : -1;
+          }
+
+          if (nameLineIndex < 0) break;
+
+          // Extract function name
+          const nameLine = lines[nameLineIndex];
+          let nameStart = nameEnd;
+          while (nameStart >= 0 && /\w/.test(nameLine[nameStart])) {
+            nameStart--;
+          }
+
+          if (nameStart < nameEnd) {
+            functionName = nameLine.slice(nameStart + 1, nameEnd + 1);
+            break;
+          }
+        } else {
+          parenDepth--;
+        }
+      }
+    }
+
+    if (functionName) break;
+    currentLine--;
+    searchPos = currentLine >= 0 ? lines[currentLine].length - 1 : -1;
+  }
+
+  if (!functionName) {
+    return [];
+  }
+
+  // Find parameters for this function/module
+  const allBuiltIns = [...openscadSymbols, ...openscadFunctions];
+  const builtIn = allBuiltIns.find((symbol) => symbol.name === functionName);
+
+  if (builtIn && 'parameters' in builtIn && builtIn.parameters) {
+    return builtIn.parameters.map((parameter) => parameter.name);
+  }
+
+  // Check user-defined modules/functions
+  const moduleInfo = findModuleDeclaration(model, functionName);
+  if (moduleInfo) {
+    return moduleInfo.parameters.map((parameter) => {
+      const [name] = parameter.includes('=') ? parameter.split('=').map((p) => p.trim()) : [parameter.trim()];
+      return name;
+    });
+  }
+
+  const functionInfo = findFunctionDeclaration(model, functionName);
+  if (functionInfo) {
+    return functionInfo.parameters.map((parameter) => {
+      const [name] = parameter.includes('=') ? parameter.split('=').map((p) => p.trim()) : [parameter.trim()];
+      return name;
+    });
+  }
+
+  return [];
 }

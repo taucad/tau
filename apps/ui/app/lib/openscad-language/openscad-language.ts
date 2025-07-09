@@ -1,4 +1,4 @@
-import type * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
 
 const languageKeywords = [
   'module',
@@ -106,9 +106,7 @@ export const openscadLanguageKeywords = [
   ...languageKeywords,
 ];
 
-export function createOpenscadLanguageConfiguration(
-  monacoInstance: typeof monaco,
-): monaco.languages.LanguageConfiguration {
+export function createOpenscadLanguageConfiguration(monaco: typeof Monaco): Monaco.languages.LanguageConfiguration {
   return {
     colorizedBracketPairs: [
       ['{', '}'],
@@ -131,28 +129,28 @@ export function createOpenscadLanguageConfiguration(
         beforeText: /^\s*\/\*\*(?!\/)([^*]|\*(?!\/))*$/,
         afterText: /^\s*\*\/$/,
         action: {
-          indentAction: monacoInstance.languages.IndentAction.IndentOutdent,
+          indentAction: monaco.languages.IndentAction.IndentOutdent,
           appendText: ' * ',
         },
       },
       {
         beforeText: /^\s*\/\*\*(?!\/)([^*]|\*(?!\/))*$/,
         action: {
-          indentAction: monacoInstance.languages.IndentAction.None,
+          indentAction: monaco.languages.IndentAction.None,
           appendText: ' * ',
         },
       },
       {
         beforeText: /^(\t|( {2}))* \*( ([^*]|\*(?!\/))*)?$/,
         action: {
-          indentAction: monacoInstance.languages.IndentAction.None,
+          indentAction: monaco.languages.IndentAction.None,
           appendText: '* ',
         },
       },
       {
         beforeText: /^(\t|( {2}))* \*\/\s*$/,
         action: {
-          indentAction: monacoInstance.languages.IndentAction.None,
+          indentAction: monaco.languages.IndentAction.None,
           removeText: 1,
         },
       },

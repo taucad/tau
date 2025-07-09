@@ -1,3 +1,9 @@
+/**
+ * Extracted from the OpenSCAD User Manual
+ *
+ * @see https://en.wikibooks.org/wiki/OpenSCAD_User_Manual
+ */
+
 export const openscadSymbols = [
   // Basic 3D Primitives
   {
@@ -146,9 +152,7 @@ export const openscadSymbols = [
     type: 'module',
     category: 'Transformations',
     description: 'Moves objects in 3D space',
-    parameters: [
-      { name: 'v', type: '[number, number, number]', description: 'Translation vector [x, y, z]', required: true },
-    ],
+    parameters: [{ name: 'v', type: '[number, number, number]', description: 'Translation vector', required: true }],
     examples: ['translate([10, 0, 0]) cube(5);', 'translate([x, y, z]) sphere(r=2);'],
   },
   {
@@ -700,28 +704,39 @@ export const openscadConstants = [
     type: 'constant',
     category: 'Special Variables',
     description: 'Number of facets for curved surfaces',
+    defaultValue: 0,
     examples: ['$fn = 50;', 'sphere(r=5, $fn=100);'],
+    documentation:
+      'Usually has the default value of 0. When this variable has a value greater than zero, the other two variables are ignored, and a full circle is rendered using this number of fragments.',
   },
   {
     name: '$fa',
     type: 'constant',
     category: 'Special Variables',
     description: 'Minimum angle for facets',
+    defaultValue: 12,
     examples: ['$fa = 12;', '$fa = 6;'],
+    documentation:
+      'The minimum angle for a fragment. Even a huge circle does not have more fragments than 360 divided by this number. The default value is 12 (i.e. 30 fragments for a full circle).',
   },
   {
     name: '$fs',
     type: 'constant',
     category: 'Special Variables',
     description: 'Minimum facet size',
+    defaultValue: 2,
     examples: ['$fs = 2;', '$fs = 0.1;'],
+    documentation:
+      'The minimum size of a fragment. The default value is 2 so very small circles have a smaller number of fragments than specified using $fa.',
   },
   {
     name: '$t',
     type: 'constant',
     category: 'Special Variables',
     description: 'Animation time variable (0-1)',
+    defaultValue: 0,
     examples: ['rotate($t * 360) cube(10);', 'translate([$t * 50, 0, 0]) sphere(2);'],
+    documentation: 'Animation time variable that varies from 0 to 1 during animation cycles.',
   },
   {
     name: '$vpr',
@@ -729,6 +744,8 @@ export const openscadConstants = [
     category: 'Special Variables',
     description: 'Viewport rotation [x, y, z]',
     examples: ['$vpr', 'echo("Viewport rotation:", $vpr);'],
+    documentation:
+      'Contains the current viewport rotation as [x, y, z] angles in degrees. Value depends on current view.',
   },
   {
     name: '$vpt',
@@ -736,6 +753,8 @@ export const openscadConstants = [
     category: 'Special Variables',
     description: 'Viewport translation [x, y, z]',
     examples: ['$vpt', 'echo("Viewport center:", $vpt);'],
+    documentation:
+      'Contains the current viewport center point as [x, y, z] coordinates. Value depends on current view.',
   },
   {
     name: '$vpd',
@@ -743,6 +762,7 @@ export const openscadConstants = [
     category: 'Special Variables',
     description: 'Viewport distance',
     examples: ['$vpd', 'echo("Viewport distance:", $vpd);'],
+    documentation: 'Contains the current viewport camera distance. Value depends on current view zoom level.',
   },
   {
     name: '$vpf',
@@ -750,6 +770,7 @@ export const openscadConstants = [
     category: 'Special Variables',
     description: 'Viewport field of view',
     examples: ['$vpf', 'echo("Viewport FOV:", $vpf);'],
+    documentation: 'Contains the current viewport field of view angle. Requires OpenSCAD version 2021.01 or later.',
   },
   {
     name: '$children',
@@ -757,13 +778,17 @@ export const openscadConstants = [
     category: 'Special Variables',
     description: 'Number of child modules',
     examples: ['echo("Children count:", $children);', 'for (i = [0 : $children-1]) children(i);'],
+    documentation:
+      'Contains the number of child objects in the current module context. Value depends on usage context.',
   },
   {
     name: '$preview',
     type: 'constant',
     category: 'Special Variables',
     description: 'True when in preview mode',
+    defaultValue: true,
     examples: ['if ($preview) color("red") cube(10);', 'echo("Preview mode:", $preview);'],
+    documentation: 'Boolean variable that is true when rendering in preview mode, false when rendering (F6).',
   },
   {
     name: '$OPENSCAD_VERSION',
@@ -772,28 +797,15 @@ export const openscadConstants = [
     description: 'OpenSCAD version information',
     examples: ['echo("Version:", $OPENSCAD_VERSION);'],
   },
-  // Boolean Constants
-  {
-    name: 'true',
-    type: 'constant',
-    category: 'Boolean Constants',
-    description: 'Boolean true value',
-    examples: ['cube(10, center=true);', 'if (condition == true) cube(5);'],
-  },
-  {
-    name: 'false',
-    type: 'constant',
-    category: 'Boolean Constants',
-    description: 'Boolean false value',
-    examples: ['cube(10, center=false);', 'if (condition == false) sphere(3);'],
-  },
   // Mathematical Constants
   {
     name: 'PI',
     type: 'constant',
     category: 'Mathematical Constants',
     description: 'Mathematical constant π (pi)',
+    defaultValue: '3.14159',
     examples: ['rotate([0, 0, PI * 45 / 180]) cube(10);', 'angle = 2 * PI / segments;'],
+    documentation: 'The mathematical constant π (pi), approximately 3.14159.',
   },
   {
     name: 'undef',

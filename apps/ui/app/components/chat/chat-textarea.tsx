@@ -21,6 +21,8 @@ import { useKeydown } from '~/hooks/use-keydown.js';
 import { ChatContextActions } from '~/components/chat/chat-context-actions.js';
 import { SvgIcon } from '~/components/icons/svg-icon.js';
 import type { KernelProvider } from '~/types/kernel.types.js';
+import { kernelProviders } from '~/types/kernel.types.js';
+import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
@@ -102,6 +104,20 @@ export const ChatTextarea = memo(function ({
   const { selectedModel } = useModels();
   const status = useChatSelector((state) => state.context.status);
   const { stop } = useChatActions();
+
+  // Memoize CAD kernel options for the combobox
+  const cadKernelOptions = useMemo(() => [
+    {
+      name: 'CAD Kernels',
+      items: kernelProviders.map(kernel => ({
+        id: kernel,
+        name: kernel === 'replicad' ? 'Replicad (TypeScript)' : 'OpenSCAD',
+        kernel,
+      }))
+    }
+  ], []);
+
+  const selectedKernelOption = cadKernelOptions[0].items.find(option => option.kernel === selectedCadKernel);
 
   const handleSubmit = async () => {
     // If there is no text or images, do not submit
@@ -581,24 +597,15 @@ export const ChatTextarea = memo(function ({
         {/* CAD Kernel selector */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              className="group rounded-full transition-transform duration-200 ease-in-out"
-              onMouseDown={(event) => {
-                // Prevent the button from being focused
-                event.stopPropagation();
-                event.preventDefault();
+            <ComboBoxResponsive
+              options={cadKernelOptions}
+              selectedItem={selectedKernelOption}
+              onSelect={(option) => {
+                setSelectedCadKernel(option.kernel);
               }}
-              onClick={() => {
-                setSelectedCadKernel((previous) => previous === 'replicad' ? 'openscad' : 'replicad');
-              }}
-            >
-              <span className="hidden text-xs @[22rem]:block">{selectedCadKernel === 'replicad' ? 'Replicad' : 'OpenSCAD'}</span>
-              <SvgIcon 
-                id={selectedCadKernel} 
-                className="transition-transform duration-200 ease-in-out group-hover:scale-110" 
-              />
-            </Button>
+              placeholder="Select CAD Kernel"
+              className="w-full"
+            />
           </TooltipTrigger>
           <TooltipContent>
             <p>CAD Kernel: {selectedCadKernel === 'replicad' ? 'Replicad (TypeScript)' : 'OpenSCAD'}</p>

@@ -1,3 +1,25 @@
+/**
+ * An naive hover provider for OpenSCAD.
+ *
+ * This is a simple hover provider that provides hover information for OpenSCAD code.
+ * This would be more robust by using an OpenSCAD LSP to provide hover information.
+ *
+ * Currently supports:
+ * - Built-in constants
+ * - Built-in functions
+ * - Built-in modules
+ * - User-defined variables
+ * - User-defined modules
+ * - User-defined functions
+ * - Group titles
+ *
+ * TODO:
+ * - Parse same-line variable comments describing constraints:
+ *   - Maximum 64 character string variable: `Address = "My Street, 123"; // 64
+ *   - Enums: `Type = "T"; // [T:Text, W:Wi-Fi,P:Phone Call,V:vCard]`
+ * - Find a way to describe types for user-defined module parameters & return types
+ */
+
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import type { IMarkdownString } from 'monaco-editor/esm/vs/editor/editor.api';
 import { openscadConstants, openscadFunctions, openscadSymbols } from '~/lib/openscad-language/openscad-symbols.js';

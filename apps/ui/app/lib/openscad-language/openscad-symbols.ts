@@ -4,7 +4,60 @@
  * @see https://en.wikibooks.org/wiki/OpenSCAD_User_Manual
  */
 
-export const openscadSymbols = [
+type Parameter = {
+  /** The name of the parameter, as it appears in the module/function call */
+  name: string;
+  /** The type of the parameter */
+  type: string;
+  /** The description of the parameter. Used for hover and signature help. */
+  description: string;
+  /** Whether the parameter is required */
+  required: boolean;
+  /** The default value of the parameter */
+  defaultValue?: string;
+};
+
+type OpenscadSymbol = {
+  /** The name of the symbol, as it appears in the code */
+  name: string;
+  /** The type of the symbol */
+  type: 'module' | 'function' | 'constant';
+  /** The category of the symbol */
+  category: string;
+  /** The description of the symbol. Used for hover and signature help. */
+  description: string;
+  /** The parameters of the symbol */
+  parameters?: Parameter[];
+  /** The examples of the symbol */
+  examples?: string[];
+  /** The long-form documentation of the symbol. Used for signature help. */
+  documentation?: string;
+};
+
+export type OpenscadModuleSymbol = OpenscadSymbol & {
+  type: 'module';
+};
+
+type OpenscadPrimitiveType =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'any'
+  | '[number, number]'
+  | '[number, number, number]'
+  | '[number, number, number, number]';
+
+export type OpenscadFunctionSymbol = OpenscadSymbol & {
+  type: 'function';
+  returnType: OpenscadPrimitiveType | `${OpenscadPrimitiveType}[]` | 'void';
+};
+
+export type OpenscadConstantSymbol = OpenscadSymbol & {
+  type: 'constant';
+  defaultValue?: string | number | boolean;
+};
+
+export const openscadSymbols: OpenscadModuleSymbol[] = [
   // Basic 3D Primitives
   {
     name: 'cube',
@@ -365,7 +418,7 @@ export const openscadSymbols = [
     documentation: 'Projects 3D objects onto the XY plane to create 2D shapes.',
   },
 ];
-export const openscadFunctions = [
+export const openscadFunctions: OpenscadFunctionSymbol[] = [
   // Mathematical Functions
   {
     name: 'sin',
@@ -698,7 +751,7 @@ export const openscadFunctions = [
     examples: ['echo(parent_module())', 'echo(parent_module(1))'],
   },
 ];
-export const openscadConstants = [
+export const openscadConstants: OpenscadConstantSymbol[] = [
   {
     name: '$fn',
     type: 'constant',
@@ -788,7 +841,7 @@ export const openscadConstants = [
     description: 'True when in preview mode',
     defaultValue: true,
     examples: ['if ($preview) color("red") cube(10);', 'echo("Preview mode:", $preview);'],
-    documentation: 'Boolean variable that is true when rendering in preview mode, false when rendering (F6).',
+    documentation: 'Boolean variable that is true when rendering in preview mode, false when rendering.',
   },
   {
     name: '$OPENSCAD_VERSION',
@@ -803,7 +856,6 @@ export const openscadConstants = [
     type: 'constant',
     category: 'Mathematical Constants',
     description: 'Mathematical constant π (pi)',
-    defaultValue: '3.14159',
     examples: ['rotate([0, 0, PI * 45 / 180]) cube(10);', 'angle = 2 * PI / segments;'],
     documentation: 'The mathematical constant π (pi), approximately 3.14159.',
   },

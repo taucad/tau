@@ -8,7 +8,6 @@ import { memo } from 'react';
 import type { JSX } from 'react';
 import { CodeViewer } from '~/components/code-viewer.js';
 import { cn } from '~/utils/ui.js';
-import { CopyButton } from '~/components/copy-button.js';
 
 export const markdownViewerLinks: LinkDescriptor[] = [{ rel: 'stylesheet', href: katexUrl }];
 
@@ -42,23 +41,24 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
         },
         code(properties) {
           const { children, className, ref, node, style, ...rest } = properties;
-          const match = /language-(\w+)/.exec(className ?? '');
+          // Const match = /language-(\w+)/.exec(className ?? '');
+          const match = false;
           const language = match ? match[1] : 'text';
 
           // eslint-disable-next-line @typescript-eslint/no-base-to-string -- TODO: revisit this
           const text = String(children).replace(/\n$/, '');
 
           return match ? (
-            <div className="@container/code overflow-hidden rounded-md border font-sans">
+            <div className="border-neutral-200 @container/code overflow-hidden rounded-md border font-sans">
               <div className="sticky top-0 flex flex-row items-center justify-between border-b border-neutral/20 py-1 pr-1 pl-3 text-foreground/50">
                 <div className="text-xs">{language}</div>
-                <div className="flex flex-row gap-1">
+                {/* <div className="flex flex-row gap-1">
                   <CopyButton
                     size="xs"
                     className="[&_[data-slot=label]]:hidden @xs/code:[&_[data-slot=label]]:flex"
                     getText={() => text}
                   />
-                </div>
+                </div> */}
               </div>
               <CodeViewer {...rest} language={language} text={text} className="overflow-x-auto p-3" />
             </div>

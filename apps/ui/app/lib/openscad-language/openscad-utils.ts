@@ -202,21 +202,65 @@ export function findFunctionDeclaration(
   return undefined;
 }
 
+function parseVariableValue(input: string): string {
+  let result = '';
+  let depth = 0;
+  let inString = false;
+  let stringChar = '';
+
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i];
+    const previousChar = i > 0 ? input[i - 1] : '';
+
+    // Handle string literals
+    if (!inString && (char === '"' || char === "'")) {
+      inString = true;
+      stringChar = char;
+      result += char;
+    } else if (inString && char === stringChar && previousChar !== '\\') {
+      inString = false;
+      stringChar = '';
+      result += char;
+    } else if (inString) {
+      result += char;
+    }
+    // Handle brackets and parentheses depth
+    else if (char === '(' || char === '[' || char === '{') {
+      depth++;
+      result += char;
+    } else if (char === ')' || char === ']' || char === '}') {
+      depth--;
+      result += char;
+    }
+    // Stop at comma or semicolon if we're at depth 0 (not inside nested structures)
+    else if ((char === ',' || char === ';') && depth === 0) {
+      break;
+    }
+    // Add other characters
+    else {
+      result += char;
+    }
+  }
+
+  return result.trim();
+}
+
 export function findVariableDeclaration(
   model: Monaco.editor.ITextModel,
   variableName: string,
 ): VariableInfo | undefined {
   const lines = model.getLinesContent();
 
-  // Pattern to match variable declarations: variableName = value; (stops at semicolon)
-  const variablePattern = new RegExp(`^\\s*${escapeRegExp(variableName)}\\s*=\\s*([^;]+);?`);
+  // Pattern to match variable declarations: variableName = value; (stops at semicolon or comma)
+  const variablePattern = new RegExp(`^\\s*${escapeRegExp(variableName)}\\s*=\\s*(.+)$`);
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const match = line.match(variablePattern);
 
     if (match) {
-      const value = match[1].trim(); // Value up to semicolon, trimmed
+      const rawValue = match[1];
+      const value = parseVariableValue(rawValue); // Parse value correctly handling nested structures
       const commentInfo = extractCommentDescription(lines, i);
 
       return {

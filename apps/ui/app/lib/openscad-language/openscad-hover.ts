@@ -329,12 +329,12 @@ function createVariableHover(
 
   // Variable signature - prefer built-in signature if available
   if (builtInSymbol && builtInSymbol.type === 'constant') {
-    const signature = `constant ${builtInSymbol.name}: ${variableInfo.type}`;
+    const signature = `(const) ${builtInSymbol.name}: ${variableInfo.type}`;
     contents.push({
       value: `\`\`\`openscad\n${signature}\n\`\`\``,
     });
   } else {
-    const signature = `var ${variableInfo.name}: ${variableInfo.type}`;
+    const signature = `(var) ${variableInfo.name}: ${variableInfo.type}`;
     contents.push({
       value: `\`\`\`openscad\n${signature}\n\`\`\``,
     });
@@ -472,41 +472,74 @@ function findParameterContext(
   position: Monaco.Position,
   word: Monaco.editor.IWordAtPosition,
 ): ParameterContext | undefined {
-  const line = model.getLineContent(position.lineNumber);
+  const lines = model.getLinesContent();
   const wordStart = word.startColumn - 1;
 
-  // Look backwards from the current position to find the function/module call
+  // Start from current position and search backwards across multiple lines
+  let currentLineIndex = position.lineNumber - 1; // Convert to 0-based
   let searchPos = wordStart - 1;
   let parenDepth = 0;
   let functionName = '';
 
   // Search backwards to find the opening parenthesis and function name
-  while (searchPos >= 0) {
-    const char = line[searchPos];
+  while (currentLineIndex >= 0) {
+    const currentLine = lines[currentLineIndex];
 
-    if (char === ')') {
-      parenDepth++;
-    } else if (char === '(') {
-      if (parenDepth === 0) {
-        // Found the opening parenthesis, now find the function name
-        let nameEnd = searchPos - 1;
-        while (nameEnd >= 0 && /\s/.test(line[nameEnd])) {
-          nameEnd--; // Skip whitespace
+    // If we're on the original line, start from wordStart, otherwise start from end of line
+    const startPos = currentLineIndex === position.lineNumber - 1 ? searchPos : currentLine.length - 1;
+
+    for (let i = startPos; i >= 0; i--) {
+      const char = currentLine[i];
+
+      if (char === ')') {
+        parenDepth++;
+      } else if (char === '(') {
+        if (parenDepth === 0) {
+          // Found the opening parenthesis, now find the function name
+          let nameEnd = i - 1;
+          let nameLineIndex = currentLineIndex;
+
+          // Skip whitespace (potentially across lines)
+          while (nameLineIndex >= 0) {
+            const nameLine = lines[nameLineIndex];
+            const searchStart = nameLineIndex === currentLineIndex ? nameEnd : nameLine.length - 1;
+
+            let found = false;
+            for (let j = searchStart; j >= 0; j--) {
+              if (!/\s/.test(nameLine[j])) {
+                nameEnd = j;
+                found = true;
+                break;
+              }
+            }
+
+            if (found) break;
+            nameLineIndex--;
+            nameEnd = nameLineIndex >= 0 ? lines[nameLineIndex].length - 1 : -1;
+          }
+
+          if (nameLineIndex < 0) break;
+
+          // Extract function name
+          const nameLine = lines[nameLineIndex];
+          let nameStart = nameEnd;
+          while (nameStart >= 0 && /\w/.test(nameLine[nameStart])) {
+            nameStart--;
+          }
+
+          if (nameStart < nameEnd) {
+            functionName = nameLine.slice(nameStart + 1, nameEnd + 1);
+            break;
+          }
+        } else {
+          parenDepth--;
         }
-
-        let nameStart = nameEnd;
-        while (nameStart >= 0 && /\w/.test(line[nameStart])) {
-          nameStart--;
-        }
-
-        functionName = line.slice(nameStart + 1, nameEnd + 1);
-        break;
-      } else {
-        parenDepth--;
       }
     }
 
-    searchPos--;
+    if (functionName) break;
+    currentLineIndex--;
+    searchPos = currentLineIndex >= 0 ? lines[currentLineIndex].length - 1 : -1;
   }
 
   if (!functionName) {

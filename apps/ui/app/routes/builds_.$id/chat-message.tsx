@@ -25,6 +25,7 @@ import {
   DropdownMenuLabel,
 } from '~/components/ui/dropdown-menu.js';
 import { ChatModelSelector } from '~/components/chat/chat-model-selector.js';
+import { useBuild } from '~/hooks/use-build.js';
 
 type ChatMessageProperties = {
   readonly messageId: string;
@@ -44,6 +45,7 @@ const getMessageContent = (message: Message): string => {
 export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties): JSX.Element {
   const message = useChatSelector((state) => state.context.messagesById.get(messageId));
   const { editMessage, retryMessage } = useChatActions();
+  const { build } = useBuild();
   const [isEditing, setIsEditing] = useState(false);
 
   // Early return if message not found (shouldn't happen in normal operation)
@@ -73,6 +75,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
           <ChatTextarea
             initialContent={message.parts}
             initialAttachments={message.experimental_attachments}
+            initialCadKernel={message.metadata?.cadKernel ?? build?.assets.mechanical?.language ?? 'replicad'}
             onSubmit={async (event) => {
               editMessage(messageId, event.content, event.model, event.metadata, event.imageUrls);
               setIsEditing(false);

@@ -54,6 +54,11 @@ declare module '@ai-sdk/react' {
        * @default 'auto'
        */
       toolChoice?: 'web_search' | 'none' | 'auto' | 'any';
+      /**
+       * The CAD kernel to use for this conversation.
+       * This allows switching between different CAD systems within a chat.
+       */
+      cadKernel?: 'replicad' | 'openscad';
     };
     /**
      * The annotations of the message.

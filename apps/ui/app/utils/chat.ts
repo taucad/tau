@@ -42,6 +42,7 @@ export function createMessage({
   status: MessageStatus;
   metadata?: {
     toolChoice?: 'web_search' | 'none' | 'auto' | 'any';
+    cadKernel?: 'replicad' | 'openscad';
   };
   imageUrls?: string[];
 }): Message {

@@ -93,7 +93,7 @@ export const ChatTextarea = memo(function ({
   }, [initialContent, initialAttachments]);
   const [inputText, setInputText] = useState(initialInputText);
   const [isSearching, setIsSearching] = useCookie(cookieName.chatWebSearch, false);
-  const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.kernel, 'openscad');
+  const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
   const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);

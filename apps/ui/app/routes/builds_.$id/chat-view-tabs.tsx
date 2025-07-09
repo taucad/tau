@@ -7,8 +7,8 @@ import type { KeyCombination } from '~/utils/keys.js';
 import { cn } from '~/utils/ui.js';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '~/components/ui/tabs.js';
 import { ChatEditorLayout } from '~/routes/builds_.$id/chat-editor-layout.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
-const chatTabCookieName = 'chat-tab';
 type ChatTabs = (typeof tabs)[number]['value'];
 
 const openPreviewKeyCombination = {
@@ -53,7 +53,7 @@ const tabs = [
 ] as const;
 
 export function ChatViewTabs(): JSX.Element {
-  const [chatTab, setChatTab] = useCookie<ChatTabs>(chatTabCookieName, 'preview');
+  const [chatTab, setChatTab] = useCookie<ChatTabs>(cookieName.chatTab, 'preview');
   return (
     <Tabs
       defaultValue={chatTab}

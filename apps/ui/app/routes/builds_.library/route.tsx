@@ -76,6 +76,7 @@ import { camelCaseToSentenceCase } from '~/utils/string.js';
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
 import { cadMachine } from '~/machines/cad.machine.js';
 import { HammerAnimation } from '~/components/hammer-animation.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -98,7 +99,7 @@ export type BuildActions = {
 
 export default function PersonalCadProjects(): JSX.Element {
   const [activeFilter, setActiveFilter] = useState<string>('all');
-  const [viewMode, setViewMode] = useCookie<'grid' | 'table'>('builds-view-mode', 'grid');
+  const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.buildViewMode, 'grid');
   const [showDeleted, setShowDeleted] = useState(false);
   const { builds, deleteBuild, duplicateBuild, restoreBuild } = useBuilds({ includeDeleted: showDeleted });
   const navigate = useNavigate();

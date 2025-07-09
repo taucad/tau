@@ -9,6 +9,8 @@ export const cookieName = {
   /* Theme */
   // The color hue.
   colorHue: 'color-hue',
+  // The theme mode.
+  themeMode: 'theme-mode',
 
   /* Layout */
   // Whether the sidebar is open.
@@ -32,13 +34,25 @@ export const cookieName = {
 
   /* CAD */
   // The last selected kernel.
-  kernel: 'kernel',
+  cadKernel: 'cad-kernel',
+  // The last selected grid unit.
+  cadUnit: 'cad-unit',
 
   /* Chat */
   // Whether to enable web search in the chat.
   chatWebSearch: 'chat-web-search',
   // The last selected model.
   chatModel: 'chat-model',
+
+  /* Builds */
+  // The last selected build view mode.
+  buildViewMode: 'build-view-mode',
+
+  /* Graphics */
+  // The last selected field of view angle.
+  fovAngle: 'fov-angle',
+  // The last selected view settings.
+  viewSettings: 'view-settings',
 
   /* Console */
   // The last selected log level.

@@ -6,9 +6,7 @@ import { cn } from '~/utils/ui.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { useCookie } from '~/hooks/use-cookie.js';
-
-// Cookie name constant - same as in the ThreeContext
-const fovAngleCookieName = 'fov-angle';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 type CameraControlProps = {
   /**
@@ -33,7 +31,7 @@ type CameraControlProps = {
  * You must use CameraHandler inside the Canvas separately.
  */
 export function FovControl({ defaultAngle, className }: Omit<CameraControlProps, 'onChange'>): JSX.Element {
-  const [fovAngle, setFovAngle] = useCookie<number>(fovAngleCookieName, defaultAngle);
+  const [fovAngle, setFovAngle] = useCookie<number>(cookieName.fovAngle, defaultAngle);
 
   // Synchronize fov angle to the Graphics context when angle changes
   useEffect(() => {

@@ -15,9 +15,7 @@ import {
 import { Switch } from '~/components/ui/switch.js';
 import { cn } from '~/utils/ui.js';
 import { useCookie } from '~/hooks/use-cookie.js';
-
-// Cookie name constant
-const viewSettingsCookieName = 'view-settings';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 type ViewSettings = {
   surface: boolean;
@@ -47,7 +45,7 @@ type CameraSettingsProps = {
  * Component that provides camera and visibility settings for the 3D viewer
  */
 export function SettingsControl({ className }: CameraSettingsProps): React.ReactNode {
-  const [viewSettings, setViewSettings] = useCookie<ViewSettings>(viewSettingsCookieName, defaultSettings);
+  const [viewSettings, setViewSettings] = useCookie<ViewSettings>(cookieName.viewSettings, defaultSettings);
   const [isOpen, setIsOpen] = useState(false);
 
   // Synchronize each setting to the Graphics context when settings change

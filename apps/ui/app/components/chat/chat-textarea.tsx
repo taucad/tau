@@ -19,10 +19,6 @@ import { cn } from '~/utils/ui.js';
 import type { MessagePart } from '~/types/chat.types.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
 import { ChatContextActions } from '~/components/chat/chat-context-actions.js';
-import { SvgIcon } from '~/components/icons/svg-icon.js';
-import type { KernelProvider } from '~/types/kernel.types.js';
-import { kernelProviders } from '~/types/kernel.types.js';
-import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
@@ -33,10 +29,7 @@ export type ChatTextareaProperties = {
   }: {
     content: string;
     model: string;
-    metadata?: { 
-      toolChoice?: 'web_search' | 'none' | 'auto' | 'any';
-      cadKernel?: KernelProvider;
-    };
+    metadata?: { toolChoice?: 'web_search' | 'none' | 'auto' | 'any' };
     imageUrls?: string[];
   }) => Promise<void>;
   readonly onEscapePressed?: () => void;
@@ -45,7 +38,6 @@ export type ChatTextareaProperties = {
   readonly initialAttachments?: Attachment[];
   readonly className?: ClassValue;
   readonly enableContextActions?: boolean;
-  readonly initialCadKernel?: KernelProvider;
 };
 
 const defaultContent: MessagePart[] = [];
@@ -67,7 +59,6 @@ export const ChatTextarea = memo(function ({
   onEscapePressed,
   className,
   enableContextActions = true,
-  initialCadKernel,
 }: ChatTextareaProperties): JSX.Element {
   const { initialInputText, initialImageUrls } = useMemo(() => {
     let initialInputText = '';
@@ -91,7 +82,6 @@ export const ChatTextarea = memo(function ({
   }, [initialContent, initialAttachments]);
   const [inputText, setInputText] = useState(initialInputText);
   const [isSearching, setIsSearching] = useCookie('chat-web-search', false);
-  const [selectedCadKernel, setSelectedCadKernel] = useCookie<KernelProvider>('chat-cad-kernel', initialCadKernel ?? 'replicad');
   const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);
@@ -105,20 +95,6 @@ export const ChatTextarea = memo(function ({
   const status = useChatSelector((state) => state.context.status);
   const { stop } = useChatActions();
 
-  // Memoize CAD kernel options for the combobox
-  const cadKernelOptions = useMemo(() => [
-    {
-      name: 'CAD Kernels',
-      items: kernelProviders.map(kernel => ({
-        id: kernel,
-        name: kernel === 'replicad' ? 'Replicad (TypeScript)' : 'OpenSCAD',
-        kernel,
-      }))
-    }
-  ], []);
-
-  const selectedKernelOption = cadKernelOptions[0].items.find(option => option.kernel === selectedCadKernel);
-
   const handleSubmit = async () => {
     // If there is no text or images, do not submit
     if (inputText.trim().length === 0) return;
@@ -131,7 +107,6 @@ export const ChatTextarea = memo(function ({
       model: selectedModel?.id ?? '',
       metadata: {
         toolChoice: isSearching ? 'web_search' : 'auto',
-        cadKernel: selectedCadKernel,
       },
       imageUrls: images,
     });
@@ -591,24 +566,6 @@ export const ChatTextarea = memo(function ({
           </TooltipTrigger>
           <TooltipContent>
             <p>{isSearching ? 'Stop searching' : 'Search the web'}</p>
-          </TooltipContent>
-        </Tooltip>
-
-        {/* CAD Kernel selector */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <ComboBoxResponsive
-              options={cadKernelOptions}
-              selectedItem={selectedKernelOption}
-              onSelect={(option) => {
-                setSelectedCadKernel(option.kernel);
-              }}
-              placeholder="Select CAD Kernel"
-              className="w-full"
-            />
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>CAD Kernel: {selectedCadKernel === 'replicad' ? 'Replicad (TypeScript)' : 'OpenSCAD'}</p>
           </TooltipContent>
         </Tooltip>
 

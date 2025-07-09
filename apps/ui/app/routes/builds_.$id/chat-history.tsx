@@ -12,7 +12,6 @@ import { messageRole, messageStatus } from '~/types/chat.types.js';
 import { useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { cn } from '~/utils/ui.js';
 import { ChatSelector } from '~/routes/builds_.$id/chat-selector.js';
-import { useBuild } from '~/hooks/use-build.js';
 
 // Memoized individual message item component to prevent re-renders
 const MessageItem = memo(function ({ messageId }: { readonly messageId: string }) {
@@ -26,7 +25,6 @@ const MessageItem = memo(function ({ messageId }: { readonly messageId: string }
 export const ChatHistory = memo(function () {
   const messageIds = useChatSelector((state) => state.context.messageOrder);
   const { append } = useChatActions();
-  const { build } = useBuild();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   // Memoize the onSubmit callback to prevent unnecessary re-renders
@@ -105,10 +103,7 @@ export const ChatHistory = memo(function () {
       </div>
       <div className={cn('relative mx-2 mb-2 rounded-2xl')}>
         <ChatStatus className="absolute inset-x-0 -top-9" />
-        <ChatTextarea 
-          onSubmit={onSubmit} 
-          initialCadKernel={build?.assets.mechanical?.language ?? 'replicad'}
-        />
+        <ChatTextarea onSubmit={onSubmit} />
       </div>
     </div>
   );

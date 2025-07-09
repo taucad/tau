@@ -102,6 +102,19 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
           // as it causes janky editor behavior resulting in poor UX.
           alwaysConsumeMouseWheel: true,
         },
+        // Intellisense
+        suggest: {
+          localityBonus: true,
+          showStatusBar: true,
+          preview: true,
+        },
+        parameterHints: {
+          enabled: true,
+          // Controls whether the parameter hints menu cycles or closes when reaching the end of the list.
+          cycle: true,
+        },
+        // Word-based suggestions are redundant for typed languages
+        wordBasedSuggestions: 'off',
       }}
       onMount={handleMount}
       {...rest}

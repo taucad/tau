@@ -145,7 +145,7 @@ function formatSingleBuiltInParameter(
   if (parameter.defaultValue !== undefined) {
     const defaultValueString =
       typeof parameter.defaultValue === 'string' ? parameter.defaultValue : JSON.stringify(parameter.defaultValue);
-    details.push(`(default: ${defaultValueString})`);
+    details.push(`_@default_ — ${defaultValueString}`);
   }
 
   return { signature, details };
@@ -165,7 +165,7 @@ function formatSingleUserDefinedParameter(parameterString: string): {
 
   const details: string[] = [];
   if (defaultValue) {
-    details.push(`(default: ${defaultValue})`);
+    details.push(`_@default_ — ${defaultValue}`);
   }
 
   return { signature, details };

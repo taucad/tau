@@ -13,7 +13,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { JSX } from 'react';
 import { useSelector, useActorRef } from '@xstate/react';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
 import { BoxDown } from '~/components/icons/box-down.js';
 import { Button } from '~/components/ui/button.js';
@@ -54,6 +54,7 @@ type CommandPaletteProperties = {
 };
 
 export function CommandPalette({ isOpen, onOpenChange }: CommandPaletteProperties): JSX.Element {
+  const navigate = useNavigate();
   const shapes = useSelector(cadActor, (state) => state.context.shapes);
   const buildName = useBuildSelector((state) => state.build?.name) ?? 'file';
   const updateThumbnail = useBuildSelector((state) => state.updateThumbnail);
@@ -443,12 +444,19 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         disabled: !code,
       },
       {
-        id: 'new-build',
-        label: 'New build',
+        id: 'new-build-from-prompt',
+        label: 'New build (from prompt)',
         group: 'Builds',
         icon: <Plus className="mr-2 size-4" />,
         link: '/',
         shortcut: '⌃N',
+      },
+      {
+        id: 'new-build-from-template',
+        label: 'New build (from code)',
+        group: 'Builds',
+        icon: <Plus className="mr-2 size-4" />,
+        link: '/builds/new',
       },
       {
         id: 'all-builds',
@@ -538,6 +546,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
                   onSelect={() => {
                     if (item.link) {
                       onOpenChange(false);
+                      void navigate(item.link);
                     } else {
                       runCommand(item);
                     }
@@ -551,7 +560,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
 
               if (item.link) {
                 return (
-                  <Link key={item.id} to={item.link}>
+                  <Link key={item.id} tabIndex={-1} to={item.link}>
                     {commandItemContent}
                   </Link>
                 );

@@ -532,7 +532,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
   return (
     <CommandDialog open={isOpen} onOpenChange={onOpenChange}>
       <CommandInput placeholder="Search for actions..." />
-      <CommandList>
+      <CommandList className="pb-1">
         <CommandEmpty>No results found.</CommandEmpty>
         {Object.entries(groupedItems).map(([groupName, items]) => (
           <CommandGroup key={groupName} heading={groupName}>

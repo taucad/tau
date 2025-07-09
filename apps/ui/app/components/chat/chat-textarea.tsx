@@ -20,6 +20,7 @@ import type { MessagePart } from '~/types/chat.types.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
 import { ChatContextActions } from '~/components/chat/chat-context-actions.js';
 import { SvgIcon } from '~/components/icons/svg-icon.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
@@ -32,7 +33,7 @@ export type ChatTextareaProperties = {
     model: string;
     metadata?: { 
       toolChoice?: 'web_search' | 'none' | 'auto' | 'any';
-      cadKernel?: 'replicad' | 'openscad';
+      cadKernel?: KernelProvider;
     };
     imageUrls?: string[];
   }) => Promise<void>;
@@ -42,7 +43,7 @@ export type ChatTextareaProperties = {
   readonly initialAttachments?: Attachment[];
   readonly className?: ClassValue;
   readonly enableContextActions?: boolean;
-  readonly initialCadKernel?: 'replicad' | 'openscad';
+  readonly initialCadKernel?: KernelProvider;
 };
 
 const defaultContent: MessagePart[] = [];
@@ -88,7 +89,7 @@ export const ChatTextarea = memo(function ({
   }, [initialContent, initialAttachments]);
   const [inputText, setInputText] = useState(initialInputText);
   const [isSearching, setIsSearching] = useCookie('chat-web-search', false);
-  const [selectedCadKernel, setSelectedCadKernel] = useCookie('chat-cad-kernel', initialCadKernel ?? 'replicad');
+  const [selectedCadKernel, setSelectedCadKernel] = useCookie<KernelProvider>('chat-cad-kernel', initialCadKernel ?? 'replicad');
   const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);

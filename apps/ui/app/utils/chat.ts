@@ -1,5 +1,6 @@
 import type { Message, useChat } from '@ai-sdk/react';
 import type { MessageRole, MessageStatus } from '~/types/chat.types.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
 import { generatePrefixedId } from '~/utils/id.js';
 import { idPrefix } from '~/constants/id.js';
 import { ENV } from '~/config.js';
@@ -42,7 +43,7 @@ export function createMessage({
   status: MessageStatus;
   metadata?: {
     toolChoice?: 'web_search' | 'none' | 'auto' | 'any';
-    cadKernel?: 'replicad' | 'openscad';
+    cadKernel?: KernelProvider;
   };
   imageUrls?: string[];
 }): Message {

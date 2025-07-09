@@ -1,5 +1,6 @@
 import type { UIMessage } from 'ai';
 import type { ConstantRecord } from '~/types/constant.types.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
 
 export const messageRole = {
   user: 'user',
@@ -58,7 +59,7 @@ declare module '@ai-sdk/react' {
        * The CAD kernel to use for this conversation.
        * This allows switching between different CAD systems within a chat.
        */
-      cadKernel?: 'replicad' | 'openscad';
+      cadKernel?: KernelProvider;
     };
     /**
      * The annotations of the message.

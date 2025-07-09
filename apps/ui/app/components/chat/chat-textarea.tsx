@@ -22,6 +22,7 @@ import { ChatContextActions } from '~/components/chat/chat-context-actions.js';
 import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
 import type { KernelProvider } from '~/types/kernel.types.js';
 import { kernelProviders } from '~/types/kernel.types.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
@@ -41,7 +42,6 @@ export type ChatTextareaProperties = {
   readonly initialAttachments?: Attachment[];
   readonly className?: ClassValue;
   readonly enableContextActions?: boolean;
-  readonly currentKernel?: KernelProvider;
 };
 
 const defaultContent: MessagePart[] = [];
@@ -70,7 +70,6 @@ export const ChatTextarea = memo(function ({
   onEscapePressed,
   className,
   enableContextActions = true,
-  currentKernel = 'replicad',
 }: ChatTextareaProperties): JSX.Element {
   const { initialInputText, initialImageUrls } = useMemo(() => {
     let initialInputText = '';
@@ -93,8 +92,8 @@ export const ChatTextarea = memo(function ({
     return { initialInputText, initialImageUrls };
   }, [initialContent, initialAttachments]);
   const [inputText, setInputText] = useState(initialInputText);
-  const [isSearching, setIsSearching] = useCookie('chat-web-search', false);
-  const [selectedKernel, setSelectedKernel] = useState<KernelProvider>(currentKernel);
+  const [isSearching, setIsSearching] = useCookie(cookieName.chatWebSearch, false);
+  const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.kernel, 'openscad');
   const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);
@@ -107,11 +106,6 @@ export const ChatTextarea = memo(function ({
   const { selectedModel } = useModels();
   const status = useChatSelector((state) => state.context.status);
   const { stop } = useChatActions();
-
-  // Update selected kernel when currentKernel prop changes
-  useEffect(() => {
-    setSelectedKernel(currentKernel);
-  }, [currentKernel]);
 
   const handleSubmit = async () => {
     // If there is no text or images, do not submit
@@ -578,9 +572,11 @@ export const ChatTextarea = memo(function ({
             )}
             getValue={(option) => option.id}
             defaultValue={kernelOptions.find((option) => option.id === selectedKernel)}
-            onSelect={(value) => setSelectedKernel(value as KernelProvider)}
-            onClose={focusInput}
             popoverProperties={{ align: 'start' }}
+            onSelect={(value) => {
+              setSelectedKernel(value as KernelProvider);
+            }}
+            onClose={focusInput}
           >
             <TooltipTrigger asChild>
               <Button variant="outline" size="sm" className="rounded-full">

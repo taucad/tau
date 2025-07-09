@@ -88,6 +88,26 @@ async function buildShapesFromCode(
   shapeId = 'defaultShape',
 ): Promise<BuildShapesResult> {
   try {
+    // Check if code is empty after trimming whitespace
+    const trimmedCode = code.trim();
+    if (trimmedCode === '') {
+      // Return empty shape for empty code.
+      // This produces a valid empty shape, without errors present.
+      const emptyShape: Shape3D = {
+        type: '3d',
+        name: 'Shape',
+        faces: {
+          vertices: [],
+          triangles: [],
+          normals: [],
+          faceGroups: [],
+        },
+        edges: { lines: [], edgeGroups: [] },
+        error: false,
+      };
+      return createKernelSuccess([emptyShape]);
+    }
+
     const inst = await getInstance();
     const inputFile = '/input.scad';
     const outputFile = '/output.stl';
@@ -116,7 +136,11 @@ async function buildShapesFromCode(
     // Store STL data globally for later export
     stlDataMemory[shapeId] = stlData;
 
-    const mesh = parseSTL(stlData.buffer);
+    // Convert to ArrayBuffer for parseSTL (handles SharedArrayBuffer compatibility)
+    const arrayBuffer = new ArrayBuffer(stlData.byteLength);
+    const view = new Uint8Array(arrayBuffer);
+    view.set(stlData);
+    const mesh = parseSTL(arrayBuffer);
 
     // Optimize the mesh
     mesh.mergeVertices?.();

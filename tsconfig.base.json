@@ -27,7 +27,11 @@
     "noImplicitOverride": true,
     "noEmitOnError": true,
     "resolveJsonModule": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUncheckedIndexedAccess": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false
   },
   "exclude": ["node_modules", "tmp"]
 }

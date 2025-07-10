@@ -12,11 +12,7 @@ type FileEditResult =
     };
 
 const fileEditSchema = z.object({
-  targetFile: z
-    .string()
-    .describe(
-      'The target file to modify. For Replicad use .ts extension, for OpenSCAD use .scad extension. If no extension is provided, one will be added based on the selected CAD kernel.',
-    ),
+  targetFile: z.string().describe('The target file to modify.'),
   codeEdit: z
     .string()
     .describe(
@@ -28,7 +24,7 @@ const fileEditJsonSchema = z.toJSONSchema(fileEditSchema);
 
 export const fileEditToolDefinition = {
   name: 'edit_file',
-  description: `Use this tool to propose an edit to an existing file or create a new file.
+  description: `Use this tool to propose an edit to an existing file.
 
 This will be read by a less intelligent model, which will quickly apply the edit. You should make it clear what the edit is, while also minimizing the unchanged code you write.
 
@@ -47,20 +43,7 @@ THIRD_EDIT
 You should bias towards repeating as few lines of the original file as possible to convey the change.
 Each edit should contain sufficient context of unchanged lines around the code you're editing to resolve ambiguity.
 If you plan on deleting a section, you must provide surrounding context to indicate the deletion.
-DO NOT omit spans of pre-existing code without using the // ... existing code ... comment to indicate its absence.
-
-**File Naming Guidelines:**
-- For Replicad projects: Use .ts file extension (e.g., main.ts, component.ts)
-- For OpenSCAD projects: Use .scad file extension (e.g., main.scad, part.scad)
-- If no extension is provided in targetFile, the appropriate extension will be added based on the selected CAD kernel
-- You can reference multiple files in a project and the system will track them appropriately
-
-**Multi-file Support:**
-The system supports multiple files per project. When working with complex models:
-- Split logical components into separate files
-- Use descriptive filenames that indicate the component's purpose
-- The main file serves as the entry point that may import or reference other files
-- The system will track all files and their relationships automatically`,
+DO NOT omit spans of pre-existing code without using the // ... existing code ... comment to indicate its absence.`,
   schema: fileEditJsonSchema,
 } as const;
 

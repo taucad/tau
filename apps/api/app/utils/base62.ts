@@ -87,7 +87,7 @@ export function encodeInteger(integer: number): string {
   }
 
   if (integer === 0) {
-    return alphabet[0];
+    return alphabet[0]!;
   }
 
   let encodedString = '';
@@ -120,7 +120,7 @@ export function encodeBigInt(bigint: bigint): string {
   }
 
   if (bigint === 0n) {
-    return alphabet[0];
+    return alphabet[0]!;
   }
 
   let encodedString = '';

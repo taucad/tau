@@ -10,10 +10,11 @@ import { ConfigService } from '@nestjs/config';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import helmet from '@fastify/helmet';
 import { AppModule } from '~/app.module.js';
-import { generatePrefixedId, idPrefix } from '~/utils/id.js';
+import { generatePrefixedId } from '~/utils/id.utils.js';
 import type { Environment } from '~/config/environment.config.js';
 import { getFastifyLoggingConfig } from '~/logger/fastify.logger.js';
 import { httpHeader } from '~/constants/http-header.constant.js';
+import { idPrefix } from '~/constants/id.constants.js';
 
 async function bootstrap() {
   const fastifyAdapter = new FastifyAdapter({

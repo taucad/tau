@@ -66,9 +66,9 @@ export function createBuildMutations(queryClient: QueryClient): {
         stars: 0,
         forks: 0,
         author: sourceBuild.author,
-        tags: sourceBuild.tags || [],
+        tags: sourceBuild.tags,
         assets: sourceBuild.assets,
-        chats: sourceBuild.chats || [],
+        chats: sourceBuild.chats,
         lastChatId: sourceBuild.lastChatId,
       });
 
@@ -147,7 +147,7 @@ export function createBuildMutations(queryClient: QueryClient): {
         updatedAt: timestamp,
       };
 
-      const chats = [...(build.chats || []), newChat];
+      const chats = [...build.chats, newChat];
 
       await storage.updateBuild(
         buildId,
@@ -171,7 +171,7 @@ export function createBuildMutations(queryClient: QueryClient): {
         throw new Error('Build not found');
       }
 
-      const chats = build.chats || [];
+      const { chats } = build;
       const chatIndex = chats.findIndex((chat) => chat.id === chatId);
 
       if (chatIndex === -1) {
@@ -205,7 +205,7 @@ export function createBuildMutations(queryClient: QueryClient): {
         throw new Error('Build not found');
       }
 
-      const chats = build.chats || [];
+      const { chats } = build;
       const chatIndex = chats.findIndex((chat) => chat.id === chatId);
 
       if (chatIndex === -1) {
@@ -247,7 +247,7 @@ export function createBuildMutations(queryClient: QueryClient): {
         throw new Error('Build not found');
       }
 
-      const chats = build.chats || [];
+      const { chats } = build;
       const filteredChats = chats.filter((chat) => chat.id !== chatId);
 
       if (filteredChats.length === chats.length) {
@@ -258,7 +258,7 @@ export function createBuildMutations(queryClient: QueryClient): {
       let { lastChatId } = build;
       if (lastChatId === chatId && filteredChats.length > 0) {
         const mostRecentChat = filteredChats.sort((a, b) => b.updatedAt - a.updatedAt)[0];
-        lastChatId = mostRecentChat.id;
+        lastChatId = mostRecentChat?.id;
       } else if (filteredChats.length === 0) {
         lastChatId = undefined;
       }

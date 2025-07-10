@@ -60,7 +60,6 @@ export type CreateChatBody = {
   files?: FilesContext;
   messages: Array<
     UIMessage & {
-      role: 'user';
       model: string;
       metadata: { toolChoice: ToolChoiceWithCategory; kernel?: 'replicad' | 'openscad' };
     }
@@ -89,11 +88,11 @@ export class ChatController {
     let modelId: string;
     const selectedToolChoice: ToolChoiceWithCategory = 'auto';
     let selectedKernel: 'replicad' | 'openscad' = 'replicad';
-    
+
     if (lastHumanMessage?.role === 'user') {
       modelId = lastHumanMessage.model;
       // Extract kernel from message metadata or use the one from body
-      selectedKernel = lastHumanMessage.metadata?.kernel || body.kernel || 'replicad';
+      selectedKernel = lastHumanMessage.metadata.kernel ?? body.kernel ?? 'replicad';
       // If (lastHumanMessage.metadata.toolChoice) {
       //   selectedToolChoice = lastHumanMessage.metadata.toolChoice;
       // }
@@ -123,14 +122,16 @@ export class ChatController {
     });
 
     // Prepare files context for the system prompt
-    const filesContextXml = body.files ? objectToXml({
-      currentFile: body.files.currentFile,
-      files: Object.entries(body.files.files).map(([filename, file]) => ({
-        filename,
-        content: file.content,
-        language: file.language,
-      })),
-    }) : '';
+    const filesContextXml = body.files
+      ? objectToXml({
+          currentFile: body.files.currentFile,
+          files: Object.entries(body.files.files).map(([filename, file]) => ({
+            filename,
+            content: file.content,
+            language: file.language,
+          })),
+        })
+      : '';
 
     const resultMessage = new HumanMessage({
       content: [
@@ -140,7 +141,7 @@ export class ChatController {
 If code errors or kernel errors are present, use this information to fix the errors.
 
 ${objectToXml({
-  codeErrors: (body.codeErrors || []).map((error) => ({
+  codeErrors: body.codeErrors.map((error) => ({
     message: error.message,
     startLineNum: error.startLineNumber,
     endLineNum: error.endLineNumber,

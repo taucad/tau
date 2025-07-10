@@ -1,20 +1,11 @@
 /* eslint-disable max-lines -- mocks */
+
 type Model = {
   id: string;
   name: string;
   code: string;
   thumbnail: string;
 };
-
-export const emptyReplicadCode = `import {} from 'replicad';
-
-export const defaultParams = {};
-
-export default function main(p = defaultParams) {}
-`;
-
-export const emptyOpenscadCode = `cube(10);
-`;
 
 export const cubeCode = `/**
  * Parametric Cube with Filleted Edges

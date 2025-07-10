@@ -7,7 +7,7 @@ import { Button } from '~/components/ui/button.js';
 import { storage } from '~/db/storage.js';
 import { messageRole, messageStatus } from '~/types/chat.types.js';
 import { createMessage } from '~/utils/chat.js';
-import { emptyReplicadCode } from '~/constants/build-code-examples.js';
+import { getMainFile, getEmptyCode } from '~/constants/kernel.constants.js';
 import { CommunityBuildGrid } from '~/components/project-grid.js';
 import { sampleBuilds } from '~/constants/build-examples.js';
 import { defaultBuildName } from '~/constants/build-names.js';
@@ -25,9 +25,10 @@ export default function ChatStart(): JSX.Element {
     async ({ content, model, metadata, imageUrls }) => {
       try {
         // Get the selected kernel from metadata, defaulting to replicad
-        const selectedKernel = metadata?.kernel || 'replicad';
-        const mainFileName = selectedKernel === 'replicad' ? 'main.ts' : 'main.scad';
-        
+        const selectedKernel = metadata?.kernel ?? 'replicad';
+        const mainFileName = getMainFile(selectedKernel);
+        const emptyCode = getEmptyCode(selectedKernel);
+
         // Create the initial message as pending
         const userMessage = createMessage({
           content,
@@ -62,8 +63,7 @@ export default function ChatStart(): JSX.Element {
           lastChatId: chatId,
           assets: {
             mechanical: {
-              // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-              files: { [mainFileName]: { content: emptyReplicadCode } },
+              files: { [mainFileName]: { content: emptyCode } },
               main: mainFileName,
               language: selectedKernel,
               parameters: {},
@@ -88,7 +88,7 @@ export default function ChatStart(): JSX.Element {
         </div>
 
         <AiChatProvider value={{}}>
-          <ChatTextarea enableContextActions={false} onSubmit={onSubmit} />
+          <ChatTextarea enableKernelSelector enableContextActions={false} onSubmit={onSubmit} />
           <div className="mx-auto my-6 flex w-20 items-center justify-center">
             <Separator />
             <div className="mx-4 text-sm font-light text-muted-foreground">or</div>

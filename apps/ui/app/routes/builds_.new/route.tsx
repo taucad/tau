@@ -11,7 +11,7 @@ import { SvgIcon } from '~/components/icons/svg-icon.js';
 import { RadioGroup, RadioGroupItem } from '~/components/ui/radio-group.js';
 import { Textarea } from '~/components/ui/textarea.js';
 import { storage } from '~/db/storage.js';
-import { emptyReplicadCode, emptyOpenscadCode } from '~/constants/build-code-examples.js';
+import { kernelOptions, getKernelOption } from '~/constants/kernel.constants.js';
 import { toast } from '~/components/ui/sonner.js';
 import type { KernelProvider } from '~/types/kernel.types';
 import type { Handle } from '~/types/matches.types.js';
@@ -26,57 +26,6 @@ export const handle: Handle = {
   },
 };
 
-type KernelOption = {
-  id: KernelProvider;
-  name: string;
-  description: string;
-  mainFile: string;
-  longDescription: string;
-  emptyCode: string;
-  recommended: string;
-  tags: string[];
-  features: string[];
-  examples: Array<{ name: string; description: string }>;
-};
-
-// Move static data outside component
-const kernelOptions: KernelOption[] = [
-  {
-    id: 'openscad',
-    name: 'OpenSCAD',
-    description: 'Constructive Solid Geometry for 3D printing',
-    mainFile: 'main.scad',
-    longDescription:
-      'Uses Constructive Solid Geometry (CSG) - build complex shapes by combining basic primitives with boolean operations. Outputs mesh files perfect for 3D printing.',
-    emptyCode: emptyOpenscadCode,
-    recommended: '3D Printing & Prototyping',
-    tags: ['Constructive Solid Geometry', 'Mesh Export', 'Scripting', '3D Printing'],
-    features: ['Boolean operations', 'Parametric design', 'STL export', 'Large community'],
-    examples: [
-      { name: 'Basic Box', description: 'Simple parametric box with rounded corners' },
-      { name: 'Gear Generator', description: 'Customizable gear with configurable teeth' },
-      { name: 'Phone Case', description: 'Parametric phone case generator' },
-    ],
-  },
-  {
-    id: 'replicad',
-    name: 'Replicad',
-    description: 'TypeScript-based CAD for precise engineering',
-    mainFile: 'main.ts',
-    longDescription:
-      'Uses Boundary Representation (BRep) for mathematically exact geometry. Perfect for engineering applications requiring precise measurements and tolerances.',
-    emptyCode: emptyReplicadCode,
-    recommended: 'Engineering & Manufacturing',
-    tags: ['Boundary Representation', 'OpenCascade', 'Exact Geometry', 'TypeScript', 'Precision'],
-    features: ['Exact geometry', 'TypeScript API', 'CAD operations', 'STEP export'],
-    examples: [
-      { name: 'Mechanical Part', description: 'Precision engineered component' },
-      { name: 'Assembly', description: 'Multi-part mechanical assembly' },
-      { name: 'Sheet Metal', description: 'Bend and fold operations' },
-    ],
-  },
-];
-
 // Custom hook for build creation logic
 function useBuildCreation() {
   const navigate = useNavigate();
@@ -87,7 +36,7 @@ function useBuildCreation() {
     async (buildData: { name: string; description: string; kernel: KernelProvider }) => {
       setIsCreating(true);
       try {
-        const selectedOption = kernelOptions.find((option) => option.id === buildData.kernel);
+        const selectedOption = getKernelOption(buildData.kernel);
         if (!selectedOption) {
           throw new Error('Invalid kernel selection');
         }
@@ -136,7 +85,7 @@ export default function BuildsNew(): JSX.Element {
   const navigate = useNavigate();
   const { createBuild, isCreating } = useBuildCreation();
 
-  const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.kernel, 'openscad');
+  const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
   const [buildName, setBuildName] = useState('');
   const [buildDescription, setBuildDescription] = useState('');
 

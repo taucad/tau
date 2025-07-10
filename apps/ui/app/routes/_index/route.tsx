@@ -17,7 +17,7 @@ import { Separator } from '~/components/ui/separator.js';
 import { InteractiveHoverButton } from '~/components/magicui/interactive-hover-button.js';
 import { toast } from '~/components/ui/sonner.js';
 import { generatePrefixedId } from '~/utils/id.js';
-import { idPrefix } from '~/constants/id.js';
+import { idPrefix } from '~/constants/id.constants.js';
 import type { KernelProvider } from '~/types/kernel.types.js';
 import useCookie from '~/hooks/use-cookie.js';
 import { cookieName } from '~/constants/cookie.constants.js';

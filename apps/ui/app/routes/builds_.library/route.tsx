@@ -399,7 +399,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows?.length ? (
+            {table.getRowModel().rows.length > 0 ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow key={row.id} className={row.getIsSelected() ? 'bg-muted/50' : undefined}>
                   {row.getVisibleCells().map((cell) => (
@@ -627,7 +627,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
   const mechanicalAsset = build.assets.mechanical;
   if (!mechanicalAsset) throw new Error('Mechanical asset not found');
 
-  const code = mechanicalAsset.files[mechanicalAsset.main].content;
+  const code = mechanicalAsset.files[mechanicalAsset.main]?.content ?? '';
   const { parameters } = mechanicalAsset;
   const status = useSelector(actorRef, (state) => state.value);
   const [showPreview, setShowPreview] = useState(false);

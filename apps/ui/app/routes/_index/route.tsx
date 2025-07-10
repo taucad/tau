@@ -3,6 +3,7 @@ import { useCallback } from 'react';
 import type { JSX } from 'react';
 import type { ChatTextareaProperties } from '~/components/chat/chat-textarea.js';
 import { ChatTextarea } from '~/components/chat/chat-textarea.js';
+import { KernelSelector } from '~/components/chat/kernel-selector.js';
 import { Button } from '~/components/ui/button.js';
 import { storage } from '~/db/storage.js';
 import { messageRole, messageStatus } from '~/types/chat.types.js';
@@ -17,15 +18,17 @@ import { InteractiveHoverButton } from '~/components/magicui/interactive-hover-b
 import { toast } from '~/components/ui/sonner.js';
 import { generatePrefixedId } from '~/utils/id.js';
 import { idPrefix } from '~/constants/id.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
+import useCookie from '~/hooks/use-cookie.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 export default function ChatStart(): JSX.Element {
   const navigate = useNavigate();
+  const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
 
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content, model, metadata, imageUrls }) => {
       try {
-        // Get the selected kernel from metadata, defaulting to replicad
-        const selectedKernel = metadata?.kernel ?? 'replicad';
         const mainFileName = getMainFile(selectedKernel);
         const emptyCode = getEmptyCode(selectedKernel);
 
@@ -35,7 +38,7 @@ export default function ChatStart(): JSX.Element {
           role: messageRole.user,
           model,
           status: messageStatus.pending, // Set as pending
-          metadata: metadata ?? {},
+          metadata: { kernel: selectedKernel, ...metadata },
           imageUrls,
         });
 
@@ -77,7 +80,7 @@ export default function ChatStart(): JSX.Element {
         toast.error('Failed to create build');
       }
     },
-    [navigate],
+    [navigate, selectedKernel],
   );
 
   return (
@@ -88,7 +91,12 @@ export default function ChatStart(): JSX.Element {
         </div>
 
         <AiChatProvider value={{}}>
-          <ChatTextarea enableKernelSelector enableContextActions={false} onSubmit={onSubmit} />
+          <div className="space-y-4">
+            <div className="flex justify-center">
+              <KernelSelector selectedKernel={selectedKernel} onKernelChange={setSelectedKernel} />
+            </div>
+            <ChatTextarea enableContextActions={false} onSubmit={onSubmit} />
+          </div>
           <div className="mx-auto my-6 flex w-20 items-center justify-center">
             <Separator />
             <div className="mx-4 text-sm font-light text-muted-foreground">or</div>

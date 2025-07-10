@@ -22,7 +22,7 @@ export type CadContext = {
   isKernelInitialized: boolean;
   graphicsRef: ActorRefFrom<typeof graphicsMachine> | undefined;
   jsonSchema?: unknown;
-  kernelTypeSelected?: KernelProvider;
+  kernelTypeSelected: KernelProvider;
 };
 
 // Define the types of events the machine can receive
@@ -77,7 +77,7 @@ export const cadMachine = setup({
           type: 'computeGeometry',
           code: context.code,
           parameters: context.parameters,
-          kernelType: context.kernelTypeSelected!,
+          kernelType: context.kernelTypeSelected,
         };
       },
     ),
@@ -88,7 +88,7 @@ export const cadMachine = setup({
         return {
           type: 'exportGeometry',
           format: event.format,
-          kernelType: context.kernelTypeSelected!,
+          kernelType: context.kernelTypeSelected,
         };
       },
     ),
@@ -215,7 +215,7 @@ export const cadMachine = setup({
     isKernelInitialized: false,
     graphicsRef: input.graphicsRef,
     jsonSchema: undefined,
-    kernelTypeSelected: undefined,
+    kernelTypeSelected: 'openscad',
   }),
   initial: 'booting',
   states: {

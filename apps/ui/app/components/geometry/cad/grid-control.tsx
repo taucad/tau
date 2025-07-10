@@ -99,7 +99,7 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
   }, []);
 
   // If there's no valid grid size, don't render
-  if (!gridSizes?.smallSize) {
+  if (!gridSizes.smallSize) {
     return null;
   }
 

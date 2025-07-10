@@ -71,7 +71,7 @@ export function FovControl({ defaultAngle, className }: Omit<CameraControlProps,
             // Inset-0 is used to make the entire button slideable for better UX
             className="absolute inset-0 h-full px-1 pt-8 opacity-0 duration-300 group-hover:pt-4 group-hover:opacity-100 max-md:pt-4 max-md:opacity-100 [&_[data-slot='slider-track']]:bg-neutral/20"
             onValueChange={(value) => {
-              setFovAngle(value[0]);
+              setFovAngle(value[0]!);
             }}
           />
         </div>

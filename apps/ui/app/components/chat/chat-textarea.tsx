@@ -145,7 +145,7 @@ export const ChatTextarea = memo(function ({
     } else if (
       event.key === 'Backspace' &&
       textareaReference.current?.selectionStart === 0 &&
-      textareaReference.current?.selectionEnd === 0 &&
+      textareaReference.current.selectionEnd === 0 &&
       images.length > 0
     ) {
       // Delete the last image when backspace is pressed at the beginning of the textarea
@@ -169,13 +169,13 @@ export const ChatTextarea = memo(function ({
     event.preventDefault();
     setIsDragging(false);
 
-    if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
+    if (event.dataTransfer.files.length > 0) {
       for (const file of event.dataTransfer.files) {
         if (file.type.startsWith('image/')) {
           const reader = new FileReader();
           const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
             if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
-              const result = readerEvent.target?.result;
+              const { result } = readerEvent.target;
               if (result !== '') {
                 setImages((previous) => [...previous, result]);
               }
@@ -204,7 +204,7 @@ export const ChatTextarea = memo(function ({
           const reader = new FileReader();
           const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
             if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
-              const result = readerEvent.target?.result;
+              const { result } = readerEvent.target;
               if (result !== '') {
                 setImages((previous) => [...previous, result]);
               }
@@ -252,7 +252,7 @@ export const ChatTextarea = memo(function ({
           const reader = new FileReader();
           const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
             if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
-              const result = readerEvent.target?.result;
+              const { result } = readerEvent.target;
               if (result !== '') {
                 setImages((previous) => [...previous, result]);
               }

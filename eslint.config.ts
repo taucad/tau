@@ -63,6 +63,14 @@ const config: Linter.Config[] = [
         },
       ],
 
+      // Enforce that unnecessary conditions are not used.
+      // For example:
+      // function bar<T>(arg: string) {
+      //   // Arg can never be nullish
+      //   return arg?.length; // Therefore `?.` is unnecessary
+      // }
+      '@typescript-eslint/no-unnecessary-condition': 'error',
+
       'no-restricted-imports': [
         'error',
         {

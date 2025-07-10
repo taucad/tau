@@ -208,7 +208,7 @@ ${objectToXml({
       this.logger.debug(`Resuming interrupted thread: ${body.id}`);
 
       // Extract the result from the last tool call to use as resume value
-      const toolResult = tryExtractLastToolResult(body.messages);
+      const toolResult = tryExtractLastToolResult(langchainMessages);
 
       this.logger.debug(`Resuming with tool result: ${JSON.stringify(toolResult, null, 2)}`);
 

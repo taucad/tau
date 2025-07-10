@@ -16,7 +16,7 @@ export function sanitizeMessagesForConversion(messages: UIMessage[]): UIMessage[
     }
 
     // Handle parts array - convert partial tool calls to completed state
-    const sanitizedParts = message.parts?.map((part) => {
+    const sanitizedParts = message.parts.map((part) => {
       if (part.type === 'tool-invocation' && part.toolInvocation.state === 'partial-call') {
         // Convert partial tool calls to completed state with mock result
         return {
@@ -34,7 +34,7 @@ export function sanitizeMessagesForConversion(messages: UIMessage[]): UIMessage[
 
     return {
       ...message,
-      ...(sanitizedParts ? { parts: sanitizedParts } : {}),
+      parts: sanitizedParts,
     };
   });
 }
@@ -60,136 +60,144 @@ export const convertAiSdkMessagesToLangchainMessages: (
     // Handle user messages which contain invalid attachments for Langchain.
     // AI SDK converts attachments to a buffer representation which is incompatible
     // with Langchain images, which needs a URL instead of a buffer.
-    if (coreMessage.role === 'user') {
-      // Find the corresponding UI message by matching user message count
-      const correspondingUiMessage = uiMessages.filter((message) => message.role === 'user').at(userMessageCount);
+    switch (coreMessage.role) {
+      case 'user': {
+        // Find the corresponding UI message by matching user message count
+        const correspondingUiMessage = uiMessages.filter((message) => message.role === 'user').at(userMessageCount);
 
-      // Increment user message counter for next match
-      userMessageCount++;
+        // Increment user message counter for next match
+        userMessageCount++;
 
-      if (!correspondingUiMessage) {
-        throw new Error('Corresponding UI message not found');
+        if (!correspondingUiMessage) {
+          throw new Error('Corresponding UI message not found');
+        }
+
+        const coreMessageContent = coreMessage.content;
+        if (!Array.isArray(coreMessageContent)) {
+          throw new TypeError('Core message content is not an array');
+        }
+
+        return [
+          new HumanMessage({
+            content: [
+              // Map attachments to images.
+              // Images always come first as the LLM is more performant when receiving images first.
+              ...(correspondingUiMessage.experimental_attachments?.map((attachment) => ({
+                type: 'image_url',
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
+                image_url: { url: attachment.url },
+              })) ?? []),
+              // Remove all the images from the core message content.
+              ...coreMessageContent.filter((part) => part.type !== 'image'),
+            ],
+          }),
+        ];
       }
 
-      const coreMessageContent = coreMessage.content;
-      if (!Array.isArray(coreMessageContent)) {
-        throw new TypeError('Core message content is not an array');
-      }
-
-      return [
-        new HumanMessage({
-          content: [
-            // Map attachments to images.
-            // Images always come first as the LLM is more performant when receiving images first.
-            ...(correspondingUiMessage.experimental_attachments?.map((attachment) => ({
-              type: 'image_url',
+      // Handle tool messages which contain array `content`, the `content` must instead be a string.
+      case 'tool': {
+        return coreMessage.content.map(
+          (part) =>
+            new ToolMessage({
+              content: JSON.stringify(part.result),
               // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
-              image_url: { url: attachment.url },
-            })) ?? []),
-            // Remove all the images from the core message content.
-            ...coreMessageContent.filter((part) => part.type !== 'image'),
-          ],
-        }),
-      ];
-    }
-
-    // Handle tool messages which contain array `content`, the `content` must instead be a string.
-    if (coreMessage.role === 'tool') {
-      return coreMessage.content.map(
-        (part) =>
-          new ToolMessage({
-            content: JSON.stringify(part.result),
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
-            tool_call_id: part.toolCallId,
-            name: part.toolName,
-          }),
-      );
-    }
-
-    // Lastly, handle assistant messages.
-    if (coreMessage.role === 'assistant') {
-      if (!Array.isArray(coreMessage.content)) {
-        throw new TypeError('Core message content is not an array');
+              tool_call_id: part.toolCallId,
+              name: part.toolName,
+            }),
+        );
       }
 
-      // Langchain handles tool calls on a separate property.
-      const toolCalls = coreMessage.content.filter((part) => part.type === 'tool-call');
+      // Lastly, handle assistant messages.
+      case 'assistant': {
+        if (!Array.isArray(coreMessage.content)) {
+          throw new TypeError('Core message content is not an array');
+        }
 
-      return [
-        new AIMessage({
-          // Tool calls need to be handled on a separate property alongside the content.
-          // This is a necessary duplication of data as required by Langchain.
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
-          tool_calls: toolCalls.flatMap((part) => ({
-            name: part.toolName,
+        // Langchain handles tool calls on a separate property.
+        const toolCalls = coreMessage.content.filter((part) => part.type === 'tool-call');
 
-            args: part.args as Record<string, unknown>,
-            id: part.toolCallId,
-            type: 'tool_call',
-          })),
-          content: coreMessage.content.map((part) => {
-            if (part.type === 'text') {
-              return {
-                type: 'text',
-                text: part.text,
-                ...part.providerOptions,
-              };
-            }
+        return [
+          new AIMessage({
+            // Tool calls need to be handled on a separate property alongside the content.
+            // This is a necessary duplication of data as required by Langchain.
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
+            tool_calls: toolCalls.flatMap((part) => ({
+              name: part.toolName,
 
-            if (part.type === 'reasoning') {
-              // Many LLMs do not support a `thinking` type, but we still want to preserve the previous thinking for better context.
-              // For simplicity, we wrap it in a <thinking> tag instead and use the `text` type.
-              return {
-                type: 'text',
-                text: `<thinking>${part.text}</thinking>`,
-                ...part.providerOptions,
-              };
-            }
+              args: part.args as Record<string, unknown>,
+              id: part.toolCallId,
+              type: 'tool_call',
+            })),
+            content: coreMessage.content.map((part) => {
+              switch (part.type) {
+                case 'text': {
+                  return {
+                    type: 'text',
+                    text: part.text,
+                    ...part.providerOptions,
+                  };
+                }
 
-            if (part.type === 'redacted-reasoning') {
-              // Similar to the `reasoning type`, redacted reasoning is not supported by many LLMs.
-              // To preserve the previous thinking for better context, we wrap it in a <redacted-thinking> tag instead and use the `text` type.
-              return {
-                type: 'text',
-                text: `<redacted-thinking>${part.data}</redacted-thinking>`,
-                ...part.providerOptions,
-              };
-            }
+                case 'reasoning': {
+                  // Many LLMs do not support a `thinking` type, but we still want to preserve the previous thinking for better context.
+                  // For simplicity, we wrap it in a <thinking> tag instead and use the `text` type.
+                  return {
+                    type: 'text',
+                    text: `<thinking>${part.text}</thinking>`,
+                    ...part.providerOptions,
+                  };
+                }
 
-            if (part.type === 'file') {
-              return {
-                type: 'document',
-                source: part.data,
-                ...part.providerOptions,
-              };
-            }
+                case 'redacted-reasoning': {
+                  // Similar to the `reasoning type`, redacted reasoning is not supported by many LLMs.
+                  // To preserve the previous thinking for better context, we wrap it in a <redacted-thinking> tag instead and use the `text` type.
+                  return {
+                    type: 'text',
+                    text: `<redacted-thinking>${part.data}</redacted-thinking>`,
+                    ...part.providerOptions,
+                  };
+                }
 
-            if (part.type === 'tool-call') {
-              return {
-                type: 'tool_use',
-                name: part.toolName,
-                id: part.toolCallId,
-                input: JSON.stringify(part.args),
-              };
-            }
+                case 'file': {
+                  return {
+                    type: 'document',
+                    source: part.data,
+                    ...part.providerOptions,
+                  };
+                }
 
-            const exhaustiveCheck: never = part;
-            throw new Error(`Unknown part type: ${String(exhaustiveCheck)}`);
+                case 'tool-call': {
+                  return {
+                    type: 'tool_use',
+                    name: part.toolName,
+                    id: part.toolCallId,
+                    input: JSON.stringify(part.args),
+                  };
+                }
+
+                default: {
+                  const exhaustiveCheck: never = part;
+                  throw new Error(`Unknown part type: ${String(exhaustiveCheck)}`);
+                }
+              }
+            }),
           }),
-        }),
-      ];
-    }
+        ];
+      }
 
-    if (coreMessage.role === 'system') {
-      return [
-        new SystemMessage({
-          content: coreMessage.content,
-        }),
-      ];
-    }
+      case 'system': {
+        return [
+          new SystemMessage({
+            content: coreMessage.content,
+          }),
+        ];
+      }
 
-    const exhaustiveCheck: never = coreMessage;
-    throw new Error(`Unknown message role: ${String(exhaustiveCheck)}`);
+      default: {
+        const exhaustiveCheck: never = coreMessage;
+        throw new Error(`Unknown message role: ${String(exhaustiveCheck)}`);
+      }
+    }
   });
 
   return langchainMessages;

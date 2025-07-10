@@ -20,7 +20,7 @@ const languageFromKernel = {
 } as const satisfies Record<KernelProvider, string>;
 
 const getFileTree = (build: Build): FileItem[] => {
-  if (!build?.assets.mechanical) return [];
+  if (!build.assets.mechanical) return [];
   const mechanicalAsset = build.assets.mechanical;
   const { files } = mechanicalAsset;
 
@@ -95,10 +95,8 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
   const displayLanguage = activeFile?.language;
 
   const handleCodeChange = useCallback((value: ComponentProps<typeof CodeEditor>['value']) => {
-    if (value) {
-      // Update CAD actor as source of truth - subscription will propagate to file explorer
-      cadActor.send({ type: 'setCode', code: value });
-    }
+    // Update CAD actor as source of truth - subscription will propagate to file explorer
+    cadActor.send({ type: 'setCode', code: value });
   }, []);
 
   useEffect(() => {

@@ -400,9 +400,7 @@ export class LangGraphAdapter {
           switch (complexType) {
             case 'text': {
               const textPart = part;
-              if (textPart.text === undefined) {
-                throw new Error('Text not found in part: ' + JSON.stringify(part));
-              } else if (textPart.text === '') {
+              if (textPart.text === '') {
                 // No-op: Sometimes empty strings are present
                 // We don't need to write them to the data stream.
               } else {
@@ -414,37 +412,35 @@ export class LangGraphAdapter {
             }
 
             case 'thinking': {
-              if (part.thinking === '') {
-                // No-op: Sometimes empty strings are present
-                // We don't need to write them to the data stream.
-              } else if (part.thinking !== undefined) {
-                dataStream.writePart('reasoning', part.thinking);
-                callbacks.onChatModelStream?.({ dataStream, content: part.thinking, type: 'reasoning' });
-              } else if (part.signature === undefined) {
-                throw new Error('Thinking not found in part: ' + JSON.stringify(part));
-              } else {
+              if ('thinking' in part) {
+                if (part.thinking === '') {
+                  // No-op: Sometimes empty strings are present
+                  // We don't need to write them to the data stream.
+                } else {
+                  dataStream.writePart('reasoning', part.thinking);
+                  callbacks.onChatModelStream?.({ dataStream, content: part.thinking, type: 'reasoning' });
+                }
+              } else if ('signature' in part) {
                 dataStream.writePart('reasoning_signature', { signature: part.signature });
                 callbacks.onChatModelStream?.({
                   dataStream,
                   content: [{ signature: part.signature }],
                   type: 'reasoning_signature',
                 });
+              } else {
+                throw new Error('Unknown part type: ' + JSON.stringify(part));
               }
 
               break;
             }
 
             case 'redacted_thinking': {
-              if (part.data === undefined) {
-                throw new Error('Redacted thinking not found in part: ' + JSON.stringify(part));
-              } else {
-                dataStream.writePart('redacted_reasoning', { data: part.data });
-                callbacks.onChatModelStream?.({
-                  dataStream,
-                  content: [{ data: part.data }],
-                  type: 'redacted_reasoning',
-                });
-              }
+              dataStream.writePart('redacted_reasoning', { data: part.data });
+              callbacks.onChatModelStream?.({
+                dataStream,
+                content: [{ data: part.data }],
+                type: 'redacted_reasoning',
+              });
 
               break;
             }

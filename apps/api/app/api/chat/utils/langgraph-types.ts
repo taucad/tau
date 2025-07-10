@@ -23,7 +23,8 @@ type BaseContentPart<Type extends ContentPartType, Data extends Record<string, u
  * Content part interfaces
  */
 export type TextPart = BaseContentPart<'text', { text: string }>;
-export type ThinkingPart = BaseContentPart<'thinking', { thinking: string; signature: string }>;
+export type ThinkingContentPart = BaseContentPart<'thinking', { thinking: string }>;
+export type ThinkingSignaturePart = BaseContentPart<'thinking', { signature: string }>;
 export type RedactedThinkingPart = BaseContentPart<'redacted_thinking', { data: string }>;
 export type ToolUsePart = BaseContentPart<'tool_use', { data: string }>;
 export type InputJsonDeltaPart = BaseContentPart<'input_json_delta', { data: string }>;
@@ -31,7 +32,13 @@ export type InputJsonDeltaPart = BaseContentPart<'input_json_delta', { data: str
 /**
  * Union of all possible content parts
  */
-export type ContentPart = TextPart | ThinkingPart | RedactedThinkingPart | ToolUsePart | InputJsonDeltaPart;
+export type ContentPart =
+  | TextPart
+  | ThinkingContentPart
+  | ThinkingSignaturePart
+  | RedactedThinkingPart
+  | ToolUsePart
+  | InputJsonDeltaPart;
 
 // ============================================================================
 // Event Types

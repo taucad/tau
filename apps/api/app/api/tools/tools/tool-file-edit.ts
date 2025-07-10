@@ -12,7 +12,11 @@ type FileEditResult =
     };
 
 const fileEditSchema = z.object({
-  targetFile: z.string().describe('The target file to modify. For Replicad use .ts extension, for OpenSCAD use .scad extension. If no extension is provided, one will be added based on the selected CAD kernel.'),
+  targetFile: z
+    .string()
+    .describe(
+      'The target file to modify. For Replicad use .ts extension, for OpenSCAD use .scad extension. If no extension is provided, one will be added based on the selected CAD kernel.',
+    ),
   codeEdit: z
     .string()
     .describe(

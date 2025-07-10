@@ -479,6 +479,12 @@ function findParameterContext(
           // Skip whitespace (potentially across lines)
           while (nameLineIndex >= 0) {
             const nameLine = lines[nameLineIndex];
+            if (!nameLine) {
+              nameLineIndex--;
+              nameEnd = nameLineIndex >= 0 ? (lines[nameLineIndex]?.length ?? 0) - 1 : -1;
+              continue;
+            }
+
             const searchStart = nameLineIndex === currentLineIndex ? nameEnd : nameLine.length - 1;
 
             let found = false;
@@ -492,13 +498,15 @@ function findParameterContext(
 
             if (found) break;
             nameLineIndex--;
-            nameEnd = nameLineIndex >= 0 ? lines[nameLineIndex].length - 1 : -1;
+            nameEnd = nameLineIndex >= 0 ? (lines[nameLineIndex]?.length ?? 0) - 1 : -1;
           }
 
           if (nameLineIndex < 0) break;
 
           // Extract function name
           const nameLine = lines[nameLineIndex];
+          if (!nameLine) break;
+
           let nameStart = nameEnd;
           while (nameStart >= 0 && /\w/.test(nameLine[nameStart])) {
             nameStart--;

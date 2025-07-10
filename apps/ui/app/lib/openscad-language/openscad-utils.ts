@@ -331,13 +331,20 @@ export function extractCommentDescription(
   // Look for comments in the lines before the variable declaration
   const commentLines: string[] = [];
   let currentLine = lineIndex - 1;
+  let hasFoundComments = false;
 
   while (currentLine >= 0) {
     const line = lines[currentLine];
     const trimmedLine = line.trim();
 
-    // Skip empty lines - allow spaces between comments and declarations
-    if (trimmedLine === '') {
+    // If we've already found comments and encounter an empty line, stop here
+    // This prevents collecting comments from previous sections
+    if (hasFoundComments && trimmedLine === '') {
+      break;
+    }
+
+    // Skip empty lines before finding any comments - allow spaces between comments and declarations
+    if (!hasFoundComments && trimmedLine === '') {
       currentLine--;
       continue;
     }
@@ -352,6 +359,7 @@ export function extractCommentDescription(
       const commentText = trimmedLine.slice(2).trim();
       if (commentText) {
         commentLines.unshift(commentText);
+        hasFoundComments = true;
       }
 
       currentLine--;
@@ -372,6 +380,7 @@ export function extractCommentDescription(
 
         // Add the multi-line comment to our collection and break
         commentLines.unshift(...multiLineComments);
+        hasFoundComments = true;
         break;
       } else {
         // Multi-line comment, extract content before */
@@ -406,6 +415,7 @@ export function extractCommentDescription(
 
       // Add the multi-line comment to our collection and break
       commentLines.unshift(...multiLineComments);
+      hasFoundComments = true;
       break;
     }
     // Non-comment line breaks the comment chain

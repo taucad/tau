@@ -339,7 +339,7 @@ export class LangGraphAdapter {
     const { streamEvent, dataStream, callbacks, reasoningState, toolCallState, toolTypeMap } = parameters;
 
     if (streamEvent.data.chunk.tool_calls.length > 0) {
-      const toolCall = streamEvent.data.chunk.tool_calls[0];
+      const toolCall = streamEvent.data.chunk.tool_calls[0]!;
       const originalToolCallId = toolCall.id;
       if (originalToolCallId) {
         const toolCallId = generatePrefixedId(idPrefix.toolCall);
@@ -357,7 +357,7 @@ export class LangGraphAdapter {
       }
     } else if (streamEvent.data.chunk.tool_call_chunks.length > 0) {
       // If tool call chunks are present, we need to handle them separately.
-      const toolCallChunk = streamEvent.data.chunk.tool_call_chunks[0];
+      const toolCallChunk = streamEvent.data.chunk.tool_call_chunks[0]!;
       if (toolCallState.currentToolCallId) {
         dataStream.writePart('tool_call_delta', {
           toolCallId: toolCallState.currentToolCallId,
@@ -500,8 +500,8 @@ export class LangGraphAdapter {
     const { streamEvent, dataStream, callbacks, modelId, totalUsageTokens } = parameters;
 
     const usageTokens = {
-      inputTokens: streamEvent.data.output.usage_metadata.input_tokens ?? 0,
-      outputTokens: streamEvent.data.output.usage_metadata.output_tokens ?? 0,
+      inputTokens: streamEvent.data.output.usage_metadata.input_tokens,
+      outputTokens: streamEvent.data.output.usage_metadata.output_tokens,
       cachedReadTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_read ?? 0,
       cachedWriteTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_creation ?? 0,
     } satisfies ChatUsageTokens;

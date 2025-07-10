@@ -5,30 +5,43 @@ import { cn } from '~/utils/ui.js';
 
 /**
  * Calculate appropriate step value for slider based on the default parameter value
- * Uses logarithmic scaling to ensure precision for values of different magnitudes
+ * Uses logarithmic scaling to determine the order of magnitude and set precision accordingly
  *
  * @param defaultValue - The default value of the parameter
  * @returns The calculated step value
  */
 const calculateSliderStep = (defaultValue: number): number => {
-  if (defaultValue === 0) return 0.01;
+  if (defaultValue === 0) {
+    return 0.01;
+  }
 
   const absoluteValue = Math.abs(defaultValue);
 
-  // Define step thresholds based on order of magnitude
-  if (absoluteValue >= 1) return 1;
-  if (absoluteValue >= 0.1) return 0.1;
-  if (absoluteValue >= 0.01) return 0.01;
-  if (absoluteValue >= 0.001) return 0.001;
-  if (absoluteValue >= 0.0001) return 0.0001;
-  if (absoluteValue >= 0.000_01) return 0.000_01;
-
-  // For very small values, continue the pattern
+  // Calculate step using order of magnitude
   const orderOfMagnitude = Math.floor(Math.log10(absoluteValue));
   const step = 10 ** orderOfMagnitude;
 
   // Ensure step is never larger than 1 and never smaller than a reasonable minimum
   return Math.min(1, Math.max(step, 0.000_001));
+};
+
+/**
+ * Calculate appropriate maximum value for slider based on the default parameter value
+ * Handles the case when defaultValue is 0 by providing a reasonable default range
+ *
+ * @param defaultValue - The default value of the parameter
+ * @returns The calculated maximum value
+ */
+const calculateSliderMax = (defaultValue: number): number => {
+  if (defaultValue === 0) {
+    return 100; // Provide a reasonable default range for zero values
+  }
+
+  const absoluteValue = Math.abs(defaultValue);
+
+  // For positive values, multiply by 4 to give a good range
+  // For negative values, we want the positive range to be 4 times the absolute value
+  return absoluteValue * 4;
 };
 
 type ChatParametersNumberProps = {
@@ -55,7 +68,7 @@ export function ChatParametersNumber({
       <Slider
         value={[value]}
         min={min ?? 0}
-        max={max ?? defaultValue * 4}
+        max={max ?? calculateSliderMax(defaultValue)}
         step={step ?? calculateSliderStep(defaultValue)}
         className={cn(
           'flex-1',

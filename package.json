@@ -33,6 +33,7 @@
     "@langchain/core": "^0.3.61",
     "@langchain/google-vertexai": "^0.2.14",
     "@langchain/langgraph": "^0.3.7",
+    "@langchain/langgraph-checkpoint-postgres": "^0.0.5",
     "@langchain/langgraph-supervisor": "^0.0.15",
     "@langchain/ollama": "^0.2.3",
     "@langchain/openai": "^0.5.18",

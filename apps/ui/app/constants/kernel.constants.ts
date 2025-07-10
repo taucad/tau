@@ -1,14 +1,5 @@
 import type { KernelProvider } from '~/types/kernel.types.js';
 
-export const emptyReplicadCode = `import {} from 'replicad';
-
-export const defaultParams = {};
-
-export default function main(p = defaultParams) {}
-`;
-
-export const emptyOpenscadCode = ``;
-
 export type KernelOption = {
   id: KernelProvider;
   name: string;
@@ -30,7 +21,7 @@ export const kernelOptions: KernelOption[] = [
     mainFile: 'main.scad',
     longDescription:
       'Uses Constructive Solid Geometry (CSG) - build complex shapes by combining basic primitives with boolean operations. Outputs mesh files perfect for 3D printing.',
-    emptyCode: emptyOpenscadCode,
+    emptyCode: ``,
     recommended: '3D Printing & Prototyping',
     tags: ['Constructive Solid Geometry', 'Mesh Export', 'Scripting', '3D Printing'],
     features: ['Boolean operations', 'Parametric design', 'STL export', 'Large community'],
@@ -47,7 +38,12 @@ export const kernelOptions: KernelOption[] = [
     mainFile: 'main.ts',
     longDescription:
       'Uses Boundary Representation (BRep) for mathematically exact geometry. Perfect for engineering applications requiring precise measurements and tolerances.',
-    emptyCode: emptyReplicadCode,
+    emptyCode: `import {} from 'replicad';
+
+export const defaultParams = {};
+
+export default function main(p = defaultParams) {}
+`,
     recommended: 'Engineering & Manufacturing',
     tags: ['Boundary Representation', 'OpenCascade', 'Exact Geometry', 'TypeScript', 'Precision'],
     features: ['Exact geometry', 'TypeScript API', 'CAD operations', 'STEP export'],

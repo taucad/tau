@@ -3,7 +3,7 @@ import { useCallback, useState, useEffect } from 'react';
 import type { JSX } from 'react';
 import { File, LoaderCircle, Play, X, ChevronDown, AlertTriangle, Bug, Camera, Check, RotateCcw } from 'lucide-react';
 import type { ToolResult } from 'ai';
-import { useMachine } from '@xstate/react';
+import { useActor } from '@xstate/react';
 import { CodeViewer } from '~/components/code-viewer.js';
 import { CopyButton } from '~/components/copy-button.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '~/components/ui/tooltip.js';
@@ -27,7 +27,7 @@ export type FileEditToolResult = ToolResult<
   {
     codeErrors: CodeError[];
     kernelError?: KernelError;
-    screenshot: string;
+    screenshot?: string;
   }
 >;
 
@@ -135,7 +135,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
   const status = useChatSelector((state) => state.context.status);
 
   // Create file edit machine
-  const [fileEditState, fileEditSend] = useMachine(fileEditMachine);
+  const [fileEditState, fileEditSend] = useActor(fileEditMachine);
 
   const setCode = useCallback((code: string) => {
     cadActor.send({ type: 'setCode', code });
@@ -190,10 +190,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
         targetFile?: string;
       };
 
-      const result =
-        part.toolInvocation.state === 'result'
-          ? (part.toolInvocation.result as FileEditToolResult['result'])
-          : undefined;
+      const result = part.toolInvocation.result as FileEditToolResult['result'];
 
       return (
         <div className="@container/code overflow-hidden rounded-md border bg-neutral/10">
@@ -270,58 +267,56 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
             </div>
           </div>
           <div>
-            {result ? (
-              <div>
-                {result.screenshot ? (
-                  <div className="border-t p-2 pt-1">
-                    <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
-                      <Camera className="size-3" />
-                      <span>views</span>
-                    </div>
-                    <HoverCard>
-                      <HoverCardTrigger asChild>
-                        <div className="cursor-pointer rounded-md border bg-neutral/5 hover:bg-neutral/10">
-                          <img
-                            src={result.screenshot}
-                            alt="Generated screenshot"
-                            className="size-full rounded-sm object-cover object-top"
-                          />
-                        </div>
-                      </HoverCardTrigger>
-                      <HoverCardContent asChild side="top" align="start" className="w-96">
-                        <img src={result.screenshot} alt="Generated screenshot (full size)" className="max-w-full" />
-                      </HoverCardContent>
-                    </HoverCard>
+            <div>
+              {result.screenshot ? (
+                <div className="border-t p-2 pt-1">
+                  <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    <Camera className="size-3" />
+                    <span>views</span>
                   </div>
-                ) : null}
+                  <HoverCard>
+                    <HoverCardTrigger asChild>
+                      <div className="cursor-pointer rounded-md border bg-neutral/5 hover:bg-neutral/10">
+                        <img
+                          src={result.screenshot}
+                          alt="Generated screenshot"
+                          className="size-full rounded-sm object-cover object-top"
+                        />
+                      </div>
+                    </HoverCardTrigger>
+                    <HoverCardContent asChild side="top" align="start" className="w-96">
+                      <img src={result.screenshot} alt="Generated screenshot (full size)" className="max-w-full" />
+                    </HoverCardContent>
+                  </HoverCard>
+                </div>
+              ) : null}
 
-                <ErrorSection
-                  isInitiallyOpen
-                  className="border-t"
-                  type="kernel"
-                  errors={
-                    result.kernelError
-                      ? [
-                          {
-                            startLineNumber: result.kernelError.startLineNumber ?? 0,
-                            startColumn: result.kernelError.startColumn ?? 0,
-                            message: result.kernelError.message,
-                          },
-                        ]
-                      : []
-                  }
-                  icon={Bug}
-                />
+              <ErrorSection
+                isInitiallyOpen
+                className="border-t"
+                type="kernel"
+                errors={
+                  result.kernelError
+                    ? [
+                        {
+                          startLineNumber: result.kernelError.startLineNumber,
+                          startColumn: result.kernelError.startColumn,
+                          message: result.kernelError.message,
+                        },
+                      ]
+                    : []
+                }
+                icon={Bug}
+              />
 
-                <ErrorSection
-                  className="border-t"
-                  type="linter"
-                  errors={result.codeErrors ?? []}
-                  icon={AlertTriangle}
-                  isInitiallyOpen={(result.codeErrors?.length ?? 0) <= 3}
-                />
-              </div>
-            ) : null}
+              <ErrorSection
+                className="border-t"
+                type="linter"
+                errors={result.codeErrors}
+                icon={AlertTriangle}
+                isInitiallyOpen={result.codeErrors.length <= 3}
+              />
+            </div>
           </div>
         </div>
       );

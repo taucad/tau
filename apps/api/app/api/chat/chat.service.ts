@@ -109,7 +109,7 @@ When receiving responses back from your team members, maintain efficiency by bei
 
 Your goal is to ensure users receive expert-level assistance by connecting them with the right specialist for their specific needs, while maintaining a smooth and efficient workflow that automatically handles technical errors through iterative refinement.`,
       outputMode: 'full_history', // Include full agent message history
-    }).compile();
+    }).compile({ checkpointer });
 
     return supervisor;
   }
@@ -131,7 +131,7 @@ Your goal is to ensure users receive expert-level assistance by connecting them 
         ]);
       },
       onEvent(parameters) {
-        logger.debug(`onEvent: ${JSON.stringify(parameters.event)}`);
+        logger.verbose(`onEvent: ${JSON.stringify(parameters.event)}`);
       },
       onError(error) {
         if (error instanceof Error && error.message === 'Aborted') {

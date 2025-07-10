@@ -1,8 +1,10 @@
-import { Body, Controller, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Logger, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { convertToCoreMessages } from 'ai';
 import type { UIMessage } from 'ai';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HumanMessage } from '@langchain/core/messages';
+import { Command } from '@langchain/langgraph';
+import { tryExtractLastToolResult } from '~/api/chat/utils/extract-tool-result.js';
 import { ToolService, toolChoiceFromToolName } from '~/api/tools/tool.service.js';
 import type { ToolChoiceWithCategory } from '~/api/tools/tool.service.js';
 import { ChatService } from '~/api/chat/chat.service.js';
@@ -58,6 +60,8 @@ export type CreateChatBody = {
   screenshot: string;
   kernel?: 'replicad' | 'openscad';
   files?: FilesContext;
+  /* The ID of the chat. */
+  id: string;
   messages: Array<
     UIMessage & {
       model: string;
@@ -69,22 +73,26 @@ export type CreateChatBody = {
 @UseGuards(AuthGuard)
 @Controller({ path: 'chat', version: '1' })
 export class ChatController {
+  private readonly logger = new Logger(ChatController.name);
+
   public constructor(
     private readonly chatService: ChatService,
     private readonly toolService: ToolService,
   ) {}
 
   @Post()
-  public async getData(
+  public async createChat(
     @Body() body: CreateChatBody,
     @Res() response: FastifyReply,
     @Req() request: FastifyRequest,
   ): Promise<void> {
+    this.logger.debug(`Creating chat: ${body.id}`);
     // Sanitize messages to handle partial tool calls before conversion
     const sanitizedMessages = sanitizeMessagesForConversion(body.messages);
     const coreMessages = convertToCoreMessages(sanitizedMessages);
     const lastHumanMessage = body.messages.findLast((message) => message.role === 'user');
 
+    this.logger.debug(`Last human message: ${JSON.stringify(lastHumanMessage, null, 2)}`);
     let modelId: string;
     const selectedToolChoice: ToolChoiceWithCategory = 'auto';
     let selectedKernel: 'replicad' | 'openscad' = 'replicad';
@@ -112,6 +120,25 @@ export class ChatController {
 
     const langchainMessages = convertAiSdkMessagesToLangchainMessages(sanitizedMessages, coreMessages);
     const graph = await this.chatService.createGraph(modelId, selectedToolChoice, selectedKernel);
+
+    // Configuration for the graph execution
+    const config = {
+      streamMode: 'values' as const,
+      version: 'v2' as const,
+      configurable: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangGraph API requires snake_case
+        thread_id: body.id, // Enable persistence using conversation ID as thread ID
+      },
+    };
+
+    // Check if this thread is in an interrupted state
+    let currentState;
+    try {
+      currentState = await graph.getState(config);
+    } catch {
+      // If we can't get state, assume it's a new conversation
+      currentState = null;
+    }
 
     // Abort the request if the client disconnects
     const abortController = new AbortController();
@@ -173,16 +200,37 @@ ${objectToXml({
       ],
     });
 
-    const eventStream = graph.streamEvents(
-      {
-        messages: [...langchainMessages, resultMessage],
-      },
-      {
-        streamMode: 'values',
-        version: 'v2',
+    let eventStream;
+
+    // Check if we're resuming from an interrupt
+    if (currentState?.next && currentState.next.length > 0) {
+      // Thread is interrupted, resume with the provided input
+      this.logger.debug(`Resuming interrupted thread: ${body.id}`);
+
+      // Extract the result from the last tool call to use as resume value
+      const toolResult = tryExtractLastToolResult(body.messages);
+
+      this.logger.debug(`Resuming with tool result: ${JSON.stringify(toolResult, null, 2)}`);
+
+      // Resume the graph execution with the tool result
+      eventStream = graph.streamEvents(new Command({ resume: toolResult }), {
+        ...config,
         signal: abortController.signal,
-      },
-    );
+      });
+    } else {
+      // Normal execution - start new conversation or continue existing one
+      this.logger.debug(`Starting normal execution for thread: ${body.id}`);
+
+      eventStream = graph.streamEvents(
+        {
+          messages: [...langchainMessages, resultMessage],
+        },
+        {
+          ...config,
+          signal: abortController.signal,
+        },
+      );
+    }
 
     // Use the LangGraphAdapter to handle the response
     const result = LangGraphAdapter.toDataStream(eventStream, {

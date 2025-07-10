@@ -38,7 +38,7 @@ type SidebarContextProperties = {
 
 const SidebarContext = React.createContext<SidebarContextProperties | undefined>(undefined);
 
-function useSidebar() {
+function useSidebar(): SidebarContextProperties {
   const context = React.useContext(SidebarContext);
   if (!context) {
     throw new Error('useSidebar must be used within a SidebarProvider.');
@@ -55,7 +55,7 @@ function SidebarProvider({
   ...properties
 }: React.ComponentProps<'div'> & {
   readonly onOpenChange?: (open: boolean) => void;
-}) {
+}): React.JSX.Element {
   const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
   const [_open, _setOpen] = useCookie(cookieName.sidebarOpen, sidebarDefaultOpen);
@@ -136,7 +136,7 @@ function Sidebar({
   readonly side?: 'left' | 'right';
   readonly variant?: 'sidebar' | 'floating' | 'inset';
   readonly collapsible?: 'offcanvas' | 'icon' | 'none';
-}) {
+}): React.JSX.Element {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
 
   if (collapsible === 'none') {
@@ -222,7 +222,7 @@ function Sidebar({
   );
 }
 
-function SidebarTrigger({ className, onClick, ...properties }: React.ComponentProps<typeof Button>) {
+function SidebarTrigger({ className, onClick, ...properties }: React.ComponentProps<typeof Button>): React.JSX.Element {
   const { toggleSidebar } = useSidebar();
 
   return (
@@ -244,7 +244,7 @@ function SidebarTrigger({ className, onClick, ...properties }: React.ComponentPr
   );
 }
 
-function SidebarRail({ className, ...properties }: React.ComponentProps<'button'>) {
+function SidebarRail({ className, ...properties }: React.ComponentProps<'button'>): React.JSX.Element {
   const { toggleSidebar } = useSidebar();
 
   return (
@@ -270,7 +270,7 @@ function SidebarRail({ className, ...properties }: React.ComponentProps<'button'
   );
 }
 
-function SidebarInset({ className, ...properties }: React.ComponentProps<'main'>) {
+function SidebarInset({ className, ...properties }: React.ComponentProps<'main'>): React.JSX.Element {
   return (
     <main
       data-slot="sidebar-inset"
@@ -284,7 +284,7 @@ function SidebarInset({ className, ...properties }: React.ComponentProps<'main'>
   );
 }
 
-function SidebarInput({ className, ...properties }: React.ComponentProps<typeof Input>) {
+function SidebarInput({ className, ...properties }: React.ComponentProps<typeof Input>): React.JSX.Element {
   return (
     <Input
       autoComplete="off"
@@ -296,7 +296,7 @@ function SidebarInput({ className, ...properties }: React.ComponentProps<typeof 
   );
 }
 
-function SidebarHeader({ className, ...properties }: React.ComponentProps<'div'>) {
+function SidebarHeader({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div
       data-slot="sidebar-header"
@@ -307,7 +307,7 @@ function SidebarHeader({ className, ...properties }: React.ComponentProps<'div'>
   );
 }
 
-function SidebarFooter({ className, ...properties }: React.ComponentProps<'div'>) {
+function SidebarFooter({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div
       data-slot="sidebar-footer"
@@ -318,7 +318,7 @@ function SidebarFooter({ className, ...properties }: React.ComponentProps<'div'>
   );
 }
 
-function SidebarSeparator({ className, ...properties }: React.ComponentProps<typeof Separator>) {
+function SidebarSeparator({ className, ...properties }: React.ComponentProps<typeof Separator>): React.JSX.Element {
   return (
     <Separator
       data-slot="sidebar-separator"
@@ -329,7 +329,7 @@ function SidebarSeparator({ className, ...properties }: React.ComponentProps<typ
   );
 }
 
-function SidebarContent({ className, ...properties }: React.ComponentProps<'div'>) {
+function SidebarContent({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div
       data-slot="sidebar-content"
@@ -343,7 +343,7 @@ function SidebarContent({ className, ...properties }: React.ComponentProps<'div'
   );
 }
 
-function SidebarGroup({ className, ...properties }: React.ComponentProps<'div'>) {
+function SidebarGroup({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div
       data-slot="sidebar-group"
@@ -358,7 +358,7 @@ function SidebarGroupLabel({
   className,
   asChild = false,
   ...properties
-}: React.ComponentProps<'div'> & { readonly asChild?: boolean }) {
+}: React.ComponentProps<'div'> & { readonly asChild?: boolean }): React.JSX.Element {
   const Comp = asChild ? Slot : 'div';
 
   return (
@@ -379,7 +379,7 @@ function SidebarGroupAction({
   className,
   asChild = false,
   ...properties
-}: React.ComponentProps<'button'> & { readonly asChild?: boolean }) {
+}: React.ComponentProps<'button'> & { readonly asChild?: boolean }): React.JSX.Element {
   const Comp = asChild ? Slot : 'button';
 
   return (
@@ -398,7 +398,7 @@ function SidebarGroupAction({
   );
 }
 
-function SidebarGroupContent({ className, ...properties }: React.ComponentProps<'div'>) {
+function SidebarGroupContent({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div
       data-slot="sidebar-group-content"
@@ -409,7 +409,7 @@ function SidebarGroupContent({ className, ...properties }: React.ComponentProps<
   );
 }
 
-function SidebarMenu({ className, ...properties }: React.ComponentProps<'ul'>) {
+function SidebarMenu({ className, ...properties }: React.ComponentProps<'ul'>): React.JSX.Element {
   return (
     <ul
       data-slot="sidebar-menu"
@@ -420,7 +420,7 @@ function SidebarMenu({ className, ...properties }: React.ComponentProps<'ul'>) {
   );
 }
 
-function SidebarMenuItem({ className, ...properties }: React.ComponentProps<'li'>) {
+function SidebarMenuItem({ className, ...properties }: React.ComponentProps<'li'>): React.JSX.Element {
   return (
     <li
       data-slot="sidebar-menu-item"
@@ -468,7 +468,7 @@ function SidebarMenuButton({
   readonly isActive?: boolean;
   readonly tooltip?: string | React.ComponentProps<typeof TooltipContent>;
   readonly shouldAutoClose?: boolean;
-} & VariantProps<typeof sidebarMenuButtonVariants>) {
+} & VariantProps<typeof sidebarMenuButtonVariants>): React.JSX.Element {
   const Comp = asChild ? Slot : 'button';
   const { isMobile, state, toggleSidebar } = useSidebar();
 
@@ -522,7 +522,7 @@ function SidebarMenuAction({
 }: React.ComponentProps<'button'> & {
   readonly asChild?: boolean;
   readonly shouldShowOnHover?: boolean;
-}) {
+}): React.JSX.Element {
   const Comp = asChild ? Slot : 'button';
 
   return (
@@ -543,7 +543,7 @@ function SidebarMenuAction({
   );
 }
 
-function SidebarMenuBadge({ className, ...properties }: React.ComponentProps<'div'>) {
+function SidebarMenuBadge({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div
       data-slot="sidebar-menu-badge"
@@ -565,7 +565,7 @@ function SidebarMenuSkeleton({
   ...properties
 }: React.ComponentProps<'div'> & {
   readonly hasIcon?: boolean;
-}) {
+}): React.JSX.Element {
   // Random width between 50 to 90%.
   const width = React.useMemo(() => {
     return `${Math.floor(Math.random() * 40) + 50}%`;
@@ -590,7 +590,7 @@ function SidebarMenuSkeleton({
   );
 }
 
-function SidebarMenuSub({ className, ...properties }: React.ComponentProps<'ul'>) {
+function SidebarMenuSub({ className, ...properties }: React.ComponentProps<'ul'>): React.JSX.Element {
   return (
     <ul
       data-slot="sidebar-menu-sub"
@@ -605,7 +605,7 @@ function SidebarMenuSub({ className, ...properties }: React.ComponentProps<'ul'>
   );
 }
 
-function SidebarMenuSubItem({ className, ...properties }: React.ComponentProps<'li'>) {
+function SidebarMenuSubItem({ className, ...properties }: React.ComponentProps<'li'>): React.JSX.Element {
   return (
     <li
       data-slot="sidebar-menu-sub-item"
@@ -626,7 +626,7 @@ function SidebarMenuSubButton({
   readonly asChild?: boolean;
   readonly size?: 'sm' | 'md';
   readonly isActive?: boolean;
-}) {
+}): React.JSX.Element {
   const Comp = asChild ? Slot : 'a';
 
   return (

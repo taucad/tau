@@ -166,11 +166,15 @@ const chatMachine = setup({
           actions: [
             assign({ error: undefined }),
             ({ context, event }) => {
-              if (!context._chatActions) return;
+              if (!context._chatActions) {
+                return;
+              }
 
               // Find message index
               const messageIndex = context.messages.findIndex((m) => m.id === event.messageId);
-              if (messageIndex === -1) return;
+              if (messageIndex === -1) {
+                return;
+              }
 
               // Create new message with updated content
               const newMessage: Message = {
@@ -195,11 +199,16 @@ const chatMachine = setup({
           actions: [
             assign({ error: undefined }),
             ({ context, event }) => {
-              if (!context._chatActions) return;
+              if (!context._chatActions) {
+                return;
+              }
 
               // Get messages up to (but not including) the message at messageIndex
               const messageIndex = context.messages.findIndex((m) => m.id === event.messageId);
-              if (messageIndex === -1) return;
+              if (messageIndex === -1) {
+                return;
+              }
+
               const newMessages = context.messages.slice(0, messageIndex);
 
               // Set messages and reload to retry
@@ -310,11 +319,15 @@ const chatMachine = setup({
           actions: [
             assign({ error: undefined }),
             ({ context, event }) => {
-              if (!context._chatActions) return;
+              if (!context._chatActions) {
+                return;
+              }
 
               // Find message index
               const messageIndex = context.messages.findIndex((m) => m.id === event.messageId);
-              if (messageIndex === -1) return;
+              if (messageIndex === -1) {
+                return;
+              }
 
               // Create new message with updated content
               const newMessage: Message = {
@@ -339,12 +352,17 @@ const chatMachine = setup({
           actions: [
             assign({ error: undefined }),
             ({ context, event }) => {
-              if (!context._chatActions) return;
+              if (!context._chatActions) {
+                return;
+              }
 
               // Original business logic: get messages up to (but not including) the message at messageIndex
               // But handle the case where there's a previous message to retry with a different model
               const messageIndex = context.messages.findIndex((m) => m.id === event.messageId);
-              if (messageIndex === -1) return;
+              if (messageIndex === -1) {
+                return;
+              }
+
               const sliceIndex = Math.max(messageIndex - 1, 0);
               const previousMessage = context.messages[sliceIndex];
 

@@ -66,7 +66,9 @@ export class AuthModule implements NestModule, OnModuleInit {
   ) {}
 
   public onModuleInit(): void {
-    if (!this.auth.options.hooks) return;
+    if (!this.auth.options.hooks) {
+      return;
+    }
 
     const providers = this.discoveryService
       .getProviders()
@@ -100,7 +102,9 @@ export class AuthModule implements NestModule, OnModuleInit {
 
         const headers = new Headers();
         for (const [key, value] of Object.entries(request.headers)) {
-          if (value) headers.append(key, value.toString());
+          if (value) {
+            headers.append(key, value.toString());
+          }
         }
 
         const request_ = new Request(url.toString(), {
@@ -135,11 +139,15 @@ export class AuthModule implements NestModule, OnModuleInit {
   }
 
   private setupHooks(providerMethod: (context: unknown) => Promise<void>): void {
-    if (!this.auth.options.hooks) return;
+    if (!this.auth.options.hooks) {
+      return;
+    }
 
     for (const { metadataKey, hookType } of hooks) {
       const hookPath = Reflect.getMetadata(metadataKey, providerMethod) as string;
-      if (!hookPath) continue;
+      if (!hookPath) {
+        continue;
+      }
 
       const originalHook = this.auth.options.hooks[hookType];
       this.auth.options.hooks[hookType] = async (context) => {

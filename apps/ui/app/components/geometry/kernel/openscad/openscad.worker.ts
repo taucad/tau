@@ -77,7 +77,7 @@ async function extractParametersFromCode(code: string): Promise<ExtractParameter
     });
   } catch (error) {
     console.error('Error extracting parameters:', error);
-    const errorMessage = (error as Error).message ?? 'Unknown error';
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return createKernelError({ message: errorMessage, startColumn: 0, startLineNumber: 0 });
   }
 }
@@ -143,7 +143,7 @@ async function buildShapesFromCode(
     const mesh = parseSTL(arrayBuffer);
 
     // Optimize the mesh
-    mesh.mergeVertices?.();
+    mesh.mergeVertices();
 
     // Extract original geometry data
     const originalVertices = [...mesh.vertices];
@@ -156,21 +156,21 @@ async function buildShapesFromCode(
 
     // For each triangle, create unique vertices with face normals
     for (let i = 0; i < originalTriangles.length; i += 3) {
-      const i1 = originalTriangles[i];
-      const i2 = originalTriangles[i + 1];
-      const i3 = originalTriangles[i + 2];
+      const i1 = originalTriangles[i]!;
+      const i2 = originalTriangles[i + 1]!;
+      const i3 = originalTriangles[i + 2]!;
 
       // Get triangle vertices from original data
-      const v1 = [originalVertices[i1 * 3], originalVertices[i1 * 3 + 1], originalVertices[i1 * 3 + 2]];
-      const v2 = [originalVertices[i2 * 3], originalVertices[i2 * 3 + 1], originalVertices[i2 * 3 + 2]];
-      const v3 = [originalVertices[i3 * 3], originalVertices[i3 * 3 + 1], originalVertices[i3 * 3 + 2]];
+      const v1 = [originalVertices[i1 * 3]!, originalVertices[i1 * 3 + 1]!, originalVertices[i1 * 3 + 2]!] as const;
+      const v2 = [originalVertices[i2 * 3]!, originalVertices[i2 * 3 + 1]!, originalVertices[i2 * 3 + 2]!] as const;
+      const v3 = [originalVertices[i3 * 3]!, originalVertices[i3 * 3 + 1]!, originalVertices[i3 * 3 + 2]!] as const;
 
       // Compute edge vectors
-      const edge1 = [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]];
-      const edge2 = [v3[0] - v1[0], v3[1] - v1[1], v3[2] - v1[2]];
+      const edge1 = [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]] as const;
+      const edge2 = [v3[0] - v1[0], v3[1] - v1[1], v3[2] - v1[2]] as const;
 
       // Compute face normal using cross product
-      const normal = [
+      const normal: [number, number, number] = [
         edge1[1] * edge2[2] - edge1[2] * edge2[1],
         edge1[2] * edge2[0] - edge1[0] * edge2[2],
         edge1[0] * edge2[1] - edge1[1] * edge2[0],
@@ -219,7 +219,7 @@ async function buildShapesFromCode(
     return createKernelSuccess([shape]);
   } catch (error) {
     console.error('Error while building shapes from code:', error);
-    const errorMessage = (error as Error).message ?? 'Unknown error';
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return createKernelError({ message: errorMessage, startColumn: 0, startLineNumber: 0 });
   }
 }
@@ -253,7 +253,7 @@ const exportShape = async (
       },
     ]);
   } catch (error) {
-    const errorMessage = (error as Error).message ?? 'Unknown error';
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return createKernelError({ message: errorMessage, startColumn: 0, startLineNumber: 0 });
   }
 };

@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_PIPE } from '@nestjs/core';
+import { ZodValidationPipe } from 'nestjs-zod';
 import { DatabaseModule } from '~/database/database.module.js';
 import { AuthModule } from '~/auth/auth.module.js';
 import { getEnvironment } from '~/config/environment.config.js';
@@ -17,7 +19,12 @@ import { RequestIdMiddleware } from '~/middlewares/request-id.middleware.js';
     LoggerModule,
   ],
   controllers: [],
-  providers: [],
+  providers: [
+    {
+      provide: APP_PIPE,
+      useClass: ZodValidationPipe,
+    },
+  ],
 })
 export class AppModule implements NestModule {
   public configure(consumer: MiddlewareConsumer): void {

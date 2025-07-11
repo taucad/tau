@@ -6,10 +6,12 @@ import type { CoreMessage, Message, UIMessage } from 'ai';
  * Preprocesses UI messages to handle partial tool calls by converting them to completed state
  * with mock results. This prevents MessageConversionError when partial tool calls are present.
  *
+ * Deprecated properties have been removed: ['data', 'annotations']
+ *
  * @param messages - The UI messages that may contain partial tool calls
  * @returns Processed messages with all tool calls in completed state
  */
-export function sanitizeMessagesForConversion(messages: UIMessage[]): UIMessage[] {
+export function sanitizeMessagesForConversion(messages: Array<Omit<UIMessage, 'data' | 'annotations'>>): UIMessage[] {
   return messages.map((message) => {
     if (message.role !== 'assistant') {
       return message;

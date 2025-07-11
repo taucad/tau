@@ -13,6 +13,7 @@ import { nameGenerationSystemPrompt } from '~/api/chat/prompts/chat-prompt-name.
 import type { LangGraphAdapterCallbacks } from '~/api/chat/utils/langgraph-adapter.js';
 import { getCadSystemPrompt } from '~/api/chat/prompts/chat-prompt-cad.js';
 import type { Environment } from '~/config/environment.config.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
 
 @Injectable()
 export class ChatService {
@@ -36,7 +37,7 @@ export class ChatService {
   public async createGraph(
     modelId: string,
     selectedToolChoice: ToolChoiceWithCategory,
-    selectedKernel: 'replicad' | 'openscad',
+    selectedKernel: KernelProvider,
   ) {
     const { tools } = this.toolService.getTools(selectedToolChoice);
 

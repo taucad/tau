@@ -2,12 +2,11 @@
 import replicadTypes from '../../../../../../gen/api/replicad/replicad-clean-with-jsdoc.d.ts?raw';
 // eslint-disable-next-line no-restricted-imports -- expected
 import { mockModels } from '../../../../../ui/app/constants/build-code-examples.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
 
 const mockModelsString = mockModels
   .map((model) => `<example>\n${model.name}\n\`\`\`javascript\n${model.code}\`\`\`\n</example>`)
   .join('\n\n');
-
-type CadKernel = 'replicad' | 'openscad';
 
 type KernelConfig = {
   fileExtension: string;
@@ -26,7 +25,7 @@ type KernelConfig = {
   mainFunctionDescription: string;
 };
 
-const cadKernelConfigs: Record<CadKernel, KernelConfig> = {
+const cadKernelConfigs: Record<KernelProvider, KernelConfig> = {
   openscad: {
     fileExtension: '.scad',
     languageName: 'OpenSCAD',
@@ -213,7 +212,7 @@ export const communicationGuidelines = {
   concise: communicationGuidelinesConcise,
 };
 
-function getKernelSpecificContent(kernel: CadKernel): string {
+function getKernelSpecificContent(kernel: KernelProvider): string {
   const config = cadKernelConfigs[kernel];
   return `${config.technicalContext}
 
@@ -224,7 +223,7 @@ ${config.modelingStrategy}
 ${config.technicalResources}`;
 }
 
-export async function getCadSystemPrompt(kernel: CadKernel = 'replicad'): Promise<string> {
+export async function getCadSystemPrompt(kernel: KernelProvider): Promise<string> {
   const config = cadKernelConfigs[kernel];
   const kernelSpecificContent = getKernelSpecificContent(kernel);
 

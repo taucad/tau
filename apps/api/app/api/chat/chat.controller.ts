@@ -15,8 +15,7 @@ import {
 } from '~/api/chat/utils/convert-messages.js';
 import { objectToXml } from '~/utils/xml.js';
 import { AuthGuard } from '~/auth/auth.guard.js';
-
-type KernelProvider = 'replicad' | 'openscad';
+import type { KernelProvider } from '~/types/kernel.types.js';
 
 export type CodeError = {
   message: string;

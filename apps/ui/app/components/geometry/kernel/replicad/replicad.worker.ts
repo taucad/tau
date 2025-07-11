@@ -66,9 +66,7 @@ export async function runAsModule(code: string, parameters: Record<string, unkno
   console.log(`Module building took ${buildTime - startTime}ms`);
 
   const execStartTime = performance.now();
-  const result = module.default
-    ? module.default(parameters || module.defaultParams)
-    : module.main?.(replicad, parameters || module.defaultParams || {});
+  const result = module.default ? module.default(parameters) : module.main?.(replicad, parameters);
   const execEndTime = performance.now();
   console.log(`Module execution took ${execEndTime - execStartTime}ms`);
 
@@ -129,8 +127,8 @@ try {
     const kernelError = await formatKernelError(error);
     return createKernelError({
       message: kernelError.message,
-      startLineNumber: kernelError.startLineNumber ?? 0,
-      startColumn: kernelError.startColumn ?? 0,
+      startLineNumber: kernelError.startLineNumber,
+      startColumn: kernelError.startColumn,
       stack: kernelError.stack,
       stackFrames: kernelError.stackFrames,
       type: kernelError.type,
@@ -285,13 +283,9 @@ const formatException = (
   let message = 'error';
 
   if (typeof error === 'number') {
-    if (oc.OCJS) {
-      const errorData = oc.OCJS.getStandard_FailureData(error);
-      // eslint-disable-next-line new-cap -- valid API in OCJS
-      message = errorData.GetMessageString();
-    } else {
-      message = `Kernel error ${error}`;
-    }
+    const errorData = oc.OCJS.getStandard_FailureData(error);
+    // eslint-disable-next-line new-cap -- valid API in OCJS
+    message = errorData.GetMessageString();
   } else {
     message = error instanceof Error ? error.message : 'Unknown error';
     console.error(error);
@@ -426,7 +420,7 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
       standardizer,
       (shapesArray) => {
         const editedShapes = helper.apply(shapesArray);
-        shapesMemory.defaultShape = shapesArray;
+        shapesMemory['defaultShape'] = shapesArray;
         return editedShapes as ShapeConfig[];
       },
       defaultName,
@@ -457,9 +451,18 @@ const buildBlob = (
   fileType: string,
   meshConfig: { tolerance: number; angularTolerance: number },
 ): Blob => {
-  if (fileType === 'stl') return shape.blobSTL(meshConfig);
-  if (fileType === 'stl-binary') return shape.blobSTL({ ...meshConfig, binary: true });
-  if (fileType === 'step') return shape.blobSTEP();
+  if (fileType === 'stl') {
+    return shape.blobSTL(meshConfig);
+  }
+
+  if (fileType === 'stl-binary') {
+    return shape.blobSTL({ ...meshConfig, binary: true });
+  }
+
+  if (fileType === 'step') {
+    return shape.blobSTEP();
+  }
+
   throw new Error(`Filetype "${fileType}" unknown for export.`);
 };
 
@@ -497,8 +500,8 @@ const exportShape = async (
     const kernelError = await formatKernelError(error);
     return createKernelError({
       message: kernelError.message,
-      startLineNumber: kernelError.startLineNumber ?? 0,
-      startColumn: kernelError.startColumn ?? 0,
+      startLineNumber: kernelError.startLineNumber,
+      startColumn: kernelError.startColumn,
       stack: kernelError.stack,
       stackFrames: kernelError.stackFrames,
       type: kernelError.type,
@@ -508,7 +511,10 @@ const exportShape = async (
 
 const faceInfo = (subshapeIndex: number, faceIndex: number, shapeId = 'defaultShape'): unknown | undefined => {
   const face = shapesMemory[shapeId]?.[subshapeIndex]?.shape.faces[faceIndex];
-  if (!face) return undefined;
+  if (!face) {
+    return undefined;
+  }
+
   return {
     type: face.geomType,
     center: face.center.toTuple(),
@@ -518,7 +524,10 @@ const faceInfo = (subshapeIndex: number, faceIndex: number, shapeId = 'defaultSh
 
 const edgeInfo = (subshapeIndex: number, edgeIndex: number, shapeId = 'defaultShape'): unknown | undefined => {
   const edge = shapesMemory[shapeId]?.[subshapeIndex]?.shape.edges[edgeIndex];
-  if (!edge) return undefined;
+  if (!edge) {
+    return undefined;
+  }
+
   return {
     type: edge.geomType,
     start: edge.startPoint.toTuple(),

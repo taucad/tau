@@ -10,7 +10,7 @@ Tau supports multiple CAD kernels. Specify the kernel when initializing the CAD 
 ## Using the OpenSCAD kernel
 
 1. Load / create a file ending with `.scad` **or** set the build asset language to `openscad`.
-2. The CAD machine will automatically choose the OpenSCAD kernel and spin up the `openscad-builder.worker`.
+2. The CAD machine will automatically choose the OpenSCAD kernel and spin up the `openscad.worker`.
 3. All Replicad viewer features work (mesh display, export ‑ *STEP export coming soon*).
 
 Example:

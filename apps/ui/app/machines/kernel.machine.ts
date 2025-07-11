@@ -2,13 +2,14 @@ import { assign, assertEvent, setup, sendTo, fromPromise } from 'xstate';
 import type { Snapshot, ActorRef, OutputFrom, DoneActorEvent } from 'xstate';
 import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
+import { isBrowser } from 'motion/react';
 import type { Shape } from '~/types/cad.types.js';
 import type { KernelError, KernelProvider } from '~/types/kernel.types.js';
 import { isKernelSuccess } from '~/types/kernel.types.js';
-import type { BuilderWorkerInterface as ReplicadWorker } from '~/components/geometry/kernel/replicad/replicad-builder.worker.js';
-import ReplicadBuilderWorker from '~/components/geometry/kernel/replicad/replicad-builder.worker.js?worker';
-import type { OpenScadBuilderInterface as OpenSCADWorker } from '~/components/geometry/kernel/openscad/openscad-builder.worker.js';
-import OpenSCADBuilderWorker from '~/components/geometry/kernel/openscad/openscad-builder.worker.js?worker';
+import type { BuilderWorkerInterface as ReplicadWorker } from '~/components/geometry/kernel/replicad/replicad.worker.js';
+import ReplicadBuilderWorker from '~/components/geometry/kernel/replicad/replicad.worker.js?worker';
+import type { OpenScadBuilderInterface as OpenSCADWorker } from '~/components/geometry/kernel/openscad/openscad.worker.js';
+import OpenSCADBuilderWorker from '~/components/geometry/kernel/openscad/openscad.worker.js?worker';
 import { assertActorDoneEvent } from '~/utils/xstate.js';
 
 const workers = {
@@ -269,7 +270,7 @@ const exportGeometryActor = fromPromise<
 
     if (isKernelSuccess(result)) {
       const { data } = result;
-      if (Array.isArray(data) && data.length > 0 && data[0].blob) {
+      if (Array.isArray(data) && data.length > 0 && data[0]?.blob) {
         return { type: 'geometryExported', blob: data[0].blob, format };
       }
 
@@ -301,9 +302,6 @@ const exportGeometryActor = fromPromise<
     };
   }
 });
-
-// Check if we're in a browser environment
-const isBrowser = globalThis.window !== undefined && typeof Worker !== 'undefined';
 
 export type CadActor = ActorRef<Snapshot<unknown>, KernelEventExternal>;
 

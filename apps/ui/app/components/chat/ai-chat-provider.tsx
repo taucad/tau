@@ -392,7 +392,7 @@ const chatMachine = setup({
 type ChatMachineState = ReturnType<typeof chatMachine.getInitialSnapshot>;
 
 // Create the actor context using XState's createActorContext
-const AiChatContext = createActorContext(chatMachine);
+export const AiChatContext = createActorContext(chatMachine);
 
 // Provider component that wraps useChat and syncs with XState
 export function AiChatProvider({
@@ -490,9 +490,6 @@ function ChatSyncWrapper({
 
   return children as JSX.Element;
 }
-
-// Export the context for direct access if needed
-export { AiChatContext };
 
 // Type-safe selector hook with full TypeScript support
 export function useChatSelector<T>(

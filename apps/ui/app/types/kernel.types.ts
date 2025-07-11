@@ -28,7 +28,7 @@ export type KernelErrorResult = {
   error: KernelError;
 };
 
-export const kernelProviders = ['replicad', 'openscad'] as const;
+export const kernelProviders = ['replicad', 'openscad', 'zoo'] as const;
 export type KernelProvider = (typeof kernelProviders)[number];
 
 export type KernelResult<T> = KernelSuccessResult<T> | KernelErrorResult;

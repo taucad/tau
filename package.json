@@ -28,6 +28,7 @@
     "@daveyplate/better-auth-ui": "^2.0.8",
     "@fastify/helmet": "^13.0.1",
     "@hookform/resolvers": "^5.1.1",
+    "@kittycad/lib": "^2.0.41",
     "@langchain/anthropic": "^0.3.23",
     "@langchain/community": "^0.3.47",
     "@langchain/core": "^0.3.61",

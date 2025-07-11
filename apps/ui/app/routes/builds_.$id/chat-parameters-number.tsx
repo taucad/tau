@@ -3,6 +3,31 @@ import { Slider } from '~/components/ui/slider.js';
 import { ChatParametersInputNumber } from '~/routes/builds_.$id/chat-parameters-input-number.js';
 import { cn } from '~/utils/ui.js';
 
+// Slider calculation constants
+/*
+ * The multiplier for the slider range.
+ * This is the factor by which the default range is multiplied to get the maximum value.
+ */
+const SliderRangeMultiplier = 4;
+
+/*
+ * The default range for zero values.
+ * This is the range that is used for zero values.
+ */
+const DefaultRangeForZero = 100;
+
+/*
+ * The minimum step value for the slider.
+ * This is the minimum step value that is used for the slider.
+ */
+const MinStepValue = 0.000_001;
+
+/*
+ * The default step value for zero values.
+ * This is the step value that is used for zero values.
+ */
+const DefaultStepForZero = 0.01;
+
 /**
  * Calculate appropriate step value for slider based on the default parameter value
  * Uses logarithmic scaling to determine the order of magnitude and set precision accordingly
@@ -12,7 +37,7 @@ import { cn } from '~/utils/ui.js';
  */
 const calculateSliderStep = (defaultValue: number): number => {
   if (defaultValue === 0) {
-    return 0.01;
+    return DefaultStepForZero;
   }
 
   const absoluteValue = Math.abs(defaultValue);
@@ -22,7 +47,7 @@ const calculateSliderStep = (defaultValue: number): number => {
   const step = 10 ** orderOfMagnitude;
 
   // Ensure step is never larger than 1 and never smaller than a reasonable minimum
-  return Math.min(1, Math.max(step, 0.000_001));
+  return Math.min(1, Math.max(step, MinStepValue));
 };
 
 /**
@@ -34,14 +59,36 @@ const calculateSliderStep = (defaultValue: number): number => {
  */
 const calculateSliderMax = (defaultValue: number): number => {
   if (defaultValue === 0) {
-    return 100; // Provide a reasonable default range for zero values
+    return DefaultRangeForZero;
   }
 
   const absoluteValue = Math.abs(defaultValue);
 
   // For positive values, multiply by 4 to give a good range
   // For negative values, we want the positive range to be 4 times the absolute value
-  return absoluteValue * 4;
+  return absoluteValue * SliderRangeMultiplier;
+};
+
+/**
+ * Calculate appropriate minimum value for slider based on the default parameter value
+ * For positive values, minimum is 0. For negative values, minimum mirrors the maximum calculation
+ *
+ * @param defaultValue - The default value of the parameter
+ * @returns The calculated minimum value
+ */
+const calculateSliderMin = (defaultValue: number): number => {
+  if (defaultValue === 0) {
+    return -DefaultRangeForZero;
+  }
+
+  // For positive values, always set minimum to 0
+  if (defaultValue > 0) {
+    return 0;
+  }
+
+  // For negative values, set minimum to negative equivalent of maximum calculation
+  const absoluteValue = Math.abs(defaultValue);
+  return -absoluteValue * SliderRangeMultiplier;
 };
 
 type ChatParametersNumberProps = {
@@ -67,7 +114,7 @@ export function ChatParametersNumber({
     <div className="flex w-full flex-row items-center gap-2">
       <Slider
         value={[value]}
-        min={min ?? 0}
+        min={min ?? calculateSliderMin(defaultValue)}
         max={max ?? calculateSliderMax(defaultValue)}
         step={step ?? calculateSliderStep(defaultValue)}
         className={cn(

@@ -23,7 +23,7 @@ export function KernelSelector({ selectedKernel, onKernelChange, onClose }: Kern
               variant="outline"
               size="sm"
               className={cn(
-                'flex h-auto min-h-[3rem] flex-col items-center justify-center gap-2 rounded-lg border-border p-3 transition-all hover:border-primary/50 hover:bg-primary/5',
+                'flex h-auto min-h-12 flex-col items-center justify-center gap-2 rounded-lg border-border p-3 transition-all hover:border-primary/50 hover:bg-primary/5',
                 selectedKernel === option.id && 'border-ring bg-primary/5 ring-[3px] ring-ring/50',
               )}
               onClick={() => {

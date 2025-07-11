@@ -5,6 +5,7 @@ import { Button } from '~/components/ui/button.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '~/components/ui/resizable.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 import useCookie from '~/hooks/use-cookie.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
 import { ChatEditorFileTree } from '~/routes/builds_.$id/chat-editor-file-tree.js';
@@ -12,17 +13,14 @@ import { ChatEditor } from '~/routes/builds_.$id/chat-editor.js';
 import type { KeyCombination } from '~/utils/keys.js';
 import { cn } from '~/utils/ui.js';
 
-const chatResizeExplorerCookieName = 'chat-resize-explorer';
-const chatExplorerOpenCookieName = 'chat-explorer-open';
-
 const keyCombinationFileExplorer = {
   key: 's',
   ctrlKey: true,
 } as const satisfies KeyCombination;
 
 export function ChatEditorLayout({ className }: { readonly className?: ClassValue }): JSX.Element {
-  const [explorerSize, setExplorerSize] = useCookie(chatResizeExplorerCookieName, [20, 80]);
-  const [isExplorerOpen, setIsExplorerOpen] = useCookie(chatExplorerOpenCookieName, true);
+  const [explorerSize, setExplorerSize] = useCookie(cookieName.chatResizeExplorer, [20, 80]);
+  const [isExplorerOpen, setIsExplorerOpen] = useCookie(cookieName.chatExplorerOpen, true);
 
   const toggleExplorer = () => {
     setIsExplorerOpen(!isExplorerOpen);
@@ -34,7 +32,7 @@ export function ChatEditorLayout({ className }: { readonly className?: ClassValu
     <div className="relative flex size-full">
       <ResizablePanelGroup
         direction="horizontal"
-        autoSaveId={chatResizeExplorerCookieName}
+        autoSaveId={cookieName.chatResizeExplorer}
         className={cn('h-full', className)}
         onLayout={setExplorerSize}
       >

@@ -6,6 +6,7 @@ import { useCookie } from '~/hooks/use-cookie.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 // Null is used to represent the system theme
 // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is used to represent the system theme, as it's serializable in JSON
@@ -14,7 +15,7 @@ type ThemeWithSystem = Theme | null;
 export function ThemeToggle(): JSX.Element {
   const [, setTheme] = useTheme();
 
-  const [theme, setThemeCookie] = useCookie<ThemeWithSystem>('theme-mode', null);
+  const [theme, setThemeCookie] = useCookie<ThemeWithSystem>(cookieName.themeMode, null);
 
   const cycleTheme = () => {
     let newTheme;

@@ -6,7 +6,7 @@ import { useSelector } from '@xstate/react';
 import Form from '@rjsf/core';
 import type { RJSFSchema } from '@rjsf/utils';
 import { categorizeParameters } from '~/routes/builds_.$id/chat-parameters-sorter.js';
-import { camelCaseToSentenceCase } from '~/utils/string.js';
+import { toSentenceCase } from '~/utils/string.js';
 import { Input } from '~/components/ui/input.js';
 import { Button } from '~/components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
@@ -72,7 +72,7 @@ export const ChatParameters = memo(function () {
       // For each group, check if any parameter matches the search term
       for (const [groupName, entries] of Object.entries(parameterGroups)) {
         const matchingEntries = entries.filter(([key]) => {
-          const prettyKey = camelCaseToSentenceCase(key).toLowerCase();
+          const prettyKey = toSentenceCase(key).toLowerCase();
           return prettyKey.includes(searchTermLower);
         });
 

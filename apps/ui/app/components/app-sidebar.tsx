@@ -116,10 +116,14 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
         </Link>
       </SidebarHeader>
       <SidebarContent>
-        <NavChat />
-        <NavHistory />
-        <NavMain items={data.navMain} />
-        <NavProjects projects={data.projects} />
+        <div className="sticky top-0 z-10">
+          <NavChat />
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <NavHistory />
+          <NavMain items={data.navMain} />
+          <NavProjects projects={data.projects} />
+        </div>
       </SidebarContent>
       <SidebarFooter className="flex flex-col items-end transition-transform duration-200 ease-linear group-data-[collapsible=icon]:items-center">
         <ColorToggle />

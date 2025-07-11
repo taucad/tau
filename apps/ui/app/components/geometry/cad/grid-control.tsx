@@ -19,6 +19,7 @@ import {
 } from '~/components/ui/dropdown-menu.js';
 import { Switch } from '~/components/ui/switch.js';
 import { cn } from '~/utils/ui.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 type GridSizeIndicatorProps = {
   /**
@@ -62,7 +63,7 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
 
   // Use the current gridUnitSystem to select an appropriate default unit
   const defaultUnit = gridUnitSystem === 'imperial' ? 'in' : 'mm';
-  const [unit, setUnit] = useCookie<GridUnitOption>('cad-unit', defaultUnit as GridUnitOption);
+  const [unit, setUnit] = useCookie<GridUnitOption>(cookieName.cadUnit, defaultUnit as GridUnitOption);
 
   // Sync graphics machine with cookie value on change
   useEffect(() => {
@@ -98,7 +99,7 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
   }, []);
 
   // If there's no valid grid size, don't render
-  if (!gridSizes?.smallSize) {
+  if (!gridSizes.smallSize) {
     return null;
   }
 

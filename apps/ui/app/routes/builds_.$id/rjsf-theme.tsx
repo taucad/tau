@@ -19,7 +19,7 @@ import { ChatParametersBoolean } from '~/routes/builds_.$id/chat-parameters-bool
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
 import { cn } from '~/utils/ui.js';
-import { camelCaseToSentenceCase } from '~/utils/string.js';
+import { toSentenceCase } from '~/utils/string.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { HighlightText } from '~/components/highlight-text.js';
 import { ChatParameterWidget } from '~/routes/builds_.$id/chat-parameter-widget.js';
@@ -44,7 +44,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
 
   // Always call hooks at the very top level
   const formContext = registry?.formContext;
-  const prettyLabel = camelCaseToSentenceCase(label);
+  const prettyLabel = toSentenceCase(label);
 
   if (!formContext?.shouldShowField(prettyLabel)) {
     return null; // Hide field if it doesn't match search
@@ -111,7 +111,7 @@ function ObjectFieldTemplate(
     return <div>{properties.map((element) => element.content)}</div>;
   }
 
-  const prettyTitle = camelCaseToSentenceCase(title);
+  const prettyTitle = toSentenceCase(title);
   const propertiesCount = properties.length;
 
   return (

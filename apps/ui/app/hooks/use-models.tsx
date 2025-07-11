@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { ENV } from '~/config.js';
 import type { loader } from '~/root.js';
 import { useCookie } from '~/hooks/use-cookie.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 export const defaultChatModel = 'anthropic-claude-4-sonnet-thinking';
 
@@ -35,7 +36,7 @@ export const getModels = async (): Promise<Model[]> => {
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- intentionally allowing inference
 export const useModels = () => {
   const loaderData = useRouteLoaderData<typeof loader>('root');
-  const [selectedModelId, setSelectedModelId] = useCookie('chat-model', defaultChatModel);
+  const [selectedModelId, setSelectedModelId] = useCookie(cookieName.chatModel, defaultChatModel);
 
   const { data, isLoading } = useQuery({
     queryKey: ['models'],

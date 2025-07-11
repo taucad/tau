@@ -1,5 +1,5 @@
-import process from 'node:process';
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ChatOpenAI } from '@langchain/openai';
 import type { ChatOpenAIFields } from '@langchain/openai';
 import { ChatVertexAI } from '@langchain/google-vertexai';
@@ -9,7 +9,7 @@ import type { ChatOllamaInput } from '@langchain/ollama';
 import { ChatAnthropic } from '@langchain/anthropic';
 import type { ChatAnthropicCallOptions } from '@langchain/anthropic';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { getEnvironment } from '~/config/environment.config.js';
+import type { Environment } from '~/config/environment.config.ts';
 import type { ProviderId, Provider } from '~/api/providers/provider.schema.js';
 
 // Type for mapping provider IDs to their option types
@@ -26,77 +26,83 @@ type ProviderType<T extends ProviderId> = Provider & {
   createClass: (options: ProviderOptionsMap[T]) => BaseChatModel;
 };
 
-// Define providers with specific types to avoid type assertions
-export const providers: {
-  [K in ProviderId]: ProviderType<K>;
-} = {
-  openai: {
-    provider: 'openai',
-    configuration: {
-      apiKey: process.env.OPENAI_API_KEY,
-    },
-    inputTokensIncludesCachedReadTokens: true,
-    createClass: (options) => new ChatOpenAI(options),
-  },
-  ollama: {
-    provider: 'ollama',
-    configuration: {
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses this format
-      baseURL: 'http://localhost:11434',
-    },
-    inputTokensIncludesCachedReadTokens: false,
-    createClass: (options) => new ChatOllama(options),
-  },
-  sambanova: {
-    provider: 'sambanova',
-    configuration: {
-      apiKey: process.env.SAMBA_API_KEY,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses this format
-      baseURL: 'https://api.sambanova.ai/v1',
-    },
-    inputTokensIncludesCachedReadTokens: false,
-    createClass: (options) => new ChatOpenAI(options),
-  },
-  anthropic: {
-    provider: 'anthropic',
-    configuration: {
-      apiKey: process.env.ANTHROPIC_API_KEY,
-    },
-    inputTokensIncludesCachedReadTokens: false,
-    createClass: (options) =>
-      new ChatAnthropic({
-        ...options,
-        maxRetries: 2,
-      }),
-  },
-
-  google: {
-    provider: 'google',
-    configuration: {
-      apiKey: process.env.GOOGLE_API_KEY,
-    },
-    inputTokensIncludesCachedReadTokens: false,
-    createClass(options) {
-      const credentials = getEnvironment().GOOGLE_VERTEX_AI_CREDENTIALS;
-      return new ChatVertexAI({
-        ...options,
-        authOptions: {
-          credentials,
-          projectId: credentials.project_id,
-        },
-      });
-    },
-  },
-};
-
 @Injectable()
 export class ProviderService {
+  public constructor(private readonly configService: ConfigService<Environment, true>) {}
+
   public getProvider(providerId: ProviderId): Provider {
+    const providers = this.getProviders();
     return providers[providerId];
   }
 
   public createModelClass<T extends ProviderId>(providerId: T, options: ProviderOptionsMap[T]): BaseChatModel {
+    const providers = this.getProviders();
     const provider = providers[providerId];
     return provider.createClass(options);
+  }
+
+  private getProviders(): {
+    [K in ProviderId]: ProviderType<K>;
+  } {
+    const { configService } = this;
+    return {
+      openai: {
+        provider: 'openai',
+        configuration: {
+          apiKey: configService.get('OPENAI_API_KEY', { infer: true }),
+        },
+        inputTokensIncludesCachedReadTokens: true,
+        createClass: (options) => new ChatOpenAI(options),
+      },
+      ollama: {
+        provider: 'ollama',
+        configuration: {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses this format
+          baseURL: 'http://localhost:11434',
+        },
+        inputTokensIncludesCachedReadTokens: false,
+        createClass: (options) => new ChatOllama(options),
+      },
+      sambanova: {
+        provider: 'sambanova',
+        configuration: {
+          apiKey: configService.get('SAMBA_API_KEY', { infer: true }),
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses this format
+          baseURL: 'https://api.sambanova.ai/v1',
+        },
+        inputTokensIncludesCachedReadTokens: false,
+        createClass: (options) => new ChatOpenAI(options),
+      },
+      anthropic: {
+        provider: 'anthropic',
+        configuration: {
+          apiKey: configService.get('ANTHROPIC_API_KEY', { infer: true }),
+        },
+        inputTokensIncludesCachedReadTokens: false,
+        createClass: (options) =>
+          new ChatAnthropic({
+            ...options,
+            maxRetries: 2,
+          }),
+      },
+
+      google: {
+        provider: 'google',
+        configuration: {
+          apiKey: undefined,
+        },
+        inputTokensIncludesCachedReadTokens: false,
+        createClass(options) {
+          const credentials = configService.get('GOOGLE_VERTEX_AI_CREDENTIALS', { infer: true });
+          return new ChatVertexAI({
+            ...options,
+            authOptions: {
+              credentials,
+              projectId: credentials.project_id,
+            },
+          });
+        },
+      },
+    };
   }
 }

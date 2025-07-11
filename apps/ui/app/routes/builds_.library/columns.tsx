@@ -158,7 +158,7 @@ export const createColumns = (actions: BuildActions): Array<ColumnDef<Build>> =>
 
       return (
         <div className="flex items-center justify-end gap-2">
-          {actions ? <BuildActionDropdown build={build} actions={actions} /> : null}
+          <BuildActionDropdown build={build} actions={actions} />
 
           {!isDeleted && (
             <Link to={`/builds/${build.id}`}>

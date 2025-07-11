@@ -10,14 +10,16 @@ import { ConfigService } from '@nestjs/config';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import helmet from '@fastify/helmet';
 import { AppModule } from '~/app.module.js';
-import { generatePrefixedId, idPrefix } from '~/utils/id.js';
+import { generatePrefixedId } from '~/utils/id.utils.js';
 import type { Environment } from '~/config/environment.config.js';
 import { getFastifyLoggingConfig } from '~/logger/fastify.logger.js';
-import { httpHeader } from '~/constants/http-header.constant.js';
+import { idPrefix } from '~/constants/id.constants.js';
+import { corsAllowedHeaders, corsAllowedMethods, corsMaxAge } from '~/constants/cors.constant.js';
+import { httpBodyLimit } from '~/constants/http-body.constant.js';
 
 async function bootstrap() {
   const fastifyAdapter = new FastifyAdapter({
-    bodyLimit: 50 * 1024 * 1024, // 50MB in bytes
+    bodyLimit: httpBodyLimit,
     genReqId: () => generatePrefixedId(idPrefix.request),
     disableRequestLogging: true, // Disables automatic 'incoming request'/'request completed' logs - these are handled by custom loggers.
     logger: getFastifyLoggingConfig(),
@@ -33,9 +35,10 @@ async function bootstrap() {
 
   app.enableCors({
     origin: [appConfig.get('TAU_FRONTEND_URL', { infer: true })],
-    allowedHeaders: Object.values(httpHeader),
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: corsAllowedHeaders,
+    methods: corsAllowedMethods,
     credentials: true,
+    maxAge: corsMaxAge,
   });
   app.enableVersioning({
     type: VersioningType.URI,

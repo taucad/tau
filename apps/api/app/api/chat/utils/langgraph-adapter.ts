@@ -3,7 +3,7 @@ import type { IterableReadableStream } from '@langchain/core/utils/stream';
 import { formatDataStreamPart, createDataStream } from 'ai';
 import type { DataStreamWriter } from 'ai';
 import type { StreamEvent as LangchainStreamEvent } from '@langchain/core/tracers/log_stream';
-import { generatePrefixedId, idPrefix } from '~/utils/id.js';
+import { generatePrefixedId } from '~/utils/id.utils.js';
 import type { ChatUsageTokens } from '~/api/chat/chat.schema.js';
 import { processContent } from '~/api/chat/utils/process-content.js';
 import type {
@@ -13,6 +13,7 @@ import type {
   ToolStartEvent,
   ToolEndEvent,
 } from '~/api/chat/utils/langgraph-types.js';
+import { idPrefix } from '~/constants/id.constants.js';
 
 /**
  * Enhanced DataStream with a convenient write method for streaming content.
@@ -338,7 +339,7 @@ export class LangGraphAdapter {
     const { streamEvent, dataStream, callbacks, reasoningState, toolCallState, toolTypeMap } = parameters;
 
     if (streamEvent.data.chunk.tool_calls.length > 0) {
-      const toolCall = streamEvent.data.chunk.tool_calls[0];
+      const toolCall = streamEvent.data.chunk.tool_calls[0]!;
       const originalToolCallId = toolCall.id;
       if (originalToolCallId) {
         const toolCallId = generatePrefixedId(idPrefix.toolCall);
@@ -356,7 +357,7 @@ export class LangGraphAdapter {
       }
     } else if (streamEvent.data.chunk.tool_call_chunks.length > 0) {
       // If tool call chunks are present, we need to handle them separately.
-      const toolCallChunk = streamEvent.data.chunk.tool_call_chunks[0];
+      const toolCallChunk = streamEvent.data.chunk.tool_call_chunks[0]!;
       if (toolCallState.currentToolCallId) {
         dataStream.writePart('tool_call_delta', {
           toolCallId: toolCallState.currentToolCallId,
@@ -399,9 +400,7 @@ export class LangGraphAdapter {
           switch (complexType) {
             case 'text': {
               const textPart = part;
-              if (textPart.text === undefined) {
-                throw new Error('Text not found in part: ' + JSON.stringify(part));
-              } else if (textPart.text === '') {
+              if (textPart.text === '') {
                 // No-op: Sometimes empty strings are present
                 // We don't need to write them to the data stream.
               } else {
@@ -413,37 +412,35 @@ export class LangGraphAdapter {
             }
 
             case 'thinking': {
-              if (part.thinking === '') {
-                // No-op: Sometimes empty strings are present
-                // We don't need to write them to the data stream.
-              } else if (part.thinking !== undefined) {
-                dataStream.writePart('reasoning', part.thinking);
-                callbacks.onChatModelStream?.({ dataStream, content: part.thinking, type: 'reasoning' });
-              } else if (part.signature === undefined) {
-                throw new Error('Thinking not found in part: ' + JSON.stringify(part));
-              } else {
+              if ('thinking' in part) {
+                if (part.thinking === '') {
+                  // No-op: Sometimes empty strings are present
+                  // We don't need to write them to the data stream.
+                } else {
+                  dataStream.writePart('reasoning', part.thinking);
+                  callbacks.onChatModelStream?.({ dataStream, content: part.thinking, type: 'reasoning' });
+                }
+              } else if ('signature' in part) {
                 dataStream.writePart('reasoning_signature', { signature: part.signature });
                 callbacks.onChatModelStream?.({
                   dataStream,
                   content: [{ signature: part.signature }],
                   type: 'reasoning_signature',
                 });
+              } else {
+                throw new Error('Unknown part type: ' + JSON.stringify(part));
               }
 
               break;
             }
 
             case 'redacted_thinking': {
-              if (part.data === undefined) {
-                throw new Error('Redacted thinking not found in part: ' + JSON.stringify(part));
-              } else {
-                dataStream.writePart('redacted_reasoning', { data: part.data });
-                callbacks.onChatModelStream?.({
-                  dataStream,
-                  content: [{ data: part.data }],
-                  type: 'redacted_reasoning',
-                });
-              }
+              dataStream.writePart('redacted_reasoning', { data: part.data });
+              callbacks.onChatModelStream?.({
+                dataStream,
+                content: [{ data: part.data }],
+                type: 'redacted_reasoning',
+              });
 
               break;
             }
@@ -499,8 +496,8 @@ export class LangGraphAdapter {
     const { streamEvent, dataStream, callbacks, modelId, totalUsageTokens } = parameters;
 
     const usageTokens = {
-      inputTokens: streamEvent.data.output.usage_metadata.input_tokens ?? 0,
-      outputTokens: streamEvent.data.output.usage_metadata.output_tokens ?? 0,
+      inputTokens: streamEvent.data.output.usage_metadata.input_tokens,
+      outputTokens: streamEvent.data.output.usage_metadata.output_tokens,
       cachedReadTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_read ?? 0,
       cachedWriteTokens: streamEvent.data.output.usage_metadata.input_token_details?.cache_creation ?? 0,
     } satisfies ChatUsageTokens;

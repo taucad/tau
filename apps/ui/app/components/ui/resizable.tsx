@@ -1,8 +1,16 @@
 import { GripVertical } from 'lucide-react';
 import * as ResizablePrimitive from 'react-resizable-panels';
+import type { SetRequired } from 'type-fest';
 import { cn } from '~/utils/ui.js';
 
-function ResizablePanelGroup({ className, ...properties }: React.ComponentProps<typeof ResizablePrimitive.PanelGroup>) {
+function ResizablePanelGroup({
+  className,
+  ...properties
+}: SetRequired<
+  React.ComponentProps<typeof ResizablePrimitive.PanelGroup>,
+  // Required to ensure layout is persisted to cookies for best UX.
+  'autoSaveId'
+>): React.JSX.Element {
   return (
     <ResizablePrimitive.PanelGroup
       className={cn('flex size-full data-[panel-group-direction=vertical]:flex-col', className)}
@@ -19,7 +27,7 @@ function ResizableHandle({
   ...properties
 }: React.ComponentProps<typeof ResizablePrimitive.PanelResizeHandle> & {
   readonly hasHandle?: boolean;
-}) {
+}): React.JSX.Element {
   return (
     <ResizablePrimitive.PanelResizeHandle
       className={cn(

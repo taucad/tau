@@ -6,9 +6,7 @@ import { cn } from '~/utils/ui.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { useCookie } from '~/hooks/use-cookie.js';
-
-// Cookie name constant - same as in the ThreeContext
-const fovAngleCookieName = 'fov-angle';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 type CameraControlProps = {
   /**
@@ -33,7 +31,7 @@ type CameraControlProps = {
  * You must use CameraHandler inside the Canvas separately.
  */
 export function FovControl({ defaultAngle, className }: Omit<CameraControlProps, 'onChange'>): JSX.Element {
-  const [fovAngle, setFovAngle] = useCookie<number>(fovAngleCookieName, defaultAngle);
+  const [fovAngle, setFovAngle] = useCookie<number>(cookieName.fovAngle, defaultAngle);
 
   // Synchronize fov angle to the Graphics context when angle changes
   useEffect(() => {
@@ -73,7 +71,7 @@ export function FovControl({ defaultAngle, className }: Omit<CameraControlProps,
             // Inset-0 is used to make the entire button slideable for better UX
             className="absolute inset-0 h-full px-1 pt-8 opacity-0 duration-300 group-hover:pt-4 group-hover:opacity-100 max-md:pt-4 max-md:opacity-100 [&_[data-slot='slider-track']]:bg-neutral/20"
             onValueChange={(value) => {
-              setFovAngle(value[0]);
+              setFovAngle(value[0]!);
             }}
           />
         </div>

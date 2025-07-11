@@ -1,6 +1,7 @@
 import { memo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { getRandomExamples } from '~/constants/chat-prompt-examples.js';
+import type { ChatExample } from '~/constants/chat-prompt-examples.js';
 import { Button } from '~/components/ui/button.js';
 import { useChatActions } from '~/components/chat/ai-chat-provider.js';
 import { useModels } from '~/hooks/use-models.js';
@@ -13,12 +14,12 @@ export const ChatExamples = memo(function () {
   const { append } = useChatActions();
   const { selectedModel } = useModels();
 
-  const handleExampleClick = (prompt: string) => {
+  const handleExampleClick = (example: ChatExample) => {
     const userMessage = createMessage({
-      content: prompt,
+      content: example.prompt,
       role: messageRole.user,
       status: messageStatus.pending,
-      metadata: {},
+      metadata: { kernel: example.kernel },
       model: selectedModel?.id ?? '',
     });
     append(userMessage);
@@ -43,7 +44,7 @@ export const ChatExamples = memo(function () {
             variant="outline"
             className="flex-1"
             onClick={() => {
-              handleExampleClick(example.prompt);
+              handleExampleClick(example);
             }}
           >
             {example.title}

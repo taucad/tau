@@ -146,7 +146,7 @@ function ItemList<T>({
   return (
     <Command>
       <CommandInput placeholder={searchPlaceHolder} />
-      <CommandList className="max-h-full">
+      <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
         {groupedItems.map((group) => (
           <CommandGroup key={group.name} heading={group.name}>
@@ -158,7 +158,7 @@ function ItemList<T>({
                   asChild={labelAsChild}
                   value={value}
                   keywords={[group.name]}
-                  className={cn('cursor-pointer', labelClassName)}
+                  className={cn(labelClassName)}
                   disabled={isDisabled?.(item)}
                   onSelect={() => {
                     setSelectedItem(item);

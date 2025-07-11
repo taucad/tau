@@ -72,10 +72,11 @@ import { createBuildMutations } from '~/hooks/build-mutations.js';
 import { Checkbox } from '~/components/ui/checkbox.js';
 import { formatRelativeTime } from '~/utils/date.js';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '~/components/ui/table.js';
-import { camelCaseToSentenceCase } from '~/utils/string.js';
+import { toSentenceCase } from '~/utils/string.js';
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
 import { cadMachine } from '~/machines/cad.machine.js';
 import { HammerAnimation } from '~/components/hammer-animation.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -98,7 +99,7 @@ export type BuildActions = {
 
 export default function PersonalCadProjects(): JSX.Element {
   const [activeFilter, setActiveFilter] = useState<string>('all');
-  const [viewMode, setViewMode] = useCookie<'grid' | 'table'>('builds-view-mode', 'grid');
+  const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.buildViewMode, 'grid');
   const [showDeleted, setShowDeleted] = useState(false);
   const { builds, deleteBuild, duplicateBuild, restoreBuild } = useBuilds({ includeDeleted: showDeleted });
   const navigate = useNavigate();
@@ -398,7 +399,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows?.length ? (
+            {table.getRowModel().rows.length > 0 ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow key={row.id} className={row.getIsSelected() ? 'bg-muted/50' : undefined}>
                   {row.getVisibleCells().map((cell) => (
@@ -529,7 +530,7 @@ function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReact
     .filter((column) => column.getCanSort())
     .map((column) => ({
       id: column.id,
-      label: camelCaseToSentenceCase(column.id),
+      label: toSentenceCase(column.id),
     }));
 
   const toggleSorting = (id: string) => {
@@ -603,7 +604,7 @@ function ViewOptionsDropdown({ table }: { readonly table: ReturnType<typeof useR
                   event.preventDefault();
                 }}
               >
-                {camelCaseToSentenceCase(column.id)}
+                {toSentenceCase(column.id)}
               </DropdownMenuCheckboxItem>
             );
           })}
@@ -626,7 +627,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
   const mechanicalAsset = build.assets.mechanical;
   if (!mechanicalAsset) throw new Error('Mechanical asset not found');
 
-  const code = mechanicalAsset.files[mechanicalAsset.main].content;
+  const code = mechanicalAsset.files[mechanicalAsset.main]?.content ?? '';
   const { parameters } = mechanicalAsset;
   const status = useSelector(actorRef, (state) => state.value);
   const [showPreview, setShowPreview] = useState(false);

@@ -63,6 +63,32 @@ const config: Linter.Config[] = [
         },
       ],
 
+      // Enforce that unnecessary conditions are not used.
+      // For example:
+      // function bar<T>(arg: string) {
+      //   // Arg can never be nullish
+      //   return arg?.length; // Therefore `?.` is unnecessary
+      // }
+      '@typescript-eslint/no-unnecessary-condition': 'error',
+
+      // Enforce that curly braces are used in all control flow statements.
+      // For example:
+      // if (condition) {
+      //   // ...
+      // }
+      // instead of:
+      // if (condition)
+      //   // ...
+      curly: ['error', 'all'],
+
+      // Require exhaustive switch statements. This is an extra barrier again bad type unions.
+      // The following is an example of how to perform an exhaustive check:
+      // default: {
+      //   const exhaustiveCheck: never = part;
+      //   throw new Error(`Unknown part type: ${String(exhaustiveCheck)}`);
+      // }
+      '@typescript-eslint/switch-exhaustiveness-check': 'off',
+
       'no-restricted-imports': [
         'error',
         {
@@ -110,6 +136,9 @@ const config: Linter.Config[] = [
             'Inject',
             'Global',
             'UseGuards',
+            'UsePipes',
+            'UseInterceptors',
+            'UseFilters',
           ],
         },
       ],

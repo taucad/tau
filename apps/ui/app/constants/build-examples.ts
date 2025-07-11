@@ -8,10 +8,10 @@ type Model = {
   name: string;
   code: string;
   thumbnail: string;
-  language?: 'replicad' | 'openscad';
+  language: KernelProvider;
 };
 
-const createBuild = (model: Model, mainFile: string, kernel: KernelProvider) => {
+const createBuild = (model: Omit<Model, 'language'>, mainFile: string, kernel: KernelProvider): Build => {
   return {
     id: model.id,
     assets: {
@@ -28,11 +28,9 @@ const createBuild = (model: Model, mainFile: string, kernel: KernelProvider) => 
       name: 'Tau Team',
       avatar: '/avatar-sample.png',
     },
-    version: '1.0.0',
     createdAt: 1_740_702_000_000,
     updatedAt: 1_740_702_000_000,
     tags: ['3d-printing', 'parametric', kernel],
-    isFavorite: false,
     stars: 0,
     forks: 0,
     thumbnail: model.thumbnail,

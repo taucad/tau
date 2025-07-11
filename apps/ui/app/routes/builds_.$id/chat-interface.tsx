@@ -7,18 +7,17 @@ import { cn } from '~/utils/ui.js';
 import { ChatParameters } from '~/routes/builds_.$id/chat-parameters.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import { useViewContext } from '~/routes/builds_.$id/chat-interface-controls.js';
-
-export const chatResizeMainCookieName = 'chat-resize-main';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 export const ChatInterface = memo(function () {
-  const [chatResizeMain, setChatResizeMain] = useCookie(chatResizeMainCookieName, [25, 60, 15]);
+  const [chatResizeMain, setChatResizeMain] = useCookie(cookieName.chatResizeMain, [25, 60, 15]);
   const { isChatOpen, isParametersOpen, viewMode } = useViewContext();
 
   return (
     <ResizablePanelGroup
       direction="horizontal"
       className="group/chat-layout relative flex flex-1 bg-background"
-      autoSaveId={chatResizeMainCookieName}
+      autoSaveId={cookieName.chatResizeMain}
       data-chat-open={isChatOpen}
       data-parameters-open={isParametersOpen}
       data-view-mode={viewMode}

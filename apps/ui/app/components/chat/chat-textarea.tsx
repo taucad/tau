@@ -19,6 +19,7 @@ import { cn } from '~/utils/ui.js';
 import type { MessagePart } from '~/types/chat.types.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
 import { ChatContextActions } from '~/components/chat/chat-context-actions.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
@@ -81,7 +82,7 @@ export const ChatTextarea = memo(function ({
     return { initialInputText, initialImageUrls };
   }, [initialContent, initialAttachments]);
   const [inputText, setInputText] = useState(initialInputText);
-  const [isSearching, setIsSearching] = useCookie('chat-web-search', false);
+  const [isSearching, setIsSearching] = useCookie(cookieName.chatWebSearch, false);
   const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);
@@ -144,7 +145,7 @@ export const ChatTextarea = memo(function ({
     } else if (
       event.key === 'Backspace' &&
       textareaReference.current?.selectionStart === 0 &&
-      textareaReference.current?.selectionEnd === 0 &&
+      textareaReference.current.selectionEnd === 0 &&
       images.length > 0
     ) {
       // Delete the last image when backspace is pressed at the beginning of the textarea
@@ -168,13 +169,13 @@ export const ChatTextarea = memo(function ({
     event.preventDefault();
     setIsDragging(false);
 
-    if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
+    if (event.dataTransfer.files.length > 0) {
       for (const file of event.dataTransfer.files) {
         if (file.type.startsWith('image/')) {
           const reader = new FileReader();
           const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
             if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
-              const result = readerEvent.target?.result;
+              const { result } = readerEvent.target;
               if (result !== '') {
                 setImages((previous) => [...previous, result]);
               }
@@ -203,7 +204,7 @@ export const ChatTextarea = memo(function ({
           const reader = new FileReader();
           const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
             if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
-              const result = readerEvent.target?.result;
+              const { result } = readerEvent.target;
               if (result !== '') {
                 setImages((previous) => [...previous, result]);
               }
@@ -251,7 +252,7 @@ export const ChatTextarea = memo(function ({
           const reader = new FileReader();
           const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
             if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
-              const result = readerEvent.target?.result;
+              const { result } = readerEvent.target;
               if (result !== '') {
                 setImages((previous) => [...previous, result]);
               }
@@ -443,7 +444,7 @@ export const ChatTextarea = memo(function ({
           )}
           rows={3}
           value={inputText}
-          placeholder="Ask Tau a question..."
+          placeholder="Ask Tau to build anything..."
           onFocus={() => {
             setIsFocused(true);
           }}

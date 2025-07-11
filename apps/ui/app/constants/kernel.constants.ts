@@ -53,6 +53,30 @@ export default function main(p = defaultParams) {}
       { name: 'Sheet Metal', description: 'Bend and fold operations' },
     ],
   },
+  {
+    id: 'zoo',
+    name: 'Zoo (KCL)',
+    description: 'Cloud-native CAD with KittyCAD Language',
+    mainFile: 'main.kcl',
+    longDescription:
+      'Uses KittyCAD Language (KCL) for cloud-native CAD modeling. Combines the power of Zoo\'s geometry engine with parametric design and AI-powered features like Text-to-CAD.',
+    emptyCode: `// KCL (KittyCAD Language) example
+const width = 20
+const height = 10
+const depth = 15
+
+// Create a basic box shape
+box(width, height, depth)
+`,
+    recommended: 'Cloud-native CAD & AI-powered Design',
+    tags: ['Cloud-native', 'KCL', 'Text-to-CAD', 'AI-powered', 'Parametric', 'Precision'],
+    features: ['Cloud geometry engine', 'KCL language', 'STL & STEP export', 'Text-to-CAD integration'],
+    examples: [
+      { name: 'Engine Valve', description: 'Parametric engine valve with precise dimensions' },
+      { name: 'Brake Rotor', description: 'Automotive brake rotor with cooling vanes' },
+      { name: 'Mechanical Assembly', description: 'Multi-part assembly with constraints' },
+    ],
+  },
 ];
 
 // Helper function to get kernel option by id

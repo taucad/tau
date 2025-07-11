@@ -215,7 +215,7 @@ export const cadMachine = setup({
     isKernelInitialized: false,
     graphicsRef: input.graphicsRef,
     jsonSchema: undefined,
-    kernelTypeSelected: 'openscad',
+    kernelTypeSelected: 'replicad',
   }),
   initial: 'booting',
   states: {

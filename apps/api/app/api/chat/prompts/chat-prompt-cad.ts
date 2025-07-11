@@ -181,6 +181,94 @@ Your goal is to create models that are not just functional, but elegant, maintai
       'Identify which features belong to each category of the RMS framework. For complex models with multiple components, create a plan for each part.',
     mainFunctionDescription: 'function should accept a parameters object and return the final shape',
   },
+  zoo: {
+    fileExtension: '.kcl',
+    languageName: 'KCL (KittyCAD Language)',
+    roleDescription: 'a cloud-native CAD programming language designed for precise parametric modeling and AI-powered design workflows',
+    technicalContext: `
+<technical_context>
+## Understanding KCL's Strengths
+KCL (KittyCAD Language) excels at creating precise, parametric 3D models using Zoo's cloud-native geometry engine. Unlike traditional CAD approaches, KCL models are executed on GPU-accelerated cloud infrastructure, providing scalable performance and enabling advanced features like Text-to-CAD. KCL is particularly well-suited for engineering applications, mechanical parts, and modern parametric designs where precision, scalability, and AI integration matter.
+
+The language uses a declarative, functional approach where you describe geometric intent clearly and concisely. KCL models are version-controllable, shareable, and can be integrated into modern software development workflows.
+</technical_context>`,
+    codeStandards: `
+<code_standards>
+## KCL Code Output Requirements
+Your code output must be written in **KCL syntax**. KCL uses a clean, functional syntax designed for 3D modeling. The code should be executable KCL that works directly with Zoo's geometry engine.
+
+Key KCL syntax elements:
+- Variables are declared with const name = value
+- Functions are called with function_name(parameters)
+- Basic shapes: box(), sphere(), cylinder(), etc.
+- Transformations: translate(), rotate(), scale()
+- Boolean operations: union(), difference(), intersection()
+- Parametric expressions using variables and mathematical operations
+- Comments use // for single line
+
+Examples of correct KCL output:
+\`\`\`kcl
+// Basic parametric box
+const width = 20
+const height = 10
+const depth = 15
+
+box(width, height, depth)
+\`\`\`
+
+\`\`\`kcl
+// Parametric cylinder with hole
+const outer_diameter = 20
+const inner_diameter = 10
+const height = 30
+
+difference() {
+    cylinder(outer_diameter / 2, height)
+    cylinder(inner_diameter / 2, height + 0.1)
+}
+\`\`\`
+</code_standards>`,
+    modelingStrategy: `
+<modeling_strategy>
+## KCL Design Philosophy: Cloud-native Parametric Modeling
+Your modeling approach should leverage KCL's cloud-native architecture and parametric capabilities:
+
+**Parametric First** - Define key dimensions as variables to make designs easily adjustable
+**Functional Composition** - Build complex shapes by composing simpler geometric operations
+**Cloud Performance** - Leverage Zoo's GPU-accelerated geometry engine for complex operations
+**Version Control Ready** - Write code that's readable, maintainable, and suitable for collaboration
+**AI Integration** - Design models that can benefit from Text-to-CAD and other AI features
+**Precision Focus** - Utilize exact geometric representations for manufacturing-ready designs
+
+This approach ensures that your models are scalable, precise, and integrate seamlessly with modern design workflows.
+</modeling_strategy>`,
+    technicalResources: `
+<technical_resources>
+KCL is designed for modern, cloud-native CAD workflows with key capabilities:
+
+- Cloud-native geometry engine with GPU acceleration
+- Parametric design with mathematical expressions
+- Integration with Zoo's Text-to-CAD AI features
+- Version control friendly syntax
+- STL and STEP export capabilities
+- Real-time collaboration features
+
+Your goal is to create models that take advantage of KCL's cloud-native architecture while maintaining precision and manufacturability. Focus on clear, parametric designs that can evolve with changing requirements.
+</technical_resources>`,
+    codeErrorDescription:
+      'KCL syntax errors, undefined variables, or function call issues that prevent the code from compiling with Zoo\'s geometry engine.',
+    kernelErrorDescription:
+      'Runtime errors from Zoo\'s geometry engine, including geometric failures, invalid operations, or cloud execution issues.',
+    commonErrorPatterns: `- **Syntax errors**: Check for proper KCL syntax, function names, and parameter usage
+- **Undefined variables**: Ensure all variables are declared with const before use
+- **Invalid operations**: Verify that geometric operations have valid parameters (positive dimensions, valid coordinates)
+- **Function call errors**: Check that KCL functions are called with correct parameter types and counts`,
+    parameterNamingConvention: 'snake_case',
+    parameterNamingExample: '`outer_diameter` rather than `outerDiam`',
+    implementationApproach:
+      'Break down the model into parametric components and plan the geometric operations needed using KCL\'s cloud-native capabilities.',
+    mainFunctionDescription: 'KCL program should use const declarations for parameters and build geometry using KCL functions',
+  },
 };
 
 const communicationGuidelinesVerbose = `

@@ -72,23 +72,23 @@ function extractImportInfo(
 
   if (namedImportMatch) {
     // Handle empty imports by filtering out empty strings after split and trim
-    const imports = namedImportMatch[1]
+    const imports = namedImportMatch[1]!
       .split(',')
       .map((imp) => imp.trim())
       .filter((imp) => imp.length > 0);
-    const module = namedImportMatch[2];
+    const module = namedImportMatch[2]!;
     return { type: 'named', imports, module };
   }
 
   if (defaultImportMatch) {
-    const defaultName = defaultImportMatch[1];
-    const module = defaultImportMatch[2];
+    const defaultName = defaultImportMatch[1]!;
+    const module = defaultImportMatch[2]!;
     return { type: 'default', defaultName, module };
   }
 
   if (namespaceImportMatch) {
-    const namespaceName = namespaceImportMatch[1];
-    const module = namespaceImportMatch[2];
+    const namespaceName = namespaceImportMatch[1]!;
+    const module = namespaceImportMatch[2]!;
     return { type: 'namespace', namespaceName, module };
   }
 
@@ -110,11 +110,13 @@ async function rewriteImports(code: string): Promise<string> {
 
   // Process imports in reverse order to maintain string positions
   for (let i = imports.length - 1; i >= 0; i--) {
-    const imp = imports[i];
+    const imp = imports[i]!;
     const specifier = code.slice(imp.s, imp.e);
 
     // Non-bare specifiers will use regular browser imports
-    if (!isBareSpecifier(specifier)) continue;
+    if (!isBareSpecifier(specifier)) {
+      continue;
+    }
 
     if (!(specifier in moduleRegistry)) {
       throw new Error(`Unknown module "${specifier}". Allowed modules: ${Object.keys(moduleRegistry).join(', ')}`);
@@ -123,47 +125,36 @@ async function rewriteImports(code: string): Promise<string> {
     // Extract import details
     const importInfo = extractImportInfo(code, imp);
 
-    if (importInfo) {
-      let declaration = '';
+    let declaration = '';
 
-      switch (importInfo.type) {
-        case 'named': {
-          // Import {draw, something} from 'replicad' -> const {draw, something} = globalThis.replicad;
-          declaration = `const {${importInfo.imports.join(', ')}} = globalThis.${importInfo.module};`;
-          break;
-        }
-
-        case 'default': {
-          // Import replicad from 'replicad' -> const replicad = globalThis.replicad;
-          declaration = `const ${importInfo.defaultName} = globalThis.${importInfo.module};`;
-          break;
-        }
-
-        case 'namespace': {
-          // Import * as replicad from 'replicad' -> const replicad = globalThis.replicad;
-          declaration = `const ${importInfo.namespaceName} = globalThis.${importInfo.module};`;
-          break;
-        }
-
-        // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check for safety
-        default: {
-          const importType: never = importInfo;
-          throw new Error(`Unknown import type: ${String(importType)}`);
-        }
+    switch (importInfo.type) {
+      case 'named': {
+        // Import {draw, something} from 'replicad' -> const {draw, something} = globalThis.replicad;
+        declaration = `const {${importInfo.imports.join(', ')}} = globalThis.${importInfo.module};`;
+        break;
       }
 
-      if (declaration && !processedModules.has(declaration)) {
-        moduleDeclarations.push(declaration);
-        processedModules.add(declaration);
+      case 'default': {
+        // Import replicad from 'replicad' -> const replicad = globalThis.replicad;
+        declaration = `const ${importInfo.defaultName} = globalThis.${importInfo.module};`;
+        break;
       }
-    } else {
-      // Fallback for unrecognized import patterns
-      const moduleName = specifier;
-      const declaration = `const ${moduleName} = globalThis.${moduleName};`;
-      if (!processedModules.has(declaration)) {
-        moduleDeclarations.push(declaration);
-        processedModules.add(declaration);
+
+      case 'namespace': {
+        // Import * as replicad from 'replicad' -> const replicad = globalThis.replicad;
+        declaration = `const ${importInfo.namespaceName} = globalThis.${importInfo.module};`;
+        break;
       }
+
+      default: {
+        const importType: never = importInfo;
+        throw new Error(`Unknown import type: ${String(importType)}`);
+      }
+    }
+
+    if (declaration && !processedModules.has(declaration)) {
+      moduleDeclarations.push(declaration);
+      processedModules.add(declaration);
     }
 
     // Remove the import statement
@@ -171,7 +162,7 @@ async function rewriteImports(code: string): Promise<string> {
     let importEnd = imp.se;
 
     // Check for and remove trailing semicolon and whitespace
-    while (importEnd < rewrittenCode.length && /[;\s]/.test(rewrittenCode[importEnd])) {
+    while (importEnd < rewrittenCode.length && /[;\s]/.test(rewrittenCode[importEnd]!)) {
       importEnd++;
     }
 

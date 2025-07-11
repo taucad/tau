@@ -16,6 +16,8 @@ import {
 import { objectToXml } from '~/utils/xml.js';
 import { AuthGuard } from '~/auth/auth.guard.js';
 
+type KernelProvider = 'replicad' | 'openscad';
+
 export type CodeError = {
   message: string;
   startLineNumber: number;
@@ -58,14 +60,14 @@ export type CreateChatBody = {
   codeErrors: CodeError[];
   kernelError?: KernelError;
   screenshot: string;
-  kernel?: 'replicad' | 'openscad';
+  kernel?: KernelProvider;
   files?: FilesContext;
   /* The ID of the chat. */
   id: string;
   messages: Array<
     UIMessage & {
       model: string;
-      metadata: { toolChoice: ToolChoiceWithCategory; kernel?: 'replicad' | 'openscad' };
+      metadata: { toolChoice: ToolChoiceWithCategory; kernel: KernelProvider };
     }
   >;
 };
@@ -95,12 +97,12 @@ export class ChatController {
     this.logger.debug(`Last human message: ${JSON.stringify(lastHumanMessage, null, 2)}`);
     let modelId: string;
     const selectedToolChoice: ToolChoiceWithCategory = 'auto';
-    let selectedKernel: 'replicad' | 'openscad' = 'replicad';
+    let selectedKernel: KernelProvider;
 
     if (lastHumanMessage?.role === 'user') {
       modelId = lastHumanMessage.model;
       // Extract kernel from message metadata or use the one from body
-      selectedKernel = lastHumanMessage.metadata.kernel ?? body.kernel ?? 'replicad';
+      selectedKernel = lastHumanMessage.metadata.kernel;
       // If (lastHumanMessage.metadata.toolChoice) {
       //   selectedToolChoice = lastHumanMessage.metadata.toolChoice;
       // }
@@ -123,13 +125,13 @@ export class ChatController {
 
     // Configuration for the graph execution
     const config = {
-      streamMode: 'values' as const,
-      version: 'v2' as const,
+      streamMode: 'values',
+      version: 'v2',
       configurable: {
         // eslint-disable-next-line @typescript-eslint/naming-convention -- LangGraph API requires snake_case
         thread_id: body.id, // Enable persistence using conversation ID as thread ID
       },
-    };
+    } as const;
 
     // Check if this thread is in an interrupted state
     let currentState;

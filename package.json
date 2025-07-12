@@ -27,6 +27,7 @@
     "@amandaghassaei/stl-parser": "^1.7.0",
     "@daveyplate/better-auth-ui": "^2.0.8",
     "@fastify/helmet": "^13.0.1",
+    "@holistic-stack/tree-sitter-openscad": "^0.1.0",
     "@hookform/resolvers": "^5.1.1",
     "@langchain/anthropic": "^0.3.23",
     "@langchain/community": "^0.3.47",
@@ -145,6 +146,7 @@
     "three-viewport-gizmo": "https://codeload.github.com/opensrchq/three-viewport-gizmo/tar.gz/9154497a6c01db5dcf64d6f403f9901cca304ef4",
     "uint8array-extras": "^1.4.0",
     "vaul": "^1.1.2",
+    "web-tree-sitter": "^0.25.6",
     "xstate": "^5.19.3",
     "zod": "^3.25.56"
   },

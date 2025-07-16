@@ -1,0 +1,289 @@
+{
+	"name": "KCL",
+	"scopeName": "source.kcl",
+	"fileTypes": [
+	  "kcl"
+	],
+	"uuid": "1ec087d3-5945-49c4-94a0-ce9c757dc153",
+	"patterns": [
+	  {
+		"name": "comment.block.kcl",
+		"begin": "/\\*",
+		"end": "\\*/",
+		"beginCaptures": {
+		  "0": {
+			"name": "punctuation.definition.comment.begin.kcl"
+		  }
+		},
+		"endCaptures": {
+		  "0": {
+			"name": "punctuation.definition.comment.end.kcl"
+		  }
+		}
+	  },
+	  {
+		"name": "comment.line.double-slash.kcl",
+		"match": "//.*$"
+	  },
+	  {
+		"name": "keyword.control.conditional.kcl",
+		"match": "\\b(if|else if|else)\\b"
+	  },
+	  {
+		"name": "keyword.control.conditional.kcl",
+		"match": "\\b(if|else if|else)\\b"
+	  },
+	  {
+		"name": "keyword.control.return.kcl",
+		"match": "\\breturn\\b"
+	  },
+	  {
+		"name": "keyword.declaration.kcl",
+		"match": "\\b(var|let|const)\\b"
+	  },
+	  {
+		"name": "keyword.operator.comparison.kcl",
+		"match": "(==|!=|<=|>=|<|>)"
+	  },
+	  {
+		"name": "keyword.operator.definition.kcl",
+		"match": "="
+	  },
+	  {
+		"name": "meta.module.import.statement.kcl",
+		"begin": "\\b(import)\\s+(?=\\w+)",
+		"beginCaptures": {
+		  "1": {
+			"name": "keyword.module.import.kcl"
+		  }
+		},
+		"end": "\\b(from)\\s+('[^']*'|\"[^\"]*\")",
+		"endCaptures": {
+		  "1": {
+			"name": "keyword.module.import.from.kcl"
+		  },
+		  "2": {
+			"name": "string.quoted.module.kcl"
+		  }
+		},
+		"patterns": [
+		  {
+			"include": "#import-item"
+		  },
+		  {
+			"name": "punctuation.separator.comma.kcl",
+			"match": ","
+		  }
+		]
+	  },
+	  {
+		"name": "keyword.module.import.kcl",
+		"match": "\\bimport\\b"
+	  },
+	  {
+		"name": "entity.name.tag.kcl",
+		"match": "\\$\\w+\\b"
+	  },
+	  {
+		"name": "keyword.directive.settings.kcl",
+		"match": "@\\w+\\b"
+	  },
+	  {
+		"name": "meta.function.definition.kcl",
+		"begin": "\\b((export)\\s+)?(fn)\\s+(\\w+)\\s*(=)",
+		"beginCaptures": {
+		  "1": {
+			"name": "storage.modifier.visibility.kcl"
+		  },
+		  "3": {
+			"name": "keyword.control.function.kcl"
+		  },
+		  "4": {
+			"name": "entity.name.function.kcl"
+		  },
+		  "5": {
+			"name": "keyword.operator.definition.kcl"
+		  }
+		},
+		"end": "\\{",
+		"endCaptures": {
+		  "0": {
+			"name": "punctuation.section.block.begin.kcl"
+		  }
+		},
+		"patterns": [
+		  {
+			"name": "meta.parameters.kcl",
+			"begin": "\\(",
+			"beginCaptures": {
+			  "0": {
+				"name": "punctuation.section.parameters.begin.kcl"
+			  }
+			},
+			"end": "\\)",
+			"endCaptures": {
+			  "0": {
+				"name": "punctuation.section.parameters.end.kcl"
+			  }
+			},
+			"patterns": [
+			  {
+				"name": "variable.parameter.kcl",
+				"match": "\\b\\w+\\b"
+			  },
+			  {
+				"name": "punctuation.separator.parameter.function.kcl",
+				"match": ","
+			  }
+			]
+		  },
+		  {
+			"name": "keyword.operator.fat-arrow.kcl",
+			"match": "=>"
+		  }
+		]
+	  },
+	  {
+		"include": "#anonymous-function"
+	  },
+	  {
+		"name": "string.quoted.double.kcl",
+		"begin": "\"",
+		"end": "\"",
+		"beginCaptures": {
+		  "0": {
+			"name": "punctuation.definition.string.begin.kcl"
+		  }
+		},
+		"endCaptures": {
+		  "0": {
+			"name": "punctuation.definition.string.end.kcl"
+		  }
+		},
+		"patterns": [
+		  {
+			"name": "constant.character.escape.kcl",
+			"match": "\\\\."
+		  }
+		]
+	  },
+	  {
+		"name": "string.quoted.single.kcl",
+		"begin": "'",
+		"end": "'",
+		"beginCaptures": {
+		  "0": {
+			"name": "punctuation.definition.string.begin.kcl"
+		  }
+		},
+		"endCaptures": {
+		  "0": {
+			"name": "punctuation.definition.string.end.kcl"
+		  }
+		},
+		"patterns": [
+		  {
+			"name": "constant.character.escape.kcl",
+			"match": "\\\\."
+		  }
+		]
+	  },
+	  {
+		"name": "keyword.operator.control.pipeline.kcl",
+		"match": "\\|>"
+	  },
+	  {
+		"name": "variable.language.pipe-substitution.kcl",
+		"match": "%"
+	  },
+	  {
+		"match": "\\b(true|false)\\b",
+		"name": "constant.language.kcl"
+	  },
+	  {
+		"name": "constant.numeric.kcl",
+		"match": "(\\b\\d+(\\.\\d+)?|\\.\\d+)\\b"
+	  },
+	  {
+		"name": "keyword.operator.arithmetic.kcl",
+		"match": "[+\\-*/^]"
+	  },
+	  {
+		"name": "support.constant.prelude.kcl",
+		"match": "\\b(ZERO|QUARTER_TURN|HALF_TURN|THREE_QUARTER_TURN)\\b"
+	  },
+	  {
+		"name": "support.function.stdlib.kcl",
+		"match": "\\b(abs|acos|appearance|arc|angledLine|angledLineOfXLength|angledLineOfYLength|angledLineThatIntersects|angledLineToX|angledLineToY|angleToMatchLengthX|angleToMatchLengthY|arc|asin|assert|assertEqual|assertGreaterThan|assertGreaterThanOrEq|assertLessThan|assertLessThanOrEq|atan|bezierCurve|ceil|chamfer|circle|clone|close|cm|cos|e|extrude|fillet|floor|ft|getNextAdjacentEdge|getOppositeEdge|getPreviousAdjacentEdge|helix|hole|hollow|import|inch|int|lastSegX|lastSegY|legAngX|legAngY|legLen|line|lineTo|ln|loft|log|log10|log2|m|map|max|min|mirror2d|mm|offsetPlane|patternCircular2d|patternCircular3d|patternLinear2d|patternLinear3d|patternTransform|pi|polar|polygon|pow|profileStart|profileStartX|profileStartY|push|reduce|rem|revolve|rotate|segAng|segEnd|segEndX|segEndY|segLen|segStart|segStartX|segStartY|shell|sin|sqrt|startProfile|startProfileAt|startSketchAt|startSketchOn|tan|tangentialArc|tangentialArcTo|tangentialArcToRelative|tau|toDegrees|toRadians|translate|xLine|xLineTo|yd|yLine|yLineTo)\\b"
+	  },
+	  {
+		"name": "punctuation.section.array.begin.kcl",
+		"match": "\\["
+	  },
+	  {
+		"name": "punctuation.section.array.end.kcl",
+		"match": "\\]"
+	  },
+	  {
+		"name": "punctuation.separator.colon.kcl",
+		"match": ":"
+	  },
+	  {
+		"name": "punctuation.separator.comma.kcl",
+		"match": ","
+	  },
+	  {
+		"name": "variable.other.kcl",
+		"match": "\\b(\\w+)\\b"
+	  }
+	],
+	"repository": {
+	  "import-item": {
+		"name": "meta.module.import.item.kcl",
+		"match": "\\b(\\w+)(?:\\s+(as)\\s+(\\w+))?",
+		"captures": {
+		  "1": {
+			"name": "variable.import.kcl"
+		  },
+		  "2": {
+			"name": "keyword.module.import.item.as.kcl"
+		  },
+		  "3": {
+			"name": "variable.import.alias.kcl"
+		  }
+		}
+	  },
+	  "anonymous-function": {
+		"name": "meta.function.anonymous.kcl",
+		"begin": "(\\()(?=\\s*\\w+(?:\\s*,\\s*\\w+)*\\)\\s*=>)",
+		"beginCaptures": {
+		  "1": {
+			"name": "punctuation.section.parameters.begin.kcl"
+		  }
+		},
+		"end": "(=>)\\s*(\\{)",
+		"endCaptures": {
+		  "1": {
+			"name": "keyword.operator.fat-arrow.kcl"
+		  },
+		  "2": {
+			"name": "punctuation.section.block.begin.kcl"
+		  }
+		},
+		"patterns": [
+		  {
+			"name": "variable.parameter.kcl",
+			"match": "\\b\\w+\\b"
+		  },
+		  {
+			"name": "punctuation.separator.parameter.function.kcl",
+			"match": ","
+		  },
+		  {
+			"name": "punctuation.section.parameters.end.kcl",
+			"match": "\\)"
+		  }
+		]
+	  }
+	}
+  }

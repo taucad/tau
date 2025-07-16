@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer';
 import type { Binary as BSONBinary } from 'bson';
 
 /**
@@ -24,7 +23,7 @@ export function binaryToUuid(binaryData: Uint8Array | BSONBinary | string): stri
     buffer = binaryData.buffer;
   }
   // Handle direct Buffer or Uint8Array
-  else if (binaryData instanceof Uint8Array || Buffer.isBuffer(binaryData)) {
+  else if (binaryData instanceof Uint8Array) {
     buffer = binaryData;
   } else {
     console.error('Invalid input type: expected MongoDB BSON Binary, Buffer, or Uint8Array');

@@ -1,123 +1,119 @@
 import { expose } from 'comlink';
+import { parseSTL } from '@amandaghassaei/stl-parser';
+import type { KclValue } from '@taucad/kcl-wasm-lib/bindings/KclValue';
+import { KclUtils } from '~/components/geometry/kernel/zoo/kcl-utils.js';
 import type { BuildShapesResult, ExportGeometryResult, ExtractParametersResult } from '~/types/kernel.types.js';
 import { createKernelError, createKernelSuccess } from '~/types/kernel.types.js';
 import type { Shape3D } from '~/types/cad.types.js';
-import { ENV } from '~/config.js';
 
-// Global storage for computed model data and API client
+// Global storage for computed model data and KCL utilities
 const modelDataMemory: Record<string, Uint8Array> = {};
-let kittyCADClient: unknown | undefined;
+let kclUtils: KclUtils | undefined;
 
-// KCL API client initialization
-async function getKittyCADClient(): Promise<unknown> {
-  if (kittyCADClient) {
-    return kittyCADClient;
+// Initialize KCL utilities with Zoo API key
+async function getKclUtils(): Promise<KclUtils> {
+  if (!kclUtils) {
+    // TODO: inject the API key to the worker
+    const apiKey = 'api-XXX';
+    kclUtils = new KclUtils({ apiKey });
+    await kclUtils.initialize();
   }
 
-  try {
-    // Dynamic import to handle potential module loading issues
-    const { KittyCADApi } = await import('@kittycad/lib');
-    
-    const apiToken = ENV.KITTYCAD_API_TOKEN;
-    if (!apiToken) {
-      throw new Error('KITTYCAD_API_TOKEN environment variable is required');
-    }
+  console.log('in getKclUtils');
 
-    kittyCADClient = new KittyCADApi({
-      token: apiToken,
-      // Use production API endpoint
-      baseUrl: 'https://api.zoo.dev',
-    });
-
-    return kittyCADClient;
-  } catch (error) {
-    console.error('Failed to initialize KittyCAD client:', error);
-    throw new Error(`KittyCAD SDK initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
+  return kclUtils;
 }
 
-// Extract parameters from KCL code by parsing variable definitions
-async function extractParametersFromCode(code: string): Promise<ExtractParametersResult> {
-  try {
-    const defaultParameters: Record<string, unknown> = {};
-    const properties: Record<string, unknown> = {};
+// Convert KCL variables to JSON schema for parameter extraction
+function convertKclVariablesToJsonSchema(variables: Partial<Record<string, KclValue>>): {
+  defaultParameters: Record<string, unknown>;
+  jsonSchema: Record<string, unknown>;
+} {
+  const defaultParameters: Record<string, unknown> = {};
+  const properties: Record<string, unknown> = {};
 
-    // Parse KCL code for variable definitions
-    const lines = code.split('\n');
-    
-    for (const line of lines) {
-      // Match variable assignments: let variable = value or const variable = value
-      const variableMatch = line.match(/^\s*(let|const)\s+(\w+)\s*=\s*(.+?)(?:\/\/.*)?$/);
-      if (variableMatch) {
-        const [, , name, valueStr] = variableMatch;
-        
-        if (name && valueStr) {
-          try {
-            // Try to parse the value as a number first
-            const numValue = Number.parseFloat(valueStr.trim());
-            if (!Number.isNaN(numValue)) {
-              defaultParameters[name] = numValue;
-              properties[name] = { type: 'number', default: numValue };
-              continue;
-            }
-
-            // Try to parse as boolean
-            if (valueStr.trim() === 'true' || valueStr.trim() === 'false') {
-              const boolValue = valueStr.trim() === 'true';
-              defaultParameters[name] = boolValue;
-              properties[name] = { type: 'boolean', default: boolValue };
-              continue;
-            }
-
-            // Try to parse as string (remove quotes)
-            const stringMatch = valueStr.match(/^["'](.*)["']$/);
-            if (stringMatch) {
-              const stringValue = stringMatch[1];
-              defaultParameters[name] = stringValue;
-              properties[name] = { type: 'string', default: stringValue };
-              continue;
-            }
-
-            // Try to parse as array
-            const arrayMatch = valueStr.match(/^\[(.*)\]$/);
-            if (arrayMatch) {
-              try {
-                const arrayValue = JSON.parse(valueStr);
-                defaultParameters[name] = arrayValue;
-                properties[name] = { type: 'array', default: arrayValue };
-              } catch {
-                // Fallback to string if JSON parsing fails
-                defaultParameters[name] = valueStr.trim();
-                properties[name] = { type: 'string', default: valueStr.trim() };
-              }
-              continue;
-            }
-
-            // Default to string for unrecognized patterns
-            defaultParameters[name] = valueStr.trim();
-            properties[name] = { type: 'string', default: valueStr.trim() };
-          } catch (error) {
-            console.warn(`Failed to parse parameter ${name}:`, error);
-            defaultParameters[name] = valueStr.trim();
-            properties[name] = { type: 'string', default: valueStr.trim() };
-          }
-        }
-      }
+  for (const [name, kclValue] of Object.entries(variables)) {
+    if (!kclValue) {
+      continue;
     }
 
-    // Create JSON schema
-    const jsonSchema = {
-      type: 'object',
-      properties,
-      additionalProperties: false,
-    };
+    try {
+      // Only process literal values: String, Number, and Bool
+      switch (kclValue.type) {
+        case 'String': {
+          defaultParameters[name] = kclValue.value;
+          properties[name] = { type: 'string', default: kclValue.value };
+          break;
+        }
+
+        case 'Number': {
+          defaultParameters[name] = kclValue.value;
+          properties[name] = { type: 'number', default: kclValue.value };
+          break;
+        }
+
+        case 'Bool': {
+          defaultParameters[name] = kclValue.value;
+          properties[name] = { type: 'boolean', default: kclValue.value };
+          break;
+        }
+
+        default: {
+          // Skip non-literal values (Plane, Face, Sketch, etc.)
+          console.debug(`Skipping non-literal KCL variable ${name} of type ${kclValue.type}`);
+          break;
+        }
+      }
+    } catch (error) {
+      console.warn(`Failed to process KCL variable ${name}:`, error);
+    }
+  }
+
+  const jsonSchema = {
+    type: 'object',
+    properties,
+    additionalProperties: false,
+  };
+
+  return { defaultParameters, jsonSchema };
+}
+
+// Extract parameters from KCL code using executeKcl
+async function extractParametersFromCode(code: string): Promise<ExtractParametersResult> {
+  console.log('extractParametersFromCode-zoo', code);
+  try {
+    const utils = await getKclUtils();
+
+    // Parse the KCL code first
+    const parseResult = await utils.parseKcl(code);
+    if (parseResult.errors.length > 0) {
+      console.warn('KCL parsing errors during parameter extraction:', parseResult.errors);
+      return createKernelSuccess({
+        defaultParameters: {},
+        jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
+      });
+    }
+
+    // Execute the KCL code to get variables
+    const executionResult = await utils.executeKcl(parseResult.program);
+
+    if (executionResult.errors.length > 0) {
+      console.warn('KCL execution errors during parameter extraction:', executionResult.errors);
+      return createKernelSuccess({
+        defaultParameters: {},
+        jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
+      });
+    }
+
+    // Convert KCL variables to JSON schema format
+    const { defaultParameters, jsonSchema } = convertKclVariablesToJsonSchema(executionResult.variables);
 
     return createKernelSuccess({
       defaultParameters,
       jsonSchema,
     });
   } catch (error) {
-    console.error('Error extracting parameters:', error);
+    console.error('Error extracting parameters from KCL code:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return createKernelError({ message: errorMessage, startColumn: 0, startLineNumber: 0 });
   }
@@ -125,7 +121,7 @@ async function extractParametersFromCode(code: string): Promise<ExtractParameter
 
 // Inject parameters into KCL code by replacing variable definitions
 function injectParametersIntoCode(code: string, parameters: Record<string, unknown>): string {
-  if (!parameters || Object.keys(parameters).length === 0) {
+  if (Object.keys(parameters).length === 0) {
     return code;
   }
 
@@ -135,7 +131,7 @@ function injectParametersIntoCode(code: string, parameters: Record<string, unkno
   for (const [name, value] of Object.entries(parameters)) {
     // Match and replace let/const variable definitions
     const regex = new RegExp(`^(\\s*(?:let|const)\\s+${name}\\s*=\\s*)(.+?)(?:\\/\\/.*)?$`, 'gm');
-    
+
     let formattedValue: string;
     if (typeof value === 'string') {
       formattedValue = `"${value}"`;
@@ -151,7 +147,7 @@ function injectParametersIntoCode(code: string, parameters: Record<string, unkno
   return modifiedCode;
 }
 
-// Build 3D shapes from KCL code using the KittyCAD API
+// Build 3D shapes from KCL code using exportKcl
 async function buildShapesFromCode(
   code: string,
   parameters?: Record<string, unknown>,
@@ -177,105 +173,128 @@ async function buildShapesFromCode(
     }
 
     // Inject parameters into the code
-    const codeWithParameters = injectParametersIntoCode(trimmedCode, parameters || {});
+    const codeWithParameters = injectParametersIntoCode(trimmedCode, parameters ?? {});
 
-         try {
-       const client = await getKittyCADClient() as {
-         modeling: {
-           modeling_commands_ws: (params: {
-             type: string;
-             cmd_id: string;
-             cmd: unknown;
-           }) => Promise<{
-             success: boolean;
-             error_code?: string;
-             data?: {
-               modeling_response?: {
-                 data?: {
-                   object_id?: string;
-                   contents?: string;
-                 };
-               };
-             };
-           }>;
-         };
-       };
+    try {
+      const utils = await getKclUtils();
 
-       // Compile KCL code to get the model
-       const response = await client.modeling.modeling_commands_ws({
-         type: 'modeling_cmd_req',
-         cmd_id: crypto.randomUUID(),
-         cmd: {
-           type: 'import',
-           path: '',
-           format: {
-             type: 'kcl',
-             source_code: codeWithParameters,
-           },
-         },
-       });
+      // Export KCL code to STL format
+      const exportResult = await utils.exportKcl(codeWithParameters, {
+        type: 'stl',
+        storage: 'binary',
+        units: 'mm',
+      });
 
-       if (!response.success) {
-         return createKernelError({
-           message: response.error_code || 'Failed to compile KCL code',
-           startColumn: 0,
-           startLineNumber: 0,
-         });
-       }
+      if (exportResult.length === 0) {
+        return createKernelError({
+          message: 'No STL data received from KCL export',
+          startColumn: 0,
+          startLineNumber: 0,
+        });
+      }
 
-       // Export the model as STL to get mesh data
-       const exportResponse = await client.modeling.modeling_commands_ws({
-         type: 'modeling_cmd_req',
-         cmd_id: crypto.randomUUID(),
-         cmd: {
-           type: 'export',
-           entity_id: response.data?.modeling_response?.data?.object_id || '',
-           format: {
-             type: 'stl',
-             storage: 'binary',
-           },
-         },
-       });
+      // Get the first exported file (should be STL)
+      const stlFile = exportResult[0];
+      if (!stlFile) {
+        return createKernelError({
+          message: 'No STL file in export result',
+          startColumn: 0,
+          startLineNumber: 0,
+        });
+      }
 
-       if (!exportResponse.success) {
-         return createKernelError({
-           message: exportResponse.error_code || 'Failed to export model',
-           startColumn: 0,
-           startLineNumber: 0,
-         });
-       }
+      // Store STL data globally for later export
+      modelDataMemory[shapeId] = stlFile.contents;
 
-       // Get the exported STL data
-       const stlData = exportResponse.data?.modeling_response?.data?.contents;
-       if (!stlData) {
-         return createKernelError({
-           message: 'No STL data received from export',
-           startColumn: 0,
-           startLineNumber: 0,
-         });
-       }
+      // Convert STL to 3D shape using the same approach as openscad.worker.ts
+      const arrayBuffer = new ArrayBuffer(stlFile.contents.byteLength);
+      const view = new Uint8Array(arrayBuffer);
+      view.set(stlFile.contents);
+      const mesh = parseSTL(arrayBuffer);
 
-       // Store the STL data for later export
-       const stlBuffer = new Uint8Array(Buffer.from(stlData, 'base64'));
-       modelDataMemory[shapeId] = stlBuffer;
+      // Optimize the mesh
+      mesh.mergeVertices();
 
-       // Parse STL to create shape geometry (simplified version)
-       // For now, create a simple cube as placeholder geometry
-       // In a full implementation, you would parse the STL data to extract vertices and triangles
-       const shape: Shape3D = createSimpleCubeShape();
+      // Extract original geometry data
+      const originalVertices = [...mesh.vertices];
+      const originalTriangles = [...mesh.facesIndices];
 
-       return createKernelSuccess([shape]);
-    } catch (apiError) {
-      console.error('KittyCAD API error:', apiError);
-      
-      // Fallback to simple cube for development/testing
-      console.warn('Falling back to mock geometry due to API error');
-      const shape: Shape3D = createSimpleCubeShape();
-      
-      // Store mock STL data
-      modelDataMemory[shapeId] = createMockSTLData();
-      
+      // Create new arrays with duplicate vertices per face (like replicad format)
+      const vertices: number[] = [];
+      const triangles: number[] = [];
+      const normals: number[] = [];
+
+      // For each triangle, create unique vertices with face normals
+      for (let i = 0; i < originalTriangles.length; i += 3) {
+        const i1 = originalTriangles[i]!;
+        const i2 = originalTriangles[i + 1]!;
+        const i3 = originalTriangles[i + 2]!;
+
+        // Get triangle vertices from original data
+        const v1 = [originalVertices[i1 * 3]!, originalVertices[i1 * 3 + 1]!, originalVertices[i1 * 3 + 2]!] as const;
+        const v2 = [originalVertices[i2 * 3]!, originalVertices[i2 * 3 + 1]!, originalVertices[i2 * 3 + 2]!] as const;
+        const v3 = [originalVertices[i3 * 3]!, originalVertices[i3 * 3 + 1]!, originalVertices[i3 * 3 + 2]!] as const;
+
+        // Compute edge vectors
+        const edge1 = [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]] as const;
+        const edge2 = [v3[0] - v1[0], v3[1] - v1[1], v3[2] - v1[2]] as const;
+
+        // Compute face normal using cross product
+        const normal: [number, number, number] = [
+          edge1[1] * edge2[2] - edge1[2] * edge2[1],
+          edge1[2] * edge2[0] - edge1[0] * edge2[2],
+          edge1[0] * edge2[1] - edge1[1] * edge2[0],
+        ];
+
+        // Normalize the normal vector
+        const length = Math.hypot(normal[0], normal[1], normal[2]);
+        if (length > 0) {
+          normal[0] /= length;
+          normal[1] /= length;
+          normal[2] /= length;
+        }
+
+        // Add duplicate vertices for this triangle
+        const newVertexIndex = vertices.length / 3;
+
+        // Add vertices
+        vertices.push(...v1, ...v2, ...v3);
+
+        // Add triangle indices (pointing to new duplicate vertices)
+        triangles.push(newVertexIndex, newVertexIndex + 1, newVertexIndex + 2);
+
+        // Add same face normal for all 3 vertices
+        normals.push(...normal, ...normal, ...normal);
+      }
+
+      const shape: Shape3D = {
+        type: '3d',
+        name: 'Shape',
+        faces: {
+          vertices,
+          triangles,
+          normals,
+          faceGroups: [
+            {
+              start: 0,
+              count: triangles.length,
+              faceId: 0,
+            },
+          ],
+        },
+        edges: { lines: [], edgeGroups: [] },
+        error: false,
+      };
+
       return createKernelSuccess([shape]);
+    } catch (kclError) {
+      console.error('KCL export error:', kclError);
+
+      return createKernelError({
+        message: 'KCL export error',
+        startColumn: 0,
+        startLineNumber: 0,
+      });
     }
   } catch (error) {
     console.error('Error while building shapes from code:', error);
@@ -284,108 +303,13 @@ async function buildShapesFromCode(
   }
 }
 
-// Create a simple cube shape for testing/fallback
-function createSimpleCubeShape(): Shape3D {
-  // Simple cube vertices
-  const vertices = [
-    // Front face
-    -1, -1, 1,  1, -1, 1,  1, 1, 1,
-    -1, -1, 1,  1, 1, 1,  -1, 1, 1,
-    // Back face
-    -1, -1, -1,  -1, 1, -1,  1, 1, -1,
-    -1, -1, -1,  1, 1, -1,  1, -1, -1,
-    // Top face
-    -1, 1, -1,  -1, 1, 1,  1, 1, 1,
-    -1, 1, -1,  1, 1, 1,  1, 1, -1,
-    // Bottom face
-    -1, -1, -1,  1, -1, -1,  1, -1, 1,
-    -1, -1, -1,  1, -1, 1,  -1, -1, 1,
-    // Right face
-    1, -1, -1,  1, 1, -1,  1, 1, 1,
-    1, -1, -1,  1, 1, 1,  1, -1, 1,
-    // Left face
-    -1, -1, -1,  -1, -1, 1,  -1, 1, 1,
-    -1, -1, -1,  -1, 1, 1,  -1, 1, -1,
-  ];
-
-  // Generate triangle indices
-  const triangles: number[] = [];
-  for (let i = 0; i < vertices.length / 9; i++) {
-    const baseIndex = i * 3;
-    triangles.push(baseIndex, baseIndex + 1, baseIndex + 2);
-  }
-
-  // Generate normals for each face
-  const normals: number[] = [];
-  const faceNormals = [
-    [0, 0, 1],   // Front
-    [0, 0, 1],   // Front
-    [0, 0, -1],  // Back
-    [0, 0, -1],  // Back
-    [0, 1, 0],   // Top
-    [0, 1, 0],   // Top
-    [0, -1, 0],  // Bottom
-    [0, -1, 0],  // Bottom
-    [1, 0, 0],   // Right
-    [1, 0, 0],   // Right
-    [-1, 0, 0],  // Left
-    [-1, 0, 0],  // Left
-  ];
-
-  for (const normal of faceNormals) {
-    normals.push(...normal, ...normal, ...normal);
-  }
-
-  return {
-    type: '3d',
-    name: 'Shape',
-    faces: {
-      vertices,
-      triangles,
-      normals,
-      faceGroups: [
-        {
-          start: 0,
-          count: triangles.length,
-          faceId: 0,
-        },
-      ],
-    },
-    edges: { lines: [], edgeGroups: [] },
-    error: false,
-  };
-}
-
-// Create mock STL data for testing
-function createMockSTLData(): Uint8Array {
-  // Simple ASCII STL header for a cube
-  const stlContent = `solid cube
-facet normal 0 0 1
-  outer loop
-    vertex -1 -1 1
-    vertex 1 -1 1
-    vertex 1 1 1
-  endloop
-endfacet
-facet normal 0 0 1
-  outer loop
-    vertex -1 -1 1
-    vertex 1 1 1
-    vertex -1 1 1
-  endloop
-endfacet
-endsolid cube`;
-  
-  return new TextEncoder().encode(stlContent);
-}
-
 // Export shape in various formats
 const exportShape = async (
   fileType: 'stl' | 'stl-binary' | 'step' = 'stl',
   shapeId = 'defaultShape',
 ): Promise<ExportGeometryResult> => {
   console.log('exportShape-zoo', fileType, shapeId);
-  
+
   try {
     // Check if model data exists in memory
     const modelData = modelDataMemory[shapeId];
@@ -397,17 +321,13 @@ const exportShape = async (
       });
     }
 
-         if (fileType === 'step') {
-       // For STEP export, we would need to call the KittyCAD API again with STEP format
-       try {
-         const client = await getKittyCADClient() as {
-           modeling: {
-             modeling_commands_ws: (params: unknown) => Promise<unknown>;
-           };
-         };
-         
-         // Note: This would require the object_id from the build phase
-         // For now, return a placeholder
+    if (fileType === 'step') {
+      // For STEP export, we would need to re-run exportKcl with STEP format
+      try {
+        const utils = await getKclUtils();
+
+        // We need the original code to export as STEP, but we don't have it stored
+        // For now, return a placeholder STEP file
         const stepContent = `ISO-10303-21;
 HEADER;
 FILE_DESCRIPTION(('Generated by Zoo/KittyCAD'),'2;1');
@@ -417,9 +337,9 @@ ENDSEC;
 DATA;
 ENDSEC;
 END-ISO-10303-21;`;
-        
+
         const stepBlob = new Blob([stepContent], { type: 'application/step' });
-        
+
         return createKernelSuccess([
           {
             blob: stepBlob,
@@ -428,7 +348,7 @@ END-ISO-10303-21;`;
         ]);
       } catch (apiError) {
         console.error('STEP export failed, using placeholder:', apiError);
-        
+
         // Fallback STEP content
         const stepContent = `ISO-10303-21;
 HEADER;
@@ -439,9 +359,9 @@ ENDSEC;
 DATA;
 ENDSEC;
 END-ISO-10303-21;`;
-        
+
         const stepBlob = new Blob([stepContent], { type: 'application/step' });
-        
+
         return createKernelSuccess([
           {
             blob: stepBlob,
@@ -470,21 +390,21 @@ END-ISO-10303-21;`;
 
 // Worker service interface
 const service = {
-  async initialize() {
+  async initialize(): Promise<boolean> {
     try {
-      await getKittyCADClient();
-      console.log('Zoo worker initialized successfully');
+      await getKclUtils();
+      return true;
     } catch (error) {
-      console.warn('Zoo worker initialization failed, will use fallback mode:', error);
-      // Don't throw - allow fallback operation
+      console.error('Failed to initialize KCL utilities:', error);
+      return false;
     }
   },
-  ready: async () => true,
+  ready: async (): Promise<boolean> => true,
   buildShapesFromCode,
   extractParametersFromCode,
-  toggleExceptions: async () => 'single' as const,
+  toggleExceptions: async (): Promise<'single'> => 'single' as const,
   exportShape,
-  isExceptionsEnabled: () => false,
+  isExceptionsEnabled: (): boolean => false,
 };
 
 expose(service);

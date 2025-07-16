@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import type { PartialDeep, SetRequired } from 'type-fest';
 import type { Node } from '@taucad/kcl-wasm-lib/bindings/Node';
 import type { Program } from '@taucad/kcl-wasm-lib/bindings/Program';
@@ -12,6 +10,7 @@ import type { DefaultPlanes } from '@taucad/kcl-wasm-lib/bindings/DefaultPlanes'
 import type { Configuration } from '@taucad/kcl-wasm-lib/bindings/Configuration';
 import type { System } from '@taucad/kcl-wasm-lib/bindings/ModelingCmd';
 import type { Models } from '@kittycad/lib';
+import wasmPath from '@taucad/kcl-wasm-lib/kcl.wasm?url';
 import { EngineConnection } from '~/components/geometry/kernel/zoo/engine-connection.js';
 import type { WasmModule } from '~/components/geometry/kernel/zoo/engine-connection.js';
 
@@ -81,11 +80,7 @@ async function loadWasmModule(): Promise<WasmModule> {
   try {
     const wasmModule = await import('@taucad/kcl-wasm-lib');
 
-    // Initialize the WASM module with the WASM binary
-    // In Node.js environment, we need to provide the path to the .wasm file
-    const wasmPath = resolve(import.meta.dirname, '../node_modules/@taucad/kcl-wasm-lib/kcl_wasm_lib_bg.wasm');
-    const wasmBinary = readFileSync(wasmPath);
-    await wasmModule.default(wasmBinary);
+    await wasmModule.default(wasmPath);
 
     return wasmModule;
   } catch (error) {

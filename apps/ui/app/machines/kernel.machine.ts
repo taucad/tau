@@ -60,9 +60,9 @@ const createWorkersActor = fromPromise<
 
     // Initialize all workers with the default exception handling mode
     await Promise.all([
-      wrappedReplicadWorker.initialize(true), 
+      wrappedReplicadWorker.initialize(true),
       wrappedOpenscadWorker.initialize(),
-      wrappedZooWorker.initialize()
+      wrappedZooWorker.initialize(),
     ]);
 
     // Store references to all workers

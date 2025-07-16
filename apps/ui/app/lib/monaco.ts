@@ -6,6 +6,7 @@ import { registerCompletion } from 'monacopilot';
 import type { CompletionRegistration, Monaco, StandaloneCodeEditor, CompletionCopilot } from 'monacopilot';
 import { ENV } from '~/config.js';
 import { registerOpenScadLanguage } from '~/lib/openscad-language/openscad-register-language.js';
+import { registerKclLanguage } from '~/lib/kcl-language/kcl-register-language.js';
 
 /**
  * Configure the Monaco editor.
@@ -46,6 +47,7 @@ export const configureMonaco = async (): Promise<void> => {
     await import('monaco-editor/esm/vs/language/typescript/monaco.contribution');
 
     registerOpenScadLanguage(monaco);
+    registerKclLanguage(monaco);
   }
 };
 

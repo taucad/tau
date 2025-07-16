@@ -17,10 +17,14 @@ import type { KernelProvider } from '~/types/kernel.types.js';
 const languageFromKernel = {
   replicad: 'typescript',
   openscad: 'openscad',
+  zoo: 'kcl',
 } as const satisfies Record<KernelProvider, string>;
 
 const getFileTree = (build: Build): FileItem[] => {
-  if (!build.assets.mechanical) return [];
+  if (!build.assets.mechanical) {
+    return [];
+  }
+
   const mechanicalAsset = build.assets.mechanical;
   const { files } = mechanicalAsset;
 
@@ -69,7 +73,9 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
 
   // Subscribe to CAD actor code changes and propagate to file explorer
   useEffect(() => {
-    if (!build?.assets.mechanical?.main) return;
+    if (!build?.assets.mechanical?.main) {
+      return;
+    }
 
     const mainFileName = build.assets.mechanical.main;
 
@@ -96,7 +102,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
 
   const handleCodeChange = useCallback((value: ComponentProps<typeof CodeEditor>['value']) => {
     // Update CAD actor as source of truth - subscription will propagate to file explorer
-    cadActor.send({ type: 'setCode', code: value });
+    cadActor.send({ type: 'setCode', code: value ?? '' });
   }, []);
 
   useEffect(() => {

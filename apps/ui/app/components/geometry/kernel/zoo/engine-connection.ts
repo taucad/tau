@@ -25,8 +25,16 @@ type PendingCommand = {
   timeout: NodeJS.Timeout;
 };
 
+type InitializationContext = {
+  resolve: (value: void) => void;
+  reject: (error: unknown) => void;
+  resolved: boolean;
+  authTimeoutId: NodeJS.Timeout;
+};
+
 const authTimeout = 10_000; // 10 second timeout
 const commandTimeout = 30_000; // 30 second timeout
+const pingIntervalMs = 30_000; // 30 second ping interval
 
 const consoleColors = {
   info: '\u001B[32m',
@@ -78,6 +86,21 @@ const getWebSocket = async (): Promise<typeof WebSocket> => {
   }
 };
 
+// Mock engine connection for local operations that don't need websocket
+export class MockEngineConnection {
+  public async sendModelingCommandFromWasm(): Promise<Uint8Array> {
+    throw new Error('Mock execution should not require websocket commands');
+  }
+
+  public async startNewSession(): Promise<void> {
+    // NO-OP for mock
+  }
+
+  public async startFromWasm(): Promise<boolean> {
+    return true;
+  }
+}
+
 // Standalone WebSocket engine connection
 export class EngineConnection {
   public context: Context | undefined;
@@ -87,6 +110,8 @@ export class EngineConnection {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly wasmModule: WasmModule;
+  private pingIntervalId: NodeJS.Timeout | undefined;
+  private initializationContext: InitializationContext | undefined;
 
   public constructor(apiKey: string, baseUrl: string, wasmModule: WasmModule) {
     this.apiKey = apiKey;
@@ -124,71 +149,19 @@ export class EngineConnection {
             }
           }, authTimeout);
 
-          this.websocket.addEventListener('open', () => {
-            clg.debug('WebSocket connected');
+          // Store initialization context
+          this.initializationContext = {
+            resolve,
+            reject,
+            resolved,
+            authTimeoutId,
+          };
 
-            // Send authentication headers in the exact format expected by the server
-            if (this.websocket?.readyState === 1) {
-              this.websocket.send(
-                JSON.stringify({
-                  type: 'headers',
-                  headers: {
-                    // eslint-disable-next-line @typescript-eslint/naming-convention -- this is the expected signature.
-                    Authorization: `Bearer ${this.apiKey}`,
-                  },
-                }),
-              );
-              this.websocket.send(JSON.stringify({ type: 'ping' }));
-            }
-          });
-
-          this.websocket.addEventListener('message', (event) => {
-            // Check for successful authentication before delegating to normal handler
-            if (typeof event.data === 'string') {
-              try {
-                const message = JSON.parse(event.data) as WebSocketResponse;
-
-                // Resolve on successful modeling_session_data (indicates auth success)
-                if (
-                  !resolved &&
-                  'success' in message &&
-                  message.success &&
-                  message.resp.type === 'modeling_session_data'
-                ) {
-                  clg.debug('Authentication successful');
-                  resolved = true;
-                  this.isConnected = true;
-                  clearTimeout(authTimeoutId);
-                  resolve();
-                }
-              } catch {
-                // Continue to normal handler
-              }
-            }
-
-            this.handleMessage(event);
-          });
-
-          this.websocket.addEventListener('error', (error) => {
-            clg.error('WebSocket error:', error);
-            if (!resolved) {
-              resolved = true;
-              clearTimeout(authTimeoutId);
-              reject(new Error('WebSocket connection failed'));
-            }
-          });
-
-          this.websocket.addEventListener('close', () => {
-            clg.debug('WebSocket disconnected');
-            this.isConnected = false;
-            if (!resolved) {
-              resolved = true;
-              clearTimeout(authTimeoutId);
-              reject(new Error('WebSocket closed before authentication'));
-            }
-
-            void this.cleanup();
-          });
+          // Add event listeners
+          this.websocket.addEventListener('open', this.onWebSocketOpen);
+          this.websocket.addEventListener('close', this.onWebSocketClose);
+          this.websocket.addEventListener('error', this.onWebSocketError);
+          this.websocket.addEventListener('message', this.onWebSocketMessage);
         } catch (error) {
           if (!resolved) {
             resolved = true;
@@ -246,6 +219,12 @@ export class EngineConnection {
   }
 
   public async cleanup(): Promise<void> {
+    // Clear ping interval
+    if (this.pingIntervalId) {
+      clearInterval(this.pingIntervalId);
+      this.pingIntervalId = undefined;
+    }
+
     // Clear all pending commands
     for (const [_id, pending] of this.pendingCommands) {
       clearTimeout(pending.timeout);
@@ -255,11 +234,105 @@ export class EngineConnection {
     this.pendingCommands.clear();
 
     if (this.websocket) {
+      // Remove all event listeners before closing
+      this.websocket.removeEventListener('open', this.onWebSocketOpen);
+      this.websocket.removeEventListener('close', this.onWebSocketClose);
+      this.websocket.removeEventListener('error', this.onWebSocketError);
+      this.websocket.removeEventListener('message', this.onWebSocketMessage);
+
       this.websocket.close();
       this.websocket = undefined;
     }
 
     this.isConnected = false;
+  }
+
+  // Store event listeners as arrow functions so they can be properly removed
+  private readonly onWebSocketOpen = (event: Event): void => {
+    clg.debug('WebSocket connected');
+
+    // Send authentication headers in the exact format expected by the server
+    if (this.websocket?.readyState === 1) {
+      this.send({
+        type: 'headers',
+        headers: {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- this is the expected signature.
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+      });
+      this.send({ type: 'ping' });
+    }
+
+    // Start ping interval to keep connection alive
+    this.startPingInterval();
+  };
+
+  private readonly onWebSocketClose = (event: CloseEvent): void => {
+    clg.debug('WebSocket disconnected');
+    this.isConnected = false;
+
+    // Remove all event listeners
+    if (this.websocket) {
+      this.websocket.removeEventListener('open', this.onWebSocketOpen);
+      this.websocket.removeEventListener('close', this.onWebSocketClose);
+      this.websocket.removeEventListener('error', this.onWebSocketError);
+      this.websocket.removeEventListener('message', this.onWebSocketMessage);
+    }
+
+    // Clear ping interval
+    if (this.pingIntervalId) {
+      clearInterval(this.pingIntervalId);
+      this.pingIntervalId = undefined;
+    }
+
+    // Handle initialization rejection if not yet resolved
+    const initContext = this.initializationContext;
+    if (initContext && !initContext.resolved) {
+      initContext.resolved = true;
+      clearTimeout(initContext.authTimeoutId);
+      initContext.reject(new Error('WebSocket closed before authentication'));
+    }
+
+    void this.cleanup();
+  };
+
+  private readonly onWebSocketError = (event: Event): void => {
+    clg.error('WebSocket error:', event);
+
+    const initContext = this.initializationContext;
+    if (initContext && !initContext.resolved) {
+      initContext.resolved = true;
+      clearTimeout(initContext.authTimeoutId);
+
+      if (event.target instanceof WebSocket) {
+        const readyStateText = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][event.target.readyState] ?? 'UNKNOWN';
+        initContext.reject(new Error(`WebSocket error in state: ${readyStateText}`));
+      } else {
+        initContext.reject(new Error('WebSocket connection failed'));
+      }
+    }
+  };
+
+  private readonly onWebSocketMessage = (event: MessageEvent): void => {
+    this.handleMessage(event);
+  };
+
+  private startPingInterval(): void {
+    // Clear existing interval if any
+    if (this.pingIntervalId) {
+      clearInterval(this.pingIntervalId);
+    }
+
+    this.pingIntervalId = setInterval(() => {
+      // Don't start pinging until we're connected
+      if (!this.isConnected) {
+        return;
+      }
+
+      if (this.websocket?.readyState === 1) {
+        this.send({ type: 'ping' });
+      }
+    }, pingIntervalMs);
   }
 
   private async sendCommand(command: WebSocketRequest): Promise<unknown> {
@@ -318,6 +391,22 @@ export class EngineConnection {
     }
 
     clg.res('Received message:', message.request_id);
+
+    // Handle authentication success
+    const initContext = this.initializationContext;
+    if (
+      initContext &&
+      !initContext.resolved &&
+      'success' in message &&
+      message.success &&
+      message.resp.type === 'modeling_session_data'
+    ) {
+      clg.debug('Authentication successful');
+      initContext.resolved = true;
+      this.isConnected = true;
+      clearTimeout(initContext.authTimeoutId);
+      initContext.resolve();
+    }
 
     // Send the response to WASM context
     if (this.context) {

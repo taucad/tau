@@ -9,9 +9,10 @@ import type { ModulePath } from '@taucad/kcl-wasm-lib/bindings/ModulePath';
 import type { DefaultPlanes } from '@taucad/kcl-wasm-lib/bindings/DefaultPlanes';
 import type { Configuration } from '@taucad/kcl-wasm-lib/bindings/Configuration';
 import type { System } from '@taucad/kcl-wasm-lib/bindings/ModelingCmd';
+import type { Context } from '@taucad/kcl-wasm-lib';
 import type { Models } from '@kittycad/lib';
 import wasmPath from '@taucad/kcl-wasm-lib/kcl.wasm?url';
-import { EngineConnection } from '~/components/geometry/kernel/zoo/engine-connection.js';
+import { EngineConnection, MockEngineConnection } from '~/components/geometry/kernel/zoo/engine-connection.js';
 import type { WasmModule } from '~/components/geometry/kernel/zoo/engine-connection.js';
 
 type OutputFormat3d = Models['OutputFormat3d_type'];
@@ -89,11 +90,127 @@ async function loadWasmModule(): Promise<WasmModule> {
 }
 
 export class KclUtils {
+  /**
+   * Inject parameters into KCL program JSON by modifying variable declarations.
+   * This is a pure transformation that doesn't modify the original program.
+   *
+   * @param program - The KCL program to inject parameters into
+   * @param parameters - The JSON parameters to inject
+   * @returns A new program with injected parameters
+   */
+  public static injectParametersIntoProgram(program: Program, parameters: Record<string, unknown>): Program {
+    if (Object.keys(parameters).length === 0) {
+      return program;
+    }
+
+    // Deep clone the program to avoid mutating the original
+    const modifiedProgram = structuredClone(program);
+
+    // Iterate through the body to find variable declarations
+    for (const bodyItem of modifiedProgram.body) {
+      if (bodyItem.type === 'VariableDeclaration') {
+        const { declaration } = bodyItem;
+        const variableName = declaration.id.name;
+        if (declaration.init.type === 'Literal' && variableName in parameters) {
+          const parameterValue = parameters[variableName];
+
+          // Update the literal value while preserving the structure
+          if (typeof parameterValue === 'number') {
+            // `value` is mistyped - it always has a nested `value` property
+            (declaration.init.value as unknown) = {
+              value: parameterValue,
+              suffix: 'None',
+            };
+            declaration.init.raw = String(parameterValue);
+          } else if (typeof parameterValue === 'string') {
+            (declaration.init.value as unknown) = {
+              value: parameterValue,
+              suffix: 'None',
+            };
+            declaration.init.raw = `"${parameterValue}"`;
+          } else if (typeof parameterValue === 'boolean') {
+            (declaration.init.value as unknown) = {
+              value: parameterValue,
+              suffix: 'None',
+            };
+            declaration.init.raw = String(parameterValue);
+          }
+        }
+      }
+    }
+
+    return modifiedProgram;
+  }
+
+  /**
+   * Convert KCL variables to JSON schema format for parameter extraction.
+   * Only processes literal values (String, Number, Bool) and skips complex types.
+   *
+   * @param variables - The KCL variables to convert
+   * @returns Object containing default parameters and JSON schema
+   */
+  public static convertKclVariablesToJsonSchema(variables: Partial<Record<string, KclValue>>): {
+    defaultParameters: Record<string, unknown>;
+    jsonSchema: Record<string, unknown>;
+  } {
+    const defaultParameters: Record<string, unknown> = {};
+    const properties: Record<string, unknown> = {};
+
+    for (const [name, kclValue] of Object.entries(variables)) {
+      if (!kclValue) {
+        continue;
+      }
+
+      try {
+        // Only process literal values: String, Number, and Bool
+        switch (kclValue.type) {
+          case 'String': {
+            defaultParameters[name] = kclValue.value;
+            properties[name] = { type: 'string', default: kclValue.value };
+            break;
+          }
+
+          case 'Number': {
+            defaultParameters[name] = kclValue.value;
+            properties[name] = { type: 'number', default: kclValue.value };
+            break;
+          }
+
+          case 'Bool': {
+            defaultParameters[name] = kclValue.value;
+            properties[name] = { type: 'boolean', default: kclValue.value };
+            break;
+          }
+
+          default: {
+            // Skip non-literal values (Plane, Face, Sketch, etc.)
+            console.debug(`Skipping non-literal KCL variable ${name} of type ${kclValue.type}`);
+            break;
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to process KCL variable ${name}:`, error);
+      }
+    }
+
+    const jsonSchema = {
+      type: 'object',
+      properties,
+      additionalProperties: false,
+    };
+
+    return { defaultParameters, jsonSchema };
+  }
+
   private wasmModule: WasmModule | undefined;
-  private isInitialized = false;
+  private isWasmInitialized = false;
+  private isEngineInitialized = false;
   private engineManager: EngineConnection | undefined;
+  private mockContext: Context | undefined;
   private readonly apiKey: string;
   private readonly baseUrl: string;
+  // Add execution state tracking
+  private hasExecutedProgram = false;
 
   public constructor(options: KclUtilsOptions) {
     if (!options.apiKey) {
@@ -105,30 +222,68 @@ export class KclUtils {
   }
 
   /**
-   * Initialize the KCL export utility.
-   * This will initialize the WASM module and engine connection.
+   * Check if WASM has been initialized
    */
-  public async initialize(): Promise<void> {
-    if (this.isInitialized) {
+  public get isWasmReady(): boolean {
+    return this.isWasmInitialized;
+  }
+
+  /**
+   * Check if the engine has been initialized
+   */
+  public get isEngineReady(): boolean {
+    return this.isEngineInitialized;
+  }
+
+  /**
+   * Initialize only the WASM module for parsing and mock execution.
+   * This allows parseKcl and executeMockKcl to work without websocket.
+   */
+  public async initializeWasm(): Promise<void> {
+    if (this.isWasmInitialized) {
       return;
     }
 
     // Initialize WASM module for parsing
     this.wasmModule = await loadWasmModule();
 
+    // Create mock context for local operations
+    const mockEngine = new MockEngineConnection();
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- WASM Context constructor may return thenable
+    this.mockContext = await new this.wasmModule.Context(
+      mockEngine,
+      undefined, // Fs_manager (undefined for now)
+    );
+
+    this.isWasmInitialized = true;
+  }
+
+  /**
+   * Initialize the full engine connection for operations that need websocket.
+   * This is required for executeKcl and exportKcl operations.
+   */
+  public async initializeEngine(): Promise<void> {
+    if (this.isEngineInitialized) {
+      return;
+    }
+
+    // Ensure WASM is initialized first
+    await this.initializeWasm();
+
     // Create and initialize engine manager
     this.engineManager = await this.createEngineManager();
     await this.engineManager.initialize();
 
-    this.isInitialized = true;
+    this.isEngineInitialized = true;
   }
 
   /**
-   * Parse KCL code and return the AST
+   * Parse KCL code and return the AST.
+   * Only requires WASM initialization.
    */
   public async parseKcl(kclCode: string): Promise<KclParseResult> {
-    if (!this.isInitialized) {
-      throw new Error('KclExportUtils not initialized. Call initialize() first.');
+    if (!this.isWasmInitialized) {
+      await this.initializeWasm();
     }
 
     if (!this.wasmModule) {
@@ -150,11 +305,48 @@ export class KclUtils {
   }
 
   /**
-   * Execute KCL code using the engine
+   * Execute KCL code using mock context (no websocket required).
+   * Only requires WASM initialization.
    */
-  public async executeKcl(program: Program, settings?: PartialDeep<Configuration>): Promise<KclExecutionResult> {
-    if (!this.isInitialized) {
-      throw new Error('KclExportUtils not initialized. Call initialize() first.');
+  public async executeMockKcl(program: Program, settings?: PartialDeep<Configuration>): Promise<KclExecutionResult> {
+    if (!this.isWasmInitialized) {
+      await this.initializeWasm();
+    }
+
+    if (!this.wasmModule) {
+      throw new Error('WASM module not loaded');
+    }
+
+    if (!this.mockContext) {
+      throw new Error('Mock context not initialized');
+    }
+
+    try {
+      const result = (await this.mockContext.executeMock(
+        JSON.stringify(program),
+        undefined,
+        JSON.stringify(settings ?? {}),
+        false,
+      )) as KclExecutionResult;
+
+      return result;
+    } catch (error) {
+      console.error('KCL mock execution error details:', error);
+      const errorMessage =
+        error instanceof Error
+          ? `KCL mock execution failed: ${error.message}`
+          : `KCL mock execution failed: ${String(error)}`;
+      throw new Error(errorMessage);
+    }
+  }
+
+  /**
+   * Execute KCL code using the full engine (requires websocket).
+   * Requires full engine initialization.
+   */
+  public async executeProgram(program: Program, settings?: PartialDeep<Configuration>): Promise<KclExecutionResult> {
+    if (!this.isEngineInitialized) {
+      await this.initializeEngine();
     }
 
     if (!this.wasmModule) {
@@ -162,7 +354,7 @@ export class KclUtils {
     }
 
     if (!this.engineManager) {
-      throw new Error('Real engine manager not initialized');
+      throw new Error('Engine manager not initialized');
     }
 
     try {
@@ -172,103 +364,44 @@ export class KclUtils {
         JSON.stringify(settings ?? {}),
       )) as KclExecutionResult;
 
+      // Track successful execution
+      this.hasExecutedProgram = true;
+
       return result;
     } catch (error) {
       console.error('KCL execution error details:', error);
       const errorMessage =
-        error && typeof error === 'object' && 'message' in error
-          ? `KCL execution failed: ${(error as { message: string }).message}`
-          : `KCL execution failed: ${JSON.stringify(error)}`;
+        error instanceof Error ? `KCL execution failed: ${error.message}` : `KCL execution failed: ${String(error)}`;
       throw new Error(errorMessage);
     }
   }
 
   /**
-   * Export KCL code from string input
+   * Export from operations already in memory without re-execution.
+   * This should be used after executeKcl has been called.
    */
-  public async exportKcl(
-    kclCode: string,
-    options: ExportOptions,
-    settings?: PartialDeep<Configuration>,
-  ): Promise<ExportedFile[]> {
-    try {
-      // Parse the KCL code
-      const { program, errors } = await this.parseKcl(kclCode);
-
-      if (errors.length > 0) {
-        throw new Error(`KCL parsing errors: ${JSON.stringify(errors)}`);
-      }
-
-      // Export the program
-      const files = await this.exportKclInternal(program, options, settings);
-
-      return files;
-    } catch (error) {
-      throw new Error(`Failed to export KCL: ${String(error)}`);
-    }
-  }
-
-  /**
-   * Clean up resources
-   */
-  public async cleanup(): Promise<void> {
-    if (this.engineManager) {
-      await this.engineManager.cleanup();
-      this.engineManager = undefined;
-    }
-
-    this.isInitialized = false;
-  }
-
-  /**
-   * Create an engine manager that connects to the modeling API
-   */
-  private async createEngineManager(): Promise<EngineConnection> {
-    if (!this.wasmModule) {
-      throw new Error('WASM module not loaded');
-    }
-
-    const engineManager = new EngineConnection(this.apiKey, this.baseUrl, this.wasmModule);
-    return engineManager;
-  }
-
-  /**
-   * Export a KCL program to the specified format using WASM export API
-   */
-  private async exportKclInternal(
-    program: Program,
+  public async exportFromMemory(
     options: ExportOptions,
     settings: PartialDeep<Configuration> = {},
   ): Promise<ExportedFile[]> {
-    // First execute the program to get the model
-    const execResult = await this.executeKcl(program, settings);
+    if (!this.hasExecutedProgram) {
+      throw new Error('No program has been executed yet. Call executeKcl first.');
+    }
 
-    if (execResult.errors.length > 0) {
-      const errorMessages = execResult.errors.map((error: unknown) => {
-        if (typeof error === 'string') {
-          return error;
-        }
-
-        if (error && typeof error === 'object') {
-          const errorObject = error as { message?: string; msg?: string };
-          return errorObject.message ?? errorObject.msg ?? JSON.stringify(error);
-        }
-
-        return String(error);
-      });
-      throw new Error(`KCL execution failed: ${errorMessages.join(', ')}`);
+    if (!this.isEngineInitialized) {
+      throw new Error('Engine not initialized');
     }
 
     // Get the context used for execution
     const context = this.engineManager?.context;
     if (!context) {
-      throw new Error('No context available for export. Make sure KCL code was executed first.');
+      throw new Error('No context available for export');
     }
 
-    // Create export format configuration following the main app's approach
+    // Create export format configuration
     const exportFormat = this.createExportFormat(options);
 
-    // Export the model
+    // Export the model using operations already in memory
     const result = (await context.export(JSON.stringify(exportFormat), JSON.stringify(settings))) as Array<{
       name: string;
       contents: ArrayBuffer;
@@ -286,6 +419,56 @@ export class KclUtils {
     }
 
     return files;
+  }
+
+  /**
+   * Clean up resources
+   */
+  public async cleanup(): Promise<void> {
+    await this.clearProgram();
+
+    if (this.engineManager) {
+      await this.engineManager.cleanup();
+      this.engineManager = undefined;
+    }
+
+    this.mockContext = undefined;
+    this.isWasmInitialized = false;
+    this.isEngineInitialized = false;
+  }
+
+  /**
+   * Clear the memory/operations cache in WASM contexts.
+   * This should be called before starting a new build to ensure clean state.
+   */
+  public async clearProgram(settings?: PartialDeep<Configuration>): Promise<void> {
+    try {
+      // Get the context used for execution
+      const context = this.engineManager?.context;
+      if (context) {
+        // Reset the scene
+        await context.bustCacheAndResetScene(JSON.stringify(settings ?? {}));
+      }
+
+      // Reset execution state
+      this.hasExecutedProgram = false;
+
+      console.log('Memory cleared successfully');
+    } catch (error) {
+      console.warn('Failed to clear memory:', error);
+    }
+  }
+
+  /**
+   * Create an engine manager that connects to the modeling API
+   */
+  private async createEngineManager(): Promise<EngineConnection> {
+    if (!this.wasmModule) {
+      throw new Error('WASM module not loaded');
+    }
+
+    const engineManager = new EngineConnection(this.apiKey, this.baseUrl, this.wasmModule);
+    return engineManager;
   }
 
   /**

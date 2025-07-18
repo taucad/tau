@@ -1,84 +1,47 @@
 import { expose } from 'comlink';
 import { parseSTL } from '@amandaghassaei/stl-parser';
-import type { KclValue } from '@taucad/kcl-wasm-lib/bindings/KclValue';
 import { KclUtils } from '~/components/geometry/kernel/zoo/kcl-utils.js';
 import type { BuildShapesResult, ExportGeometryResult, ExtractParametersResult } from '~/types/kernel.types.js';
 import { createKernelError, createKernelSuccess } from '~/types/kernel.types.js';
 import type { Shape3D } from '~/types/cad.types.js';
 
-// Global storage for computed model data and KCL utilities
-const modelDataMemory: Record<string, Uint8Array> = {};
+// Global storage for computed STL data
+const stlDataMemory: Record<string, Uint8Array> = {};
 let kclUtils: KclUtils | undefined;
 
-// Initialize KCL utilities with Zoo API key
-async function getKclUtils(): Promise<KclUtils> {
+// Create or get the singleton KCL utilities instance
+async function getKclUtilsInstance(): Promise<KclUtils> {
   if (!kclUtils) {
     // TODO: inject the API key to the worker
     const apiKey = 'api-XXX';
     kclUtils = new KclUtils({ apiKey });
-    await kclUtils.initialize();
   }
-
-  console.log('in getKclUtils');
 
   return kclUtils;
 }
 
-// Convert KCL variables to JSON schema for parameter extraction
-function convertKclVariablesToJsonSchema(variables: Partial<Record<string, KclValue>>): {
-  defaultParameters: Record<string, unknown>;
-  jsonSchema: Record<string, unknown>;
-} {
-  const defaultParameters: Record<string, unknown> = {};
-  const properties: Record<string, unknown> = {};
+// Initialize KCL utilities with WASM only (for parsing and mock operations)
+async function getKclUtils(): Promise<KclUtils> {
+  const utils = await getKclUtilsInstance();
 
-  for (const [name, kclValue] of Object.entries(variables)) {
-    if (!kclValue) {
-      continue;
-    }
+  // Initialize WASM (idempotent - will return early if already initialized)
+  await utils.initializeWasm();
 
-    try {
-      // Only process literal values: String, Number, and Bool
-      switch (kclValue.type) {
-        case 'String': {
-          defaultParameters[name] = kclValue.value;
-          properties[name] = { type: 'string', default: kclValue.value };
-          break;
-        }
-
-        case 'Number': {
-          defaultParameters[name] = kclValue.value;
-          properties[name] = { type: 'number', default: kclValue.value };
-          break;
-        }
-
-        case 'Bool': {
-          defaultParameters[name] = kclValue.value;
-          properties[name] = { type: 'boolean', default: kclValue.value };
-          break;
-        }
-
-        default: {
-          // Skip non-literal values (Plane, Face, Sketch, etc.)
-          console.debug(`Skipping non-literal KCL variable ${name} of type ${kclValue.type}`);
-          break;
-        }
-      }
-    } catch (error) {
-      console.warn(`Failed to process KCL variable ${name}:`, error);
-    }
-  }
-
-  const jsonSchema = {
-    type: 'object',
-    properties,
-    additionalProperties: false,
-  };
-
-  return { defaultParameters, jsonSchema };
+  return utils;
 }
 
-// Extract parameters from KCL code using executeKcl
+// Get KCL utils with full engine initialization (for export operations)
+async function getKclUtilsWithEngine(): Promise<KclUtils> {
+  const utils = await getKclUtilsInstance();
+
+  // Initialize engine (idempotent - will return early if already initialized)
+  // This automatically initializes WASM first if needed
+  await utils.initializeEngine();
+
+  return utils;
+}
+
+// Extract parameters from KCL code
 async function extractParametersFromCode(code: string): Promise<ExtractParametersResult> {
   console.log('extractParametersFromCode-zoo', code);
   try {
@@ -88,25 +51,27 @@ async function extractParametersFromCode(code: string): Promise<ExtractParameter
     const parseResult = await utils.parseKcl(code);
     if (parseResult.errors.length > 0) {
       console.warn('KCL parsing errors during parameter extraction:', parseResult.errors);
-      return createKernelSuccess({
-        defaultParameters: {},
-        jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
+      return createKernelError({
+        message: 'KCL parsing errors during parameter extraction',
+        startColumn: 0,
+        startLineNumber: 0,
       });
     }
 
     // Execute the KCL code to get variables
-    const executionResult = await utils.executeKcl(parseResult.program);
+    const executionResult = await utils.executeMockKcl(parseResult.program);
 
     if (executionResult.errors.length > 0) {
       console.warn('KCL execution errors during parameter extraction:', executionResult.errors);
-      return createKernelSuccess({
-        defaultParameters: {},
-        jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
+      return createKernelError({
+        message: 'KCL execution errors during parameter extraction',
+        startColumn: 0,
+        startLineNumber: 0,
       });
     }
 
     // Convert KCL variables to JSON schema format
-    const { defaultParameters, jsonSchema } = convertKclVariablesToJsonSchema(executionResult.variables);
+    const { defaultParameters, jsonSchema } = KclUtils.convertKclVariablesToJsonSchema(executionResult.variables);
 
     return createKernelSuccess({
       defaultParameters,
@@ -119,35 +84,7 @@ async function extractParametersFromCode(code: string): Promise<ExtractParameter
   }
 }
 
-// Inject parameters into KCL code by replacing variable definitions
-function injectParametersIntoCode(code: string, parameters: Record<string, unknown>): string {
-  if (Object.keys(parameters).length === 0) {
-    return code;
-  }
-
-  let modifiedCode = code;
-
-  // Replace variable definitions with injected values
-  for (const [name, value] of Object.entries(parameters)) {
-    // Match and replace let/const variable definitions
-    const regex = new RegExp(`^(\\s*(?:let|const)\\s+${name}\\s*=\\s*)(.+?)(?:\\/\\/.*)?$`, 'gm');
-
-    let formattedValue: string;
-    if (typeof value === 'string') {
-      formattedValue = `"${value}"`;
-    } else if (Array.isArray(value)) {
-      formattedValue = JSON.stringify(value);
-    } else {
-      formattedValue = String(value);
-    }
-
-    modifiedCode = modifiedCode.replace(regex, `$1${formattedValue}`);
-  }
-
-  return modifiedCode;
-}
-
-// Build 3D shapes from KCL code using exportKcl
+// Build 3D shapes from KCL code using the new program-based parameter injection
 async function buildShapesFromCode(
   code: string,
   parameters?: Record<string, unknown>,
@@ -172,14 +109,51 @@ async function buildShapesFromCode(
       return createKernelSuccess([emptyShape]);
     }
 
-    // Inject parameters into the code
-    const codeWithParameters = injectParametersIntoCode(trimmedCode, parameters ?? {});
-
     try {
-      const utils = await getKclUtils();
+      const utils = await getKclUtilsWithEngine();
 
-      // Export KCL code to STL format
-      const exportResult = await utils.exportKcl(codeWithParameters, {
+      // Clear memory before starting a new build to ensure clean state
+      await utils.clearProgram();
+
+      // Parse the KCL code first to get the program JSON
+      const parseResult = await utils.parseKcl(trimmedCode);
+
+      if (parseResult.errors.length > 0) {
+        console.warn('KCL parsing errors:', parseResult.errors);
+        const errorMessages = parseResult.errors.map(String);
+        return createKernelError({
+          message: `KCL parsing failed: ${errorMessages.join(', ')}`,
+          startColumn: 0,
+          startLineNumber: 0,
+        });
+      }
+
+      // Inject parameters into the program JSON
+      const modifiedProgram = KclUtils.injectParametersIntoProgram(parseResult.program, parameters ?? {});
+
+      // Execute the modified program
+      const executionResult = await utils.executeProgram(modifiedProgram);
+
+      // Check for execution errors
+      if (executionResult.errors.length > 0) {
+        console.warn('KCL execution errors:', executionResult.errors);
+        const errorMessages = executionResult.errors.map((error) => {
+          if (typeof error === 'string') {
+            return error;
+          }
+
+          const errorObject = error as { message?: string; msg?: string };
+          return errorObject.message ?? errorObject.msg ?? JSON.stringify(error);
+        });
+        return createKernelError({
+          message: `KCL execution failed: ${errorMessages.join(', ')}`,
+          startColumn: 0,
+          startLineNumber: 0,
+        });
+      }
+
+      // Now export to STL format using operations already in memory
+      const exportResult = await utils.exportFromMemory({
         type: 'stl',
         storage: 'binary',
         units: 'mm',
@@ -204,7 +178,7 @@ async function buildShapesFromCode(
       }
 
       // Store STL data globally for later export
-      modelDataMemory[shapeId] = stlFile.contents;
+      stlDataMemory[shapeId] = stlFile.contents;
 
       // Convert STL to 3D shape using the same approach as openscad.worker.ts
       const arrayBuffer = new ArrayBuffer(stlFile.contents.byteLength);
@@ -311,9 +285,9 @@ const exportShape = async (
   console.log('exportShape-zoo', fileType, shapeId);
 
   try {
-    // Check if model data exists in memory
-    const modelData = modelDataMemory[shapeId];
-    if (!modelData) {
+    // Check if STL data exists in memory
+    const stlData = stlDataMemory[shapeId];
+    if (!stlData) {
       return createKernelError({
         message: `Shape ${shapeId} not computed yet. Please build shapes before exporting.`,
         startColumn: 0,
@@ -322,57 +296,54 @@ const exportShape = async (
     }
 
     if (fileType === 'step') {
-      // For STEP export, we would need to re-run exportKcl with STEP format
+      // For STEP export, use operations already in memory without re-execution
       try {
-        const utils = await getKclUtils();
+        const utils = await getKclUtilsWithEngine();
 
-        // We need the original code to export as STEP, but we don't have it stored
-        // For now, return a placeholder STEP file
-        const stepContent = `ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('Generated by Zoo/KittyCAD'),'2;1');
-FILE_NAME('model.step','${new Date().toISOString()}',('Tau CAD'),('Zoo/KittyCAD'),'Unknown','Unknown','Unknown');
-FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
-ENDSEC;
-DATA;
-ENDSEC;
-END-ISO-10303-21;`;
+        // Use exportFromMemory to export STEP format from operations already in memory
+        const stepResult = await utils.exportFromMemory({
+          type: 'step',
+        });
 
-        const stepBlob = new Blob([stepContent], { type: 'application/step' });
+        if (stepResult.length === 0) {
+          return createKernelError({
+            message: 'No STEP data received from KCL export',
+            startColumn: 0,
+            startLineNumber: 0,
+          });
+        }
 
-        return createKernelSuccess([
-          {
-            blob: stepBlob,
-            name: 'model.step',
-          },
-        ]);
-      } catch (apiError) {
-        console.error('STEP export failed, using placeholder:', apiError);
+        const stepFile = stepResult[0];
+        if (!stepFile) {
+          return createKernelError({
+            message: 'No STEP file in export result',
+            startColumn: 0,
+            startLineNumber: 0,
+          });
+        }
 
-        // Fallback STEP content
-        const stepContent = `ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('Generated by Zoo/KittyCAD'),'2;1');
-FILE_NAME('model.step','${new Date().toISOString()}',('Tau CAD'),('Zoo/KittyCAD'),'Unknown','Unknown','Unknown');
-FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
-ENDSEC;
-DATA;
-ENDSEC;
-END-ISO-10303-21;`;
-
-        const stepBlob = new Blob([stepContent], { type: 'application/step' });
+        const blob = new Blob([stepFile.contents], {
+          type: 'application/step',
+        });
 
         return createKernelSuccess([
           {
-            blob: stepBlob,
+            blob,
             name: 'model.step',
           },
         ]);
+      } catch (stepError) {
+        console.error('STEP export error:', stepError);
+        return createKernelError({
+          message: 'STEP export failed',
+          startColumn: 0,
+          startLineNumber: 0,
+        });
       }
     }
 
     // For STL export (both ASCII and binary)
-    const blob = new Blob([modelData], {
+    const blob = new Blob([stlData], {
       type: fileType === 'stl-binary' ? 'application/octet-stream' : 'text/plain',
     });
 
@@ -392,6 +363,7 @@ END-ISO-10303-21;`;
 const service = {
   async initialize(): Promise<boolean> {
     try {
+      // Initialize WASM for basic operations - engine will be initialized on-demand
       await getKclUtils();
       return true;
     } catch (error) {

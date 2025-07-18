@@ -208,36 +208,26 @@ Key KCL syntax elements:
 
 Examples of correct KCL output:
 \`\`\`kcl
-// Basic parametric box
-const width = 20
-const height = 10
-const depth = 15
+// Simple test cube
+@settings(defaultLengthUnit = mm)
 
-const box = startSketchOn('XY')
-  |> startProfileAt([0, 0], %)
-  |> line([width, 0], %)
-  |> line([0, height], %)
-  |> line([-width, 0], %)
-  |> close(%)
-  |> extrude(depth, %)
+length = 10
+
+fn createCube(sideLength) {
+  cube = startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [sideLength, 0], tag = $seg01)
+  |> line(end = [0, sideLength], tag = $seg02)
+  |> line(end = [-sideLength, 0], tag = $seg03)
+  |> close(tag = $seg04)
+  |> extrude(length = sideLength)
+
+  return cube
+}
+
+createCube(sideLength = length)
 \`\`\`
 
-\`\`\`kcl
-// Parametric cylinder with hole
-const outerRadius = 10
-const innerRadius = 5
-const height = 30
-
-const outerCylinder = startSketchOn('XY')
-  |> circle({ center: [0, 0], radius: outerRadius }, %)
-  |> extrude(height, %)
-
-const innerCylinder = startSketchOn('XY')
-  |> circle({ center: [0, 0], radius: innerRadius }, %)
-  |> extrude(height + 1, %)
-
-const hollowCylinder = subtract(outerCylinder, innerCylinder)
-\`\`\`
 </code_standards>`,
     modelingStrategy: `
 <modeling_strategy>

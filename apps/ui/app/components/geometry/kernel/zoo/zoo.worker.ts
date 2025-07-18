@@ -43,7 +43,6 @@ async function getKclUtilsWithEngine(): Promise<KclUtils> {
 
 // Extract parameters from KCL code
 async function extractParametersFromCode(code: string): Promise<ExtractParametersResult> {
-  console.log('extractParametersFromCode-zoo', code);
   try {
     const utils = await getKclUtils();
 
@@ -282,8 +281,6 @@ const exportShape = async (
   fileType: 'stl' | 'stl-binary' | 'step' = 'stl',
   shapeId = 'defaultShape',
 ): Promise<ExportGeometryResult> => {
-  console.log('exportShape-zoo', fileType, shapeId);
-
   try {
     // Check if STL data exists in memory
     const stlData = stlDataMemory[shapeId];

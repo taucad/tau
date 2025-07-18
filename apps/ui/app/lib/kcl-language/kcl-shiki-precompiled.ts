@@ -38,6 +38,7 @@ const lang = Object.freeze({
     { name: 'keyword.control.conditional.kcl', match: /\b(if|else if|else)\b/dgv },
     { name: 'keyword.control.conditional.kcl', match: /\b(if|else if|else)\b/dgv },
     { name: 'keyword.control.return.kcl', match: /\breturn\b/dgv },
+    { name: 'keyword.control.function.kcl', match: /\b(fn|function)\b/dgv },
     { name: 'keyword.declaration.kcl', match: /\b(var|let|const)\b/dgv },
     { name: 'keyword.operator.comparison.kcl', match: /(==|!=|<=|>=|<|>)/dgv },
     { name: 'keyword.operator.definition.kcl', match: /=/dgv },
@@ -52,6 +53,22 @@ const lang = Object.freeze({
     { name: 'keyword.module.import.kcl', match: /\bimport\b/dgv },
     { name: 'entity.name.tag.kcl', match: /\$[\p{L}\p{M}\p{N}\p{Pc}]+\b/dgv },
     { name: 'keyword.directive.settings.kcl', match: /@[\p{L}\p{M}\p{N}\p{Pc}]+\b/dgv },
+    {
+      name: 'meta.function.declaration.kcl',
+      begin: /\b(fn|function)\p{space}+([\p{L}\p{M}\p{N}\p{Pc}]+)\p{space}*(\()/dgv,
+      beginCaptures: {
+        '1': { name: 'keyword.control.function.kcl' },
+        '2': { name: 'entity.name.function.kcl' },
+        '3': { name: 'punctuation.section.parameters.begin.kcl' },
+      },
+      end: /\)/dgv,
+      endCaptures: { '0': { name: 'punctuation.section.parameters.end.kcl' } },
+      patterns: [
+        { name: 'variable.parameter.kcl', match: /\b[\p{L}\p{M}\p{N}\p{Pc}]+\b/dgv },
+        { name: 'punctuation.separator.parameter.kcl', match: /,/dgv },
+        { name: 'keyword.operator.assignment.kcl', match: /=/dgv },
+      ],
+    },
     {
       name: 'meta.function.definition.kcl',
       begin: /\b((export)\p{space}+)?(fn)\p{space}+([\p{L}\p{M}\p{N}\p{Pc}]+)\p{space}*(=)/dgv,
@@ -77,6 +94,11 @@ const lang = Object.freeze({
         },
         { name: 'keyword.operator.fat-arrow.kcl', match: /=>/dgv },
       ],
+    },
+    {
+      name: 'meta.function.invocation.kcl',
+      match: /\b([\p{L}\p{M}\p{N}\p{Pc}]+)\p{space}*(?=\()/dgv,
+      captures: { '1': { name: 'entity.name.function.call.kcl' } },
     },
     { include: '#anonymous-function' },
     {
@@ -110,6 +132,11 @@ const lang = Object.freeze({
     { name: 'punctuation.section.array.end.kcl', match: /\]/dgv },
     { name: 'punctuation.separator.colon.kcl', match: /:/dgv },
     { name: 'punctuation.separator.comma.kcl', match: /,/dgv },
+    {
+      name: 'variable.parameter.named.kcl',
+      match: /(?<=\(|,)\p{space}*([\p{L}\p{M}\p{N}\p{Pc}]+)\p{space}*(?==)/dgv,
+      captures: { '1': { name: 'variable.parameter.kcl' } },
+    },
     { name: 'variable.other.kcl', match: /\b([\p{L}\p{M}\p{N}\p{Pc}]+)\b/dgv },
   ],
   repository: {

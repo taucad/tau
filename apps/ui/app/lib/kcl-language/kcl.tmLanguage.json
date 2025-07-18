@@ -38,6 +38,10 @@
 		"match": "\\breturn\\b"
 	  },
 	  {
+		"name": "keyword.control.function.kcl",
+		"match": "\\b(fn|function)\\b"
+	  },
+	  {
 		"name": "keyword.declaration.kcl",
 		"match": "\\b(var|let|const)\\b"
 	  },
@@ -88,6 +92,41 @@
 		"name": "keyword.directive.settings.kcl",
 		"match": "@\\w+\\b"
 	  },
+	    {
+	"name": "meta.function.declaration.kcl",
+	"begin": "\\b(fn|function)\\s+(\\w+)\\s*(\\()",
+	"beginCaptures": {
+	  "1": {
+		"name": "keyword.control.function.kcl"
+	  },
+	  "2": {
+		"name": "entity.name.function.kcl"
+	  },
+	  "3": {
+		"name": "punctuation.section.parameters.begin.kcl"
+	  }
+	},
+	"end": "\\)",
+	"endCaptures": {
+	  "0": {
+		"name": "punctuation.section.parameters.end.kcl"
+	  }
+	},
+	"patterns": [
+	  {
+		"name": "variable.parameter.kcl",
+		"match": "\\b\\w+\\b"
+	  },
+	  {
+		"name": "punctuation.separator.parameter.kcl",
+		"match": ","
+	  },
+	  {
+		"name": "keyword.operator.assignment.kcl",
+		"match": "="
+	  }
+	]
+  },
 	  {
 		"name": "meta.function.definition.kcl",
 		"begin": "\\b((export)\\s+)?(fn)\\s+(\\w+)\\s*(=)",
@@ -142,6 +181,15 @@
 			"match": "=>"
 		  }
 		]
+	  },
+	  {
+		"name": "meta.function.invocation.kcl",
+		"match": "\\b(\\w+)\\s*(?=\\()",
+		"captures": {
+		  "1": {
+			"name": "entity.name.function.call.kcl"
+		  }
+		}
 	  },
 	  {
 		"include": "#anonymous-function"
@@ -232,6 +280,15 @@
 		"name": "punctuation.separator.comma.kcl",
 		"match": ","
 	  },
+	    {
+	"name": "variable.parameter.named.kcl",
+	"match": "(?<=\\(|,)\\s*(\\w+)\\s*(?==)",
+	"captures": {
+	  "1": {
+		"name": "variable.parameter.kcl"
+	  }
+	}
+  },
 	  {
 		"name": "variable.other.kcl",
 		"match": "\\b(\\w+)\\b"

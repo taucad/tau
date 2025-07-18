@@ -103,21 +103,19 @@ export class KclWasmError extends KclError {
     const { backtrace } = extendedError.details;
     const { filenames } = extendedError;
 
-    if (!backtrace || backtrace.length === 0) {
+    if (backtrace.length === 0) {
       return [];
     }
 
     return backtrace.map((item) => {
       const { fnName, sourceRange } = item;
-      const [startChar, endChar, moduleId] = sourceRange;
+      const [_startChar, _endChar, moduleId] = sourceRange;
 
       // Get filename from filenames object using moduleId
       let fileName: string | undefined;
-      if (filenames && moduleId !== undefined && filenames[moduleId]) {
+      if (filenames?.[moduleId]) {
         const fileInfo = filenames[moduleId];
-        if (fileInfo && typeof fileInfo === 'object' && 'value' in fileInfo) {
-          fileName = fileInfo.value;
-        }
+        fileName = fileInfo.value;
       }
 
       // Convert source range to line/column positions

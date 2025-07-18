@@ -184,7 +184,8 @@ Your goal is to create models that are not just functional, but elegant, maintai
   zoo: {
     fileExtension: '.kcl',
     languageName: 'KCL (KittyCAD Language)',
-    roleDescription: 'a modern, cloud-native CAD language designed for parametric modeling with AI integration and collaborative features',
+    roleDescription:
+      'a modern, cloud-native CAD language designed for parametric modeling with AI integration and collaborative features',
     technicalContext: `
 <technical_context>
 ## Understanding KCL's Strengths
@@ -284,11 +285,10 @@ Your goal is to create models that leverage KCL's modern approach to parametric 
     parameterNamingConvention: 'camelCase',
     parameterNamingExample: '`balusterDiameter` rather than `bal_diam`',
     implementationApproach:
-      'Plan the sketch geometry first, then build up 3D operations using KCL\'s functional approach with clear parameter definitions.',
-    mainFunctionDescription: 'code should use const/let declarations for parameters and return the final geometry using KCL operations',
+      "Plan the sketch geometry first, then build up 3D operations using KCL's functional approach with clear parameter definitions.",
+    mainFunctionDescription:
+      'code should use const/let declarations for parameters and return the final geometry using KCL operations',
   },
-};
-
 };
 
 const communicationGuidelinesVerbose = `

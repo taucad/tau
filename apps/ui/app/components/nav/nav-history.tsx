@@ -1,4 +1,4 @@
-import { Edit, History, MoreHorizontal, Trash2 } from 'lucide-react';
+import { Edit, History, MoreHorizontal, Trash2, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router';
@@ -21,18 +21,59 @@ import {
 } from '~/components/ui/sidebar.js';
 import { useBuilds } from '~/hooks/use-builds.js';
 import { toast } from '~/components/ui/sonner.js';
+import { groupItemsByTimeHorizon } from '~/utils/temporal.js';
+import { Input } from '~/components/ui/input.js';
 
 const buildsPerPage = 5;
 
 export function NavHistory(): ReactNode {
   const [visibleCount, setVisibleCount] = useState(buildsPerPage);
   const [editingId, setEditingId] = useState<string | undefined>(undefined);
+  const [searchQuery, setSearchQuery] = useState('');
   const { builds, deleteBuild, updateName } = useBuilds();
 
+  // Filter builds based on search query
+  const filteredBuilds = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return builds;
+    }
+
+    const query = searchQuery.toLowerCase().trim();
+    return builds.filter(
+      (build) => build.name.toLowerCase().includes(query) || build.description.toLowerCase().includes(query),
+    );
+  }, [builds, searchQuery]);
+
+  const groupedBuilds = useMemo(() => {
+    return groupItemsByTimeHorizon(filteredBuilds);
+  }, [filteredBuilds]);
+
   const visibleBuilds = useMemo(() => {
-    const sortedBuilds = builds.sort((a, b) => b.updatedAt - a.updatedAt);
-    return sortedBuilds.slice(0, visibleCount);
-  }, [builds, visibleCount]);
+    let totalShown = 0;
+    const result = [];
+
+    for (const group of groupedBuilds) {
+      const remainingSlots = visibleCount - totalShown;
+      if (remainingSlots <= 0) {
+        break;
+      }
+
+      const visibleItemsInGroup = group.items.slice(0, remainingSlots);
+      if (visibleItemsInGroup.length > 0) {
+        result.push({
+          ...group,
+          items: visibleItemsInGroup,
+        });
+        totalShown += visibleItemsInGroup.length;
+      }
+    }
+
+    return result;
+  }, [groupedBuilds, visibleCount]);
+
+  const totalVisibleBuildCount = useMemo(() => {
+    return visibleBuilds.reduce((sum, group) => sum + group.items.length, 0);
+  }, [visibleBuilds]);
 
   const handleLoadMore = () => {
     setVisibleCount((previous) => previous + buildsPerPage);
@@ -62,35 +103,91 @@ export function NavHistory(): ReactNode {
     }
   };
 
-  if (visibleBuilds.length === 0) {
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(event.target.value);
+    // Reset visible count when searching to show all results
+    if (event.target.value.trim()) {
+      setVisibleCount(Infinity);
+    } else {
+      setVisibleCount(buildsPerPage);
+    }
+  };
+
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    // Prevent the search from triggering sidebar navigation
+    event.stopPropagation();
+  };
+
+  if (builds.length === 0) {
     return null;
   }
 
   return (
-    <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-      <SidebarGroupLabel>Recent Builds</SidebarGroupLabel>
-      <SidebarMenu>
-        {visibleBuilds.map((build) => (
-          <NavHistoryItem
-            key={build.id}
-            build={build}
-            isEditing={editingId === build.id}
-            onRename={handleRename}
-            onRenameSubmit={handleRenameSubmit}
-            onRenameCancel={handleRenameCancel}
-            onDelete={handleDelete}
-          />
-        ))}
-        {builds.length > visibleCount && (
-          <SidebarMenuItem>
-            <SidebarMenuButton shouldAutoClose className="text-sidebar-foreground/70" onClick={handleLoadMore}>
-              <MoreHorizontal className="size-4" />
-              <span>Load More</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        )}
-      </SidebarMenu>
-    </SidebarGroup>
+    <>
+      {/* Search input - always show for the first group */}
+      {visibleBuilds.length > 0 && (
+        <SidebarGroup className="-mb-2 group-data-[collapsible=icon]:hidden">
+          <SidebarGroupLabel>Recent Builds</SidebarGroupLabel>
+          <div className="relative">
+            <Search className="absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search builds..."
+              value={searchQuery}
+              className="h-7 pl-7 text-xs"
+              onChange={handleSearchChange}
+              onKeyDown={handleSearchKeyDown}
+            />
+          </div>
+        </SidebarGroup>
+      )}
+
+      {/* Temporal groups */}
+      {visibleBuilds.map((group) => (
+        <SidebarGroup key={group.name} className="group-data-[collapsible=icon]:hidden">
+          <SidebarGroupLabel>{group.name}</SidebarGroupLabel>
+          <SidebarMenu>
+            {group.items.map((build) => (
+              <NavHistoryItem
+                key={build.id}
+                build={build}
+                isEditing={editingId === build.id}
+                onRename={handleRename}
+                onRenameSubmit={handleRenameSubmit}
+                onRenameCancel={handleRenameCancel}
+                onDelete={handleDelete}
+              />
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+      ))}
+
+      {/* Show "No results" message when searching with no results */}
+      {searchQuery.trim() && filteredBuilds.length === 0 && (
+        <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+                No builds found for &ldquo;{searchQuery}&rdquo;
+              </div>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+      )}
+
+      {/* Load More button */}
+      {builds.length > totalVisibleBuildCount && !searchQuery.trim() && (
+        <SidebarGroup className="-mt-3.5 group-data-[collapsible=icon]:hidden">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton shouldAutoClose className="text-sidebar-foreground/70" onClick={handleLoadMore}>
+                <MoreHorizontal className="size-4" />
+                <span>Load More</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+      )}
+    </>
   );
 }
 

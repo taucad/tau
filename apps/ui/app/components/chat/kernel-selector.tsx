@@ -15,7 +15,7 @@ export type KernelSelectorProperties = {
 
 export function KernelSelector({ selectedKernel, onKernelChange, onClose }: KernelSelectorProperties): JSX.Element {
   return (
-    <div className="flex flex-row gap-3">
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
       {kernelOptions.map((option) => (
         <HoverCard key={option.id}>
           <HoverCardTrigger asChild>
@@ -35,7 +35,7 @@ export function KernelSelector({ selectedKernel, onKernelChange, onClose }: Kern
                 <SvgIcon id={option.id} className="size-5" />
                 <span className="text-sm font-medium">{option.name}</span>
               </div>
-              <span className="text-xs text-muted-foreground">{option.description}</span>
+              <span className="text-xs text-wrap text-muted-foreground">{option.description}</span>
             </Button>
           </HoverCardTrigger>
           <HoverCardContent className="w-80">
@@ -44,7 +44,7 @@ export function KernelSelector({ selectedKernel, onKernelChange, onClose }: Kern
                 <SvgIcon id={option.id} className="size-12 min-w-12 rounded-lg bg-muted p-2" />
                 <div>
                   <h3 className="text-lg font-semibold">{option.name}</h3>
-                  <p className="text-sm text-muted-foreground italic">{option.description}</p>
+                  <p className="text-sm text-wrap text-muted-foreground italic">{option.description}</p>
                 </div>
               </div>
 

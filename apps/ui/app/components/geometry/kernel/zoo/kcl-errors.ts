@@ -3,22 +3,12 @@ import type { KclError as WasmKclError } from '@taucad/kcl-wasm-lib/bindings/Kcl
 import type { KernelStackFrame } from '~/types/kernel.types.js';
 import { sourceRangeToLineColumn } from '~/components/geometry/kernel/zoo/source-range-utils.js';
 
-// Extended WASM error types to include backtrace information
-export type WasmBacktraceItem = {
-  fnName?: string | undefined;
-  sourceRange: SourceRange;
-};
-
 export type WasmFileInfo = {
   type: string;
   value: string;
 };
 
 export type ExtendedWasmKclError = WasmKclError & {
-  details: WasmKclError['details'] & {
-    backtrace?: WasmBacktraceItem[];
-  };
-} & {
   filenames?: Record<string | number, WasmFileInfo>;
 };
 

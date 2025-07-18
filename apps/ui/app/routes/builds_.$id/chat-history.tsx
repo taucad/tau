@@ -49,7 +49,7 @@ export const ChatHistory = memo(function () {
   // Memoize the item renderer for Virtuoso with stable references
   const renderItem = useCallback(
     (index: number) => {
-      const messageId = messageIds[index];
+      const messageId = messageIds[index]!;
 
       return <MessageItem key={`message-${messageId}`} messageId={messageId} />;
     },

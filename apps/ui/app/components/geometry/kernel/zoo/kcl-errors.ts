@@ -21,15 +21,15 @@ export type KclErrorKind =
   | 'lexical'
   | 'syntax'
   | 'semantic'
-  | 'type' // -> compilation
+  | 'type'
   | 'engine'
-  | 'runtime' // -> runtime
+  | 'runtime'
   | 'internal'
   | 'io'
-  | 'unexpected' // -> kernel
+  | 'unexpected'
   | 'auth'
-  | 'export' // -> special handling
-  | 'unknown'; // -> unknown
+  | 'export'
+  | 'unknown';
 
 export class KclError extends Error {
   /**

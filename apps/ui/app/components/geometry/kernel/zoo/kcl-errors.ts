@@ -8,6 +8,10 @@ export type WasmFileInfo = {
   value: string;
 };
 
+/**
+ * This addresses some shortcomings of the WASM KclError type.
+ * - The `filenames` field is not included in the type.
+ */
 export type ExtendedWasmKclError = WasmKclError & {
   filenames?: Record<string | number, WasmFileInfo>;
 };

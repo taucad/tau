@@ -33,67 +33,68 @@ const base64Loader: Plugin = {
   },
 };
 
-export default defineConfig({
-  root: __dirname,
-  cacheDir: '../../node_modules/.vite/apps/ui',
-  plugins: [
-    base64Loader,
-    reactRouter(),
-    nxViteTsPaths(),
-    tsconfigPaths(),
-    // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
-    tailwindcss(),
-    devtoolsJson(),
-    visualizer({
-      exclude: [{ file: '**/*?raw' }], // ignore raw files that are used for editor typings
-    }),
-    // TODO: add back after fixing the recrusive reload issue.
-    // ViteSvgSpriteWrapper({
-    //   icons: path.resolve(__dirname, './app/components/icons/raw/**/*.svg'),
-    //   outputDir: path.resolve(__dirname, './app/components/icons/generated'),
-    //   generateType: true,
-    //   typeOutputDir: path.resolve(__dirname, './app/components/icons/generated'),
-    //   // Ensure the sprite retains the original svg attributes
-    //   sprite: { shape: {} },
-    // }),
-  ],
-  worker: {
-    // Workers need their own plugins.
-    // https://vite.dev/config/worker-options.html#worker-plugins
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- false positive
-    plugins: () => [nxViteTsPaths(), tsconfigPaths()],
-    format: 'es',
-  },
+export default defineConfig(({ mode }) => {
+  const isTest = mode === 'test';
 
-  server: {
-    port: 3000,
-    // TODO: set to actual domain
-    allowedHosts: true,
-  },
-  build: {
-    assetsInlineLimit(file) {
-      // Don't inline SVGs
-      return !file.endsWith('.svg');
+  return {
+    root: __dirname,
+    cacheDir: '../../node_modules/.vite/apps/ui',
+    plugins: [
+      base64Loader,
+      // Only include React Router plugin for non-test modes
+      ...(isTest ? [] : [reactRouter()]),
+      nxViteTsPaths(),
+      tsconfigPaths(),
+      // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
+      tailwindcss(),
+      devtoolsJson(),
+      visualizer({
+        exclude: [{ file: '**/*?raw' }], // ignore raw files that are used for editor typings
+      }),
+      // TODO: add back after fixing the recrusive reload issue.
+      // ViteSvgSpriteWrapper({
+      //   icons: path.resolve(__dirname, './app/components/icons/raw/**/*.svg'),
+      //   outputDir: path.resolve(__dirname, './app/components/icons/generated'),
+      //   generateType: true,
+      //   typeOutputDir: path.resolve(__dirname, './app/components/icons/generated'),
+      //   // Ensure the sprite retains the original svg attributes
+      //   sprite: { shape: {} },
+      // }),
+    ],
+    worker: {
+      // Workers need their own plugins.
+      // https://vite.dev/config/worker-options.html#worker-plugins
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- false positive
+      plugins: () => [nxViteTsPaths(), tsconfigPaths()],
+      format: 'es',
     },
-    target: 'es2022',
-  },
 
-  test: {
-    setupFiles: ['./vitest.setup.ts'],
-    watch: false,
-    globals: true,
-    environment: 'jsdom',
-    include: ['./tests/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
-    reporters: ['default'],
-    coverage: {
-      reportsDirectory: '../../coverage/apps/ui',
-      provider: 'v8',
-      include: ['app/**/*'],
-      exclude: [
-        'app/**/*.test.{ts,tsx}',
-        'app/**/*.spec.{ts,tsx}',
-        'app/**/index.ts',
-      ],
+    server: {
+      port: 3000,
+      // TODO: set to actual domain
+      allowedHosts: true,
     },
-  },
+    build: {
+      assetsInlineLimit(file) {
+        // Don't inline SVGs
+        return !file.endsWith('.svg');
+      },
+      target: 'es2022',
+    },
+
+    test: {
+      setupFiles: ['./vitest.setup.ts'],
+      watch: false,
+      globals: true,
+      environment: 'jsdom',
+      include: ['./tests/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
+      reporters: ['default'],
+      coverage: {
+        reportsDirectory: '../../coverage/apps/ui',
+        provider: 'v8',
+        include: ['app/**/*'],
+        exclude: ['app/**/*.test.{ts,tsx}', 'app/**/*.spec.{ts,tsx}', 'app/**/index.ts'],
+      },
+    },
+  };
 });

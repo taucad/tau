@@ -22,7 +22,9 @@ const base64Loader: Plugin = {
   name: 'base64-loader',
   transform(_, id) {
     const [path, query] = id.split('?');
-    if (query !== 'base64') return;
+    if (query !== 'base64' || !path) {
+      return;
+    }
 
     const data = fs.readFileSync(path);
     const base64 = data.toString('base64');
@@ -60,6 +62,7 @@ export default defineConfig({
     // https://vite.dev/config/worker-options.html#worker-plugins
     // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- false positive
     plugins: () => [nxViteTsPaths(), tsconfigPaths()],
+    format: 'es',
   },
 
   server: {

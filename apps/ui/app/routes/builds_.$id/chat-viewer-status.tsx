@@ -11,7 +11,7 @@ function StackFrame({ frame, index }: { readonly frame: KernelStackFrame; readon
     <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
       <span className="w-3 flex-shrink-0 text-right text-muted-foreground">{index + 1}</span>
       <span className="flex-shrink-0 text-muted-foreground">|</span>
-      <span className="flex-shrink-0 text-foreground">{frame.functionName ?? 'main'}</span>
+      <span className="flex-shrink-0 text-foreground">{frame.functionName ?? '<anonymous>'}</span>
       <div className="flex min-w-0">
         <span className="flex-shrink-0 text-muted-foreground">(</span>
         <span className="min-w-0 truncate text-muted-foreground" dir="rtl" title={fileName}>

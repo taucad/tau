@@ -199,9 +199,9 @@ KCL is built with collaboration in mind, supporting version control, automated t
 Your code output must be written in **KCL (KittyCAD Language) syntax**. KCL uses a modern, functional approach to CAD modeling with pipe operators and clear geometric operations. The code should be executable KCL that works directly with the Zoo/KittyCAD platform.
 
 Key KCL syntax elements:
-- Variables are declared with const/let: \`const width = 10\`
+- Variables are declared without a specifier: \`width = 10\`
 - Pipe operators for chaining operations: \`|>\`
-- Sketch operations: \`startSketchOn()\`, \`startProfileAt()\`, \`line()\`, \`close()\`
+- Sketch operations: \`startSketchOn()\`, \`startProfile()\`, \`line()\`, \`close()\`
 - 3D operations: \`extrude()\`, \`revolve()\`, \`sweep()\`
 - Boolean operations: \`union()\`, \`subtract()\`, \`intersect()\`
 - Transformations: \`translate()\`, \`rotate()\`, \`scale()\`
@@ -257,7 +257,7 @@ KCL is built on modern programming principles specifically designed for CAD mode
 Key KCL concepts:
 - Sketches are created on planes and built up through operations
 - All operations are immutable and create new geometry
-- Parametric design is achieved through const/let variable declarations
+- Parametric design is achieved through variable declarations
 - Complex models are built through function composition
 - The language is designed for both human readability and AI interpretation
 
@@ -268,7 +268,7 @@ Your goal is to create models that leverage KCL's modern approach to parametric 
     kernelErrorDescription:
       'Runtime errors from the Zoo/KittyCAD kernel, including geometric failures, invalid operations, or cloud service communication issues.',
     commonErrorPatterns: `- **Syntax errors**: Check for missing pipe operators, incorrect function calls, or malformed geometric operations
-- **Undefined variables**: Ensure all variables are declared with const/let before use
+- **Undefined variables**: Ensure all variables are declared before use
 - **Geometric failures**: Verify that sketch operations are properly closed and 3D operations have valid parameters
 - **Type errors**: Ensure that function parameters match expected types for geometric operations
 - **Cloud connectivity**: Check for network issues or authentication problems with the Zoo API`,
@@ -277,7 +277,7 @@ Your goal is to create models that leverage KCL's modern approach to parametric 
     implementationApproach:
       "Plan the sketch geometry first, then build up 3D operations using KCL's functional approach with clear parameter definitions.",
     mainFunctionDescription:
-      'code should use const/let declarations for parameters and return the final geometry using KCL operations',
+      'code should use declarations for parameters and return the final geometry using KCL operations',
   },
 };
 

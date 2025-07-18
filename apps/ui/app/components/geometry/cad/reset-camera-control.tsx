@@ -19,7 +19,7 @@ export function ResetCameraControl(): JSX.Element {
           <RotateCcw className="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Reset camera</TooltipContent>
+      <TooltipContent>Reset camera zoom</TooltipContent>
     </Tooltip>
   );
 }

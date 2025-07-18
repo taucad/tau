@@ -1,27 +1,28 @@
 import { memo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { getRandomExamples } from '~/constants/chat-prompt-examples.js';
+import type { ChatExample } from '~/constants/chat-prompt-examples.js';
 import { Button } from '~/components/ui/button.js';
-import { useAiChat } from '~/components/chat/ai-chat-provider.js';
+import { useChatActions } from '~/components/chat/ai-chat-provider.js';
 import { useModels } from '~/hooks/use-models.js';
 import { createMessage } from '~/utils/chat.js';
-import { MessageRole, MessageStatus } from '~/types/chat.js';
+import { messageRole, messageStatus } from '~/types/chat.types.js';
 
 export const ChatExamples = memo(function () {
   // Use lazy initialization to ensure consistent examples across renders
   const [examples, setExamples] = useState(() => getRandomExamples(3));
-  const { append } = useAiChat();
+  const { append } = useChatActions();
   const { selectedModel } = useModels();
 
-  const handleExampleClick = (prompt: string) => {
+  const handleExampleClick = (example: ChatExample) => {
     const userMessage = createMessage({
-      content: prompt,
-      role: MessageRole.User,
-      status: MessageStatus.Pending,
-      metadata: {},
+      content: example.prompt,
+      role: messageRole.user,
+      status: messageStatus.pending,
+      metadata: { kernel: example.kernel },
       model: selectedModel?.id ?? '',
     });
-    void append(userMessage);
+    append(userMessage);
   };
 
   const handleRefreshExamples = () => {
@@ -43,7 +44,7 @@ export const ChatExamples = memo(function () {
             variant="outline"
             className="flex-1"
             onClick={() => {
-              handleExampleClick(example.prompt);
+              handleExampleClick(example);
             }}
           >
             {example.title}

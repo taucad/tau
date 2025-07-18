@@ -1,14 +1,14 @@
 import { Eye, Code, Terminal } from 'lucide-react';
 import type { JSX } from 'react';
 import { ChatConsole } from '~/routes/builds_.$id/chat-console.js';
-import { ChatEditor } from '~/routes/builds_.$id/chat-editor.js';
 import { ChatViewer } from '~/routes/builds_.$id/chat-viewer.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import type { KeyCombination } from '~/utils/keys.js';
 import { cn } from '~/utils/ui.js';
-import { Tabs, TabsList, TabsTrigger, TabsContent, TabsContents } from '~/components/ui/tabs.js';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '~/components/ui/tabs.js';
+import { ChatEditorLayout } from '~/routes/builds_.$id/chat-editor-layout.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
-const chatTabCookieName = 'chat-tab';
 type ChatTabs = (typeof tabs)[number]['value'];
 
 const openPreviewKeyCombination = {
@@ -41,7 +41,7 @@ const tabs = [
   {
     value: 'editor',
     icon: Code,
-    label: 'Editor',
+    label: 'Code',
     keyCombination: openCodeKeyCombination,
   },
   {
@@ -53,7 +53,7 @@ const tabs = [
 ] as const;
 
 export function ChatViewTabs(): JSX.Element {
-  const [chatTab, setChatTab] = useCookie<ChatTabs>(chatTabCookieName, 'preview');
+  const [chatTab, setChatTab] = useCookie<ChatTabs>(cookieName.chatTab, 'preview');
   return (
     <Tabs
       defaultValue={chatTab}
@@ -62,7 +62,7 @@ export function ChatViewTabs(): JSX.Element {
         setChatTab(value as ChatTabs);
       }}
     >
-      <div className={cn('absolute top-0 left-0 z-10 mt-2 ml-2 group-data-[chat-open=false]/chat-layout:ml-12')}>
+      <div className={cn('absolute top-0 left-0 z-10 mt-2 ml-2')}>
         <TabsList defaultValue="editor" className="rounded-md border">
           {tabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value} className="px-1.5 md:px-2">
@@ -72,15 +72,20 @@ export function ChatViewTabs(): JSX.Element {
           ))}
         </TabsList>
       </div>
-      <TabsContent withAnimation={false} value="preview" className="mt-0 flex size-full flex-1">
+      <TabsContent enableAnimation={false} value="preview" className="mt-0 flex size-full flex-1">
         <ChatViewer />
       </TabsContent>
       {/* subtract 6rem for the chat history and chat input as they don't take the full height */}
-      <TabsContent withAnimation={false} value="editor" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
-        <ChatEditor className="mt-[3rem]" />
+      <TabsContent enableAnimation={false} value="editor" className="mt-0 flex size-full flex-1">
+        <div className="flex size-full flex-col">
+          <div className="h-11" /> {/* Spacer for tab area */}
+          <div className="min-h-0 flex-1 border-t">
+            <ChatEditorLayout />
+          </div>
+        </div>
       </TabsContent>
-      <TabsContent withAnimation={false} value="console" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
-        <ChatConsole data-view="tabs" className="mt-[3rem]" />
+      <TabsContent enableAnimation={false} value="console" className="mt-0 flex h-[calc(100vh-6rem)] w-full flex-1">
+        <ChatConsole data-view="tabs" className="mt-11" />
       </TabsContent>
     </Tabs>
   );

@@ -3,8 +3,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reactRouter } from '@react-router/dev/vite';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
+import devtoolsJson from 'vite-plugin-devtools-json';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import tailwindcss from '@tailwindcss/vite';
+import { visualizer } from 'rollup-plugin-visualizer';
 // Import viteSvgSpriteWrapper from 'vite-svg-sprite-wrapper';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
@@ -20,7 +22,9 @@ const base64Loader: Plugin = {
   name: 'base64-loader',
   transform(_, id) {
     const [path, query] = id.split('?');
-    if (query !== 'base64') return;
+    if (query !== 'base64' || !path) {
+      return;
+    }
 
     const data = fs.readFileSync(path);
     const base64 = data.toString('base64');
@@ -39,6 +43,10 @@ export default defineConfig({
     tsconfigPaths(),
     // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
     tailwindcss(),
+    devtoolsJson(),
+    visualizer({
+      exclude: [{ file: '**/*?raw' }], // ignore raw files that are used for editor typings
+    }),
     // TODO: add back after fixing the recrusive reload issue.
     // ViteSvgSpriteWrapper({
     //   icons: path.resolve(__dirname, './app/components/icons/raw/**/*.svg'),
@@ -54,6 +62,7 @@ export default defineConfig({
     // https://vite.dev/config/worker-options.html#worker-plugins
     // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- false positive
     plugins: () => [nxViteTsPaths(), tsconfigPaths()],
+    format: 'es',
   },
 
   server: {

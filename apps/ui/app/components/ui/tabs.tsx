@@ -28,7 +28,8 @@ function TabsList({
   },
   ...props
 }: TabsListProps) {
-  const localRef = React.useRef<HTMLDivElement | undefined>(null);
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- radix requires `null` ref
+  const localRef = React.useRef<HTMLDivElement | null>(null);
   React.useImperativeHandle(ref, () => localRef.current!);
 
   const [activeValue, setActiveValue] = React.useState<string | undefined>(undefined);
@@ -69,7 +70,7 @@ function TabsList({
         ref={localRef}
         data-slot="tabs-list"
         className={cn(
-          'inline-flex h-8 w-fit items-center justify-center rounded-sm bg-muted p-[3px] text-muted-foreground',
+          'inline-flex h-7 w-fit items-center justify-center rounded-sm bg-muted p-0.75 text-muted-foreground',
           className,
         )}
         {...props}
@@ -88,7 +89,7 @@ function TabsTrigger({ className, value, ...props }: TabsTriggerProps) {
       <TabsPrimitive.Trigger
         data-slot="tabs-trigger"
         className={cn(
-          "z-10 inline-flex size-full cursor-pointer items-center justify-center gap-1.5 rounded-sm px-2 py-1 text-sm font-medium whitespace-nowrap text-foreground transition-[box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 dark:text-muted-foreground dark:data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+          "z-10 flex size-full cursor-pointer items-center justify-center gap-1.5 rounded-sm px-2 py-1 text-sm font-medium whitespace-nowrap text-foreground transition-[box-shadow] select-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 dark:text-muted-foreground dark:data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
           className,
         )}
         value={value}
@@ -101,20 +102,20 @@ function TabsTrigger({ className, value, ...props }: TabsTriggerProps) {
 type TabsContentProps = React.ComponentProps<typeof TabsPrimitive.Content> &
   HTMLMotionProps<'div'> & {
     readonly transition?: Transition;
-    readonly withAnimation?: boolean;
+    readonly enableAnimation?: boolean;
   };
 
 function TabsContent({
   className,
   children,
-  withAnimation = true,
+  enableAnimation = true,
   transition = {
     duration: 0.5,
     ease: 'easeInOut',
   },
   ...props
 }: TabsContentProps) {
-  if (!withAnimation) {
+  if (!enableAnimation) {
     return (
       <TabsPrimitive.Content data-slot="tabs-content" className={cn('flex-1 outline-none', className)} {...props}>
         {children}

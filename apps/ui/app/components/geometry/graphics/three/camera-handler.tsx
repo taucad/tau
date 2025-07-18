@@ -12,7 +12,7 @@ import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 export function CameraHandler(): JSX.Element {
   const camera = useThree((state) => state.camera);
   const { invalidate } = useThree();
-  const cameraAngle = useSelector(graphicsActor, (state) => state.context.cameraAngle);
+  const cameraFovAngle = useSelector(graphicsActor, (state) => state.context.cameraFovAngle);
 
   // Store original camera settings to maintain consistent view
   const cameraState = useRef({
@@ -30,14 +30,14 @@ export function CameraHandler(): JSX.Element {
       if (!cameraState.current.initialized) return;
 
       // Apply a FOV change based on angle
-      const minFov = 1; // Very narrow FOV at 0 degrees (nearly orthographic)
+      const minFov = 0.1; // Very narrow FOV at 0 degrees (nearly orthographic)
       const maxFov = 90; // Very wide FOV at 90 degrees (extreme perspective)
 
       // Store old FOV before changing
       const oldFov = camera.fov;
 
       // Calculate new FOV with dramatic change
-      const newFov = minFov + (maxFov - minFov) * (newAngle / 90);
+      const newFov = minFov + (maxFov - minFov) * (newAngle / maxFov);
 
       // Apply the FOV change to the camera
       camera.fov = newFov;
@@ -85,9 +85,9 @@ export function CameraHandler(): JSX.Element {
       cameraState.current.initialized = true;
 
       // Force immediate update with initial angle
-      updateCameraProjection(camera, cameraAngle);
+      updateCameraProjection(camera, cameraFovAngle);
     }
-  }, [camera, cameraAngle, updateCameraProjection]);
+  }, [camera, cameraFovAngle, updateCameraProjection]);
 
   // Update camera projection when angle changes
   useEffect(() => {
@@ -101,8 +101,8 @@ export function CameraHandler(): JSX.Element {
       return;
     }
 
-    updateCameraProjection(camera, cameraAngle);
-  }, [camera, cameraAngle, updateCameraProjection]);
+    updateCameraProjection(camera, cameraFovAngle);
+  }, [camera, cameraFovAngle, updateCameraProjection]);
 
   // Use an empty group as R3F requires returning a valid Three.js object
   return <group name="camera-handler" />;

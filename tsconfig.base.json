@@ -7,6 +7,7 @@
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "importHelpers": true,
     "noFallthroughCasesInSwitch": true,
     "target": "ESNext",
@@ -26,7 +27,11 @@
     "noImplicitOverride": true,
     "noEmitOnError": true,
     "resolveJsonModule": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUncheckedIndexedAccess": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false
   },
   "exclude": ["node_modules", "tmp"]
 }

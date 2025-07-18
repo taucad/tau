@@ -48,13 +48,13 @@ import {
 } from '~/components/ui/dropdown-menu.js';
 import { cn } from '~/utils/ui.js';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '~/components/ui/tabs.js';
-import type { Category } from '~/types/cad.js';
-import { categories } from '~/types/cad.js';
-import type { Build } from '~/types/build.js';
+import type { Category } from '~/types/cad.types.js';
+import { categories } from '~/types/cad.types.js';
+import type { Build } from '~/types/build.types.js';
 import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
 import { useBuilds } from '~/hooks/use-builds.js';
 import { toast } from '~/components/ui/sonner.js';
-import type { Handle } from '~/types/matches.js';
+import type { Handle } from '~/types/matches.types.js';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -72,10 +72,11 @@ import { createBuildMutations } from '~/hooks/build-mutations.js';
 import { Checkbox } from '~/components/ui/checkbox.js';
 import { formatRelativeTime } from '~/utils/date.js';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '~/components/ui/table.js';
-import { camelCaseToSentenceCase } from '~/utils/string.js';
+import { toSentenceCase } from '~/utils/string.js';
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
-import { cadMachine } from '~/machines/cad.js';
+import { cadMachine } from '~/machines/cad.machine.js';
 import { HammerAnimation } from '~/components/hammer-animation.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -98,7 +99,7 @@ export type BuildActions = {
 
 export default function PersonalCadProjects(): JSX.Element {
   const [activeFilter, setActiveFilter] = useState<string>('all');
-  const [viewMode, setViewMode] = useCookie<'grid' | 'table'>('builds-view-mode', 'grid');
+  const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.buildViewMode, 'grid');
   const [showDeleted, setShowDeleted] = useState(false);
   const { builds, deleteBuild, duplicateBuild, restoreBuild } = useBuilds({ includeDeleted: showDeleted });
   const navigate = useNavigate();
@@ -261,24 +262,24 @@ export default function PersonalCadProjects(): JSX.Element {
             </DropdownMenu>
           </div>
         </div>
-        <TabsContent withAnimation={false} value="all">
+        <TabsContent enableAnimation={false} value="all">
           <UnifiedBuildList projects={filteredBuilds} viewMode={viewMode} actions={actions} />
         </TabsContent>
-        <TabsContent withAnimation={false} value="mechanical">
+        <TabsContent enableAnimation={false} value="mechanical">
           <UnifiedBuildList
             projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('mechanical'))}
             viewMode={viewMode}
             actions={actions}
           />
         </TabsContent>
-        <TabsContent withAnimation={false} value="electrical">
+        <TabsContent enableAnimation={false} value="electrical">
           <UnifiedBuildList
             projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('electrical'))}
             viewMode={viewMode}
             actions={actions}
           />
         </TabsContent>
-        <TabsContent withAnimation={false} value="firmware">
+        <TabsContent enableAnimation={false} value="firmware">
           <UnifiedBuildList
             projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('firmware'))}
             viewMode={viewMode}
@@ -365,7 +366,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
           <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             autoComplete="off"
-            className="h-8 pl-10"
+            className="h-7 pl-10"
             placeholder="Search builds..."
             value={globalFilter}
             onChange={(event) => {
@@ -398,7 +399,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows?.length ? (
+            {table.getRowModel().rows.length > 0 ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow key={row.id} className={row.getIsSelected() ? 'bg-muted/50' : undefined}>
                   {row.getVisibleCells().map((cell) => (
@@ -447,7 +448,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
                 table.setPageSize(Number(value));
               }}
             >
-              <SelectTrigger className="h-8 w-[70px]">
+              <SelectTrigger className="h-7 w-[70px]">
                 <SelectValue placeholder={table.getState().pagination.pageSize} />
               </SelectTrigger>
               <SelectContent side="top">
@@ -471,7 +472,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
           <div className="flex items-center space-x-2">
             <Button
               variant="outline"
-              className="hidden h-8 w-8 p-0 lg:flex"
+              className="hidden h-7 w-8 p-0 lg:flex"
               disabled={!table.getCanPreviousPage()}
               onClick={() => {
                 table.setPageIndex(0);
@@ -482,7 +483,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
             </Button>
             <Button
               variant="outline"
-              className="h-8 w-8 p-0"
+              className="h-7 w-8 p-0"
               disabled={!table.getCanPreviousPage()}
               onClick={() => {
                 table.previousPage();
@@ -493,7 +494,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
             </Button>
             <Button
               variant="outline"
-              className="h-8 w-8 p-0"
+              className="h-7 w-8 p-0"
               disabled={!table.getCanNextPage()}
               onClick={() => {
                 table.nextPage();
@@ -504,7 +505,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
             </Button>
             <Button
               variant="outline"
-              className="hidden h-8 w-8 p-0 lg:flex"
+              className="hidden h-7 w-8 p-0 lg:flex"
               disabled={!table.getCanNextPage()}
               onClick={() => {
                 table.setPageIndex(table.getPageCount() - 1);
@@ -529,7 +530,7 @@ function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReact
     .filter((column) => column.getCanSort())
     .map((column) => ({
       id: column.id,
-      label: camelCaseToSentenceCase(column.id),
+      label: toSentenceCase(column.id),
     }));
 
   const toggleSorting = (id: string) => {
@@ -603,7 +604,7 @@ function ViewOptionsDropdown({ table }: { readonly table: ReturnType<typeof useR
                   event.preventDefault();
                 }}
               >
-                {camelCaseToSentenceCase(column.id)}
+                {toSentenceCase(column.id)}
               </DropdownMenuCheckboxItem>
             );
           })}
@@ -622,8 +623,12 @@ type BuildLibraryCardProps = {
 function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibraryCardProps) {
   const [_, send, actorRef] = useActor(cadMachine, { input: { shouldInitializeKernelOnStart: false } });
   const shapes = useSelector(actorRef, (state) => state.context.shapes);
-  const code = build.assets.mechanical?.files[build.assets.mechanical?.main]?.content;
-  const parameters = build.assets.mechanical?.parameters;
+
+  const mechanicalAsset = build.assets.mechanical;
+  if (!mechanicalAsset) throw new Error('Mechanical asset not found');
+
+  const code = mechanicalAsset.files[mechanicalAsset.main]?.content ?? '';
+  const { parameters } = mechanicalAsset;
   const status = useSelector(actorRef, (state) => state.value);
   const [showPreview, setShowPreview] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -644,12 +649,12 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
 
   useEffect(() => {
     if (showPreview) {
-      send({ type: 'initializeModel', code: code ?? '', parameters: parameters ?? {} });
+      send({ type: 'initializeModel', code, parameters, kernelType: mechanicalAsset.language });
     }
-  }, [code, parameters, showPreview, send]);
+  }, [code, parameters, mechanicalAsset.language, showPreview, send]);
 
   return (
-    <Card className={cn('group relative flex flex-col overflow-hidden', isSelected && 'ring-2 ring-primary')}>
+    <Card className={cn('group relative flex flex-col overflow-hidden pt-0', isSelected && 'ring-2 ring-primary')}>
       <div className="absolute top-2 left-2 z-10">
         <Checkbox size="large" checked={isSelected} onCheckedChange={() => onSelect?.()} />
       </div>
@@ -677,6 +682,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
             ) : null}
             <CadViewer
               shapes={shapes}
+              enableLines={false}
               className="bg-muted"
               stageOptions={{
                 zoomLevel: 1.5,
@@ -711,7 +717,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
                   autoFocus
                   autoComplete="off"
                   value={name}
-                  className="h-8"
+                  className="h-7"
                   onChange={(event) => {
                     setName(event.target.value);
                   }}
@@ -803,7 +809,7 @@ function BulkActions({ table, deleteBuild }: BulkActionsProps) {
         <Button
           variant="outline"
           size="sm"
-          className="h-8 gap-1 border-destructive text-destructive hover:bg-destructive/10"
+          className="h-7 gap-1 border-destructive text-destructive hover:bg-destructive/10"
           onClick={() => {
             setShowDeleteDialog(true);
           }}

@@ -17,18 +17,34 @@ import { useNetworkConnectivity } from '~/hooks/use-network-connectivity.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import { formatKeyCombination } from '~/utils/keys.js';
 import { useTypedMatches } from '~/hooks/use-typed-matches.js';
+import { NavUser } from '~/components/nav/nav-user.js';
 
-export const headerHeight = '3rem';
+export const headerHeight = 'calc(var(--spacing) * 11)';
 
 export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
-  const { breadcrumbItems, hasBreadcrumbItems, actionItems, hasActionItems } = useTypedMatches((handles) => ({
+  const {
+    breadcrumbItems,
+    hasBreadcrumbItems,
+    actionItems,
+    hasActionItems,
+    commandPaletteItems,
+    hasCommandPaletteItems,
+    noPageWrapper,
+  } = useTypedMatches((handles) => ({
     breadcrumbItems: handles.breadcrumb,
     hasBreadcrumbItems: handles.breadcrumb.length > 0,
     actionItems: handles.actions,
     hasActionItems: handles.actions.length > 0,
+    commandPaletteItems: handles.commandPalette,
+    hasCommandPaletteItems: handles.commandPalette.length > 0,
+    noPageWrapper: handles.noPageWrapper.some((match) => match.handle.noPageWrapper === true),
   }));
 
   const isOnline = useNetworkConnectivity();
+
+  if (noPageWrapper) {
+    return <Outlet />;
+  }
 
   return (
     <SidebarProvider>
@@ -37,7 +53,7 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
         className="w-[calc(100dvw-var(--sidebar-width-current)-1px)]"
         style={{ '--header-height': headerHeight }}
       >
-        <header className="flex h-[var(--header-height)] shrink-0 items-center justify-between gap-2 border-b-[1px] border-border transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
+        <header className="relative flex h-[var(--header-height)] shrink-0 items-center justify-between gap-2 border-b-[1px] border-border transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-11">
           <div className="flex items-center gap-1 px-4">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -66,6 +82,18 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
               </BreadcrumbList>
             </Breadcrumb>
           </div>
+
+          {/* Centered Command Palette */}
+          <div className="absolute top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2">
+            {hasCommandPaletteItems ? (
+              <div className="flex items-center gap-2">
+                {commandPaletteItems.map((match) => (
+                  <Fragment key={match.id}>{match.handle.commandPalette?.(match)}</Fragment>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
           <div className="flex items-center gap-2 px-2">
             {!isOnline && (
               <Tooltip>
@@ -86,6 +114,8 @@ export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
                 ))}
               </div>
             ) : null}
+
+            <NavUser />
           </div>
         </header>
         <section className="h-[calc(100dvh-var(--header-height)-1px)] overflow-y-auto">

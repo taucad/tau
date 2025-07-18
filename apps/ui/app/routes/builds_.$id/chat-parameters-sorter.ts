@@ -2,7 +2,18 @@
  * Common 3D descriptor terms that should not form their own categories
  * These should be associated with the feature they describe
  */
+import * as pluralize from 'pluralize';
 import { descriptorTerms, commonGeneralTerms } from '~/constants/build-parameters.js';
+
+/**
+ * Normalize a plural word to its singular form using the pluralize library
+ *
+ * @param word - The word to normalize
+ * @returns The normalized singular form
+ */
+export const normalizePlural = (word: string): string => {
+  return pluralize.singular(word.toLowerCase());
+};
 
 /**
  * Extract meaningful terms from a parameter name
@@ -25,9 +36,10 @@ export const extractTerms = (parameterName: string): string[] => {
 /**
  * Extract primary term from a parameter name (usually the first non-descriptor term)
  * This helps identify the main feature that a parameter belongs to
+ * Normalizes plural forms to singular to group related parameters together
  *
  * @param parameterName - The parameter name to analyze
- * @returns The primary term
+ * @returns The normalized primary term
  */
 export const extractPrimaryTerm = (parameterName: string): string | undefined => {
   const terms = extractTerms(parameterName);
@@ -35,19 +47,19 @@ export const extractPrimaryTerm = (parameterName: string): string | undefined =>
   // First look for a non-descriptor, non-common term
   for (const term of terms) {
     if (!isDescriptorTerm(term) && !isCommonGeneralTerm(term)) {
-      return term;
+      return normalizePlural(term);
     }
   }
 
   // If not found, take the first non-descriptor term
   for (const term of terms) {
     if (!isDescriptorTerm(term)) {
-      return term;
+      return normalizePlural(term);
     }
   }
 
   // Fallback to the first term
-  return terms[0];
+  return terms[0] ? normalizePlural(terms[0]) : undefined;
 };
 
 /**

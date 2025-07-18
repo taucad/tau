@@ -6,8 +6,8 @@ import { useState } from 'react';
 import { CategoryBadge } from '~/components/category-badge.js';
 import { DataTableColumnHeader } from '~/routes/builds_.library/data-table-column-header.js';
 import { Button } from '~/components/ui/button.js';
-import type { Build } from '~/types/build.js';
-import type { Category } from '~/types/cad.js';
+import type { Build } from '~/types/build.types.js';
+import type { Category } from '~/types/cad.types.js';
 import { Checkbox } from '~/components/ui/checkbox.js';
 import { formatRelativeTime } from '~/utils/date.js';
 import type { BuildActions } from '~/routes/builds_.library/route.js';
@@ -61,7 +61,7 @@ function BuildNameCell({ build, actions }: { readonly build: Build; readonly act
                 autoFocus
                 autoComplete="off"
                 value={name}
-                className="h-8"
+                className="h-7"
                 onChange={(event) => {
                   setName(event.target.value);
                 }}
@@ -158,7 +158,7 @@ export const createColumns = (actions: BuildActions): Array<ColumnDef<Build>> =>
 
       return (
         <div className="flex items-center justify-end gap-2">
-          {actions ? <BuildActionDropdown build={build} actions={actions} /> : null}
+          <BuildActionDropdown build={build} actions={actions} />
 
           {!isDeleted && (
             <Link to={`/builds/${build.id}`}>

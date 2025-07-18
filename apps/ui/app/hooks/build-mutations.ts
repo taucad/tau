@@ -1,9 +1,9 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { Message } from '@ai-sdk/react';
-import type { Build, Chat } from '~/types/build.js';
+import type { Build, Chat, File } from '~/types/build.types.js';
 import { storage } from '~/db/storage.js';
 import { generatePrefixedId } from '~/utils/id.js';
-import { idPrefix } from '~/constants/id.js';
+import { idPrefix } from '~/constants/id.constants.js';
 
 /**
  * Creates a shared set of build mutations that can be used by both useBuild and useBuilds hooks
@@ -14,7 +14,11 @@ export function createBuildMutations(queryClient: QueryClient): {
   duplicateBuild: (buildId: string) => Promise<Build>;
   updateName: (buildId: string, name: string) => Promise<void>;
   updateThumbnail: (buildId: string, thumbnail: string) => Promise<void>;
-  updateCodeParameters: (buildId: string, code: string, parameters: Record<string, unknown>) => Promise<void>;
+  updateCodeParameters: (
+    buildId: string,
+    files: Record<string, { content: string }>,
+    parameters: Record<string, unknown>,
+  ) => Promise<void>;
   // New chat-related mutations
   addChat: (buildId: string, initialMessages?: Message[]) => Promise<Chat>;
   updateChatMessages: (buildId: string, chatId: string, messages: Message[]) => Promise<void>;
@@ -62,9 +66,9 @@ export function createBuildMutations(queryClient: QueryClient): {
         stars: 0,
         forks: 0,
         author: sourceBuild.author,
-        tags: sourceBuild.tags || [],
+        tags: sourceBuild.tags,
         assets: sourceBuild.assets,
-        chats: sourceBuild.chats || [],
+        chats: sourceBuild.chats,
         lastChatId: sourceBuild.lastChatId,
       });
 
@@ -93,18 +97,27 @@ export function createBuildMutations(queryClient: QueryClient): {
     /**
      * Update a build's code and parameters
      */
-    async updateCodeParameters(buildId: string, code: string, parameters: Record<string, unknown>) {
+    async updateCodeParameters(
+      buildId: string,
+      files: Record<string, { content: string }>,
+      parameters: Record<string, unknown>,
+    ) {
+      const now = Date.now();
+      const fileUpdates: Record<string, File> = {};
+      for (const [filename, { content }] of Object.entries(files)) {
+        fileUpdates[filename] = {
+          content,
+          lastModified: now,
+          size: new TextEncoder().encode(content).length,
+        };
+      }
+
       await storage.updateBuild(
         buildId,
         {
           assets: {
             mechanical: {
-              files: {
-                // eslint-disable-next-line @typescript-eslint/naming-convention -- filenames include extensions
-                'model.ts': {
-                  content: code,
-                },
-              },
+              files: fileUpdates,
               parameters,
             },
           },
@@ -128,13 +141,13 @@ export function createBuildMutations(queryClient: QueryClient): {
 
       const newChat: Chat = {
         id: chatId,
-        name: 'New Chat', // Will be updated by AI
+        name: 'New chat', // Will be updated by AI
         messages: initialMessages,
         createdAt: timestamp,
         updatedAt: timestamp,
       };
 
-      const chats = [...(build.chats || []), newChat];
+      const chats = [...build.chats, newChat];
 
       await storage.updateBuild(
         buildId,
@@ -158,7 +171,7 @@ export function createBuildMutations(queryClient: QueryClient): {
         throw new Error('Build not found');
       }
 
-      const chats = build.chats || [];
+      const { chats } = build;
       const chatIndex = chats.findIndex((chat) => chat.id === chatId);
 
       if (chatIndex === -1) {
@@ -192,7 +205,7 @@ export function createBuildMutations(queryClient: QueryClient): {
         throw new Error('Build not found');
       }
 
-      const chats = build.chats || [];
+      const { chats } = build;
       const chatIndex = chats.findIndex((chat) => chat.id === chatId);
 
       if (chatIndex === -1) {
@@ -234,7 +247,7 @@ export function createBuildMutations(queryClient: QueryClient): {
         throw new Error('Build not found');
       }
 
-      const chats = build.chats || [];
+      const { chats } = build;
       const filteredChats = chats.filter((chat) => chat.id !== chatId);
 
       if (filteredChats.length === chats.length) {
@@ -245,7 +258,7 @@ export function createBuildMutations(queryClient: QueryClient): {
       let { lastChatId } = build;
       if (lastChatId === chatId && filteredChats.length > 0) {
         const mostRecentChat = filteredChats.sort((a, b) => b.updatedAt - a.updatedAt)[0];
-        lastChatId = mostRecentChat.id;
+        lastChatId = mostRecentChat?.id;
       } else if (filteredChats.length === 0) {
         lastChatId = undefined;
       }

@@ -2,8 +2,6 @@ import React, { useState } from 'react';
 import type { ComponentProps, JSX, RefObject } from 'react';
 import type { HslColor } from 'react-colorful';
 import { RotateCcw } from 'lucide-react';
-import { ThreeProvider } from '~/components/geometry/graphics/three/three-context.js';
-import { CadLoader } from '~/components/geometry/graphics/three/cad-loader.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { Slider } from '~/components/ui/slider.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
@@ -76,19 +74,7 @@ function ColorPicker({
         </TooltipContent>
       </Tooltip>
       <PopoverContent side="right" className="flex w-48 flex-col gap-2 p-2">
-        <ThreeProvider
-          className={cn(className, 'p-0')}
-          stageOptions={{
-            zoomLevel: 1.75,
-            rotation: {
-              side: -(Math.PI * 4) / 6,
-              vertical: Math.PI / 6,
-            },
-          }}
-          frameloop="always"
-        >
-          <CadLoader action="Running" />
-        </ThreeProvider>
+        <span className="w-full items-center text-sm text-muted-foreground">Select hue ({value.h}°)</span>
         <div className="flex w-full flex-row gap-2">
           <Slider
             ref={ref}
@@ -117,7 +103,7 @@ function ColorPicker({
                 <RotateCcw className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Reset</TooltipContent>
+            <TooltipContent>Reset hue</TooltipContent>
           </Tooltip>
         </div>
       </PopoverContent>

@@ -1,8 +1,9 @@
 import type { Message, useChat } from '@ai-sdk/react';
-import type { MessageRole, MessageStatus } from '~/types/chat.js';
+import type { MessageRole, MessageStatus } from '~/types/chat.types.js';
 import { generatePrefixedId } from '~/utils/id.js';
-import { idPrefix } from '~/constants/id.js';
+import { idPrefix } from '~/constants/id.constants.js';
 import { ENV } from '~/config.js';
+import type { KernelProvider } from '~/types/kernel.types.js';
 
 export const useChatConstants = {
   api: `${ENV.TAU_API_URL}/v1/chat`,
@@ -20,8 +21,12 @@ export const useChatConstants = {
  * @param dataUrl
  * @returns
  */
-const extractMimeTypeFromDataUrl = (dataUrl: string) => {
-  const mimeType = dataUrl.split(',')[0].split(':')[1].split(';')[0];
+const extractMimeTypeFromDataUrl = (dataUrl: string): string => {
+  const mimeType = dataUrl.split(',')[0]?.split(':')[1]?.split(';')[0];
+  if (!mimeType) {
+    throw new Error('Invalid data URL');
+  }
+
   return mimeType;
 };
 
@@ -32,7 +37,7 @@ export function createMessage({
   role,
   model,
   status,
-  metadata = {},
+  metadata,
   imageUrls = [],
 }: {
   id?: string;
@@ -40,8 +45,9 @@ export function createMessage({
   role: MessageRole;
   model: string;
   status: MessageStatus;
-  metadata?: {
+  metadata: {
     toolChoice?: 'web_search' | 'none' | 'auto' | 'any';
+    kernel: KernelProvider;
   };
   imageUrls?: string[];
 }): Message {

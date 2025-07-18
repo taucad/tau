@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import type { ClassValue } from 'clsx';
-import { LockIcon } from 'lucide-react';
+import { Lock, LockIcon, LockOpen } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { Button } from '~/components/ui/button.js';
@@ -9,15 +9,17 @@ import { formatNumber } from '~/utils/number.js';
 import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '~/components/ui/dropdown-menu.js';
 import { Switch } from '~/components/ui/switch.js';
 import { cn } from '~/utils/ui.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 type GridSizeIndicatorProps = {
   /**
@@ -29,13 +31,13 @@ type GridSizeIndicatorProps = {
 const getTextSizeClass = (sizeText: string) => {
   const { length } = sizeText;
 
-  if (length > 8) return 'text-[0.3rem]';
-  if (length > 7) return 'text-[0.35rem]';
-  if (length > 6) return 'text-[0.4rem]';
-  if (length > 5) return 'text-[0.45rem]';
-  if (length > 4) return 'text-[0.5rem]';
-  if (length > 3) return 'text-[0.55rem]';
-  return 'text-xs';
+  if (length > 8) return 'text-[calc(var(--spacing)*1.2)]';
+  if (length > 7) return 'text-[calc(var(--spacing)*1.4)]';
+  if (length > 6) return 'text-[calc(var(--spacing)*1.6)]';
+  if (length > 5) return 'text-[calc(var(--spacing)*1.8)]';
+  if (length > 4) return 'text-[calc(var(--spacing)*2)]';
+  if (length > 3) return 'text-[calc(var(--spacing)*2.2)]';
+  return 'text-[calc(var(--spacing)*3)]';
 };
 
 const gridUnitOptions = [
@@ -61,7 +63,7 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
 
   // Use the current gridUnitSystem to select an appropriate default unit
   const defaultUnit = gridUnitSystem === 'imperial' ? 'in' : 'mm';
-  const [unit, setUnit] = useCookie<GridUnitOption>('cad-unit', defaultUnit as GridUnitOption);
+  const [unit, setUnit] = useCookie<GridUnitOption>(cookieName.cadUnit, defaultUnit as GridUnitOption);
 
   // Sync graphics machine with cookie value on change
   useEffect(() => {
@@ -83,11 +85,11 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
   }, []);
 
   const handleUnitChange = useCallback(
-    (selectedUnit: GridUnitOption) => {
+    (selectedUnit: string) => {
       const selectedOption = gridUnitOptions.find((option) => option.value === selectedUnit);
       if (!selectedOption) return;
 
-      setUnit(selectedUnit);
+      setUnit(selectedUnit as GridUnitOption);
     },
     [setUnit],
   );
@@ -97,7 +99,7 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
   }, []);
 
   // If there's no valid grid size, don't render
-  if (!gridSizes?.smallSize) {
+  if (!gridSizes.smallSize) {
     return null;
   }
 
@@ -116,13 +118,16 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="overlay"
-              size="icon"
-              className={cn('flex-col gap-0 font-mono text-xs [&>span]:leading-none', className)}
-            >
-              <span className={getTextSizeClass(localizedSmallGridSize)}>{localizedSmallGridSize}</span>
-              <span className="flex items-center gap-0.5">
+            <Button variant="overlay" size="icon" className={cn('relative font-mono [&>span]:leading-none', className)}>
+              <span
+                className={cn(
+                  getTextSizeClass(localizedSmallGridSize),
+                  'absolute top-[calc(var(--spacing)*2)] left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center',
+                )}
+              >
+                <span>{localizedSmallGridSize}</span>
+              </span>
+              <span className="absolute bottom-[calc(var(--spacing)*0.25)] left-1/2 flex -translate-x-1/2 items-center gap-0.5 text-[calc(var(--spacing)*3)]">
                 {unit}
                 {isGridSizeLocked ? <LockIcon className="size-2" /> : null}
               </span>
@@ -137,19 +142,14 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
           event.preventDefault();
         }}
       >
-        <DropdownMenuLabel>Units</DropdownMenuLabel>
-        {gridUnitOptions.map((option) => (
-          <DropdownMenuCheckboxItem
-            key={option.value}
-            checked={unit === option.value}
-            onCheckedChange={() => {
-              handleUnitChange(option.value);
-            }}
-            onSelect={preventClose}
-          >
-            {option.label}
-          </DropdownMenuCheckboxItem>
-        ))}
+        <DropdownMenuLabel>Unit</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={unit} onValueChange={handleUnitChange}>
+          {gridUnitOptions.map((option) => (
+            <DropdownMenuRadioItem key={option.value} value={option.value} onSelect={preventClose}>
+              {option.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Grid</DropdownMenuLabel>
         <DropdownMenuItem
@@ -159,7 +159,9 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
           }}
           onSelect={preventClose}
         >
-          <span>
+          <span data-locked={isGridSizeLocked} className="group flex items-center gap-2">
+            <Lock className="hidden size-4 group-data-[locked=true]:block" />
+            <LockOpen className="block size-4 group-data-[locked=true]:hidden" />
             Lock Grid Size ({localizedSmallGridSize} {unit})
           </span>
           <Switch

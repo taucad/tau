@@ -4,38 +4,23 @@ import { Theme, useTheme } from 'remix-themes';
 import { useCallback, useEffect, useRef } from 'react';
 import type { JSX } from 'react';
 import { shikiToMonaco } from '@shikijs/monaco';
-import { createHighlighter } from 'shiki';
-import { registerCompletion } from 'monacopilot';
 import type { CompletionRegistration, Monaco, StandaloneCodeEditor } from 'monacopilot';
 import { cn } from '~/utils/ui.js';
-import { ENV } from '~/config.js';
-
-// Create the highlighter, it can be reused
-const highlighter = await createHighlighter({
-  themes: ['github-light', 'github-dark'],
-  langs: ['javascript', 'typescript'],
-});
+import { highlighter } from '~/lib/shiki.js';
+import { configureMonaco, registerCompletions } from '~/lib/monaco.js';
 
 type CodeEditorProperties = EditorProps & {
   readonly onChange: (value: string) => void;
 };
 
-// Const displayLanguageFromOriginalLanguage = {
-//   kcl: 'typescript',
-// };
-
-// type MappedLanguage = keyof typeof displayLanguageFromOriginalLanguage;
+await configureMonaco();
 
 export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.Element {
   const [theme] = useTheme();
   const completionRef = useRef<CompletionRegistration | undefined>(null);
 
   const handleMount = useCallback((editor: StandaloneCodeEditor, monaco: Monaco) => {
-    completionRef.current = registerCompletion(monaco, editor, {
-      endpoint: `${ENV.TAU_API_URL}/v1/code-completion`,
-      language: 'typescript',
-      trigger: 'onTyping',
-    });
+    completionRef.current = registerCompletions(editor, monaco);
   }, []);
 
   useEffect(() => {
@@ -63,20 +48,32 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         '[&_.monaco-editor]:![--vscode-multiDiffEditor-background:var(--background)]',
         '[&_.monaco-editor]:![--vscode-editorMarkerNavigation-background:var(--background)]',
         '[&_.monaco-editor]:![--vscode-editorGutter-background:var(--background)]',
+        // Hide the redundant text area cover element
+        '[&_.monaco-editor-background.textAreaCover.line-numbers]:!hidden',
+        // Disable ::before pseudo-elements on line numbers
+        '[&_.line-numbers::before]:!hidden',
+        // Scroll decoration appears after scrolling from top, replace shadow with top border
+        '[&_.scroll-decoration]:!border-t',
+        '[&_.scroll-decoration]:![box-shadow:none]',
         // Existing scrollbar styles
         '[&_.monaco-scrollable-element_>_.scrollbar]:!bg-(--scrollbar-track)',
         '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:!bg-(--scrollbar-thumb)/80',
         // Apply rounded corners to scrollbar sliders
-        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:rounded-[4px]',
+        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:rounded-sm',
         // Ensure scrollbars don't overlap content
         '[&_.monaco-scrollable-element]:overflow-hidden',
         className,
       )}
       theme={theme === Theme.DARK ? 'github-dark' : 'github-light'}
-      defaultLanguage="typescript"
       options={{
+        fontSize: 14,
         tabSize: 2,
         minimap: { enabled: false },
+        // Explicitly configure line numbers
+        lineNumbers: 'on',
+        lineNumbersMinChars: 5,
+        renderLineHighlight: 'line',
+        renderLineHighlightOnlyWhenFocus: false,
         // Disable horizontal scroll beyond last line
         scrollBeyondLastColumn: 1,
         // Disable vertical scroll beyond last line
@@ -90,6 +87,9 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
         stickyScroll: {
           enabled: false,
         },
+        // Configure gutter and margin properly
+        glyphMargin: false,
+        folding: true,
         // Custom scrollbar styling to match global scrollbar styles
         scrollbar: {
           // Applying to ensure that other elements that use the scrollbar
@@ -102,6 +102,19 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.El
           // as it causes janky editor behavior resulting in poor UX.
           alwaysConsumeMouseWheel: true,
         },
+        // Intellisense
+        suggest: {
+          localityBonus: true,
+          showStatusBar: true,
+          preview: true,
+        },
+        parameterHints: {
+          enabled: true,
+          // Controls whether the parameter hints menu cycles or closes when reaching the end of the list.
+          cycle: true,
+        },
+        // Word-based suggestions are redundant for typed languages
+        wordBasedSuggestions: 'off',
       }}
       onMount={handleMount}
       {...rest}

@@ -13,12 +13,11 @@ import { cn } from '~/utils/ui.js';
 export type ThreeViewerProperties = {
   readonly enableGizmo?: boolean;
   readonly enableGrid?: boolean;
-  readonly enableAxesHelper?: boolean;
+  readonly enableAxes?: boolean;
   readonly enableZoom?: boolean;
   readonly enableDamping?: boolean;
-  readonly enableCameraControls?: boolean;
   readonly className?: string;
-  readonly center?: boolean;
+  readonly enableCentering?: boolean;
   readonly stageOptions?: StageOptions;
   readonly defaultCameraAngle?: number;
   readonly zoomSpeed?: number;
@@ -30,13 +29,12 @@ export function ThreeProvider({
   children,
   enableGizmo = false,
   enableGrid = false,
-  enableAxesHelper = false,
+  enableAxes = false,
   enableZoom = false,
   enableDamping = false,
-  enableCameraControls = false,
   className,
   stageOptions,
-  center = true,
+  enableCentering = true,
   defaultCameraAngle = 60,
   zoomSpeed = 1,
   ...properties
@@ -71,12 +69,12 @@ export function ThreeProvider({
       {...properties}
     >
       <Scene
-        hasGizmo={enableGizmo}
-        isCentered={center}
-        hasDamping={enableDamping}
-        hasZoom={enableZoom}
-        hasGrid={enableGrid}
-        hasAxesHelper={enableAxesHelper}
+        enableGizmo={enableGizmo}
+        enableCentering={enableCentering}
+        enableDamping={enableDamping}
+        enableZoom={enableZoom}
+        enableGrid={enableGrid}
+        enableAxes={enableAxes}
         stageOptions={stageOptions}
         zoomSpeed={zoomSpeed}
       >

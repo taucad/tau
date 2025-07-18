@@ -1,11 +1,12 @@
 import React, { useRef, useLayoutEffect, useCallback } from 'react';
 import { useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
-import { BufferGeometry } from 'three';
+import { BufferGeometry, EdgesGeometry } from 'three';
+import * as THREE from 'three';
 import * as r3js from 'replicad-threejs-helper';
 import { MatcapMaterial } from '~/components/geometry/graphics/three/matcap-material.js';
 import { useColor } from '~/hooks/use-color.js';
-import type { Shape3D } from '~/types/cad.js';
+import type { Shape3D } from '~/types/cad.types.js';
 
 export const useApplyHighlights = (geometry: BufferGeometry, highlight: number | number[]) => {
   const { invalidate } = useThree();
@@ -34,7 +35,7 @@ export const useFaceEvent = (onEvent: (event: ThreeEvent<MouseEvent>, faceIndex:
   }, []);
 };
 
-type ReplicadMeshProperties = {
+export type ReplicadMeshProperties = {
   readonly faces?: Shape3D['faces'];
   readonly edges?: Shape3D['edges'];
   readonly onFaceClick?: (event: ThreeEvent<MouseEvent>, faceIndex: number) => void;
@@ -42,6 +43,8 @@ type ReplicadMeshProperties = {
   readonly faceHover?: boolean;
   readonly color?: string;
   readonly opacity?: number;
+  readonly enableSurface?: boolean;
+  readonly enableLines?: boolean;
 };
 
 export const ReplicadMesh = React.memo(function ({
@@ -52,6 +55,8 @@ export const ReplicadMesh = React.memo(function ({
   onFaceClick,
   selected,
   faceHover,
+  enableSurface = true,
+  enableLines = true,
 }: ReplicadMeshProperties) {
   const { invalidate } = useThree();
   const colors = useColor();
@@ -83,10 +88,24 @@ export const ReplicadMesh = React.memo(function ({
   }, [selected, invalidate]);
 
   useLayoutEffect(() => {
-    if (faces) r3js.syncFaces(body.current, faces);
+    if (faces) {
+      // Create geometry from OpenSCAD Shape3D faces data
+      const positions = new Float32Array(faces.vertices);
+      const indices = new Uint32Array(faces.triangles);
+      const normals = new Float32Array(faces.normals);
 
-    if (edges) r3js.syncLines(lines.current, edges);
-    else if (faces) r3js.syncLinesFromFaces(lines.current, body.current);
+      body.current.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      body.current.setIndex(new THREE.BufferAttribute(indices, 1));
+      body.current.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    }
+
+    if (edges?.lines.length) {
+      r3js.syncLines(lines.current, edges);
+    } else {
+      lines.current.clearGroups();
+      delete lines.current.userData.edgeGroups;
+      lines.current.copy(new EdgesGeometry(body.current, 2));
+    }
 
     invalidate();
   }, [faces, edges, invalidate]);
@@ -103,6 +122,9 @@ export const ReplicadMesh = React.memo(function ({
   return (
     <group>
       <mesh
+        // Always render the mesh, but control visibility
+        // eslint-disable-next-line react/no-unknown-property -- TODO: make Three.js type available for linter
+        visible={enableSurface}
         // eslint-disable-next-line react/no-unknown-property -- TODO: make Three.js type available for linter
         geometry={body.current}
         onClick={onClick}
@@ -121,7 +143,7 @@ export const ReplicadMesh = React.memo(function ({
         />
       </mesh>
       {/* eslint-disable-next-line react/no-unknown-property -- TODO: make Three.js type available for linter */}
-      <lineSegments geometry={lines.current}>
+      <lineSegments visible={enableLines} geometry={lines.current}>
         <lineBasicMaterial color="#244224" />
       </lineSegments>
     </group>

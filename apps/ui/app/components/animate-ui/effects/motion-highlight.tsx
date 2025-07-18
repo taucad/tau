@@ -31,7 +31,7 @@ type MotionHighlightContextType<T extends string> = {
 };
 
 const MotionHighlightContext = React.createContext<
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- any is used to allow for dynamic context values
   MotionHighlightContextType<any> | undefined
 >(undefined);
 
@@ -99,7 +99,7 @@ type MotionHighlightProps<T extends string> = React.ComponentProps<'div'> &
     | UncontrolledChildrenModeMotionHighlightProps<T>
   );
 
-function MotionHighlight<T extends string>({ ref, ...props }: MotionHighlightProps<T>) {
+function MotionHighlight<T extends string>({ ref, ...props }: MotionHighlightProps<T>): React.JSX.Element {
   const {
     children,
     value,
@@ -118,8 +118,8 @@ function MotionHighlight<T extends string>({ ref, ...props }: MotionHighlightPro
   const localRef = React.useRef<HTMLDivElement>(null);
   React.useImperativeHandle(ref, () => localRef.current!);
 
-  const [activeValue, setActiveValue] = React.useState<T | undefined>(value ?? defaultValue ?? null);
-  const [boundsState, setBoundsState] = React.useState<Bounds | undefined>(null);
+  const [activeValue, setActiveValue] = React.useState<T | undefined>(value ?? defaultValue ?? undefined);
+  const [boundsState, setBoundsState] = React.useState<Bounds | undefined>(undefined);
   const [activeClassNameState, setActiveClassNameState] = React.useState<string>('');
 
   const safeSetActiveValue = React.useCallback(
@@ -167,7 +167,7 @@ function MotionHighlight<T extends string>({ ref, ...props }: MotionHighlightPro
   );
 
   const clearBounds = React.useCallback(() => {
-    setBoundsState((previous) => (previous === null ? previous : null));
+    setBoundsState((previous) => (previous === undefined ? previous : undefined));
   }, []);
 
   React.useEffect(() => {
@@ -197,7 +197,7 @@ function MotionHighlight<T extends string>({ ref, ...props }: MotionHighlightPro
   }, [mode, activeValue, safeSetBounds]);
 
   const render = React.useCallback(
-    // eslint-disable-next-line @typescript-eslint/promise-function-async
+    // eslint-disable-next-line @typescript-eslint/promise-function-async -- this is a callback function
     (children: React.ReactNode) => {
       if (mode === 'parent') {
         return (
@@ -317,6 +317,7 @@ type MotionHighlightItemProps = React.ComponentProps<'div'> & {
   readonly forceUpdateBounds?: boolean;
 };
 
+// eslint-disable-next-line complexity -- copied from animate-ui
 function MotionHighlightItem({
   ref,
   children,
@@ -358,10 +359,11 @@ function MotionHighlightItem({
   const localRef = React.useRef<HTMLDivElement>(null);
   React.useImperativeHandle(ref, () => localRef.current!);
 
+  // @ts-expect-error -- copied from animate-ui
   React.useEffect(() => {
     if (mode !== 'parent') return;
     let rafId: number;
-    let previousBounds: Bounds | undefined = null;
+    let previousBounds: Bounds | undefined;
     const shouldUpdateBounds = forceUpdateBounds === true || (contextForceUpdateBounds && forceUpdateBounds !== false);
 
     const updateBounds = () => {
@@ -426,7 +428,7 @@ function MotionHighlightItem({
           element.props.onMouseEnter?.(e);
         },
         onMouseLeave(e: React.MouseEvent<HTMLDivElement>) {
-          setActiveValue(null);
+          setActiveValue(undefined);
           element.props.onMouseLeave?.(e);
         },
       }

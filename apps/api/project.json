@@ -46,6 +46,41 @@
       "options": {
         "command": "fly launch --config ./apps/api/fly.toml"
       }
+    },
+    "db-generate-migrations": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "drizzle-kit generate",
+        "cwd": "apps/api"
+      }
+    },
+    "db-generate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "drizzle-kit generate",
+        "cwd": "apps/api"
+      }
+    },
+    "db-migrate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "drizzle-kit migrate",
+        "cwd": "apps/api"
+      }
+    },
+    "db-studio": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "drizzle-kit studio",
+        "cwd": "apps/api"
+      }
+    },
+    "db-push": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "drizzle-kit push",
+        "cwd": "apps/api"
+      }
     }
   }
 }

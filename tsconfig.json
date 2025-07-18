@@ -10,5 +10,6 @@
         "eslint.config.ts",
         "vitest.workspace.ts",
         "jest.config.ts",
+        "scripts/**/*"
     ]
 }

@@ -4,6 +4,8 @@ import path from 'node:path';
 import { defineConfig } from 'vite';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import tsconfigPaths from 'vite-tsconfig-paths';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
+import { VitePluginNode as vitePluginNode } from 'vite-plugin-node';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -20,6 +22,36 @@ export default defineConfig({
   plugins: [
     nxViteTsPaths(),
     tsconfigPaths(),
+    viteStaticCopy({
+      targets: [
+        {
+          src: 'app/database/migrations/**/*',
+          dest: 'migrations',
+        },
+      ],
+    }),
+    vitePluginNode({
+      // Nodejs native Request adapter
+      // currently this plugin support 'express', 'nest', 'koa' and 'fastify' out of box,
+      // you can also pass a function if you are using other frameworks, see Custom Adapter section
+      adapter: 'nest',
+      // Tell the plugin where is your project entry
+      appPath: './app/main.ts',
+      outputFormat: 'module',
+      // Optional, default: 'viteNodeApp'
+      // the name of named export of you app from the appPath file
+      exportName: 'viteNodeApp',
+      // Optional, default: false
+      // if true, the app will be initialized on plugin boot
+      initAppOnBoot: true,
+      // Optional, default: 'esbuild'
+      // The TypeScript compiler you want to use
+      // by default this plugin is using vite default ts compiler which is esbuild
+      // 'swc' compiler is supported to use as well for frameworks
+      // like Nestjs (esbuild dont support 'emitDecoratorMetadata' yet)
+      // you need to INSTALL `@swc/core` as dev dependency if you want to use swc
+      tsCompiler: 'swc',
+    }),
   ],
   optimizeDeps: {
     // Vite does not work well with optionnal dependencies,
@@ -39,12 +71,7 @@ export default defineConfig({
       provider: 'v8',
       reportsDirectory: '../../coverage/apps/api',
       include: ['app/**/*'],
-      exclude: [
-        'app/**/*.spec.ts',
-        'app/**/*.test.ts',
-        'app/**/index.ts',
-        'app/main.ts',
-      ],
+      exclude: ['app/**/*.spec.ts', 'app/**/*.test.ts', 'app/**/index.ts', 'app/main.ts'],
     },
     pool: 'forks', // Use forks for better isolation in Node.js environment
     poolOptions: {

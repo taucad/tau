@@ -1,6 +1,6 @@
 import { useMatches } from 'react-router';
 import { useMemo } from 'react';
-import type { Handle, TypedUIMatch } from '~/types/matches.js';
+import type { Handle, TypedUIMatch } from '~/types/matches.types.js';
 
 /**
  * Use typed matches to get the breadcrumb and action items for the current route
@@ -18,6 +18,8 @@ export function useTypedMatches<Selected>(
     const result: Record<keyof Handle, TypedUIMatch[]> = {
       breadcrumb: [],
       actions: [],
+      commandPalette: [],
+      noPageWrapper: [],
     };
 
     // Get all possible handle properties from all matches

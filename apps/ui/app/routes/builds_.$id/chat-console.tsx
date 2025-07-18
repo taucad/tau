@@ -8,8 +8,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import { cn } from '~/utils/ui.js';
 import { useLogs } from '~/hooks/use-logs.js';
-import type { LogLevel, LogOrigin } from '~/types/console.js';
-import { logLevels } from '~/types/console.js';
+import type { LogLevel, LogOrigin } from '~/types/console.types.js';
+import { logLevels } from '~/types/console.types.js';
 import { Badge } from '~/components/ui/badge.js';
 import {
   DropdownMenu,
@@ -20,7 +20,8 @@ import {
   DropdownMenuTrigger,
 } from '~/components/ui/dropdown-menu.js';
 import { useCookie } from '~/hooks/use-cookie.js';
-import { logActor } from '~/machines/logs.js';
+import { logActor } from '~/machines/logs.machine.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   readonly onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -28,10 +29,6 @@ type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   readonly keyCombination?: string;
   readonly 'data-view': 'tabs' | 'split';
 };
-
-// Cookie names for persisting console settings
-const consoleLogLevelsCookieName = 'console-log-levels';
-const consoleDisplayConfigCookieName = 'console-display-config';
 
 // Default values for enabled log levels
 const defaultLogLevels: Record<LogLevel, boolean> = {
@@ -150,8 +147,8 @@ export const ChatConsole = memo(function ({
   const [filter, setFilter] = useState('');
 
   // Cookie-persisted state for log levels
-  const [enabledLevels, setEnabledLevels] = useCookie(consoleLogLevelsCookieName, defaultLogLevels);
-  const [displayConfig, setDisplayConfig] = useCookie(consoleDisplayConfigCookieName, defaultDisplayConfig);
+  const [enabledLevels, setEnabledLevels] = useCookie(cookieName.consoleLogLevel, defaultLogLevels);
+  const [displayConfig, setDisplayConfig] = useCookie(cookieName.consoleDisplayConfig, defaultDisplayConfig);
 
   // Filter logs based on search text and verbosity levels
   const filteredLogs = useSelector(logActor, (state) => {
@@ -259,7 +256,7 @@ export const ChatConsole = memo(function ({
         </Tooltip>
         <Input
           autoComplete="off"
-          className="h-6 w-full group-data-[view=tabs]/console:h-8"
+          className="h-6 w-full group-data-[view=tabs]/console:h-7"
           placeholder="Filter..."
           value={filter}
           onChange={handleFilterChange}

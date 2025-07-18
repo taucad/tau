@@ -1,5 +1,7 @@
-import { Fragment, memo, useCallback, useRef } from 'react';
-import type { Message } from '@ai-sdk/react';
+import { memo, useCallback, useRef, useState } from 'react';
+import { Virtuoso } from 'react-virtuoso';
+import type { VirtuosoHandle } from 'react-virtuoso';
+import { useSelector } from '@xstate/react';
 import { ChatMessage } from '~/routes/builds_.$id/chat-message.js';
 import { ScrollDownButton } from '~/routes/builds_.$id/scroll-down-button.js';
 import { ChatError } from '~/routes/builds_.$id/chat-error.js';
@@ -7,119 +9,103 @@ import { ChatStatus } from '~/routes/builds_.$id/chat-status.js';
 import type { ChatTextareaProperties } from '~/components/chat/chat-textarea.js';
 import { ChatTextarea } from '~/components/chat/chat-textarea.js';
 import { createMessage } from '~/utils/chat.js';
-import { MessageRole, MessageStatus } from '~/types/chat.js';
-import { useAiChat } from '~/components/chat/ai-chat-provider.js';
-import { AnimatedShinyText } from '~/components/magicui/animated-shiny-text.js';
-import { When } from '~/components/ui/utils/when.js';
+import { messageRole, messageStatus } from '~/types/chat.types.js';
+import { useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { cn } from '~/utils/ui.js';
 import { ChatSelector } from '~/routes/builds_.$id/chat-selector.js';
+import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
+
+// Memoized individual message item component to prevent re-renders
+const MessageItem = memo(function ({ messageId }: { readonly messageId: string }) {
+  return (
+    <div className="px-4 py-2">
+      <ChatMessage messageId={messageId} />
+    </div>
+  );
+});
 
 export const ChatHistory = memo(function () {
-  const { append, messages, reload, setMessages, status } = useAiChat();
-  const chatContainerReference = useRef<HTMLDivElement>(null);
+  const kernel = useSelector(cadActor, (state) => state.context.kernelTypeSelected);
+  const messageIds = useChatSelector((state) => state.context.messageOrder);
+  const { append } = useChatActions();
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
 
-  const onSubmit: ChatTextareaProperties['onSubmit'] = async ({ content, model, metadata, imageUrls }) => {
-    const userMessage = createMessage({
-      content,
-      role: MessageRole.User,
-      status: MessageStatus.Pending,
-      metadata: metadata ?? {},
-      model,
-      imageUrls,
-    });
-    void append(userMessage);
-  };
-
-  const editMessage = useCallback(
-    (newMessage: Message) => {
-      setMessages((messages) => {
-        const currentMessages = messages;
-        const existingMessageIndex = currentMessages.findIndex((message) => message.id === newMessage.id);
-        if (existingMessageIndex === -1) {
-          throw new Error('Message not found');
-        }
-
-        const updatedMessages = [...currentMessages.slice(0, existingMessageIndex), newMessage];
-
-        return updatedMessages;
+  // Memoize the onSubmit callback to prevent unnecessary re-renders
+  const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
+    async ({ content, model, metadata, imageUrls }) => {
+      const userMessage = createMessage({
+        content,
+        role: messageRole.user,
+        status: messageStatus.pending,
+        metadata: { kernel, ...metadata },
+        model,
+        imageUrls,
       });
-      void reload();
+      append(userMessage);
     },
-    [setMessages, reload],
+    [append, kernel],
   );
 
-  const onEdit = async (
-    { content, model, metadata, imageUrls }: Parameters<ChatTextareaProperties['onSubmit']>[0],
-    messageId: string,
-  ) => {
-    const userMessage = createMessage({
-      id: messageId,
-      content,
-      role: MessageRole.User,
-      status: MessageStatus.Pending,
-      metadata: metadata ?? {},
-      model,
-      imageUrls,
-    });
-    editMessage(userMessage);
-  };
+  // Memoize the item renderer for Virtuoso with stable references
+  const renderItem = useCallback(
+    (index: number) => {
+      const messageId = messageIds[index]!;
+
+      return <MessageItem key={`message-${messageId}`} messageId={messageId} />;
+    },
+    [messageIds],
+  );
+  // Track scroll state for the scroll button
+  const [atBottom, setAtBottom] = useState(true);
+
+  const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
+    setAtBottom(atBottom);
+  }, []);
+
+  // Scroll to bottom when new messages arrive
+  const scrollToBottom = useCallback(() => {
+    if (virtuosoRef.current && messageIds.length > 0) {
+      virtuosoRef.current.scrollToIndex({
+        index: messageIds.length - 1,
+        align: 'end',
+        behavior: 'smooth',
+      });
+    }
+  }, [messageIds.length]);
 
   return (
     <div className="relative flex h-full flex-col">
-      <div className="flex items-center justify-between border-b p-2 pl-12">
+      <div className="flex items-center justify-between border-b p-2">
         <ChatSelector />
       </div>
-      <div ref={chatContainerReference} className="-mb-3 flex-1 overflow-y-auto pb-10">
-        <div className="space-y-4 p-4 pb-0">
-          {messages.map((message, index) => (
-            <Fragment key={message.id}>
-              <When
-                shouldRender={
-                  message.role === 'assistant' &&
-                  message.parts?.length === 1 &&
-                  status === 'submitted' &&
-                  index === messages.length - 1
-                }
-              >
-                <AnimatedShinyText className="text-sm italic">Creating...</AnimatedShinyText>
-              </When>
-              <When
-                shouldRender={
-                  message.role === 'assistant' &&
-                  message.parts?.length === 1 &&
-                  status === 'streaming' &&
-                  index === messages.length - 1
-                }
-              >
-                <AnimatedShinyText className="text-sm italic">Generating...</AnimatedShinyText>
-              </When>
-              <ChatMessage
-                message={message}
-                onEdit={async (event) => onEdit(event, message.id)}
-                onRetry={({ modelId }) => {
-                  setMessages((messages) => {
-                    // Slicing with a negative index returns non-empty array, so we need
-                    // to ensure that the slice index is positve in the case only 2 messages are present.
-                    const sliceIndex = Math.max(index - 1, 0);
-                    const previousMessage = messages[sliceIndex];
-                    const updatedMessages = [
-                      ...messages.slice(0, sliceIndex),
-                      { ...previousMessage, model: modelId ?? previousMessage.model },
-                    ];
-                    return updatedMessages;
-                  });
-
-                  void reload();
-                }}
-              />
-            </Fragment>
-          ))}
-          <ChatError />
-        </div>
-        <ScrollDownButton containerRef={chatContainerReference} hasContent={messages.length > 0} />
+      <div className="-mb-3 flex-1 overflow-hidden">
+        <Virtuoso
+          ref={virtuosoRef}
+          alignToBottom
+          totalCount={messageIds.length}
+          itemContent={renderItem}
+          followOutput="smooth"
+          className="h-full"
+          style={{ height: '100%', paddingBottom: '2.5rem' }}
+          atBottomStateChange={handleAtBottomStateChange}
+          components={{
+            Header: () => <div className="pt-2" />,
+            EmptyPlaceholder: () => (
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                <p>Start a conversation...</p>
+              </div>
+            ),
+            Footer: () => (
+              <div className="px-4 pb-12">
+                <ChatError />
+              </div>
+            ),
+          }}
+        />
+        <ScrollDownButton hasContent={messageIds.length > 0} isVisible={!atBottom} onScrollToBottom={scrollToBottom} />
       </div>
       <div className={cn('relative mx-2 mb-2 rounded-2xl')}>
-        <ChatStatus status={status} className="absolute inset-x-0 -top-9" />
+        <ChatStatus className="absolute inset-x-0 -top-9" />
         <ChatTextarea onSubmit={onSubmit} />
       </div>
     </div>

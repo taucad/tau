@@ -158,7 +158,7 @@ function ItemList<T>({
                   asChild={labelAsChild}
                   value={value}
                   keywords={[group.name]}
-                  className={cn('cursor-pointer', labelClassName)}
+                  className={cn(labelClassName)}
                   disabled={isDisabled?.(item)}
                   onSelect={() => {
                     setSelectedItem(item);

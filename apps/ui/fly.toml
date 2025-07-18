@@ -11,7 +11,8 @@ primary_region = 'syd'
 
 [env]
   NODE_ENV = 'production'
-  TAU_API_URL = 'https://tau-api.fly.dev'
+  TAU_API_URL = 'https://api.taucad.dev'
+  TAU_FRONTEND_URL = 'https://taucad.dev'
 
 [http_service]
   internal_port = 3000

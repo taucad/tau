@@ -8,7 +8,7 @@ import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
 import { toast } from '~/components/ui/sonner.js';
 import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
-import { orthographicViews, screenshotRequestMachine } from '~/machines/screenshot-request.js';
+import { orthographicViews, screenshotRequestMachine } from '~/machines/screenshot-request.machine.js';
 
 type ChatContextActionsProperties = {
   readonly addImage: (image: string) => void;
@@ -156,9 +156,12 @@ ${errors.join('\n')}
 
   const handleAddKernelError = useCallback(() => {
     if (kernelError) {
+      const locationInfo = ` (Line ${kernelError.startLineNumber}:${kernelError.startColumn}`;
+
       const markdownKernelError = `
-# Kernel error
-${kernelError}
+# Kernel error${locationInfo}
+${kernelError.message}
+${kernelError.stack ? `\n\`\`\`\n${kernelError.stack}\n\`\`\`` : ''}
 `;
       addText(markdownKernelError);
       if (asPopoverMenu) {

@@ -2,14 +2,21 @@ import type { JSX } from 'react';
 import { ReplicadMesh } from '~/components/geometry/kernel/replicad/replicad-mesh.js';
 import { ThreeProvider } from '~/components/geometry/graphics/three/three-context.js';
 import type { ThreeViewerProperties } from '~/components/geometry/graphics/three/three-context.js';
-import type { Shape } from '~/types/cad.js';
-import SvgViewer from '~/components/geometry/kernel/replicad/svg-viewer.js';
+import type { Shape } from '~/types/cad.types.js';
+import { SvgViewer } from '~/components/geometry/graphics/svg/svg-viewer.js';
 
-type CadViewerProperties = Omit<ThreeViewerProperties, 'enableCameraControls'> & {
+type CadViewerProperties = ThreeViewerProperties & {
   readonly shapes: Shape[];
+  readonly enableSurface?: boolean;
+  readonly enableLines?: boolean;
 };
 
-export function CadViewer({ shapes, ...properties }: CadViewerProperties): JSX.Element {
+export function CadViewer({
+  shapes,
+  enableSurface = true,
+  enableLines = true,
+  ...properties
+}: CadViewerProperties): JSX.Element {
   const svgShapes = shapes.filter((shape) => shape.type === '2d');
 
   // If there are any SVG shapes, we render them in a SVG viewer
@@ -18,10 +25,10 @@ export function CadViewer({ shapes, ...properties }: CadViewerProperties): JSX.E
   }
 
   return (
-    <ThreeProvider enableCameraControls={false} {...properties}>
+    <ThreeProvider {...properties}>
       {shapes.map((shape) => {
         if (shape.type === '3d') {
-          return <ReplicadMesh key={shape.name} {...shape} />;
+          return <ReplicadMesh key={shape.name} {...shape} enableSurface={enableSurface} enableLines={enableLines} />;
         }
 
         if (shape.type === '2d') {

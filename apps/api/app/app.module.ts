@@ -1,12 +1,33 @@
 import { Module } from '@nestjs/common';
+import type { MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { ChatModule } from '~/chat/chat-module.js';
-import { CodeCompletionModule } from '~/code-completion/code-completion-module.js';
-import { getEnvironment } from '~/config.js';
+import { APP_PIPE } from '@nestjs/core';
+import { ZodValidationPipe } from 'nestjs-zod';
+import { DatabaseModule } from '~/database/database.module.js';
+import { AuthModule } from '~/auth/auth.module.js';
+import { getEnvironment } from '~/config/environment.config.js';
+import { ApiModule } from '~/api/api.module.js';
+import { LoggerModule } from '~/logger/logger.module.js';
+import { RequestIdMiddleware } from '~/middlewares/request-id.middleware.js';
 
 @Module({
-  imports: [ChatModule, CodeCompletionModule, ConfigModule.forRoot({ validate: getEnvironment })],
+  imports: [
+    ApiModule,
+    DatabaseModule,
+    AuthModule.forRootAsync(),
+    ConfigModule.forRoot({ validate: getEnvironment, isGlobal: true }),
+    LoggerModule,
+  ],
   controllers: [],
-  providers: [],
+  providers: [
+    {
+      provide: APP_PIPE,
+      useClass: ZodValidationPipe,
+    },
+  ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  public configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestIdMiddleware).forRoutes('*');
+  }
+}

@@ -2,7 +2,7 @@ import type { JSX } from 'react';
 import { Link } from 'react-router';
 import { Button } from '~/components/ui/button.js';
 import { ComingSoon } from '~/components/ui/coming-soon.js';
-import type { Handle } from '~/types/matches.js';
+import type { Handle } from '~/types/matches.types.js';
 
 export const handle: Handle = {
   breadcrumb() {

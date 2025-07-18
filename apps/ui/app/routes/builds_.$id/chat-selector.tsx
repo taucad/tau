@@ -8,60 +8,12 @@ import { useBuild } from '~/hooks/use-build.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { cn } from '~/utils/ui.js';
 import { useChatConstants } from '~/utils/chat.js';
-import type { Chat } from '~/types/build.js';
+import type { Chat } from '~/types/build.types.js';
 import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
 import { formatRelativeTime } from '~/utils/date.js';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '~/components/ui/dialog.js';
 import { Input } from '~/components/ui/input.js';
-
-// Group chats by date (Today, Yesterday, Older)
-function groupChatsByDate(chats: Chat[]) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-
-  const todayChats: Chat[] = [];
-  const yesterdayChats: Chat[] = [];
-  const olderChats: Chat[] = [];
-
-  for (const chat of chats) {
-    const chatDate = new Date(chat.updatedAt);
-    chatDate.setHours(0, 0, 0, 0);
-
-    if (chatDate.getTime() === today.getTime()) {
-      todayChats.push(chat);
-    } else if (chatDate.getTime() === yesterday.getTime()) {
-      yesterdayChats.push(chat);
-    } else {
-      olderChats.push(chat);
-    }
-  }
-
-  // Sort each group by updatedAt timestamp (most recent first)
-  const sortByMostRecent = (a: Chat, b: Chat) => b.updatedAt - a.updatedAt;
-
-  todayChats.sort(sortByMostRecent);
-  yesterdayChats.sort(sortByMostRecent);
-  olderChats.sort(sortByMostRecent);
-
-  const groups = [];
-
-  if (todayChats.length > 0) {
-    groups.push({ name: 'Today', items: todayChats });
-  }
-
-  if (yesterdayChats.length > 0) {
-    groups.push({ name: 'Yesterday', items: yesterdayChats });
-  }
-
-  if (olderChats.length > 0) {
-    groups.push({ name: 'Older', items: olderChats });
-  }
-
-  return groups;
-}
+import { groupItemsByTimeHorizon } from '~/utils/temporal.js';
 
 export function ChatSelector(): ReactNode {
   const { build, isLoading, activeChat, activeChatId, addChat, setActiveChat, updateChatName, deleteChat } = useBuild();
@@ -73,8 +25,11 @@ export function ChatSelector(): ReactNode {
 
   const { append } = useChat({
     ...useChatConstants,
+    credentials: 'include',
     onFinish(message) {
-      if (!activeChatId) return;
+      if (!activeChatId) {
+        return;
+      }
 
       const textPart = message.parts?.find((part) => part.type === 'text');
       if (textPart) {
@@ -86,10 +41,12 @@ export function ChatSelector(): ReactNode {
 
   // Generate name for new chats
   useEffect(() => {
-    if (isLoading || !activeChat) return;
+    if (isLoading || !activeChat) {
+      return;
+    }
 
     // Check if this chat needs a name
-    if (activeChat.name === 'New Chat' && activeChat.messages[0]) {
+    if (activeChat.name === 'New chat' && activeChat.messages[0]) {
       setIsGeneratingName(true);
 
       // Create and send message for name generation
@@ -136,7 +93,7 @@ export function ChatSelector(): ReactNode {
   );
 
   // Group chats for the ComboBoxResponsive component
-  const groupedChats = !isLoading && build?.chats ? groupChatsByDate(build.chats) : [];
+  const groupedChats = !isLoading && build?.chats ? groupItemsByTimeHorizon(build.chats) : [];
 
   // Render function for each chat item
   const renderChatLabel = useCallback(
@@ -188,7 +145,7 @@ export function ChatSelector(): ReactNode {
 
   return (
     <>
-      <div className="flex h-8 w-full items-center justify-between">
+      <div className="flex h-7 w-full items-center justify-between">
         <div className="group min-w-0 flex-1 opacity-70 hover:opacity-100">
           <Tooltip>
             <ComboBoxResponsive
@@ -218,7 +175,7 @@ export function ChatSelector(): ReactNode {
                     {isLoading
                       ? null
                       : !build?.chats || build.chats.length === 0
-                        ? 'New Chat'
+                        ? 'Initial design'
                         : (activeChat?.name ?? 'Select a chat')}
                   </span>
                   <Search className="size-4 shrink-0 opacity-0 group-hover:opacity-100" />
@@ -236,7 +193,7 @@ export function ChatSelector(): ReactNode {
                 <Plus className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>New Chat</TooltipContent>
+            <TooltipContent>New chat</TooltipContent>
           </Tooltip>
         </div>
       </div>

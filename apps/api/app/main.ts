@@ -2,30 +2,66 @@
  * This is not a production server yet!
  * This is only a minimal backend to get started.
  */
-import process from 'node:process';
-import { Logger } from '@nestjs/common';
+import { Logger, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
+import { ConfigService } from '@nestjs/config';
+import { Logger as PinoLogger } from 'nestjs-pino';
+import helmet from '@fastify/helmet';
 import { AppModule } from '~/app.module.js';
+import { generatePrefixedId } from '~/utils/id.utils.js';
+import type { Environment } from '~/config/environment.config.js';
+import { getFastifyLoggingConfig } from '~/logger/fastify.logger.js';
+import { idPrefix } from '~/constants/id.constants.js';
+import { corsAllowedHeaders, corsAllowedMethods, corsMaxAge } from '~/constants/cors.constant.js';
+import { httpBodyLimit } from '~/constants/http-body.constant.js';
 
-// Create Fastify adapter with custom options for body size limits
-const fastifyAdapter = new FastifyAdapter({
-  bodyLimit: 50 * 1024 * 1024, // 50MB in bytes
-});
-const globalPrefix = 'v1';
-const app = await NestFactory.create<NestFastifyApplication>(AppModule, fastifyAdapter);
-app.setGlobalPrefix(globalPrefix);
-app.enableCors();
+async function bootstrap() {
+  const fastifyAdapter = new FastifyAdapter({
+    bodyLimit: httpBodyLimit,
+    genReqId: () => generatePrefixedId(idPrefix.request),
+    disableRequestLogging: true, // Disables automatic 'incoming request'/'request completed' logs - these are handled by custom loggers.
+    logger: getFastifyLoggingConfig(),
+  });
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule, fastifyAdapter, {
+    bufferLogs: true, // Buffer logs until pino logger is ready. This ensures all logs are consistently formatted.
+  });
 
-if (import.meta.env.PROD) {
-  async function bootstrap() {
-    const port = process.env.PORT;
+  const appConfig = app.get(ConfigService<Environment, true>);
+
+  app.useLogger(app.get(PinoLogger));
+  app.flushLogs(); // Standalone applications require flushing after configuring the logger - https://github.com/iamolegga/nestjs-pino/issues/553
+
+  app.enableCors({
+    origin: [appConfig.get('TAU_FRONTEND_URL', { infer: true })],
+    allowedHeaders: corsAllowedHeaders,
+    methods: corsAllowedMethods,
+    credentials: true,
+    maxAge: corsMaxAge,
+  });
+  app.enableVersioning({
+    type: VersioningType.URI,
+  });
+  await app.register(helmet);
+
+  if (import.meta.env.PROD) {
+    const port = appConfig.get('PORT', { infer: true });
     await app.listen(port, '0.0.0.0'); // Listen on all network interfaces
-    Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`);
+    Logger.log(`🚀 Application is running on: http://localhost:${port}`, 'Bootstrap');
   }
 
-  await bootstrap();
+  // Hot Module Replacement using Vite's HMR API
+  if (import.meta.hot) {
+    import.meta.hot.accept();
+    import.meta.hot.dispose(async () => {
+      await app.close();
+    });
+  }
+
+  return app;
 }
+
+const app = await bootstrap();
 
 export const viteNodeApp = app;

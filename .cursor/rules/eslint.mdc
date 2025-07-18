@@ -1,0 +1,95 @@
+---
+description: eslint rules
+globs: *.ts, *.tsx
+alwaysApply: false
+---
+## Common AI Mistakes to Avoid:
+
+**Type Imports**: Use `import type` for type-only imports:
+```diff
+- import { User } from '~/types.js';
++ import type { User } from '~/types.js';
+```
+
+**Explicit Types**: Always provide explicit return types for exported functions:
+```diff
+- export function getUserName(user: User) {
++ export function getUserName(user: User): string {
+```
+
+```diff
+- export function MyComponent() {
++ export function MyComponent(): React.JSX.Element {
+```
+
+**No `any` Type**: Use `unknown` instead of `any`:
+```diff
+- const data: any = response;
++ const data: unknown = response;
+```
+
+**No `null` Type**: Use `undefined` instead of `null`:
+```diff
+- const data: null = response;
++ const data: undefined = response;
+```
+
+**Curly Braces**: Always use curly braces for control flow:
+```diff
+- if (condition) return;
++ if (condition) {
++   return;
++ }
+```
+
+**Class Accessibility**: Explicitly declare class member accessibility:
+```diff
+- constructor(name: string) {}
++ public constructor(name: string) {}
+```
+
+**Class Member Ordering**: Order class members in the following order:
+* `static`
+* `public`
+* `private`
+
+**Absolute Imports**: Use absolute imports with `~/` prefix:
+```diff
+- import { utils } from '../utils/helper.js';
++ import { utils } from '~/utils/helper.js';
+```
+
+**Unnecessary Conditions**: Don't use optional chaining when value can't be nullish:
+```diff
+- function getLength(str: string) {
+-   return str?.length; // str can never be nullish
+- }
++ function getLength(str: string) {
++   return str.length;
++ }
+```
+
+**React Boolean Props**: Boolean props should follow naming convention:
+```diff
+- <Button disabled={true} />
++ <Button isDisabled={true} />
+```
+
+**ESLint Comments**: Always include description for ESLint disable comments:
+```diff
+- // eslint-disable-next-line @typescript-eslint/no-explicit-any
++ // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Legacy API requires any type
+```
+
+**File Extensions**: Always include `.js` extensions for local imports:
+```diff
+- import { helper } from '~/utils/helper';
++ import { helper } from '~/utils/helper.js';
+```
+
+**Duplicate Imports**: Keep type and value imports separate:
+```diff
+- import { User, type UserConfig } from '~/types.js';
++ import { User } from '~/types.js';
++ import type { UserConfig } from '~/types.js';
+```

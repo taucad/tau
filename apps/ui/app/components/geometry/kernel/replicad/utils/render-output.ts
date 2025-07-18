@@ -1,8 +1,8 @@
-import type { Shape as ReplicadShape, Drawing, Face, Wire, AnyShape, Vertex } from 'replicad';
+import type { Shape as ReplicadShape, Drawing, Face, Wire, AnyShape, Vertex, exportSTEP } from 'replicad';
 import { Sketch, EdgeFinder, FaceFinder, Sketches, CompoundSketch } from 'replicad';
 import type { SetRequired } from 'type-fest';
 import { normalizeColor } from '~/components/geometry/kernel/replicad/utils/normalize-color.js';
-import type { Shape2D, Shape3D } from '~/types/cad.js';
+import type { Shape2D, Shape3D } from '~/types/cad.types.js';
 
 type Shape = ReplicadShape<never>;
 type Meshable = SetRequired<Shape, 'mesh' | 'meshEdges'>;
@@ -17,15 +17,6 @@ type InputShape = {
   highlight?: unknown;
   highlightEdge?: unknown;
   highlightFace?: unknown;
-  strokeType?: string;
-};
-
-type CleanConfig = {
-  name: string;
-  shape: Meshable | Svgable;
-  color?: string;
-  opacity?: number;
-  highlight?: unknown;
   strokeType?: string;
 };
 
@@ -45,6 +36,10 @@ type MeshableConfiguration = {
   highlight?: unknown;
 };
 
+export type ShapeConfig = Exclude<Parameters<typeof exportSTEP>[0], undefined>[number];
+
+export type MainResultShapes = Shape | Shape[] | InputShape | InputShape[];
+
 const isSvgable = (shape: unknown): shape is Svgable => {
   return Boolean((shape as Svgable).toSVGPaths) && Boolean((shape as Svgable).toSVGViewBox);
 };
@@ -58,7 +53,7 @@ const isInputShape = (shape: unknown): shape is InputShape => {
 };
 
 function createBasicShapeConfig(
-  inputShapes: Shape | Shape[] | InputShape | InputShape[],
+  inputShapes: MainResultShapes,
   baseName = 'Shape',
 ): Array<InputShape & { name: string }> {
   let shapes: Array<Shape | InputShape> = [];
@@ -236,17 +231,17 @@ function renderMesh(shapeConfig: MeshableConfiguration) {
   return shapeInfo;
 }
 
-export function render(shapes: CleanConfig[]): Array<Shape2D | Shape3D> {
-  return shapes.map((shapeConfig: CleanConfig) => {
+export function render(shapes: ShapeConfig[]): Array<Shape2D | Shape3D> {
+  return shapes.map((shapeConfig: ShapeConfig) => {
     if (isSvgable(shapeConfig.shape)) return renderSvg(shapeConfig as SvgShapeConfiguration);
     return renderMesh(shapeConfig as MeshableConfiguration);
   });
 }
 
 export function renderOutput(
-  shapes: Shape | Shape[] | InputShape | InputShape[],
+  shapes: MainResultShapes,
   shapeStandardizer?: ShapeStandardizer,
-  beforeRender?: (shapes: CleanConfig[]) => CleanConfig[],
+  beforeRender?: (shapes: ShapeConfig[]) => ShapeConfig[],
   defaultName = 'Shape',
 ): Array<Shape2D | Shape3D> {
   const standardizer = shapeStandardizer ?? new ShapeStandardizer();

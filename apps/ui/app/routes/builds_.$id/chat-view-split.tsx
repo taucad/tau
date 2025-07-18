@@ -2,15 +2,14 @@ import { useRef, useCallback } from 'react';
 import type { JSX } from 'react';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
 import { ChatConsole } from '~/routes/builds_.$id/chat-console.js';
-import { ChatEditor } from '~/routes/builds_.$id/chat-editor.js';
 import { ChatViewer } from '~/routes/builds_.$id/chat-viewer.js';
 import type { KeyCombination } from '~/utils/keys.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '~/components/ui/resizable.js';
+import { ChatEditorLayout } from '~/routes/builds_.$id/chat-editor-layout.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
-const chatResizeViewerCookieName = 'chat-resize-viewer';
-const chatResizeCodeCookieName = 'chat-resize-editor';
 const toggleConsoleKeyCombination = {
   key: 'l',
   ctrlKey: true,
@@ -20,8 +19,8 @@ const toggleConsoleKeyCombination = {
 export const collapsedConsoleSize = 4;
 
 export function ChatViewSplit(): JSX.Element {
-  const [consoleSize, setConsoleSize] = useCookie(chatResizeCodeCookieName, [85, 15]);
-  const [codeSize, setCodeSize] = useCookie(chatResizeViewerCookieName, [60, 40]);
+  const [consoleSize, setConsoleSize] = useCookie(cookieName.chatResizeEditor, [85, 15]);
+  const [codeSize, setCodeSize] = useCookie(cookieName.chatResizeViewer, [60, 40]);
 
   const consolePanelReference = useRef<ImperativePanelHandle>(null);
 
@@ -43,7 +42,7 @@ export function ChatViewSplit(): JSX.Element {
 
   return (
     <ResizablePanelGroup
-      autoSaveId={chatResizeViewerCookieName}
+      autoSaveId={cookieName.chatResizeViewer}
       direction="horizontal"
       className="h-full"
       onLayout={setCodeSize}
@@ -53,9 +52,9 @@ export function ChatViewSplit(): JSX.Element {
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel order={2} defaultSize={codeSize[1]} minSize={30} id="chat-editor-container">
-        <ResizablePanelGroup direction="vertical" autoSaveId={chatResizeCodeCookieName} onLayout={setConsoleSize}>
-          <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-editor" className="size-full pt-12">
-            <ChatEditor />
+        <ResizablePanelGroup direction="vertical" autoSaveId={cookieName.chatResizeEditor} onLayout={setConsoleSize}>
+          <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-editor" className="size-full">
+            <ChatEditorLayout />
           </ResizablePanel>
           <ResizableHandle />
           <ResizablePanel

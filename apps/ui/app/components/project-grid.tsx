@@ -1,6 +1,6 @@
 import type { ComponentType, JSX } from 'react';
 import { Star, GitFork, Eye } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useActor, useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
@@ -8,20 +8,18 @@ import { Button } from '~/components/ui/button.js';
 import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '~/components/ui/card.js';
 import { SvgIcon } from '~/components/icons/svg-icon.js';
-import type { Build } from '~/types/build.js';
-import type { CadKernelProvider } from '~/types/cad.js';
+import type { Build } from '~/types/build.types.js';
+import type { KernelProvider } from '~/types/kernel.types';
 import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
 import { storage } from '~/db/storage.js';
-import { cadMachine } from '~/machines/cad.js';
+import { cadMachine } from '~/machines/cad.machine.js';
 import { HammerAnimation } from '~/components/hammer-animation.js';
 
 // Placeholder for language icons
-const languageIcons: Record<CadKernelProvider, ComponentType<{ className?: string }>> = {
+const kernelIcons: Record<KernelProvider, ComponentType<{ className?: string }>> = {
   replicad: ({ className }) => <SvgIcon id="replicad" className={className} />,
   openscad: ({ className }) => <SvgIcon id="openscad" className={className} />,
-  kicad: ({ className }) => <SvgIcon id="kicad" className={className} />,
-  kcl: ({ className }) => <SvgIcon id="kcl" className={className} />,
-  cpp: ({ className }) => <SvgIcon id="cpp" className={className} />,
+  zoo: ({ className }) => <SvgIcon id="zoo" className={className} />,
 };
 
 type CommunityBuildCardProperties = Build;
@@ -75,25 +73,28 @@ function ProjectCard({
 
   const navigate = useNavigate();
 
-  const LanguageIcon = Object.values(assets)
-    .map((asset) => asset.language)
-    .map((language) => ({
-      Icon: languageIcons[language],
-      language,
-    }));
-
-  // Get the replicad code if available
-  const replicadAsset = Object.values(assets).find((asset) => asset.language === 'replicad');
-  const replicadCode = replicadAsset?.files[replicadAsset.main]?.content;
+  // Memoize the KernelIcon computation to prevent re-creation on every render
+  const KernelIcon = useMemo(
+    () =>
+      Object.values(assets)
+        .map((asset) => asset.language)
+        .map((kernel) => ({
+          Icon: kernelIcons[kernel],
+          language: kernel,
+        })),
+    [assets],
+  );
 
   // Set up visibility observer
   useEffect(() => {
     const currentElement = cardReference.current;
-    if (!currentElement) return;
+    if (!currentElement) {
+      return;
+    }
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) {
+        if (entries[0]?.isIntersecting) {
           setIsVisible(true);
           // Once we've detected visibility, we can stop observing
           observer.disconnect();
@@ -105,24 +106,32 @@ function ProjectCard({
     observer.observe(currentElement);
 
     return () => {
-      if (currentElement) {
-        observer.unobserve(currentElement);
-      }
+      observer.unobserve(currentElement);
     };
   }, []);
 
+  const mechanicalAsset = assets.mechanical;
+  if (!mechanicalAsset) {
+    throw new Error('Mechanical asset not found');
+  }
+
   // Only load the CAD model when the card is visible and preview is enabled
   useEffect(() => {
-    if (isVisible && showPreview && replicadCode && shapes.length === 0) {
-      send({ type: 'initializeModel', code: replicadCode, parameters: {} });
+    if (isVisible && showPreview) {
+      send({
+        type: 'initializeModel',
+        code: mechanicalAsset.files[mechanicalAsset.main]!.content,
+        parameters: mechanicalAsset.parameters,
+        kernelType: mechanicalAsset.language,
+      });
     }
-  }, [isVisible, showPreview, replicadCode, send, shapes]);
+  }, [isVisible, showPreview, mechanicalAsset, send]);
 
-  const handleStar = () => {
+  const handleStar = useCallback(() => {
     // TODO: Implement star functionality
-  };
+  }, []);
 
-  const handleFork = async () => {
+  const handleFork = useCallback(async () => {
     // Create a new build with forked data
     const newBuild: Omit<Build, 'id'> = {
       name: `${name} (Fork)`,
@@ -142,10 +151,18 @@ function ProjectCard({
     const createdBuild = await storage.createBuild(newBuild);
     // Navigate to the new build
     await navigate(`/builds/${createdBuild.id}`);
-  };
+  }, [name, description, thumbnail, author, tags, assets, id, chats, navigate]);
+
+  const handlePreviewToggle = useCallback(
+    (event: React.MouseEvent) => {
+      event.stopPropagation();
+      setShowPreview(!showPreview);
+    },
+    [showPreview],
+  );
 
   return (
-    <Card ref={cardReference} className="group relative flex flex-col overflow-hidden">
+    <Card ref={cardReference} className="group relative flex flex-col overflow-hidden pt-0">
       <div className="relative aspect-video overflow-hidden bg-muted">
         {!showPreview && (
           <img
@@ -163,6 +180,7 @@ function ProjectCard({
               </div>
             ) : null}
             <CadViewer
+              enableLines={false}
               shapes={shapes}
               className="bg-muted"
               stageOptions={{
@@ -171,15 +189,7 @@ function ProjectCard({
             />
           </div>
         ) : null}
-        <Button
-          variant="overlay"
-          size="icon"
-          className="absolute top-2 right-2 z-10"
-          onClick={(event) => {
-            event.stopPropagation();
-            setShowPreview(!showPreview);
-          }}
-        >
+        <Button variant="overlay" size="icon" className="absolute top-2 right-2 z-10" onClick={handlePreviewToggle}>
           <Eye className={showPreview ? 'size-4 text-primary' : 'size-4'} />
         </Button>
       </div>
@@ -187,7 +197,7 @@ function ProjectCard({
         <div className="flex items-center justify-between">
           <CardTitle>{name}</CardTitle>
           <div className="flex flex-wrap gap-1">
-            {LanguageIcon.map(({ language, Icon }) => (
+            {KernelIcon.map(({ language, Icon }) => (
               <Tooltip key={language}>
                 <TooltipTrigger>
                   <Avatar className="h-5 w-5">

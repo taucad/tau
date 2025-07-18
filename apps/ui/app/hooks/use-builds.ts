@@ -1,16 +1,12 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import type { Build } from '~/types/build.js';
+import type { Build } from '~/types/build.types.js';
 import { storage } from '~/db/storage.js';
 import { createBuildMutations } from '~/hooks/build-mutations.js';
 
 // Function to fetch builds
 export const fetchBuilds = async (options?: { includeDeleted?: boolean }): Promise<Build[]> => {
   const clientBuilds = await storage.getBuilds({ includeDeleted: options?.includeDeleted ?? false });
-  if (!clientBuilds) {
-    throw new Error('Builds not found');
-  }
-
   return clientBuilds;
 };
 
@@ -36,5 +32,6 @@ export function useBuilds(options?: { includeDeleted?: boolean }) {
     deleteBuild: mutations.deleteBuild,
     restoreBuild: mutations.restoreBuild,
     duplicateBuild: mutations.duplicateBuild,
+    updateName: mutations.updateName,
   };
 }

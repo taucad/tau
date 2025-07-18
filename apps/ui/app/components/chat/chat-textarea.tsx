@@ -3,13 +3,12 @@ import type { JSX } from 'react';
 import { Globe, ArrowUp, Image, X, Square, CircuitBoard, ChevronDown } from 'lucide-react';
 import type { Attachment } from 'ai';
 import type { ClassValue } from 'clsx';
-import { useAiChat } from '~/components/chat/ai-chat-provider.js';
+import { useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { ChatModelSelector } from '~/components/chat/chat-model-selector.js';
 import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '~/components/ui/hover-card.js';
 import { Button } from '~/components/ui/button.js';
 import { Textarea } from '~/components/ui/textarea.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
 import { useModels } from '~/hooks/use-models.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import { formatKeyCombination } from '~/utils/keys.js';
@@ -17,9 +16,10 @@ import type { KeyCombination } from '~/utils/keys.js';
 import { toast } from '~/components/ui/sonner.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import { cn } from '~/utils/ui.js';
-import type { MessagePart } from '~/types/chat.js';
+import type { MessagePart } from '~/types/chat.types.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
 import { ChatContextActions } from '~/components/chat/chat-context-actions.js';
+import { cookieName } from '~/constants/cookie.constants.js';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
@@ -38,7 +38,7 @@ export type ChatTextareaProperties = {
   readonly initialContent?: MessagePart[];
   readonly initialAttachments?: Attachment[];
   readonly className?: ClassValue;
-  readonly withContextActions?: boolean;
+  readonly enableContextActions?: boolean;
 };
 
 const defaultContent: MessagePart[] = [];
@@ -48,6 +48,8 @@ const defaultAttachments: Attachment[] = [];
 const cancelKeyCombination = {
   key: 'Backspace',
   metaKey: true,
+  shiftKey: true,
+  requireAllModifiers: true,
 } satisfies KeyCombination;
 
 export const ChatTextarea = memo(function ({
@@ -57,7 +59,7 @@ export const ChatTextarea = memo(function ({
   initialAttachments = defaultAttachments,
   onEscapePressed,
   className,
-  withContextActions = true,
+  enableContextActions = true,
 }: ChatTextareaProperties): JSX.Element {
   const { initialInputText, initialImageUrls } = useMemo(() => {
     let initialInputText = '';
@@ -80,7 +82,7 @@ export const ChatTextarea = memo(function ({
     return { initialInputText, initialImageUrls };
   }, [initialContent, initialAttachments]);
   const [inputText, setInputText] = useState(initialInputText);
-  const [isSearching, setIsSearching] = useCookie('chat-web-search', false);
+  const [isSearching, setIsSearching] = useCookie(cookieName.chatWebSearch, false);
   const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);
@@ -91,7 +93,8 @@ export const ChatTextarea = memo(function ({
   const fileInputReference = useRef<HTMLInputElement>(null);
   const textareaReference = useRef<HTMLTextAreaElement>(null);
   const { selectedModel } = useModels();
-  const { stop, status } = useAiChat();
+  const status = useChatSelector((state) => state.context.status);
+  const { stop } = useChatActions();
 
   const handleSubmit = async () => {
     // If there is no text or images, do not submit
@@ -142,7 +145,7 @@ export const ChatTextarea = memo(function ({
     } else if (
       event.key === 'Backspace' &&
       textareaReference.current?.selectionStart === 0 &&
-      textareaReference.current?.selectionEnd === 0 &&
+      textareaReference.current.selectionEnd === 0 &&
       images.length > 0
     ) {
       // Delete the last image when backspace is pressed at the beginning of the textarea
@@ -166,13 +169,13 @@ export const ChatTextarea = memo(function ({
     event.preventDefault();
     setIsDragging(false);
 
-    if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
+    if (event.dataTransfer.files.length > 0) {
       for (const file of event.dataTransfer.files) {
         if (file.type.startsWith('image/')) {
           const reader = new FileReader();
           const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
             if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
-              const result = readerEvent.target?.result;
+              const { result } = readerEvent.target;
               if (result !== '') {
                 setImages((previous) => [...previous, result]);
               }
@@ -201,7 +204,7 @@ export const ChatTextarea = memo(function ({
           const reader = new FileReader();
           const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
             if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
-              const result = readerEvent.target?.result;
+              const { result } = readerEvent.target;
               if (result !== '') {
                 setImages((previous) => [...previous, result]);
               }
@@ -249,7 +252,7 @@ export const ChatTextarea = memo(function ({
           const reader = new FileReader();
           const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
             if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
-              const result = readerEvent.target?.result;
+              const { result } = readerEvent.target;
               if (result !== '') {
                 setImages((previous) => [...previous, result]);
               }
@@ -437,11 +440,11 @@ export const ChatTextarea = memo(function ({
           ref={textareaReference}
           className={cn(
             'mt-2 mb-10 size-full max-h-48 min-h-14 resize-none border-none px-4 pt-1 pb-1 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
-            (images.length > 0 || withContextActions) && 'mt-6 pt-5',
+            (images.length > 0 || enableContextActions) && 'mt-6 pt-5',
           )}
           rows={3}
           value={inputText}
-          placeholder="Ask Tau a question..."
+          placeholder="Ask Tau to build anything..."
           onFocus={() => {
             setIsFocused(true);
           }}
@@ -478,7 +481,7 @@ export const ChatTextarea = memo(function ({
 
       {/* Context */}
       <div className="absolute top-0 left-0 m-4 flex flex-wrap gap-1">
-        {withContextActions ? <ChatContextActions addImage={handleAddImage} addText={handleAddText} /> : null}
+        {enableContextActions ? <ChatContextActions addImage={handleAddImage} addText={handleAddText} /> : null}
         {images.map((image, index) => (
           <div key={image} className="relative">
             <HoverCard openDelay={100} closeDelay={100}>

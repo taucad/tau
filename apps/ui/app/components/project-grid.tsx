@@ -19,6 +19,7 @@ import { HammerAnimation } from '~/components/hammer-animation.js';
 const kernelIcons: Record<KernelProvider, ComponentType<{ className?: string }>> = {
   replicad: ({ className }) => <SvgIcon id="replicad" className={className} />,
   openscad: ({ className }) => <SvgIcon id="openscad" className={className} />,
+  zoo: ({ className }) => <SvgIcon id="zoo" className={className} />,
 };
 
 type CommunityBuildCardProperties = Build;
@@ -87,11 +88,13 @@ function ProjectCard({
   // Set up visibility observer
   useEffect(() => {
     const currentElement = cardReference.current;
-    if (!currentElement) return;
+    if (!currentElement) {
+      return;
+    }
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) {
+        if (entries[0]?.isIntersecting) {
           setIsVisible(true);
           // Once we've detected visibility, we can stop observing
           observer.disconnect();
@@ -103,21 +106,21 @@ function ProjectCard({
     observer.observe(currentElement);
 
     return () => {
-      if (currentElement) {
-        observer.unobserve(currentElement);
-      }
+      observer.unobserve(currentElement);
     };
   }, []);
 
   const mechanicalAsset = assets.mechanical;
-  if (!mechanicalAsset) throw new Error('Mechanical asset not found');
+  if (!mechanicalAsset) {
+    throw new Error('Mechanical asset not found');
+  }
 
   // Only load the CAD model when the card is visible and preview is enabled
   useEffect(() => {
-    if (isVisible && showPreview && mechanicalAsset) {
+    if (isVisible && showPreview) {
       send({
         type: 'initializeModel',
-        code: mechanicalAsset.files[mechanicalAsset.main].content,
+        code: mechanicalAsset.files[mechanicalAsset.main]!.content,
         parameters: mechanicalAsset.parameters,
         kernelType: mechanicalAsset.language,
       });

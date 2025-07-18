@@ -10,11 +10,14 @@ import type { BuilderWorkerInterface as ReplicadWorker } from '~/components/geom
 import ReplicadBuilderWorker from '~/components/geometry/kernel/replicad/replicad.worker.js?worker';
 import type { OpenScadBuilderInterface as OpenSCADWorker } from '~/components/geometry/kernel/openscad/openscad.worker.js';
 import OpenSCADBuilderWorker from '~/components/geometry/kernel/openscad/openscad.worker.js?worker';
+import type { ZooBuilderInterface as ZooWorker } from '~/components/geometry/kernel/zoo/zoo.worker.js';
+import ZooBuilderWorker from '~/components/geometry/kernel/zoo/zoo.worker.js?worker';
 import { assertActorDoneEvent } from '~/utils/xstate.js';
 
 const workers = {
   replicad: ReplicadBuilderWorker,
   openscad: OpenSCADBuilderWorker,
+  zoo: ZooBuilderWorker,
 } as const satisfies Partial<Record<KernelProvider, new () => Worker>>;
 
 const createWorkersActor = fromPromise<
@@ -37,25 +40,38 @@ const createWorkersActor = fromPromise<
     context.workers.openscad.terminate();
   }
 
+  if (context.workers.zoo) {
+    context.workers.zoo.terminate();
+  }
+
   try {
-    // Create both workers
+    // Create all workers
     // eslint-disable-next-line new-cap -- following type definitions
     const replicadWorker = new workers.replicad();
     // eslint-disable-next-line new-cap -- following type definitions
     const openscadWorker = new workers.openscad();
+    // eslint-disable-next-line new-cap -- following type definitions
+    const zooWorker = new workers.zoo();
 
-    // Wrap both workers with comlink
+    // Wrap all workers with comlink
     const wrappedReplicadWorker = wrap<ReplicadWorker>(replicadWorker);
     const wrappedOpenscadWorker = wrap<OpenSCADWorker>(openscadWorker);
+    const wrappedZooWorker = wrap<ZooWorker>(zooWorker);
 
-    // Initialize both workers with the default exception handling mode
-    await Promise.all([wrappedReplicadWorker.initialize(true), wrappedOpenscadWorker.initialize()]);
+    // Initialize all workers with the default exception handling mode
+    await Promise.all([
+      wrappedReplicadWorker.initialize(true),
+      wrappedOpenscadWorker.initialize(),
+      wrappedZooWorker.initialize(),
+    ]);
 
-    // Store references to both workers
+    // Store references to all workers
     context.workers.replicad = replicadWorker;
     context.workers.openscad = openscadWorker;
+    context.workers.zoo = zooWorker;
     context.wrappedWorkers.replicad = wrappedReplicadWorker;
     context.wrappedWorkers.openscad = wrappedOpenscadWorker;
+    context.wrappedWorkers.zoo = wrappedZooWorker;
 
     // Return success result
     return { type: 'kernelInitialized' };
@@ -330,7 +346,7 @@ type KernelEvent = KernelEventExternalDone | KernelEventInternal;
 // Interface defining the context for the Kernel machine
 type KernelContext = {
   workers: Record<KernelProvider, Worker | undefined>;
-  wrappedWorkers: Record<KernelProvider, Remote<ReplicadWorker | OpenSCADWorker> | undefined>;
+  wrappedWorkers: Record<KernelProvider, Remote<ReplicadWorker | OpenSCADWorker | ZooWorker> | undefined>;
   parentRef?: CadActor;
   currentKernelType?: KernelProvider;
 };
@@ -379,6 +395,12 @@ export const kernelMachine = setup({
         context.workers.openscad = undefined;
         context.wrappedWorkers.openscad = undefined;
       }
+
+      if (context.workers.zoo) {
+        context.workers.zoo.terminate();
+        context.workers.zoo = undefined;
+        context.wrappedWorkers.zoo = undefined;
+      }
     },
   },
   guards: {
@@ -394,10 +416,12 @@ export const kernelMachine = setup({
     workers: {
       replicad: undefined,
       openscad: undefined,
+      zoo: undefined,
     },
     wrappedWorkers: {
       replicad: undefined,
       openscad: undefined,
+      zoo: undefined,
     },
     parentRef: undefined,
     currentKernelType: undefined,

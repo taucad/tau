@@ -30,7 +30,7 @@ export const getEnvironment = async (): Promise<Environment> => {
 
 export type Environment = z.infer<typeof environmentSchema>;
 
-// eslint-disable-next-line @typescript-eslint/naming-convention -- easier to distinguish this constant with UPPER_CASE.
+// eslint-disable-next-line @typescript-eslint/naming-convention, @typescript-eslint/no-unnecessary-condition -- easier to distinguish this constant with UPPER_CASE.
 export const ENV = globalThis.window ? globalThis.window.ENV : process.env;
 
 /**

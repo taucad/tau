@@ -6,7 +6,6 @@ export type SvgIcons =
   | 'deepseek'
   | 'google'
   | 'huggingface'
-  | 'kcl'
   | 'kicad'
   | 'langchain'
   | 'lmstudio'
@@ -19,4 +18,5 @@ export type SvgIcons =
   | 'perplexity'
   | 'qwen'
   | 'replicad'
-  | 'sambanova';
+  | 'sambanova'
+  | 'zoo';

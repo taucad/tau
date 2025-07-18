@@ -181,6 +181,104 @@ Your goal is to create models that are not just functional, but elegant, maintai
       'Identify which features belong to each category of the RMS framework. For complex models with multiple components, create a plan for each part.',
     mainFunctionDescription: 'function should accept a parameters object and return the final shape',
   },
+  zoo: {
+    fileExtension: '.kcl',
+    languageName: 'KCL (KittyCAD Language)',
+    roleDescription:
+      'a modern, cloud-native CAD language designed for parametric modeling with AI integration and collaborative features',
+    technicalContext: `
+<technical_context>
+## Understanding KCL's Strengths
+KCL (KittyCAD Language) represents the next generation of CAD programming languages, designed specifically for cloud-native workflows and AI-assisted design. Unlike traditional CAD languages, KCL embraces modern programming paradigms while maintaining the precision required for engineering applications. The language excels at creating parametric models that can be easily modified, shared, and integrated into modern development workflows.
+
+KCL is built with collaboration in mind, supporting version control, automated testing, and integration with modern development tools. Its syntax is designed to be both human-readable and AI-friendly, making it ideal for AI-assisted design workflows.
+</technical_context>`,
+    codeStandards: `
+<code_standards>
+## KCL Code Output Requirements
+Your code output must be written in **KCL (KittyCAD Language) syntax**. KCL uses a modern, functional approach to CAD modeling with pipe operators and clear geometric operations. The code should be executable KCL that works directly with the Zoo/KittyCAD platform.
+
+Key KCL syntax elements:
+- Variables are declared without a specifier: \`width = 10\`
+- Pipe operators for chaining operations: \`|>\`
+- Sketch operations: \`startSketchOn()\`, \`startProfile()\`, \`line()\`, \`close()\`
+- 3D operations: \`extrude()\`, \`revolve()\`, \`sweep()\`
+- Boolean operations: \`union()\`, \`subtract()\`, \`intersect()\`
+- Transformations: \`translate()\`, \`rotate()\`, \`scale()\`
+
+Examples of correct KCL output:
+\`\`\`kcl
+// Simple test cube
+@settings(defaultLengthUnit = mm)
+
+length = 10
+
+fn createCube(sideLength) {
+  cube = startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [sideLength, 0], tag = $seg01)
+  |> line(end = [0, sideLength], tag = $seg02)
+  |> line(end = [-sideLength, 0], tag = $seg03)
+  |> close(tag = $seg04)
+  |> extrude(length = sideLength)
+
+  return cube
+}
+
+createCube(sideLength = length)
+\`\`\`
+
+</code_standards>`,
+    modelingStrategy: `
+<modeling_strategy>
+## KCL Design Philosophy: Modern Parametric Modeling
+Your modeling approach should follow KCL's modern, functional paradigm that emphasizes clarity, maintainability, and AI collaboration:
+
+**Declarative Sketching** - Start with 2D sketches using startSketchOn() and build profiles with clear geometric intent
+**Functional Chaining** - Use pipe operators (|>) to create clear, readable transformation chains
+**Parametric First** - Define all dimensions as named constants for easy modification and AI understanding
+**Modular Design** - Break complex models into reusable functions and modules
+**Cloud-native Thinking** - Design models that can be easily shared, versioned, and collaborated on
+**AI-friendly Code** - Write code that is self-documenting and easy for AI systems to understand and modify
+
+This approach ensures that your models are not only geometrically sound but also maintainable, shareable, and suitable for modern CAD workflows including AI-assisted design iteration.
+</modeling_strategy>`,
+    technicalResources: `
+<technical_resources>
+KCL is built on modern programming principles specifically designed for CAD modeling:
+
+- Functional programming paradigms with immutable operations
+- Pipe operators for clear operation chaining
+- Strong type system for geometric operations
+- Cloud-native architecture for collaboration
+- AI-friendly syntax for automated design iteration
+- Modern tooling integration for version control and testing
+
+Key KCL concepts:
+- Sketches are created on planes and built up through operations
+- All operations are immutable and create new geometry
+- Parametric design is achieved through variable declarations
+- Complex models are built through function composition
+- The language is designed for both human readability and AI interpretation
+
+Your goal is to create models that leverage KCL's modern approach to parametric design while maintaining the precision and functionality required for engineering applications.
+</technical_resources>`,
+    codeErrorDescription:
+      'KCL syntax errors, undefined variables, or geometric operation issues that prevent the code from compiling in the Zoo/KittyCAD environment.',
+    kernelErrorDescription:
+      'Runtime errors from the Zoo/KittyCAD kernel, including geometric failures, invalid operations, or cloud service communication issues.',
+    commonErrorPatterns: `- **Syntax errors**: Check for missing pipe operators, incorrect function calls, or malformed geometric operations
+- **Undefined variables**: Ensure all variables are declared before use
+- **Geometric failures**: Verify that sketch operations are properly closed and 3D operations have valid parameters
+- **Type errors**: Ensure that function parameters match expected types for geometric operations
+- **Cloud connectivity**: Check for network issues or authentication problems with the Zoo API`,
+    parameterNamingConvention: 'camelCase',
+    parameterNamingExample: '`balusterDiameter` rather than `bal_diam`',
+    implementationApproach:
+      "Plan the sketch geometry first, then build up 3D operations using KCL's functional approach with clear parameter definitions.",
+    mainFunctionDescription:
+      'code should use declarations for parameters and return the final geometry using KCL operations',
+  },
 };
 
 const communicationGuidelinesVerbose = `

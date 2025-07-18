@@ -14,6 +14,13 @@ import type { Models } from '@kittycad/lib';
 import wasmPath from '@taucad/kcl-wasm-lib/kcl.wasm?url';
 import { EngineConnection, MockEngineConnection } from '~/components/geometry/kernel/zoo/engine-connection.js';
 import type { WasmModule } from '~/components/geometry/kernel/zoo/engine-connection.js';
+import {
+  KclError,
+  KclAuthError,
+  KclExportError,
+  KclWasmError,
+  extractWasmKclError,
+} from '~/components/geometry/kernel/zoo/kcl-errors.js';
 
 type OutputFormat3d = Models['OutputFormat3d_type'];
 
@@ -85,7 +92,7 @@ async function loadWasmModule(): Promise<WasmModule> {
 
     return wasmModule;
   } catch (error) {
-    throw new Error(`Failed to load WASM module: ${String(error)}`);
+    throw KclError.simple('engine', `Failed to load WASM module: ${String(error)}`);
   }
 }
 
@@ -214,7 +221,7 @@ export class KclUtils {
 
   public constructor(options: KclUtilsOptions) {
     if (!options.apiKey) {
-      throw new Error('API key is required');
+      throw new KclAuthError('API key is required');
     }
 
     this.apiKey = options.apiKey;
@@ -287,7 +294,7 @@ export class KclUtils {
     }
 
     if (!this.wasmModule) {
-      throw new Error('WASM module not loaded');
+      throw KclError.simple('engine', 'WASM module not loaded');
     }
 
     try {
@@ -300,7 +307,7 @@ export class KclUtils {
         warnings: errors.warnings,
       };
     } catch (error) {
-      throw new Error(`Failed to parse KCL code: ${String(error)}`);
+      throw KclError.simple('syntax', `Failed to parse KCL code: ${String(error)}`);
     }
   }
 
@@ -308,23 +315,27 @@ export class KclUtils {
    * Execute KCL code using mock context (no websocket required).
    * Only requires WASM initialization.
    */
-  public async executeMockKcl(program: Program, settings?: PartialDeep<Configuration>): Promise<KclExecutionResult> {
+  public async executeMockKcl(
+    program: Program,
+    path: string,
+    settings?: PartialDeep<Configuration>,
+  ): Promise<KclExecutionResult> {
     if (!this.isWasmInitialized) {
       await this.initializeWasm();
     }
 
     if (!this.wasmModule) {
-      throw new Error('WASM module not loaded');
+      throw KclError.simple('engine', 'WASM module not loaded');
     }
 
     if (!this.mockContext) {
-      throw new Error('Mock context not initialized');
+      throw KclError.simple('engine', 'Mock context not initialized');
     }
 
     try {
       const result = (await this.mockContext.executeMock(
         JSON.stringify(program),
-        undefined,
+        path,
         JSON.stringify(settings ?? {}),
         false,
       )) as KclExecutionResult;
@@ -332,11 +343,18 @@ export class KclUtils {
       return result;
     } catch (error) {
       console.error('KCL mock execution error details:', error);
+
+      // Check if this is a WASM KclError
+      const wasmError = extractWasmKclError(error);
+      if (wasmError) {
+        throw new KclWasmError(wasmError);
+      }
+
       const errorMessage =
         error instanceof Error
           ? `KCL mock execution failed: ${error.message}`
           : `KCL mock execution failed: ${String(error)}`;
-      throw new Error(errorMessage);
+      throw KclError.simple('engine', errorMessage);
     }
   }
 
@@ -344,23 +362,27 @@ export class KclUtils {
    * Execute KCL code using the full engine (requires websocket).
    * Requires full engine initialization.
    */
-  public async executeProgram(program: Program, settings?: PartialDeep<Configuration>): Promise<KclExecutionResult> {
+  public async executeProgram(
+    program: Program,
+    path: string,
+    settings?: PartialDeep<Configuration>,
+  ): Promise<KclExecutionResult> {
     if (!this.isEngineInitialized) {
       await this.initializeEngine();
     }
 
     if (!this.wasmModule) {
-      throw new Error('WASM module not loaded');
+      throw KclError.simple('engine', 'WASM module not loaded');
     }
 
     if (!this.engineManager) {
-      throw new Error('Engine manager not initialized');
+      throw KclError.simple('engine', 'Engine manager not initialized');
     }
 
     try {
       const result = (await this.engineManager.context?.execute(
         JSON.stringify(program),
-        undefined,
+        path,
         JSON.stringify(settings ?? {}),
       )) as KclExecutionResult;
 
@@ -370,9 +392,16 @@ export class KclUtils {
       return result;
     } catch (error) {
       console.error('KCL execution error details:', error);
+
+      // Check if this is a WASM KclError
+      const wasmError = extractWasmKclError(error);
+      if (wasmError) {
+        throw new KclWasmError(wasmError);
+      }
+
       const errorMessage =
         error instanceof Error ? `KCL execution failed: ${error.message}` : `KCL execution failed: ${String(error)}`;
-      throw new Error(errorMessage);
+      throw KclError.simple('engine', errorMessage);
     }
   }
 
@@ -385,40 +414,55 @@ export class KclUtils {
     settings: PartialDeep<Configuration> = {},
   ): Promise<ExportedFile[]> {
     if (!this.hasExecutedProgram) {
-      throw new Error('No program has been executed yet. Call executeKcl first.');
+      throw new KclExportError('No program has been executed yet. Call executeKcl first.');
     }
 
     if (!this.isEngineInitialized) {
-      throw new Error('Engine not initialized');
+      throw KclError.simple('engine', 'Engine not initialized');
     }
 
     // Get the context used for execution
     const context = this.engineManager?.context;
     if (!context) {
-      throw new Error('No context available for export');
+      throw KclError.simple('engine', 'No context available for export');
     }
 
     // Create export format configuration
     const exportFormat = this.createExportFormat(options);
 
-    // Export the model using operations already in memory
-    const result = (await context.export(JSON.stringify(exportFormat), JSON.stringify(settings))) as Array<{
-      name: string;
-      contents: ArrayBuffer;
-    }>;
+    try {
+      // Export the model using operations already in memory
+      const result = (await context.export(JSON.stringify(exportFormat), JSON.stringify(settings))) as Array<{
+        name: string;
+        contents: ArrayBuffer;
+      }>;
 
-    // Convert the result to our format
-    const files: ExportedFile[] = [];
-    if (Array.isArray(result)) {
-      for (const file of result) {
-        files.push({
-          name: file.name,
-          contents: new Uint8Array(file.contents),
-        });
+      // Convert the result to our format
+      const files: ExportedFile[] = [];
+      if (Array.isArray(result)) {
+        for (const file of result) {
+          files.push({
+            name: file.name,
+            contents: new Uint8Array(file.contents),
+          });
+        }
       }
-    }
 
-    return files;
+      return files;
+    } catch (error) {
+      // Handle the specific "Nothing to export" case as a valid scenario
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Check for the "Nothing to export" pattern in various forms
+      if (errorMessage.includes('Nothing to export') || errorMessage.includes('internal_engine: Nothing to export')) {
+        // This is a valid case - return empty array instead of throwing
+        console.log('No geometry to export - returning empty result');
+        return [];
+      }
+
+      // For other export errors, re-throw as KCLExportError
+      throw new KclExportError(`Export failed: ${errorMessage}`, options.type);
+    }
   }
 
   /**
@@ -464,7 +508,7 @@ export class KclUtils {
    */
   private async createEngineManager(): Promise<EngineConnection> {
     if (!this.wasmModule) {
-      throw new Error('WASM module not loaded');
+      throw KclError.simple('engine', 'WASM module not loaded');
     }
 
     const engineManager = new EngineConnection(this.apiKey, this.baseUrl, this.wasmModule);
@@ -539,7 +583,7 @@ export class KclUtils {
 
       default: {
         const _exhaustiveCheck: never = options;
-        throw new Error(`Unsupported export format: ${String(_exhaustiveCheck)}`);
+        throw new KclExportError(`Unsupported export format: ${String(_exhaustiveCheck)}`);
       }
     }
   }

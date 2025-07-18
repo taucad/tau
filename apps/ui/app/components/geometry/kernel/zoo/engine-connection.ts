@@ -3,6 +3,7 @@ import type { Models } from '@kittycad/lib';
 import type { Context } from '@taucad/kcl-wasm-lib';
 import { BSON } from 'bson';
 import { binaryToUuid } from '~/utils/binary.js';
+import { KclError, KclAuthError } from '~/components/geometry/kernel/zoo/kcl-errors.js';
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- required
 export type WasmModule = typeof import('@taucad/kcl-wasm-lib');
@@ -89,7 +90,7 @@ const getWebSocket = async (): Promise<typeof WebSocket> => {
 // Mock engine connection for local operations that don't need websocket
 export class MockEngineConnection {
   public async sendModelingCommandFromWasm(): Promise<Uint8Array> {
-    throw new Error('Mock execution should not require websocket commands');
+    throw KclError.simple('engine', 'Mock execution should not require websocket commands');
   }
 
   public async startNewSession(): Promise<void> {
@@ -145,7 +146,7 @@ export class EngineConnection {
           authTimeoutId = setTimeout(() => {
             if (!resolved) {
               resolved = true;
-              reject(new Error('Authentication timeout'));
+              reject(new KclAuthError('Authentication timeout', 408));
             }
           }, authTimeout);
 
@@ -166,7 +167,7 @@ export class EngineConnection {
           if (!resolved) {
             resolved = true;
             clearTimeout(authTimeoutId);
-            reject(error instanceof Error ? error : new Error(String(error)));
+            reject(KclError.simple('io', String(error)));
           }
         }
       };
@@ -183,7 +184,7 @@ export class EngineConnection {
     _pathString: string,
   ): Promise<Uint8Array> {
     if (!this.isConnected) {
-      throw new Error('Engine not connected');
+      throw KclError.simple('engine', 'Engine not connected');
     }
 
     try {
@@ -193,17 +194,9 @@ export class EngineConnection {
 
       return BSON.serialize(response);
     } catch (error) {
-      const errorResponse = {
-        success: false,
-        errors: [
-          {
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- this is the expected signature.
-            error_code: 'internal_api',
-            message: error instanceof Error ? error.message : String(error),
-          },
-        ],
-      };
-      throw new Error(JSON.stringify(errorResponse));
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      throw KclError.simple('engine', errorMessage);
     }
   }
 
@@ -228,7 +221,7 @@ export class EngineConnection {
     // Clear all pending commands
     for (const [_id, pending] of this.pendingCommands) {
       clearTimeout(pending.timeout);
-      pending.reject(new Error('Connection closed'));
+      pending.reject(KclError.simple('io', 'Connection closed'));
     }
 
     this.pendingCommands.clear();
@@ -267,7 +260,7 @@ export class EngineConnection {
     this.startPingInterval();
   };
 
-  private readonly onWebSocketClose = (event: CloseEvent): void => {
+  private readonly onWebSocketClose = (_event: CloseEvent): void => {
     clg.debug('WebSocket disconnected');
     this.isConnected = false;
 
@@ -290,7 +283,7 @@ export class EngineConnection {
     if (initContext && !initContext.resolved) {
       initContext.resolved = true;
       clearTimeout(initContext.authTimeoutId);
-      initContext.reject(new Error('WebSocket closed before authentication'));
+      initContext.reject(new KclAuthError('Invalid Zoo API key. Please check that your Zoo API key is correct.', 401));
     }
 
     void this.cleanup();
@@ -306,9 +299,9 @@ export class EngineConnection {
 
       if (event.target instanceof WebSocket) {
         const readyStateText = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][event.target.readyState] ?? 'UNKNOWN';
-        initContext.reject(new Error(`WebSocket error in state: ${readyStateText}`));
+        initContext.reject(KclError.simple('io', `WebSocket error in state: ${readyStateText}`));
       } else {
-        initContext.reject(new Error('WebSocket connection failed'));
+        initContext.reject(KclError.simple('io', 'WebSocket connection failed'));
       }
     }
   };
@@ -349,7 +342,7 @@ export class EngineConnection {
       reject,
       timeout: setTimeout(() => {
         this.pendingCommands.delete(commandId);
-        reject(new Error('Command timeout'));
+        reject(KclError.simple('engine', `Timed out waiting for response to commandId: ${commandId}`));
       }, commandTimeout),
     });
 
@@ -450,7 +443,7 @@ export class EngineConnection {
           const errorMessage = message.errors
             .map((error: { error_code: string; message: string }) => `${error.error_code}: ${error.message}`)
             .join(', ');
-          pending.reject(new Error(errorMessage));
+          pending.reject(KclError.simple('engine', errorMessage));
         }
       }
     }
@@ -541,7 +534,7 @@ export class EngineConnection {
     if (this.websocket && this.websocket.readyState === 1) {
       this.websocket.send(JSON.stringify(message));
     } else {
-      throw new Error('WebSocket not connected');
+      throw KclError.simple('io', 'WebSocket not connected');
     }
   }
 

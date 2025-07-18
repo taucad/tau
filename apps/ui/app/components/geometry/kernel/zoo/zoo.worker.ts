@@ -4,10 +4,38 @@ import { KclUtils } from '~/components/geometry/kernel/zoo/kcl-utils.js';
 import type { BuildShapesResult, ExportGeometryResult, ExtractParametersResult } from '~/types/kernel.types.js';
 import { createKernelError, createKernelSuccess } from '~/types/kernel.types.js';
 import type { Shape3D } from '~/types/cad.types.js';
+import { isKclError, extractExecutionError } from '~/components/geometry/kernel/zoo/kcl-errors.js';
+import { convertKclErrorToKernelError, mapErrorToKclError } from '~/components/geometry/kernel/zoo/error-mappers.js';
+import { getErrorPosition } from '~/components/geometry/kernel/zoo/source-range-utils.js';
 
 // Global storage for computed STL data
 const stlDataMemory: Record<string, Uint8Array> = {};
 let kclUtils: KclUtils | undefined;
+
+const emptyShape: Shape3D = {
+  type: '3d',
+  name: 'Shape',
+  faces: {
+    vertices: [],
+    triangles: [],
+    normals: [],
+    faceGroups: [],
+  },
+  edges: { lines: [], edgeGroups: [] },
+  error: false,
+};
+
+// Helper function to handle errors and convert them appropriately
+function handleError(error: unknown, code?: string): ReturnType<typeof createKernelError> {
+  // If it's already a KCL error, convert it directly
+  if (isKclError(error)) {
+    return convertKclErrorToKernelError(error, code);
+  }
+
+  // Map any other error to a KCL error first, then convert
+  const mappedError = mapErrorToKclError(error);
+  return convertKclErrorToKernelError(mappedError, code);
+}
 
 // Create or get the singleton KCL utilities instance
 async function getKclUtilsInstance(): Promise<KclUtils> {
@@ -50,22 +78,30 @@ async function extractParametersFromCode(code: string): Promise<ExtractParameter
     const parseResult = await utils.parseKcl(code);
     if (parseResult.errors.length > 0) {
       console.warn('KCL parsing errors during parameter extraction:', parseResult.errors);
+      const firstError = parseResult.errors[0]!;
+      const errorPosition = getErrorPosition(firstError, code);
       return createKernelError({
-        message: 'KCL parsing errors during parameter extraction',
-        startColumn: 0,
-        startLineNumber: 0,
+        message: firstError.message,
+        startColumn: errorPosition.column,
+        startLineNumber: errorPosition.line,
       });
     }
 
     // Execute the KCL code to get variables
-    const executionResult = await utils.executeMockKcl(parseResult.program);
+    const executionResult = await utils.executeMockKcl(parseResult.program, 'main.kcl');
 
     if (executionResult.errors.length > 0) {
       console.warn('KCL execution errors during parameter extraction:', executionResult.errors);
+      const errorInfo = extractExecutionError(
+        executionResult.errors,
+        code,
+        'KCL execution errors during parameter extraction',
+      );
+
       return createKernelError({
-        message: 'KCL execution errors during parameter extraction',
-        startColumn: 0,
-        startLineNumber: 0,
+        message: errorInfo.message,
+        startColumn: errorInfo.startColumn,
+        startLineNumber: errorInfo.startLineNumber,
       });
     }
 
@@ -78,8 +114,7 @@ async function extractParametersFromCode(code: string): Promise<ExtractParameter
     });
   } catch (error) {
     console.error('Error extracting parameters from KCL code:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return createKernelError({ message: errorMessage, startColumn: 0, startLineNumber: 0 });
+    return handleError(error, code);
   }
 }
 
@@ -93,18 +128,6 @@ async function buildShapesFromCode(
     // Check if code is empty
     const trimmedCode = code.trim();
     if (trimmedCode === '') {
-      const emptyShape: Shape3D = {
-        type: '3d',
-        name: 'Shape',
-        faces: {
-          vertices: [],
-          triangles: [],
-          normals: [],
-          faceGroups: [],
-        },
-        edges: { lines: [], edgeGroups: [] },
-        error: false,
-      };
       return createKernelSuccess([emptyShape]);
     }
 
@@ -119,11 +142,13 @@ async function buildShapesFromCode(
 
       if (parseResult.errors.length > 0) {
         console.warn('KCL parsing errors:', parseResult.errors);
-        const errorMessages = parseResult.errors.map(String);
+        const firstError = parseResult.errors[0]!;
+        const errorPosition = getErrorPosition(firstError, trimmedCode);
+        const errorMessages = parseResult.errors.map((error) => error.message);
         return createKernelError({
           message: `KCL parsing failed: ${errorMessages.join(', ')}`,
-          startColumn: 0,
-          startLineNumber: 0,
+          startColumn: errorPosition.column,
+          startLineNumber: errorPosition.line,
         });
       }
 
@@ -131,23 +156,17 @@ async function buildShapesFromCode(
       const modifiedProgram = KclUtils.injectParametersIntoProgram(parseResult.program, parameters ?? {});
 
       // Execute the modified program
-      const executionResult = await utils.executeProgram(modifiedProgram);
+      const executionResult = await utils.executeProgram(modifiedProgram, 'main.kcl');
 
       // Check for execution errors
       if (executionResult.errors.length > 0) {
         console.warn('KCL execution errors:', executionResult.errors);
-        const errorMessages = executionResult.errors.map((error) => {
-          if (typeof error === 'string') {
-            return error;
-          }
+        const errorInfo = extractExecutionError(executionResult.errors, trimmedCode, 'KCL execution failed');
 
-          const errorObject = error as { message?: string; msg?: string };
-          return errorObject.message ?? errorObject.msg ?? JSON.stringify(error);
-        });
         return createKernelError({
-          message: `KCL execution failed: ${errorMessages.join(', ')}`,
-          startColumn: 0,
-          startLineNumber: 0,
+          message: errorInfo.message,
+          startColumn: errorInfo.startColumn,
+          startLineNumber: errorInfo.startLineNumber,
         });
       }
 
@@ -159,11 +178,7 @@ async function buildShapesFromCode(
       });
 
       if (exportResult.length === 0) {
-        return createKernelError({
-          message: 'No STL data received from KCL export',
-          startColumn: 0,
-          startLineNumber: 0,
-        });
+        return createKernelSuccess([emptyShape]);
       }
 
       // Get the first exported file (should be STL)
@@ -262,17 +277,11 @@ async function buildShapesFromCode(
       return createKernelSuccess([shape]);
     } catch (kclError) {
       console.error('KCL export error:', kclError);
-
-      return createKernelError({
-        message: 'KCL export error',
-        startColumn: 0,
-        startLineNumber: 0,
-      });
+      return handleError(kclError, code);
     }
   } catch (error) {
     console.error('Error while building shapes from code:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return createKernelError({ message: errorMessage, startColumn: 0, startLineNumber: 0 });
+    return handleError(error, code);
   }
 }
 
@@ -331,11 +340,7 @@ const exportShape = async (
         ]);
       } catch (stepError) {
         console.error('STEP export error:', stepError);
-        return createKernelError({
-          message: 'STEP export failed',
-          startColumn: 0,
-          startLineNumber: 0,
-        });
+        return handleError(stepError);
       }
     }
 
@@ -351,8 +356,7 @@ const exportShape = async (
       },
     ]);
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return createKernelError({ message: errorMessage, startColumn: 0, startLineNumber: 0 });
+    return handleError(error);
   }
 };
 

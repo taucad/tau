@@ -1,8 +1,8 @@
 import type { Monaco } from '@monaco-editor/react';
 // eslint-disable-next-line no-restricted-imports -- replicad types are not in the monorepo
 import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
-// eslint-disable-next-line no-restricted-imports -- zod types are not in the monorepo
-import zodTypes from '../../../../../node_modules/zod/dist/types/v4/index.d.ts?raw';
+
+// Import zodTypes from '../../../../../node_modules/zod/v4/index.d.ts?raw';
 
 export const registerMonaco = async (monaco: Monaco): Promise<void> => {
   monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
@@ -29,17 +29,17 @@ export const registerMonaco = async (monaco: Monaco): Promise<void> => {
     }
   `,
     },
-    {
-      content: `declare module 'zod' { ${zodTypes} }`,
-      filePath: 'file:///node_modules/zod/index.d.ts',
-    },
-    {
-      content: `
-    import {z as zAll} from 'zod';
-    declare global {
-    declare var z = zAll;
-    }
-  `,
-    },
+    //   {
+    //     content: `declare module 'zod' { ${zodTypes} }`,
+    //     filePath: 'file:///node_modules/zod/index.d.ts',
+    //   },
+    //   {
+    //     content: `
+    //   import {z as zAll} from 'zod';
+    //   declare global {
+    //   declare var z = zAll;
+    //   }
+    // `,
+    //   },
   ]);
 };

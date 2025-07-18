@@ -60,19 +60,7 @@ export default function main(p = defaultParams) {}
     mainFile: 'main.kcl',
     longDescription:
       'Uses KittyCAD Language (KCL) for cloud-native CAD modeling with precise parametric geometry. Designed for modern CAD workflows with AI integration and collaborative features.',
-    emptyCode: `// Simple test cube for engine verification
-@settings(defaultLengthUnit = mm)
-
-length = 10
-
-// Create a simple cube
-cube = startSketchOn(XY)
-  |> startProfile(at = [0, 0])
-  |> line(end = [length, 0], tag = $seg01)
-  |> line(end = [0, length], tag = $seg02)
-  |> line(end = [-length, 0], tag = $seg03)
-  |> close(tag = $seg04)
-  |> extrude(length = length)
+    emptyCode: `@settings(defaultLengthUnit = mm)
 `,
     recommended: 'Cloud-native & AI-driven CAD',
     tags: ['Cloud-native', 'Parametric', 'AI Integration', 'Modern CAD', 'KCL'],

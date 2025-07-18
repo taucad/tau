@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import process from 'node:process';
 import type { ConfigService } from '@nestjs/config';
 import type { Params } from 'nestjs-pino';
 import type { Options } from 'pino-http';
@@ -36,7 +35,7 @@ const colors = {
 } as const;
 
 const getMethodColor = (method: string) => {
-  switch (method?.toUpperCase()) {
+  switch (method.toUpperCase()) {
     case 'GET': {
       return colors.green;
     }
@@ -72,10 +71,22 @@ const getMethodColor = (method: string) => {
 };
 
 const getStatusColor = (statusCode: number) => {
-  if (statusCode >= 200 && statusCode < 300) return colors.green;
-  if (statusCode >= 300 && statusCode < 400) return colors.yellow;
-  if (statusCode >= 400 && statusCode < 500) return colors.red;
-  if (statusCode >= 500) return colors.bgRed;
+  if (statusCode >= 200 && statusCode < 300) {
+    return colors.green;
+  }
+
+  if (statusCode >= 300 && statusCode < 400) {
+    return colors.yellow;
+  }
+
+  if (statusCode >= 400 && statusCode < 500) {
+    return colors.red;
+  }
+
+  if (statusCode >= 500) {
+    return colors.bgRed;
+  }
+
   return colors.white;
 };
 
@@ -84,7 +95,9 @@ const formatRequestId = (requestId: string) => {
 };
 
 const formatUrl = (url: string, isDevMode = true) => {
-  if (!url) return isDevMode ? `${colors.white}/${colors.reset}` : '/';
+  if (!url) {
+    return isDevMode ? `${colors.white}/${colors.reset}` : '/';
+  }
 
   // Parse URL to separate pathname and query parameters
   try {
@@ -117,7 +130,7 @@ const customSuccessMessage = (request: IncomingMessage, response: ServerResponse
   }
 
   const methodColor = getMethodColor(request.method ?? '');
-  const statusColor = getStatusColor(response.statusCode ?? 0);
+  const statusColor = getStatusColor(response.statusCode);
   const url = formatUrl(request.url ?? '', true);
 
   return `${colors.bright}${colors.white}[RES]:${formatRequestId(request.id as string)} ${methodColor}${request.method}${colors.reset} ${url} ${statusColor}${response.statusCode}${colors.reset} ${colors.dim}${responseTime}ms${colors.reset}`;
@@ -148,7 +161,7 @@ const customErrorMessage = (request: IncomingMessage, response: ServerResponse, 
   }
 
   const methodColor = getMethodColor(request.method ?? '');
-  const statusColor = getStatusColor(response.statusCode ?? 0);
+  const statusColor = getStatusColor(response.statusCode);
   const url = formatUrl(request.url ?? '', true);
 
   return `${colors.bright}${colors.red}[ERR]:${formatRequestId(request.id as string)} ${methodColor}${request.method}${colors.reset} ${url} ${statusColor}${response.statusCode}${colors.reset} ${colors.red}${error.message}${colors.reset}`;
@@ -167,8 +180,7 @@ function googleLoggingConfig(): Options {
     formatters: {
       level(label: string, number: number) {
         const severity =
-          pinoLevelToGoogleLoggingSeverityLookup[label as keyof typeof pinoLevelToGoogleLoggingSeverityLookup] ??
-          pinoLevelToGoogleLoggingSeverityLookup.info;
+          pinoLevelToGoogleLoggingSeverityLookup[label as keyof typeof pinoLevelToGoogleLoggingSeverityLookup];
         return {
           severity,
           level: number,
@@ -226,7 +238,6 @@ export function logServiceConfig(logService: LogServiceProvider): Options {
       return consoleLoggingConfig();
     }
 
-    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive switch
     default: {
       const exhaustiveCheck: never = logService;
       throw new Error(`Unknown log service: ${String(exhaustiveCheck)}`);

@@ -30,7 +30,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       prepare: false,
       onnotice: (notice) => {
         if (this.isNoticeLogEnabled) {
-          this.logger.log(`${notice.message}`);
+          this.logger.log(`${notice['message']}`);
         }
       },
     });

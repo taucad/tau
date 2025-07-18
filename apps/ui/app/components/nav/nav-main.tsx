@@ -117,7 +117,10 @@ function NavKeyboardShortcut({
   const isMatch = useMatch(url);
   const navigate = useNavigate();
   const { formattedKeyCombination } = useKeydown(keyCombination, () => {
-    if (isMatch) return;
+    if (isMatch) {
+      return;
+    }
+
     void navigate(url);
   });
   return <KeyShortcut className={className}>{formattedKeyCombination}</KeyShortcut>;

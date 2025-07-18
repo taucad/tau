@@ -48,6 +48,11 @@ alwaysApply: false
 + public constructor(name: string) {}
 ```
 
+**Class Member Ordering**: Order class members in the following order:
+* `static`
+* `public`
+* `private`
+
 **Absolute Imports**: Use absolute imports with `~/` prefix:
 ```diff
 - import { utils } from '../utils/helper.js';

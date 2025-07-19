@@ -162,7 +162,7 @@ export const ChatParameters = memo(function () {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="absolute top-1 right-1 size-6 p-0 text-muted-foreground hover:text-foreground"
+                  className="absolute top-1/2 right-1 size-5 -translate-y-1/2 p-0 text-muted-foreground hover:text-foreground"
                   onClick={clearSearch}
                 >
                   <X className="size-3.5" />

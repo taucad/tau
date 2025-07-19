@@ -13,13 +13,6 @@
         "typecheckTargetName": "typecheck"
       }
     },
-    // TODO: add back after fixing NX graph issue.
-    // {
-    //   "plugin": "@nx/eslint/plugin",
-    //   "options": {
-    //     "targetName": "lint"
-    //   }
-    // },
     {
       "plugin": "@nx/playwright/plugin",
       "options": {

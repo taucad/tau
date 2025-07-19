@@ -1,6 +1,6 @@
+// eslint-disable-next-line import-x/no-unassigned-import -- reflect-metadata polyfill
 import 'reflect-metadata';
-import { beforeEach, afterEach } from 'vitest';
-import { vi } from 'vitest';
+import { beforeEach, afterEach, vi } from 'vitest';
 
 // Global test setup for NestJS API
 beforeEach(async () => {
@@ -9,32 +9,16 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.clearAllMocks();
+  vi.clearAllTimers();
   // Cleanup after each test
   // E.g., clear database, reset mocks
 });
 
-// You can add global test utilities here
-export const createMockRepository = () => ({
-  find: vi.fn(),
-  findOne: vi.fn(),
-  save: vi.fn(),
-  delete: vi.fn(),
-  create: vi.fn(),
-  update: vi.fn(),
-});
-
-export const createMockService = (methods: string[]) => {
-  const mock: any = {};
-  methods.forEach(method => {
-    mock[method] = vi.fn();
-  });
-  return mock;
-};
-
 // Extend Vitest matchers if needed
 declare global {
   namespace Vi {
-    interface JestAssertion<T = any> {
+    interface JestAssertion<T = unknown> {
       // Add custom matchers here if needed
     }
   }

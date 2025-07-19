@@ -6,6 +6,7 @@ import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { VitePluginNode as vitePluginNode } from 'vite-plugin-node';
+import swc from 'unplugin-swc';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,10 +34,13 @@ export default defineConfig(({ mode }) => {
           },
         ],
       }),
-      // Only include vite-plugin-node for non-test modes
       ...(isTest
-        ? []
+        ? [
+            // Use SWC for proper decorator and metadata support in tests
+            swc.vite(),
+          ]
         : [
+            // Only include vite-plugin-node for non-test mode
             vitePluginNode({
               // Nodejs native Request adapter
               // currently this plugin support 'express', 'nest', 'koa' and 'fastify' out of box,
@@ -70,23 +74,20 @@ export default defineConfig(({ mode }) => {
       ],
     },
     test: {
-      globals: true,
       environment: 'node',
-      include: ['**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts}'],
-      exclude: ['**/node_modules/**', '**/dist/**', '**/e2e/**'],
+      typecheck: {
+        enabled: true,
+        include: ['**/*.test-d.ts'],
+        tsconfig: './tsconfig.spec.json',
+        ignoreSourceErrors: true,
+      },
       setupFiles: ['./vitest.setup.ts'],
       reporter: ['verbose'], // Ensure detailed test output
       coverage: {
         provider: 'v8',
         reportsDirectory: '../../coverage/apps/api',
         include: ['app/**/*'],
-        exclude: ['app/**/*.spec.ts', 'app/**/*.test.ts', 'app/**/index.ts', 'app/main.ts'],
-      },
-      pool: 'threads', // Changed from 'forks' to 'threads' for better output display
-      poolOptions: {
-        threads: {
-          singleThread: false,
-        },
+        exclude: ['app/**/*.{test,spec}.ts', 'app/main.ts'],
       },
     },
   };

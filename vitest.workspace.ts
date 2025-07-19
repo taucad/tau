@@ -10,7 +10,7 @@ export default defineWorkspace([
       environment: 'jsdom',
     },
   },
-  // API Project Configuration  
+  // API Project Configuration
   {
     extends: './apps/api/vite.config.ts',
     test: {

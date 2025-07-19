@@ -37,13 +37,6 @@
         "serveStaticTargetName": "serve-static",
         "outputPath": "dist"
       }
-    },
-    {
-      "plugin": "@nx/jest/plugin",
-      "options": {
-        "targetName": "test"
-      },
-      "exclude": ["apps/api-e2e/**/*"]
     }
   ],
   "targetDefaults": {

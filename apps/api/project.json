@@ -8,7 +8,14 @@
     "test": {
       "executor": "@nx/vite:test",
       "outputs": ["{workspaceRoot}/coverage/apps/api"],
-      "options": {}
+      "options": {
+        "watch": false
+      },
+      "configurations": {
+        "watch": {
+          "watch": true
+        }
+      }
     },
     "build": {
       "executor": "@nx/vite:build",

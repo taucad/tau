@@ -83,17 +83,21 @@ export default defineConfig(({ mode }) => {
     },
 
     test: {
-      setupFiles: ['./vitest.setup.ts'],
-      watch: false,
-      globals: true,
+      globals: true, // Required by @testing-library/jest-dom, which uses `expect` implicitly
       environment: 'jsdom',
-      include: ['./tests/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
-      reporters: ['default'],
+      typecheck: {
+        enabled: true,
+        include: ['**/*.test-d.ts'],
+        tsconfig: './tsconfig.spec.json',
+        ignoreSourceErrors: true,
+      },
+      setupFiles: ['./vitest.setup.ts'],
+      reporters: ['verbose'],
       coverage: {
         reportsDirectory: '../../coverage/apps/ui',
         provider: 'v8',
         include: ['app/**/*'],
-        exclude: ['app/**/*.test.{ts,tsx}', 'app/**/*.spec.{ts,tsx}', 'app/**/index.ts'],
+        exclude: ['app/**/*.{test,spec}.{ts,tsx}', 'app/**/index.ts'],
       },
     },
   };

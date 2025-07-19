@@ -5,11 +5,9 @@
     "module": "NodeNext",
     "types": ["node"],
     "target": "ESNext",
-    "erasableSyntaxOnly": false // Incompatible with NestJS dependency injection.
   },
   "include": ["app/**/*.ts"],
   "exclude": [
-    "jest.config.ts",
     "app/**/*.spec.ts",
     "app/**/*.test.ts",
     "vite.config.ts"

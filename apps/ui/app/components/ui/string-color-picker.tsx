@@ -34,13 +34,11 @@ const convertToRgb = (color: string): RgbColor => {
     if (parsed) {
       // Convert to RGB space using culori
       const rgbColor = rgbConverter(parsed);
-      if (rgbColor) {
-        return {
-          r: Math.round((rgbColor.r ?? 0) * 255),
-          g: Math.round((rgbColor.g ?? 0) * 255),
-          b: Math.round((rgbColor.b ?? 0) * 255),
-        };
-      }
+      return {
+        r: Math.round(rgbColor.r * 255),
+        g: Math.round(rgbColor.g * 255),
+        b: Math.round(rgbColor.b * 255),
+      };
     }
   } catch {
     // Fallback if conversion fails

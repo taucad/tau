@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { Test } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
 import { ModelController } from '~/api/models/model.controller.js';
-import type { ModelService } from '~/api/models/model.service.js';
+import { ModelService } from '~/api/models/model.service.js';
 import type { Model } from '~/api/models/model.schema.js';
 
 // Mock data for testing
@@ -54,41 +56,57 @@ const mockModels: Model[] = [
 
 describe('ModelController', () => {
   let controller: ModelController;
-  let mockModelService: Pick<ModelService, 'getModels'>;
+  let modelService: ModelService;
+  let module: TestingModule;
 
-  beforeEach(() => {
-    // Create a focused mock that only includes what the controller uses
-    mockModelService = {
+  beforeEach(async () => {
+    // Create a proper mock class that implements the ModelService interface
+    const mockModelService = {
       getModels: vi.fn(),
     };
 
-    // Create the controller with the mocked service
-    controller = new ModelController(mockModelService as ModelService);
+    const moduleRef = await Test.createTestingModule({
+      controllers: [ModelController],
+      providers: [
+        {
+          provide: ModelService,
+          useValue: mockModelService,
+        },
+      ],
+    }).compile();
+
+    controller = moduleRef.get<ModelController>(ModelController);
+    modelService = moduleRef.get<ModelService>(ModelService);
+    module = moduleRef;
+  });
+
+  afterEach(async () => {
+    await module.close();
   });
 
   describe('getModels', () => {
     it('should return an array of models', async () => {
       // Arrange
-      vi.mocked(mockModelService.getModels).mockResolvedValue(mockModels);
+      vi.mocked(modelService.getModels).mockResolvedValue(mockModels);
 
       // Act
       const result = await controller.getModels();
 
       // Assert
-      expect(mockModelService.getModels).toHaveBeenCalledTimes(1);
+      expect(modelService.getModels).toHaveBeenCalledTimes(1);
       expect(result).toEqual(mockModels);
       expect(result).toHaveLength(2);
     });
 
     it('should return models with required properties', async () => {
       // Arrange
-      vi.mocked(mockModelService.getModels).mockResolvedValue(mockModels);
+      vi.mocked(modelService.getModels).mockResolvedValue(mockModels);
 
       // Act
       const result = await controller.getModels();
 
       // Assert
-      expect(mockModelService.getModels).toHaveBeenCalledTimes(1);
+      expect(modelService.getModels).toHaveBeenCalledTimes(1);
 
       for (const model of result) {
         expect(model).toHaveProperty('id');
@@ -112,13 +130,13 @@ describe('ModelController', () => {
 
     it('should return models from different providers', async () => {
       // Arrange
-      vi.mocked(mockModelService.getModels).mockResolvedValue(mockModels);
+      vi.mocked(modelService.getModels).mockResolvedValue(mockModels);
 
       // Act
       const result = await controller.getModels();
 
       // Assert
-      expect(mockModelService.getModels).toHaveBeenCalledTimes(1);
+      expect(modelService.getModels).toHaveBeenCalledTimes(1);
 
       const providers = result.map((model) => model.provider);
       expect(providers).toContain('anthropic');
@@ -128,33 +146,22 @@ describe('ModelController', () => {
     it('should handle service errors gracefully', async () => {
       // Arrange
       const errorMessage = 'Service error';
-      vi.mocked(mockModelService.getModels).mockRejectedValue(new Error(errorMessage));
+      vi.mocked(modelService.getModels).mockRejectedValue(new Error(errorMessage));
 
       // Act & Assert
       await expect(controller.getModels()).rejects.toThrow(errorMessage);
-      expect(mockModelService.getModels).toHaveBeenCalledTimes(1);
+      expect(modelService.getModels).toHaveBeenCalledTimes(1);
     });
 
     it('should call ModelService.getModels without parameters', async () => {
       // Arrange
-      vi.mocked(mockModelService.getModels).mockResolvedValue(mockModels);
+      vi.mocked(modelService.getModels).mockResolvedValue(mockModels);
 
       // Act
       await controller.getModels();
 
       // Assert - verify the service method is called with correct signature
-      expect(mockModelService.getModels).toHaveBeenCalledWith();
-    });
-  });
-
-  describe('controller instantiation', () => {
-    it('should be defined', () => {
-      expect(controller).toBeDefined();
-    });
-
-    it('should have ModelService dependency injected', () => {
-      // Verify the controller has access to the service
-      expect(controller).toBeInstanceOf(ModelController);
+      expect(modelService.getModels).toHaveBeenCalledWith();
     });
   });
 });

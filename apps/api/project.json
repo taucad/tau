@@ -6,11 +6,8 @@
   "tags": [],
   "targets": {
     "test": {
-      "executor": "@nx/vite:test",
       "outputs": ["{workspaceRoot}/coverage/apps/api"],
-      "options": {
-        "watch": false
-      },
+      "options": {},
       "configurations": {
         "watch": {
           "watch": true

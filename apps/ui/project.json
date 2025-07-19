@@ -7,7 +7,6 @@
   "// targets": "to see all targets run: nx show project ui --web",
   "targets": {
     "test": {
-      "executor": "@nx/vite:test",
       "outputs": ["{workspaceRoot}/coverage/apps/ui"],
       "options": {},
       "configurations": {

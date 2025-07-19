@@ -1,14 +1,12 @@
 # See https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/
 
 name: Deploy API to Fly
+
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'apps/api/**'
-      - '.github/workflows/fly-deploy-api.yml'
-  workflow_dispatch:  # Allows manual triggering from GitHub UI
+  workflow_call:
+    # Called from CI workflow
+  workflow_dispatch:
+    # Manual trigger from GitHub UI
 
 jobs:
   deploy:

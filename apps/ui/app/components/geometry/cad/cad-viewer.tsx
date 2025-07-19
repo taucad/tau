@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import { ReplicadMesh } from '~/components/geometry/kernel/replicad/replicad-mesh.js';
+import { GLTFMesh } from '~/components/geometry/graphics/three/gltf-mesh.js';
 import { ThreeProvider } from '~/components/geometry/graphics/three/three-context.js';
 import type { ThreeViewerProperties } from '~/components/geometry/graphics/three/three-context.js';
 import type { Shape } from '~/types/cad.types.js';
@@ -29,6 +30,10 @@ export function CadViewer({
       {shapes.map((shape) => {
         if (shape.type === '3d') {
           return <ReplicadMesh key={shape.name} {...shape} enableSurface={enableSurface} enableLines={enableLines} />;
+        }
+
+        if (shape.type === 'gltf') {
+          return <GLTFMesh key={shape.name} {...shape} />;
         }
 
         if (shape.type === '2d') {

@@ -9,7 +9,12 @@
     "test": {
       "executor": "@nx/vite:test",
       "outputs": ["{workspaceRoot}/coverage/apps/ui"],
-      "options": {}
+      "options": {},
+      "configurations": {
+        "watch": {
+          "watch": true
+        }
+      }
     },
     "deploy": {
       "executor": "nx:run-commands",

@@ -21,6 +21,12 @@ jobs:
       actions: 'read'
       pull-requests: 'read'
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+        # filter: tree:0  # Uncomment if using large repos (>200-500MB of files)
+
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
@@ -47,6 +53,11 @@ jobs:
     outputs:
       affected_apps: ${{ steps.affected.outputs.apps }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 

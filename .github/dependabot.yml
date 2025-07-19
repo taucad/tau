@@ -10,7 +10,7 @@ updates:
     open-pull-requests-limit: 10
     versioning-strategy: "increase"
     commit-message:
-      prefix: "deps"
+      prefix: "chore"
       include: "scope"
     labels:
       - "dependencies"
@@ -69,7 +69,7 @@ updates:
       time: "09:00"
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "deps(ui)"
+      prefix: "chore(ui)"
       include: "scope"
     labels:
       - "dependencies"
@@ -101,7 +101,7 @@ updates:
       time: "11:00"
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "deps(docker)"
+      prefix: "chore(docker)"
       include: "scope"
     labels:
       - "dependencies"
@@ -116,7 +116,7 @@ updates:
       time: "11:00"
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "deps(docker)"
+      prefix: "chore(docker)"
       include: "scope"
     labels:
       - "dependencies"
@@ -132,7 +132,7 @@ updates:
       time: "11:00"
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "deps(infra)"
+      prefix: "chore(infra)"
       include: "scope"
     labels:
       - "dependencies"
@@ -148,7 +148,7 @@ updates:
       time: "11:00"
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "deps(search)"
+      prefix: "chore(search)"
       include: "scope"
     labels:
       - "dependencies"

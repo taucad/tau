@@ -19,6 +19,7 @@ jobs:
   main:
     name: Main
     runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'production' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       contents: 'read'
       actions: 'read'

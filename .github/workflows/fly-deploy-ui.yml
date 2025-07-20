@@ -12,6 +12,7 @@ jobs:
   deploy:
     name: Deploy UI
     runs-on: ubuntu-latest
+    environment: production
     concurrency: deploy-ui-group
     steps:
       - uses: actions/checkout@v4

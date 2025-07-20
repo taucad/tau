@@ -12,6 +12,7 @@ jobs:
   deploy:
     name: Deploy API
     runs-on: ubuntu-latest
+    environment: production
     concurrency: deploy-api-group
     
     steps:

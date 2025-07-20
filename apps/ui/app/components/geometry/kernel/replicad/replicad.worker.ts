@@ -12,6 +12,7 @@ import type {
   KernelError,
   ExtractNameResult,
   ExtractSchemaResult,
+  ExportFormat,
 } from '~/types/kernel.types.js';
 import { createKernelSuccess, createKernelError, isKernelError } from '~/types/kernel.types.js';
 import {
@@ -23,6 +24,8 @@ import { runInCjsContext, buildEsModule } from '~/components/geometry/kernel/rep
 import { renderOutput, ShapeStandardizer } from '~/components/geometry/kernel/replicad/utils/render-output.js';
 import { jsonSchemaFromJson } from '~/utils/schema.js';
 import type { MainResultShapes, ShapeConfig } from '~/components/geometry/kernel/replicad/utils/render-output.js';
+
+type ReplicadExportFormat = Extract<ExportFormat, 'stl' | 'stl-binary' | 'step' | 'step-assembly'>;
 
 // Track whether we've already set OC in replicad to avoid repeated calls
 let replicadHasOc = false;
@@ -467,7 +470,7 @@ const buildBlob = (
 };
 
 const exportShape = async (
-  fileType: 'stl' | 'stl-binary' | 'step' | 'step-assembly' = 'stl',
+  fileType: ReplicadExportFormat,
   shapeId = 'defaultShape',
   meshConfig = defaultExportMeshConfig,
 ): Promise<ExportGeometryResult> => {

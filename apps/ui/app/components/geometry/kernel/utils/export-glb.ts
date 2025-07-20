@@ -1,6 +1,5 @@
 import type { Primitive } from '@gltf-transform/core';
 import { Document, NodeIO } from '@gltf-transform/core';
-import { stringToBase64 } from 'uint8array-extras';
 import type { Color, IndexedPolyhedron } from '~/components/geometry/kernel/utils/common.js';
 
 type GeometryData = {
@@ -202,7 +201,8 @@ export async function createGltf(meshData: IndexedPolyhedron): Promise<Blob> {
         binaryString += String.fromCodePoint(byte);
       }
 
-      const base64Data = stringToBase64(binaryString, { urlSafe: true });
+      // eslint-disable-next-line no-restricted-globals -- btoa is available in browsers
+      const base64Data = btoa(binaryString);
 
       buffer.uri = `data:application/octet-stream;base64,${base64Data}`;
     }

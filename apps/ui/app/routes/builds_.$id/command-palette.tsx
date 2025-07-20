@@ -35,6 +35,8 @@ import {
 import { useKeydown } from '~/hooks/use-keydown.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import type { KeyCombination } from '~/utils/keys.js';
+import type { ExportFormat } from '~/types/kernel.types.js';
+import { extensionFromFormat } from '~/constants/kernel.constants.js';
 
 type CommandPaletteItem = {
   id: string;
@@ -105,9 +107,8 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
   }, [screenshotActorRef]);
 
   const handleExport = useCallback(
-    async (filename: string, format: 'stl' | 'stl-binary' | 'step' | 'step-assembly') => {
-      const fileExtension =
-        format === 'stl' ? 'stl' : format === 'stl-binary' ? 'stl' : format === 'step' ? 'step' : 'step-assembly';
+    async (filename: string, format: ExportFormat) => {
+      const fileExtension = extensionFromFormat[format];
       const filenameWithExtension = `${filename}.${fileExtension}`;
       toast.promise(
         new Promise<Blob>((resolve, reject) => {
@@ -338,7 +339,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
                   const response = await fetch(dataUrl);
                   // eslint-disable-next-line no-await-in-loop -- we need to wait for the blob to be created
                   const blob = await response.blob();
-                  const filename = `${buildName}-${angleNames[index] || `angle-${index}`}.png`;
+                  const filename = `${buildName}-${angleNames[index] ?? `angle-${index}`}.png`;
                   downloadBlob(blob, filename);
                 }
 
@@ -391,6 +392,30 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         group: 'Export',
         icon: <BoxDown className="mr-2 size-4" />,
         action: async () => handleExport(buildName, 'step'),
+        disabled: shapes.length === 0,
+      },
+      {
+        id: 'download-gltf',
+        label: 'Download GLTF',
+        group: 'Export',
+        icon: <BoxDown className="mr-2 size-4" />,
+        action: async () => handleExport(buildName, 'gltf'),
+        disabled: shapes.length === 0,
+      },
+      {
+        id: 'download-glb',
+        label: 'Download GLB',
+        group: 'Export',
+        icon: <BoxDown className="mr-2 size-4" />,
+        action: async () => handleExport(buildName, 'glb'),
+        disabled: shapes.length === 0,
+      },
+      {
+        id: 'download-3mf',
+        label: 'Download 3MF',
+        group: 'Export',
+        icon: <BoxDown className="mr-2 size-4" />,
+        action: async () => handleExport(buildName, '3mf'),
         disabled: shapes.length === 0,
       },
       {
@@ -517,7 +542,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
 
       groups[item.group] ??= [];
 
-      groups[item.group].push(item);
+      groups[item.group]!.push(item);
     }
 
     return groups;

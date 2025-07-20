@@ -8,13 +8,23 @@ import {
   flattenParametersForInjection,
 } from '~/components/geometry/kernel/openscad/parse-parameters.js';
 import type { OpenScadParameterExport } from '~/components/geometry/kernel/openscad/parse-parameters.js';
-import type { BuildShapesResult, ExportGeometryResult, ExtractParametersResult } from '~/types/kernel.types.js';
+import type {
+  BuildShapesResult,
+  ExportGeometryResult,
+  ExtractParametersResult,
+  ExportFormat,
+} from '~/types/kernel.types.js';
 import { createKernelError, createKernelSuccess } from '~/types/kernel.types.js';
 import type { ShapeGLTF } from '~/types/cad.types.js';
 import { convertOffToGltf } from '~/components/geometry/kernel/utils/off-to-gltf.js';
+import { convertOffToStl } from '~/components/geometry/kernel/utils/off-to-stl.js';
+import { convertOffTo3mf } from '~/components/geometry/kernel/utils/off-to-3mf.js';
 
-// Global storage for computed GLTF data
-const gltfDataMemory: Record<string, Blob> = {};
+// Extract only the formats supported by OpenSCAD worker
+type OpenScadExportFormat = Extract<ExportFormat, 'stl' | 'stl-binary' | 'glb' | 'gltf' | '3mf'>;
+
+// Global storage for computed OFF data (for later format conversion)
+const offDataMemory: Record<string, string> = {};
 
 async function getInstance(): Promise<OpenSCAD> {
   const instance = await createOpenSCAD({
@@ -93,11 +103,11 @@ async function buildShapesFromCode(
     if (trimmedCode === '') {
       // Return empty GLTF shape for empty code.
       // Create a minimal GLTF blob for empty geometry
-      const emptyGltf = await convertOffToGltf('OFF\n0 0 0\n');
+      const emptyGlb = await convertOffToGltf('OFF\n0 0 0\n', 'glb');
       const emptyShape: ShapeGLTF = {
         type: 'gltf',
         name: 'Shape',
-        gltfBlob: emptyGltf,
+        gltfBlob: emptyGlb,
         error: false,
       };
       return createKernelSuccess([emptyShape]);
@@ -128,11 +138,11 @@ async function buildShapesFromCode(
     // Read the output OFF file
     const offData = inst.FS.readFile(outputFile, { encoding: 'utf8' });
 
-    // Convert OFF directly to GLTF
-    const gltfBlob = await convertOffToGltf(offData);
+    // Store OFF data globally for later export (we'll convert on demand)
+    offDataMemory[shapeId] = offData;
 
-    // Store GLTF data globally for later export
-    gltfDataMemory[shapeId] = gltfBlob;
+    // Convert OFF to GLB (binary format) for rendering
+    const gltfBlob = await convertOffToGltf(offData, 'glb');
 
     const shape: ShapeGLTF = {
       type: 'gltf',
@@ -150,13 +160,13 @@ async function buildShapesFromCode(
 }
 
 const exportShape = async (
-  fileType: 'stl' | 'stl-binary' | 'gltf' = 'gltf',
+  fileType: OpenScadExportFormat = 'glb',
   shapeId = 'defaultShape',
 ): Promise<ExportGeometryResult> => {
   try {
-    // Check if GLTF data exists in memory
-    const gltfData = gltfDataMemory[shapeId];
-    if (!gltfData) {
+    // Check if OFF data exists in memory
+    const offData = offDataMemory[shapeId];
+    if (!offData) {
       return createKernelError({
         message: `Shape ${shapeId} not computed yet. Please build shapes before exporting.`,
         startColumn: 0,
@@ -164,21 +174,58 @@ const exportShape = async (
       });
     }
 
-    // For now, we only support GLTF export since that's what we generate
-    if (fileType === 'stl' || fileType === 'stl-binary') {
-      return createKernelError({
-        message: `STL export not supported in GLTF mode. Use 'gltf' file type instead.`,
-        startColumn: 0,
-        startLineNumber: 0,
-      });
-    }
+    // Handle geometry export
+    switch (fileType) {
+      case 'glb': {
+        const gltfBlob = await convertOffToGltf(offData, 'glb');
+        return createKernelSuccess([
+          {
+            blob: gltfBlob,
+            name: 'model.glb',
+          },
+        ]);
+      }
 
-    return createKernelSuccess([
-      {
-        blob: gltfData,
-        name: 'model.glb',
-      },
-    ]);
+      case 'gltf': {
+        const gltfBlob = await convertOffToGltf(offData, 'gltf');
+        return createKernelSuccess([
+          {
+            blob: gltfBlob,
+            name: 'model.gltf',
+          },
+        ]);
+      }
+
+      case 'stl': {
+        const stlBlob = await convertOffToStl(offData, 'stl');
+        return createKernelSuccess([
+          {
+            blob: stlBlob,
+            name: 'model.stl',
+          },
+        ]);
+      }
+
+      case 'stl-binary': {
+        const stlBlob = await convertOffToStl(offData, 'stl-binary');
+        return createKernelSuccess([
+          {
+            blob: stlBlob,
+            name: 'model.stl',
+          },
+        ]);
+      }
+
+      case '3mf': {
+        const threeMfBlob = await convertOffTo3mf(offData);
+        return createKernelSuccess([
+          {
+            blob: threeMfBlob,
+            name: 'model.3mf',
+          },
+        ]);
+      }
+    }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return createKernelError({ message: errorMessage, startColumn: 0, startLineNumber: 0 });

@@ -13,6 +13,8 @@ import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
 import { downloadBlob } from '~/utils/file.js';
 import { screenshotRequestMachine } from '~/machines/screenshot-request.machine.js';
 import { exportGeometryMachine } from '~/machines/export-geometry.machine.js';
+import type { ExportFormat } from '~/types/kernel.types.js';
+import { extensionFromFormat } from '~/constants/kernel.constants.js';
 
 type ViewerControlItem = {
   id: string;
@@ -72,9 +74,8 @@ export function ChatControls(): JSX.Element {
   }, [screenshotActorRef]);
 
   const handleExport = useCallback(
-    async (filename: string, format: 'stl' | 'stl-binary' | 'step' | 'step-assembly') => {
-      const fileExtension =
-        format === 'stl' ? 'stl' : format === 'stl-binary' ? 'stl' : format === 'step' ? 'step' : 'step-assembly';
+    async (filename: string, format: ExportFormat) => {
+      const fileExtension = extensionFromFormat[format];
       const filenameWithExtension = `${filename}.${fileExtension}`;
       toast.promise(
         new Promise<Blob>((resolve, reject) => {
@@ -326,7 +327,7 @@ export function ChatControls(): JSX.Element {
                   const response = await fetch(dataUrl);
                   // eslint-disable-next-line no-await-in-loop -- we need to wait for the blob to be created
                   const blob = await response.blob();
-                  const filename = `${buildName}-${angleNames[index] || `angle-${index}`}.png`;
+                  const filename = `${buildName}-${angleNames[index] ?? `angle-${index}`}.png`;
                   downloadBlob(blob, filename);
                 }
 
@@ -365,6 +366,14 @@ export function ChatControls(): JSX.Element {
         group: 'Export',
         icon: <BoxDown className="mr-2" />,
         action: async () => handleExport(buildName, 'step'),
+        disabled: shapes.length === 0,
+      },
+      {
+        id: 'download-3mf',
+        label: 'Download 3MF',
+        group: 'Export',
+        icon: <BoxDown className="mr-2" />,
+        action: async () => handleExport(buildName, '3mf'),
         disabled: shapes.length === 0,
       },
       {
@@ -450,7 +459,7 @@ export function ChatControls(): JSX.Element {
         groupOrder.push(item.group);
       }
 
-      groupedControlItemsMap[item.group].items.push(item);
+      groupedControlItemsMap[item.group]!.items.push(item);
     }
 
     return Object.values(groupedControlItemsMap).sort(

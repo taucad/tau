@@ -1,16 +1,11 @@
-import type { Vertex, Face, Color } from '~/components/geometry/kernel/utils/common.js';
-
-export type OffData = {
-  vertices: Vertex[];
-  faces: Face[];
-  colors: Color[];
-};
+import type { Vertex, Face, Color, IndexedPolyhedron } from '~/components/geometry/kernel/utils/common.js';
 
 /**
  * Parse OFF (Object File Format) data from string
  * OFF format supports vertices, faces, and colors
  */
-export function parseOff(offContent: string): OffData {
+// eslint-disable-next-line complexity -- TODO: refactor this
+export function parseOff(offContent: string): IndexedPolyhedron {
   const lines = offContent
     .split('\n')
     .map((line) => line.trim())
@@ -40,7 +35,7 @@ export function parseOff(offContent: string): OffData {
   const numberVertices = countParts[0] ?? 0;
   const numberFaces = countParts[1] ?? 0;
 
-  if (isNaN(numberVertices) || isNaN(numberFaces)) {
+  if (Number.isNaN(numberVertices) || Number.isNaN(numberFaces)) {
     throw new TypeError('Invalid OFF file: invalid vertex or face counts');
   }
 
@@ -113,7 +108,7 @@ export function parseOff(offContent: string): OffData {
     } else {
       // Triangulate polygon faces using fan triangulation
       for (let j = 1; j < faceVertices.length - 1; j++) {
-        faces.push([faceVertices[0], faceVertices[j], faceVertices[j + 1]]);
+        faces.push([faceVertices[0]!, faceVertices[j]!, faceVertices[j + 1]!]);
         colors.push(color);
       }
     }

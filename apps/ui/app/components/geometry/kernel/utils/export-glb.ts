@@ -1,5 +1,5 @@
 import type { Primitive } from '@gltf-transform/core';
-import { Document, NodeIO, Accessor } from '@gltf-transform/core';
+import { Document, NodeIO } from '@gltf-transform/core';
 import type { Vertex, Face, Color } from '~/components/geometry/kernel/utils/common.js';
 
 export type MeshData = {

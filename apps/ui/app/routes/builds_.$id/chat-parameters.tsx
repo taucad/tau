@@ -5,7 +5,6 @@ import React, { useCallback, useMemo, memo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import Form from '@rjsf/core';
 import type { RJSFSchema } from '@rjsf/utils';
-import { categorizeParameters } from '~/routes/builds_.$id/chat-parameters-sorter.js';
 import { toSentenceCase } from '~/utils/string.js';
 import { Input } from '~/components/ui/input.js';
 import { Button } from '~/components/ui/button.js';
@@ -57,41 +56,59 @@ export const ChatParameters = memo(function () {
     [parameters, setParameters],
   );
 
-  const { hasSearchResults } = useMemo(() => {
-    const parameterEntries = Object.entries(defaultParameters);
-
-    // Use the imported categorizeParameters function
-    const parameterGroups = categorizeParameters(parameterEntries);
-
-    // Filter groups based on search term
-    const filteredGroups: Record<string, Array<[string, unknown]>> = {};
-    let hasSearchResults = false;
-
-    if (searchTerm) {
-      const searchTermLower = searchTerm.toLowerCase();
-      // For each group, check if any parameter matches the search term
-      for (const [groupName, entries] of Object.entries(parameterGroups)) {
-        const matchingEntries = entries.filter(([key]) => {
-          const prettyKey = toSentenceCase(key).toLowerCase();
-          return prettyKey.includes(searchTermLower);
-        });
-
-        if (matchingEntries.length > 0) {
-          filteredGroups[groupName] = matchingEntries;
-          hasSearchResults = true;
-        }
-      }
-    } else {
-      // No search term, show all groups
-      Object.assign(filteredGroups, parameterGroups);
-      hasSearchResults = true;
+  const hasSearchResults = useMemo(() => {
+    if (!searchTerm) {
+      return true;
     }
 
-    return {
-      filteredGroups,
-      hasSearchResults,
+    // Helper function that matches our template logic
+    const matchesSearch = (text: string): boolean => {
+      const prettyText = toSentenceCase(text);
+      return prettyText.toLowerCase().includes(searchTerm.toLowerCase());
     };
-  }, [searchTerm, defaultParameters]);
+
+    // Check flat parameters in defaultParameters
+    const parameterEntries = Object.entries(defaultParameters);
+    const hasMatchingParameters = parameterEntries.some(([key]) => matchesSearch(key));
+
+    // Check group titles from jsonSchema if it exists
+    let hasMatchingGroups = false;
+    let hasMatchingNestedParameters = false;
+
+    if (jsonSchema && typeof jsonSchema === 'object' && 'properties' in jsonSchema) {
+      const schemaProperties = jsonSchema.properties as Record<string, unknown>;
+
+      // Check if any group titles match
+      const groupNames = Object.keys(schemaProperties);
+      hasMatchingGroups = groupNames.some((groupName) => matchesSearch(groupName));
+
+      // Check if any nested parameters within groups match
+      for (const [_groupName, groupSchema] of Object.entries(schemaProperties)) {
+        if (
+          groupSchema &&
+          typeof groupSchema === 'object' &&
+          'properties' in groupSchema &&
+          groupSchema.properties &&
+          typeof groupSchema.properties === 'object'
+        ) {
+          const nestedProperties = groupSchema.properties as Record<string, unknown>;
+          const nestedParameterNames = Object.keys(nestedProperties);
+
+          const hasMatchingNestedInThisGroup = nestedParameterNames.some((parameterName) =>
+            matchesSearch(parameterName),
+          );
+
+          if (hasMatchingNestedInThisGroup) {
+            hasMatchingNestedParameters = true;
+            break;
+          }
+        }
+      }
+    }
+
+    // Return true if any parameters, groups, or nested parameters match
+    return hasMatchingParameters || hasMatchingGroups || hasMatchingNestedParameters;
+  }, [searchTerm, defaultParameters, jsonSchema]);
 
   const resetAllParameters = useCallback(() => {
     setParameters({});
@@ -103,7 +120,7 @@ export const ChatParameters = memo(function () {
   }, [allExpanded]);
 
   const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchTerm(event.target.value.toLowerCase());
+    setSearchTerm(event.target.value);
   }, []);
 
   const clearSearch = useCallback(() => {
@@ -119,7 +136,10 @@ export const ChatParameters = memo(function () {
       searchTerm: searchTerm.toLowerCase(),
       resetSingleParameter,
       shouldShowField(prettyLabel: string) {
-        if (!searchTerm) return true;
+        if (!searchTerm) {
+          return true;
+        }
+
         const searchableLabel = prettyLabel.toLowerCase();
         return searchableLabel.includes(searchTerm.toLowerCase());
       },

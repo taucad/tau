@@ -41,23 +41,6 @@ function getColorMapping(
 const paintColorMap = ['', '8', '0C', '1C', '2C', '3C', '4C', '5C', '6C', '7C', '8C', '9C', 'AC', 'BC', 'CC', 'DC'];
 
 /**
- * Generate a UUID v4 using crypto API
- */
-function generateUuid(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-
-  // Set version (4) and variant bits
-  // eslint-disable-next-line no-bitwise -- UUID generation requires bitwise operations
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40; // Version 4
-  // eslint-disable-next-line no-bitwise -- UUID generation requires bitwise operations
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80; // Variant 10
-
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
-}
-
-/**
  * Convert RGB values (0-1) to hex color string
  */
 function rgbToHex(rgb: [number, number, number]): string {
@@ -106,9 +89,9 @@ function triangulateFace(
 /**
  * Export IndexedPolyhedron to 3MF format
  */
-export function exportThreeMf(data: IndexedPolyhedron, extruderColors?: Array<[number, number, number]>): Blob {
-  const objectUuid = generateUuid();
-  const buildUuid = generateUuid();
+export function export3mf(data: IndexedPolyhedron, extruderColors?: Array<[number, number, number]>): Blob {
+  const objectUuid = crypto.randomUUID();
+  const buildUuid = crypto.randomUUID();
 
   // Early return for empty geometry
   if (data.vertices.length === 0 || data.faces.length === 0) {

@@ -1,5 +1,5 @@
 import { parseOff } from '~/components/geometry/kernel/utils/import-off.js';
-import { exportThreeMf } from '~/components/geometry/kernel/utils/export-3mf.js';
+import { export3mf } from '~/components/geometry/kernel/utils/export-3mf.js';
 
 /**
  * Convert OFF format data to 3MF blob
@@ -14,5 +14,5 @@ export async function convertOffTo3mf(
   const offData = parseOff(offContent);
 
   // Convert to 3MF format
-  return exportThreeMf(offData, extruderColors);
+  return export3mf(offData, extruderColors);
 }

@@ -4,7 +4,7 @@ import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import { isBrowser } from 'motion/react';
 import type { Shape } from '~/types/cad.types.js';
-import type { KernelError, KernelProvider } from '~/types/kernel.types.js';
+import type { ExportFormat, KernelError, KernelProvider } from '~/types/kernel.types.js';
 import { isKernelSuccess } from '~/types/kernel.types.js';
 import type { BuilderWorkerInterface as ReplicadWorker } from '~/components/geometry/kernel/replicad/replicad.worker.js';
 import ReplicadBuilderWorker from '~/components/geometry/kernel/replicad/replicad.worker.js?worker';
@@ -246,9 +246,8 @@ const evaluateCodeActor = fromPromise<
 });
 
 const exportGeometryActor = fromPromise<
-  | { type: 'geometryExported'; blob: Blob; format: 'stl' | 'stl-binary' | 'step' | 'step-assembly' }
-  | { type: 'kernelError'; error: KernelError },
-  { context: KernelContext; event: { format: string; kernelType: KernelProvider } }
+  { type: 'geometryExported'; blob: Blob; format: ExportFormat } | { type: 'kernelError'; error: KernelError },
+  { context: KernelContext; event: { format: ExportFormat; kernelType: KernelProvider } }
 >(async ({ input }) => {
   const { context, event } = input;
 
@@ -281,7 +280,8 @@ const exportGeometryActor = fromPromise<
   }
 
   try {
-    const format = event.format as 'stl' | 'stl-binary' | 'step' | 'step-assembly';
+    const { format } = event;
+    // TODO: Add support checking for kernels
     const result = await wrappedWorker.exportShape(format as 'stl' | 'stl-binary');
 
     if (isKernelSuccess(result)) {
@@ -335,7 +335,7 @@ type KernelEventInternal =
   | { type: 'initializeKernel'; parentRef: CadActor }
   | { type: 'computeGeometry'; code: string; parameters: Record<string, unknown>; kernelType: KernelProvider }
   | { type: 'parseParameters'; code: string; kernelType: KernelProvider }
-  | { type: 'exportGeometry'; format: string; kernelType: KernelProvider };
+  | { type: 'exportGeometry'; format: ExportFormat; kernelType: KernelProvider };
 
 // The kernel machine simply sends the output of the actors to the parent machine.
 export type KernelEventExternal = OutputFrom<(typeof kernelActors)[KernelActorNames]>;

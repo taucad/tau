@@ -1,12 +1,19 @@
 import { expose } from 'comlink';
 import { parseSTL } from '@amandaghassaei/stl-parser';
 import { KclUtils } from '~/components/geometry/kernel/zoo/kcl-utils.js';
-import type { BuildShapesResult, ExportGeometryResult, ExtractParametersResult } from '~/types/kernel.types.js';
+import type {
+  BuildShapesResult,
+  ExportFormat,
+  ExportGeometryResult,
+  ExtractParametersResult,
+} from '~/types/kernel.types.js';
 import { createKernelError, createKernelSuccess } from '~/types/kernel.types.js';
 import type { Shape3D } from '~/types/cad.types.js';
 import { isKclError, extractExecutionError } from '~/components/geometry/kernel/zoo/kcl-errors.js';
 import { convertKclErrorToKernelError, mapErrorToKclError } from '~/components/geometry/kernel/zoo/error-mappers.js';
 import { getErrorPosition } from '~/components/geometry/kernel/zoo/source-range-utils.js';
+
+type ZooExportFormat = Extract<ExportFormat, 'stl' | 'stl-binary' | 'step'>;
 
 // Global storage for computed STL data
 const stlDataMemory: Record<string, Uint8Array> = {};
@@ -286,10 +293,7 @@ async function buildShapesFromCode(
 }
 
 // Export shape in various formats
-const exportShape = async (
-  fileType: 'stl' | 'stl-binary' | 'step' = 'stl',
-  shapeId = 'defaultShape',
-): Promise<ExportGeometryResult> => {
+const exportShape = async (fileType: ZooExportFormat, shapeId = 'defaultShape'): Promise<ExportGeometryResult> => {
   try {
     // Check if STL data exists in memory
     const stlData = stlDataMemory[shapeId];

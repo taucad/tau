@@ -1,12 +1,7 @@
 import type { Primitive } from '@gltf-transform/core';
 import { Document, NodeIO } from '@gltf-transform/core';
-import type { Vertex, Face, Color } from '~/components/geometry/kernel/utils/common.js';
-
-export type MeshData = {
-  vertices: Vertex[];
-  faces: Face[];
-  colors: Color[];
-};
+import { stringToBase64 } from 'uint8array-extras';
+import type { Color, IndexedPolyhedron } from '~/components/geometry/kernel/utils/common.js';
 
 type GeometryData = {
   positions: Float32Array;
@@ -45,7 +40,7 @@ function createPrimitive(document: Document, baseColorFactor: Color, geometry: G
 /**
  * Convert mesh data to geometry arrays suitable for glTF
  */
-function convertMeshToGeometry(meshData: MeshData): GeometryData {
+function convertMeshToGeometry(meshData: IndexedPolyhedron): GeometryData {
   const { vertices, faces, colors } = meshData;
 
   // Calculate total number of triangles
@@ -137,9 +132,9 @@ function convertMeshToGeometry(meshData: MeshData): GeometryData {
 }
 
 /**
- * Create a GLB (binary GLTF) blob from mesh data with colors
+ * Create a GLTF document from mesh data (shared between GLB and GLTF exports)
  */
-export async function createGlb(meshData: MeshData): Promise<Blob> {
+function createGltfDocument(meshData: IndexedPolyhedron): Document {
   const document = new Document();
   document.createBuffer();
 
@@ -165,7 +160,56 @@ export async function createGlb(meshData: MeshData): Promise<Blob> {
 
   scene.addChild(document.createNode().setMesh(mesh));
 
-  const glbBuffer = await new NodeIO().writeBinary(document);
+  return document;
+}
 
+/**
+ * Create a GLB (binary GLTF) blob from mesh data with colors
+ */
+export async function createGlb(meshData: IndexedPolyhedron): Promise<Blob> {
+  const document = createGltfDocument(meshData);
+  const glbBuffer = await new NodeIO().writeBinary(document);
   return new Blob([glbBuffer], { type: 'model/gltf-binary' });
+}
+
+/**
+ * Create a GLTF (JSON format) blob from mesh data with colors
+ * Note: This creates a self-contained GLTF with embedded binary data
+ */
+export async function createGltf(meshData: IndexedPolyhedron): Promise<Blob> {
+  const document = createGltfDocument(meshData);
+
+  // Use writeJSON which returns both the JSON and binary data
+  const gltfData = await new NodeIO().writeJSON(document);
+
+  // For a self-contained GLTF file, we need to embed the binary data as base64
+  // This creates a single .gltf file that doesn't require separate .bin files
+  const gltfJson = gltfData.json;
+
+  // If there are resources, embed them as data URIs
+  const { resources } = gltfData;
+  const buffers = gltfJson.buffers ?? [];
+
+  for (const [resourceKey, resourceData] of Object.entries(resources)) {
+    // Find the buffer that references this resource
+    const bufferIndex = buffers.findIndex((buffer) => buffer.uri === resourceKey);
+    const buffer = buffers[bufferIndex];
+    if (buffer) {
+      // Convert binary data to base64 using browser-compatible method
+      const uint8Array = new Uint8Array(resourceData);
+      let binaryString = '';
+      for (const byte of uint8Array) {
+        binaryString += String.fromCodePoint(byte);
+      }
+
+      const base64Data = stringToBase64(binaryString, { urlSafe: true });
+
+      buffer.uri = `data:application/octet-stream;base64,${base64Data}`;
+    }
+  }
+
+  // Convert to pretty-printed JSON string
+  const gltfString = JSON.stringify(gltfJson, undefined, 2);
+
+  return new Blob([gltfString], { type: 'model/gltf+json' });
 }

@@ -3,7 +3,7 @@ import type { ActorRefFrom } from 'xstate';
 import { kernelMachine } from '~/machines/kernel.machine.js';
 import type { KernelEventExternal } from '~/machines/kernel.machine.js';
 import type { CodeError, Shape } from '~/types/cad.types.js';
-import type { KernelError, KernelProvider } from '~/types/kernel.types.js';
+import type { ExportFormat, KernelError, KernelProvider } from '~/types/kernel.types.js';
 import type { graphicsMachine } from '~/machines/graphics.machine.js';
 
 // Interface defining the context for the CAD machine
@@ -32,7 +32,7 @@ type CadEvent =
   | { type: 'setCode'; code: string; screenshot?: string }
   | { type: 'setParameters'; parameters: Record<string, unknown> }
   | { type: 'setCodeErrors'; errors: CadContext['codeErrors'] }
-  | { type: 'exportGeometry'; format: 'stl' | 'stl-binary' | 'step' | 'step-assembly' }
+  | { type: 'exportGeometry'; format: ExportFormat }
   | KernelEventExternal;
 
 type CadEmitted =

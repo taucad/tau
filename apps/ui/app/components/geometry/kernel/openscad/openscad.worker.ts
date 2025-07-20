@@ -11,7 +11,7 @@ import type { OpenScadParameterExport } from '~/components/geometry/kernel/opens
 import type { BuildShapesResult, ExportGeometryResult, ExtractParametersResult } from '~/types/kernel.types.js';
 import { createKernelError, createKernelSuccess } from '~/types/kernel.types.js';
 import type { ShapeGLTF } from '~/types/cad.types.js';
-import { convertOFFToGLTF } from '~/components/geometry/kernel/utils/off-to-gltf.js';
+import { convertOffToGltf } from '~/components/geometry/kernel/utils/off-to-gltf.js';
 
 // Global storage for computed GLTF data
 const gltfDataMemory: Record<string, Blob> = {};
@@ -93,11 +93,11 @@ async function buildShapesFromCode(
     if (trimmedCode === '') {
       // Return empty GLTF shape for empty code.
       // Create a minimal GLTF blob for empty geometry
-      const emptyGLTF = convertOFFToGLTF('OFF\n0 0 0\n');
+      const emptyGltf = await convertOffToGltf('OFF\n0 0 0\n');
       const emptyShape: ShapeGLTF = {
         type: 'gltf',
         name: 'Shape',
-        gltfBlob: emptyGLTF,
+        gltfBlob: emptyGltf,
         error: false,
       };
       return createKernelSuccess([emptyShape]);
@@ -126,10 +126,10 @@ async function buildShapesFromCode(
     inst.callMain(args);
 
     // Read the output OFF file
-    const offData = inst.FS.readFile(outputFile, { encoding: 'utf8' }) as string;
+    const offData = inst.FS.readFile(outputFile, { encoding: 'utf8' });
 
     // Convert OFF directly to GLTF
-    const gltfBlob = convertOFFToGLTF(offData);
+    const gltfBlob = await convertOffToGltf(offData);
 
     // Store GLTF data globally for later export
     gltfDataMemory[shapeId] = gltfBlob;
@@ -153,7 +153,6 @@ const exportShape = async (
   fileType: 'stl' | 'stl-binary' | 'gltf' = 'gltf',
   shapeId = 'defaultShape',
 ): Promise<ExportGeometryResult> => {
-  console.log('exportShape-openscad', fileType, shapeId);
   try {
     // Check if GLTF data exists in memory
     const gltfData = gltfDataMemory[shapeId];
@@ -174,7 +173,6 @@ const exportShape = async (
       });
     }
 
-    console.log('exportShape-openscad', gltfData);
     return createKernelSuccess([
       {
         blob: gltfData,

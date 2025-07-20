@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    # Run CI on all branches for early feedback
+    branches: [main]  # Only run on pushes to main branch
   pull_request:
     # Run CI on all pull requests
 

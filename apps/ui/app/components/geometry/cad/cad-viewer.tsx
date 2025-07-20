@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { ReplicadMesh } from '~/components/geometry/kernel/replicad/replicad-mesh.js';
-import { GLTFMesh } from '~/components/geometry/graphics/three/gltf-mesh.js';
+import { GltfMesh } from '~/components/geometry/graphics/three/gltf-mesh.js';
 import { ThreeProvider } from '~/components/geometry/graphics/three/three-context.js';
 import type { ThreeViewerProperties } from '~/components/geometry/graphics/three/three-context.js';
 import type { Shape } from '~/types/cad.types.js';
@@ -28,20 +28,24 @@ export function CadViewer({
   return (
     <ThreeProvider {...properties}>
       {shapes.map((shape) => {
-        if (shape.type === '3d') {
-          return <ReplicadMesh key={shape.name} {...shape} enableSurface={enableSurface} enableLines={enableLines} />;
-        }
+        switch (shape.type) {
+          case '3d': {
+            return <ReplicadMesh key={shape.name} {...shape} enableSurface={enableSurface} enableLines={enableLines} />;
+          }
 
-        if (shape.type === 'gltf') {
-          return <GLTFMesh key={shape.name} {...shape} />;
-        }
+          case 'gltf': {
+            return <GltfMesh key={shape.name} {...shape} enableSurface={enableSurface} enableLines={enableLines} />;
+          }
 
-        if (shape.type === '2d') {
-          throw new Error('2D shapes are not supported');
-        }
+          case '2d': {
+            throw new Error('2D shapes are not supported');
+          }
 
-        const neverShape: never = shape;
-        throw new Error(`Unknown shape type: ${JSON.stringify(neverShape)}`);
+          default: {
+            const neverShape: never = shape;
+            throw new Error(`Unknown shape type: ${JSON.stringify(neverShape)}`);
+          }
+        }
       })}
     </ThreeProvider>
   );

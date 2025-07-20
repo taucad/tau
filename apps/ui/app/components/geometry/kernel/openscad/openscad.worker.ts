@@ -159,10 +159,7 @@ async function buildShapesFromCode(
   }
 }
 
-const exportShape = async (
-  fileType: OpenScadExportFormat = 'glb',
-  shapeId = 'defaultShape',
-): Promise<ExportGeometryResult> => {
+const exportShape = async (fileType: OpenScadExportFormat, shapeId = 'defaultShape'): Promise<ExportGeometryResult> => {
   try {
     // Check if OFF data exists in memory
     const offData = offDataMemory[shapeId];

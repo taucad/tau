@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { JSX } from 'react';
-import { RgbaColorPicker } from 'react-colorful';
-import type { RgbaColor } from 'react-colorful';
+import { RgbColorPicker } from 'react-colorful';
+import type { RgbColor } from 'react-colorful';
 import { parse, converter } from 'culori';
 import { Check, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
@@ -26,42 +26,42 @@ export const isValidColor = (color: string): boolean => {
 };
 
 /**
- * Convert any valid CSS color to RGBA object for react-colorful
+ * Convert any valid CSS color to RGB object for react-colorful
  */
-const convertToRgba = (color: string): RgbaColor => {
+const convertToRgb = (color: string): RgbColor => {
   try {
     const parsed = parse(color);
     if (parsed) {
       // Convert to RGB space using culori
       const rgbColor = rgbConverter(parsed);
-      if (rgbColor) {
-        return {
-          r: Math.round((rgbColor.r ?? 0) * 255),
-          g: Math.round((rgbColor.g ?? 0) * 255),
-          b: Math.round((rgbColor.b ?? 0) * 255),
-          a: rgbColor.alpha ?? 1,
-        };
-      }
+      return {
+        r: Math.round(rgbColor.r * 255),
+        g: Math.round(rgbColor.g * 255),
+        b: Math.round(rgbColor.b * 255),
+      };
     }
   } catch {
     // Fallback if conversion fails
   }
 
-  return { r: 0, g: 0, b: 0, a: 1 }; // Default fallback
+  return { r: 0, g: 0, b: 0 }; // Default fallback
 };
 
 /**
- * Convert RGBA object back to CSS color string using culori
- * Returns simple RGBA format with rounded values
+ * Convert RGB object to hex color string
+ * Always returns 6-digit hex (#RRGGBB)
  */
-const rgbaToString = (rgba: RgbaColor): string => {
-  // Return simple RGBA format with rounded values
-  const r = Math.round(rgba.r);
-  const g = Math.round(rgba.g);
-  const b = Math.round(rgba.b);
-  const a = Math.round(rgba.a * 1000) / 1000; // Round alpha to 3 decimal places
+const rgbToHex = (rgb: RgbColor): string => {
+  const toHex = (value: number): string => {
+    const hex = Math.round(Math.max(0, Math.min(255, value))).toString(16);
+    return hex.length === 1 ? '0' + hex : hex;
+  };
 
-  return `rgba(${r},${g},${b},${a})`;
+  const r = toHex(rgb.r);
+  const g = toHex(rgb.g);
+  const b = toHex(rgb.b);
+
+  return `#${r}${g}${b}`;
 };
 
 /**
@@ -71,7 +71,9 @@ const rgbaToString = (rgba: RgbaColor): string => {
 const getColorFormat = (color: string): string => {
   try {
     const parsed = parse(color);
-    if (!parsed) return '';
+    if (!parsed) {
+      return '';
+    }
 
     // Map culori color modes to display-friendly format names
     const { mode } = parsed;
@@ -197,7 +199,6 @@ const getColorFormat = (color: string): string => {
         return 'OKHSV';
       }
 
-      // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check
       default: {
         const _exhaustiveCheck: never = mode;
         throw new Error(`Unknown color format: ${String(_exhaustiveCheck)}`);
@@ -214,7 +215,7 @@ const baseIndicatorClass = 'flex h-7 w-7 items-center justify-center border bg-m
 
 /**
  * String Color Picker Component
- * Uses react-colorful for color selection with RGBA values
+ * Uses react-colorful for color selection with RGB values (no alpha)
  */
 export function StringColorPicker({ value, onChange, className }: StringColorPickerProperties): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -227,12 +228,12 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
   }, [value]);
 
   const isValid = isValidColor(value);
-  const rgbaValue = isValid ? convertToRgba(value) : { r: 0, g: 0, b: 0, a: 1 };
+  const rgbValue = isValid ? convertToRgb(value) : { r: 0, g: 0, b: 0 };
   const colorFormat = getColorFormat(value);
 
   const handleColorChange = useCallback(
-    (newColor: RgbaColor) => {
-      const colorString = rgbaToString(newColor);
+    (newColor: RgbColor) => {
+      const colorString = rgbToHex(newColor);
       setTemporaryColor(colorString);
       onChange(colorString);
     },
@@ -282,7 +283,7 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
         </PopoverTrigger>
         <PopoverContent className="w-70 p-3" side="right" align="end">
           <div className="space-y-3">
-            <RgbaColorPicker color={rgbaValue} className="!h-48 !w-full" onChange={handleColorChange} />
+            <RgbColorPicker color={rgbValue} className="!h-48 !w-full" onChange={handleColorChange} />
             <div className="relative">
               <div
                 className="absolute top-px bottom-px left-px w-8 overflow-clip rounded-l border-r border-border bg-clip-padding"

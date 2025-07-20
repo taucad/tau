@@ -48,7 +48,14 @@ export type Shape3D = {
   highlight?: number[];
 };
 
-export type Shape = Shape2D | Shape3D;
+export type ShapeGLTF = {
+  type: 'gltf';
+  gltfBlob: Blob;
+  error: boolean;
+  name: string;
+};
+
+export type Shape = Shape2D | Shape3D | ShapeGLTF;
 
 export const modelProviders = ['sambanova', 'openai', 'anthropic', 'ollama'] as const;
 export type ModelProvider = (typeof modelProviders)[number];

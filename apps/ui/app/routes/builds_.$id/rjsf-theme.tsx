@@ -43,10 +43,10 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   }
 
   // Always call hooks at the very top level
-  const formContext = registry?.formContext;
+  const { formContext } = registry;
   const prettyLabel = toSentenceCase(label);
 
-  if (!formContext?.shouldShowField(prettyLabel)) {
+  if (!formContext.shouldShowField(prettyLabel)) {
     return null; // Hide field if it doesn't match search
   }
 
@@ -64,8 +64,8 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   return (
     <div className="@container/parameter flex flex-col rounded-md p-1 transition-colors hover:bg-muted/30">
       <div className="flex h-auto min-h-6 flex-row justify-between gap-2">
-        <span className={cn(fieldHasValue ? 'font-medium' : 'font-normal')}>
-          <HighlightText text={prettyLabel} searchTerm={String(formContext?.searchTerm)} />
+        <span className={cn(fieldHasValue ? 'font-medium' : 'font-normal')} aria-label={`Parameter: ${prettyLabel}`}>
+          <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
           {required ? <span className="text-destructive">*</span> : null}
         </span>
         {fieldHasValue ? (
@@ -111,7 +111,26 @@ function ObjectFieldTemplate(
     return <div>{properties.map((element) => element.content)}</div>;
   }
 
+  // FIXED: Check if the group should be visible by checking BOTH:
+  // 1. If the group title itself matches the search term, OR
+  // 2. If any child properties match the search term
   const prettyTitle = toSentenceCase(title);
+  const groupTitleMatches = formContext.shouldShowField(prettyTitle);
+
+  const hasVisibleChildProperties = properties.some((property) => {
+    const propertyName = property.name;
+    const prettyLabel = toSentenceCase(propertyName);
+    return formContext.shouldShowField(prettyLabel);
+  });
+
+  // Show the group if either the title matches OR any children match
+  const shouldShowGroup = groupTitleMatches || hasVisibleChildProperties;
+
+  // Don't render the group if neither title nor children would be visible
+  if (!shouldShowGroup) {
+    return null;
+  }
+
   const propertiesCount = properties.length;
 
   return (
@@ -248,7 +267,7 @@ export const templates: TemplatesType = {
   ObjectFieldTemplate,
   ArrayFieldTemplate: (props: ArrayFieldTemplateProps) => (
     <div className="w-full space-y-2">
-      {props.items ? props.items.map((item) => item.children) : null}
+      {props.items.map((item) => item.children)}
       {props.canAdd ? (
         <Button type="button" variant="outline" size="sm" onClick={props.onAddClick}>
           Add Item

@@ -1,7 +1,6 @@
 import { expose } from 'comlink';
 import { createOpenSCAD } from 'openscad-wasm-prebuilt';
 import type { OpenSCAD } from 'openscad-wasm-prebuilt';
-import { parseSTL } from '@amandaghassaei/stl-parser';
 import { jsonDefault } from 'json-schema-default';
 import type { JSONSchema7 } from 'json-schema';
 import {
@@ -11,10 +10,11 @@ import {
 import type { OpenScadParameterExport } from '~/components/geometry/kernel/openscad/parse-parameters.js';
 import type { BuildShapesResult, ExportGeometryResult, ExtractParametersResult } from '~/types/kernel.types.js';
 import { createKernelError, createKernelSuccess } from '~/types/kernel.types.js';
-import type { Shape3D } from '~/types/cad.types.js';
+import type { ShapeGLTF } from '~/types/cad.types.js';
+import { convertOffToGltf } from '~/components/geometry/kernel/utils/off-to-gltf.js';
 
-// Global storage for computed STL data
-const stlDataMemory: Record<string, Uint8Array> = {};
+// Global storage for computed GLTF data
+const gltfDataMemory: Record<string, Blob> = {};
 
 async function getInstance(): Promise<OpenSCAD> {
   const instance = await createOpenSCAD({
@@ -91,18 +91,13 @@ async function buildShapesFromCode(
     // Check if code is empty after trimming whitespace
     const trimmedCode = code.trim();
     if (trimmedCode === '') {
-      // Return empty shape for empty code.
-      // This produces a valid empty shape, without errors present.
-      const emptyShape: Shape3D = {
-        type: '3d',
+      // Return empty GLTF shape for empty code.
+      // Create a minimal GLTF blob for empty geometry
+      const emptyGltf = await convertOffToGltf('OFF\n0 0 0\n');
+      const emptyShape: ShapeGLTF = {
+        type: 'gltf',
         name: 'Shape',
-        faces: {
-          vertices: [],
-          triangles: [],
-          normals: [],
-          faceGroups: [],
-        },
-        edges: { lines: [], edgeGroups: [] },
+        gltfBlob: emptyGltf,
         error: false,
       };
       return createKernelSuccess([emptyShape]);
@@ -110,12 +105,12 @@ async function buildShapesFromCode(
 
     const inst = await getInstance();
     const inputFile = '/input.scad';
-    const outputFile = '/output.stl';
+    const outputFile = '/output.off';
 
     // Write the SCAD code
     inst.FS.writeFile(inputFile, code);
 
-    // Build command line arguments
+    // Build command line arguments for OFF output
     const args = [inputFile, '--backend=manifold', '-o', outputFile];
 
     // Add parameter injection if provided
@@ -130,89 +125,19 @@ async function buildShapesFromCode(
     // Run OpenSCAD
     inst.callMain(args);
 
-    // Read the output STL file
-    const stlData = inst.FS.readFile(outputFile) as Uint8Array;
+    // Read the output OFF file
+    const offData = inst.FS.readFile(outputFile, { encoding: 'utf8' });
 
-    // Store STL data globally for later export
-    stlDataMemory[shapeId] = stlData;
+    // Convert OFF directly to GLTF
+    const gltfBlob = await convertOffToGltf(offData);
 
-    // Convert to ArrayBuffer for parseSTL (handles SharedArrayBuffer compatibility)
-    const arrayBuffer = new ArrayBuffer(stlData.byteLength);
-    const view = new Uint8Array(arrayBuffer);
-    view.set(stlData);
-    const mesh = parseSTL(arrayBuffer);
+    // Store GLTF data globally for later export
+    gltfDataMemory[shapeId] = gltfBlob;
 
-    // Optimize the mesh
-    mesh.mergeVertices();
-
-    // Extract original geometry data
-    const originalVertices = [...mesh.vertices];
-    const originalTriangles = [...mesh.facesIndices];
-
-    // Create new arrays with duplicate vertices per face (like replicad format)
-    const vertices: number[] = [];
-    const triangles: number[] = [];
-    const normals: number[] = [];
-
-    // For each triangle, create unique vertices with face normals
-    for (let i = 0; i < originalTriangles.length; i += 3) {
-      const i1 = originalTriangles[i]!;
-      const i2 = originalTriangles[i + 1]!;
-      const i3 = originalTriangles[i + 2]!;
-
-      // Get triangle vertices from original data
-      const v1 = [originalVertices[i1 * 3]!, originalVertices[i1 * 3 + 1]!, originalVertices[i1 * 3 + 2]!] as const;
-      const v2 = [originalVertices[i2 * 3]!, originalVertices[i2 * 3 + 1]!, originalVertices[i2 * 3 + 2]!] as const;
-      const v3 = [originalVertices[i3 * 3]!, originalVertices[i3 * 3 + 1]!, originalVertices[i3 * 3 + 2]!] as const;
-
-      // Compute edge vectors
-      const edge1 = [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]] as const;
-      const edge2 = [v3[0] - v1[0], v3[1] - v1[1], v3[2] - v1[2]] as const;
-
-      // Compute face normal using cross product
-      const normal: [number, number, number] = [
-        edge1[1] * edge2[2] - edge1[2] * edge2[1],
-        edge1[2] * edge2[0] - edge1[0] * edge2[2],
-        edge1[0] * edge2[1] - edge1[1] * edge2[0],
-      ];
-
-      // Normalize the normal vector
-      const length = Math.hypot(normal[0], normal[1], normal[2]);
-      if (length > 0) {
-        normal[0] /= length;
-        normal[1] /= length;
-        normal[2] /= length;
-      }
-
-      // Add duplicate vertices for this triangle
-      const newVertexIndex = vertices.length / 3;
-
-      // Add vertices
-      vertices.push(...v1, ...v2, ...v3);
-
-      // Add triangle indices (pointing to new duplicate vertices)
-      triangles.push(newVertexIndex, newVertexIndex + 1, newVertexIndex + 2);
-
-      // Add same face normal for all 3 vertices
-      normals.push(...normal, ...normal, ...normal);
-    }
-
-    const shape: Shape3D = {
-      type: '3d',
+    const shape: ShapeGLTF = {
+      type: 'gltf',
       name: 'Shape',
-      faces: {
-        vertices,
-        triangles,
-        normals,
-        faceGroups: [
-          {
-            start: 0,
-            count: triangles.length,
-            faceId: 0,
-          },
-        ],
-      },
-      edges: { lines: [], edgeGroups: [] },
+      gltfBlob,
       error: false,
     };
 
@@ -225,14 +150,13 @@ async function buildShapesFromCode(
 }
 
 const exportShape = async (
-  fileType: 'stl' | 'stl-binary' = 'stl',
+  fileType: 'stl' | 'stl-binary' | 'gltf' = 'gltf',
   shapeId = 'defaultShape',
 ): Promise<ExportGeometryResult> => {
-  console.log('exportShape-openscad', fileType, shapeId);
   try {
-    // Check if STL data exists in memory
-    const stlData = stlDataMemory[shapeId];
-    if (!stlData) {
+    // Check if GLTF data exists in memory
+    const gltfData = gltfDataMemory[shapeId];
+    if (!gltfData) {
       return createKernelError({
         message: `Shape ${shapeId} not computed yet. Please build shapes before exporting.`,
         startColumn: 0,
@@ -240,16 +164,19 @@ const exportShape = async (
       });
     }
 
-    // Create blob with appropriate content type
-    const blob = new Blob([stlData], {
-      type: 'model/stl' + (fileType === 'stl-binary' ? '' : '+ascii'),
-    });
+    // For now, we only support GLTF export since that's what we generate
+    if (fileType === 'stl' || fileType === 'stl-binary') {
+      return createKernelError({
+        message: `STL export not supported in GLTF mode. Use 'gltf' file type instead.`,
+        startColumn: 0,
+        startLineNumber: 0,
+      });
+    }
 
-    console.log('exportShape-openscad', blob);
     return createKernelSuccess([
       {
-        blob,
-        name: fileType === 'stl-binary' ? 'model-binary.stl' : 'model.stl',
+        blob: gltfData,
+        name: 'model.glb',
       },
     ]);
   } catch (error) {

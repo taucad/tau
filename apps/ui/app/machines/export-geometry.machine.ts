@@ -1,8 +1,7 @@
 import { setup, fromCallback, assign } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '~/machines/cad.machine.js';
-
-type ExportFormat = 'stl' | 'stl-binary' | 'step' | 'step-assembly';
+import type { ExportFormat } from '~/types/kernel.types.js';
 
 // Context
 type ExportGeometryContext = {
@@ -66,7 +65,10 @@ export const exportGeometryMachine = setup({
   actions: {
     setActiveRequest: assign({
       activeRequest({ event }) {
-        if (event.type !== 'requestExport') return undefined;
+        if (event.type !== 'requestExport') {
+          return undefined;
+        }
+
         return {
           format: event.format,
           onSuccess: event.onSuccess,
@@ -78,14 +80,20 @@ export const exportGeometryMachine = setup({
       activeRequest: undefined,
     }),
     sendExportRequest({ context }) {
-      if (!context.activeRequest) return;
+      if (!context.activeRequest) {
+        return;
+      }
+
       context.cadRef.send({
         type: 'exportGeometry',
         format: context.activeRequest.format,
       });
     },
     handleExportSuccess({ context, event }) {
-      if (event.type !== 'exportCompleted' || !context.activeRequest) return;
+      if (event.type !== 'exportCompleted' || !context.activeRequest) {
+        return;
+      }
+
       try {
         context.activeRequest.onSuccess(event.blob, event.format);
       } catch (error) {
@@ -93,7 +101,10 @@ export const exportGeometryMachine = setup({
       }
     },
     handleExportError({ context, event }) {
-      if (event.type !== 'exportFailed' || !context.activeRequest) return;
+      if (event.type !== 'exportFailed' || !context.activeRequest) {
+        return;
+      }
+
       try {
         context.activeRequest.onError(event.error);
       } catch (error) {

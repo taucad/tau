@@ -1,4 +1,18 @@
-import type { KernelProvider } from '~/types/kernel.types.js';
+import type { ExportFormat, KernelProvider } from '~/types/kernel.types.js';
+
+/**
+ * Map of export formats to file extensions
+ */
+export const extensionFromFormat = {
+  stl: 'stl',
+  'stl-binary': 'stl',
+  step: 'step',
+  'step-assembly': 'step',
+  glb: 'glb',
+  gltf: 'gltf',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- File format names don't follow camelCase
+  '3mf': '3mf',
+} as const satisfies Record<ExportFormat, string>;
 
 export type KernelOption = {
   id: KernelProvider;

@@ -6,6 +6,9 @@ on:
   pull_request:
     # Run CI on all pull requests
 
+env:
+  NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+
 # Cancel in-progress runs when a new workflow with the same group name is triggered
 # This can save 10-50% on CI compute costs.
 concurrency:

@@ -40,8 +40,6 @@ export type KclExecutionResult = {
   defaultPlanes: DefaultPlanes | undefined;
 };
 
-export type ExportFormat = OutputFormat3d['type'];
-
 export type ExportOptions = SetRequired<Partial<OutputFormat3d>, 'type'> & {
   deterministic?: boolean;
 };

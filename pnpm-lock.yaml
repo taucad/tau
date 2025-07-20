@@ -403,6 +403,9 @@ importers:
       uint8array-extras:
         specifier: ^1.4.0
         version: 1.4.0
+      uzip:
+        specifier: ^0.20201231.0
+        version: 0.20201231.0
       vaul:
         specifier: ^1.1.2
         version: 1.1.2(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
@@ -512,6 +515,9 @@ importers:
       '@types/three':
         specifier: ^0.174.0
         version: 0.174.0
+      '@types/uzip':
+        specifier: ^0.20201231.2
+        version: 0.20201231.2
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
@@ -6271,6 +6277,9 @@ packages:
 
   '@types/uuid@10.0.0':
     resolution: {integrity: sha512-7gqG38EyHgyP1S+7+xomFtL+ZNHcKv6DwNaCZmJmo1vgMugyF3TCnXVg4t1uk89mLNwnLtnY3TpOpCOyp1/xHQ==}
+
+  '@types/uzip@0.20201231.2':
+    resolution: {integrity: sha512-l8n/uaJDoxv2hMMWKCaq6l/umbCZjq6CMr8z2wuteB7lKoIwHrIlMZ3AwAuc+olmOK1AobfvK1PPfr5wl7lkWQ==}
 
   '@types/webxr@0.5.21':
     resolution: {integrity: sha512-geZIAtLzjGmgY2JUi6VxXdCrTb99A7yP49lxLr2Nm/uIK0PkkxcEi4OGhoGDO4pxCf3JwGz2GiJL2Ej4K2bKaA==}
@@ -14042,6 +14051,9 @@ packages:
     engines: {node: '>=8'}
     hasBin: true
 
+  uzip@0.20201231.0:
+    resolution: {integrity: sha512-OZeJfZP+R0z9D6TmBgLq2LHzSSptGMGDGigGiEe0pr8UBe/7fdflgHlHBNDASTXB5jnFuxHpNaJywSg8YFeGng==}
+
   v8-compile-cache-lib@3.0.1:
     resolution: {integrity: sha512-wa7YjyUGfNZngI/vtK0UHAN+lgDCxBPCylVXGp0zu59Fz5aiGtNXaq3DhIov063MorB+VfufLh3JlF2KdTK3xg==}
 
@@ -20489,6 +20501,8 @@ snapshots:
   '@types/unist@3.0.3': {}
 
   '@types/uuid@10.0.0': {}
+
+  '@types/uzip@0.20201231.2': {}
 
   '@types/webxr@0.5.21': {}
 
@@ -29736,6 +29750,8 @@ snapshots:
       diff: 5.2.0
       kleur: 4.1.5
       sade: 1.8.1
+
+  uzip@0.20201231.0: {}
 
   v8-compile-cache-lib@3.0.1: {}
 

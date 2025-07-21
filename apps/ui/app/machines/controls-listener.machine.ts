@@ -1,7 +1,7 @@
 import { setup, sendTo, fromCallback } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import * as THREE from 'three';
-import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import type { OrbitControls } from 'three-stdlib';
 import type { graphicsMachine } from '~/machines/graphics.machine.js';
 
 type ControlsListenerInput = {
@@ -44,7 +44,9 @@ const controlsListenerLogic = fromCallback<ControlsListenerEvent, ControlsListen
 
     // Extract common logic for calculating and sending control values
     const sendCurrentControlsState = (forceUpdate = false) => {
-      if (!isListening) return;
+      if (!isListening) {
+        return;
+      }
 
       const zoom = calculateZoom();
       const { position, fov } = getCameraProperties();
@@ -70,23 +72,29 @@ const controlsListenerLogic = fromCallback<ControlsListenerEvent, ControlsListen
     };
 
     const handleControlsStart = () => {
-      if (!isListening) return;
+      if (!isListening) {
+        return;
+      }
+
       sendBack({ type: 'controlsInteractionStart' });
     };
 
     const handleControlsChange = () => {
-      if (!isListening) return;
+      if (!isListening) {
+        return;
+      }
 
       // Set original distance on first change if not set
-      if (!originalDistance && controls.getDistance) {
-        originalDistance = controls.getDistance();
-      }
+      originalDistance ??= controls.getDistance();
 
       sendCurrentControlsState();
     };
 
     const handleControlsEnd = () => {
-      if (!isListening) return;
+      if (!isListening) {
+        return;
+      }
+
       sendBack({ type: 'controlsInteractionEnd' });
     };
 
@@ -102,9 +110,7 @@ const controlsListenerLogic = fromCallback<ControlsListenerEvent, ControlsListen
     controls.addEventListener('end', handleControlsEnd);
 
     // Set initial distance and send initial state
-    if (controls.getDistance) {
-      originalDistance = controls.getDistance();
-    }
+    originalDistance = controls.getDistance();
 
     // Send initial controls state
     sendCurrentControlsState(true);

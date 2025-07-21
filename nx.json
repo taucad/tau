@@ -30,11 +30,20 @@
         "serveStaticTargetName": "serve-static",
         "outputPath": "dist"
       }
+    },
+    {
+      "plugin": "@nx/eslint/plugin",
+      "options": {
+        "targetName": "lint",
+        "eslintConfig": "eslint.config.ts"
+      }
     }
   ],
   "targetDefaults": {
     "e2e-ci--**/*": {
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build"
+      ]
     },
     "deploy": {
       "executor": "nx:run-commands",
@@ -58,7 +67,11 @@
   },
   "nxCloudId": "687b39d7852b9a43a8bba201",
   "namedInputs": {
-    "sharedGlobals": ["{workspaceRoot}/.github/workflows/ci.yml"],
-    "default": ["sharedGlobals"]
+    "sharedGlobals": [
+      "{workspaceRoot}/.github/workflows/ci.yml"
+    ],
+    "default": [
+      "sharedGlobals"
+    ]
   }
 }

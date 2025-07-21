@@ -1,11 +1,25 @@
 import xo from 'xo';
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
-import type { Linter } from 'eslint';
 
-const config: Linter.Config[] = [
+/**
+ * @type {import('eslint').Linter.Config[]}
+ */
+const config = [
+  // First, apply XO's base configuration
   ...xo.xoToEslintConfig([{ space: true, react: true, prettier: 'compat' }]),
   eslintPluginPrettierRecommended,
   {
+    // Ensure TypeScript support is properly configured
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+  {
+    // Apply custom rules only to TypeScript files to ensure the plugin is available
+    files: ['**/*.ts', '**/*.tsx'],
     rules: {
       // Require a description for each ESLint rule comment. This informs co-authors about the rule and why it is being applied.
       '@eslint-community/eslint-comments/require-description': ['error', { ignore: [] }],
@@ -101,13 +115,6 @@ const config: Linter.Config[] = [
           ],
         },
       ],
-    },
-    // Configure Typescript support
-    languageOptions: {
-      parserOptions: {
-        projectService: true,
-        tsconfigRootDir: import.meta.dirname,
-      },
     },
   },
   {

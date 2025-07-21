@@ -60,11 +60,8 @@ export function ThreeProvider({
       dpr={dpr}
       frameloop="demand"
       className={cn('bg-background', className)}
-      onCreated={(state) => {
-        // Make sure the WebGLRenderer is fully initialized
-        if (state.gl?.domElement) {
-          setIsCanvasReady(true);
-        }
+      onCreated={() => {
+        setIsCanvasReady(true);
       }}
       {...properties}
     >

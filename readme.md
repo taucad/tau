@@ -33,7 +33,7 @@ Your AI-powered workshop companion - a free, open-source CAD platform that works
 
 4. Start the development servers:
    ```bash
-   pnpm start
+   pnpm dev
    ```
 
    That's it! You can now start developing.

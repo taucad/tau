@@ -7,7 +7,7 @@
       "options": {
         "buildTargetName": "build",
         "devTargetName": "dev",
-        "startTargetName": "start",
+        "startTargetName": "serve",
         "watchDepsTargetName": "watch-deps",
         "buildDepsTargetName": "build-deps",
         "typecheckTargetName": "typecheck"

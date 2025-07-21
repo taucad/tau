@@ -180,6 +180,7 @@ function ProjectCard({
               </div>
             ) : null}
             <CadViewer
+              enablePan={false}
               enableLines={false}
               shapes={shapes}
               className="bg-muted"

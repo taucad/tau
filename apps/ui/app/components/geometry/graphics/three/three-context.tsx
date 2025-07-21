@@ -14,6 +14,7 @@ export type ThreeViewerProperties = {
   readonly enableGrid?: boolean;
   readonly enableAxes?: boolean;
   readonly enableZoom?: boolean;
+  readonly enablePan?: boolean;
   readonly enableDamping?: boolean;
   readonly className?: string;
   readonly enableCentering?: boolean;
@@ -30,6 +31,7 @@ export function ThreeProvider({
   enableGrid = false,
   enableAxes = false,
   enableZoom = false,
+  enablePan = false,
   enableDamping = false,
   className,
   stageOptions,
@@ -69,6 +71,7 @@ export function ThreeProvider({
         enableCentering={enableCentering}
         enableDamping={enableDamping}
         enableZoom={enableZoom}
+        enablePan={enablePan}
         enableGrid={enableGrid}
         enableAxes={enableAxes}
         stageOptions={stageOptions}

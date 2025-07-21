@@ -690,6 +690,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
             ) : null}
             <CadViewer
               shapes={shapes}
+              enablePan={false}
               enableLines={false}
               className="bg-muted"
               stageOptions={{

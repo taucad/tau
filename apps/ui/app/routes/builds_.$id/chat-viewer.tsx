@@ -31,6 +31,7 @@ export const ChatViewer = memo(function () {
         ) : (
           <CadViewer
             enableZoom
+            enablePan
             enableGizmo={enableGizmo}
             enableGrid={enableGrid}
             enableAxes={enableAxes}

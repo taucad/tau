@@ -292,5 +292,12 @@ export function InfiniteGrid({
     materialRef.current = material;
   }, [material]);
 
-  return <Plane userData={{ isPreviewOnly: true }} material={material} renderOrder={9999} />;
+  return (
+    <Plane
+      frustumCulled={false} // Ensure the grid is always rendered
+      userData={{ isPreviewOnly: true }}
+      material={material}
+      renderOrder={9999}
+    />
+  );
 }

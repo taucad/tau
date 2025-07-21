@@ -13,7 +13,7 @@ export const ChatViewer = memo(function () {
   const status = useSelector(cadActor, (state) => state.value);
 
   // Get all visibility states from graphics machine
-  const enableSurface = useSelector(graphicsActor, (state) => state.context.enableSurface);
+  const enableSurfaces = useSelector(graphicsActor, (state) => state.context.enableSurfaces);
   const enableLines = useSelector(graphicsActor, (state) => state.context.enableLines);
   const enableGizmo = useSelector(graphicsActor, (state) => state.context.enableGizmo);
   const enableGrid = useSelector(graphicsActor, (state) => state.context.enableGrid);
@@ -34,7 +34,7 @@ export const ChatViewer = memo(function () {
             enableGizmo={enableGizmo}
             enableGrid={enableGrid}
             enableAxes={enableAxes}
-            enableSurface={enableSurface}
+            enableSurfaces={enableSurfaces}
             enableLines={enableLines}
             shapes={shapes}
           />

@@ -6,25 +6,39 @@
   "tags": [],
   "// targets": "to see all targets run: nx show project ui --web",
   "targets": {
-      "build": {
-        "executor": "nx:run-commands",
-        "outputs": ["{projectRoot}/build"],
-        "options": {
-          "command": "react-router build",
-          "cwd": "apps/ui",
-          "env": {
-            "NODE_OPTIONS": "--max-old-space-size=4096"
-          }
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": [
+        "{projectRoot}/build"
+      ],
+      "options": {
+        "command": "react-router build",
+        "cwd": "apps/ui",
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=4096"
         }
-      },
+      }
+    },
     "test": {
-      "outputs": ["{workspaceRoot}/coverage/apps/ui"],
+      "outputs": [
+        "{workspaceRoot}/coverage/apps/ui"
+      ],
       "options": {},
       "configurations": {
         "watch": {
           "watch": true
         }
       }
+    },
+    "typegen": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "react-router typegen",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "typecheck": {
+      "dependsOn": ["typegen"]
     },
     "deploy": {
       "executor": "nx:run-commands",

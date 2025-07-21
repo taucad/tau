@@ -1,8 +1,9 @@
 /* eslint-disable react/no-unknown-property -- TODO: fix this */
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useThree } from '@react-three/fiber';
+import { useState, useRef, useLayoutEffect } from 'react';
 import type { Mesh, BufferGeometry, Material, Object3D } from 'three';
 import { LineBasicMaterial, EdgesGeometry } from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { GLTFLoader } from 'three-stdlib';
 import { MatcapMaterial } from '~/components/geometry/graphics/three/matcap-material.js';
 import type { ShapeGLTF } from '~/types/cad.types.js';
 
@@ -17,6 +18,7 @@ export function GltfMesh({
   enableSurfaces = true,
   enableLines = true,
 }: GltfMeshProperties): React.JSX.Element {
+  const { invalidate } = useThree();
   const [meshData, setMeshData] = useState<
     | {
         geometry: BufferGeometry;
@@ -26,7 +28,6 @@ export function GltfMesh({
     | undefined
   >(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
-  const [isLoading, setIsLoading] = useState(true);
 
   // Track resources for proper cleanup
   const resourcesRef = useRef<{
@@ -35,34 +36,11 @@ export function GltfMesh({
     edgeMaterial?: Material;
   }>({});
 
-  // Cleanup function to prevent memory leaks
-  const cleanup = useCallback(() => {
-    const resources = resourcesRef.current;
-    if (resources.geometry) {
-      resources.geometry.dispose();
-    }
-
-    if (resources.edgeGeometry) {
-      resources.edgeGeometry.dispose();
-    }
-
-    if (resources.edgeMaterial) {
-      resources.edgeMaterial.dispose();
-    }
-
-    resourcesRef.current = {};
-  }, []);
-
-  useEffect(() => {
+  useLayoutEffect(() => {
     const loadGltf = async (): Promise<void> => {
-      setIsLoading(true);
       setError(undefined);
 
-      // Clean up previous resources
-      cleanup();
-
       try {
-        // Convert blob to ArrayBuffer more efficiently
         const arrayBuffer = await gltfBlob.arrayBuffer();
 
         // Validate ArrayBuffer
@@ -89,14 +67,24 @@ export function GltfMesh({
             }
           }
         });
-
         if (!geometry) {
           throw new Error('No valid mesh geometry found in GLTF');
+        }
+
+        // Validate geometry has vertices
+        const positionAttribute = geometry.attributes['position'];
+        if (!positionAttribute || positionAttribute.count === 0) {
+          throw new Error('Geometry has no vertices');
         }
 
         // Optimize geometry for rendering
         if (!geometry.attributes['normal']) {
           geometry.computeVertexNormals();
+        }
+
+        // Validate that bounding box was computed successfully
+        if (!geometry.boundingBox || geometry.boundingBox.isEmpty()) {
+          throw new Error('Failed to compute valid bounding box for geometry');
         }
 
         // Create edge geometry with error handling
@@ -124,23 +112,30 @@ export function GltfMesh({
           edgeMaterial,
         });
         setError(undefined);
-        setIsLoading(false);
       } catch (parseError: unknown) {
         const errorMessage = parseError instanceof Error ? parseError.message : 'Failed to parse GLTF data';
         console.warn('GLTF parsing error:', errorMessage);
         setError(errorMessage);
         setMeshData(undefined);
-        setIsLoading(false);
+      } finally {
+        invalidate();
       }
     };
 
     void loadGltf();
+  }, [gltfBlob, invalidate]);
 
-    // Cleanup on unmount or dependency change
+  useLayoutEffect(() => {
     return () => {
-      cleanup();
+      // Cleanup function to prevent memory leaks
+      const resources = resourcesRef.current;
+      resources.geometry?.dispose();
+      resources.edgeGeometry?.dispose();
+      resources.edgeMaterial?.dispose();
+
+      resourcesRef.current = {};
     };
-  }, [gltfBlob, cleanup]);
+  }, []);
 
   // Show error state with more informative display
   if (error) {
@@ -148,35 +143,26 @@ export function GltfMesh({
     return <group name={`${name}-error`} />;
   }
 
-  // Show loading state
-  if (isLoading || !meshData) {
-    return <group name={`${name}-loading`} />;
-  }
-
   // Manual mesh construction with optimized settings
   return (
     <group name={name}>
       {/* Main mesh with MatCap material and vertex colors */}
-      {enableSurface ? (
-        <mesh
-          castShadow
-          receiveShadow
-          frustumCulled // Enable frustum culling for performance
-          geometry={meshData.geometry}
-        >
-          <MatcapMaterial vertexColors polygonOffset polygonOffsetFactor={1} side={2} polygonOffsetUnits={1} />
-        </mesh>
-      ) : null}
+      <mesh
+        frustumCulled={false} // Don't cull the mesh
+        visible={enableSurfaces}
+        geometry={meshData?.geometry}
+      >
+        <MatcapMaterial vertexColors polygonOffset polygonOffsetFactor={1} side={2} polygonOffsetUnits={1} />
+      </mesh>
 
       {/* Edge lines with optimized settings */}
-      {enableLines ? (
-        <lineSegments
-          frustumCulled
-          geometry={meshData.edgeGeometry}
-          material={meshData.edgeMaterial}
-          renderOrder={1} // Render after main mesh
-        />
-      ) : null}
+      <lineSegments
+        frustumCulled={false} // Don't cull the lines
+        visible={enableLines}
+        geometry={meshData?.edgeGeometry}
+        material={meshData?.edgeMaterial}
+        renderOrder={1} // Render after main mesh
+      />
     </group>
   );
 }

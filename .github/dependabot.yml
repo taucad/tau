@@ -42,7 +42,6 @@ updates:
       # Group testing frameworks
       testing-frameworks:
         patterns:
-          - "*jest*"
           - "*vitest*"
           - "@vitest/*"
           - "playwright*"

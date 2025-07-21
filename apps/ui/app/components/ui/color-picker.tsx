@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { ComponentProps, JSX, RefObject } from 'react';
+import type { ComponentProps, RefObject } from 'react';
 import type { HslColor } from 'react-colorful';
 import { RotateCcw } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
@@ -30,7 +30,8 @@ function ColorPicker({
   onReset,
   ref,
   ...properties
-}: Omit<React.ComponentProps<typeof Button>, 'value' | 'onChange' | 'onBlur'> & ColorPickerProperties): JSX.Element {
+}: Omit<React.ComponentProps<typeof Button>, 'value' | 'onChange' | 'onBlur'> &
+  ColorPickerProperties): React.JSX.Element {
   const [open, setOpen] = useState(false);
 
   const handleChange = (value: HslColor) => {
@@ -94,7 +95,7 @@ function ColorPicker({
               '[&_[data-slot="slider-thumb"]]:border-2',
             )}
             onValueChange={([h]) => {
-              handleChange({ h, s: 50, l: 50 });
+              handleChange({ h: Number(h), s: 50, l: 50 });
             }}
           />
           <Tooltip>

@@ -10,11 +10,13 @@ type CheckboxProps = React.ComponentProps<typeof CheckboxPrimitive.Root> &
   };
 
 function Checkbox({ className, onCheckedChange, size = 'default', ...props }: CheckboxProps): React.JSX.Element {
-  const [isChecked, setIsChecked] = React.useState(props?.checked ?? props?.defaultChecked ?? false);
+  const [isChecked, setIsChecked] = React.useState(props.checked ?? props.defaultChecked ?? false);
 
   React.useEffect(() => {
-    if (props?.checked !== undefined) setIsChecked(props.checked);
-  }, [props?.checked]);
+    if (props.checked !== undefined) {
+      setIsChecked(props.checked);
+    }
+  }, [props.checked]);
 
   const handleCheckedChange = React.useCallback(
     (checked: boolean) => {

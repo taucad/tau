@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { Switch } from '~/components/ui/switch.js';
 
 type ChatParametersBooleanProps = {
@@ -7,7 +6,7 @@ type ChatParametersBooleanProps = {
   readonly onChange: (value: boolean) => void;
 };
 
-export function ChatParametersBoolean({ value, onChange }: ChatParametersBooleanProps): JSX.Element {
+export function ChatParametersBoolean({ value, onChange }: ChatParametersBooleanProps): React.JSX.Element {
   return (
     <Switch
       size="lg"

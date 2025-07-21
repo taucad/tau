@@ -51,7 +51,7 @@ type ColorContextType = {
 
 const ColorContext = createContext<ColorContextType | undefined>(undefined);
 
-export function ColorProvider({ children }: { readonly children: ReactNode }): JSX.Element {
+export function ColorProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const [hue, setHue] = useCookie(cookieName.colorHue, defaultHue);
 
   // Update styles whenever the colorCookie changes

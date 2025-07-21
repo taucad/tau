@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import type { JSX } from 'react';
 import { RgbColorPicker } from 'react-colorful';
 import type { RgbColor } from 'react-colorful';
 import { parse, converter } from 'culori';
@@ -217,7 +216,7 @@ const baseIndicatorClass = 'flex h-7 w-7 items-center justify-center border bg-m
  * String Color Picker Component
  * Uses react-colorful for color selection with RGB values (no alpha)
  */
-export function StringColorPicker({ value, onChange, className }: StringColorPickerProperties): JSX.Element {
+export function StringColorPicker({ value, onChange, className }: StringColorPickerProperties): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [temporaryColor, setTemporaryColor] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);

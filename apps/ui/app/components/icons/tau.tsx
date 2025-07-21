@@ -1,6 +1,4 @@
-import type { JSX } from 'react';
-
-export function Tau(properties: React.SVGProps<SVGSVGElement>): JSX.Element {
+export function Tau(properties: React.SVGProps<SVGSVGElement>): React.JSX.Element {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" {...properties}>
       <path

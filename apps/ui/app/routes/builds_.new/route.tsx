@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import type { JSX } from 'react';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
 import { Button } from '~/components/ui/button.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '~/components/ui/card.js';
@@ -81,7 +80,7 @@ function useBuildCreation() {
   return { createBuild, isCreating };
 }
 
-export default function BuildsNew(): JSX.Element {
+export default function BuildsNew(): React.JSX.Element {
   const navigate = useNavigate();
   const { createBuild, isCreating } = useBuildCreation();
 

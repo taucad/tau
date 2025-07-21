@@ -1,6 +1,5 @@
 import { Link, useNavigate } from 'react-router';
 import { useCallback } from 'react';
-import type { JSX } from 'react';
 import type { ChatTextareaProperties } from '~/components/chat/chat-textarea.js';
 import { ChatTextarea } from '~/components/chat/chat-textarea.js';
 import { KernelSelector } from '~/components/chat/kernel-selector.js';
@@ -22,7 +21,7 @@ import type { KernelProvider } from '~/types/kernel.types.js';
 import useCookie from '~/hooks/use-cookie.js';
 import { cookieName } from '~/constants/cookie.constants.js';
 
-export default function ChatStart(): JSX.Element {
+export default function ChatStart(): React.JSX.Element {
   const navigate = useNavigate();
   const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
 

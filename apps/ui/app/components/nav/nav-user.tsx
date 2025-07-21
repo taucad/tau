@@ -2,7 +2,6 @@ import { AuthUIContext, SignedIn, SignedOut, UserAvatar, UserButton } from '@dav
 import type { UserButtonProps } from '@daveyplate/better-auth-ui';
 import { CreditCard, Sparkles } from 'lucide-react';
 import { useContext } from 'react';
-import type { JSX } from 'react';
 import { Link } from 'react-router';
 import { Button } from '~/components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
@@ -22,7 +21,7 @@ const additionalUserButtonLinks: UserButtonProps['additionalLinks'] = [
   },
 ];
 
-export function NavUser(): JSX.Element {
+export function NavUser(): React.JSX.Element {
   const { hooks } = useContext(AuthUIContext);
   const { data: session } = hooks.useSession();
 

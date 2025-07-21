@@ -1,5 +1,4 @@
 import React from 'react';
-import type { JSX } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { Slot } from '@radix-ui/react-slot';
 import { cn } from '~/utils/ui.js';
@@ -14,7 +13,7 @@ export function InteractiveHoverButton({
   className,
   asChild,
   ...props
-}: InteractiveHoverButtonProps): JSX.Element {
+}: InteractiveHoverButtonProps): React.JSX.Element {
   const Comp = asChild ? Slot : 'button';
 
   return (

@@ -11,7 +11,6 @@ import {
   Terminal,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { JSX } from 'react';
 import { useSelector, useActorRef } from '@xstate/react';
 import { Link, useNavigate } from 'react-router';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
@@ -42,7 +41,7 @@ type CommandPaletteItem = {
   id: string;
   label: string;
   group: string;
-  icon: JSX.Element;
+  icon: React.JSX.Element;
   action?: () => void;
   disabled?: boolean;
   shortcut?: string;
@@ -55,7 +54,7 @@ type CommandPaletteProperties = {
   readonly onOpenChange: (isOpen: boolean) => void;
 };
 
-export function CommandPalette({ isOpen, onOpenChange }: CommandPaletteProperties): JSX.Element {
+export function CommandPalette({ isOpen, onOpenChange }: CommandPaletteProperties): React.JSX.Element {
   const navigate = useNavigate();
   const shapes = useSelector(cadActor, (state) => state.context.shapes);
   const buildName = useBuildSelector((state) => state.build?.name) ?? 'file';
@@ -605,7 +604,7 @@ const commandKeyCombination = {
   metaKey: true,
 } as const satisfies KeyCombination;
 
-export function CommandPaletteTrigger(): JSX.Element {
+export function CommandPaletteTrigger(): React.JSX.Element {
   const [open, setOpen] = useState(false);
 
   const { formattedKeyCombination } = useKeydown(commandKeyCombination, () => {

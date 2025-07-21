@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-condition -- TODO: review these types, some are actually required */
 import { useThree, useFrame } from '@react-three/fiber';
 import type { GizmoAxisOptions, GizmoOptions } from 'three-viewport-gizmo';
 import { ViewportGizmo } from 'three-viewport-gizmo';
@@ -149,13 +150,13 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
 
   // Define event handlers using useCallback to maintain references
   const handleStart = useCallback(() => {
-    if (controls?.update) {
+    if (controls.update) {
       controls.update();
     }
   }, [controls]);
 
   const handleChange = useCallback(() => {
-    if (controls?.update) {
+    if (controls.update) {
       controls.update();
     }
 
@@ -165,7 +166,7 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
   }, [controls, gl, scene, camera]);
 
   const handleEnd = useCallback(() => {
-    if (controls?.update) {
+    if (controls.update) {
       controls.update();
     }
 
@@ -177,7 +178,9 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
   // Create DOM overlay for gizmo
   useEffect(() => {
     // Early return if we don't have the required components
-    if (!camera || !gl || !controls) return;
+    if (!camera || !gl || !controls) {
+      return;
+    }
 
     function animation() {
       // Render the Gizmo
@@ -194,7 +197,9 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
 
     // Find the parent container to append our canvas
     const container = gl.domElement.parentElement;
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     // Append the canvas to the container
     container.append(canvas);

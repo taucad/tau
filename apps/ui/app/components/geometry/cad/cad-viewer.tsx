@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { ReplicadMesh } from '~/components/geometry/kernel/replicad/replicad-mesh.js';
 import { GltfMesh } from '~/components/geometry/graphics/three/gltf-mesh.js';
 import { ThreeProvider } from '~/components/geometry/graphics/three/three-context.js';
@@ -17,7 +16,7 @@ export function CadViewer({
   enableSurfaces = true,
   enableLines = true,
   ...properties
-}: CadViewerProperties): JSX.Element {
+}: CadViewerProperties): React.JSX.Element {
   const svgShapes = shapes.filter((shape) => shape.type === '2d');
 
   // If there are any SVG shapes, we render them in a SVG viewer

@@ -38,7 +38,7 @@ const getFileTree = (build: Build): FileItem[] => {
   }));
 };
 
-export const ChatEditor = memo(function ({ className }: { readonly className?: string }): JSX.Element {
+export const ChatEditor = memo(function ({ className }: { readonly className?: string }): React.JSX.Element {
   const monaco = useMonaco();
   const { build } = useBuild();
   const activeBuildId = useRef<string | undefined>(build?.id);

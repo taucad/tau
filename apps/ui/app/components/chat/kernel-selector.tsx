@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { Button } from '~/components/ui/button.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '~/components/ui/hover-card.js';
 import { Badge } from '~/components/ui/badge.js';
@@ -13,7 +12,11 @@ export type KernelSelectorProperties = {
   readonly onClose?: () => void;
 };
 
-export function KernelSelector({ selectedKernel, onKernelChange, onClose }: KernelSelectorProperties): JSX.Element {
+export function KernelSelector({
+  selectedKernel,
+  onKernelChange,
+  onClose,
+}: KernelSelectorProperties): React.JSX.Element {
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
       {kernelOptions.map((option) => (

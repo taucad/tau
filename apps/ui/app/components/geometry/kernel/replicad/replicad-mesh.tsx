@@ -14,8 +14,11 @@ export const useApplyHighlights = (geometry: BufferGeometry, highlight: number |
   useLayoutEffect(() => {
     let toHighlight = highlight;
 
-    if (!highlight && highlight !== 0) toHighlight = [];
-    else if (!Array.isArray(highlight)) toHighlight = [highlight];
+    if (!highlight && highlight !== 0) {
+      toHighlight = [];
+    } else if (!Array.isArray(highlight)) {
+      toHighlight = [highlight];
+    }
 
     r3js.highlightInGeometry(toHighlight, geometry);
     invalidate();
@@ -29,7 +32,10 @@ export const useFaceEvent = (onEvent: (event: ThreeEvent<MouseEvent>, faceIndex:
   }, [onEvent]);
 
   return useCallback((event: ThreeEvent<MouseEvent>) => {
-    if (!function_.current) return;
+    if (!function_.current) {
+      return;
+    }
+
     const faceIndex = r3js.getFaceIndex(event.faceIndex, event.object.geometry);
     function_.current(event, faceIndex);
   }, []);
@@ -66,10 +72,14 @@ export const ReplicadMesh = React.memo(function ({
 
   const onClick = useFaceEvent(onFaceClick);
   const onHover = (event?: ThreeEvent<MouseEvent>) => {
-    if (!faceHover) return;
+    if (!faceHover) {
+      return;
+    }
+
     let toHighlight;
-    if (event === undefined) toHighlight = [];
-    else {
+    if (event === undefined) {
+      toHighlight = [];
+    } else {
       const faceIndex = r3js.getFaceIndex(event.faceIndex, event.object.geometry);
       toHighlight = [faceIndex];
     }
@@ -79,7 +89,9 @@ export const ReplicadMesh = React.memo(function ({
   };
 
   useLayoutEffect(() => {
-    if (!faceHover && body.current) r3js.highlightInGeometry([], body.current);
+    if (!faceHover && body.current) {
+      r3js.highlightInGeometry([], body.current);
+    }
   }, [faceHover]);
 
   useLayoutEffect(() => {

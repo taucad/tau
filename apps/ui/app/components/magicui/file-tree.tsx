@@ -79,7 +79,10 @@ function Tree({
   }, []);
 
   const expandSpecificTargetedElements = useCallback((elements?: TreeViewElement[], selectId?: string) => {
-    if (!elements || !selectId) return;
+    if (!elements || !selectId) {
+      return;
+    }
+
     const findParent = (currentElement: TreeViewElement, currentPath: string[] = []) => {
       const isSelectable = currentElement.isSelectable ?? true;
       const newPath = [...currentPath, currentElement.id];
@@ -140,7 +143,7 @@ function Tree({
           className="flex w-full flex-col gap-1"
           dir={dir as Direction}
           onValueChange={(value) => {
-            setExpandedItems?.((previous) => [...(previous ?? []), value[0]]);
+            setExpandedItems((previous) => [...(previous ?? []), value[0]]);
           }}
         >
           {children}

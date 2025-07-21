@@ -1,5 +1,4 @@
 import { useCallback } from 'react';
-import type { JSX } from 'react';
 import { FileExplorerContext } from '~/routes/builds_.$id/graphics-actor.js';
 import { Tree, Folder, File } from '~/components/magicui/file-tree.js';
 import type { TreeViewElement } from '~/components/magicui/file-tree.js';
@@ -32,7 +31,7 @@ function findFileById(items: FileItem[], id: string): FileItem | undefined {
   return undefined;
 }
 
-export function ChatEditorFileTree(): JSX.Element {
+export function ChatEditorFileTree(): React.JSX.Element {
   const fileTree = FileExplorerContext.useSelector((state) => state.context.fileTree);
   const activeFileId = FileExplorerContext.useSelector((state) => state.context.activeFileId);
   const actorRef = FileExplorerContext.useActorRef();
@@ -76,7 +75,7 @@ type TreeItemProps = {
   readonly activeFileId: string | undefined;
 };
 
-function TreeItem({ element, onSelect, activeFileId }: TreeItemProps): JSX.Element {
+function TreeItem({ element, onSelect, activeFileId }: TreeItemProps): React.JSX.Element {
   if (element.children && element.children.length > 0) {
     return (
       <Folder

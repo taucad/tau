@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import type { JSX } from 'react';
 import { Link } from 'react-router';
 import { Search, Code2, SlidersHorizontal } from 'lucide-react';
 import { Button } from '~/components/ui/button.js';
@@ -32,7 +31,7 @@ export const handle: Handle = {
 const itemsPerPage = 9;
 type SortOption = 'newest' | 'oldest' | 'stars' | 'forks';
 
-export default function CadCommunity(): JSX.Element {
+export default function CadCommunity(): React.JSX.Element {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedKernel, setSelectedKernel] = useState<KernelProvider | 'all'>('all');
   const [sortOption, setSortOption] = useState<SortOption>('newest');

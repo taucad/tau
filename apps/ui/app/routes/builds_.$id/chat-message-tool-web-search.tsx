@@ -1,6 +1,5 @@
 import { ChevronRight } from 'lucide-react';
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
-import type { JSX } from 'react';
 import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '~/components/ui/sheet.js';
 import { Badge } from '~/components/ui/badge.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '~/components/ui/tooltip.js';
@@ -17,7 +16,7 @@ import { extractDomainFromUrl, createFaviconUrl } from '~/utils/url.js';
 //   { icon: Projector, key: 'projects' },
 // ] as const satisfies { icon: React.ElementType; key: SourceOrigin }[];
 
-export function ChatMessageToolWebSearch({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
+export function ChatMessageToolWebSearch({ part }: { readonly part: ToolInvocationUIPart }): React.JSX.Element {
   switch (part.toolInvocation.state) {
     case 'call':
     case 'partial-call': {

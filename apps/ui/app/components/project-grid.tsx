@@ -30,7 +30,7 @@ export type CommunityBuildGridProperties = {
   readonly onLoadMore?: () => void;
 };
 
-export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBuildGridProperties): JSX.Element {
+export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBuildGridProperties): React.JSX.Element {
   return (
     <>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

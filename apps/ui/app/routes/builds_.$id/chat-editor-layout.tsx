@@ -1,6 +1,5 @@
 import type { ClassValue } from 'clsx';
 import { ArrowRightToLine } from 'lucide-react';
-import type { JSX } from 'react';
 import { Button } from '~/components/ui/button.js';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '~/components/ui/resizable.js';
@@ -18,7 +17,7 @@ const keyCombinationFileExplorer = {
   ctrlKey: true,
 } as const satisfies KeyCombination;
 
-export function ChatEditorLayout({ className }: { readonly className?: ClassValue }): JSX.Element {
+export function ChatEditorLayout({ className }: { readonly className?: ClassValue }): React.JSX.Element {
   const [explorerSize, setExplorerSize] = useCookie(cookieName.chatResizeExplorer, [20, 80]);
   const [isExplorerOpen, setIsExplorerOpen] = useCookie(cookieName.chatExplorerOpen, true);
 

@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { SvgIcon } from '~/components/icons/svg-icon.js';
 import { InfoTooltip } from '~/components/info-tooltip.js';
 import { Badge } from '~/components/ui/badge.js';
@@ -11,7 +10,7 @@ import { formatCurrency } from '~/utils/currency.js';
 import { formatNumber } from '~/utils/number.js';
 
 // Single annotation component
-export function ChatMessageAnnotationUsage({ annotation }: { readonly annotation: MessageAnnotation }): JSX.Element {
+export function ChatMessageAnnotationUsage({ annotation }: { readonly annotation: MessageAnnotation }): React.JSX.Element {
   const { data: models } = useModels();
 
   switch (annotation.type) {
@@ -129,7 +128,7 @@ export function ChatMessageAnnotationUsageAggregated({
   annotations,
 }: {
   readonly annotations: MessageAnnotation[];
-}): JSX.Element {
+}): React.JSX.Element {
   const { data: models } = useModels();
 
   // Filter for usage annotations only

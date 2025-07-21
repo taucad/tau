@@ -3,12 +3,11 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import type { JSX } from 'react';
 import { ChatParameters } from '~/routes/builds_.$id/chat-parameters.js';
 import { TooltipProvider } from '~/components/ui/tooltip.js';
 
 // Test wrapper component that provides necessary providers
-function TestWrapper({ children }: { readonly children: React.ReactNode }): JSX.Element {
+function TestWrapper({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const queryClient = useMemo(
     () =>
       new QueryClient({

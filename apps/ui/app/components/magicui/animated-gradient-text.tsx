@@ -14,7 +14,7 @@ export function AnimatedGradientText({
   colorFrom = '#ffaa40',
   colorTo = '#9c40ff',
   ...props
-}: AnimatedGradientTextProps): JSX.Element {
+}: AnimatedGradientTextProps): React.JSX.Element {
   return (
     <span
       style={

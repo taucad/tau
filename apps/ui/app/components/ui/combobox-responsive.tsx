@@ -49,7 +49,7 @@ export function ComboBoxResponsive<T>({
   readonly asChildLabel?: boolean;
   readonly labelClassName?: ClassValue;
   readonly isDisabled?: (item: T) => boolean;
-}): JSX.Element {
+}): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
   const isMobile = useIsMobile();
   const [selectedItem, setSelectedItem] = React.useState<T | undefined>(defaultValue);

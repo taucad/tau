@@ -1,5 +1,4 @@
 import { AuthCard } from '@daveyplate/better-auth-ui';
-import type { JSX } from 'react';
 import { Link, useLocation } from 'react-router';
 import { Tau } from '~/components/icons/tau.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
@@ -10,7 +9,7 @@ export const handle: Handle = {
   noPageWrapper: true,
 };
 
-export default function AuthPage(): JSX.Element {
+export default function AuthPage(): React.JSX.Element {
   const { pathname } = useLocation();
   return (
     <div className="grid min-h-svh lg:grid-cols-2">

@@ -1,7 +1,6 @@
 import { ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { NavLink, useMatch, useNavigate } from 'react-router';
-import type { JSX } from 'react';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
 import {
@@ -32,7 +31,7 @@ export function NavMain({
     }>;
     keyCombination?: KeyCombination;
   }>;
-}): JSX.Element {
+}): React.JSX.Element {
   return (
     <SidebarGroup>
       <SidebarGroupLabel>Platform</SidebarGroupLabel>

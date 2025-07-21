@@ -1,6 +1,5 @@
 import type { VariantProps } from 'class-variance-authority';
 import { cva } from 'class-variance-authority';
-import type { JSX } from 'react';
 import { cn } from '~/utils/ui.js';
 
 const keyboardShortcutVariants = cva(
@@ -26,6 +25,10 @@ export type KeyShortcutProperties = React.HTMLAttributes<HTMLSpanElement> &
 /**
  * Renders a key combination with proper styling
  */
-export function KeyShortcut({ children, className = '', variant = 'default' }: KeyShortcutProperties): JSX.Element {
+export function KeyShortcut({
+  children,
+  className = '',
+  variant = 'default',
+}: KeyShortcutProperties): React.JSX.Element {
   return <span className={cn(keyboardShortcutVariants({ variant, className }))}>{children}</span>;
 }

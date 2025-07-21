@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { cn } from '~/utils/ui.js';
 
-function Card({ className, ...properties }: React.ComponentProps<'div'>) {
+function Card({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div
       data-slot="card"
@@ -11,7 +11,7 @@ function Card({ className, ...properties }: React.ComponentProps<'div'>) {
   );
 }
 
-function CardHeader({ className, ...properties }: React.ComponentProps<'div'>) {
+function CardHeader({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div
       data-slot="card-header"
@@ -24,17 +24,17 @@ function CardHeader({ className, ...properties }: React.ComponentProps<'div'>) {
   );
 }
 
-function CardTitle({ className, ...properties }: React.ComponentProps<'div'>) {
+function CardTitle({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return <div data-slot="card-title" className={cn('leading-none font-semibold', className)} {...properties} />;
 }
 
-function CardDescription({ className, ...properties }: React.ComponentProps<'div'>) {
+function CardDescription({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div data-slot="card-description" className={cn('text-sm text-muted-foreground', className)} {...properties} />
   );
 }
 
-function CardAction({ className, ...properties }: React.ComponentProps<'div'>) {
+function CardAction({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div
       data-slot="card-action"
@@ -44,11 +44,11 @@ function CardAction({ className, ...properties }: React.ComponentProps<'div'>) {
   );
 }
 
-function CardContent({ className, ...properties }: React.ComponentProps<'div'>) {
+function CardContent({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return <div data-slot="card-content" className={cn('px-6', className)} {...properties} />;
 }
 
-function CardFooter({ className, ...properties }: React.ComponentProps<'div'>) {
+function CardFooter({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div data-slot="card-footer" className={cn('flex items-center px-6 [.border-t]:pt-6', className)} {...properties} />
   );

@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useEffect } from 'react';
-import type { JSX } from 'react';
 import { AtSign, Image, Code, AlertTriangle, AlertCircle, Camera } from 'lucide-react';
 import { useSelector, useActorRef } from '@xstate/react';
 import { TooltipTrigger, TooltipContent, Tooltip } from '~/components/ui/tooltip.js';
@@ -25,7 +24,7 @@ type ContextActionItem = {
   id: string;
   label: string;
   group: string;
-  icon: JSX.Element;
+  icon: React.JSX.Element;
   action: () => void;
   disabled?: boolean;
 };
@@ -39,7 +38,7 @@ export function ChatContextActions({
   selectedIndex,
   onSelectedIndexChange,
   onSelectItem,
-}: ChatContextActionsProperties): JSX.Element {
+}: ChatContextActionsProperties): React.JSX.Element {
   const kernelError = useSelector(cadActor, (state) => state.context.kernelError);
   const codeErrors = useSelector(cadActor, (state) => state.context.codeErrors);
   const code = useSelector(cadActor, (state) => state.context.code);
@@ -236,7 +235,7 @@ ${kernelError.stack ? `\n\`\`\`\n${kernelError.stack}\n\`\`\`` : ''}
         groupOrder.push(item.group);
       }
 
-      groupedContextItemsMap[item.group].items.push(item);
+      groupedContextItemsMap[item.group]!.items.push(item);
     }
 
     return Object.values(groupedContextItemsMap).sort(
@@ -292,7 +291,9 @@ ${kernelError.stack ? `\n\`\`\`\n${kernelError.stack}\n\`\`\`` : ''}
   // @ts-expect-error: todo: separate into multiple components
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!asPopoverMenu || selectedIndex === undefined || !onSelectedIndexChange) return;
+      if (!asPopoverMenu || selectedIndex === undefined || !onSelectedIndexChange) {
+        return;
+      }
 
       switch (event.key) {
         case 'ArrowDown': {

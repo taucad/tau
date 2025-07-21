@@ -1,7 +1,6 @@
 import type { MotionProps } from 'motion/react';
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
-import type { JSX } from 'react';
 import { cn } from '~/utils/ui.js';
 
 type TypingAnimationProps = {
@@ -21,7 +20,7 @@ export function TypingAnimation({
   as: Component = 'div',
   shouldStartOnView = false,
   ...props
-}: TypingAnimationProps): JSX.Element {
+}: TypingAnimationProps): React.JSX.Element {
   const MotionComponent = motion.create(Component, {
     forwardMotionProps: true,
   });
@@ -62,7 +61,9 @@ export function TypingAnimation({
   }, [delay, shouldStartOnView]);
 
   useEffect(() => {
-    if (!started) return;
+    if (!started) {
+      return;
+    }
 
     let i = 0;
     const typingEffect = setInterval(() => {

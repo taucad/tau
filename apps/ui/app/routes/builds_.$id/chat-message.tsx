@@ -1,6 +1,5 @@
 import { ChevronDown, ChevronRight, Edit, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
-import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
 import { ChatMessageReasoning } from '~/routes/builds_.$id/chat-message-reasoning.js';
@@ -41,7 +40,7 @@ const getMessageContent = (message: Message): string => {
   return content.join('\n\n');
 };
 
-export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties): JSX.Element {
+export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties): React.JSX.Element {
   const message = useChatSelector((state) => state.context.messagesById.get(messageId));
   const { editMessage, retryMessage } = useChatActions();
   const [isEditing, setIsEditing] = useState(false);

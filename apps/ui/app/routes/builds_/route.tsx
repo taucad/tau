@@ -1,7 +1,6 @@
 import { Link, Outlet, redirect, useLocation, useNavigate } from 'react-router';
 import { useEffect } from 'react';
 import type { LoaderFunction } from 'react-router';
-import type { JSX } from 'react';
 import { Button } from '~/components/ui/button.js';
 import type { Handle } from '~/types/matches.types.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
@@ -38,7 +37,7 @@ export const loader: LoaderFunction = async ({ request }) => {
 };
 
 // We want to redirect to the new build page if the user navigates to the builds route
-export default function Builds(): JSX.Element {
+export default function Builds(): React.JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
 

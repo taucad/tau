@@ -44,7 +44,7 @@ export function BuildProvider({
 }: {
   readonly children: ReactNode;
   readonly buildId: string;
-}): JSX.Element {
+}): React.JSX.Element {
   const queryClient = useQueryClient();
   const mutations = useMemo(() => createBuildMutations(queryClient), [queryClient]);
 

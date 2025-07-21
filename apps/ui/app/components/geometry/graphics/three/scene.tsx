@@ -25,7 +25,7 @@ export function Scene({
   stageOptions,
   enableCentering = true,
   zoomSpeed,
-}: SceneProperties): JSX.Element {
+}: SceneProperties): React.JSX.Element {
   return (
     <>
       <Controls enableGizmo={enableGizmo} enableDamping={enableDamping} enableZoom={enableZoom} zoomSpeed={zoomSpeed} />

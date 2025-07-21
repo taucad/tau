@@ -21,7 +21,7 @@ import { NavUser } from '~/components/nav/nav-user.js';
 
 export const headerHeight = 'calc(var(--spacing) * 11)';
 
-export function Page({ error }: { readonly error?: ReactNode }): JSX.Element {
+export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Element {
   const {
     breadcrumbItems,
     hasBreadcrumbItems,

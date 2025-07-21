@@ -1,9 +1,8 @@
 import { AuthUIProvider } from '@daveyplate/better-auth-ui';
-import type { JSX } from 'react';
 import { Link } from 'react-router';
 import { authClient } from '~/lib/auth-client.js';
 
-export function AuthConfigProvider({ children }: { readonly children: React.ReactNode }): JSX.Element {
+export function AuthConfigProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   // Const rrNavigate = useNavigate();
 
   // Using these results in an inifinite redirect loop.

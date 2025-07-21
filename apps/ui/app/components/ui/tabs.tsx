@@ -7,7 +7,7 @@ import { MotionHighlight, MotionHighlightItem } from '~/components/animate-ui/ef
 
 type TabsProps = React.ComponentProps<typeof TabsPrimitive.Root>;
 
-function Tabs({ className, ...props }: TabsProps) {
+function Tabs({ className, ...props }: TabsProps): React.JSX.Element {
   return <TabsPrimitive.Root data-slot="tabs" className={cn('flex flex-col gap-2', className)} {...props} />;
 }
 
@@ -16,18 +16,20 @@ type TabsListProps = React.ComponentProps<typeof TabsPrimitive.List> & {
   readonly transition?: Transition;
 };
 
+const defaultTabsListTransition = {
+  type: 'spring',
+  stiffness: 200,
+  damping: 25,
+};
+
 function TabsList({
   ref,
   children,
   className,
   activeClassName,
-  transition = {
-    type: 'spring',
-    stiffness: 200,
-    damping: 25,
-  },
+  transition = defaultTabsListTransition,
   ...props
-}: TabsListProps) {
+}: TabsListProps): React.JSX.Element {
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- radix requires `null` ref
   const localRef = React.useRef<HTMLDivElement | null>(null);
   React.useImperativeHandle(ref, () => localRef.current!);
@@ -35,10 +37,16 @@ function TabsList({
   const [activeValue, setActiveValue] = React.useState<string | undefined>(undefined);
 
   const getActiveValue = React.useCallback(() => {
-    if (!localRef.current) return;
+    if (!localRef.current) {
+      return;
+    }
+
     const activeTab = localRef.current.querySelector<HTMLElement>('[data-state="active"]');
-    if (!activeTab) return;
-    setActiveValue(activeTab.dataset.value ?? undefined);
+    if (!activeTab) {
+      return;
+    }
+
+    setActiveValue(activeTab.dataset['value'] ?? undefined);
   }, []);
 
   React.useEffect(() => {
@@ -83,7 +91,7 @@ function TabsList({
 
 type TabsTriggerProps = React.ComponentProps<typeof TabsPrimitive.Trigger>;
 
-function TabsTrigger({ className, value, ...props }: TabsTriggerProps) {
+function TabsTrigger({ className, value, ...props }: TabsTriggerProps): React.JSX.Element {
   return (
     <MotionHighlightItem value={value} className="size-full">
       <TabsPrimitive.Trigger
@@ -105,16 +113,18 @@ type TabsContentProps = React.ComponentProps<typeof TabsPrimitive.Content> &
     readonly enableAnimation?: boolean;
   };
 
+const defaultTabsContentTransition = {
+  duration: 0.5,
+  ease: 'easeInOut',
+};
+
 function TabsContent({
   className,
   children,
   enableAnimation = true,
-  transition = {
-    duration: 0.5,
-    ease: 'easeInOut',
-  },
+  transition = defaultTabsContentTransition,
   ...props
-}: TabsContentProps) {
+}: TabsContentProps): React.JSX.Element {
   if (!enableAnimation) {
     return (
       <TabsPrimitive.Content data-slot="tabs-content" className={cn('flex-1 outline-none', className)} {...props}>
@@ -147,22 +157,33 @@ type TabsContentsProps = HTMLMotionProps<'div'> & {
   readonly transition?: Transition;
 };
 
+const defaultTabsContentsTransition = {
+  type: 'spring',
+  stiffness: 200,
+  damping: 25,
+};
+
 function TabsContents({
   children,
   className,
-  transition = { type: 'spring', stiffness: 200, damping: 25 },
+  transition = defaultTabsContentsTransition,
   ...props
-}: TabsContentsProps) {
+}: TabsContentsProps): React.JSX.Element {
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   const [height, setHeight] = React.useState(0);
 
   React.useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current) {
+      return;
+    }
 
     const resizeObserver = new ResizeObserver((entries) => {
-      const newHeight = entries?.[0]?.contentRect.height;
-      if (!newHeight) return;
+      const newHeight = entries[0]?.contentRect.height;
+      if (!newHeight) {
+        return;
+      }
+
       requestAnimationFrame(() => {
         setHeight(newHeight);
       });

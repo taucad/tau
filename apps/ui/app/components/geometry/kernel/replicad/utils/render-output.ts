@@ -58,14 +58,15 @@ function createBasicShapeConfig(
 ): Array<InputShape & { name: string }> {
   let shapes: Array<Shape | InputShape> = [];
 
-  if (!inputShapes) return [];
-
   // We accept a single shape or an array of shapes
   shapes = Array.isArray(inputShapes) ? inputShapes : [inputShapes];
 
   return shapes
     .map((inputShape) => {
-      if (isInputShape(inputShape)) return inputShape;
+      if (isInputShape(inputShape)) {
+        return inputShape;
+      }
+
       return {
         shape: inputShape,
       };
@@ -121,14 +122,22 @@ function checkShapeConfigIsValid<T extends Record<string, unknown> & { shape: un
 }
 
 const adaptSketch = (shape: Shape) => {
-  if (!(shape instanceof Sketch)) return shape;
-  if (shape.wire.isClosed) return shape.face();
+  if (!(shape instanceof Sketch)) {
+    return shape;
+  }
+
+  if (shape.wire.isClosed) {
+    return shape.face();
+  }
+
   return shape.wire;
 };
 
 const adaptSketches = (shape: Shape) => {
   const isSketches = shape instanceof Sketches || shape instanceof CompoundSketch;
-  if (!isSketches) return shape;
+  if (!isSketches) {
+    return shape;
+  }
 
   return shape.wires;
 };
@@ -219,7 +228,7 @@ function renderMesh(shapeConfig: MeshableConfiguration) {
     return shapeInfo;
   }
 
-  if (highlight)
+  if (highlight) {
     try {
       shapeInfo.highlight = highlight.find(shape).map((s: unknown) => {
         return s.hashCode;
@@ -227,13 +236,17 @@ function renderMesh(shapeConfig: MeshableConfiguration) {
     } catch (error) {
       console.error(error);
     }
+  }
 
   return shapeInfo;
 }
 
 export function render(shapes: ShapeConfig[]): Array<Shape2D | Shape3D> {
   return shapes.map((shapeConfig: ShapeConfig) => {
-    if (isSvgable(shapeConfig.shape)) return renderSvg(shapeConfig as SvgShapeConfiguration);
+    if (isSvgable(shapeConfig.shape)) {
+      return renderSvg(shapeConfig as SvgShapeConfiguration);
+    }
+
     return renderMesh(shapeConfig as MeshableConfiguration);
   });
 }

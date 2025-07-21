@@ -1,7 +1,7 @@
 import { Info } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 
-export function InfoTooltip({ tooltip }: { readonly tooltip: string }) {
+export function InfoTooltip({ tooltip }: { readonly tooltip: string }): React.JSX.Element {
   return (
     <Tooltip>
       <TooltipTrigger asChild>

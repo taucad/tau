@@ -1,10 +1,9 @@
 import { useSelector } from '@xstate/react';
-import type { JSX } from 'react';
 import type { KernelStackFrame } from '~/types/kernel.types.js';
 import { HammerAnimation } from '~/components/hammer-animation.js';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 
-function StackFrame({ frame, index }: { readonly frame: KernelStackFrame; readonly index: number }): JSX.Element {
+function StackFrame({ frame, index }: { readonly frame: KernelStackFrame; readonly index: number }): React.JSX.Element {
   const fileName = frame.fileName ?? '<unknown>';
 
   return (
@@ -38,7 +37,7 @@ function ErrorStackTrace({
   readonly startLineNumber?: number;
   readonly startColumn?: number;
   readonly stackFrames?: KernelStackFrame[];
-}): JSX.Element {
+}): React.JSX.Element {
   return (
     <div className="flex flex-col gap-2 rounded-md border border-destructive/20 bg-destructive/5 p-3 text-xs">
       {/* Error message */}
@@ -66,7 +65,7 @@ function ErrorStackTrace({
   );
 }
 
-export function ChatViewerStatus(): JSX.Element {
+export function ChatViewerStatus(): React.JSX.Element {
   const error = useSelector(cadActor, (state) => state.context.kernelError);
   const state = useSelector(cadActor, (state) => state.value);
   return (

@@ -31,12 +31,30 @@ type GridSizeIndicatorProps = {
 const getTextSizeClass = (sizeText: string) => {
   const { length } = sizeText;
 
-  if (length > 8) return 'text-[calc(var(--spacing)*1.2)]';
-  if (length > 7) return 'text-[calc(var(--spacing)*1.4)]';
-  if (length > 6) return 'text-[calc(var(--spacing)*1.6)]';
-  if (length > 5) return 'text-[calc(var(--spacing)*1.8)]';
-  if (length > 4) return 'text-[calc(var(--spacing)*2)]';
-  if (length > 3) return 'text-[calc(var(--spacing)*2.2)]';
+  if (length > 8) {
+    return 'text-[calc(var(--spacing)*1.2)]';
+  }
+
+  if (length > 7) {
+    return 'text-[calc(var(--spacing)*1.4)]';
+  }
+
+  if (length > 6) {
+    return 'text-[calc(var(--spacing)*1.6)]';
+  }
+
+  if (length > 5) {
+    return 'text-[calc(var(--spacing)*1.8)]';
+  }
+
+  if (length > 4) {
+    return 'text-[calc(var(--spacing)*2)]';
+  }
+
+  if (length > 3) {
+    return 'text-[calc(var(--spacing)*2.2)]';
+  }
+
   return 'text-[calc(var(--spacing)*3)]';
 };
 
@@ -87,7 +105,9 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
   const handleUnitChange = useCallback(
     (selectedUnit: string) => {
       const selectedOption = gridUnitOptions.find((option) => option.value === selectedUnit);
-      if (!selectedOption) return;
+      if (!selectedOption) {
+        return;
+      }
 
       setUnit(selectedUnit as GridUnitOption);
     },

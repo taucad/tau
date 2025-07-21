@@ -2,7 +2,6 @@ import { Editor, useMonaco } from '@monaco-editor/react';
 import type { EditorProps } from '@monaco-editor/react';
 import { Theme, useTheme } from 'remix-themes';
 import { useCallback, useEffect, useRef } from 'react';
-import type { JSX } from 'react';
 import { shikiToMonaco } from '@shikijs/monaco';
 import type { CompletionRegistration, Monaco, StandaloneCodeEditor } from 'monacopilot';
 import { cn } from '~/utils/ui.js';
@@ -15,7 +14,7 @@ type CodeEditorProperties = EditorProps & {
 
 await configureMonaco();
 
-export function CodeEditor({ className, ...rest }: CodeEditorProperties): JSX.Element {
+export function CodeEditor({ className, ...rest }: CodeEditorProperties): React.JSX.Element {
   const [theme] = useTheme();
   const completionRef = useRef<CompletionRegistration | undefined>(null);
 

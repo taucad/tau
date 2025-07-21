@@ -3,23 +3,26 @@ import * as SheetPrimitive from '@radix-ui/react-dialog';
 import { XIcon } from 'lucide-react';
 import { cn } from '~/utils/ui.js';
 
-function Sheet({ ...properties }: React.ComponentProps<typeof SheetPrimitive.Root>) {
+function Sheet({ ...properties }: React.ComponentProps<typeof SheetPrimitive.Root>): React.JSX.Element {
   return <SheetPrimitive.Root data-slot="sheet" {...properties} />;
 }
 
-function SheetTrigger({ ...properties }: React.ComponentProps<typeof SheetPrimitive.Trigger>) {
+function SheetTrigger({ ...properties }: React.ComponentProps<typeof SheetPrimitive.Trigger>): React.JSX.Element {
   return <SheetPrimitive.Trigger data-slot="sheet-trigger" {...properties} />;
 }
 
-function SheetClose({ ...properties }: React.ComponentProps<typeof SheetPrimitive.Close>) {
+function SheetClose({ ...properties }: React.ComponentProps<typeof SheetPrimitive.Close>): React.JSX.Element {
   return <SheetPrimitive.Close data-slot="sheet-close" {...properties} />;
 }
 
-function SheetPortal({ ...properties }: React.ComponentProps<typeof SheetPrimitive.Portal>) {
+function SheetPortal({ ...properties }: React.ComponentProps<typeof SheetPrimitive.Portal>): React.JSX.Element {
   return <SheetPrimitive.Portal data-slot="sheet-portal" {...properties} />;
 }
 
-function SheetOverlay({ className, ...properties }: React.ComponentProps<typeof SheetPrimitive.Overlay>) {
+function SheetOverlay({
+  className,
+  ...properties
+}: React.ComponentProps<typeof SheetPrimitive.Overlay>): React.JSX.Element {
   return (
     <SheetPrimitive.Overlay
       data-slot="sheet-overlay"
@@ -39,7 +42,7 @@ function SheetContent({
   ...properties
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   readonly side?: 'top' | 'right' | 'bottom' | 'left';
-}) {
+}): React.JSX.Element {
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -60,7 +63,7 @@ function SheetContent({
         {...properties}
       >
         {children}
-        <SheetPrimitive.Close className="data-[state=open]:bg-secondary absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none">
+        <SheetPrimitive.Close className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-secondary">
           <XIcon className="size-4" />
           <span className="sr-only">Close</span>
         </SheetPrimitive.Close>
@@ -69,15 +72,18 @@ function SheetContent({
   );
 }
 
-function SheetHeader({ className, ...properties }: React.ComponentProps<'div'>) {
+function SheetHeader({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return <div data-slot="sheet-header" className={cn('flex flex-col gap-1.5 p-4', className)} {...properties} />;
 }
 
-function SheetFooter({ className, ...properties }: React.ComponentProps<'div'>) {
+function SheetFooter({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return <div data-slot="sheet-footer" className={cn('mt-auto flex flex-col gap-2 p-4', className)} {...properties} />;
 }
 
-function SheetTitle({ className, ...properties }: React.ComponentProps<typeof SheetPrimitive.Title>) {
+function SheetTitle({
+  className,
+  ...properties
+}: React.ComponentProps<typeof SheetPrimitive.Title>): React.JSX.Element {
   return (
     <SheetPrimitive.Title
       data-slot="sheet-title"
@@ -87,7 +93,10 @@ function SheetTitle({ className, ...properties }: React.ComponentProps<typeof Sh
   );
 }
 
-function SheetDescription({ className, ...properties }: React.ComponentProps<typeof SheetPrimitive.Description>) {
+function SheetDescription({
+  className,
+  ...properties
+}: React.ComponentProps<typeof SheetPrimitive.Description>): React.JSX.Element {
   return (
     <SheetPrimitive.Description
       data-slot="sheet-description"

@@ -2,16 +2,12 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import katexUrl from 'katex/dist/katex.min.css?url';
-import type { LinkDescriptor } from 'react-router';
 import { memo } from 'react';
-import type { JSX } from 'react';
 import { CodeViewer } from '~/components/code-viewer.js';
+import type { CodeLanguage } from '~/components/code-viewer.js';
 import { cn } from '~/utils/ui.js';
 
-export const markdownViewerLinks: LinkDescriptor[] = [{ rel: 'stylesheet', href: katexUrl }];
-
-export const MarkdownViewer = memo(({ children }: { readonly children: string }): JSX.Element => {
+export const MarkdownViewer = memo(({ children }: { readonly children: string }): React.JSX.Element => {
   return (
     <Markdown
       className={cn(
@@ -43,11 +39,13 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
           const { children, className, ref, node, style, ...rest } = properties;
           // Const match = /language-(\w+)/.exec(className ?? '');
           const match = false;
-          const language = match ? match[1] : 'text';
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- TODO fix markdown code rendering performance. right now it's re-rendering the entire component on every change.
+          const language = (match ? match[1] : 'text') as CodeLanguage;
 
           // eslint-disable-next-line @typescript-eslint/no-base-to-string -- TODO: revisit this
           const text = String(children).replace(/\n$/, '');
 
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- see above
           return match ? (
             <div className="border-neutral-200 @container/code overflow-hidden rounded-md border font-sans">
               <div className="sticky top-0 flex flex-row items-center justify-between border-b border-neutral/20 py-1 pr-1 pl-3 text-foreground/50">

@@ -4,7 +4,7 @@ import { SearchIcon } from 'lucide-react';
 import { cn } from '~/utils/ui.js';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '~/components/ui/dialog.js';
 
-function Command({ className, ...properties }: React.ComponentProps<typeof CommandPrimitive>) {
+function Command({ className, ...properties }: React.ComponentProps<typeof CommandPrimitive>): React.JSX.Element {
   return (
     <CommandPrimitive
       data-slot="command"
@@ -22,7 +22,7 @@ function CommandDialog({
 }: React.ComponentProps<typeof Dialog> & {
   readonly title?: string;
   readonly description?: string;
-}) {
+}): React.JSX.Element {
   return (
     <Dialog {...properties}>
       <DialogHeader className="sr-only">
@@ -38,7 +38,10 @@ function CommandDialog({
   );
 }
 
-function CommandInput({ className, ...properties }: React.ComponentProps<typeof CommandPrimitive.Input>) {
+function CommandInput({
+  className,
+  ...properties
+}: React.ComponentProps<typeof CommandPrimitive.Input>): React.JSX.Element {
   return (
     <div data-slot="command-input-wrapper" className="flex h-9 items-center gap-2 border-b px-3">
       <SearchIcon className="size-4 shrink-0 opacity-50" />
@@ -54,7 +57,10 @@ function CommandInput({ className, ...properties }: React.ComponentProps<typeof 
   );
 }
 
-function CommandList({ className, ...properties }: React.ComponentProps<typeof CommandPrimitive.List>) {
+function CommandList({
+  className,
+  ...properties
+}: React.ComponentProps<typeof CommandPrimitive.List>): React.JSX.Element {
   return (
     <CommandPrimitive.List
       data-slot="command-list"
@@ -64,11 +70,14 @@ function CommandList({ className, ...properties }: React.ComponentProps<typeof C
   );
 }
 
-function CommandEmpty({ ...properties }: React.ComponentProps<typeof CommandPrimitive.Empty>) {
+function CommandEmpty({ ...properties }: React.ComponentProps<typeof CommandPrimitive.Empty>): React.JSX.Element {
   return <CommandPrimitive.Empty data-slot="command-empty" className="py-6 text-center text-sm" {...properties} />;
 }
 
-function CommandGroup({ className, ...properties }: React.ComponentProps<typeof CommandPrimitive.Group>) {
+function CommandGroup({
+  className,
+  ...properties
+}: React.ComponentProps<typeof CommandPrimitive.Group>): React.JSX.Element {
   return (
     <CommandPrimitive.Group
       data-slot="command-group"
@@ -81,7 +90,10 @@ function CommandGroup({ className, ...properties }: React.ComponentProps<typeof 
   );
 }
 
-function CommandSeparator({ className, ...properties }: React.ComponentProps<typeof CommandPrimitive.Separator>) {
+function CommandSeparator({
+  className,
+  ...properties
+}: React.ComponentProps<typeof CommandPrimitive.Separator>): React.JSX.Element {
   return (
     <CommandPrimitive.Separator
       data-slot="command-separator"
@@ -91,7 +103,10 @@ function CommandSeparator({ className, ...properties }: React.ComponentProps<typ
   );
 }
 
-function CommandItem({ className, ...properties }: React.ComponentProps<typeof CommandPrimitive.Item>) {
+function CommandItem({
+  className,
+  ...properties
+}: React.ComponentProps<typeof CommandPrimitive.Item>): React.JSX.Element {
   return (
     <CommandPrimitive.Item
       data-slot="command-item"
@@ -104,7 +119,7 @@ function CommandItem({ className, ...properties }: React.ComponentProps<typeof C
   );
 }
 
-function CommandShortcut({ className, ...properties }: React.ComponentProps<'span'>) {
+function CommandShortcut({ className, ...properties }: React.ComponentProps<'span'>): React.JSX.Element {
   return (
     <span
       data-slot="command-shortcut"

@@ -1,6 +1,5 @@
 import { Link, useParams } from 'react-router';
 import { useCallback, useEffect } from 'react';
-import type { JSX } from 'react';
 import { createActor } from 'xstate';
 import { PackagePlus } from 'lucide-react';
 // eslint-disable-next-line no-restricted-imports -- allowed for router types
@@ -138,7 +137,7 @@ function Chat() {
   return <ChatInterface />;
 }
 
-export default function ChatRoute(): JSX.Element {
+export default function ChatRoute(): React.JSX.Element {
   const { id } = useParams();
 
   if (!id) {

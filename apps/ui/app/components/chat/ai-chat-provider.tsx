@@ -12,7 +12,6 @@ import { useChat } from '@ai-sdk/react';
 import { createActorContext } from '@xstate/react';
 import { setup, assign } from 'xstate';
 import { useEffect } from 'react';
-import type { JSX } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
 import { messageStatus } from '~/types/chat.types.js';
@@ -401,7 +400,7 @@ export function AiChatProvider({
 }: {
   readonly children: React.ReactNode;
   readonly value: Omit<UseChatArgs, 'onFinish' | 'onError' | 'onResponse'>;
-}): JSX.Element {
+}): React.JSX.Element {
   return (
     <AiChatContext.Provider>
       <ChatSyncWrapper value={value}>{children}</ChatSyncWrapper>
@@ -416,7 +415,7 @@ function ChatSyncWrapper({
 }: {
   readonly children: React.ReactNode;
   readonly value: Omit<UseChatArgs, 'onFinish' | 'onError' | 'onResponse'>;
-}): JSX.Element {
+}): React.JSX.Element {
   const actorRef = AiChatContext.useActorRef();
 
   // Initialize useChat with sync callbacks
@@ -488,7 +487,7 @@ function ChatSyncWrapper({
     queueSyncChatState();
   }, [chat.messages, chat.input, chat.status, chat.error, chat.data]);
 
-  return children as JSX.Element;
+  return children as React.JSX.Element;
 }
 
 // Type-safe selector hook with full TypeScript support

@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react';
-import type { JSX } from 'react';
 import { useGLTF, useAnimations, useTexture } from '@react-three/drei';
 import type { Group, MeshBasicMaterial } from 'three';
 import { Mesh, MeshMatcapMaterial, LoopRepeat } from 'three';
@@ -26,7 +25,7 @@ type CadLoaderProperties = {
   readonly action?: Action;
 };
 
-export function CadLoader({ action = 'Idle' }: CadLoaderProperties): JSX.Element {
+export function CadLoader({ action = 'Idle' }: CadLoaderProperties): React.JSX.Element {
   const group = useRef<Group>(null);
   const { scene, animations } = useGLTF('/robot.glb');
   const { actions, mixer } = useAnimations(animations, group);

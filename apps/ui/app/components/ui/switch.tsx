@@ -47,7 +47,7 @@ function Switch({
   size,
   variant,
   ...properties
-}: React.ComponentProps<typeof SwitchPrimitive.Root> & VariantProps<typeof switchVariants>) {
+}: React.ComponentProps<typeof SwitchPrimitive.Root> & VariantProps<typeof switchVariants>): React.JSX.Element {
   return (
     <SwitchPrimitive.Root
       data-slot="switch"

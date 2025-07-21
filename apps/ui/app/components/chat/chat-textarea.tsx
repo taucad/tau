@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
-import type { JSX } from 'react';
 import { Globe, ArrowUp, Image, X, Square, CircuitBoard, ChevronDown } from 'lucide-react';
 import type { Attachment } from 'ai';
 import type { ClassValue } from 'clsx';
@@ -60,7 +59,7 @@ export const ChatTextarea = memo(function ({
   onEscapePressed,
   className,
   enableContextActions = true,
-}: ChatTextareaProperties): JSX.Element {
+}: ChatTextareaProperties): React.JSX.Element {
   const { initialInputText, initialImageUrls } = useMemo(() => {
     let initialInputText = '';
     const initialImageUrls: string[] = [];
@@ -98,7 +97,9 @@ export const ChatTextarea = memo(function ({
 
   const handleSubmit = async () => {
     // If there is no text or images, do not submit
-    if (inputText.trim().length === 0) return;
+    if (inputText.trim().length === 0) {
+      return;
+    }
 
     // The useChat hook will handle cancelling any ongoing stream
     setInputText('');
@@ -240,10 +241,14 @@ export const ChatTextarea = memo(function ({
       document.activeElement === textareaReference.current ||
       textareaReference.current?.contains(document.activeElement);
 
-    if (!isTextareaFocused) return;
+    if (!isTextareaFocused) {
+      return;
+    }
 
     const items = event.clipboardData?.items;
-    if (!items) return;
+    if (!items) {
+      return;
+    }
 
     for (const item of items) {
       if (item.type.startsWith('image/')) {

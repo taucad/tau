@@ -68,7 +68,7 @@ export function Stage({
   enableCentering = false,
   stageOptions = defaultStageOptions,
   ...properties
-}: StageProperties): JSX.Element {
+}: StageProperties): React.JSX.Element {
   const outer = React.useRef<THREE.Group>(null);
   const inner = React.useRef<THREE.Group>(null);
 

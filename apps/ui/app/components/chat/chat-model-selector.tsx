@@ -21,7 +21,7 @@ export const ChatModelSelector = memo(function ({
   onClose,
   children,
   ...props
-}: ChatModelSelectorProps): JSX.Element {
+}: ChatModelSelectorProps): React.JSX.Element {
   const { selectedModel, setSelectedModelId, data: models = [] } = useModels();
 
   const providerModelsMap = new Map<string, Model[]>();

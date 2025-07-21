@@ -51,8 +51,18 @@ function SvgGrid({ viewbox }: SvgGridProps): React.ReactElement {
 }
 
 function parseViewbox(viewbox?: string): Viewbox {
-  if (!viewbox) return { xMin: 0, yMin: 0, xMax: 0, yMax: 0, width: 0, height: 0 };
-  const [x, y, width, height] = viewbox.split(' ').map((v) => Number.parseFloat(v));
+  if (!viewbox) {
+    return { xMin: 0, yMin: 0, xMax: 0, yMax: 0, width: 0, height: 0 };
+  }
+
+  const split = viewbox.split(' ').map((v) => Number.parseFloat(v));
+
+  if (split.length !== 4 || split.some((v) => Number.isNaN(v))) {
+    throw new Error(`Invalid viewbox: ${viewbox}`);
+  }
+
+  const [x, y, width, height] = split as [number, number, number, number];
+
   return { xMin: x, yMin: y, xMax: x + width, yMax: y + height, width, height };
 }
 
@@ -78,10 +88,22 @@ const stringifyViewbox = ({ xMin, yMin, xMax, yMax }: Viewbox): string => {
 };
 
 const dashArray = (strokeType?: string): string | undefined => {
-  if (!strokeType) return undefined;
-  if (strokeType === 'solid') return undefined;
-  if (strokeType === 'dots') return '1, 2';
-  if (strokeType === 'dashes') return '5, 5';
+  if (!strokeType) {
+    return undefined;
+  }
+
+  if (strokeType === 'solid') {
+    return undefined;
+  }
+
+  if (strokeType === 'dots') {
+    return '1, 2';
+  }
+
+  if (strokeType === 'dashes') {
+    return '5, 5';
+  }
+
   return undefined;
 };
 
@@ -92,7 +114,7 @@ type ShapePathProps = {
 function ShapePath({ shape }: ShapePathProps): React.ReactElement {
   return (
     <path
-      d={shape.paths?.flat(Infinity).join(' ')}
+      d={shape.paths.flat(Infinity).join(' ')}
       strokeDasharray={dashArray(shape.strokeType)}
       vectorEffect="non-scaling-stroke"
       style={{ stroke: shape.color }}
@@ -155,7 +177,10 @@ function SvgWindow({ viewbox, enableGrid, defaultColor, children }: SvgWindowPro
   }, []);
 
   useEffect(() => {
-    if (!clientRect) return;
+    if (!clientRect) {
+      return;
+    }
+
     const marginedViewbox = addMarginToViewbox(viewbox, 0.1);
 
     const { width: rectWidth, height: rectHeight } = clientRect;
@@ -231,31 +256,27 @@ type SvgViewerProps = {
 };
 
 export function SvgViewer({
-  shapes: shape,
+  shapes: shapeOrShapes,
   enableGrid = true,
   enableRawWindow = false,
   defaultColor,
 }: SvgViewerProps): ReactNode {
   const Window = enableRawWindow ? RawCanvas : SvgWindow;
 
-  if (shape && (shape as Shape2D).format === 'svg')
-    return (
-      <Window viewbox={parseViewbox((shape as Shape2D).viewbox)} enableGrid={enableGrid} defaultColor={defaultColor}>
-        <ShapePath shape={shape as Shape2D} />
-      </Window>
-    );
-
-  if (shape && Array.isArray(shape) && shape.length > 0 && shape[0].format === 'svg') {
-    const viewbox = mergeViewboxes(shape.map((s) => s.viewbox ?? ''));
+  if (Array.isArray(shapeOrShapes)) {
+    const viewbox = mergeViewboxes(shapeOrShapes.map((s) => s.viewbox));
     return (
       <Window viewbox={viewbox} enableGrid={enableGrid} defaultColor={defaultColor}>
-        {shape.map((s) => {
-          if (s && s.format === 'svg') return <ShapePath key={s.name} shape={s} />;
-          return null;
+        {shapeOrShapes.map((s) => {
+          return <ShapePath key={s.name} shape={s} />;
         })}
       </Window>
     );
   }
 
-  return null;
+  return (
+    <Window viewbox={parseViewbox(shapeOrShapes.viewbox)} enableGrid={enableGrid} defaultColor={defaultColor}>
+      <ShapePath shape={shapeOrShapes} />
+    </Window>
+  );
 }

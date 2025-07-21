@@ -20,9 +20,9 @@ export function TeamSwitcher({
     logo: React.ComponentType<{ className: string }>;
     plan: string;
   }>;
-}) {
+}): React.JSX.Element {
   const { isMobile } = useSidebar();
-  const [activeTeam, setActiveTeam] = React.useState(teams[0]);
+  const [activeTeam, setActiveTeam] = React.useState(teams[0]!);
 
   return (
     <SidebarMenu>

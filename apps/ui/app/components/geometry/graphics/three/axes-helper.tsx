@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import * as THREE from 'three';
 import { Line } from '@react-three/drei';
 import React, { Fragment } from 'react';
@@ -43,7 +42,7 @@ export function AxesHelper({
   zAxisColor = 'rgb(37, 78, 136)',
   thickness = 1.25,
   hoverThickness = 2,
-}: CustomAxesHelperProps): JSX.Element {
+}: CustomAxesHelperProps): React.JSX.Element {
   const [hoveredAxis, setHoveredAxis] = React.useState<'x' | 'y' | 'z' | undefined>(undefined);
 
   const axes = React.useMemo(

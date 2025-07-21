@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import type { JSX } from 'react';
 import {
   Search,
   Grid,
@@ -97,7 +96,7 @@ export type BuildActions = {
   handleRestore: (build: Build) => void;
 };
 
-export default function PersonalCadProjects(): JSX.Element {
+export default function PersonalCadProjects(): React.JSX.Element {
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.buildViewMode, 'grid');
   const [showDeleted, setShowDeleted] = useState(false);

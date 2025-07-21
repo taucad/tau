@@ -1,6 +1,5 @@
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
 import { useCallback, useState, useEffect } from 'react';
-import type { JSX } from 'react';
 import { File, LoaderCircle, Play, X, ChevronDown, AlertTriangle, Bug, Camera, Check, RotateCcw } from 'lucide-react';
 import type { ToolResult } from 'ai';
 import { useActor } from '@xstate/react';
@@ -43,7 +42,7 @@ function ErrorSection({
   readonly icon: typeof AlertTriangle;
   readonly isInitiallyOpen?: boolean;
   readonly className?: string;
-}): JSX.Element | undefined {
+}): React.JSX.Element | undefined {
   const [isOpen, setIsOpen] = useState(isInitiallyOpen);
 
   if (errors.length === 0) return undefined;
@@ -101,7 +100,7 @@ function StatusIcon({
 }: {
   readonly chatStatus: 'error' | 'submitted' | 'streaming' | 'ready';
   readonly toolStatus: ToolInvocationUIPart['toolInvocation']['state'];
-}): JSX.Element {
+}): React.JSX.Element {
   if (chatStatus === 'streaming' && ['partial-call', 'call'].includes(toolStatus)) {
     return <LoaderCircle className="size-3 animate-spin" />;
   }
@@ -121,7 +120,7 @@ function Filename({
   readonly targetFile: string;
   readonly chatStatus: 'error' | 'submitted' | 'streaming' | 'ready';
   readonly toolStatus: ToolInvocationUIPart['toolInvocation']['state'];
-}): JSX.Element {
+}): React.JSX.Element {
   if (chatStatus === 'streaming' && ['partial-call', 'call'].includes(toolStatus)) {
     return <AnimatedShinyText>{targetFile}</AnimatedShinyText>;
   }
@@ -130,7 +129,7 @@ function Filename({
 }
 
 // eslint-disable-next-line complexity -- refactor later
-export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocationUIPart }): JSX.Element {
+export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocationUIPart }): React.JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const status = useChatSelector((state) => state.context.status);
 

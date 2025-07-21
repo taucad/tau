@@ -4,13 +4,12 @@ import type { Theme } from 'remix-themes';
 import { PreventFlashOnWrongTheme, ThemeProvider, useTheme } from 'remix-themes';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
-import type { JSX, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import globalStylesUrl from '~/styles/global.css?url';
 import { getEnvironment, metaConfig } from '~/config.js';
 import { Page } from '~/components/page.js';
 import { themeSessionResolver } from '~/sessions.server.js';
 import { cn } from '~/utils/ui.js';
-import { markdownViewerLinks } from '~/components/markdown-viewer.js';
 import { Toaster } from '~/components/ui/sonner.js';
 import { webManifestLinks } from '~/routes/manifest[.webmanifest].js';
 import type { Model } from '~/hooks/use-models.js';
@@ -21,11 +20,7 @@ import { TooltipProvider } from '~/components/ui/tooltip.js';
 import { AppError } from '~/components/error-page.js';
 import { AuthConfigProvider } from '~/providers/auth-provider.js';
 
-export const links: LinksFunction = () => [
-  { rel: 'stylesheet', href: globalStylesUrl },
-  ...webManifestLinks,
-  ...markdownViewerLinks,
-];
+export const links: LinksFunction = () => [{ rel: 'stylesheet', href: globalStylesUrl }, ...webManifestLinks];
 
 export const meta: MetaFunction = () => [
   { title: metaConfig.name },
@@ -64,7 +59,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 // Wrap your app with ThemeProvider.
 // `specifiedTheme` is the stored theme in the session storage.
 // `themeAction` is the action name that's used to change the theme in the session storage.
-function AppWithProviders({ error }: { readonly error?: ReactNode }): JSX.Element {
+function AppWithProviders({ error }: { readonly error?: ReactNode }): React.JSX.Element {
   const data = useLoaderData<typeof loader>();
   const queryClient = useMemo(
     () =>
@@ -80,10 +75,10 @@ function AppWithProviders({ error }: { readonly error?: ReactNode }): JSX.Elemen
   return (
     <AuthConfigProvider>
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider specifiedTheme={data?.theme} themeAction="/action/set-theme">
+        <ThemeProvider specifiedTheme={data.theme} themeAction="/action/set-theme">
           <ColorProvider>
             <TooltipProvider>
-              <App error={error} ssrTheme={data?.theme} env={data?.env} />
+              <App error={error} ssrTheme={data.theme} env={data.env} />
             </TooltipProvider>
           </ColorProvider>
         </ThemeProvider>
@@ -103,7 +98,7 @@ export function App({
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is used for system theme
   readonly ssrTheme: Theme | null;
   readonly env: Record<string, string>;
-}): JSX.Element {
+}): React.JSX.Element {
   const [theme] = useTheme();
   const color = useColor();
   const { setFaviconColor } = useFavicon();
@@ -137,6 +132,6 @@ export function App({
   );
 }
 
-export function ErrorBoundary(): JSX.Element {
+export function ErrorBoundary(): React.JSX.Element {
   return <AppWithProviders error={<AppError />} />;
 }

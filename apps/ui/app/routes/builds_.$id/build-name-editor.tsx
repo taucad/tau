@@ -1,7 +1,6 @@
 import { useChat } from '@ai-sdk/react';
 import type { Message } from 'ai';
 import { useState, useEffect } from 'react';
-import type { JSX } from 'react';
 import { Popover, PopoverTrigger, PopoverContent } from '~/components/ui/popover.js';
 import { Button } from '~/components/ui/button.js';
 import { Input } from '~/components/ui/input.js';
@@ -10,7 +9,7 @@ import { useBuild } from '~/hooks/use-build.js';
 import { useChatConstants } from '~/utils/chat.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 
-export function BuildNameEditor(): JSX.Element {
+export function BuildNameEditor(): React.JSX.Element {
   const { build, updateName, isLoading } = useBuild();
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState<string>();

@@ -1,7 +1,6 @@
 import type { ReasoningUIPart } from '@ai-sdk/ui-utils';
 import { ChevronRight } from 'lucide-react';
 import { useState } from 'react';
-import type { JSX } from 'react';
 import { Button } from '~/components/ui/button.js';
 import { cn } from '~/utils/ui.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
@@ -17,7 +16,7 @@ type ChatMessageReasoningProperties = {
   readonly hasContent: boolean;
 };
 
-export function ChatMessageReasoning({ part, hasContent }: ChatMessageReasoningProperties): JSX.Element {
+export function ChatMessageReasoning({ part, hasContent }: ChatMessageReasoningProperties): React.JSX.Element {
   const [isOpen, setIsOpen] = useState<true | undefined>();
 
   // These combinations provide the most natural experience for the user.

@@ -3,11 +3,11 @@ import { Slot } from '@radix-ui/react-slot';
 import { ChevronRight, MoreHorizontal } from 'lucide-react';
 import { cn } from '~/utils/ui.js';
 
-function Breadcrumb({ ...properties }: React.ComponentProps<'nav'>) {
+function Breadcrumb({ ...properties }: React.ComponentProps<'nav'>): React.JSX.Element {
   return <nav aria-label="breadcrumb" data-slot="breadcrumb" {...properties} />;
 }
 
-function BreadcrumbList({ className, ...properties }: React.ComponentProps<'ol'>) {
+function BreadcrumbList({ className, ...properties }: React.ComponentProps<'ol'>): React.JSX.Element {
   return (
     <ol
       data-slot="breadcrumb-list"
@@ -20,7 +20,7 @@ function BreadcrumbList({ className, ...properties }: React.ComponentProps<'ol'>
   );
 }
 
-function BreadcrumbItem({ className, ...properties }: React.ComponentProps<'li'>) {
+function BreadcrumbItem({ className, ...properties }: React.ComponentProps<'li'>): React.JSX.Element {
   return (
     <li data-slot="breadcrumb-item" className={cn('inline-flex items-center gap-1.5', className)} {...properties} />
   );
@@ -32,13 +32,13 @@ function BreadcrumbLink({
   ...properties
 }: React.ComponentProps<'a'> & {
   readonly asChild?: boolean;
-}) {
+}): React.JSX.Element {
   const Comp = asChild ? Slot : 'a';
 
   return <Comp data-slot="breadcrumb-link" className={cn('hover:text-foreground', className)} {...properties} />;
 }
 
-function BreadcrumbPage({ className, ...properties }: React.ComponentProps<'span'>) {
+function BreadcrumbPage({ className, ...properties }: React.ComponentProps<'span'>): React.JSX.Element {
   return (
     <span
       data-slot="breadcrumb-page"
@@ -51,7 +51,7 @@ function BreadcrumbPage({ className, ...properties }: React.ComponentProps<'span
   );
 }
 
-function BreadcrumbSeparator({ children, className, ...properties }: React.ComponentProps<'li'>) {
+function BreadcrumbSeparator({ children, className, ...properties }: React.ComponentProps<'li'>): React.JSX.Element {
   return (
     <li
       data-slot="breadcrumb-separator"
@@ -65,7 +65,7 @@ function BreadcrumbSeparator({ children, className, ...properties }: React.Compo
   );
 }
 
-function BreadcrumbEllipsis({ className, ...properties }: React.ComponentProps<'span'>) {
+function BreadcrumbEllipsis({ className, ...properties }: React.ComponentProps<'span'>): React.JSX.Element {
   return (
     <span
       data-slot="breadcrumb-ellipsis"

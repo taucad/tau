@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { Slider } from '~/components/ui/slider.js';
 import { ChatParametersInputNumber } from '~/routes/builds_.$id/chat-parameters-input-number.js';
 import { cn } from '~/utils/ui.js';
@@ -109,7 +108,7 @@ export function ChatParametersNumber({
   min,
   max,
   step,
-}: ChatParametersNumberProps): JSX.Element {
+}: ChatParametersNumberProps): React.JSX.Element {
   return (
     <div className="flex w-full flex-row items-center gap-2">
       <Slider

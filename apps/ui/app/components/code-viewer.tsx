@@ -1,19 +1,18 @@
 import { useShikiHighlighter } from 'react-shiki/core';
-import type { JSX } from 'react';
 import type { ClassValue } from 'clsx';
 import { useTheme } from 'remix-themes';
 import { cn } from '~/utils/ui.js';
 import { highlighter } from '~/lib/shiki.js';
 
-type Language = 'typescript' | 'kcl' | 'javascript' | 'jsx' | 'tsx';
+export type CodeLanguage = 'typescript' | 'kcl' | 'javascript' | 'jsx' | 'tsx';
 
 type CodeViewerProps = {
   readonly text: string;
-  readonly language: Language;
+  readonly language: CodeLanguage;
   readonly className?: ClassValue;
 };
 
-export function CodeViewer({ text, language, className }: CodeViewerProps): JSX.Element {
+export function CodeViewer({ text, language, className }: CodeViewerProps): React.JSX.Element {
   const [theme] = useTheme();
 
   const highlightedCode = useShikiHighlighter(text, language, `github-${theme}`, { delay: 300, highlighter });

@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import type { JSX } from 'react';
 import { Slider } from '~/components/ui/slider.js';
 import { buttonVariants } from '~/components/ui/button.js';
 import { cn } from '~/utils/ui.js';
@@ -30,7 +29,7 @@ type CameraControlProps = {
  * Note: This component DOES NOT directly use Three.js hooks.
  * You must use CameraHandler inside the Canvas separately.
  */
-export function FovControl({ defaultAngle, className }: Omit<CameraControlProps, 'onChange'>): JSX.Element {
+export function FovControl({ defaultAngle, className }: Omit<CameraControlProps, 'onChange'>): React.JSX.Element {
   const [fovAngle, setFovAngle] = useCookie<number>(cookieName.fovAngle, defaultAngle);
 
   // Synchronize fov angle to the Graphics context when angle changes

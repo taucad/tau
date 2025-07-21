@@ -1,6 +1,5 @@
 import { Copy, Check } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
-import type { JSX } from 'react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { Button } from '~/components/ui/button.js';
 
@@ -22,13 +21,13 @@ export function CopyButton({
   tooltip = 'Copy',
   tooltipContentProperties,
   ...properties
-}: CopyButtonProperties): JSX.Element {
+}: CopyButtonProperties): React.JSX.Element {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
     setCopied(true);
     if (globalThis.isSecureContext) {
-      void navigator.clipboard.writeText(getText() ?? '');
+      void navigator.clipboard.writeText(getText());
     } else {
       console.warn('Clipboard operations are only allowed in secure contexts.');
     }

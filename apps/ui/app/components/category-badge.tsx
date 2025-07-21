@@ -1,9 +1,8 @@
 import { Cog, Cpu, Zap } from 'lucide-react';
-import type { JSX } from 'react';
 import type { Category } from '~/types/cad.types.js';
 import { cn } from '~/utils/ui.js';
 
-export function CategoryBadge({ category }: { readonly category: Category }): JSX.Element {
+export function CategoryBadge({ category }: { readonly category: Category }): React.JSX.Element {
   const icons = {
     mechanical: <Cog className="size-4" />,
     electrical: <Zap className="size-4" />,

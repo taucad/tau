@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { cn } from '~/utils/ui.js';
 
-function Textarea({ className, ...properties }: React.ComponentProps<'textarea'>) {
+function Textarea({ className, ...properties }: React.ComponentProps<'textarea'>): React.JSX.Element {
   return (
     <textarea
       data-slot="textarea"

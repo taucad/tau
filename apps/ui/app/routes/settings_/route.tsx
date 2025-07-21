@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import type { JSX } from 'react';
 import { Outlet, redirect, useLocation, useNavigate } from 'react-router';
 import type { LoaderFunction } from 'react-router';
 import type { Handle } from '~/types/matches.types.js';
@@ -19,7 +18,7 @@ export const loader: LoaderFunction = async ({ request }) => {
   return null;
 };
 
-export default function SettingsPage(): JSX.Element {
+export default function SettingsPage(): React.JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
 

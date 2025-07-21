@@ -1,6 +1,5 @@
 import { Clipboard, Download, GalleryThumbnails, ImageDown, Menu } from 'lucide-react';
 import { useCallback, useEffect, useMemo } from 'react';
-import type { JSX } from 'react';
 import { useSelector, useActorRef } from '@xstate/react';
 import { BoxDown } from '~/components/icons/box-down.js';
 import { Button } from '~/components/ui/button.js';
@@ -20,12 +19,12 @@ type ViewerControlItem = {
   id: string;
   label: string;
   group: string;
-  icon: JSX.Element;
+  icon: React.JSX.Element;
   action: () => void;
   disabled?: boolean;
 };
 
-export function ChatControls(): JSX.Element {
+export function ChatControls(): React.JSX.Element {
   const shapes = useSelector(cadActor, (state) => state.context.shapes);
   const buildName = useBuildSelector((state) => state.build?.name) ?? 'file';
   const updateThumbnail = useBuildSelector((state) => state.updateThumbnail);

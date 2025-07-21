@@ -7,7 +7,13 @@ import type { ReactNode } from 'react';
  * @param children - The children to render if the condition is true.
  * @returns The children if the condition is true, otherwise null.
  */
-// eslint-disable-next-line @typescript-eslint/promise-function-async -- TODO: revisit this
-export function When({ shouldRender, children }: { readonly shouldRender: boolean; readonly children: ReactNode }) {
+
+export function When({
+  shouldRender,
+  children,
+}: {
+  readonly shouldRender: boolean;
+  readonly children: ReactNode;
+}): ReactNode {
   return shouldRender ? children : null;
 }

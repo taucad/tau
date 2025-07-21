@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { Plane } from '@react-three/drei';
 import React from 'react';
-import type { JSX } from 'react';
 import { Theme, useTheme } from 'remix-themes';
 
 type InfiniteGridProperties = {
@@ -251,7 +250,7 @@ export function InfiniteGrid({
   fadeStart = 0.05,
   fadeEnd = 0.3,
   alphaThreshold = 0.01,
-}: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): JSX.Element {
+}: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): React.JSX.Element {
   const [theme] = useTheme();
   const materialRef = React.useRef<THREE.ShaderMaterial | undefined>(null);
 

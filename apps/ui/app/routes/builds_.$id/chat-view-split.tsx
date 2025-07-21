@@ -1,5 +1,4 @@
 import { useRef, useCallback } from 'react';
-import type { JSX } from 'react';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
 import { ChatConsole } from '~/routes/builds_.$id/chat-console.js';
 import { ChatViewer } from '~/routes/builds_.$id/chat-viewer.js';
@@ -18,7 +17,7 @@ const toggleConsoleKeyCombination = {
 
 export const collapsedConsoleSize = 4;
 
-export function ChatViewSplit(): JSX.Element {
+export function ChatViewSplit(): React.JSX.Element {
   const [consoleSize, setConsoleSize] = useCookie(cookieName.chatResizeEditor, [85, 15]);
   const [codeSize, setCodeSize] = useCookie(cookieName.chatResizeViewer, [60, 40]);
 

@@ -1,9 +1,8 @@
-import type { JSX } from 'react';
 import { ChatMessageAnnotationUsageAggregated } from '~/routes/builds_.$id/chat-message-annotation-usage.js';
 import type { MessageAnnotation } from '~/types/chat.types.js';
 
 // Controller component that routes to appropriate annotation handlers
-export function ChatMessageAnnotation({ annotation }: { readonly annotation: MessageAnnotation }): JSX.Element {
+export function ChatMessageAnnotation({ annotation }: { readonly annotation: MessageAnnotation }): React.JSX.Element {
   switch (annotation.type) {
     case 'usage': {
       return <ChatMessageAnnotationUsageAggregated annotations={[annotation]} />;
@@ -22,7 +21,7 @@ export function ChatMessageAnnotations({
   annotations,
 }: {
   readonly annotations: MessageAnnotation[];
-}): JSX.Element | undefined {
+}): React.JSX.Element | undefined {
   // Filter for usage annotations only
   const usageAnnotations = annotations.filter((annotation) => annotation.type === 'usage');
 

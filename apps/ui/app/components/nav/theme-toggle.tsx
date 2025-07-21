@@ -1,6 +1,5 @@
 import { Laptop, Moon, Sun } from 'lucide-react';
 import { Theme, useTheme } from 'remix-themes';
-import type { JSX } from 'react';
 import { SidebarMenuButton } from '~/components/ui/sidebar.js';
 import { useCookie } from '~/hooks/use-cookie.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
@@ -12,7 +11,7 @@ import { cookieName } from '~/constants/cookie.constants.js';
 // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is used to represent the system theme, as it's serializable in JSON
 type ThemeWithSystem = Theme | null;
 
-export function ThemeToggle(): JSX.Element {
+export function ThemeToggle(): React.JSX.Element {
   const [, setTheme] = useTheme();
 
   const [theme, setThemeCookie] = useCookie<ThemeWithSystem>(cookieName.themeMode, null);

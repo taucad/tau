@@ -1,5 +1,4 @@
 import { createContext, useCallback, useContext, useMemo } from 'react';
-import type { JSX } from 'react';
 import { LayoutGrid, MessageCircle, Rows, Settings2 } from 'lucide-react';
 import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import { useCookie } from '~/hooks/use-cookie.js';
@@ -48,7 +47,7 @@ export const useViewContext = (): ViewContextType => {
   return context;
 };
 
-export function ViewContextProvider({ children }: { readonly children: React.ReactNode }): JSX.Element {
+export function ViewContextProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const [isChatOpen, setIsChatOpen] = useCookie(cookieName.chatHistoryOpen, true);
   const [isParametersOpen, setIsParametersOpen] = useCookie(cookieName.chatParametersOpen, true);
   const [viewMode, setViewMode] = useCookie<ViewMode>(cookieName.chatViewMode, 'tabs');
@@ -73,7 +72,7 @@ export function ViewContextProvider({ children }: { readonly children: React.Rea
   return <ViewContext.Provider value={value}>{children}</ViewContext.Provider>;
 }
 
-export function ChatInterfaceControls(): JSX.Element {
+export function ChatInterfaceControls(): React.JSX.Element {
   const { toggleParametersOpen, toggleChatOpen, toggleViewMode, isChatOpen, isParametersOpen, viewMode } =
     useViewContext();
 

@@ -5,7 +5,7 @@ export type AnimatedShinyTextProps = {
   readonly shimmerWidth?: number;
 } & ComponentPropsWithoutRef<'span'>;
 
-export function AnimatedShinyText({ children, className, ...props }: AnimatedShinyTextProps): JSX.Element {
+export function AnimatedShinyText({ children, className, ...props }: AnimatedShinyTextProps): React.JSX.Element {
   return (
     <span
       className={cn(

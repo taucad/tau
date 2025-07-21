@@ -1,15 +1,21 @@
 import { Sketch } from 'replicad';
 
-const shapeOrSketch = (shape: any) => {
-  if (!(shape instanceof Sketch)) return shape;
-  if (shape.wire.isClosed) return shape.face();
+const shapeOrSketch = (shape: unknown) => {
+  if (!(shape instanceof Sketch)) {
+    return shape;
+  }
+
+  if (shape.wire.isClosed) {
+    return shape.face();
+  }
+
   return shape.wire;
 };
 
 export class StudioHelper {
-  public _shapes: any[] = [];
-  public _faceFinder: any;
-  public _edgeFinder: any;
+  public _shapes: unknown[] = [];
+  public _faceFinder: unknown;
+  public _edgeFinder: unknown;
 
   public constructor() {
     this._shapes = [];
@@ -17,34 +23,34 @@ export class StudioHelper {
     this._edgeFinder = null;
   }
 
-  public debug(shape: any) {
+  public debug(shape: unknown) {
     this._shapes.push(shape);
     return shape;
   }
 
-  public d(shape: any) {
+  public d(shape: unknown) {
     return this.debug(shape);
   }
 
-  public highlightFace(faceFinder: any) {
+  public highlightFace(faceFinder: unknown) {
     this._faceFinder = faceFinder;
     return faceFinder;
   }
 
-  public hf(faceFinder: any) {
+  public hf(faceFinder: unknown) {
     return this.highlightFace(faceFinder);
   }
 
-  public highlightEdge(edgeFinder: any) {
+  public highlightEdge(edgeFinder: unknown) {
     this._edgeFinder = edgeFinder;
     return edgeFinder;
   }
 
-  public he(edgeFinder: any) {
+  public he(edgeFinder: unknown) {
     return this.highlightEdge(edgeFinder);
   }
 
-  public apply(config: any) {
+  public apply(config: unknown) {
     const config_ = [
       ...config,
       ...this._shapes.map((s, index) => ({

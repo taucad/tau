@@ -79,7 +79,7 @@ const createAxesObject = ({
     axes.add(lineObject);
 
     // Add text label at the end of each axis
-    const endPoint = line.points[1];
+    const endPoint = line.points[1]!;
 
     // Create a canvas for the text
     const canvas = document.createElement('canvas');

@@ -218,7 +218,9 @@ export class ModelService implements OnModuleInit {
   public buildModel(modelId: string): { model: BaseChatModel; support?: ModelSupport } {
     const modelConfig = this.models.find((model) => model.id === modelId);
 
-    if (!modelConfig) throw new Error(`Could not find model ${modelId}`);
+    if (!modelConfig) {
+      throw new Error(`Could not find model ${modelId}`);
+    }
 
     const provider = this.providerService.getProvider(modelConfig.provider);
 
@@ -236,7 +238,9 @@ export class ModelService implements OnModuleInit {
 
   public normalizeUsageTokens(modelId: string, usage: ChatUsageTokens): ChatUsageTokens {
     const modelConfig = this.models.find((model) => model.id === modelId);
-    if (!modelConfig) throw new Error(`Could not find model ${modelId}`);
+    if (!modelConfig) {
+      throw new Error(`Could not find model ${modelId}`);
+    }
 
     const provider = this.providerService.getProvider(modelConfig.provider);
 
@@ -245,14 +249,16 @@ export class ModelService implements OnModuleInit {
       // so we need to subtract them if necessary.
       inputTokens: usage.inputTokens - (provider.inputTokensIncludesCachedReadTokens ? usage.cachedReadTokens : 0),
       outputTokens: usage.outputTokens,
-      cachedReadTokens: usage.cachedReadTokens ?? 0,
-      cachedWriteTokens: usage.cachedWriteTokens ?? 0,
+      cachedReadTokens: usage.cachedReadTokens,
+      cachedWriteTokens: usage.cachedWriteTokens,
     };
   }
 
   public getModelCost(modelId: string, usage: ChatUsageTokens): ChatUsageCost {
     const modelConfig = this.models.find((model) => model.id === modelId);
-    if (!modelConfig) throw new Error(`Could not find model ${modelId}`);
+    if (!modelConfig) {
+      throw new Error(`Could not find model ${modelId}`);
+    }
 
     // Convert cost per million tokens to cost per token
     const inputCostPerToken = modelConfig.details.cost.inputTokens / 1_000_000;

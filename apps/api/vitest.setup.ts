@@ -17,7 +17,9 @@ afterEach(async () => {
 
 // Extend Vitest matchers if needed
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- module augmentation
   namespace Vi {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-definitions, @typescript-eslint/no-empty-interface, @typescript-eslint/no-empty-object-type -- module augmentation
     interface JestAssertion<T = unknown> {
       // Add custom matchers here if needed
     }

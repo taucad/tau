@@ -296,7 +296,6 @@ export class LangGraphAdapter {
               break;
             }
 
-            // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check for all event types
             default: {
               const unknownEvent: never = streamEvent;
               throw new Error(`Unknown event: ${JSON.stringify(unknownEvent)}`);
@@ -451,7 +450,6 @@ export class LangGraphAdapter {
               break;
             }
 
-            // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check for all part types
             default: {
               const unknownPart: never = part;
               throw new Error(`Unknown part type: ${String(unknownPart)}`);

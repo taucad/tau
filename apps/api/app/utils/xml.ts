@@ -4,17 +4,13 @@
  * @returns XML string representation of the object
  */
 export function objectToXml(object: Record<string, unknown>): string {
-  if (object === null || object === undefined) {
-    return '';
-  }
-
   let xmlContent = '';
 
   for (const [key, value] of Object.entries(object)) {
     if (Array.isArray(value)) {
       xmlContent += convertArrayToXml(key, value);
     } else if (isObject(value)) {
-      xmlContent += `<${key}>${objectToXml(value as Record<string, unknown>)}</${key}>`;
+      xmlContent += `<${key}>${objectToXml(value)}</${key}>`;
     } else {
       xmlContent += `<${key}>${escapeXmlContent(String(value))}</${key}>`;
     }
@@ -30,7 +26,7 @@ function convertArrayToXml(elementName: string, array: unknown[]): string {
   return array
     .map((item) => {
       if (isObject(item)) {
-        return `<${elementName}>${objectToXml(item as Record<string, unknown>)}</${elementName}>`;
+        return `<${elementName}>${objectToXml(item)}</${elementName}>`;
       }
 
       return `<${elementName}>${escapeXmlContent(String(item))}</${elementName}>`;
@@ -41,7 +37,7 @@ function convertArrayToXml(elementName: string, array: unknown[]): string {
 /**
  * Checks if a value is a plain object (not null, not array)
  */
-function isObject(value: unknown): boolean {
+function isObject<T extends Record<string, unknown>>(value: unknown): value is T {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 

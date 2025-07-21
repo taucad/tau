@@ -24,7 +24,9 @@ export class AuthGuard implements CanActivate {
       context.getClass(),
     ]);
 
-    if (isAuthPublic) return true;
+    if (isAuthPublic) {
+      return true;
+    }
 
     const contextType = context.getType();
 
@@ -32,7 +34,7 @@ export class AuthGuard implements CanActivate {
       const socket = context.switchToWs().getClient<Socket>();
       try {
         const session = await this.auth.api.getSession({
-          headers: fromNodeHeaders(socket?.handshake?.headers),
+          headers: fromNodeHeaders(socket.handshake.headers),
         });
         // @ts-expect-error -- socket.session is not typed
         socket.session = session;
@@ -61,7 +63,9 @@ export class AuthGuard implements CanActivate {
       context.getClass(),
     ]);
 
-    if (isAuthOptional && !session) return true;
+    if (isAuthOptional && !session) {
+      return true;
+    }
 
     if (!session) {
       throw new UnauthorizedException({

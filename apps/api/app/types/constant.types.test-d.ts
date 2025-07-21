@@ -12,7 +12,7 @@ it('should accept single word keys and values', () => {
     content: 'content',
   } as const;
 
-  expectTypeOf<'header'>().toMatchTypeOf<ConstantRecord<typeof validSingleHeaders>>();
+  expectTypeOf<'header'>().toExtend<ConstantRecord<typeof validSingleHeaders>>();
 });
 
 it('should accept camelCase keys with kebab-case values', () => {
@@ -24,10 +24,10 @@ it('should accept camelCase keys with kebab-case values', () => {
     authToken: 'auth-token',
   } as const;
 
-  expectTypeOf<'request-id'>().toMatchTypeOf<ConstantRecord<typeof validCamelKebabHeaders>>();
-  expectTypeOf<'content-type'>().toMatchTypeOf<ConstantRecord<typeof validCamelKebabHeaders>>();
-  expectTypeOf<'user-agent'>().toMatchTypeOf<ConstantRecord<typeof validCamelKebabHeaders>>();
-  expectTypeOf<'auth-token'>().toMatchTypeOf<ConstantRecord<typeof validCamelKebabHeaders>>();
+  expectTypeOf<'request-id'>().toExtend<ConstantRecord<typeof validCamelKebabHeaders>>();
+  expectTypeOf<'content-type'>().toExtend<ConstantRecord<typeof validCamelKebabHeaders>>();
+  expectTypeOf<'user-agent'>().toExtend<ConstantRecord<typeof validCamelKebabHeaders>>();
+  expectTypeOf<'auth-token'>().toExtend<ConstantRecord<typeof validCamelKebabHeaders>>();
 });
 
 it('should reject invalid values not in the union', () => {
@@ -53,7 +53,7 @@ it('should accept complex camelCase to kebab-case transformations', () => {
     apiVersionNumber: 'api-version-number',
   } as const;
 
-  expectTypeOf<'http-request-id'>().toMatchTypeOf<ConstantRecord<typeof validComplexHeaders>>();
+  expectTypeOf<'http-request-id'>().toExtend<ConstantRecord<typeof validComplexHeaders>>();
 });
 
 /**
@@ -67,7 +67,7 @@ it('should reject PascalCase values', () => {
   } as const;
 
   // @ts-expect-error - Values should be kebab-case, not Pascal-Case
-  expectTypeOf<'Request-Id'>().toMatchTypeOf<ConstantRecord<typeof invalidPascalCaseValues>>();
+  expectTypeOf<'Request-Id'>().toExtend<ConstantRecord<typeof invalidPascalCaseValues>>();
 });
 
 it('should reject camelCase values', () => {
@@ -78,7 +78,7 @@ it('should reject camelCase values', () => {
   } as const;
 
   // @ts-expect-error - Values should be kebab-case, not camelCase
-  expectTypeOf<'requestId'>().toMatchTypeOf<ConstantRecord<typeof invalidCamelCaseValues>>();
+  expectTypeOf<'requestId'>().toExtend<ConstantRecord<typeof invalidCamelCaseValues>>();
 });
 
 it('should reject snake_case values', () => {
@@ -89,7 +89,7 @@ it('should reject snake_case values', () => {
   } as const;
 
   // @ts-expect-error - Values should be kebab-case, not snake_case
-  expectTypeOf<'request_id'>().toMatchTypeOf<ConstantRecord<typeof invalidSnakeCaseValues>>();
+  expectTypeOf<'request_id'>().toExtend<ConstantRecord<typeof invalidSnakeCaseValues>>();
 });
 
 it('should reject CONSTANT_CASE values', () => {
@@ -100,7 +100,7 @@ it('should reject CONSTANT_CASE values', () => {
   } as const;
 
   // @ts-expect-error - Values should be kebab-case, not CONSTANT_CASE
-  expectTypeOf<'REQUEST_ID'>().toMatchTypeOf<ConstantRecord<typeof invalidConstantCaseValues>>();
+  expectTypeOf<'REQUEST_ID'>().toExtend<ConstantRecord<typeof invalidConstantCaseValues>>();
 });
 
 /**
@@ -114,7 +114,7 @@ it('should reject key-value mismatches', () => {
   } as const;
 
   // @ts-expect-error - Keys must be camelCase version of their values
-  expectTypeOf<'user-agent'>().toMatchTypeOf<ConstantRecord<typeof invalidKeyValueMismatch>>();
+  expectTypeOf<'user-agent'>().toExtend<ConstantRecord<typeof invalidKeyValueMismatch>>();
 });
 
 it('should reject mixed valid and invalid values', () => {
@@ -127,7 +127,7 @@ it('should reject mixed valid and invalid values', () => {
   } as const;
 
   // @ts-expect-error - Some values are not in kebab-case
-  expectTypeOf<'request-id'>().toMatchTypeOf<ConstantRecord<typeof invalidMixedHeaders>>();
+  expectTypeOf<'request-id'>().toExtend<ConstantRecord<typeof invalidMixedHeaders>>();
 });
 
 /**
@@ -143,7 +143,7 @@ it('should correctly extract union types', () => {
 
   // Test that union type is correctly extracted
   type ExpectedUnionType = 'request-id' | 'content-type' | 'user-agent' | 'auth-token';
-  expectTypeOf<'request-id'>().toMatchTypeOf<ExpectedUnionType>();
+  expectTypeOf<'request-id'>().toExtend<ExpectedUnionType>();
   expectTypeOf<ConstantRecord<typeof validCamelKebabHeaders>>().toEqualTypeOf<ExpectedUnionType>();
 });
 
@@ -157,5 +157,5 @@ it('should reject invalid union values', () => {
 
   // Test that invalid union types are rejected
   // @ts-expect-error - 'invalid-value' is not in the union
-  expectTypeOf<'invalid-value'>().toMatchTypeOf<ConstantRecord<typeof validCamelKebabHeaders>>();
+  expectTypeOf<'invalid-value'>().toExtend<ConstantRecord<typeof validCamelKebabHeaders>>();
 });

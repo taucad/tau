@@ -137,7 +137,7 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
         >
           <span className="flex items-center gap-2">
             <Box />
-            Surface
+            Surfaces
           </span>
           <Switch variant="dropdown" checked={viewSettings.surface} onCheckedChange={handleMeshToggle} />
         </DropdownMenuItem>

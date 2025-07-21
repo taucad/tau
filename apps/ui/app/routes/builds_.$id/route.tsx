@@ -99,7 +99,7 @@ function Chat() {
     // Initialize model
     cadActor.send({
       type: 'initializeModel',
-      code: mechanicalAsset.files[mechanicalAsset.main].content,
+      code: mechanicalAsset.files[mechanicalAsset.main]!.content,
       parameters: mechanicalAsset.parameters,
       kernelType: mechanicalAsset.language,
     });

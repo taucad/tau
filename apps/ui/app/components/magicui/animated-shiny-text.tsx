@@ -1,4 +1,4 @@
-import type { ComponentPropsWithoutRef, JSX } from 'react';
+import type { ComponentPropsWithoutRef } from 'react';
 import { cn } from '~/utils/ui.js';
 
 export type AnimatedShinyTextProps = {

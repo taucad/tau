@@ -1,4 +1,4 @@
-import type { CSSProperties, JSX, ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
 import type { Hsl, Rgb, Oklch } from 'culori/fn';
 import {

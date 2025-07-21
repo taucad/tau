@@ -1,6 +1,6 @@
 import { useMatches } from 'react-router';
 import { useMemo } from 'react';
-import type { Handle, TypedUIMatch } from '~/types/matches.types.js';
+import type { Handle, TypedUiMatch, TypedUiMatchWithHandle } from '~/types/matches.types.js';
 
 /**
  * Use typed matches to get the breadcrumb and action items for the current route
@@ -9,13 +9,13 @@ import type { Handle, TypedUIMatch } from '~/types/matches.types.js';
  * @returns The memoized selected properties
  */
 export function useTypedMatches<Selected>(
-  selector: (handles: Record<keyof Handle, TypedUIMatch[]>) => Selected,
+  selector: (handles: Record<keyof Handle, TypedUiMatchWithHandle[]>) => Selected,
 ): Selected {
-  const matches = useMatches() as TypedUIMatch[];
+  const matches = useMatches() as TypedUiMatch[];
 
   // Create a map of handle properties to matches with those properties
   const handleMap = useMemo(() => {
-    const result: Record<keyof Handle, TypedUIMatch[]> = {
+    const result: Record<keyof Handle, TypedUiMatchWithHandle[]> = {
       breadcrumb: [],
       actions: [],
       commandPalette: [],
@@ -34,7 +34,7 @@ export function useTypedMatches<Selected>(
 
     // Populate the result with matches for each handle property
     for (const key of handleKeys) {
-      result[key] = matches.filter((match) => Boolean(match.handle?.[key]));
+      result[key] = matches.filter((match): match is TypedUiMatchWithHandle => Boolean(match.handle?.[key]));
     }
 
     return result;

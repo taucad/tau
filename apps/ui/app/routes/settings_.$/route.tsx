@@ -47,8 +47,8 @@ const nonAuthTabs: Array<Omit<SettingsTab, 'tabView'>> = [
 
 const allTabs = [...authTabs, ...nonAuthTabs];
 
-const defaultTab = authTabs[0].label;
-const defaultLabel = authTabs[0].label;
+const defaultTab = authTabs[0]!.label;
+const defaultLabel = authTabs[0]!.label;
 
 export const handle: Handle = {
   breadcrumb() {

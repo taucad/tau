@@ -52,7 +52,7 @@ export function convertKclErrorToKernelError(kclError: KclError, code?: string):
     // Create stack string representation if we have stack frames
     if (stackFrames.length > 0) {
       stack = stackFrames
-        .map((frame, index) => {
+        .map((frame) => {
           const location = frame.fileName
             ? `${frame.fileName}:${frame.lineNumber}:${frame.columnNumber}`
             : `<unknown>:${frame.lineNumber}:${frame.columnNumber}`;

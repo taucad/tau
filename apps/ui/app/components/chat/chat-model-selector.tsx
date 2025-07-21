@@ -1,5 +1,5 @@
 import { memo, useCallback } from 'react';
-import type { JSX, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Check } from 'lucide-react';
 import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
 import { Badge } from '~/components/ui/badge.js';

@@ -241,7 +241,7 @@ export class EngineConnection {
   }
 
   // Store event listeners as arrow functions so they can be properly removed
-  private readonly onWebSocketOpen = (event: Event): void => {
+  private readonly onWebSocketOpen = (_event: Event): void => {
     clg.debug('WebSocket connected');
 
     // Send authentication headers in the exact format expected by the server

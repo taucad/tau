@@ -129,7 +129,7 @@ function addDefaultValuesToSchema(schema: JsonSchema, originalJson: Record<strin
     // Process the root definition with the original JSON
     if (rootDefinitionName && updatedDefinitions[rootDefinitionName]) {
       updatedDefinitions[rootDefinitionName] = addDefaultValues(
-        updatedDefinitions[rootDefinitionName],
+        updatedDefinitions[rootDefinitionName]!,
         originalJson,
         updatedDefinitions,
       );

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef } from 'react';
-import type { ComponentProps, JSX } from 'react';
+import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
 import { FileExplorerContext } from '~/routes/builds_.$id/graphics-actor.js';
@@ -98,7 +98,6 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
   const fallbackContent = build?.assets.mechanical?.files[fallbackFilename]?.content ?? code;
 
   const displayCode = activeFile ? activeFile.content : fallbackContent;
-  const displayLanguage = activeFile?.language;
 
   const handleCodeChange = useCallback((value: ComponentProps<typeof CodeEditor>['value']) => {
     // Update CAD actor as source of truth - subscription will propagate to file explorer

@@ -143,7 +143,7 @@ function Tree({
           className="flex w-full flex-col gap-1"
           dir={dir as Direction}
           onValueChange={(value) => {
-            setExpandedItems((previous) => [...(previous ?? []), value[0]]);
+            setExpandedItems((previous) => [...(previous ?? []), value[0]!]);
           }}
         >
           {children}
@@ -217,7 +217,7 @@ function Folder({
           defaultValue={expandedItems}
           value={expandedItems}
           onValueChange={(value) => {
-            setExpandedItems?.((previous) => [...(previous ?? []), value[0]]);
+            setExpandedItems?.((previous) => [...(previous ?? []), value[0]!]);
           }}
         >
           {children}

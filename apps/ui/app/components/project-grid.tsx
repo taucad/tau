@@ -1,4 +1,4 @@
-import type { ComponentType, JSX } from 'react';
+import type { ComponentType } from 'react';
 import { Star, GitFork, Eye } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';

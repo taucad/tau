@@ -469,7 +469,7 @@ function findParameterContext(
 
   // Search backwards to find the opening parenthesis and function name
   while (currentLineIndex >= 0) {
-    const currentLine = lines[currentLineIndex];
+    const currentLine = lines[currentLineIndex]!;
 
     // If we're on the original line, start from wordStart, otherwise start from end of line
     const startPos = currentLineIndex === position.lineNumber - 1 ? searchPos : currentLine.length - 1;
@@ -498,7 +498,7 @@ function findParameterContext(
 
             let found = false;
             for (let j = searchStart; j >= 0; j--) {
-              if (!/\s/.test(nameLine[j])) {
+              if (!/\s/.test(nameLine[j]!)) {
                 nameEnd = j;
                 found = true;
                 break;
@@ -524,7 +524,7 @@ function findParameterContext(
           }
 
           let nameStart = nameEnd;
-          while (nameStart >= 0 && /\w/.test(nameLine[nameStart])) {
+          while (nameStart >= 0 && /\w/.test(nameLine[nameStart]!)) {
             nameStart--;
           }
 
@@ -543,7 +543,7 @@ function findParameterContext(
     }
 
     currentLineIndex--;
-    searchPos = currentLineIndex >= 0 ? lines[currentLineIndex].length - 1 : -1;
+    searchPos = currentLineIndex >= 0 ? lines[currentLineIndex]!.length - 1 : -1;
   }
 
   if (!functionName) {

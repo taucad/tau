@@ -7,6 +7,11 @@ export const transferToStartingWith = `transfer_to`;
 export function ChatMessageToolTransfer({ part }: { readonly part: ToolInvocationUIPart }): React.JSX.Element {
   const { toolName } = part.toolInvocation;
   const destination = toolName.split(transferToStartingWith)[1];
+
+  if (!destination) {
+    throw new Error(`Invalid tool name ${toolName}`);
+  }
+
   const sentenceCasedDestination = snakeToSentenceCase(destination);
 
   return <p className="text-sm text-muted-foreground italic">Consulting {sentenceCasedDestination}</p>;

@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import React from 'react';
 import type { ClassValue } from 'clsx';
 import { useIsMobile } from '~/hooks/use-mobile.js';

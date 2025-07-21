@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback } from 'react';
-import type { JSX, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import * as THREE from 'three';
 import { PerspectiveCamera } from '@react-three/drei';
 import { AxesHelper } from '~/components/geometry/graphics/three/axes-helper.js';

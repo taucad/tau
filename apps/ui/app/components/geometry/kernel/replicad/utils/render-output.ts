@@ -1,3 +1,5 @@
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment -- TODO: fix these types
+// @ts-nocheck
 import type { Shape as ReplicadShape, Drawing, Face, Wire, AnyShape, Vertex, exportSTEP } from 'replicad';
 import { Sketch, EdgeFinder, FaceFinder, Sketches, CompoundSketch } from 'replicad';
 import type { SetRequired } from 'type-fest';

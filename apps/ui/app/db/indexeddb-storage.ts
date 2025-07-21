@@ -58,18 +58,30 @@ export class IndexedDbStorageProvider implements StorageProvider {
     update: PartialDeep<Build>,
     options?: {
       ignoreKeys?: string[];
+      /**
+       * If true, the updatedAt timestamp will not be updated.
+       *
+       * This should be removed after hash-checking is added for avoiding
+       * unnecessary updates.
+       */
+      noUpdatedAt?: boolean;
     },
   ): Promise<Build | undefined> {
     const db = await this.getDb();
     const build = await this.getBuild(buildId);
 
-    if (!build) return undefined;
+    if (!build) {
+      return undefined;
+    }
 
     const mergeIgnoreKeys = new Set(options?.ignoreKeys ?? []);
+    const optionalParameters = {
+      ...(options?.noUpdatedAt ? {} : { updatedAt: Date.now() }),
+    };
 
     const updatedBuild = deepmerge(
       build,
-      { ...update, updatedAt: Date.now() },
+      { ...update, ...optionalParameters },
       {
         customMerge(key) {
           if (mergeIgnoreKeys.has(key)) {
@@ -157,7 +169,9 @@ export class IndexedDbStorageProvider implements StorageProvider {
   public async deleteBuild(buildId: string): Promise<void> {
     // Get the build to make sure it exists
     const build = await this.getBuild(buildId);
-    if (!build) return;
+    if (!build) {
+      return;
+    }
 
     // Perform soft delete by updating deletedAt timestamp
     await this.updateBuild(buildId, { deletedAt: Date.now() });

@@ -89,7 +89,7 @@ export function createBuildMutations(queryClient: QueryClient): {
      * Update a build's thumbnail
      */
     async updateThumbnail(buildId: string, thumbnail: string) {
-      await storage.updateBuild(buildId, { thumbnail });
+      await storage.updateBuild(buildId, { thumbnail }, { noUpdatedAt: true });
       void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
       void queryClient.invalidateQueries({ queryKey: ['builds'] });
     },
@@ -180,7 +180,7 @@ export function createBuildMutations(queryClient: QueryClient): {
 
       const updatedChats = [...chats];
       updatedChats[chatIndex] = {
-        ...updatedChats[chatIndex],
+        ...updatedChats[chatIndex]!,
         messages,
         updatedAt: Date.now(),
       };
@@ -214,7 +214,7 @@ export function createBuildMutations(queryClient: QueryClient): {
 
       const updatedChats = [...chats];
       updatedChats[chatIndex] = {
-        ...updatedChats[chatIndex],
+        ...updatedChats[chatIndex]!,
         name,
         updatedAt: Date.now(),
       };

@@ -1,5 +1,6 @@
 import type { UIMatch } from 'react-router';
 import type { ReactNode } from 'react';
+import type { SetNonNullable } from 'type-fest';
 
 export type Handle = {
   breadcrumb?: (match: UIMatch) => ReactNode;
@@ -8,7 +9,8 @@ export type Handle = {
   noPageWrapper?: boolean;
 };
 
-// eslint-disable-next-line @typescript-eslint/naming-convention -- keeping the convention from react-router
-export type TypedUIMatch = UIMatch & {
+export type TypedUiMatch = UIMatch & {
   handle?: Handle;
 };
+
+export type TypedUiMatchWithHandle = SetNonNullable<TypedUiMatch, 'handle'>;

@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router';
 import { Fragment } from 'react/jsx-runtime';
-import type { JSX, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { AppSidebar } from '~/components/app-sidebar.js';
 import {
   Breadcrumb,

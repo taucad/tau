@@ -41,7 +41,18 @@ export const shapeModifierTerms = [
  * Terms that indicate a parameter represents a count or quantity
  * These parameters should display a "×" (times) icon instead of a unit
  */
-export const countTerms = ['count', 'number', 'num', 'quantity', 'amount', 'frequency'];
+export const countTerms = [
+  'count',
+  'number',
+  'num',
+  'quantity',
+  'amount',
+  'frequency',
+  'rows',
+  'columns',
+  'cols',
+  'cells',
+];
 
 /**
  * Terms that indicate a parameter represents an angle

@@ -1,7 +1,9 @@
+/* eslint-disable @typescript-eslint/naming-convention -- CONSTANT_CASE is expected for environment variables */
+// eslint-disable-next-line import-x/no-unassigned-import -- this is a side effect
 import '@testing-library/jest-dom';
 
 // Mock window.ENV for testing - required since the app uses window.ENV in browser environments
-Object.defineProperty(window, 'ENV', {
+Object.defineProperty(globalThis, 'ENV', {
   writable: true,
   value: {
     TAU_API_URL: 'http://localhost:3001',
@@ -9,32 +11,3 @@ Object.defineProperty(window, 'ENV', {
     NODE_ENV: 'test',
   },
 });
-
-// Mock common browser APIs for testing
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: (query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: () => {},
-    removeListener: () => {},
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    dispatchEvent: () => {},
-  }),
-});
-
-// Mock IntersectionObserver
-(global as any).IntersectionObserver = class IntersectionObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-};
-
-// Mock ResizeObserver
-(global as any).ResizeObserver = class ResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-};

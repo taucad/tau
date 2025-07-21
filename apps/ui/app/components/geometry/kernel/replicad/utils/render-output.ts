@@ -105,7 +105,7 @@ function normalizeColorAndOpacity<T extends Record<string, unknown>>(
 function normalizeHighlight<T extends Record<string, unknown>>(config: T) {
   const { highlight: inputHighlight, highlightEdge, highlightFace, ...rest } = config;
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- TODO: fix these
   const highlight: { find: (s: unknown) => unknown } =
     (inputHighlight && typeof inputHighlight.find === 'function') ??
     highlightEdge?.(new EdgeFinder()) ??

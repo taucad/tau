@@ -5,6 +5,25 @@ import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
  * @type {import('eslint').Linter.Config[]}
  */
 const config = [
+  // Global ignores - same patterns as .gitignore
+  {
+    ignores: [
+      // From root .gitignore
+      '**/vite.config.{js,ts,mjs,mts,cjs,cts}.timestamp*',
+      'node_modules',
+      '.nx/cache',
+      '.nx/workspace-data',
+      '**/dist',
+      '**/coverage/',
+      '**/.cache',
+      '**/build',
+      '**/public/build',
+      '**/public/entry.worker.js',
+      '**/.env',
+      '**/.react-router',
+      '**/stats.html',
+    ],
+  },
   // First, apply XO's base configuration
   ...xo.xoToEslintConfig([{ space: true, react: true, prettier: 'compat' }]),
   eslintPluginPrettierRecommended,

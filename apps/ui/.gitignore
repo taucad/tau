@@ -1,7 +1,10 @@
-.cache
+# Build
 build
+dist
+
+# Public
 public/build
 public/entry.worker.js
-.env
+
+# React Router
 .react-router
-stats.html

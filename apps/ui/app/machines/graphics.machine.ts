@@ -25,7 +25,7 @@ export type GraphicsContext = {
   sceneRadius: number | undefined;
 
   // Visibility state
-  enableSurface: boolean;
+  enableSurfaces: boolean;
   enableLines: boolean;
   enableGizmo: boolean;
   enableGrid: boolean;
@@ -415,7 +415,7 @@ export const graphicsMachine = setup({
     }),
 
     setSurfaceVisibility: assign({
-      enableSurface({ event }) {
+      enableSurfaces({ event }) {
         assertEvent(event, 'setSurfaceVisibility');
         return event.payload;
       },
@@ -469,7 +469,7 @@ export const graphicsMachine = setup({
     sceneRadius: undefined,
 
     // Visibility state
-    enableSurface: true,
+    enableSurfaces: true,
     enableLines: true,
     enableGizmo: true,
     enableGrid: true,

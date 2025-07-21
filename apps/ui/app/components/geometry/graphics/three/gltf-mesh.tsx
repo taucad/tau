@@ -7,14 +7,14 @@ import { MatcapMaterial } from '~/components/geometry/graphics/three/matcap-mate
 import type { ShapeGLTF } from '~/types/cad.types.js';
 
 type GltfMeshProperties = ShapeGLTF & {
-  readonly enableSurface?: boolean;
+  readonly enableSurfaces?: boolean;
   readonly enableLines?: boolean;
 };
 
 export function GltfMesh({
   gltfBlob,
   name,
-  enableSurface = true,
+  enableSurfaces = true,
   enableLines = true,
 }: GltfMeshProperties): React.JSX.Element {
   const [meshData, setMeshData] = useState<

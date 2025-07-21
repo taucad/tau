@@ -8,13 +8,13 @@ import { SvgViewer } from '~/components/geometry/graphics/svg/svg-viewer.js';
 
 type CadViewerProperties = ThreeViewerProperties & {
   readonly shapes: Shape[];
-  readonly enableSurface?: boolean;
+  readonly enableSurfaces?: boolean;
   readonly enableLines?: boolean;
 };
 
 export function CadViewer({
   shapes,
-  enableSurface = true,
+  enableSurfaces = true,
   enableLines = true,
   ...properties
 }: CadViewerProperties): JSX.Element {
@@ -30,11 +30,13 @@ export function CadViewer({
       {shapes.map((shape) => {
         switch (shape.type) {
           case '3d': {
-            return <ReplicadMesh key={shape.name} {...shape} enableSurface={enableSurface} enableLines={enableLines} />;
+            return (
+              <ReplicadMesh key={shape.name} {...shape} enableSurfaces={enableSurfaces} enableLines={enableLines} />
+            );
           }
 
           case 'gltf': {
-            return <GltfMesh key={shape.name} {...shape} enableSurface={enableSurface} enableLines={enableLines} />;
+            return <GltfMesh key={shape.name} {...shape} enableSurfaces={enableSurfaces} enableLines={enableLines} />;
           }
 
           case '2d': {

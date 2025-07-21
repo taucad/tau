@@ -1,6 +1,5 @@
-import React, { useRef, useLayoutEffect, useCallback } from 'react';
+import React, { useRef, useLayoutEffect } from 'react';
 import { useThree } from '@react-three/fiber';
-import type { ThreeEvent } from '@react-three/fiber';
 import { BufferGeometry, EdgesGeometry } from 'three';
 import * as THREE from 'three';
 import * as r3js from 'replicad-threejs-helper';
@@ -8,45 +7,9 @@ import { MatcapMaterial } from '~/components/geometry/graphics/three/matcap-mate
 import { useColor } from '~/hooks/use-color.js';
 import type { Shape3D } from '~/types/cad.types.js';
 
-export const useApplyHighlights = (geometry: BufferGeometry, highlight: number | number[]) => {
-  const { invalidate } = useThree();
-
-  useLayoutEffect(() => {
-    let toHighlight = highlight;
-
-    if (!highlight && highlight !== 0) {
-      toHighlight = [];
-    } else if (!Array.isArray(highlight)) {
-      toHighlight = [highlight];
-    }
-
-    r3js.highlightInGeometry(toHighlight, geometry);
-    invalidate();
-  }, [geometry, highlight, invalidate]);
-};
-
-export const useFaceEvent = (onEvent: (event: ThreeEvent<MouseEvent>, faceIndex: number) => void) => {
-  const function_ = useRef(onEvent);
-  useLayoutEffect(() => {
-    function_.current = onEvent;
-  }, [onEvent]);
-
-  return useCallback((event: ThreeEvent<MouseEvent>) => {
-    if (!function_.current) {
-      return;
-    }
-
-    const faceIndex = r3js.getFaceIndex(event.faceIndex, event.object.geometry);
-    function_.current(event, faceIndex);
-  }, []);
-};
-
 export type ReplicadMeshProperties = {
   readonly faces?: Shape3D['faces'];
   readonly edges?: Shape3D['edges'];
-  readonly onFaceClick?: (event: ThreeEvent<MouseEvent>, faceIndex: number) => void;
-  readonly selected?: number;
-  readonly faceHover?: boolean;
   readonly color?: string;
   readonly opacity?: number;
   readonly enableSurfaces?: boolean;
@@ -58,9 +21,6 @@ export const ReplicadMesh = React.memo(function ({
   edges,
   color,
   opacity,
-  onFaceClick,
-  selected,
-  faceHover,
   enableSurfaces = true,
   enableLines = true,
 }: ReplicadMeshProperties) {
@@ -69,35 +29,6 @@ export const ReplicadMesh = React.memo(function ({
 
   const body = useRef(new BufferGeometry());
   const lines = useRef(new BufferGeometry());
-
-  const onClick = useFaceEvent(onFaceClick);
-  const onHover = (event?: ThreeEvent<MouseEvent>) => {
-    if (!faceHover) {
-      return;
-    }
-
-    let toHighlight;
-    if (event === undefined) {
-      toHighlight = [];
-    } else {
-      const faceIndex = r3js.getFaceIndex(event.faceIndex, event.object.geometry);
-      toHighlight = [faceIndex];
-    }
-
-    r3js.highlightInGeometry(toHighlight, body.current);
-    invalidate();
-  };
-
-  useLayoutEffect(() => {
-    if (!faceHover && body.current) {
-      r3js.highlightInGeometry([], body.current);
-    }
-  }, [faceHover]);
-
-  useLayoutEffect(() => {
-    r3js.highlightInGeometry(selected || selected === 0 ? [selected] : [], body.current);
-    invalidate();
-  }, [selected, invalidate]);
 
   useLayoutEffect(() => {
     if (faces) {
@@ -115,7 +46,7 @@ export const ReplicadMesh = React.memo(function ({
       r3js.syncLines(lines.current, edges);
     } else {
       lines.current.clearGroups();
-      delete lines.current.userData.edgeGroups;
+      delete lines.current.userData['edgeGroups'];
       lines.current.copy(new EdgesGeometry(body.current, 2));
     }
 
@@ -139,10 +70,6 @@ export const ReplicadMesh = React.memo(function ({
         visible={enableSurfaces}
         // eslint-disable-next-line react/no-unknown-property -- TODO: make Three.js type available for linter
         geometry={body.current}
-        onClick={onClick}
-        onPointerOver={onHover}
-        onPointerMove={onHover}
-        onPointerLeave={onHover}
       >
         <MatcapMaterial
           polygonOffset

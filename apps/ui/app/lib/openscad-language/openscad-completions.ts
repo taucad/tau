@@ -43,7 +43,7 @@ function createDocumentationForSymbol(symbol: OpenscadModuleSymbol | OpenscadFun
   }
 
   // Return type (for functions)
-  if ('returnType' in symbol && symbol.returnType) {
+  if ('returnType' in symbol) {
     parts.push(`\n${documentationDescriptor.returns}: ${symbol.returnType}`);
   }
 

@@ -19,7 +19,6 @@ import {
   initOpenCascade,
   initOpenCascadeWithExceptions,
 } from '~/components/geometry/kernel/replicad/init-open-cascade.js';
-import { StudioHelper } from '~/components/geometry/kernel/replicad/utils/studio-helper.js';
 import { runInCjsContext, buildEsModule } from '~/components/geometry/kernel/replicad/vm.js';
 import { renderOutput, ShapeStandardizer } from '~/components/geometry/kernel/replicad/utils/render-output.js';
 import { jsonSchemaFromJson } from '~/utils/schema.js';
@@ -390,7 +389,6 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
     // Prepare context and helpers
     let shapes: MainResultShapes;
     let defaultName: string | undefined;
-    const helper = new StudioHelper();
     const standardizer = new ShapeStandardizer();
 
     try {
@@ -422,9 +420,8 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
       shapes,
       standardizer,
       (shapesArray) => {
-        const editedShapes = helper.apply(shapesArray);
         shapesMemory['defaultShape'] = shapesArray;
-        return editedShapes as ShapeConfig[];
+        return shapesArray;
       },
       defaultName,
     );

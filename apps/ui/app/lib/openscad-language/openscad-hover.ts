@@ -452,6 +452,7 @@ type ParameterContext = {
   isBuiltIn: boolean;
 };
 
+// eslint-disable-next-line complexity -- TODO: refactor
 function findParameterContext(
   model: Monaco.editor.ITextModel,
   position: Monaco.Position,
@@ -724,10 +725,10 @@ export function createHoverProvider(monaco: typeof Monaco): Monaco.languages.Hov
         case 'function': {
           if ('parameters' in symbol && symbol.parameters && symbol.parameters.length > 0) {
             parameterInfo = formatParameters({ builtIn: symbol.parameters });
-            const returnType = 'returnType' in symbol && symbol.returnType ? `: ${symbol.returnType}` : '';
+            const returnType = 'returnType' in symbol ? `: ${symbol.returnType}` : '';
             signature = `${signatureSymbolDescriptor.function} ${symbol.name}(${parameterInfo.signature})${returnType}`;
           } else {
-            const returnType = 'returnType' in symbol && symbol.returnType ? `: ${symbol.returnType}` : '';
+            const returnType = 'returnType' in symbol ? `: ${symbol.returnType}` : '';
             signature = `${signatureSymbolDescriptor.function} ${symbol.name}()${returnType}`;
           }
 
@@ -775,7 +776,7 @@ export function createHoverProvider(monaco: typeof Monaco): Monaco.languages.Hov
       }
 
       // Return type (for functions)
-      if ('returnType' in symbol && symbol.returnType) {
+      if ('returnType' in symbol) {
         contents.push({
           value: `${documentationDescriptor.returns} — ${symbol.returnType}`,
         });

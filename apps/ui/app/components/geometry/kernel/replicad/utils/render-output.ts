@@ -45,6 +45,7 @@ const isSvgable = (shape: unknown): shape is Svgable => {
 };
 
 const isMeshable = (shape: unknown): shape is Meshable => {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- type casting
   return Boolean((shape as Meshable).mesh && (shape as Meshable).meshEdges);
 };
 
@@ -104,9 +105,10 @@ function normalizeColorAndOpacity<T extends Record<string, unknown>>(
 function normalizeHighlight<T extends Record<string, unknown>>(config: T) {
   const { highlight: inputHighlight, highlightEdge, highlightFace, ...rest } = config;
 
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const highlight: { find: (s: unknown) => unknown } =
-    (inputHighlight && typeof inputHighlight.find === 'function') ||
-    highlightEdge?.(new EdgeFinder()) ||
+    (inputHighlight && typeof inputHighlight.find === 'function') ??
+    highlightEdge?.(new EdgeFinder()) ??
     highlightFace?.(new FaceFinder());
 
   return {
@@ -230,9 +232,14 @@ function renderMesh(shapeConfig: MeshableConfiguration) {
 
   if (highlight) {
     try {
-      shapeInfo.highlight = highlight.find(shape).map((s: unknown) => {
-        return s.hashCode;
-      });
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call -- TODO: fix these
+      shapeInfo.highlight = highlight
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- TODO: fix these
+        .find((element) => shape(element))
+        .map((s: unknown) => {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- TODO: fix these
+          return s.hashCode;
+        });
     } catch (error) {
       console.error(error);
     }

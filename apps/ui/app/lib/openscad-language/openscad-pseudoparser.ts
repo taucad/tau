@@ -68,7 +68,7 @@ export function parseOpenScad(path: string, src: string, skipPrivates: boolean):
       name,
       signature: `${name}(${parametersString.replaceAll(/\s+/gm, ' ').replaceAll(/\b | \b/g, '')})`,
       params: parameters,
-      referencesChildren: optBody === null ? undefined : optBody.includes('children()'),
+      referencesChildren: optBody === undefined ? undefined : optBody.includes('children()'),
     };
   }
 

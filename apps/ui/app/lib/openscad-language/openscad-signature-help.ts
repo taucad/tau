@@ -31,7 +31,7 @@ function createSignatureInformation(
       label += parameterText;
       const endIndex = label.length;
 
-      const documentation = parameter.description ?? '';
+      const documentation = parameter.description;
 
       parameters.push({
         label: [startIndex, endIndex],

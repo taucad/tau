@@ -58,13 +58,13 @@ export function BuildProvider({
     const { data, isLoading, error } = buildQuery;
 
     const activeChatId = data?.lastChatId;
-    const activeChat = data?.chats?.find((chat) => chat.id === activeChatId);
+    const activeChat = data?.chats.find((chat) => chat.id === activeChatId);
 
     return {
       build: data,
       isLoading,
       error,
-      code: data?.assets.mechanical?.files[data?.assets.mechanical.main]?.content ?? '',
+      code: data?.assets.mechanical?.files[data.assets.mechanical.main]?.content ?? '',
       parameters: data?.assets.mechanical?.parameters ?? {},
       activeChatId,
       activeChat,

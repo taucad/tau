@@ -8,7 +8,9 @@ export const ChatError = memo(() => {
   const error = useChatSelector((state) => state.context.error);
   const { reload } = useChatActions();
 
-  if (!error) return null;
+  if (!error) {
+    return null;
+  }
 
   let errorMessage: string;
 

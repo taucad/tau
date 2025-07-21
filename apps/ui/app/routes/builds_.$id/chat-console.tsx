@@ -49,7 +49,9 @@ const defaultDisplayConfig = {
 
 // Generate a deterministic color based on the component name
 const getComponentColor = (component: string | undefined): string => {
-  if (!component) return '#6b7280'; // Default gray
+  if (!component) {
+    return '#6b7280';
+  } // Default gray
 
   // Simple hash function
   let hash = 0;
@@ -66,7 +68,9 @@ const getComponentColor = (component: string | undefined): string => {
 
 // Component badge renderer
 function ComponentBadge({ origin }: { readonly origin?: LogOrigin }) {
-  if (!origin?.component) return;
+  if (!origin?.component) {
+    return;
+  }
 
   const bgColor = getComponentColor(origin.component);
 
@@ -106,7 +110,6 @@ function VerbosityBadge({ level }: { readonly level: LogLevel }) {
         return 'bg-feature';
       }
 
-      // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check
       default: {
         return 'bg-[grey]';
       }

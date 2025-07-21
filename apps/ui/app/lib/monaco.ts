@@ -15,6 +15,7 @@ import { registerKclLanguage } from '~/lib/kcl-language/kcl-register-language.js
  * bundle size.
  */
 export const configureMonaco = async (): Promise<void> => {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- can be undefined in SSR
   if (globalThis.self !== undefined) {
     globalThis.self.MonacoEnvironment = {
       getWorker(_, label) {

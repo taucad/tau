@@ -55,8 +55,13 @@ function calculateOptimalGrid(
   itemCount: number,
   preferredRatio: { columns: number; rows: number } = defaultCompositeOptions.preferredRatio,
 ): { columns: number; rows: number } {
-  if (itemCount <= 0) return { columns: 1, rows: 1 };
-  if (itemCount === 1) return { columns: 1, rows: 1 };
+  if (itemCount <= 0) {
+    return { columns: 1, rows: 1 };
+  }
+
+  if (itemCount === 1) {
+    return { columns: 1, rows: 1 };
+  }
 
   const targetRatio = preferredRatio.columns / preferredRatio.rows;
 
@@ -116,9 +121,13 @@ async function createCompositeImage(
     }),
   );
 
+  if (images.length === 0) {
+    throw new Error('No images to create composite image from');
+  }
+
   // Get original dimensions
-  const originalWidth = images[0].image.width;
-  const originalHeight = images[0].image.height;
+  const originalWidth = images[0]!.image.width;
+  const originalHeight = images[0]!.image.height;
 
   // Scale down images if they're too large (optimize for composite view)
   const maxImageSize = 600;
@@ -238,10 +247,6 @@ async function captureScreenshots(
   camera: THREE.Camera,
   options?: ScreenshotOptions,
 ): Promise<string[]> {
-  if (!gl.domElement) {
-    throw new Error('Screenshot attempted before renderer was ready');
-  }
-
   // Additional validation to ensure canvas is still valid
   if (!gl.domElement.isConnected) {
     throw new Error('Screenshot attempted on disconnected canvas - canvas may have been recreated');
@@ -270,7 +275,7 @@ async function captureScreenshots(
   };
 
   // Ensure we have camera angles array
-  if (!config.cameraAngles || config.cameraAngles.length === 0) {
+  if (config.cameraAngles.length === 0) {
     config.cameraAngles = defaultOptions.cameraAngles;
   }
 
@@ -309,7 +314,7 @@ async function captureScreenshots(
 
     // For composite screenshots, use 1:1 pixel ratio to respect maxResolution
     // For high-quality single screenshots, we could use the original pixel ratio
-    const useHighDpi = config.cameraAngles && config.cameraAngles.length === 1;
+    const useHighDpi = config.cameraAngles.length === 1;
     const pixelRatio = useHighDpi ? gl.getPixelRatio() : 1;
     screenshotRenderer.setPixelRatio(pixelRatio);
 
@@ -325,7 +330,7 @@ async function captureScreenshots(
     // Handle preview mode - hide non-preview objects in the cloned scene
     if (config.output.isPreview) {
       screenshotScene.traverse((object) => {
-        if (object.userData?.isPreviewOnly) {
+        if (object.userData['isPreviewOnly']) {
           object.visible = false;
         }
       });

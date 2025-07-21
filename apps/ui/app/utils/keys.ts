@@ -26,7 +26,9 @@ const formatKey = (key: KeyCombination['key']): string => {
 
   const specialKey = specialKeys[key];
 
-  if (specialKey) return specialKey;
+  if (specialKey) {
+    return specialKey;
+  }
 
   return key.length === 1 ? key.toUpperCase() : key;
 };
@@ -40,15 +42,31 @@ export const formatKeyCombination = (combo: KeyCombination): string => {
   const parts: string[] = [];
 
   // Add modifiers in the correct order
-  if (combo.altKey) parts.push('⌥');
-  if (combo.shiftKey) parts.push('⇧');
-  if (combo.metaKey && combo.ctrlKey) parts.push('⌘');
-  if (combo.metaKey) parts.push('⌘');
-  if (combo.ctrlKey) parts.push('⌃');
+  if (combo.altKey) {
+    parts.push('⌥');
+  }
+
+  if (combo.shiftKey) {
+    parts.push('⇧');
+  }
+
+  if (combo.metaKey && combo.ctrlKey) {
+    parts.push('⌘');
+  }
+
+  if (combo.metaKey) {
+    parts.push('⌘');
+  }
+
+  if (combo.ctrlKey) {
+    parts.push('⌃');
+  }
 
   // Format the main key
   const formattedKey = formatKey(combo.key);
-  if (formattedKey) parts.push(formattedKey);
+  if (formattedKey) {
+    parts.push(formattedKey);
+  }
 
   return parts.join('');
 };

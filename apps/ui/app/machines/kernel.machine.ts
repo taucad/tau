@@ -12,7 +12,7 @@ import type { OpenScadBuilderInterface as OpenSCADWorker } from '~/components/ge
 import OpenSCADBuilderWorker from '~/components/geometry/kernel/openscad/openscad.worker.js?worker';
 import type { ZooBuilderInterface as ZooWorker } from '~/components/geometry/kernel/zoo/zoo.worker.js';
 import ZooBuilderWorker from '~/components/geometry/kernel/zoo/zoo.worker.js?worker';
-import { assertActorDoneEvent } from '~/utils/xstate.js';
+import { assertActorDoneEvent } from '~/lib/xstate.js';
 
 const workers = {
   replicad: ReplicadBuilderWorker,

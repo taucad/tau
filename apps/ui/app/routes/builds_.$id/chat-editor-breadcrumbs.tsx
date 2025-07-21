@@ -18,7 +18,9 @@ export function ChatEditorBreadcrumbs(): ReactNode {
   const parts = displayPath.split('/');
 
   const handleDownloadCode = () => {
-    if (!activeFile) return;
+    if (!activeFile) {
+      return;
+    }
 
     toast.promise(
       async () => {

@@ -214,7 +214,9 @@ export default function PersonalCadProjects(): React.JSX.Element {
                 <DropdownMenuCheckboxItem
                   checked={viewMode === 'grid'}
                   onCheckedChange={(checked) => {
-                    if (checked) setViewMode('grid');
+                    if (checked) {
+                      setViewMode('grid');
+                    }
                   }}
                   onSelect={(event) => {
                     event.preventDefault();
@@ -226,7 +228,9 @@ export default function PersonalCadProjects(): React.JSX.Element {
                 <DropdownMenuCheckboxItem
                   checked={viewMode === 'table'}
                   onCheckedChange={(checked) => {
-                    if (checked) setViewMode('table');
+                    if (checked) {
+                      setViewMode('table');
+                    }
                   }}
                   onSelect={(event) => {
                     event.preventDefault();
@@ -543,7 +547,10 @@ function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReact
   };
 
   const renderSortIndicator = (fieldId: string) => {
-    if (sortingState?.id !== fieldId) return null;
+    if (sortingState?.id !== fieldId) {
+      return null;
+    }
+
     return sortingState.desc ? <ArrowDown className="ml-auto" /> : <ArrowUp className="ml-auto" />;
   };
 
@@ -624,7 +631,9 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
   const shapes = useSelector(actorRef, (state) => state.context.shapes);
 
   const mechanicalAsset = build.assets.mechanical;
-  if (!mechanicalAsset) throw new Error('Mechanical asset not found');
+  if (!mechanicalAsset) {
+    throw new Error('Mechanical asset not found');
+  }
 
   const code = mechanicalAsset.files[mechanicalAsset.main]?.content ?? '';
   const { parameters } = mechanicalAsset;

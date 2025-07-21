@@ -58,7 +58,7 @@ export function ChatMessageReasoning({ part, hasContent }: ChatMessageReasoningP
 
           <CollapsibleContent className="data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up">
             <div className="border-l border-foreground/20 pl-5 text-sm whitespace-pre-wrap text-foreground/60 italic">
-              {part.reasoning?.trim()}
+              {part.reasoning.trim()}
             </div>
           </CollapsibleContent>
         </Collapsible>

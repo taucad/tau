@@ -642,12 +642,17 @@ export function findFunctionCall(
               }
             }
 
-            if (found) break;
+            if (found) {
+              break;
+            }
+
             nameLineIndex--;
             nameEnd = nameLineIndex >= 0 ? lines[nameLineIndex].length - 1 : -1;
           }
 
-          if (nameLineIndex < 0) break;
+          if (nameLineIndex < 0) {
+            break;
+          }
 
           // Extract function name
           const nameLine = lines[nameLineIndex];
@@ -679,7 +684,10 @@ export function findFunctionCall(
       }
     }
 
-    if (functionName) break;
+    if (functionName) {
+      break;
+    }
+
     currentLine--;
     searchPos = currentLine >= 0 ? lines[currentLine].length : 0;
   }
@@ -721,11 +729,17 @@ function countParametersFromParenToCursor(
     }
     // Handle brackets and parentheses depth
     else if (char === '(' || char === '[') {
-      if (char === '(') parenDepth++;
-      else bracketDepth++;
+      if (char === '(') {
+        parenDepth++;
+      } else {
+        bracketDepth++;
+      }
     } else if (char === ')' || char === ']') {
-      if (char === ')') parenDepth--;
-      else bracketDepth--;
+      if (char === ')') {
+        parenDepth--;
+      } else {
+        bracketDepth--;
+      }
     }
     // Count commas only at depth 0 (not inside nested structures)
     else if (char === ',' && parenDepth === 0 && bracketDepth === 0) {
@@ -775,12 +789,17 @@ export function findParameterCompletions(model: Monaco.editor.ITextModel, positi
               }
             }
 
-            if (found) break;
+            if (found) {
+              break;
+            }
+
             nameLineIndex--;
             nameEnd = nameLineIndex >= 0 ? lines[nameLineIndex].length - 1 : -1;
           }
 
-          if (nameLineIndex < 0) break;
+          if (nameLineIndex < 0) {
+            break;
+          }
 
           // Extract function name
           const nameLine = lines[nameLineIndex];
@@ -799,7 +818,10 @@ export function findParameterCompletions(model: Monaco.editor.ITextModel, positi
       }
     }
 
-    if (functionName) break;
+    if (functionName) {
+      break;
+    }
+
     currentLine--;
     searchPos = currentLine >= 0 ? lines[currentLine].length - 1 : -1;
   }

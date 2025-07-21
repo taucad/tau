@@ -3,10 +3,15 @@ import { assertEvent, setup, enqueueActions } from 'xstate';
 // Helper function to find a file by path in the tree
 function findFileByPath(tree: FileItem[], path: string): FileItem | undefined {
   for (const item of tree) {
-    if (item.path === path) return item;
+    if (item.path === path) {
+      return item;
+    }
+
     if (item.children) {
       const found = findFileByPath(item.children, path);
-      if (found) return found;
+      if (found) {
+        return found;
+      }
     }
   }
 
@@ -82,10 +87,14 @@ export const fileExplorerMachine = setup({
 
       // Find the file in the tree by path
       const file = findFileByPath(context.fileTree, event.path);
-      if (!file) return;
+      if (!file) {
+        return;
+      }
 
       // Don't open directories
-      if (file.isDirectory) return;
+      if (file.isDirectory) {
+        return;
+      }
 
       const existingFile = context.openFiles.find((f) => f.id === file.id);
       if (existingFile) {

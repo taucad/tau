@@ -27,7 +27,9 @@ export function ChatEditorTabs(): React.JSX.Element {
 
   useEffect(() => {
     const scrollContainer = scrollContainerRef.current;
-    if (!scrollContainer) return;
+    if (!scrollContainer) {
+      return;
+    }
 
     const handleWheel = (event: WheelEvent) => {
       // Only handle vertical scroll when there's horizontal overflow

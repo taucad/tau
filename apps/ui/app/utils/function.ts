@@ -66,6 +66,7 @@ export const debounce = <ArgumentsType extends unknown[], U>(
  * @returns `true` if the value is a function, `false` otherwise.
  */
 
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, @typescript-eslint/no-explicit-any -- allowable for a type guard
 export function isFunction(functionToCheck: any): functionToCheck is (...arguments_: any[]) => any {
   return Boolean(functionToCheck?.constructor && functionToCheck.call && functionToCheck.apply);
 }

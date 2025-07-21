@@ -15,7 +15,7 @@ import type {
   ExportFormat,
 } from '~/types/kernel.types.js';
 import { createKernelError, createKernelSuccess } from '~/types/kernel.types.js';
-import type { ShapeGLTF } from '~/types/cad.types.js';
+import type { ShapeGltf } from '~/types/cad.types.js';
 import { convertOffToGltf } from '~/components/geometry/kernel/utils/off-to-gltf.js';
 import { convertOffToStl } from '~/components/geometry/kernel/utils/off-to-stl.js';
 import { convertOffTo3mf } from '~/components/geometry/kernel/utils/off-to-3mf.js';
@@ -104,7 +104,7 @@ async function buildShapesFromCode(
       // Return empty GLTF shape for empty code.
       // Create a minimal GLTF blob for empty geometry
       const emptyGlb = await convertOffToGltf('OFF\n0 0 0\n', 'glb');
-      const emptyShape: ShapeGLTF = {
+      const emptyShape: ShapeGltf = {
         type: 'gltf',
         name: 'Shape',
         gltfBlob: emptyGlb,
@@ -144,7 +144,7 @@ async function buildShapesFromCode(
     // Convert OFF to GLB (binary format) for rendering
     const gltfBlob = await convertOffToGltf(offData, 'glb');
 
-    const shape: ShapeGLTF = {
+    const shape: ShapeGltf = {
       type: 'gltf',
       name: 'Shape',
       gltfBlob,

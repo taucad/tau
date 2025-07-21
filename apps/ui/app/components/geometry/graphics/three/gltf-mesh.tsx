@@ -5,9 +5,9 @@ import type { Mesh, BufferGeometry, Material, Object3D } from 'three';
 import { LineBasicMaterial, EdgesGeometry } from 'three';
 import { GLTFLoader } from 'three-stdlib';
 import { MatcapMaterial } from '~/components/geometry/graphics/three/matcap-material.js';
-import type { ShapeGLTF } from '~/types/cad.types.js';
+import type { ShapeGltf } from '~/types/cad.types.js';
 
-type GltfMeshProperties = ShapeGLTF & {
+type GltfMeshProperties = ShapeGltf & {
   readonly enableSurfaces?: boolean;
   readonly enableLines?: boolean;
 };

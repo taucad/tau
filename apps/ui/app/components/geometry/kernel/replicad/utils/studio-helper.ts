@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/explicit-module-boundary-types -- TODO: likely delete this file, otherwise fix */
 import { Sketch } from 'replicad';
 
 const shapeOrSketch = (shape: unknown) => {
@@ -50,7 +51,7 @@ export class StudioHelper {
     return this.highlightEdge(edgeFinder);
   }
 
-  public apply(config: unknown) {
+  public apply(config: unknown[]) {
     const config_ = [
       ...config,
       ...this._shapes.map((s, index) => ({

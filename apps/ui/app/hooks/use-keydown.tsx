@@ -29,7 +29,9 @@ export const useKeydown = (
 
   const handler = useCallback(
     (event: KeyboardEvent) => {
-      if (!repeat && event.repeat) return;
+      if (!repeat && event.repeat) {
+        return;
+      }
 
       const matches =
         event.key.toLowerCase() === combo.key.toLowerCase() &&
@@ -39,8 +41,14 @@ export const useKeydown = (
         Boolean(event.shiftKey) === Boolean(combo.shiftKey);
 
       if (matches) {
-        if (preventDefault) event.preventDefault();
-        if (stopPropagation) event.stopPropagation();
+        if (preventDefault) {
+          event.preventDefault();
+        }
+
+        if (stopPropagation) {
+          event.stopPropagation();
+        }
+
         callback(event);
       }
     },

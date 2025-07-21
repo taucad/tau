@@ -198,7 +198,9 @@ function formatParameterDetailedList(
   const { includeDescription = true } = options;
 
   if ('builtIn' in source) {
-    if (source.builtIn.length === 0) return undefined;
+    if (source.builtIn.length === 0) {
+      return undefined;
+    }
 
     return source.builtIn
       .map((parameter) => {
@@ -210,7 +212,9 @@ function formatParameterDetailedList(
       .join('\n');
   }
 
-  if (source.userDefined.length === 0) return undefined;
+  if (source.userDefined.length === 0) {
+    return undefined;
+  }
 
   return source.userDefined
     .map((parameter) => {
@@ -235,7 +239,9 @@ function formatSingleParameter(
 } {
   if ('builtIn' in source) {
     const parameter = source.builtIn.find((p) => p.name === parameterName);
-    if (!parameter) return {};
+    if (!parameter) {
+      return {};
+    }
 
     const result = formatSingleBuiltInParameter(parameter, options);
     return {
@@ -249,7 +255,9 @@ function formatSingleParameter(
     return name === parameterName;
   });
 
-  if (!parameter) return {};
+  if (!parameter) {
+    return {};
+  }
 
   const result = formatSingleUserDefinedParameter(parameter);
   return {
@@ -496,16 +504,23 @@ function findParameterContext(
               }
             }
 
-            if (found) break;
+            if (found) {
+              break;
+            }
+
             nameLineIndex--;
             nameEnd = nameLineIndex >= 0 ? (lines[nameLineIndex]?.length ?? 0) - 1 : -1;
           }
 
-          if (nameLineIndex < 0) break;
+          if (nameLineIndex < 0) {
+            break;
+          }
 
           // Extract function name
           const nameLine = lines[nameLineIndex];
-          if (!nameLine) break;
+          if (!nameLine) {
+            break;
+          }
 
           let nameStart = nameEnd;
           while (nameStart >= 0 && /\w/.test(nameLine[nameStart])) {
@@ -522,7 +537,10 @@ function findParameterContext(
       }
     }
 
-    if (functionName) break;
+    if (functionName) {
+      break;
+    }
+
     currentLineIndex--;
     searchPos = currentLineIndex >= 0 ? lines[currentLineIndex].length - 1 : -1;
   }
@@ -722,7 +740,6 @@ export function createHoverProvider(monaco: typeof Monaco): Monaco.languages.Hov
           break;
         }
 
-        // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check
         default: {
           const neverSymbol: never = symbol;
           throw new Error(`Unknown symbol type: ${String(neverSymbol)}`);

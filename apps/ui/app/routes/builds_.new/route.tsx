@@ -36,9 +36,6 @@ function useBuildCreation() {
       setIsCreating(true);
       try {
         const selectedOption = getKernelOption(buildData.kernel);
-        if (!selectedOption) {
-          throw new Error('Invalid kernel selection');
-        }
 
         const build = await storage.createBuild({
           name: buildData.name.trim(),
@@ -104,7 +101,7 @@ export default function BuildsNew(): React.JSX.Element {
     void navigate('/');
   }, [navigate]);
 
-  const isCreateButtonDisabled = !selectedKernel || !buildName.trim() || isCreating;
+  const isCreateButtonDisabled = !buildName.trim() || isCreating;
 
   // Add keyboard shortcut for Enter to submit
   const { formattedKeyCombination } = useKeydown(

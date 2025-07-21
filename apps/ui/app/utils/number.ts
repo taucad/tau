@@ -3,6 +3,6 @@
  * @param value - The number to format
  * @returns A formatted number string
  */
-export const formatNumber = (value: number) => {
+export const formatNumber = (value: number): string => {
   return value.toLocaleString();
 };

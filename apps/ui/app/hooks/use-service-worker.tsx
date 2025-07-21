@@ -1,12 +1,12 @@
 import { useSWEffect } from '@remix-pwa/sw';
 import { useEffect, useRef } from 'react';
-import { useNetworkConnectivity } from './use-network-connectivity.js';
+import { useNetworkConnectivity } from '~/hooks/use-network-connectivity.js';
 import { toast } from '~/components/ui/sonner.js';
 
 const networkStatusCookie = 'network-status';
 const networkStatusToastId = 'network-connectivity';
 
-export const useServiceWorker = () => {
+export const useServiceWorker = (): { isOnline: boolean } => {
   // Configure the service worker for PWA
   useSWEffect();
 

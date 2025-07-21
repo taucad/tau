@@ -105,54 +105,58 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
               );
             })}
             {message.parts?.map((part, index) => {
-              if (part.type === 'text') {
-                return (
-                  <ChatMessageText
-                    // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                    key={`${message.id}-message-part-${index}`}
-                    part={part}
-                  />
-                );
-              }
-
-              if (part.type === 'reasoning') {
-                /* TODO: remove trim when backend is fixed to trim thinking tags */
-                return (
-                  part.reasoning.trim().length > 0 && (
-                    <ChatMessageReasoning
+              switch (part.type) {
+                case 'text': {
+                  return (
+                    <ChatMessageText
                       // eslint-disable-next-line react/no-array-index-key -- Index is stable
                       key={`${message.id}-message-part-${index}`}
                       part={part}
-                      hasContent={message.content.length > 0}
                     />
-                  )
-                );
+                  );
+                }
+
+                case 'reasoning': {
+                  /* TODO: remove trim when backend is fixed to trim thinking tags */
+                  return (
+                    part.reasoning.trim().length > 0 && (
+                      <ChatMessageReasoning
+                        // eslint-disable-next-line react/no-array-index-key -- Index is stable
+                        key={`${message.id}-message-part-${index}`}
+                        part={part}
+                        hasContent={message.content.length > 0}
+                      />
+                    )
+                  );
+                }
+
+                case 'tool-invocation': {
+                  // eslint-disable-next-line react/no-array-index-key -- Index is stable
+                  return <ChatMessageTool key={`${message.id}-message-part-${index}`} part={part} />;
+                }
+
+                case 'source': {
+                  // TODO: add source rendering to the message
+
+                  return null;
+                }
+
+                case 'step-start': {
+                  // We are not rendering step-start parts.
+
+                  return null;
+                }
+
+                case 'file': {
+                  // TODO: add file rendering
+                  throw new Error('File rendering is not implemented');
+                }
+
+                default: {
+                  const exhaustiveCheck: never = part;
+                  throw new Error(`Unknown part: ${JSON.stringify(exhaustiveCheck)}`);
+                }
               }
-
-              if (part.type === 'tool-invocation') {
-                // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                return <ChatMessageTool key={`${message.id}-message-part-${index}`} part={part} />;
-              }
-
-              if (part.type === 'source') {
-                // TODO: add source rendering to the message
-
-                return null;
-              }
-
-              if (part.type === 'step-start') {
-                // We are not rendering step-start parts.
-
-                return null;
-              }
-
-              if (part.type === 'file') {
-                // TODO: add file rendering
-                throw new Error('File rendering is not implemented');
-              }
-
-              const exhaustiveCheck: never = part;
-              throw new Error(`Unknown part: ${JSON.stringify(exhaustiveCheck)}`);
             })}
           </div>
         </When>

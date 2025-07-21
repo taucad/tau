@@ -45,7 +45,9 @@ function ErrorSection({
 }): React.JSX.Element | undefined {
   const [isOpen, setIsOpen] = useState(isInitiallyOpen);
 
-  if (errors.length === 0) return undefined;
+  if (errors.length === 0) {
+    return undefined;
+  }
 
   return (
     <Collapsible open={isOpen} className={className} onOpenChange={setIsOpen}>

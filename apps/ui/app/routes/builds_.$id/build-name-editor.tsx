@@ -28,9 +28,11 @@ export function BuildNameEditor(): React.JSX.Element {
 
   // Set initial name and trigger generation if needed
   useEffect(() => {
-    if (isLoading || !build) return;
+    if (isLoading || !build) {
+      return;
+    }
 
-    const activeChat = build.chats?.find((chat) => chat.id === build.lastChatId);
+    const activeChat = build.chats.find((chat) => chat.id === build.lastChatId);
 
     if (build.name === defaultBuildName && activeChat?.messages[0]) {
       // Create and send message for name generation
@@ -42,7 +44,7 @@ export function BuildNameEditor(): React.JSX.Element {
         },
       } as const satisfies Message;
       void append(message);
-    } else if (!isLoading) {
+    } else {
       setName(build.name);
       setDisplayName(build.name);
     }

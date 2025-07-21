@@ -35,6 +35,7 @@ export type ScrollToProperties = {
  *
  * @returns The scroll to properties, `{ isScrolledTo: boolean, scrollTo: () => void }`.
  */
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- infer type for hooks
 export function useScroll({ behavior, reference }: ScrollToProperties, dependencies: readonly unknown[] = []) {
   const [isScrolledTo, setIsScrolledTo] = useState(false);
 
@@ -68,7 +69,7 @@ export function useScroll({ behavior, reference }: ScrollToProperties, dependenc
     const currentReference = reference.current;
     const observer = new IntersectionObserver(
       ([entry]) => {
-        setIsScrolledTo(entry.isIntersecting);
+        setIsScrolledTo(entry?.isIntersecting ?? false);
       },
       { root: undefined, threshold: 1 },
     );

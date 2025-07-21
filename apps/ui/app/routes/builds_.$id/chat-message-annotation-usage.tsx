@@ -10,10 +10,15 @@ import { formatCurrency } from '~/utils/currency.js';
 import { formatNumber } from '~/utils/number.js';
 
 // Single annotation component
-export function ChatMessageAnnotationUsage({ annotation }: { readonly annotation: MessageAnnotation }): React.JSX.Element {
+export function ChatMessageAnnotationUsage({
+  annotation,
+}: {
+  readonly annotation: MessageAnnotation;
+}): React.JSX.Element {
   const { data: models } = useModels();
 
   switch (annotation.type) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- supporting future types
     case 'usage': {
       const model = models?.find((model) => model.id === annotation.model);
       return (
@@ -115,7 +120,6 @@ export function ChatMessageAnnotationUsage({ annotation }: { readonly annotation
       );
     }
 
-    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check
     default: {
       const exhaustiveCheck: never = annotation.type;
       throw new Error(`Unknown annotation type: ${String(exhaustiveCheck)}`);
@@ -132,11 +136,12 @@ export function ChatMessageAnnotationUsageAggregated({
   const { data: models } = useModels();
 
   // Filter for usage annotations only
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- supporting future types
   const usageAnnotations = annotations.filter((annotation) => annotation.type === 'usage');
 
   // If only one usage annotation, use the single component
   if (usageAnnotations.length === 1) {
-    return <ChatMessageAnnotationUsage annotation={usageAnnotations[0]} />;
+    return <ChatMessageAnnotationUsage annotation={usageAnnotations[0]!} />;
   }
 
   // Calculate totals across all annotations
@@ -153,6 +158,7 @@ export function ChatMessageAnnotationUsageAggregated({
   };
 
   for (const annotation of usageAnnotations) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- supporting future types
     if (annotation.type === 'usage') {
       totals.inputTokens += annotation.usageTokens.inputTokens;
       totals.outputTokens += annotation.usageTokens.outputTokens;

@@ -24,15 +24,22 @@ const cookieStore = () => {
   const notify = (cookieName: string) => {
     const listeners = listenerMap.get(cookieName);
     if (listeners) {
-      for (const listener of listeners) listener();
+      for (const listener of listeners) {
+        listener();
+      }
     }
   };
 
-  const get = <T>(cookieName: string) => {
+  const get = <T>(cookieName: string): T | undefined => {
     const value = cache.get(cookieName);
-    if (value) return value;
+    if (value) {
+      return value as T;
+    }
+
     const cookieValue = Cookies.get(cookieName);
-    if (!cookieValue) return;
+    if (!cookieValue) {
+      return;
+    }
 
     const cachedValue = JSON.parse(cookieValue) as T;
     cache.set(cookieName, cachedValue);
@@ -61,6 +68,7 @@ const cookieStore = () => {
 
 export const store = cookieStore();
 
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- infer type for hooks
 export const useCookie = <T>(name: CookieName, defaultValue: T) => {
   const cookieName = `${metaConfig.cookiePrefix}${name}`;
   // Get the latest cookie value from route data on each render
@@ -70,6 +78,7 @@ export const useCookie = <T>(name: CookieName, defaultValue: T) => {
     () => [
       (): T => {
         // On client, use the store's already parsed value
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- can be undefined on server
         if (globalThis.document !== undefined) {
           const cookieValue = store.get<T>(cookieName);
           if (cookieValue === undefined) {
@@ -88,7 +97,7 @@ export const useCookie = <T>(name: CookieName, defaultValue: T) => {
         }
 
         // We need to parse the cookie from the server as stringification occurs when setting cookie.
-        return JSON.parse(serverCookie);
+        return JSON.parse(serverCookie) as T;
       },
       (valueOrFunction: T | ((previous: T) => T)) => {
         const currentValue = selector();

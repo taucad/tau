@@ -70,7 +70,6 @@ export default function CadCommunity(): React.JSX.Element {
         return b.forks - a.forks;
       }
 
-      // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- exhaustive check
       default: {
         const exhaustiveCheck: never = sortOption;
         throw new Error(`Invalid sort option: ${String(exhaustiveCheck)}`);

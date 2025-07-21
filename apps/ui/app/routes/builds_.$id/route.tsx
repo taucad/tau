@@ -73,7 +73,9 @@ function Chat() {
   useEffect(() => {
     const subscription = cadActor.on('modelUpdated', ({ code, parameters }) => {
       const mainFile = build?.assets.mechanical?.main;
-      if (!mainFile) return;
+      if (!mainFile) {
+        return;
+      }
 
       setCodeParameters({ [mainFile]: { content: code } }, parameters);
     });
@@ -85,10 +87,14 @@ function Chat() {
 
   useEffect(() => {
     // On init, set the code and parameters
-    if (!build || isLoading) return;
+    if (!build || isLoading) {
+      return;
+    }
 
     const mechanicalAsset = build.assets.mechanical;
-    if (!mechanicalAsset) throw new Error('Mechanical asset not found');
+    if (!mechanicalAsset) {
+      throw new Error('Mechanical asset not found');
+    }
 
     // Initialize model
     cadActor.send({
@@ -101,7 +107,9 @@ function Chat() {
   }, [id, isLoading]);
 
   useEffect(() => {
-    if (!build || isLoading) return;
+    if (!build || isLoading) {
+      return;
+    }
 
     // Set initial messages based on active chat or legacy messages
     if (activeChat) {
@@ -117,7 +125,9 @@ function Chat() {
 
   // Persist message changes to the active build chat
   useEffect(() => {
-    if (!activeChatId || !activeChat) return;
+    if (!activeChatId || !activeChat) {
+      return;
+    }
 
     if (status === 'submitted') {
       // A message just got submitted, set the build messages to include the new message.

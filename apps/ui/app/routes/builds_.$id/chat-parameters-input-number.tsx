@@ -13,7 +13,9 @@ type MeasurementDescriptor = 'length' | 'angle' | 'count' | 'unitless';
  * @returns The appropriate descriptor for the parameter
  */
 function getDescriptor(name?: string): MeasurementDescriptor {
-  if (!name) return 'length';
+  if (!name) {
+    return 'length';
+  }
 
   if (isCountParameter(name)) {
     return 'count';

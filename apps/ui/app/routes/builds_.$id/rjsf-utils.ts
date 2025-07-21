@@ -87,7 +87,7 @@ export function setNestedValue(
 
   // Navigate to parent of target, creating objects as needed
   for (let i = 0; i < path.length - 1; i++) {
-    const key = path[i];
+    const key = path[i]!;
     current[key] =
       !current[key] || typeof current[key] !== 'object' ? {} : { ...(current[key] as Record<string, unknown>) };
     current = current[key] as Record<string, unknown>;
@@ -131,7 +131,7 @@ export function deleteNestedValue(object: Record<string, unknown>, path: string[
 
   // Navigate to parent of target
   for (let i = 0; i < path.length - 1; i++) {
-    const key = path[i];
+    const key = path[i]!;
     if (current[key] && typeof current[key] === 'object') {
       current[key] = { ...(current[key] as Record<string, unknown>) };
       current = current[key] as Record<string, unknown>;
@@ -182,7 +182,7 @@ export function hasCustomValue(formData: unknown, defaultValue: unknown): boolea
     return formData.length > 0;
   }
 
-  if (formData && typeof formData === 'object') {
+  if (typeof formData === 'object') {
     return Object.keys(formData).length > 0;
   }
 

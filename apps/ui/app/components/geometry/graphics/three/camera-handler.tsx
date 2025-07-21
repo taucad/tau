@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef } from 'react';
-import type { JSX } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { useSelector } from '@xstate/react';
@@ -9,7 +8,7 @@ import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
  * Internal component that handles the camera matrix manipulation in response to changing field of view.
  * This MUST be used inside a Canvas/R3F component tree.
  */
-export function CameraHandler(): JSX.Element {
+export function CameraHandler(): React.ReactNode {
   const camera = useThree((state) => state.camera);
   const { invalidate } = useThree();
   const cameraFovAngle = useSelector(graphicsActor, (state) => state.context.cameraFovAngle);
@@ -27,7 +26,9 @@ export function CameraHandler(): JSX.Element {
   // Separate function for camera updates to avoid code duplication
   const updateCameraProjection = useCallback(
     (camera: THREE.PerspectiveCamera, newAngle: number) => {
-      if (!cameraState.current.initialized) return;
+      if (!cameraState.current.initialized) {
+        return;
+      }
 
       // Apply a FOV change based on angle
       const minFov = 0.1; // Very narrow FOV at 0 degrees (nearly orthographic)
@@ -104,6 +105,5 @@ export function CameraHandler(): JSX.Element {
     updateCameraProjection(camera, cameraFovAngle);
   }, [camera, cameraFovAngle, updateCameraProjection]);
 
-  // Use an empty group as R3F requires returning a valid Three.js object
-  return <group name="camera-handler" />;
+  return null;
 }

@@ -2,10 +2,14 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import katexUrl from 'katex/dist/katex.min.css?url';
+import type { LinkDescriptor } from 'react-router';
 import { memo } from 'react';
 import { CodeViewer } from '~/components/code-viewer.js';
 import type { CodeLanguage } from '~/components/code-viewer.js';
 import { cn } from '~/utils/ui.js';
+
+export const markdownViewerLinks: LinkDescriptor[] = [{ rel: 'stylesheet', href: katexUrl }];
 
 export const MarkdownViewer = memo(({ children }: { readonly children: string }): React.JSX.Element => {
   return (

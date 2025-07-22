@@ -277,6 +277,9 @@ importers:
       json-schema-default:
         specifier: ^1.0.2
         version: 1.0.2
+      katex:
+        specifier: ^0.16.21
+        version: 0.16.21
       langchain:
         specifier: ^0.3.29
         version: 0.3.30(@langchain/anthropic@0.3.24(@langchain/core@0.3.65(@opentelemetry/api@1.9.0)(openai@4.96.2(encoding@0.1.13)(ws@8.18.3)(zod@3.25.76))))(@langchain/core@0.3.65(@opentelemetry/api@1.9.0)(openai@4.96.2(encoding@0.1.13)(ws@8.18.3)(zod@3.25.76)))(@langchain/google-genai@0.2.5(@langchain/core@0.3.65(@opentelemetry/api@1.9.0)(openai@4.96.2(encoding@0.1.13)(ws@8.18.3)(zod@3.25.76)))(zod@3.25.76))(@langchain/google-vertexai@0.2.15(@langchain/core@0.3.65(@opentelemetry/api@1.9.0)(openai@4.96.2(encoding@0.1.13)(ws@8.18.3)(zod@3.25.76))))(@langchain/ollama@0.2.3(@langchain/core@0.3.65(@opentelemetry/api@1.9.0)(openai@4.96.2(encoding@0.1.13)(ws@8.18.3)(zod@3.25.76))))(@opentelemetry/api@1.9.0)(axios@1.9.0)(cheerio@1.0.0)(openai@4.96.2(encoding@0.1.13)(ws@8.18.3)(zod@3.25.76))(ws@8.18.3)

@@ -19,7 +19,7 @@ const keyCombinationFileExplorer = {
 
 export function ChatEditorLayout({ className }: { readonly className?: ClassValue }): React.JSX.Element {
   const [explorerSize, setExplorerSize] = useCookie(cookieName.chatResizeExplorer, [20, 80]);
-  const [isExplorerOpen, setIsExplorerOpen] = useCookie(cookieName.chatExplorerOpen, true);
+  const [isExplorerOpen, setIsExplorerOpen] = useCookie(cookieName.chatExplorerOpen, false);
 
   const toggleExplorer = () => {
     setIsExplorerOpen(!isExplorerOpen);

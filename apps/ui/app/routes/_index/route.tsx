@@ -18,7 +18,7 @@ import { toast } from '~/components/ui/sonner.js';
 import { generatePrefixedId } from '~/utils/id.js';
 import { idPrefix } from '~/constants/id.constants.js';
 import type { KernelProvider } from '~/types/kernel.types.js';
-import useCookie from '~/hooks/use-cookie.js';
+import { useCookie } from '~/hooks/use-cookie.js';
 import { cookieName } from '~/constants/cookie.constants.js';
 
 export default function ChatStart(): React.JSX.Element {

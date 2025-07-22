@@ -115,5 +115,3 @@ export const useCookie = <T>(name: CookieName, defaultValue: T) => {
 
   return [value, update, remove] as const;
 };
-
-export default useCookie;

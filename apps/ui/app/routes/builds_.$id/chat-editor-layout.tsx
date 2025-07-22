@@ -5,7 +5,7 @@ import { KeyShortcut } from '~/components/ui/key-shortcut.js';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '~/components/ui/resizable.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
 import { cookieName } from '~/constants/cookie.constants.js';
-import useCookie from '~/hooks/use-cookie.js';
+import { useCookie } from '~/hooks/use-cookie.js';
 import { useKeydown } from '~/hooks/use-keydown.js';
 import { ChatEditorFileTree } from '~/routes/builds_.$id/chat-editor-file-tree.js';
 import { ChatEditor } from '~/routes/builds_.$id/chat-editor.js';

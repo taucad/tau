@@ -9,6 +9,16 @@ e.g.:
 - Production package: `pnpm install react`
 - Development package: `pnpm install -d eslint`
 
-# Package executables
-- Run all applications in dev mode: `pnpm start`
-- Test all applications: `pnpm test`
+# Testing Changes
+As you iterate towards a solution, you should test your changes using NX workspace commands.
+All commands follow the patter of `pnpm nx <command> <application/package/lib> <options>`.
+
+Possible commands:
+- `typecheck` - Typecheck the application/package/lib
+- `test` - Test the application/package/lib. Always use the `--watch=false` option.
+- `lint` - Lint the application/package/lib
+- `build` - Build the application/package/lib
+
+The application/package/lib is the name of the application/package/lib you are working on, as designated by the path. For example, changes under `apps/ui` correspond to the `ui` application, whilst changes under `packages/converter` correspond to the `converter` package.
+
+A full example to test the `ui` application would be `pnpm nx test ui`.

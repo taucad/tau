@@ -19,19 +19,6 @@ type ZooExportFormat = Extract<ExportFormat, 'stl' | 'stl-binary' | 'step'>;
 const stlDataMemory: Record<string, Uint8Array> = {};
 let kclUtils: KclUtils | undefined;
 
-const emptyShape: Shape3D = {
-  type: '3d',
-  name: 'Shape',
-  faces: {
-    vertices: [],
-    triangles: [],
-    normals: [],
-    faceGroups: [],
-  },
-  edges: { lines: [], edgeGroups: [] },
-  error: false,
-};
-
 // Helper function to handle errors and convert them appropriately
 function handleError(error: unknown, code?: string): ReturnType<typeof createKernelError> {
   // If it's already a KCL error, convert it directly
@@ -135,7 +122,7 @@ async function buildShapesFromCode(
     // Check if code is empty
     const trimmedCode = code.trim();
     if (trimmedCode === '') {
-      return createKernelSuccess([emptyShape]);
+      return createKernelSuccess([]);
     }
 
     try {
@@ -185,7 +172,7 @@ async function buildShapesFromCode(
       });
 
       if (exportResult.length === 0) {
-        return createKernelSuccess([emptyShape]);
+        return createKernelSuccess([]);
       }
 
       // Get the first exported file (should be STL)
@@ -278,7 +265,6 @@ async function buildShapesFromCode(
           ],
         },
         edges: { lines: [], edgeGroups: [] },
-        error: false,
       };
 
       return createKernelSuccess([shape]);

@@ -445,7 +445,6 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
         type: 'gltf',
         name: defaultName ?? 'Shape',
         gltfBlob,
-        error: false,
       };
       gltfShapes.push(shapeGltf);
     }
@@ -525,7 +524,6 @@ const exportShape = async (
             lines: [],
             edgeGroups: [],
           },
-          error: false,
         } satisfies Shape3D;
       });
 

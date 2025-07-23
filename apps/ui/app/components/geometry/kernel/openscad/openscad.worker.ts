@@ -101,16 +101,7 @@ async function buildShapesFromCode(
     // Check if code is empty after trimming whitespace
     const trimmedCode = code.trim();
     if (trimmedCode === '') {
-      // Return empty GLTF shape for empty code.
-      // Create a minimal GLTF blob for empty geometry
-      const emptyGlb = await convertOffToGltf('OFF\n0 0 0\n', 'glb');
-      const emptyShape: ShapeGltf = {
-        type: 'gltf',
-        name: 'Shape',
-        gltfBlob: emptyGlb,
-        error: false,
-      };
-      return createKernelSuccess([emptyShape]);
+      return createKernelSuccess([]);
     }
 
     const inst = await getInstance();
@@ -148,7 +139,6 @@ async function buildShapesFromCode(
       type: 'gltf',
       name: 'Shape',
       gltfBlob,
-      error: false,
     };
 
     return createKernelSuccess([shape]);

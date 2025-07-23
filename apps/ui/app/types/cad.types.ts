@@ -17,8 +17,6 @@ export type Shape2D = {
   viewbox: string;
   opacity?: number;
   strokeType?: string;
-  /** @deprecated - TODO: remove this */
-  error: boolean;
   name: string;
 };
 
@@ -44,8 +42,6 @@ export type Shape3D = {
   };
   color?: string;
   opacity?: number;
-  /** @deprecated - TODO: remove this */
-  error: boolean;
   name: string;
   highlight?: number[];
 };
@@ -53,8 +49,6 @@ export type Shape3D = {
 export type ShapeGltf = {
   type: 'gltf';
   gltfBlob: Blob;
-  /** @deprecated - TODO: remove this */
-  error: boolean;
   name: string;
 };
 

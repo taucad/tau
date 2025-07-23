@@ -18,7 +18,6 @@ describe('convertReplicadShapesToGltf', () => {
       name: 'Test Cube',
       color: '#ff0000',
       opacity: 1,
-      error: false,
       faces: {
         // Simple triangle vertices (3 vertices per triangle, 3 components per vertex)
         vertices: [
@@ -77,7 +76,6 @@ describe('convertReplicadShapesToGltf', () => {
     const simpleShape: Shape3D = {
       type: '3d',
       name: 'Test Shape',
-      error: false,
       faces: {
         vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
         triangles: [0, 1, 2],
@@ -102,7 +100,6 @@ describe('convertReplicadShapesToGltf', () => {
       type: '3d',
       name: 'Red Shape',
       color: '#ff0000',
-      error: false,
       faces: {
         vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
         triangles: [0, 1, 2],
@@ -116,7 +113,6 @@ describe('convertReplicadShapesToGltf', () => {
       type: '3d',
       name: 'Blue Shape',
       color: '#0000ff',
-      error: false,
       faces: {
         vertices: [2, 0, 0, 3, 0, 0, 2, 1, 0],
         triangles: [0, 1, 2],
@@ -142,7 +138,6 @@ describe('convertReplicadShapesToGltf', () => {
     const shapeWithoutLines: Shape3D = {
       type: '3d',
       name: 'Shape without Lines',
-      error: false,
       faces: {
         vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
         triangles: [0, 1, 2],
@@ -158,7 +153,6 @@ describe('convertReplicadShapesToGltf', () => {
     const shapeWithLines: Shape3D = {
       type: '3d',
       name: 'Shape with Lines',
-      error: false,
       faces: {
         vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
         triangles: [0, 1, 2],

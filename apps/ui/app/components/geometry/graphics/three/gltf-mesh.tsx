@@ -1,17 +1,54 @@
 /* eslint-disable react/no-unknown-property -- TODO: fix this */
 import { useThree } from '@react-three/fiber';
 import { useState, useRef, useLayoutEffect } from 'react';
-import type { Mesh, BufferGeometry, Material, Object3D } from 'three';
+import type { Mesh, Material, Object3D, LineSegments, BufferGeometry } from 'three';
 import { LineBasicMaterial, EdgesGeometry } from 'three';
 import { GLTFLoader } from 'three-stdlib';
 import { MatcapMaterial } from '~/components/geometry/graphics/three/matcap-material.js';
 import type { ShapeGltf } from '~/types/cad.types.js';
+
+type MeshDataItem = {
+  readonly geometry: BufferGeometry;
+  readonly materialColor?: string;
+  readonly materialOpacity?: number;
+  readonly hasVertexColors: boolean;
+  readonly name: string;
+  readonly id: string;
+};
+
+type EdgeDataItem = {
+  readonly geometry: BufferGeometry;
+  readonly material: Material;
+  readonly name: string;
+  readonly id: string;
+};
 
 type GltfMeshProperties = ShapeGltf & {
   readonly enableSurfaces?: boolean;
   readonly enableLines?: boolean;
 };
 
+/**
+ * This component renders a GLTF mesh.
+ *
+ * Rather than using Drei's `Gltf` component, this component is optimized for performance
+ * and caters to the needs of a CAD application.
+ *
+ * It does the following:
+ * - Parses the GLTF blob
+ * - Collects all mesh data and line segments
+ * - Creates separate mesh and edge arrays
+ * - Creates edge geometry from mesh faces if no line segments are found
+ * - Detects and prioritizes vertex colors over material colors
+ *   - When vertex colors (COLOR_0 attribute) are present: uses vertex colors exclusively
+ *   - When no vertex colors are present: falls back to material colors and opacity
+ *
+ * @param gltfBlob - The GLTF blob to load
+ * @param name - The name of the mesh
+ * @param enableSurfaces - Whether to enable surfaces
+ * @param enableLines - Whether to enable lines
+ * @returns A React component with Three.js primitives that renders the GLTF mesh
+ */
 export function GltfMesh({
   gltfBlob,
   name,
@@ -19,22 +56,15 @@ export function GltfMesh({
   enableLines = true,
 }: GltfMeshProperties): React.JSX.Element {
   const { invalidate } = useThree();
-  const [meshData, setMeshData] = useState<
-    | {
-        geometry: BufferGeometry;
-        edgeGeometry: BufferGeometry;
-        edgeMaterial: Material;
-      }
-    | undefined
-  >(undefined);
+  const [meshDataItems, setMeshDataItems] = useState<MeshDataItem[]>([]);
+  const [edgeDataItems, setEdgeDataItems] = useState<EdgeDataItem[]>([]);
   const [error, setError] = useState<string | undefined>(undefined);
 
   // Track resources for proper cleanup
   const resourcesRef = useRef<{
-    geometry?: BufferGeometry;
-    edgeGeometry?: BufferGeometry;
-    edgeMaterial?: Material;
-  }>({});
+    meshItems: MeshDataItem[];
+    edgeItems: EdgeDataItem[];
+  }>({ meshItems: [], edgeItems: [] });
 
   useLayoutEffect(() => {
     const loadGltf = async (): Promise<void> => {
@@ -54,69 +84,162 @@ export function GltfMesh({
         // Use singleton loader for parsing
         const parsedGltf = await loader.parseAsync(arrayBuffer, '');
 
-        // Extract geometry with better traversal
-        let geometry: BufferGeometry | undefined;
-        let foundMesh = false;
+        // First pass: collect mesh data and check for line segments
+        const meshData: Array<{
+          geometry: BufferGeometry;
+          materialColor?: string;
+          materialOpacity?: number;
+          hasVertexColors: boolean;
+          name: string;
+        }> = [];
+        const separateLineSegments: Array<{ geometry: BufferGeometry; name: string }> = [];
 
         parsedGltf.scene.traverse((child: Object3D) => {
-          if (child.type === 'Mesh' && !foundMesh) {
+          if (child.type === 'Mesh') {
             const mesh = child as Mesh;
             if (mesh.geometry.attributes['position']) {
-              geometry = mesh.geometry.clone(); // Clone to avoid shared references
-              foundMesh = true;
+              const geometry = mesh.geometry.clone();
+              let materialColor: string | undefined;
+              let materialOpacity: number | undefined;
+
+              // Check for vertex colors first (COLOR_0 attribute)
+              const hasVertexColors = Boolean(geometry.attributes['color'] ?? geometry.attributes['COLOR_0']);
+
+              // Only extract material colors if vertex colors are not present
+              if (!hasVertexColors) {
+                // Extract material color and opacity from the mesh material
+                if ('color' in mesh.material) {
+                  const material = mesh.material as { color: { getHexString(): string } };
+                  materialColor = `#${material.color.getHexString()}`;
+                }
+
+                // Extract material opacity
+                if ('opacity' in mesh.material) {
+                  const material = mesh.material as { opacity: number };
+                  materialOpacity = material.opacity;
+                }
+              }
+
+              // Validate geometry has vertices
+              const positionAttribute = geometry.attributes['position'];
+              if (!positionAttribute || positionAttribute.count === 0) {
+                console.warn(`Mesh ${child.name || 'unnamed'} has no vertices, skipping`);
+                return;
+              }
+
+              // Optimize geometry for rendering
+              if (!geometry.attributes['normal']) {
+                geometry.computeVertexNormals();
+              }
+
+              // Validate that bounding box was computed successfully
+              if (!geometry.boundingBox || geometry.boundingBox.isEmpty()) {
+                console.warn(`Failed to compute valid bounding box for mesh ${child.name || 'unnamed'}, skipping`);
+                return;
+              }
+
+              const itemName = child.name || `mesh-${meshData.length}`;
+              meshData.push({
+                geometry,
+                materialColor,
+                materialOpacity,
+                hasVertexColors,
+                name: itemName,
+              });
+            }
+          }
+
+          // Look for separate line segments that aren't part of meshes
+          if (child.type === 'LineSegments') {
+            const linesMesh = child as LineSegments;
+            if (linesMesh.geometry.attributes['position']) {
+              separateLineSegments.push({
+                geometry: linesMesh.geometry.clone(),
+                name: child.name || `lines-${separateLineSegments.length}`,
+              });
             }
           }
         });
-        if (!geometry) {
-          throw new Error('No valid mesh geometry found in GLTF');
+
+        // Build separate mesh and edge arrays
+        const meshItems: MeshDataItem[] = [];
+        const edgeItems: EdgeDataItem[] = [];
+
+        // Create mesh items (always create these for surfaces)
+        for (const [index, mesh] of meshData.entries()) {
+          meshItems.push({
+            geometry: mesh.geometry,
+            materialColor: mesh.materialColor,
+            materialOpacity: mesh.materialOpacity,
+            hasVertexColors: mesh.hasVertexColors,
+            name: mesh.name,
+            id: `mesh-${mesh.name}-${index}-${Date.now()}`,
+          });
         }
 
-        // Validate geometry has vertices
-        const positionAttribute = geometry.attributes['position'];
-        if (!positionAttribute || positionAttribute.count === 0) {
-          throw new Error('Geometry has no vertices');
+        // Create edge items based on strategy
+        if (separateLineSegments.length > 0) {
+          // Use existing LineSegments for edges
+          console.log('Using existing LineSegments for edges');
+
+          for (const [index, lineSegment] of separateLineSegments.entries()) {
+            const edgeMaterial = new LineBasicMaterial({
+              color: 0x24_42_24,
+              linewidth: 1,
+              transparent: false,
+              depthWrite: true,
+              depthTest: true,
+            });
+
+            edgeItems.push({
+              geometry: lineSegment.geometry,
+              material: edgeMaterial,
+              name: lineSegment.name,
+              id: `edge-${lineSegment.name}-${index}-${Date.now()}`,
+            });
+          }
+        } else {
+          // No LineSegments found - compute edge geometry from all mesh geometries
+          console.log('No LineSegments found, computing edge geometry from meshes');
+
+          for (const [index, mesh] of meshData.entries()) {
+            // Create edge geometry from mesh faces
+            const edgeGeometry = new EdgesGeometry(mesh.geometry, 1); // Threshold of 1 degree
+
+            // Create edge material with optimized settings
+            const edgeMaterial = new LineBasicMaterial({
+              color: 0x24_42_24,
+              linewidth: 1,
+              transparent: false,
+              depthWrite: true,
+              depthTest: true,
+            });
+
+            edgeItems.push({
+              geometry: edgeGeometry,
+              material: edgeMaterial,
+              name: `${mesh.name}-edges`,
+              id: `edge-${mesh.name}-${index}-${Date.now()}`,
+            });
+          }
         }
 
-        // Optimize geometry for rendering
-        if (!geometry.attributes['normal']) {
-          geometry.computeVertexNormals();
+        if (meshItems.length === 0 && edgeItems.length === 0) {
+          throw new Error('No valid mesh or line geometry found in GLTF');
         }
-
-        // Validate that bounding box was computed successfully
-        if (!geometry.boundingBox || geometry.boundingBox.isEmpty()) {
-          throw new Error('Failed to compute valid bounding box for geometry');
-        }
-
-        // Create edge geometry with error handling
-        const edgeGeometry = new EdgesGeometry(geometry, 1); // Threshold of 1 degree
-
-        // Create edge material with optimized settings
-        const edgeMaterial = new LineBasicMaterial({
-          color: 0x24_42_24,
-          linewidth: 1, // Use 1 for better browser compatibility
-          transparent: false,
-          depthWrite: true,
-          depthTest: true,
-        });
 
         // Store resources for cleanup
-        resourcesRef.current = {
-          geometry,
-          edgeGeometry,
-          edgeMaterial,
-        };
+        resourcesRef.current = { meshItems, edgeItems };
 
-        setMeshData({
-          geometry,
-          edgeGeometry,
-          edgeMaterial,
-        });
+        setMeshDataItems(meshItems);
+        setEdgeDataItems(edgeItems);
         setError(undefined);
       } catch (parseError: unknown) {
         const errorMessage = parseError instanceof Error ? parseError.message : 'Failed to parse GLTF data';
         console.warn('GLTF parsing error:', errorMessage);
         setError(errorMessage);
-        setMeshData(undefined);
+        setMeshDataItems([]);
+        setEdgeDataItems([]);
       } finally {
         invalidate();
       }
@@ -128,12 +251,18 @@ export function GltfMesh({
   useLayoutEffect(() => {
     return () => {
       // Cleanup function to prevent memory leaks
-      const resources = resourcesRef.current;
-      resources.geometry?.dispose();
-      resources.edgeGeometry?.dispose();
-      resources.edgeMaterial?.dispose();
+      const { meshItems, edgeItems } = resourcesRef.current;
 
-      resourcesRef.current = {};
+      for (const item of meshItems) {
+        item.geometry.dispose();
+      }
+
+      for (const item of edgeItems) {
+        item.geometry.dispose();
+        item.material.dispose();
+      }
+
+      resourcesRef.current = { meshItems: [], edgeItems: [] };
     };
   }, []);
 
@@ -146,23 +275,45 @@ export function GltfMesh({
   // Manual mesh construction with optimized settings
   return (
     <group name={name}>
-      {/* Main mesh with MatCap material and vertex colors */}
-      <mesh
-        frustumCulled={false} // Don't cull the mesh
-        visible={enableSurfaces}
-        geometry={meshData?.geometry}
-      >
-        <MatcapMaterial vertexColors polygonOffset polygonOffsetFactor={1} side={2} polygonOffsetUnits={1} />
-      </mesh>
+      {/* Render all mesh surfaces */}
+      {meshDataItems.map((meshData) => {
+        // Determine if material should be transparent
+        const isTransparent = meshData.materialOpacity !== undefined && meshData.materialOpacity < 1;
 
-      {/* Edge lines with optimized settings */}
-      <lineSegments
-        frustumCulled={false} // Don't cull the lines
-        visible={enableLines}
-        geometry={meshData?.edgeGeometry}
-        material={meshData?.edgeMaterial}
-        renderOrder={1} // Render after main mesh
-      />
+        return (
+          <mesh
+            key={meshData.id}
+            name={meshData.name}
+            frustumCulled={false}
+            visible={enableSurfaces}
+            geometry={meshData.geometry}
+          >
+            <MatcapMaterial
+              polygonOffset
+              color={meshData.hasVertexColors ? undefined : meshData.materialColor}
+              opacity={meshData.hasVertexColors ? undefined : meshData.materialOpacity}
+              transparent={meshData.hasVertexColors ? false : isTransparent}
+              vertexColors={meshData.hasVertexColors}
+              polygonOffsetFactor={1}
+              polygonOffsetUnits={1}
+              side={2}
+            />
+          </mesh>
+        );
+      })}
+
+      {/* Render all edge lines */}
+      {edgeDataItems.map((edgeData) => (
+        <lineSegments
+          key={edgeData.id}
+          name={edgeData.name}
+          frustumCulled={false}
+          visible={enableLines}
+          geometry={edgeData.geometry}
+          material={edgeData.material}
+          renderOrder={1}
+        />
+      ))}
     </group>
   );
 }

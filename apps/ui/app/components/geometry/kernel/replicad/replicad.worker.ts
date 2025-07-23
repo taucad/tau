@@ -21,10 +21,12 @@ import {
 } from '~/components/geometry/kernel/replicad/init-open-cascade.js';
 import { runInCjsContext, buildEsModule } from '~/components/geometry/kernel/replicad/vm.js';
 import { renderOutput, ShapeStandardizer } from '~/components/geometry/kernel/replicad/utils/render-output.js';
+import { convertReplicadShapesToGltf } from '~/components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
 import { jsonSchemaFromJson } from '~/utils/schema.js';
 import type { MainResultShapes, ShapeConfig } from '~/components/geometry/kernel/replicad/utils/render-output.js';
+import type { ShapeGltf, Shape3D, Shape2D } from '~/types/cad.types.js';
 
-type ReplicadExportFormat = Extract<ExportFormat, 'stl' | 'stl-binary' | 'step' | 'step-assembly'>;
+type ReplicadExportFormat = Extract<ExportFormat, 'stl' | 'stl-binary' | 'step' | 'step-assembly' | 'glb' | 'gltf'>;
 
 // Track whether we've already set OC in replicad to avoid repeated calls
 let replicadHasOc = false;
@@ -409,9 +411,9 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
       };
     }
 
-    // Process shapes efficiently
+    // Process shapes to get 3D mesh data
     const renderStartTime = performance.now();
-    const result = renderOutput(
+    const renderedShapes = renderOutput(
       shapes,
       standardizer,
       (shapesArray) => {
@@ -423,12 +425,37 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
     const renderEndTime = performance.now();
     console.log(`Render output took ${renderEndTime - renderStartTime}ms`);
 
+    // Convert 3D shapes to GLTF format
+    const gltfStartTime = performance.now();
+    const shapes3d = renderedShapes.filter((shape): shape is Shape3D => shape.type === '3d');
+    const shapes2d = renderedShapes.filter((shape): shape is Shape2D => shape.type === '2d');
+
+    if (shapes3d.length === 0 && shapes2d.length === 0) {
+      return createKernelSuccess([]);
+    }
+
+    // Convert to GLTF (binary format) for rendering
+    const gltfShapes = [];
+    if (shapes3d.length > 0) {
+      const gltfBlob = await convertReplicadShapesToGltf(shapes3d, 'glb');
+      const gltfEndTime = performance.now();
+      console.log(`GLTF conversion took ${gltfEndTime - gltfStartTime}ms`);
+
+      const shapeGltf: ShapeGltf = {
+        type: 'gltf',
+        name: defaultName ?? 'Shape',
+        gltfBlob,
+        error: false,
+      };
+      gltfShapes.push(shapeGltf);
+    }
+
     const totalTime = performance.now() - startTime;
     console.log(`Total buildShapesFromCode time: ${totalTime}ms`);
 
     return {
       success: true,
-      data: result,
+      data: [...gltfShapes, ...shapes2d],
     };
   } catch (error) {
     console.error('Error in buildShapesFromCode:', error);
@@ -474,6 +501,41 @@ const exportShape = async (
         startColumn: 0,
         type: 'runtime',
       });
+    }
+
+    // Handle GLTF formats using our conversion utility
+    if (fileType === 'glb' || fileType === 'gltf') {
+      // Create temporary 3D shapes from the stored shape configs
+      const temporaryShapes = shapesMemory[shapeId].map((shapeConfig) => {
+        const { shape } = shapeConfig;
+        // Convert to Shape3D format for GLTF conversion
+        const faces = shape.mesh({
+          tolerance: meshConfig.tolerance,
+          angularTolerance: meshConfig.angularTolerance,
+        });
+
+        return {
+          type: '3d' as const,
+          name: shapeConfig.name ?? 'Shape',
+          color: (shapeConfig as { color?: string }).color,
+          opacity: (shapeConfig as { opacity?: number }).opacity,
+          faces,
+          // Lines are only used for the viewer, so we don't need to compute them
+          edges: {
+            lines: [],
+            edgeGroups: [],
+          },
+          error: false,
+        } satisfies Shape3D;
+      });
+
+      const gltfBlob = await convertReplicadShapesToGltf(temporaryShapes, fileType);
+      return createKernelSuccess([
+        {
+          blob: gltfBlob,
+          name: fileType === 'glb' ? 'model.glb' : 'model.gltf',
+        },
+      ]);
     }
 
     if (fileType === 'step-assembly') {

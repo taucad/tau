@@ -392,14 +392,9 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
     const standardizer = new ShapeStandardizer();
 
     try {
-      // Set up global helpers
-      // TODO: Review if this is needed.
-      // (globalThis as any).$ = helper;
-      // (globalThis as any).registerShapeStandardizer = standardizer.registerAdapter.bind(standardizer);
-
       // Run the code with measurements
       const runCodeStartTime = performance.now();
-      shapes = (await runCode(code, parameters)) as MainResultShapes;
+      shapes = ((await runCode(code, parameters)) ?? []) as MainResultShapes;
       const runCodeEndTime = performance.now();
       console.log(`Code execution took ${runCodeEndTime - runCodeStartTime}ms`);
 

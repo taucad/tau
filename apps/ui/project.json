@@ -18,6 +18,13 @@
     },
     "typegen": {
       "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/app/**/*.tsx",
+        "{projectRoot}/app/**/*.ts",
+        "{projectRoot}/react-router.config.ts"
+      ],
+      "outputs": ["{projectRoot}/.react-router/types/**"],
       "options": {
         "command": "react-router typegen",
         "cwd": "{projectRoot}"

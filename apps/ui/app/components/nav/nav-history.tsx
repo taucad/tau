@@ -124,22 +124,20 @@ export function NavHistory(): ReactNode {
 
   return (
     <>
-      {/* Search input - always show for the first group */}
-      {visibleBuilds.length > 0 && (
-        <SidebarGroup className="-mb-2 group-data-[collapsible=icon]:hidden">
-          <SidebarGroupLabel>Recent Builds</SidebarGroupLabel>
-          <div className="relative">
-            <Search className="absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search builds..."
-              value={searchQuery}
-              className="h-7 pl-7 text-xs"
-              onChange={handleSearchChange}
-              onKeyDown={handleSearchKeyDown}
-            />
-          </div>
-        </SidebarGroup>
-      )}
+      {/* Search input */}
+      <SidebarGroup className="-mb-2 group-data-[collapsible=icon]:hidden">
+        <SidebarGroupLabel>Recent Builds</SidebarGroupLabel>
+        <div className="relative">
+          <Search className="absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search builds..."
+            value={searchQuery}
+            className="h-7 pl-7 text-xs"
+            onChange={handleSearchChange}
+            onKeyDown={handleSearchKeyDown}
+          />
+        </div>
+      </SidebarGroup>
 
       {/* Temporal groups */}
       {visibleBuilds.map((group) => (

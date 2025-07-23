@@ -323,7 +323,8 @@ export class EngineConnection {
       }
 
       if (this.websocket?.readyState === 1) {
-        this.send({ type: 'ping' });
+        // TODO: Re-enable after investigation & fix, right now it results in heavy API usage.
+        // this.send({ type: 'ping' });
       }
     }, pingIntervalMs);
   }

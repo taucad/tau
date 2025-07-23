@@ -82,6 +82,8 @@ export const unitlessTerms = [
   'divisions',
   'precision',
   'sampling',
+  'opacity',
+  'transparency',
 ];
 
 /**

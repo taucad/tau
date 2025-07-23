@@ -287,6 +287,7 @@ const exportGeometryActor = fromPromise<
     if (isKernelSuccess(result)) {
       const { data } = result;
       if (Array.isArray(data) && data.length > 0 && data[0]?.blob) {
+        // TODO: Handle multiple blobs during export
         return { type: 'geometryExported', blob: data[0].blob, format };
       }
 

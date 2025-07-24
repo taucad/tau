@@ -29,6 +29,14 @@ type GltfMeshProperties = ShapeGltf & {
 };
 
 /**
+ * The threshold in degrees for the EdgesGeometry.
+ *
+ * This is used to determine which edges are visible. When a face has adjacent faces with a
+ * connecting angle lesser than this threshold, the edge is visible.
+ */
+const edgeThresholdDegrees = 30;
+
+/**
  * This component renders a GLTF mesh.
  *
  * Rather than using Drei's `Gltf` component, this component is optimized for performance
@@ -204,7 +212,7 @@ export function GltfMesh({
 
           for (const [index, mesh] of meshData.entries()) {
             // Create edge geometry from mesh faces
-            const edgeGeometry = new EdgesGeometry(mesh.geometry, 1); // Threshold of 1 degree
+            const edgeGeometry = new EdgesGeometry(mesh.geometry, edgeThresholdDegrees);
 
             // Create edge material with optimized settings
             const edgeMaterial = new LineBasicMaterial({

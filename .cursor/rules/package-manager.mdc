@@ -11,14 +11,18 @@ e.g.:
 
 # Testing Changes
 As you iterate towards a solution, you should test your changes using NX workspace commands.
-All commands follow the patter of `pnpm nx <command> <application/package/lib> <options>`.
+All commands follow the patter of `pnpm nx <command> <project> <options>`.
 
 Possible commands:
-- `typecheck` - Typecheck the application/package/lib
-- `test` - Test the application/package/lib. Always use the `--watch=false` option.
-- `lint` - Lint the application/package/lib
-- `build` - Build the application/package/lib
+- `typecheck` - Typecheck the project
+- `test` - Test the project. Always use the `--watch=false` option.
+  - Run tests for a specific file: `pnpm nx test <project> <path-from-PROJECT-root> --watch=false`
+  - e.g. `pnpm nx test ui ./app/utils/crypto.test.ts --watch=false`
+- `lint` - Lint the project
+  - Run lint for a specific file: `pnpm eslint <path-from-WORKSPACE-root>`
+  - e.g. `pnpm eslint ./apps/ui/app/utils/crypto.test.ts`
+- `build` - Build the project
 
-The application/package/lib is the name of the application/package/lib you are working on, as designated by the path. For example, changes under `apps/ui` correspond to the `ui` application, whilst changes under `packages/converter` correspond to the `converter` package.
+The project is the name of the project you are working on, as designated by the path. For example, changes under `apps/ui` correspond to the `ui` project, whilst changes under `packages/converter` correspond to the `converter` project.
 
-A full example to test the `ui` application would be `pnpm nx test ui`.
+A full example to test the `ui` project would be `pnpm nx test ui`.

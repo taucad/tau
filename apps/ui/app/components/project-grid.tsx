@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { Star, GitFork, Eye } from 'lucide-react';
+import { Star, GitFork, Eye, Loader2 } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useActor, useSelector } from '@xstate/react';
@@ -64,6 +64,7 @@ function ProjectCard({
 }: CommunityBuildCardProperties) {
   const [showPreview, setShowPreview] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
+  const [isForking, setIsForking] = useState(false);
   const cardReference = useRef<HTMLDivElement>(null);
 
   // Create a unique instance of the CAD machine for this card using the card's ID
@@ -132,26 +133,38 @@ function ProjectCard({
   }, []);
 
   const handleFork = useCallback(async () => {
-    // Create a new build with forked data
-    const newBuild: Omit<Build, 'id'> = {
-      name: `${name} (Fork)`,
-      description,
-      thumbnail,
-      stars: 0,
-      forks: 0,
-      author, // This should be the current user in a real implementation
-      tags,
-      assets,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      forkedFrom: id,
-      chats,
-    };
+    if (isForking) {
+      return;
+    }
 
-    const createdBuild = await storage.createBuild(newBuild);
-    // Navigate to the new build
-    await navigate(`/builds/${createdBuild.id}`);
-  }, [name, description, thumbnail, author, tags, assets, id, chats, navigate]);
+    setIsForking(true);
+
+    try {
+      // Create a new build with forked data
+      const newBuild: Omit<Build, 'id'> = {
+        name: `${name} (Fork)`,
+        description,
+        thumbnail,
+        stars: 0,
+        forks: 0,
+        author, // This should be the current user in a real implementation
+        tags,
+        assets,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        forkedFrom: id,
+        chats,
+      };
+
+      const createdBuild = await storage.createBuild(newBuild);
+      // Navigate to the new build
+      await navigate(`/builds/${createdBuild.id}`);
+    } catch (error) {
+      console.error('Failed to fork project:', error);
+      // TODO: Show error toast/notification to user
+      setIsForking(false);
+    }
+  }, [name, description, thumbnail, author, tags, assets, id, chats, navigate, isForking]);
 
   const handlePreviewToggle = useCallback(
     (event: React.MouseEvent) => {
@@ -243,13 +256,14 @@ function ProjectCard({
                 variant="outline"
                 size="sm"
                 className="flex items-center gap-1 text-sm text-muted-foreground hover:text-blue"
+                disabled={isForking}
                 onClick={handleFork}
               >
-                <GitFork />
+                {isForking ? <Loader2 className="animate-spin" /> : <GitFork />}
                 {forks}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Fork this project</TooltipContent>
+            <TooltipContent>{isForking ? 'Forking project...' : 'Fork this project'}</TooltipContent>
           </Tooltip>
         </div>
       </CardFooter>

@@ -26,7 +26,18 @@ import { jsonSchemaFromJson } from '~/utils/schema.js';
 import type { MainResultShapes, ShapeConfig } from '~/components/geometry/kernel/replicad/utils/render-output.js';
 import type { ShapeGltf, Shape3D, Shape2D } from '~/types/cad.types.js';
 
-type ReplicadExportFormat = Extract<ExportFormat, 'stl' | 'stl-binary' | 'step' | 'step-assembly' | 'glb' | 'gltf'>;
+const supportedExportFormats = [
+  'stl',
+  'stl-binary',
+  'step',
+  'step-assembly',
+  'glb',
+  'gltf',
+] as const satisfies ExportFormat[];
+
+const getSupportedExportFormats = (): ExportFormat[] => supportedExportFormats;
+
+type ReplicadExportFormat = (typeof supportedExportFormats)[number];
 
 // Track whether we've already set OC in replicad to avoid repeated calls
 let replicadHasOc = false;
@@ -626,10 +637,10 @@ const service = {
   initialize,
   toggleExceptions,
   isExceptionsEnabled: (): boolean => ocVersions.current === 'withExceptions',
+  getSupportedExportFormats,
 };
 
 // @ts-expect-error -- TODO: Investigate this. It's not causing any issues.
 expose(service, globalThis);
 
 export type BuilderWorkerInterface = typeof service;
-export default service;

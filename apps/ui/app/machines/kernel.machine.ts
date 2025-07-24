@@ -246,7 +246,7 @@ const evaluateCodeActor = fromPromise<
 });
 
 const exportGeometryActor = fromPromise<
-  { type: 'geometryExported'; blob: Blob; format: ExportFormat } | { type: 'kernelError'; error: KernelError },
+  { type: 'geometryExported'; blob: Blob; format: ExportFormat } | { type: 'geometryExportFailed'; error: KernelError },
   { context: KernelContext; event: { format: ExportFormat; kernelType: KernelProvider } }
 >(async ({ input }) => {
   const { context, event } = input;
@@ -254,7 +254,7 @@ const exportGeometryActor = fromPromise<
   // Skip in non-browser environments
   if (!isBrowser) {
     return {
-      type: 'kernelError',
+      type: 'geometryExportFailed',
       error: {
         message: 'Not in browser environment',
         startLineNumber: 0,
@@ -269,7 +269,7 @@ const exportGeometryActor = fromPromise<
 
   if (!wrappedWorker) {
     return {
-      type: 'kernelError',
+      type: 'geometryExportFailed',
       error: {
         message: `${event.kernelType} worker not initialized`,
         startLineNumber: 0,
@@ -281,8 +281,21 @@ const exportGeometryActor = fromPromise<
 
   try {
     const { format } = event;
-    // TODO: Add support checking for kernels
-    const result = await wrappedWorker.exportShape(format as 'stl' | 'stl-binary');
+    const supportedFormats = await wrappedWorker.getSupportedExportFormats();
+    if (!supportedFormats.includes(format)) {
+      return {
+        type: 'geometryExportFailed',
+        error: {
+          message: `Unsupported export format: ${format}`,
+          startLineNumber: 0,
+          startColumn: 0,
+          type: 'runtime',
+        },
+      };
+    }
+
+    // TODO: add a proper type guard for the export format
+    const result = await wrappedWorker.exportShape(format as never);
 
     if (isKernelSuccess(result)) {
       const { data } = result;
@@ -292,7 +305,7 @@ const exportGeometryActor = fromPromise<
       }
 
       return {
-        type: 'kernelError',
+        type: 'geometryExportFailed',
         error: {
           message: 'No geometry data to export',
           startLineNumber: 0,
@@ -302,14 +315,16 @@ const exportGeometryActor = fromPromise<
       };
     }
 
+    console.log('Got Export Error', result);
+
     return {
-      type: 'kernelError',
+      type: 'geometryExportFailed',
       error: result.error,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Failed to export shape';
     return {
-      type: 'kernelError',
+      type: 'geometryExportFailed',
       error: {
         message: errorMessage,
         startLineNumber: 0,

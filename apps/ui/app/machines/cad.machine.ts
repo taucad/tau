@@ -38,7 +38,8 @@ type CadEvent =
 type CadEmitted =
   | { type: 'modelUpdated'; code: string; parameters: Record<string, unknown> }
   | { type: 'geometryEvaluated'; shapes: Shape[] }
-  | { type: 'geometryExported'; blob: Blob; format: string };
+  | { type: 'geometryExported'; blob: Blob; format: ExportFormat }
+  | { type: 'exportFailed'; error: KernelError };
 
 type CadInput = {
   shouldInitializeKernelOnStart: boolean;
@@ -163,6 +164,16 @@ export const cadMachine = setup({
         type: 'geometryExported' as const,
         blob: event.blob,
         format: event.format,
+      });
+    }),
+    setExportError: enqueueActions(({ enqueue, event }) => {
+      assertEvent(event, 'geometryExportFailed');
+      enqueue.assign({
+        exportedBlob: undefined,
+      });
+      enqueue.emit({
+        type: 'exportFailed' as const,
+        error: event.error,
       });
     }),
     initializeKernel: enqueueActions(({ enqueue, context, self }) => {
@@ -306,6 +317,9 @@ export const cadMachine = setup({
         geometryExported: {
           actions: 'setExportedBlob',
         },
+        geometryExportFailed: {
+          actions: 'setExportError',
+        },
       },
     },
     // The buffering state debounces rapid code/parameter changes
@@ -400,6 +414,9 @@ export const cadMachine = setup({
         },
         geometryExported: {
           actions: 'setExportedBlob',
+        },
+        geometryExportFailed: {
+          actions: 'setExportError',
         },
       },
     },

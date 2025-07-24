@@ -13,7 +13,11 @@ import { isKclError, extractExecutionError } from '~/components/geometry/kernel/
 import { convertKclErrorToKernelError, mapErrorToKclError } from '~/components/geometry/kernel/zoo/error-mappers.js';
 import { getErrorPosition } from '~/components/geometry/kernel/zoo/source-range-utils.js';
 
-type ZooExportFormat = Extract<ExportFormat, 'stl' | 'stl-binary' | 'step'>;
+const supportedExportFormats = ['stl', 'stl-binary', 'step', 'gltf'] as const satisfies ExportFormat[];
+
+const getSupportedExportFormats = (): ExportFormat[] => supportedExportFormats;
+
+type ZooExportFormat = (typeof supportedExportFormats)[number];
 
 // Global storage for computed STL data
 const stlDataMemory: Record<string, Uint8Array> = {};
@@ -368,6 +372,7 @@ const service = {
   toggleExceptions: async (): Promise<'single'> => 'single' as const,
   exportShape,
   isExceptionsEnabled: (): boolean => false,
+  getSupportedExportFormats,
 };
 
 expose(service);

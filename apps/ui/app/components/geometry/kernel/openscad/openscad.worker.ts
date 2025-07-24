@@ -20,8 +20,11 @@ import { convertOffToGltf } from '~/components/geometry/kernel/utils/off-to-gltf
 import { convertOffToStl } from '~/components/geometry/kernel/utils/off-to-stl.js';
 import { convertOffTo3mf } from '~/components/geometry/kernel/utils/off-to-3mf.js';
 
-// Extract only the formats supported by OpenSCAD worker
-type OpenScadExportFormat = Extract<ExportFormat, 'stl' | 'stl-binary' | 'glb' | 'gltf' | '3mf'>;
+const supportedExportFormats = ['stl', 'stl-binary', 'glb', 'gltf', '3mf'] as const satisfies ExportFormat[];
+
+const getSupportedExportFormats = (): ExportFormat[] => supportedExportFormats;
+
+type OpenScadExportFormat = (typeof supportedExportFormats)[number];
 
 // Global storage for computed OFF data (for later format conversion)
 const offDataMemory: Record<string, string> = {};
@@ -229,6 +232,7 @@ const service = {
   toggleExceptions: async () => 'single',
   exportShape,
   isExceptionsEnabled: () => false,
+  getSupportedExportFormats,
 };
 
 expose(service);

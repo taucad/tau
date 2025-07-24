@@ -43,9 +43,18 @@ const cadListener = fromCallback<ExportGeometryEvent, { cadRef: ActorRefFrom<typ
       });
     });
 
+    // Subscribe to export failure events
+    const errorSubscription = cadRef.on('exportFailed', (event) => {
+      sendBack({
+        type: 'exportFailed',
+        error: event.error.message,
+      });
+    });
+
     // Cleanup function
     return () => {
       exportSubscription.unsubscribe();
+      errorSubscription.unsubscribe();
     };
   },
 );

@@ -46,6 +46,7 @@ function createPrimitiveFromReplicadShape(document: Document, shape: Shape3D): P
   const normalsArray = transformVertexArray(normals);
 
   // Handle color - normalize and convert to RGB array
+  // TODO: collect all colors and create a material for each color, deduplicating materials
   let baseColor: [number, number, number, number] = [0.8, 0.8, 0.8, 1]; // Default light gray
   if (shape.color) {
     try {
@@ -74,6 +75,12 @@ function createPrimitiveFromReplicadShape(document: Document, shape: Shape3D): P
     .setRoughnessFactor(0.7)
     .setBaseColorFactor(baseColor);
 
+  if (shape.color) {
+    material.setName(shape.color);
+  } else {
+    material.setName(`default`);
+  }
+
   // Set alpha mode based on opacity
   if (baseColor[3] < 1) {
     material.setAlphaMode('BLEND');
@@ -98,7 +105,11 @@ function createPrimitiveFromReplicadShape(document: Document, shape: Shape3D): P
 /**
  * Create line primitive from replicad edge data
  */
-function createLinePrimitiveFromReplicadEdges(document: Document, edges: Shape3D['edges']): Primitive | undefined {
+function createLinePrimitiveFromReplicadEdges(
+  document: Document,
+  edges: Shape3D['edges'],
+  name: string,
+): Primitive | undefined {
   if (edges.lines.length === 0) {
     return undefined;
   }
@@ -118,12 +129,14 @@ function createLinePrimitiveFromReplicadEdges(document: Document, edges: Shape3D
     .setAlphaMode('OPAQUE')
     .setMetallicFactor(0)
     .setRoughnessFactor(1)
+    .setName(`outline-${name}`)
     .setBaseColorFactor([0.141, 0.259, 0.141, 1]); // #244224 color
 
   const linePrimitive = document
     .createPrimitive()
     .setMode(1) // LINES mode
     .setMaterial(lineMaterial)
+    .setName(`outline-${name}`)
     .setAttribute('POSITION', document.createAccessor().setType('VEC3').setArray(linePositions))
     .setIndices(document.createAccessor().setType('SCALAR').setArray(lineIndices));
 
@@ -151,7 +164,7 @@ function createGltfDocumentFromReplicadShapes(shapes: Shape3D[]): Document {
     }
 
     // Add line primitive for edges if available
-    const linePrimitive = createLinePrimitiveFromReplicadEdges(document, shape.edges);
+    const linePrimitive = createLinePrimitiveFromReplicadEdges(document, shape.edges, shape.name);
     if (linePrimitive) {
       mesh.addPrimitive(linePrimitive);
     }
@@ -211,6 +224,7 @@ async function createGltfFromReplicadShapes(shapes: Shape3D[]): Promise<Blob> {
         binaryString += String.fromCodePoint(byte);
       }
 
+      // TODO: use https://github.com/sindresorhus/uint8array-extras instead.
       // eslint-disable-next-line no-restricted-globals -- btoa is available in browsers
       const base64Data = btoa(binaryString);
 

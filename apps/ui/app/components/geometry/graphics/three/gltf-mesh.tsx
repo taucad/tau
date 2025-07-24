@@ -2,7 +2,7 @@
 import { useThree } from '@react-three/fiber';
 import { useState, useRef, useLayoutEffect } from 'react';
 import type { Mesh, Material, Object3D, LineSegments, BufferGeometry } from 'three';
-import { LineBasicMaterial, EdgesGeometry } from 'three';
+import { LineBasicMaterial, EdgesGeometry, Matrix4 } from 'three';
 import { GLTFLoader } from 'three-stdlib';
 import { MatcapMaterial } from '~/components/geometry/graphics/three/matcap-material.js';
 import type { ShapeGltf } from '~/types/cad.types.js';
@@ -35,6 +35,17 @@ type GltfMeshProperties = ShapeGltf & {
  * connecting angle lesser than this threshold, the edge is visible.
  */
 const edgeThresholdDegrees = 30;
+
+/**
+ * Create a transformation matrix to convert from y-up (glTF format) to z-up (app coordinate system)
+ * and scale from meters back to millimeters.
+ *
+ * Y-up to Z-up transformation: x' = x, y' = -z, z' = y
+ * Unit conversion: meters to millimeters (multiply by 1000)
+ */
+function createTransformationMatrix(): Matrix4 {
+  return new Matrix4().set(1000, 0, 0, 0, 0, 0, -1000, 0, 0, 1000, 0, 0, 0, 0, 0, 1);
+}
 
 /**
  * This component renders a GLTF mesh.
@@ -107,6 +118,11 @@ export function GltfMesh({
             const mesh = child as Mesh;
             if (mesh.geometry.attributes['position']) {
               const geometry = mesh.geometry.clone();
+
+              // Transform from y-up (glTF) to z-up (app coordinate system)
+              const yupToZupMatrix = createTransformationMatrix();
+              geometry.applyMatrix4(yupToZupMatrix);
+
               let materialColor: string | undefined;
               let materialOpacity: number | undefined;
 
@@ -135,7 +151,7 @@ export function GltfMesh({
                 return;
               }
 
-              // Optimize geometry for rendering
+              // Optimize geometry for rendering (compute normals after applying transformation)
               if (!geometry.attributes['normal']) {
                 geometry.computeVertexNormals();
               }
@@ -161,8 +177,14 @@ export function GltfMesh({
           if (child.type === 'LineSegments') {
             const linesMesh = child as LineSegments;
             if (linesMesh.geometry.attributes['position']) {
+              const lineGeometry = linesMesh.geometry.clone();
+
+              // Transform from y-up (glTF) to z-up (app coordinate system)
+              const yupToZupMatrix = createTransformationMatrix();
+              lineGeometry.applyMatrix4(yupToZupMatrix);
+
               separateLineSegments.push({
-                geometry: linesMesh.geometry.clone(),
+                geometry: lineGeometry,
                 name: child.name || `lines-${separateLineSegments.length}`,
               });
             }

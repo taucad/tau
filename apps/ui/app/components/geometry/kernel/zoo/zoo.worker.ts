@@ -1,5 +1,4 @@
 import { expose } from 'comlink';
-import { parseSTL } from '@amandaghassaei/stl-parser';
 import { KclUtils } from '~/components/geometry/kernel/zoo/kcl-utils.js';
 import type {
   BuildShapesResult,
@@ -8,7 +7,7 @@ import type {
   ExtractParametersResult,
 } from '~/types/kernel.types.js';
 import { createKernelError, createKernelSuccess } from '~/types/kernel.types.js';
-import type { Shape3D } from '~/types/cad.types.js';
+import type { ShapeGltf } from '~/types/cad.types.js';
 import { isKclError, extractExecutionError } from '~/components/geometry/kernel/zoo/kcl-errors.js';
 import { convertKclErrorToKernelError, mapErrorToKclError } from '~/components/geometry/kernel/zoo/error-mappers.js';
 import { getErrorPosition } from '~/components/geometry/kernel/zoo/source-range-utils.js';
@@ -20,7 +19,7 @@ const getSupportedExportFormats = (): ExportFormat[] => supportedExportFormats;
 type ZooExportFormat = (typeof supportedExportFormats)[number];
 
 // Global storage for computed STL data
-const stlDataMemory: Record<string, Uint8Array> = {};
+const gltfDataMemory: Record<string, Uint8Array> = {};
 let kclUtils: KclUtils | undefined;
 
 // Helper function to handle errors and convert them appropriately
@@ -168,20 +167,20 @@ async function buildShapesFromCode(
         });
       }
 
-      // Now export to STL format using operations already in memory
+      // Now export to GLTF format using operations already in memory
       const exportResult = await utils.exportFromMemory({
-        type: 'stl',
-        storage: 'binary',
-        units: 'mm',
+        type: 'gltf',
+        storage: 'embedded',
+        presentation: 'pretty',
       });
 
       if (exportResult.length === 0) {
         return createKernelSuccess([]);
       }
 
-      // Get the first exported file (should be STL)
-      const stlFile = exportResult[0];
-      if (!stlFile) {
+      // Get the first exported file (should be GLTF)
+      const gltf = exportResult[0];
+      if (!gltf) {
         return createKernelError({
           message: 'No STL file in export result',
           startColumn: 0,
@@ -189,86 +188,18 @@ async function buildShapesFromCode(
         });
       }
 
-      // Store STL data globally for later export
-      stlDataMemory[shapeId] = stlFile.contents;
+      // Store GLTF data globally for later export
+      gltfDataMemory[shapeId] = gltf.contents;
 
       // Convert STL to 3D shape using the same approach as openscad.worker.ts
-      const arrayBuffer = new ArrayBuffer(stlFile.contents.byteLength);
+      const arrayBuffer = new ArrayBuffer(gltf.contents.byteLength);
       const view = new Uint8Array(arrayBuffer);
-      view.set(stlFile.contents);
-      const mesh = parseSTL(arrayBuffer);
+      view.set(gltf.contents);
 
-      // Optimize the mesh
-      mesh.mergeVertices();
-
-      // Extract original geometry data
-      const originalVertices = [...mesh.vertices];
-      const originalTriangles = [...mesh.facesIndices];
-
-      // Create new arrays with duplicate vertices per face (like replicad format)
-      const vertices: number[] = [];
-      const triangles: number[] = [];
-      const normals: number[] = [];
-
-      // For each triangle, create unique vertices with face normals
-      for (let i = 0; i < originalTriangles.length; i += 3) {
-        const i1 = originalTriangles[i]!;
-        const i2 = originalTriangles[i + 1]!;
-        const i3 = originalTriangles[i + 2]!;
-
-        // Get triangle vertices from original data
-        const v1 = [originalVertices[i1 * 3]!, originalVertices[i1 * 3 + 1]!, originalVertices[i1 * 3 + 2]!] as const;
-        const v2 = [originalVertices[i2 * 3]!, originalVertices[i2 * 3 + 1]!, originalVertices[i2 * 3 + 2]!] as const;
-        const v3 = [originalVertices[i3 * 3]!, originalVertices[i3 * 3 + 1]!, originalVertices[i3 * 3 + 2]!] as const;
-
-        // Compute edge vectors
-        const edge1 = [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]] as const;
-        const edge2 = [v3[0] - v1[0], v3[1] - v1[1], v3[2] - v1[2]] as const;
-
-        // Compute face normal using cross product
-        const normal: [number, number, number] = [
-          edge1[1] * edge2[2] - edge1[2] * edge2[1],
-          edge1[2] * edge2[0] - edge1[0] * edge2[2],
-          edge1[0] * edge2[1] - edge1[1] * edge2[0],
-        ];
-
-        // Normalize the normal vector
-        const length = Math.hypot(normal[0], normal[1], normal[2]);
-        if (length > 0) {
-          normal[0] /= length;
-          normal[1] /= length;
-          normal[2] /= length;
-        }
-
-        // Add duplicate vertices for this triangle
-        const newVertexIndex = vertices.length / 3;
-
-        // Add vertices
-        vertices.push(...v1, ...v2, ...v3);
-
-        // Add triangle indices (pointing to new duplicate vertices)
-        triangles.push(newVertexIndex, newVertexIndex + 1, newVertexIndex + 2);
-
-        // Add same face normal for all 3 vertices
-        normals.push(...normal, ...normal, ...normal);
-      }
-
-      const shape: Shape3D = {
-        type: '3d',
+      const shape: ShapeGltf = {
+        type: 'gltf',
         name: 'Shape',
-        faces: {
-          vertices,
-          triangles,
-          normals,
-          faceGroups: [
-            {
-              start: 0,
-              count: triangles.length,
-              faceId: 0,
-            },
-          ],
-        },
-        edges: { lines: [], edgeGroups: [] },
+        gltfBlob: new Blob([gltf.contents]),
       };
 
       return createKernelSuccess([shape]);
@@ -286,8 +217,8 @@ async function buildShapesFromCode(
 const exportShape = async (fileType: ZooExportFormat, shapeId = 'defaultShape'): Promise<ExportGeometryResult> => {
   try {
     // Check if STL data exists in memory
-    const stlData = stlDataMemory[shapeId];
-    if (!stlData) {
+    const gltfData = gltfDataMemory[shapeId];
+    if (!gltfData) {
       return createKernelError({
         message: `Shape ${shapeId} not computed yet. Please build shapes before exporting.`,
         startColumn: 0,
@@ -295,60 +226,112 @@ const exportShape = async (fileType: ZooExportFormat, shapeId = 'defaultShape'):
       });
     }
 
-    if (fileType === 'step') {
-      // For STEP export, use operations already in memory without re-execution
-      try {
-        const utils = await getKclUtilsWithEngine();
+    switch (fileType) {
+      case 'stl':
+      case 'stl-binary': {
+        try {
+          const utils = await getKclUtilsWithEngine();
 
-        // Use exportFromMemory to export STEP format from operations already in memory
-        const stepResult = await utils.exportFromMemory({
-          type: 'step',
-        });
-
-        if (stepResult.length === 0) {
-          return createKernelError({
-            message: 'No STEP data received from KCL export',
-            startColumn: 0,
-            startLineNumber: 0,
+          // Use exportFromMemory to export STEP format from operations already in memory
+          const stlResult = await utils.exportFromMemory({
+            type: 'stl',
+            storage: fileType === 'stl-binary' ? 'binary' : 'ascii',
+            units: 'mm',
           });
-        }
 
-        const stepFile = stepResult[0];
-        if (!stepFile) {
-          return createKernelError({
-            message: 'No STEP file in export result',
-            startColumn: 0,
-            startLineNumber: 0,
+          if (stlResult.length === 0) {
+            return createKernelError({
+              message: 'No STL data received from KCL export',
+              startColumn: 0,
+              startLineNumber: 0,
+            });
+          }
+
+          const stlFile = stlResult[0];
+          if (!stlFile) {
+            return createKernelError({
+              message: 'No STL file in export result',
+              startColumn: 0,
+              startLineNumber: 0,
+            });
+          }
+
+          const blob = new Blob([stlFile.contents], {
+            type: fileType === 'stl-binary' ? 'application/octet-stream' : 'text/plain',
           });
+
+          return createKernelSuccess([
+            {
+              blob,
+              name: 'model.stl',
+            },
+          ]);
+        } catch (stlError) {
+          console.error('STL export error:', stlError);
+          return handleError(stlError);
         }
+      }
 
-        const blob = new Blob([stepFile.contents], {
-          type: 'application/step',
-        });
+      case 'step': {
+        try {
+          const utils = await getKclUtilsWithEngine();
 
-        return createKernelSuccess([
-          {
-            blob,
-            name: 'model.step',
-          },
-        ]);
-      } catch (stepError) {
-        console.error('STEP export error:', stepError);
-        return handleError(stepError);
+          // Use exportFromMemory to export STEP format from operations already in memory
+          const stepResult = await utils.exportFromMemory({
+            type: 'step',
+          });
+
+          if (stepResult.length === 0) {
+            return createKernelError({
+              message: 'No STEP data received from KCL export',
+              startColumn: 0,
+              startLineNumber: 0,
+            });
+          }
+
+          const stepFile = stepResult[0];
+          if (!stepFile) {
+            return createKernelError({
+              message: 'No STEP file in export result',
+              startColumn: 0,
+              startLineNumber: 0,
+            });
+          }
+
+          const blob = new Blob([stepFile.contents], {
+            type: 'application/step',
+          });
+
+          return createKernelSuccess([
+            {
+              blob,
+              name: 'model.step',
+            },
+          ]);
+        } catch (stepError) {
+          console.error('STEP export error:', stepError);
+          return handleError(stepError);
+        }
+      }
+
+      case 'gltf': {
+        try {
+          const blob = new Blob([gltfData], {
+            type: 'model/gltf-json',
+          });
+
+          return createKernelSuccess([
+            {
+              blob,
+              name: 'model.gltf',
+            },
+          ]);
+        } catch (gltfError) {
+          console.error('GLTF export error:', gltfError);
+          return handleError(gltfError);
+        }
       }
     }
-
-    // For STL export (both ASCII and binary)
-    const blob = new Blob([stlData], {
-      type: fileType === 'stl-binary' ? 'application/octet-stream' : 'text/plain',
-    });
-
-    return createKernelSuccess([
-      {
-        blob,
-        name: fileType === 'stl-binary' ? 'model-binary.stl' : 'model.stl',
-      },
-    ]);
   } catch (error) {
     return handleError(error);
   }

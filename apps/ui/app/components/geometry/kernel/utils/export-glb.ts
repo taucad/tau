@@ -1,6 +1,7 @@
 import type { Primitive } from '@gltf-transform/core';
 import { Document, NodeIO } from '@gltf-transform/core';
 import type { Color, IndexedPolyhedron } from '~/components/geometry/kernel/utils/common.js';
+import { transformVerticesGltf } from '~/components/geometry/kernel/utils/common.js';
 
 /**
  * Geometry data optimized for glTF primitive creation.
@@ -139,18 +140,23 @@ function convertMeshToGeometry(meshData: IndexedPolyhedron): GeometryData {
         continue;
       }
 
+      // Transform vertices from z-up to y-up coordinate system and convert units (mm to m)
+      const transformedV1 = transformVerticesGltf(v1);
+      const transformedV2 = transformVerticesGltf(v2);
+      const transformedV3 = transformVerticesGltf(v3);
+
       // Add positions
-      positions[positionIndex++] = v1[0];
-      positions[positionIndex++] = v1[1];
-      positions[positionIndex++] = v1[2];
+      positions[positionIndex++] = transformedV1[0];
+      positions[positionIndex++] = transformedV1[1];
+      positions[positionIndex++] = transformedV1[2];
 
-      positions[positionIndex++] = v2[0];
-      positions[positionIndex++] = v2[1];
-      positions[positionIndex++] = v2[2];
+      positions[positionIndex++] = transformedV2[0];
+      positions[positionIndex++] = transformedV2[1];
+      positions[positionIndex++] = transformedV2[2];
 
-      positions[positionIndex++] = v3[0];
-      positions[positionIndex++] = v3[1];
-      positions[positionIndex++] = v3[2];
+      positions[positionIndex++] = transformedV3[0];
+      positions[positionIndex++] = transformedV3[1];
+      positions[positionIndex++] = transformedV3[2];
 
       // Add colors (same color for all vertices of this triangle)
       vertexColors[colorIndex++] = faceColor[0];
@@ -219,8 +225,26 @@ function createGltfDocument(meshData: IndexedPolyhedron): Document {
   if (meshData.lines?.positions.length) {
     const linesMesh = document.createMesh();
 
-    // Create line geometry - convert flat positions to Float32Array
-    const linePositions = new Float32Array(meshData.lines.positions);
+    // Create line geometry - convert flat positions to Float32Array and transform coordinates
+    const originalLinePositions = meshData.lines.positions;
+    const linePositions = new Float32Array(originalLinePositions.length);
+
+    // Transform line positions from z-up to y-up coordinate system and convert units (mm to m)
+    for (let i = 0; i < originalLinePositions.length; i += 3) {
+      const x = originalLinePositions[i];
+      const y = originalLinePositions[i + 1];
+      const z = originalLinePositions[i + 2];
+
+      if (x === undefined || y === undefined || z === undefined) {
+        continue;
+      }
+
+      const vertex: [number, number, number] = [x, y, z];
+      const transformed = transformVerticesGltf(vertex);
+      linePositions[i] = transformed[0];
+      linePositions[i + 1] = transformed[1];
+      linePositions[i + 2] = transformed[2];
+    }
 
     // Create line indices - each pair of positions forms a line
     const lineIndices = new Uint32Array(linePositions.length / 3);

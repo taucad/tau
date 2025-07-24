@@ -28,9 +28,6 @@ importers:
       '@ai-sdk/ui-utils':
         specifier: ^1.2.11
         version: 1.2.11(zod@3.25.76)
-      '@amandaghassaei/stl-parser':
-        specifier: ^1.7.0
-        version: 1.7.0
       '@daveyplate/better-auth-ui':
         specifier: ^2.0.8
         version: 2.0.14(03f6d08a0381725fd9ea67551e33d8d2)
@@ -379,9 +376,6 @@ importers:
       replicad-opencascadejs:
         specifier: ^0.18.0
         version: 0.18.0
-      replicad-threejs-helper:
-        specifier: ^0.18.0
-        version: 0.18.0(three@0.174.0)
       rxjs:
         specifier: ^7.8.1
         version: 7.8.1
@@ -668,12 +662,6 @@ packages:
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.23.8
-
-  '@amandaghassaei/3d-mesh-utils@1.3.0':
-    resolution: {integrity: sha512-xuAxoYK6Dwewv5mm75cRKCKI8xqeFhlPoQduogT/IfLMwd8JYV7dZ5Fjdw6jlunTzwGZKQj4FmkOBy5KK3OcGw==}
-
-  '@amandaghassaei/stl-parser@1.7.0':
-    resolution: {integrity: sha512-Asu70JCMc7usfvxWlNo7S5l5QDmTOyuxrTq50v9Z2mqHX+JysMrN4GyFzKnlz7e6hooa/QDFARRPhLJrEF6x4w==}
 
   '@ampproject/remapping@2.3.0':
     resolution: {integrity: sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw==}
@@ -12550,11 +12538,6 @@ packages:
   replicad-opencascadejs@0.18.0:
     resolution: {integrity: sha512-8QW2MOzUs4VNk2Abqqf3A2ra8xEMG8fPUiyfPhKhvQ77RxsBZ4GX4410KCsBWcmRphYJXHUjEJjIYD8UzfcM9A==}
 
-  replicad-threejs-helper@0.18.0:
-    resolution: {integrity: sha512-FZj5a3nA8I5nUVgbOyRMIPbu6p6jAXBNawzQJIeHzIKZ5U/brHKVjB3ba8Zg7RgxOyYKKPEupOYq47PPnCLilw==}
-    peerDependencies:
-      three: '>=0.155.0'
-
   replicad@0.18.2:
     resolution: {integrity: sha512-C3ZQUXSXDEhAJbtTj1qtVp/Ngu5uDYmEVokPDt3aKH5SDn7fEdmrRA6Zvnm1mXQbY2O36fyddNXpkqwmFRlBmw==}
 
@@ -14736,12 +14719,6 @@ snapshots:
       '@ai-sdk/provider-utils': 2.2.8(zod@3.25.76)
       zod: 3.25.76
       zod-to-json-schema: 3.24.1(zod@3.25.76)
-
-  '@amandaghassaei/3d-mesh-utils@1.3.0': {}
-
-  '@amandaghassaei/stl-parser@1.7.0':
-    dependencies:
-      '@amandaghassaei/3d-mesh-utils': 1.3.0
 
   '@ampproject/remapping@2.3.0':
     dependencies:
@@ -28086,10 +28063,6 @@ snapshots:
   replace-ext@1.0.1: {}
 
   replicad-opencascadejs@0.18.0: {}
-
-  replicad-threejs-helper@0.18.0(three@0.174.0):
-    dependencies:
-      three: 0.174.0
 
   replicad@0.18.2(patch_hash=769234de5352f62bbd6f510a8c77ae4b1910e66e9d9f377c99d963f6347b9dbe):
     dependencies:

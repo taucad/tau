@@ -1,4 +1,3 @@
-import { ReplicadMesh } from '~/components/geometry/kernel/replicad/replicad-mesh.js';
 import { GltfMesh } from '~/components/geometry/graphics/three/gltf-mesh.js';
 import { ThreeProvider } from '~/components/geometry/graphics/three/three-context.js';
 import type { ThreeViewerProperties } from '~/components/geometry/graphics/three/three-context.js';
@@ -29,9 +28,7 @@ export function CadViewer({
       {shapes.map((shape) => {
         switch (shape.type) {
           case '3d': {
-            return (
-              <ReplicadMesh key={shape.name} {...shape} enableSurfaces={enableSurfaces} enableLines={enableLines} />
-            );
+            throw new Error('3D shapes are not supported for rendering. Please use the GLTF viewer instead.');
           }
 
           case 'gltf': {

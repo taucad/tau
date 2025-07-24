@@ -1,7 +1,36 @@
 import type { Primitive } from '@gltf-transform/core';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { normalizeColor } from '~/components/geometry/kernel/replicad/utils/normalize-color.js';
+import { transformVerticesGltf } from '~/components/geometry/kernel/utils/common.js';
 import type { Shape3D } from '~/types/cad.types.js';
+
+/**
+ * Transform a flat array of vertex positions from z-up to y-up coordinate system and convert units
+ *
+ * This is necessary as Replicad uses z-up coordinates and millimeter units,
+ * while glTF uses y-up coordinates and meter units.
+ */
+function transformVertexArray(vertices: number[]): Float32Array {
+  const transformedVertices = new Float32Array(vertices.length);
+
+  for (let i = 0; i < vertices.length; i += 3) {
+    const x = vertices[i];
+    const y = vertices[i + 1];
+    const z = vertices[i + 2];
+
+    if (x === undefined || y === undefined || z === undefined) {
+      continue;
+    }
+
+    const vertex: [number, number, number] = [x, y, z];
+    const transformed = transformVerticesGltf(vertex);
+    transformedVertices[i] = transformed[0];
+    transformedVertices[i + 1] = transformed[1];
+    transformedVertices[i + 2] = transformed[2];
+  }
+
+  return transformedVertices;
+}
 
 /**
  * Create a glTF primitive directly from replicad Shape3D data
@@ -11,10 +40,10 @@ function createPrimitiveFromReplicadShape(document: Document, shape: Shape3D): P
   const { faces } = shape;
   const { vertices: vertexData, triangles, normals } = faces;
 
-  // Convert flat arrays to typed arrays
-  const positions = new Float32Array(vertexData);
+  // Convert flat arrays to typed arrays and transform coordinates
+  const positions = transformVertexArray(vertexData);
   const indices = new Uint32Array(triangles);
-  const normalsArray = new Float32Array(normals);
+  const normalsArray = transformVertexArray(normals);
 
   // Handle color - normalize and convert to RGB array
   let baseColor: [number, number, number, number] = [0.8, 0.8, 0.8, 1]; // Default light gray
@@ -74,8 +103,8 @@ function createLinePrimitiveFromReplicadEdges(document: Document, edges: Shape3D
     return undefined;
   }
 
-  // Convert edges to typed arrays
-  const linePositions = new Float32Array(edges.lines);
+  // Convert edges to typed arrays and transform coordinates
+  const linePositions = transformVertexArray(edges.lines);
 
   // Create line indices - each pair of positions forms a line
   const lineIndices = new Uint32Array(linePositions.length / 3);

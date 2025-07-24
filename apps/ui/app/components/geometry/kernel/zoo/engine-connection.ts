@@ -35,7 +35,6 @@ type InitializationContext = {
 
 const authTimeout = 10_000; // 10 second timeout
 const commandTimeout = 30_000; // 30 second timeout
-const pingIntervalMs = 30_000; // 30 second ping interval
 
 const consoleColors = {
   info: '\u001B[32m',
@@ -184,7 +183,10 @@ export class EngineConnection {
     _pathString: string,
   ): Promise<Uint8Array> {
     if (!this.isConnected) {
-      throw KclError.simple('engine', 'Engine not connected');
+      // If the connection is not connected, we need to cleanup and re-initialize.
+      // This lazy initialization ensures we only create and use a connection when it's required.
+      await this.cleanup();
+      await this.initialize();
     }
 
     try {
@@ -253,11 +255,7 @@ export class EngineConnection {
           Authorization: `Bearer ${this.apiKey}`,
         },
       });
-      this.send({ type: 'ping' });
     }
-
-    // Start ping interval to keep connection alive
-    this.startPingInterval();
   };
 
   private readonly onWebSocketClose = (_event: CloseEvent): void => {
@@ -309,25 +307,6 @@ export class EngineConnection {
   private readonly onWebSocketMessage = (event: MessageEvent): void => {
     this.handleMessage(event);
   };
-
-  private startPingInterval(): void {
-    // Clear existing interval if any
-    if (this.pingIntervalId) {
-      clearInterval(this.pingIntervalId);
-    }
-
-    this.pingIntervalId = setInterval(() => {
-      // Don't start pinging until we're connected
-      if (!this.isConnected) {
-        return;
-      }
-
-      if (this.websocket?.readyState === 1) {
-        // TODO: Re-enable after investigation & fix, right now it results in heavy API usage.
-        // this.send({ type: 'ping' });
-      }
-    }, pingIntervalMs);
-  }
 
   private async sendCommand(command: WebSocketRequest): Promise<unknown> {
     clg.req(JSON.stringify(command, null, 2));

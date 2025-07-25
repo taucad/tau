@@ -19,7 +19,6 @@ export type ThreeViewerProperties = {
   readonly className?: string;
   readonly enableCentering?: boolean;
   readonly stageOptions?: StageOptions;
-  readonly defaultCameraAngle?: number;
   readonly zoomSpeed?: number;
 };
 
@@ -36,7 +35,6 @@ export function ThreeProvider({
   className,
   stageOptions,
   enableCentering = true,
-  defaultCameraAngle = 60,
   zoomSpeed = 1,
   ...properties
 }: ThreeContextProperties): React.JSX.Element {

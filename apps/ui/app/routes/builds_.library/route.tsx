@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Search,
   Grid,
   Layout,
   Eye,
@@ -33,6 +32,7 @@ import { useActor, useSelector } from '@xstate/react';
 import { createColumns } from '~/routes/builds_.library/columns.js';
 import { CategoryBadge } from '~/components/category-badge.js';
 import { Button, buttonVariants } from '~/components/ui/button.js';
+import { SearchInput } from '~/components/search-input.js';
 import { Input } from '~/components/ui/input.js';
 import { Card, CardContent, CardHeader, CardDescription, CardFooter } from '~/components/ui/card.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select.js';
@@ -365,18 +365,19 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <div className="relative flex-grow">
-          <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            autoComplete="off"
-            className="h-7 pl-10"
-            placeholder="Search builds..."
-            value={globalFilter}
-            onChange={(event) => {
-              setGlobalFilter(event.target.value);
-            }}
-          />
-        </div>
+        <SearchInput
+          autoComplete="off"
+          className="h-7"
+          placeholder="Search builds..."
+          value={globalFilter}
+          containerClassName="flex-grow"
+          onChange={(event) => {
+            setGlobalFilter(event.target.value);
+          }}
+          onClear={() => {
+            setGlobalFilter('');
+          }}
+        />
         <div className="flex items-center gap-2">
           {/* Add bulk actions when rows are selected */}
           {table.getFilteredSelectedRowModel().rows.length > 0 && (

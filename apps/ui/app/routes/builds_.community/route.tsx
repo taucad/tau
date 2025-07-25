@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { Search, Code2, SlidersHorizontal } from 'lucide-react';
+import { Code2, SlidersHorizontal } from 'lucide-react';
 import { Button } from '~/components/ui/button.js';
-import { Input } from '~/components/ui/input.js';
+import { SearchInput } from '~/components/search-input.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -81,6 +81,10 @@ export default function CadCommunity(): React.JSX.Element {
     setVisibleProjects((previous) => Math.min(previous + itemsPerPage, sortedProjects.length));
   };
 
+  const handleSearchClear = () => {
+    setSearchTerm('');
+  };
+
   return (
     <div className="container mx-auto space-y-8 px-4 py-8">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -95,17 +99,15 @@ export default function CadCommunity(): React.JSX.Element {
 
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-4 md:flex-row md:items-center">
-          <div className="relative flex-grow">
-            <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search projects..."
-              value={searchTerm}
-              className="pl-10"
-              onChange={(event) => {
-                setSearchTerm(event.target.value);
-              }}
-            />
-          </div>
+          <SearchInput
+            placeholder="Search projects..."
+            value={searchTerm}
+            containerClassName="flex-grow"
+            onChange={(event) => {
+              setSearchTerm(event.target.value);
+            }}
+            onClear={handleSearchClear}
+          />
           <div className="flex items-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

@@ -102,6 +102,7 @@ export function ViewportGizmoAxes({ size = 128 }: ViewportGizmoAxesProps): React
       type: 'sphere',
       placement: 'bottom-right',
       size,
+      resolution: 256,
       font: {
         weight: 'normal',
         family: 'monospace',

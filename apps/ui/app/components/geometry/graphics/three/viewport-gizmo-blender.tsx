@@ -249,9 +249,14 @@ export function ViewportGizmoBlender({ size = 128 }: ViewportGizmoBlenderProps):
         weight: 'normal',
         family: 'monospace',
       },
+      resolution: 256,
       background: {
         color: backgroundColor,
         hover: { color: backgroundColor },
+      },
+      offset: {
+        bottom: 0,
+        right: 0,
       },
       corners: cornerConfig,
       edges: edgeConfig,

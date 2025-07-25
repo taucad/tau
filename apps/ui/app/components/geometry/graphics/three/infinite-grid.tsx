@@ -39,7 +39,7 @@ type InfiniteGridProperties = {
    * 'xzy': Grid on XZ plane with Y as normal (standard front view)
    * @default 'xyz'
    */
-  readonly axes: 'xyz' | 'xzy' | 'yzx';
+  readonly axes: 'xyz' | 'xzy' | 'zyx';
   /**
    * The base opacity of the grid lines.
    * Increasing makes the entire grid more visible/opaque.
@@ -95,7 +95,7 @@ function infiniteGridMaterial({
   fadeEnd,
 }: InfiniteGridProperties) {
   // Validate to ensure axes cannot be used to inject malicious code
-  if (!['xyz', 'xzy', 'yzx'].includes(axes)) {
+  if (!['xyz', 'xzy', 'zyx'].includes(axes)) {
     throw new Error('Invalid axes parameter');
   }
 
@@ -306,11 +306,10 @@ export function InfiniteGrid({
 
     if (Math.abs(up.x) === 1) {
       // X-up: grid on YZ plane
-      return 'yzx' as const;
+      return 'zyx' as const;
     }
 
-    // Default fallback to Y-up
-    return 'xzy' as const;
+    throw new Error(`Invalid up direction: [x:${up.x}, y:${up.y}, z:${up.z}]`);
   }, []);
 
   // Create material with initial properties

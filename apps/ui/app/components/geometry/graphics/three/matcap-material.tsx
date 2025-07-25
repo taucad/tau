@@ -3,7 +3,7 @@ import { useTexture } from '@react-three/drei';
 import * as THREE from 'three';
 
 export const MatcapMaterial = React.memo(function (properties: React.ComponentProps<'meshMatcapMaterial'>) {
-  const [matcap] = useTexture(['/textures/matcap-1.png']);
+  const [matcap] = useTexture(['/textures/matcap-soft.png']);
   if (matcap) {
     matcap.colorSpace = THREE.SRGBColorSpace;
   }

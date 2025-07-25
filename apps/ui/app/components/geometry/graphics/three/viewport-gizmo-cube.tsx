@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition -- TODO: review these types, some are actually required */
-import { useThree, useFrame } from '@react-three/fiber';
+import { useThree } from '@react-three/fiber';
 import type { GizmoAxisOptions, GizmoOptions } from 'three-viewport-gizmo';
 import { ViewportGizmo } from 'three-viewport-gizmo';
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
@@ -144,7 +144,6 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
   const gizmoRef = useRef<ViewportGizmo | undefined>(null);
   const canvasRef = useRef<HTMLCanvasElement | undefined>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | undefined>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
   const { serialized } = useColor();
   const [theme] = useTheme();
 
@@ -259,8 +258,8 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
       edges: edgeConfig,
       right: faceConfig,
       top: faceConfig,
-      front: { ...faceConfig, label: 'Back' },
-      back: { ...faceConfig, label: 'Front' },
+      front: faceConfig,
+      back: faceConfig,
       left: faceConfig,
       bottom: faceConfig,
     };
@@ -291,9 +290,6 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
     // Attach the controls to enable proper interaction
     gizmo.attachControls(controls);
 
-    // Mark initialization as complete
-    setIsInitialized(true);
-
     // Cleanup function
     return () => {
       // Remove event listeners
@@ -315,13 +311,6 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
       }
     };
   }, [camera, gl, controls, scene, serialized.hex, handleStart, handleChange, handleEnd, theme, size]);
-
-  // Render the gizmo in each frame
-  useFrame(() => {
-    if (isInitialized && gizmoRef.current) {
-      gizmoRef.current.render();
-    }
-  });
 
   return null;
 }

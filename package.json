@@ -151,7 +151,7 @@
     "sonner": "^1.7.4",
     "three": "^0.174.0",
     "three-stdlib": "^2.36.0",
-    "three-viewport-gizmo": "https://codeload.github.com/opensrchq/three-viewport-gizmo/tar.gz/9154497a6c01db5dcf64d6f403f9901cca304ef4",
+    "three-viewport-gizmo": "https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/781ce3afd404e67d93f82ec1bbf11470fb2b7536",
     "uint8array-extras": "^1.4.0",
     "uzip": "^0.20201231.0",
     "vaul": "^1.1.2",

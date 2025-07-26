@@ -42,7 +42,7 @@ export function ThreeProvider({
   const [isCanvasReady, setIsCanvasReady] = useState(false);
 
   useEffect(() => {
-    THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+    THREE.Object3D.DEFAULT_UP.set(0, 0, 1); // Z-up coordinate system
   }, []);
 
   return (

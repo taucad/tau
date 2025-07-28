@@ -10,11 +10,11 @@ import { Theme, useTheme } from 'remix-themes';
 import { useColor } from '~/hooks/use-color.js';
 import { createViewportGizmoCubeAxes } from '~/components/geometry/graphics/three/viewport-gizmo-cube-axes.js';
 
-type ViewportGizmoBlenderProps = {
+type ViewportGizmoOnshapeProps = {
   readonly size?: number;
 };
 
-export function ViewportGizmoBlender({ size = 128 }: ViewportGizmoBlenderProps): ReactNode {
+export function ViewportGizmoOnshape({ size = 128 }: ViewportGizmoOnshapeProps): ReactNode {
   const { camera, gl, controls, scene } = useThree((state) => ({
     camera: state.camera,
     gl: state.gl,

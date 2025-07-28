@@ -395,8 +395,8 @@ importers:
         specifier: ^2.36.0
         version: 2.36.0(three@0.174.0)
       three-viewport-gizmo:
-        specifier: https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/781ce3afd404e67d93f82ec1bbf11470fb2b7536
-        version: https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/781ce3afd404e67d93f82ec1bbf11470fb2b7536(three@0.174.0)
+        specifier: https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/d5ae66010e7f5f067931aaeb6a74880a73d23b5d
+        version: https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/d5ae66010e7f5f067931aaeb6a74880a73d23b5d(three@0.174.0)
       uint8array-extras:
         specifier: ^1.4.0
         version: 1.4.0
@@ -13507,8 +13507,8 @@ packages:
     peerDependencies:
       three: '>=0.128.0'
 
-  three-viewport-gizmo@https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/781ce3afd404e67d93f82ec1bbf11470fb2b7536:
-    resolution: {tarball: https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/781ce3afd404e67d93f82ec1bbf11470fb2b7536}
+  three-viewport-gizmo@https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/d5ae66010e7f5f067931aaeb6a74880a73d23b5d:
+    resolution: {tarball: https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/d5ae66010e7f5f067931aaeb6a74880a73d23b5d}
     version: 2.2.0
     peerDependencies:
       three: '>=0.162.0 <1.0.0'
@@ -29179,7 +29179,7 @@ snapshots:
       potpack: 1.0.2
       three: 0.174.0
 
-  three-viewport-gizmo@https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/781ce3afd404e67d93f82ec1bbf11470fb2b7536(three@0.174.0):
+  three-viewport-gizmo@https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/d5ae66010e7f5f067931aaeb6a74880a73d23b5d(three@0.174.0):
     dependencies:
       three: 0.174.0
 

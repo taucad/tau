@@ -2,7 +2,7 @@
 import { useThree } from '@react-three/fiber';
 import type { GizmoOptions } from 'three-viewport-gizmo';
 import { ViewportGizmo } from 'three-viewport-gizmo';
-import { useRef, useEffect, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { ReactNode } from 'react';
@@ -21,38 +21,12 @@ export function ViewportGizmoAxes({ size = 128 }: ViewportGizmoAxesProps): React
     scene: state.scene,
   }));
 
-  const gizmoRef = useRef<ViewportGizmo | undefined>(null);
-  const canvasRef = useRef<HTMLCanvasElement | undefined>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | undefined>(null);
   const { serialized } = useColor();
   const [theme] = useTheme();
 
-  // Define event handlers using useCallback to maintain references
-  const handleStart = useCallback(() => {
-    if (controls.update) {
-      controls.update();
-    }
-  }, [controls]);
-
   const handleChange = useCallback(() => {
-    if (controls.update) {
-      controls.update();
-    }
-
-    if (gl && scene && camera) {
-      gl.render(scene, camera);
-    }
-  }, [controls, gl, scene, camera]);
-
-  const handleEnd = useCallback(() => {
-    if (controls.update) {
-      controls.update();
-    }
-
-    if (gl && scene && camera) {
-      gl.render(scene, camera);
-    }
-  }, [controls, gl, scene, camera]);
+    controls?.update();
+  }, [controls]);
 
   // Create DOM overlay for gizmo
   useEffect(() => {
@@ -82,7 +56,6 @@ export function ViewportGizmoAxes({ size = 128 }: ViewportGizmoAxesProps): React
 
     // Append the canvas to the container
     container.append(canvas);
-    canvasRef.current = canvas;
 
     // Create a renderer for the gizmo
     const renderer = new THREE.WebGLRenderer({
@@ -95,7 +68,6 @@ export function ViewportGizmoAxes({ size = 128 }: ViewportGizmoAxesProps): React
     renderer.setPixelRatio(dpr);
     renderer.setAnimationLoop(animation);
     renderer.setClearColor(0x00_00_00, 0);
-    rendererRef.current = renderer;
 
     // Configure the gizmo options
     const gizmoConfig: GizmoOptions = {
@@ -116,12 +88,9 @@ export function ViewportGizmoAxes({ size = 128 }: ViewportGizmoAxesProps): React
 
     // Create the gizmo
     const gizmo = new ViewportGizmo(camera, renderer, gizmoConfig);
-    gizmoRef.current = gizmo;
 
     // Add event listeners for the gizmo
-    gizmo.addEventListener('start', handleStart);
     gizmo.addEventListener('change', handleChange);
-    gizmo.addEventListener('end', handleEnd);
 
     gizmo.scale.multiplyScalar(0.7);
 
@@ -131,9 +100,7 @@ export function ViewportGizmoAxes({ size = 128 }: ViewportGizmoAxesProps): React
     // Cleanup function
     return () => {
       // Remove event listeners
-      gizmo.removeEventListener('start', handleStart);
       gizmo.removeEventListener('change', handleChange);
-      gizmo.removeEventListener('end', handleEnd);
 
       // Dispose the gizmo
       gizmo.dispose();
@@ -148,7 +115,7 @@ export function ViewportGizmoAxes({ size = 128 }: ViewportGizmoAxesProps): React
         renderer.dispose();
       }
     };
-  }, [camera, gl, controls, scene, serialized.hex, handleStart, handleChange, handleEnd, theme, size]);
+  }, [camera, gl, controls, scene, serialized.hex, handleChange, theme, size]);
 
   return null;
 }

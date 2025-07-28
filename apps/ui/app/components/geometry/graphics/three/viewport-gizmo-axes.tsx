@@ -14,19 +14,20 @@ type ViewportGizmoAxesProps = {
 };
 
 export function ViewportGizmoAxes({ size = 128 }: ViewportGizmoAxesProps): ReactNode {
-  const { camera, gl, controls, scene } = useThree((state) => ({
+  const { camera, gl, controls, scene, invalidate } = useThree((state) => ({
     camera: state.camera as THREE.PerspectiveCamera,
     gl: state.gl,
     controls: state.controls as OrbitControls,
     scene: state.scene,
+    invalidate: state.invalidate,
   }));
 
   const { serialized } = useColor();
   const [theme] = useTheme();
 
-  const handleChange = useCallback(() => {
-    controls?.update();
-  }, [controls]);
+  const handleChange = useCallback((): void => {
+    invalidate();
+  }, [invalidate]);
 
   // Create DOM overlay for gizmo
   useEffect(() => {
@@ -115,7 +116,7 @@ export function ViewportGizmoAxes({ size = 128 }: ViewportGizmoAxesProps): React
         renderer.dispose();
       }
     };
-  }, [camera, gl, controls, scene, serialized.hex, handleChange, theme, size]);
+  }, [camera, gl, controls, scene, serialized.hex, theme, size, handleChange]);
 
   return null;
 }

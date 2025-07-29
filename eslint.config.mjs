@@ -134,6 +134,10 @@ const config = [
           ],
         },
       ],
+
+      // Supporting monorepo with both workspace and project level dependencies.
+      'import-x/no-extraneous-dependencies': ['error', { packageDir: ['.', '../..'] }],
+      'n/no-extraneous-import': 'off', // Disabled as it conflicts with import-x/no-extraneous-dependencies.
     },
   },
   {
@@ -174,9 +178,6 @@ const config = [
     // UI App
     files: ['apps/ui/**/*.ts', 'apps/ui/**/*.tsx'],
     rules: {
-      // Turned off as the UI app has a `package.json` required by NX, and this results in a false positive.
-      'import-x/no-extraneous-dependencies': 'off',
-      'n/no-extraneous-import': 'off',
       // React is a global variable in the UI
       'react/react-in-jsx-scope': 'off',
       'react/boolean-prop-naming': [

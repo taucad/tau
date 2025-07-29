@@ -6,10 +6,10 @@ import { isBrowser } from 'motion/react';
 import type { Geometry } from '~/types/cad.types.js';
 import type { ExportFormat, KernelError, KernelProvider } from '~/types/kernel.types.js';
 import { isKernelSuccess } from '~/types/kernel.types.js';
-import type { BuilderWorkerInterface as ReplicadWorker } from '~/components/geometry/kernel/replicad/replicad.worker.js';
+import type { ReplicadWorkerInterface as ReplicadWorker } from '~/components/geometry/kernel/replicad/replicad.worker.js';
 import ReplicadBuilderWorker from '~/components/geometry/kernel/replicad/replicad.worker.js?worker';
-import type { OpenScadBuilderInterface as OpenSCADWorker } from '~/components/geometry/kernel/openscad/openscad.worker.js';
-import OpenSCADBuilderWorker from '~/components/geometry/kernel/openscad/openscad.worker.js?worker';
+import type { OpenScadBuilderInterface as OpenScadWorker } from '~/components/geometry/kernel/openscad/openscad.worker.js';
+import OpenScadBuilderWorker from '~/components/geometry/kernel/openscad/openscad.worker.js?worker';
 import type { ZooBuilderInterface as ZooWorker } from '~/components/geometry/kernel/zoo/zoo.worker.js';
 import ZooBuilderWorker from '~/components/geometry/kernel/zoo/zoo.worker.js?worker';
 import { assertActorDoneEvent } from '~/lib/xstate.js';
@@ -17,7 +17,7 @@ import type { LogLevel, LogOrigin, OnWorkerLog } from '~/types/console.types.js'
 
 const workers = {
   replicad: ReplicadBuilderWorker,
-  openscad: OpenSCADBuilderWorker,
+  openscad: OpenScadBuilderWorker,
   zoo: ZooBuilderWorker,
 } as const satisfies Partial<Record<KernelProvider, new () => Worker>>;
 
@@ -56,7 +56,7 @@ const createWorkersActor = fromPromise<
 
     // Wrap all workers with comlink
     const wrappedReplicadWorker = wrap<ReplicadWorker>(replicadWorker);
-    const wrappedOpenscadWorker = wrap<OpenSCADWorker>(openscadWorker);
+    const wrappedOpenscadWorker = wrap<OpenScadWorker>(openscadWorker);
     const wrappedZooWorker = wrap<ZooWorker>(zooWorker);
 
     const onLog: OnWorkerLog = (log) => {
@@ -384,7 +384,7 @@ type KernelEvent = KernelEventExternalDone | KernelEventInternal;
 // Interface defining the context for the Kernel machine
 type KernelContext = {
   workers: Record<KernelProvider, Worker | undefined>;
-  wrappedWorkers: Record<KernelProvider, Remote<ReplicadWorker | OpenSCADWorker | ZooWorker> | undefined>;
+  wrappedWorkers: Record<KernelProvider, Remote<ReplicadWorker | OpenScadWorker | ZooWorker> | undefined>;
   parentRef?: CadActor;
   currentKernelType?: KernelProvider;
 };

@@ -549,4 +549,4 @@ return main(replicad, __inputParams || dp)
 const service = new ReplicadWorker();
 expose(service);
 
-export type BuilderWorkerInterface = typeof service;
+export type ReplicadWorkerInterface = typeof service;

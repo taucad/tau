@@ -3,7 +3,7 @@
   "defaultBase": "main",
   "plugins": [
     {
-      "plugin": "./tools/tsup.ts"
+      "plugin": "./tools/tsup.plugin.ts"
     },
     {
       "plugin": "@nx/react/router-plugin",

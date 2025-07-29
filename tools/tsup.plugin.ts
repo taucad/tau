@@ -78,7 +78,7 @@ const createTsupTarget = (configFilePath: string, context: CreateNodesContextV2)
             inputs: [
               ...('production' in namedInputs ? ['default', '^production'] : ['default', '^default']),
               {
-                externalDependencies: ['vitest'],
+                externalDependencies: ['tsup'],
               },
               {
                 env: 'CI',

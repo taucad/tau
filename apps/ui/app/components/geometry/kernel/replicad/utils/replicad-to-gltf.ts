@@ -2,7 +2,7 @@ import type { Primitive } from '@gltf-transform/core';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { normalizeColor } from '~/components/geometry/kernel/replicad/utils/normalize-color.js';
 import { transformVerticesGltf } from '~/components/geometry/kernel/utils/common.js';
-import type { Shape3D } from '~/types/cad.types.js';
+import type { Geometry3D } from '~/types/cad.types.js';
 
 /**
  * Transform a flat array of vertex positions from z-up to y-up coordinate system and convert units
@@ -36,7 +36,7 @@ function transformVertexArray(vertices: number[]): Float32Array {
  * Create a glTF primitive directly from replicad Shape3D data
  * This preserves the original triangulation from replicad without re-triangulating
  */
-function createPrimitiveFromReplicadShape(document: Document, shape: Shape3D): Primitive {
+function createPrimitiveFromReplicadShape(document: Document, shape: Geometry3D): Primitive {
   const { faces } = shape;
   const { vertices: vertexData, triangles, normals } = faces;
 
@@ -46,7 +46,6 @@ function createPrimitiveFromReplicadShape(document: Document, shape: Shape3D): P
   const normalsArray = transformVertexArray(normals);
 
   // Handle color - normalize and convert to RGB array
-  // TODO: collect all colors and create a material for each color, deduplicating materials
   let baseColor: [number, number, number, number] = [0.8, 0.8, 0.8, 1]; // Default light gray
   if (shape.color) {
     try {
@@ -107,7 +106,7 @@ function createPrimitiveFromReplicadShape(document: Document, shape: Shape3D): P
  */
 function createLinePrimitiveFromReplicadEdges(
   document: Document,
-  edges: Shape3D['edges'],
+  edges: Geometry3D['edges'],
   name: string,
 ): Primitive | undefined {
   if (edges.lines.length === 0) {
@@ -147,7 +146,7 @@ function createLinePrimitiveFromReplicadEdges(
  * Create a GLTF document directly from replicad Shape3D data
  * This preserves the original triangulation without re-triangulating
  */
-function createGltfDocumentFromReplicadShapes(shapes: Shape3D[]): Document {
+function createGltfDocumentFromReplicadShapes(shapes: Geometry3D[]): Document {
   const document = new Document();
   document.createBuffer();
 
@@ -190,7 +189,7 @@ function createGltfDocumentFromReplicadShapes(shapes: Shape3D[]): Document {
 /**
  * Convert replicad shapes to GLB blob format (preserving original triangulation)
  */
-async function createGlbFromReplicadShapes(shapes: Shape3D[]): Promise<Blob> {
+async function createGlbFromReplicadShapes(shapes: Geometry3D[]): Promise<Blob> {
   const document = createGltfDocumentFromReplicadShapes(shapes);
   const glbBuffer = await new NodeIO().writeBinary(document);
   return new Blob([glbBuffer], { type: 'model/gltf-binary' });
@@ -199,7 +198,7 @@ async function createGlbFromReplicadShapes(shapes: Shape3D[]): Promise<Blob> {
 /**
  * Convert replicad shapes to GLTF blob format (preserving original triangulation)
  */
-async function createGltfFromReplicadShapes(shapes: Shape3D[]): Promise<Blob> {
+async function createGltfFromReplicadShapes(shapes: Geometry3D[]): Promise<Blob> {
   const document = createGltfDocumentFromReplicadShapes(shapes);
 
   // Use writeJSON which returns both the JSON and binary data
@@ -224,7 +223,6 @@ async function createGltfFromReplicadShapes(shapes: Shape3D[]): Promise<Blob> {
         binaryString += String.fromCodePoint(byte);
       }
 
-      // TODO: use https://github.com/sindresorhus/uint8array-extras instead.
       // eslint-disable-next-line no-restricted-globals -- btoa is available in browsers
       const base64Data = btoa(binaryString);
 
@@ -247,7 +245,7 @@ async function createGltfFromReplicadShapes(shapes: Shape3D[]): Promise<Blob> {
  * This function preserves the original triangulation from replicad without re-triangulating,
  * resulting in better rendering quality and performance.
  */
-export async function convertReplicadShapesToGltf(shapes: Shape3D[], format: 'glb' | 'gltf' = 'glb'): Promise<Blob> {
+export async function convertReplicadShapesToGltf(shapes: Geometry3D[], format: 'glb' | 'gltf' = 'glb'): Promise<Blob> {
   if (format === 'gltf') {
     return createGltfFromReplicadShapes(shapes);
   }

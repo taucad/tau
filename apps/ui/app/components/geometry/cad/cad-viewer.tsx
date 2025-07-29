@@ -1,11 +1,11 @@
 import { GltfMesh } from '~/components/geometry/graphics/three/gltf-mesh.js';
 import { ThreeProvider } from '~/components/geometry/graphics/three/three-context.js';
 import type { ThreeViewerProperties } from '~/components/geometry/graphics/three/three-context.js';
-import type { Shape } from '~/types/cad.types.js';
+import type { Geometry } from '~/types/cad.types.js';
 import { SvgViewer } from '~/components/geometry/graphics/svg/svg-viewer.js';
 
 type CadViewerProperties = ThreeViewerProperties & {
-  readonly shapes: Shape[];
+  readonly shapes: Geometry[];
   readonly enableSurfaces?: boolean;
   readonly enableLines?: boolean;
 };

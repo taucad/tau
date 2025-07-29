@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import type { ReactNode } from 'react';
-import type { Shape2D } from '~/types/cad.types.js';
+import type { Geometry2D } from '~/types/cad.types.js';
 
 type Viewbox = {
   xMin: number;
@@ -108,7 +108,7 @@ const dashArray = (strokeType?: string): string | undefined => {
 };
 
 type ShapePathProps = {
-  readonly shape: Shape2D;
+  readonly shape: Geometry2D;
 };
 
 function ShapePath({ shape }: ShapePathProps): React.ReactElement {
@@ -249,7 +249,7 @@ function RawCanvas({ viewbox, enableGrid, defaultColor, children }: RawCanvasPro
 }
 
 type SvgViewerProps = {
-  readonly shapes: Shape2D | Shape2D[];
+  readonly shapes: Geometry2D | Geometry2D[];
   readonly enableGrid?: boolean;
   readonly enableRawWindow?: boolean;
   readonly defaultColor?: string;

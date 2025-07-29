@@ -4,7 +4,7 @@ import type { Shape as ReplicadShape, Drawing, Face, Wire, AnyShape, Vertex, exp
 import { Sketch, EdgeFinder, FaceFinder, Sketches, CompoundSketch } from 'replicad';
 import type { SetRequired } from 'type-fest';
 import { normalizeColor } from '~/components/geometry/kernel/replicad/utils/normalize-color.js';
-import type { Shape2D, Shape3D } from '~/types/cad.types.js';
+import type { Geometry2D, Geometry3D } from '~/types/cad.types.js';
 
 type Shape = ReplicadShape<never>;
 type Meshable = SetRequired<Shape, 'mesh' | 'meshEdges'>;
@@ -181,7 +181,7 @@ export class ShapeStandardizer {
   }
 }
 
-function renderSvg(shapeConfig: SvgShapeConfiguration): Shape2D {
+function renderSvg(shapeConfig: SvgShapeConfiguration): Geometry2D {
   const { name, shape, color, strokeType, opacity } = shapeConfig;
   return {
     type: '2d',
@@ -198,7 +198,7 @@ function renderSvg(shapeConfig: SvgShapeConfiguration): Shape2D {
 
 function renderMesh(shapeConfig: MeshableConfiguration) {
   const { name, shape, color, opacity, highlight } = shapeConfig;
-  const shapeInfo: Shape3D = {
+  const shapeInfo: Geometry3D = {
     type: '3d',
     name,
     color,
@@ -250,7 +250,7 @@ function renderMesh(shapeConfig: MeshableConfiguration) {
   return shapeInfo;
 }
 
-export function render(shapes: ShapeConfig[]): Array<Shape2D | Shape3D> {
+export function render(shapes: ShapeConfig[]): Array<Geometry2D | Geometry3D> {
   return shapes.map((shapeConfig: ShapeConfig) => {
     if (isSvgable(shapeConfig.shape)) {
       return renderSvg(shapeConfig as SvgShapeConfiguration);
@@ -265,7 +265,7 @@ export function renderOutput(
   shapeStandardizer?: ShapeStandardizer,
   beforeRender?: (shapes: ShapeConfig[]) => ShapeConfig[],
   defaultName = 'Shape',
-): Array<Shape2D | Shape3D> {
+): Array<Geometry2D | Geometry3D> {
   const standardizer = shapeStandardizer ?? new ShapeStandardizer();
 
   const baseShape = createBasicShapeConfig(shapes, defaultName)

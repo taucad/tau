@@ -2,7 +2,7 @@ import { assign, assertEvent, setup, sendTo, emit, not, enqueueActions } from 'x
 import type { ActorRefFrom } from 'xstate';
 import { kernelMachine } from '~/machines/kernel.machine.js';
 import type { KernelEventExternal } from '~/machines/kernel.machine.js';
-import type { CodeError, Shape } from '~/types/cad.types.js';
+import type { CodeError, Geometry } from '~/types/cad.types.js';
 import type { ExportFormat, KernelError, KernelProvider } from '~/types/kernel.types.js';
 import type { graphicsMachine } from '~/machines/graphics.machine.js';
 import type { logMachine } from '~/machines/logs.machine.js';
@@ -13,7 +13,7 @@ export type CadContext = {
   screenshot: string | undefined;
   parameters: Record<string, unknown>;
   defaultParameters: Record<string, unknown>;
-  shapes: Shape[];
+  shapes: Geometry[];
   kernelError: KernelError | undefined;
   codeErrors: CodeError[];
   kernelRef: ActorRefFrom<typeof kernelMachine>;
@@ -39,7 +39,7 @@ type CadEvent =
 
 type CadEmitted =
   | { type: 'modelUpdated'; code: string; parameters: Record<string, unknown> }
-  | { type: 'geometryEvaluated'; shapes: Shape[] }
+  | { type: 'geometryEvaluated'; shapes: Geometry[] }
   | { type: 'geometryExported'; blob: Blob; format: ExportFormat }
   | { type: 'exportFailed'; error: KernelError };
 

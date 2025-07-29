@@ -1,7 +1,7 @@
 import { assign, assertEvent, setup, sendTo, emit, enqueueActions } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import type { GridSizes, ScreenshotOptions } from '~/types/graphics.types.js';
-import type { Shape } from '~/types/cad.types.js';
+import type { Geometry } from '~/types/cad.types.js';
 
 // Context type definition
 export type GraphicsContext = {
@@ -46,7 +46,7 @@ export type GraphicsContext = {
   };
 
   // Shape data from CAD
-  shapes: Shape[];
+  shapes: Geometry[];
 };
 
 // Event types
@@ -84,7 +84,7 @@ export type GraphicsEvent =
   | { type: 'unregisterScreenshotCapability' }
   | { type: 'unregisterCameraCapability' }
   // Shape updates from CAD
-  | { type: 'updateShapes'; shapes: Shape[] };
+  | { type: 'updateShapes'; shapes: Geometry[] };
 
 // Emitted events
 export type GraphicsEmitted =
@@ -153,7 +153,7 @@ function calculateGridSizes(
 }
 
 // Calculate shape radius from shapes
-function calculateShapeRadius(shapes: Shape[]): number {
+function calculateShapeRadius(shapes: Geometry[]): number {
   // This is a placeholder - in reality, this would use Three.js to calculate bounding sphere
   // For now, return a default value
   return shapes.length > 0 ? 100 : 0;

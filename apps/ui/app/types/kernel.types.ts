@@ -1,4 +1,4 @@
-import type { Shape } from '~/types/cad.types.js';
+import type { Geometry } from '~/types/cad.types.js';
 
 export type KernelStackFrame = {
   fileName?: string;
@@ -36,7 +36,7 @@ export type KernelProvider = (typeof kernelProviders)[number];
 export type KernelResult<T> = KernelSuccessResult<T> | KernelErrorResult;
 
 // Specific result types for different kernel operations
-export type BuildShapesResult = KernelResult<Shape[]>;
+export type ComputeGeometryResult = KernelResult<Geometry[]>;
 
 export type ExtractParametersResult = KernelResult<{
   defaultParameters: Record<string, unknown>;

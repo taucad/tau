@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { convertReplicadShapesToGltf } from '~/components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
-import type { Shape3D } from '~/types/cad.types.js';
+import type { Geometry3D } from '~/types/cad.types.js';
 
 describe('convertReplicadShapesToGltf', () => {
   it('should convert empty shapes array to valid GLTF blob', async () => {
@@ -13,7 +13,7 @@ describe('convertReplicadShapesToGltf', () => {
 
   it('should convert a simple cube shape to GLTF', async () => {
     // Mock a simple cube shape data
-    const cubeShape: Shape3D = {
+    const cubeShape: Geometry3D = {
       type: '3d',
       name: 'Test Cube',
       color: '#ff0000',
@@ -73,7 +73,7 @@ describe('convertReplicadShapesToGltf', () => {
   });
 
   it('should handle GLTF JSON format output', async () => {
-    const simpleShape: Shape3D = {
+    const simpleShape: Geometry3D = {
       type: '3d',
       name: 'Test Shape',
       faces: {
@@ -96,7 +96,7 @@ describe('convertReplicadShapesToGltf', () => {
   });
 
   it('should preserve colors from multiple shapes', async () => {
-    const redShape: Shape3D = {
+    const redShape: Geometry3D = {
       type: '3d',
       name: 'Red Shape',
       color: '#ff0000',
@@ -109,7 +109,7 @@ describe('convertReplicadShapesToGltf', () => {
       edges: { lines: [], edgeGroups: [] },
     };
 
-    const blueShape: Shape3D = {
+    const blueShape: Geometry3D = {
       type: '3d',
       name: 'Blue Shape',
       color: '#0000ff',
@@ -135,7 +135,7 @@ describe('convertReplicadShapesToGltf', () => {
   });
 
   it('should preserve edge lines from Shape3D in GLTF conversion', async () => {
-    const shapeWithoutLines: Shape3D = {
+    const shapeWithoutLines: Geometry3D = {
       type: '3d',
       name: 'Shape without Lines',
       faces: {
@@ -150,7 +150,7 @@ describe('convertReplicadShapesToGltf', () => {
       },
     };
 
-    const shapeWithLines: Shape3D = {
+    const shapeWithLines: Geometry3D = {
       type: '3d',
       name: 'Shape with Lines',
       faces: {

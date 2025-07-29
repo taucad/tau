@@ -5,7 +5,7 @@ import type { Mesh, Material, Object3D, LineSegments, BufferGeometry } from 'thr
 import { LineBasicMaterial, EdgesGeometry, Matrix4 } from 'three';
 import { GLTFLoader } from 'three-stdlib';
 import { MatcapMaterial } from '~/components/geometry/graphics/three/matcap-material.js';
-import type { ShapeGltf } from '~/types/cad.types.js';
+import type { GeometryGltf } from '~/types/cad.types.js';
 
 type MeshDataItem = {
   readonly geometry: BufferGeometry;
@@ -23,7 +23,7 @@ type EdgeDataItem = {
   readonly id: string;
 };
 
-type GltfMeshProperties = ShapeGltf & {
+type GltfMeshProperties = GeometryGltf & {
   readonly enableSurfaces?: boolean;
   readonly enableLines?: boolean;
 };

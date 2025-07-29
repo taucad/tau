@@ -9,7 +9,7 @@ export type CodeError = {
   endColumn: number;
 };
 
-export type Shape2D = {
+export type Geometry2D = {
   type: '2d';
   color?: string;
   format: 'svg';
@@ -20,7 +20,7 @@ export type Shape2D = {
   name: string;
 };
 
-export type Shape3D = {
+export type Geometry3D = {
   type: '3d';
   faces: {
     triangles: number[];
@@ -46,13 +46,13 @@ export type Shape3D = {
   highlight?: number[];
 };
 
-export type ShapeGltf = {
+export type GeometryGltf = {
   type: 'gltf';
   gltfBlob: Blob;
   name: string;
 };
 
-export type Shape = Shape2D | Shape3D | ShapeGltf;
+export type Geometry = Geometry2D | Geometry3D | GeometryGltf;
 
 export const modelProviders = ['sambanova', 'openai', 'anthropic', 'ollama'] as const;
 export type ModelProvider = (typeof modelProviders)[number];

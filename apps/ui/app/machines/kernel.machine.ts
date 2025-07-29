@@ -3,7 +3,7 @@ import type { Snapshot, ActorRef, OutputFrom, DoneActorEvent } from 'xstate';
 import { proxy, wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import { isBrowser } from 'motion/react';
-import type { Shape } from '~/types/cad.types.js';
+import type { Geometry } from '~/types/cad.types.js';
 import type { ExportFormat, KernelError, KernelProvider } from '~/types/kernel.types.js';
 import { isKernelSuccess } from '~/types/kernel.types.js';
 import type { BuilderWorkerInterface as ReplicadWorker } from '~/components/geometry/kernel/replicad/replicad.worker.js';
@@ -73,9 +73,9 @@ const createWorkersActor = fromPromise<
 
     // Initialize all workers with the default exception handling mode
     await Promise.all([
-      wrappedReplicadWorker.initialize(true, proxy(onLog)),
-      wrappedOpenscadWorker.initialize(proxy(onLog)),
-      wrappedZooWorker.initialize(proxy(onLog)),
+      wrappedReplicadWorker.initialize(proxy(onLog), { withExceptions: true }),
+      wrappedOpenscadWorker.initialize(proxy(onLog), {}),
+      wrappedZooWorker.initialize(proxy(onLog), { apiKey: '123' }),
     ]);
 
     // Store references to all workers
@@ -152,7 +152,7 @@ const parseParametersActor = fromPromise<
   }
 
   try {
-    const parametersResult = await wrappedWorker.extractParametersFromCode(event.code);
+    const parametersResult = await wrappedWorker.extractParameters(event.code);
 
     if (isKernelSuccess(parametersResult)) {
       const { defaultParameters, jsonSchema } = parametersResult.data as {
@@ -194,7 +194,7 @@ const parseParametersActor = fromPromise<
 const evaluateCodeActor = fromPromise<
   | {
       type: 'geometryComputed';
-      shapes: Shape[];
+      shapes: Geometry[];
     }
   | {
       type: 'kernelError';
@@ -245,7 +245,7 @@ const evaluateCodeActor = fromPromise<
     ...event.parameters,
   };
 
-  const result = await wrappedWorker.buildShapesFromCode(event.code, mergedParameters);
+  const result = await wrappedWorker.computeGeometry(event.code, mergedParameters);
 
   // Handle the result pattern
   if (isKernelSuccess(result)) {
@@ -308,7 +308,7 @@ const exportGeometryActor = fromPromise<
     }
 
     // TODO: add a proper type guard for the export format
-    const result = await wrappedWorker.exportShape(format as never);
+    const result = await wrappedWorker.exportGeometry(format as never);
 
     if (isKernelSuccess(result)) {
       const { data } = result;

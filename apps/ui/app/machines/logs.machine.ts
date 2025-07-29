@@ -18,7 +18,7 @@ type LogMachineEvents =
   | { type: 'addLogs'; entries: Array<{ message: string; options?: LogOptions }> }
   | { type: 'clearLogs' };
 
-const logMachine = setup({
+export const logMachine = setup({
   /* eslint-disable @typescript-eslint/consistent-type-assertions -- Required for XState's type inference */
   types: {
     context: {} as LogMachineContext,

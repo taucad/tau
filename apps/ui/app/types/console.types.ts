@@ -7,7 +7,6 @@ export const logLevels = {
   trace: 'trace',
 } as const satisfies Record<string, string>;
 
-// Define log levels as string literals instead of enum
 export type LogLevel = (typeof logLevels)[keyof typeof logLevels];
 
 export type LogOrigin = {
@@ -24,8 +23,8 @@ export type LogEntry = {
   data?: unknown;
 };
 
-export type LogOptions = {
-  level?: LogLevel;
-  origin?: LogOrigin;
-  data?: unknown;
-};
+export type LogOptions = Pick<LogEntry, 'level' | 'origin' | 'data'>;
+
+export type WorkerLog = Pick<LogEntry, 'level' | 'message' | 'origin' | 'data'>;
+
+export type OnWorkerLog = (log: WorkerLog) => void;

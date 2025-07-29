@@ -19,6 +19,8 @@ import type { ShapeGltf } from '~/types/cad.types.js';
 import { convertOffToGltf } from '~/components/geometry/kernel/utils/off-to-gltf.js';
 import { convertOffToStl } from '~/components/geometry/kernel/utils/off-to-stl.js';
 import { convertOffTo3mf } from '~/components/geometry/kernel/utils/off-to-3mf.js';
+import { logLevels } from '~/types/console.types.js';
+import type { LogLevel, OnWorkerLog } from '~/types/console.types.js';
 
 const supportedExportFormats = ['stl', 'stl-binary', 'glb', 'gltf', '3mf'] as const satisfies ExportFormat[];
 
@@ -29,11 +31,34 @@ type OpenScadExportFormat = (typeof supportedExportFormats)[number];
 // Global storage for computed OFF data (for later format conversion)
 const offDataMemory: Record<string, string> = {};
 
-async function getInstance(): Promise<OpenSCAD> {
+// Store proxied loggers
+let onLog: OnWorkerLog;
+
+const parseLogLevel = (message: string): LogLevel => {
+  if (message.includes('ERROR')) {
+    return logLevels.error;
+  }
+
+  if (message.includes('WARNING')) {
+    return logLevels.warn;
+  }
+
+  return logLevels.info;
+};
+
+const print = (message: string): void => {
+  onLog({ level: parseLogLevel(message), message, origin: { component: 'openscad.worker' } });
+};
+
+const printError = (message: string): void => {
+  onLog({ level: parseLogLevel(message), message, origin: { component: 'openscad.worker' } });
+};
+
+async function createInstance(): Promise<OpenSCAD> {
   const instance = await createOpenSCAD({
     noInitialRun: true,
-    print: console.log,
-    printErr: console.error,
+    print,
+    printErr: printError,
   });
 
   return instance.getInstance();
@@ -55,7 +80,7 @@ function formatValue(value: unknown): string {
 // Extract parameters using OpenSCAD's built-in parameter export
 async function extractParametersFromCode(code: string): Promise<ExtractParametersResult> {
   try {
-    const inst = await getInstance();
+    const inst = await createInstance();
     const inputFile = '/input.scad';
     const parameterFile = '/params.json';
 
@@ -107,7 +132,7 @@ async function buildShapesFromCode(
       return createKernelSuccess([]);
     }
 
-    const inst = await getInstance();
+    const inst = await createInstance();
     const inputFile = '/input.scad';
     const outputFile = '/output.off';
 
@@ -223,8 +248,8 @@ const exportShape = async (fileType: OpenScadExportFormat, shapeId = 'defaultSha
 };
 
 const service = {
-  async initialize() {
-    await getInstance();
+  initialize(logCallback: OnWorkerLog) {
+    onLog = logCallback;
   },
   ready: async () => true,
   buildShapesFromCode,

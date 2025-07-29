@@ -11,10 +11,14 @@ import type { ShapeGltf } from '~/types/cad.types.js';
 import { isKclError, extractExecutionError } from '~/components/geometry/kernel/zoo/kcl-errors.js';
 import { convertKclErrorToKernelError, mapErrorToKclError } from '~/components/geometry/kernel/zoo/error-mappers.js';
 import { getErrorPosition } from '~/components/geometry/kernel/zoo/source-range-utils.js';
+import { logLevels } from '~/types/console.types.js';
+import type { OnWorkerLog } from '~/types/console.types.js';
 
 const supportedExportFormats = ['stl', 'stl-binary', 'step', 'gltf'] as const satisfies ExportFormat[];
 
 const getSupportedExportFormats = (): ExportFormat[] => supportedExportFormats;
+
+let onLog: OnWorkerLog;
 
 type ZooExportFormat = (typeof supportedExportFormats)[number];
 
@@ -74,7 +78,12 @@ async function extractParametersFromCode(code: string): Promise<ExtractParameter
     // Parse the KCL code first
     const parseResult = await utils.parseKcl(code);
     if (parseResult.errors.length > 0) {
-      console.warn('KCL parsing errors during parameter extraction:', parseResult.errors);
+      onLog({
+        level: logLevels.error,
+        message: 'KCL parsing errors during parameter extraction',
+        data: parseResult.errors,
+        origin: { component: 'zoo.worker', operation: 'extractParametersFromCode' },
+      });
       const firstError = parseResult.errors[0]!;
       const errorPosition = getErrorPosition(firstError, code);
       return createKernelError({
@@ -88,7 +97,12 @@ async function extractParametersFromCode(code: string): Promise<ExtractParameter
     const executionResult = await utils.executeMockKcl(parseResult.program, 'main.kcl');
 
     if (executionResult.errors.length > 0) {
-      console.warn('KCL execution errors during parameter extraction:', executionResult.errors);
+      onLog({
+        level: logLevels.error,
+        message: 'KCL execution errors during parameter extraction',
+        data: executionResult.errors,
+        origin: { component: 'zoo.worker', operation: 'extractParametersFromCode' },
+      });
       const errorInfo = extractExecutionError(
         executionResult.errors,
         code,
@@ -110,7 +124,12 @@ async function extractParametersFromCode(code: string): Promise<ExtractParameter
       jsonSchema,
     });
   } catch (error) {
-    console.error('Error extracting parameters from KCL code:', error);
+    onLog({
+      level: logLevels.error,
+      message: 'Error extracting parameters from KCL code',
+      data: error,
+      origin: { component: 'zoo.worker', operation: 'extractParametersFromCode' },
+    });
     return handleError(error, code);
   }
 }
@@ -138,7 +157,12 @@ async function buildShapesFromCode(
       const parseResult = await utils.parseKcl(trimmedCode);
 
       if (parseResult.errors.length > 0) {
-        console.warn('KCL parsing errors:', parseResult.errors);
+        onLog({
+          level: logLevels.warn,
+          message: 'KCL parsing errors',
+          data: parseResult.errors,
+          origin: { component: 'zoo.worker', operation: 'buildShapesFromCode' },
+        });
         const firstError = parseResult.errors[0]!;
         const errorPosition = getErrorPosition(firstError, trimmedCode);
         const errorMessages = parseResult.errors.map((error) => error.message);
@@ -157,7 +181,12 @@ async function buildShapesFromCode(
 
       // Check for execution errors
       if (executionResult.errors.length > 0) {
-        console.warn('KCL execution errors:', executionResult.errors);
+        onLog({
+          level: logLevels.warn,
+          message: 'KCL execution errors',
+          data: executionResult.errors,
+          origin: { component: 'zoo.worker', operation: 'buildShapesFromCode' },
+        });
         const errorInfo = extractExecutionError(executionResult.errors, trimmedCode, 'KCL execution failed');
 
         return createKernelError({
@@ -203,13 +232,25 @@ async function buildShapesFromCode(
       };
 
       return createKernelSuccess([shape]);
-    } catch (kclError) {
-      console.error('KCL export error:', kclError);
-      return handleError(kclError, code);
+    } catch (error) {
+      const kclError = handleError(error, code);
+      onLog({
+        level: logLevels.error,
+        message: kclError.error.message,
+        data: kclError,
+        origin: { component: 'zoo.worker', operation: 'buildShapesFromCode' },
+      });
+      return kclError;
     }
   } catch (error) {
-    console.error('Error while building shapes from code:', error);
-    return handleError(error, code);
+    const kclError = handleError(error, code);
+    onLog({
+      level: logLevels.error,
+      message: kclError.error.message,
+      data: kclError,
+      origin: { component: 'zoo.worker', operation: 'buildShapesFromCode' },
+    });
+    return kclError;
   }
 }
 
@@ -267,8 +308,14 @@ const exportShape = async (fileType: ZooExportFormat, shapeId = 'defaultShape'):
             },
           ]);
         } catch (stlError) {
-          console.error('STL export error:', stlError);
-          return handleError(stlError);
+          const kclError = handleError(stlError);
+          onLog({
+            level: logLevels.error,
+            message: kclError.error.message,
+            data: kclError,
+            origin: { component: 'zoo.worker', operation: 'exportShape' },
+          });
+          return kclError;
         }
       }
 
@@ -309,8 +356,14 @@ const exportShape = async (fileType: ZooExportFormat, shapeId = 'defaultShape'):
             },
           ]);
         } catch (stepError) {
-          console.error('STEP export error:', stepError);
-          return handleError(stepError);
+          const kclError = handleError(stepError);
+          onLog({
+            level: logLevels.error,
+            message: kclError.error.message,
+            data: kclError,
+            origin: { component: 'zoo.worker', operation: 'exportShape' },
+          });
+          return kclError;
         }
       }
 
@@ -327,8 +380,14 @@ const exportShape = async (fileType: ZooExportFormat, shapeId = 'defaultShape'):
             },
           ]);
         } catch (gltfError) {
-          console.error('GLTF export error:', gltfError);
-          return handleError(gltfError);
+          const kclError = handleError(gltfError);
+          onLog({
+            level: logLevels.error,
+            message: kclError.error.message,
+            data: kclError,
+            origin: { component: 'zoo.worker', operation: 'exportShape' },
+          });
+          return kclError;
         }
       }
     }
@@ -339,13 +398,29 @@ const exportShape = async (fileType: ZooExportFormat, shapeId = 'defaultShape'):
 
 // Worker service interface
 const service = {
-  async initialize(): Promise<boolean> {
+  async initialize(logCallback: OnWorkerLog): Promise<boolean> {
+    onLog = logCallback;
     try {
+      onLog({
+        level: logLevels.debug,
+        message: 'Initializing KCL utilities',
+        origin: { component: 'zoo.worker', operation: 'initialize' },
+      });
       // Initialize WASM for basic operations - engine will be initialized on-demand
       await getKclUtils();
+      onLog({
+        level: logLevels.debug,
+        message: 'KCL utilities initialized',
+        origin: { component: 'zoo.worker', operation: 'initialize' },
+      });
       return true;
     } catch (error) {
-      console.error('Failed to initialize KCL utilities:', error);
+      onLog({
+        level: logLevels.error,
+        message: 'Failed to initialize KCL utilities',
+        data: error,
+        origin: { component: 'zoo.worker', operation: 'initialize' },
+      });
       return false;
     }
   },

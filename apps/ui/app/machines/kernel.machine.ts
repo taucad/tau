@@ -1,6 +1,6 @@
 import { assign, assertEvent, setup, sendTo, fromPromise } from 'xstate';
 import type { Snapshot, ActorRef, OutputFrom, DoneActorEvent } from 'xstate';
-import { wrap } from 'comlink';
+import { proxy, wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import { isBrowser } from 'motion/react';
 import type { Shape } from '~/types/cad.types.js';
@@ -13,6 +13,7 @@ import OpenSCADBuilderWorker from '~/components/geometry/kernel/openscad/opensca
 import type { ZooBuilderInterface as ZooWorker } from '~/components/geometry/kernel/zoo/zoo.worker.js';
 import ZooBuilderWorker from '~/components/geometry/kernel/zoo/zoo.worker.js?worker';
 import { assertActorDoneEvent } from '~/lib/xstate.js';
+import type { LogLevel, LogOrigin, OnWorkerLog } from '~/types/console.types.js';
 
 const workers = {
   replicad: ReplicadBuilderWorker,
@@ -58,11 +59,23 @@ const createWorkersActor = fromPromise<
     const wrappedOpenscadWorker = wrap<OpenSCADWorker>(openscadWorker);
     const wrappedZooWorker = wrap<ZooWorker>(zooWorker);
 
+    const onLog: OnWorkerLog = (log) => {
+      if (context.parentRef) {
+        context.parentRef.send({
+          type: 'kernelLog',
+          level: log.level,
+          message: log.message,
+          origin: log.origin,
+          data: log.data,
+        });
+      }
+    };
+
     // Initialize all workers with the default exception handling mode
     await Promise.all([
-      wrappedReplicadWorker.initialize(true),
-      wrappedOpenscadWorker.initialize(),
-      wrappedZooWorker.initialize(),
+      wrappedReplicadWorker.initialize(true, proxy(onLog)),
+      wrappedOpenscadWorker.initialize(proxy(onLog)),
+      wrappedZooWorker.initialize(proxy(onLog)),
     ]);
 
     // Store references to all workers
@@ -353,8 +366,17 @@ type KernelEventInternal =
   | { type: 'parseParameters'; code: string; kernelType: KernelProvider }
   | { type: 'exportGeometry'; format: ExportFormat; kernelType: KernelProvider };
 
+// Define the events that the workers can send to the kernel machine
+type KernelEventWorker = {
+  type: 'kernelLog';
+  level: LogLevel;
+  message: string;
+  origin?: LogOrigin;
+  data?: unknown;
+};
+
 // The kernel machine simply sends the output of the actors to the parent machine.
-export type KernelEventExternal = OutputFrom<(typeof kernelActors)[KernelActorNames]>;
+export type KernelEventExternal = OutputFrom<(typeof kernelActors)[KernelActorNames]> | KernelEventWorker;
 type KernelEventExternalDone = DoneActorEvent<KernelEventExternal, KernelActorNames>;
 
 type KernelEvent = KernelEventExternalDone | KernelEventInternal;

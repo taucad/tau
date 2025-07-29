@@ -25,6 +25,8 @@ import { convertReplicadShapesToGltf } from '~/components/geometry/kernel/replic
 import { jsonSchemaFromJson } from '~/utils/schema.js';
 import type { MainResultShapes, ShapeConfig } from '~/components/geometry/kernel/replicad/utils/render-output.js';
 import type { ShapeGltf, Shape3D, Shape2D } from '~/types/cad.types.js';
+import { logLevels } from '~/types/console.types.js';
+import type { OnWorkerLog } from '~/types/console.types.js';
 
 const supportedExportFormats = [
   'stl',
@@ -36,6 +38,8 @@ const supportedExportFormats = [
 ] as const satisfies ExportFormat[];
 
 const getSupportedExportFormats = (): ExportFormat[] => supportedExportFormats;
+
+let onLog: OnWorkerLog;
 
 type ReplicadExportFormat = (typeof supportedExportFormats)[number];
 
@@ -78,31 +82,55 @@ export async function runAsModule(code: string, parameters: Record<string, unkno
   const startTime = performance.now();
   const module = await buildEsModule(code);
   const buildTime = performance.now();
-  console.log(`Module building took ${buildTime - startTime}ms`);
+  onLog({
+    level: logLevels.info,
+    message: `Module building took ${buildTime - startTime}ms`,
+    origin: { component: 'replicad.worker', operation: 'runAsModule' },
+  });
 
   const execStartTime = performance.now();
   const result = module.default ? module.default(parameters) : module.main?.(replicad, parameters);
   const execEndTime = performance.now();
-  console.log(`Module execution took ${execEndTime - execStartTime}ms`);
+  onLog({
+    level: logLevels.info,
+    message: `Module execution took ${execEndTime - execStartTime}ms`,
+    origin: { component: 'replicad.worker', operation: 'runAsModule' },
+  });
 
   return result;
 }
 
 const runCode = async (code: string, parameters: Record<string, unknown>): Promise<unknown> => {
-  console.log('Starting runCode evaluation');
+  onLog({
+    level: logLevels.info,
+    message: 'Starting runCode evaluation',
+    origin: { component: 'replicad.worker', operation: 'runCode' },
+  });
   const startTime = performance.now();
 
   let result;
   if (/^\s*export\s+/m.test(code)) {
-    console.log('Starting runAsModule');
+    onLog({
+      level: logLevels.info,
+      message: 'Starting runAsModule',
+      origin: { component: 'replicad.worker', operation: 'runCode' },
+    });
     result = await runAsModule(code, parameters);
   } else {
-    console.log('Starting runAsFunction');
+    onLog({
+      level: logLevels.info,
+      message: 'Starting runAsFunction',
+      origin: { component: 'replicad.worker', operation: 'runCode' },
+    });
     result = await runAsFunction(code, parameters);
   }
 
   const endTime = performance.now();
-  console.log(`Total runCode execution took ${endTime - startTime}ms`);
+  onLog({
+    level: logLevels.info,
+    message: `Total runCode execution took ${endTime - startTime}ms`,
+    origin: { component: 'replicad.worker', operation: 'runCode' },
+  });
   return result;
 };
 
@@ -232,7 +260,11 @@ let isInitializing = false;
  */
 async function initializeOpenCascadeInstance(withExceptions: boolean): Promise<OpenCascadeInstance> {
   if (isInitializing) {
-    console.log('Already initializing OpenCascade, returning existing promise');
+    onLog({
+      level: logLevels.info,
+      message: 'Already initializing OpenCascade, returning existing promise',
+      origin: { component: 'replicad.worker', operation: 'initializeOpenCascadeInstance' },
+    });
     if (!OC) {
       throw new Error('OpenCascade initialization in progress but OC is undefined');
     }
@@ -250,14 +282,22 @@ async function initializeOpenCascadeInstance(withExceptions: boolean): Promise<O
     // Use cached version if available
     if (withExceptions) {
       if (!ocVersions.withExceptions) {
-        console.log('Initializing OpenCascade with exceptions');
+        onLog({
+          level: logLevels.debug,
+          message: 'Initializing OpenCascade with exceptions',
+          origin: { component: 'replicad.worker', operation: 'initializeOpenCascadeInstance' },
+        });
         ocVersions.withExceptions = initOpenCascadeWithExceptions();
       }
 
       OC = ocVersions.withExceptions;
     } else {
       if (!ocVersions.single) {
-        console.log('Initializing OpenCascade without exceptions');
+        onLog({
+          level: logLevels.debug,
+          message: 'Initializing OpenCascade without exceptions',
+          origin: { component: 'replicad.worker', operation: 'initializeOpenCascadeInstance' },
+        });
         ocVersions.single = initOpenCascade();
       }
 
@@ -266,10 +306,19 @@ async function initializeOpenCascadeInstance(withExceptions: boolean): Promise<O
 
     const result = await OC;
     const endTime = performance.now();
-    console.log(`OpenCascade initialized successfully in ${endTime - startTime}ms`);
+    onLog({
+      level: logLevels.debug,
+      message: `OpenCascade initialized successfully in ${endTime - startTime}ms`,
+      origin: { component: 'replicad.worker', operation: 'initializeOpenCascadeInstance' },
+    });
     return result;
   } catch (error) {
-    console.error('Failed to initialize OpenCascade:', error);
+    onLog({
+      level: logLevels.error,
+      message: 'Failed to initialize OpenCascade:',
+      data: error,
+      origin: { component: 'replicad.worker', operation: 'initializeOpenCascadeInstance' },
+    });
     throw error;
   } finally {
     isInitializing = false;
@@ -303,7 +352,12 @@ const formatException = (
     message = errorData.GetMessageString();
   } else {
     message = error instanceof Error ? error.message : 'Unknown error';
-    console.error(error);
+    onLog({
+      level: logLevels.error,
+      message: 'Error in formatException',
+      data: error,
+      origin: { component: 'replicad.worker', operation: 'formatException' },
+    });
   }
 
   return {
@@ -315,7 +369,12 @@ const formatException = (
 
 // Enhanced error formatting function using robust error-stack-parser
 const formatKernelError = async (error: unknown): Promise<KernelError> => {
-  console.log('Formatting kernel error:\n', error);
+  onLog({
+    level: logLevels.info,
+    message: 'Formatting kernel error:',
+    data: error,
+    origin: { component: 'replicad.worker', operation: 'formatKernelError' },
+  });
   // Start with default values
   let message = 'Unknown error occurred';
   let stack: string | undefined;
@@ -338,7 +397,12 @@ const formatKernelError = async (error: unknown): Promise<KernelError> => {
         type = 'kernel';
       }
     } catch (ocError) {
-      console.warn('Failed to format OpenCascade exception:', ocError);
+      onLog({
+        level: logLevels.warn,
+        message: 'Failed to format OpenCascade exception:',
+        data: ocError,
+        origin: { component: 'replicad.worker', operation: 'formatKernelError' },
+      });
       message = `Kernel error ${error}`;
       type = 'kernel';
     }
@@ -369,7 +433,12 @@ const formatKernelError = async (error: unknown): Promise<KernelError> => {
       startColumn = userFrame?.columnNumber ?? 0;
     } catch (parseError) {
       // Fallback if stack parsing fails
-      console.warn('Failed to parse error stack:', parseError);
+      onLog({
+        level: logLevels.warn,
+        message: 'Failed to parse error stack:',
+        data: parseError,
+        origin: { component: 'replicad.worker', operation: 'formatKernelError' },
+      });
     }
   }
   // Handle string errors
@@ -390,7 +459,11 @@ const formatKernelError = async (error: unknown): Promise<KernelError> => {
 
 const buildShapesFromCode = async (code: string, parameters: Record<string, unknown>): Promise<BuildShapesResult> => {
   const startTime = performance.now();
-  console.log('Building shapes from code');
+  onLog({
+    level: logLevels.info,
+    message: 'Building shapes from code',
+    origin: { component: 'replicad.worker', operation: 'buildShapesFromCode' },
+  });
 
   try {
     // Ensure font is loaded
@@ -409,13 +482,21 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
       const runCodeStartTime = performance.now();
       shapes = ((await runCode(code, parameters)) ?? []) as MainResultShapes;
       const runCodeEndTime = performance.now();
-      console.log(`Code execution took ${runCodeEndTime - runCodeStartTime}ms`);
+      onLog({
+        level: logLevels.info,
+        message: `Code execution took ${runCodeEndTime - runCodeStartTime}ms`,
+        origin: { component: 'replicad.worker', operation: 'buildShapesFromCode' },
+      });
 
       const defaultNameResult = await extractDefaultNameFromCode(code);
       defaultName = isKernelError(defaultNameResult) ? undefined : defaultNameResult.data;
     } catch (error) {
       const endTime = performance.now();
-      console.log(`Error occurred after ${endTime - startTime}ms`);
+      onLog({
+        level: logLevels.info,
+        message: `Error occurred after ${endTime - startTime}ms`,
+        origin: { component: 'replicad.worker', operation: 'buildShapesFromCode' },
+      });
       return {
         success: false,
         error: await formatKernelError(error),
@@ -434,7 +515,11 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
       defaultName,
     );
     const renderEndTime = performance.now();
-    console.log(`Render output took ${renderEndTime - renderStartTime}ms`);
+    onLog({
+      level: logLevels.info,
+      message: `Render output took ${renderEndTime - renderStartTime}ms`,
+      origin: { component: 'replicad.worker', operation: 'buildShapesFromCode' },
+    });
 
     // Convert 3D shapes to GLTF format
     const gltfStartTime = performance.now();
@@ -450,7 +535,11 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
     if (shapes3d.length > 0) {
       const gltfBlob = await convertReplicadShapesToGltf(shapes3d, 'glb');
       const gltfEndTime = performance.now();
-      console.log(`GLTF conversion took ${gltfEndTime - gltfStartTime}ms`);
+      onLog({
+        level: logLevels.info,
+        message: `GLTF conversion took ${gltfEndTime - gltfStartTime}ms`,
+        origin: { component: 'replicad.worker', operation: 'buildShapesFromCode' },
+      });
 
       const shapeGltf: ShapeGltf = {
         type: 'gltf',
@@ -461,14 +550,23 @@ const buildShapesFromCode = async (code: string, parameters: Record<string, unkn
     }
 
     const totalTime = performance.now() - startTime;
-    console.log(`Total buildShapesFromCode time: ${totalTime}ms`);
+    onLog({
+      level: logLevels.info,
+      message: `Total buildShapesFromCode time: ${totalTime}ms`,
+      origin: { component: 'replicad.worker', operation: 'buildShapesFromCode' },
+    });
 
     return {
       success: true,
       data: [...gltfShapes, ...shapes2d],
     };
   } catch (error) {
-    console.error('Error in buildShapesFromCode:', error);
+    onLog({
+      level: logLevels.error,
+      message: 'Error in buildShapesFromCode:',
+      data: error,
+      origin: { component: 'replicad.worker', operation: 'buildShapesFromCode' },
+    });
     return {
       success: false,
       error: await formatKernelError(error),
@@ -602,16 +700,25 @@ const edgeInfo = (subshapeIndex: number, edgeIndex: number, shapeId = 'defaultSh
   };
 };
 
-const initialize = async (withExceptions: boolean): Promise<void> => {
+const initialize = async (withExceptions: boolean, logCallback: OnWorkerLog): Promise<void> => {
+  onLog = logCallback;
   const startTime = performance.now();
   const oc = await initializeOpenCascadeInstance(withExceptions);
 
   const ocEndTime = performance.now();
-  console.log(`OpenCascade initialization took ${ocEndTime - startTime}ms`);
+  onLog({
+    level: logLevels.debug,
+    message: `OpenCascade initialization took ${ocEndTime - startTime}ms`,
+    origin: { component: 'replicad.worker', operation: 'initialize' },
+  });
 
   // Set replicad OC once we have it
   if (!replicadHasOc) {
-    console.log('Setting OC in replicad');
+    onLog({
+      level: logLevels.debug,
+      message: 'Setting OC in replicad',
+      origin: { component: 'replicad.worker', operation: 'initialize' },
+    });
     replicad.setOC(oc);
     replicadHasOc = true;
   }
@@ -623,7 +730,12 @@ const service = {
       await OC;
       return true;
     } catch (error) {
-      console.error('OpenCascade initialization error:', error);
+      onLog({
+        level: logLevels.error,
+        message: 'OpenCascade initialization error:',
+        data: error,
+        origin: { component: 'replicad.worker', operation: 'ready' },
+      });
       return false;
     }
   },

@@ -13,7 +13,7 @@ WORKDIR /app
 ENV NODE_ENV="production"
 
 # Install pnpm
-ARG PNPM_VERSION=10.8.1
+ARG PNPM_VERSION=10.13.1
 RUN npm install -g pnpm@$PNPM_VERSION
 
 

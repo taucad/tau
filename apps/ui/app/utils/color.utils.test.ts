@@ -108,4 +108,16 @@ describe('stringToColor', () => {
     const uniqueColors = new Set(colorValues);
     expect(uniqueColors.size).toBe(colorValues.length);
   });
+
+  it('should handle opacity correctly', () => {
+    const input = 'test-opacity';
+    const colorWithDefaultOpacity = stringToColor(input);
+    const colorWithOpacity = stringToColor(input, 0.5);
+    const colorWithOpacityOne = stringToColor(input, 1);
+
+    expect(colorWithDefaultOpacity).toMatch(/^oklch\(var\(--l-medium\) 0\.2 \d+deg\)$/);
+    expect(colorWithOpacity).toMatch(/^oklch\(var\(--l-medium\) 0\.2 \d+deg \/ 0\.5\)$/);
+    expect(colorWithOpacityOne).toMatch(/^oklch\(var\(--l-medium\) 0\.2 \d+deg\)$/);
+    expect(colorWithDefaultOpacity).toBe(colorWithOpacityOne);
+  });
 });

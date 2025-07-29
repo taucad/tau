@@ -5,7 +5,7 @@ import { hashCode } from '~/utils/crypto.js';
  * @param hash - Hexadecimal hash string
  * @returns OKLCH color string with CSS variables
  */
-function hashToColor(hash: string): string {
+function hashToColor(hash: string, opacity = 1): string {
   const hashNumber = Number.parseInt(hash, 36);
   const hue = hashNumber % 360;
 
@@ -13,7 +13,11 @@ function hashToColor(hash: string): string {
   const lightness = 'var(--l-medium)';
   const chroma = '0.2'; // Strong enough for good saturation
 
-  return `oklch(${lightness} ${chroma} ${hue}deg)`;
+  if (opacity === 1) {
+    return `oklch(${lightness} ${chroma} ${hue}deg)`;
+  }
+
+  return `oklch(${lightness} ${chroma} ${hue}deg / ${opacity})`;
 }
 
 /**
@@ -21,7 +25,7 @@ function hashToColor(hash: string): string {
  * @param input - Any string input
  * @returns OKLCH color string with CSS variables
  */
-export function stringToColor(input: string): string {
+export function stringToColor(input: string, opacity = 1): string {
   const hash = hashCode(input);
-  return hashToColor(hash);
+  return hashToColor(hash, opacity);
 }

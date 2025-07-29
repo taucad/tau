@@ -87,6 +87,7 @@ export function GltfMesh({
 
   useLayoutEffect(() => {
     const loadGltf = async (): Promise<void> => {
+      console.log('Loading GLTF');
       setError(undefined);
 
       try {

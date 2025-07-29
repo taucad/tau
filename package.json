@@ -97,7 +97,7 @@
     "@xstate/react": "^5.0.4",
     "ai": "^4.3.16",
     "autoprefixer": "10.4.20",
-    "axios": "^1.7.9",
+    "axios": "^1.11.0",
     "better-auth": "^1.2.10",
     "bson": "^6.10.4",
     "cheerio": "^1.0.0",

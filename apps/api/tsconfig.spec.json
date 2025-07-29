@@ -3,7 +3,6 @@
   "compilerOptions": {
     "types": [
       "node",
-      "vitest/globals",
       "vitest/importMeta",
       "vite-plugin-node",
       "vitest"

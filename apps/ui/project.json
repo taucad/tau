@@ -25,14 +25,18 @@
         "{projectRoot}/app/**/*.ts",
         "{projectRoot}/react-router.config.ts"
       ],
-      "outputs": ["{projectRoot}/.react-router/types/**"],
+      "outputs": [
+        "{projectRoot}/.react-router/types/**"
+      ],
       "options": {
         "command": "react-router typegen",
         "cwd": "{projectRoot}"
       }
     },
     "typecheck": {
-      "dependsOn": ["typegen"]
+      "dependsOn": [
+        "typegen"
+      ]
     },
     "deploy": {
       "executor": "nx:run-commands",

@@ -200,10 +200,14 @@ export const cadMachine = setup({
         parentRef: self,
       });
     }),
-    initializeModel: assign(({ event }: { event: CadEvent }) => {
+    initializeModel: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'initializeModel');
 
-      return {
+      if (context.logActorRef) {
+        enqueue.sendTo(context.logActorRef, { type: 'clearLogs' });
+      }
+
+      enqueue.assign({
         code: event.code,
         parameters: event.parameters,
         codeErrors: [],
@@ -212,7 +216,7 @@ export const cadMachine = setup({
         exportedBlob: undefined,
         jsonSchema: undefined,
         kernelTypeSelected: event.kernelType,
-      };
+      });
     }),
   },
   guards: {

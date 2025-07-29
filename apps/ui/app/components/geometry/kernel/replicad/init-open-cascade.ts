@@ -35,7 +35,7 @@ export async function initOpenCascade(): Promise<OpenCascadeInstance> {
         .then((output) => {
           successCallback(output.instance);
         })
-        .catch((error: unknown) => {
+        .catch(() => {
           // Fallback to traditional approach
           void fetch(opencascadeWasm, { cache: 'force-cache' })
             .then(async (response) => response.arrayBuffer())
@@ -71,7 +71,7 @@ export async function initOpenCascadeWithExceptions(): Promise<OpenCascadeInstan
         .then((output) => {
           successCallback(output.instance);
         })
-        .catch((error: unknown) => {
+        .catch(() => {
           // Fallback to traditional approach
           void fetch(opencascadeWithExceptionsWasm, { cache: 'force-cache' })
             .then(async (response) => response.arrayBuffer())

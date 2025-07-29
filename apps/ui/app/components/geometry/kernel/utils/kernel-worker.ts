@@ -8,6 +8,9 @@ import { logLevels } from '~/types/console.types';
 import type { OnWorkerLog } from '~/types/console.types';
 
 export abstract class KernelWorker<Options extends Record<string, unknown> = Record<string, never>> {
+  /**
+   * The supported export formats for the worker.
+   */
   protected static readonly supportedExportFormats: ExportFormat[] = [];
 
   /**

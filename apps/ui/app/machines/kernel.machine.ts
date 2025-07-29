@@ -423,18 +423,21 @@ export const kernelMachine = setup({
     }),
     async destroyWorkers({ context }) {
       if (context.workers.replicad) {
+        await context.wrappedWorkers.replicad?.cleanup();
         context.workers.replicad.terminate();
         context.workers.replicad = undefined;
         context.wrappedWorkers.replicad = undefined;
       }
 
       if (context.workers.openscad) {
+        await context.wrappedWorkers.openscad?.cleanup();
         context.workers.openscad.terminate();
         context.workers.openscad = undefined;
         context.wrappedWorkers.openscad = undefined;
       }
 
       if (context.workers.zoo) {
+        await context.wrappedWorkers.zoo?.cleanup();
         context.workers.zoo.terminate();
         context.workers.zoo = undefined;
         context.wrappedWorkers.zoo = undefined;

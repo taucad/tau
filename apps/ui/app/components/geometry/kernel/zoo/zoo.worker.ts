@@ -272,6 +272,12 @@ class ZooWorker extends KernelWorker<ZooOptions> {
     }
   }
 
+  public override async cleanup(): Promise<void> {
+    await this.kclUtils?.cleanup();
+    this.kclUtils = undefined;
+    this.gltfDataMemory = {};
+  }
+
   private handleError(error: unknown, code?: string): ReturnType<typeof createKernelError> {
     if (isKclError(error)) {
       return convertKclErrorToKernelError(error, code);

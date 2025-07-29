@@ -187,7 +187,7 @@ class OpenScadWorker extends KernelWorker {
     this.onLog({
       level: this.parseLogLevel(message),
       message,
-      origin: { component: 'openscad.worker', operation: 'internal' },
+      origin: { component: OpenScadWorker.name, operation: 'internal' },
     });
   }
 
@@ -195,7 +195,7 @@ class OpenScadWorker extends KernelWorker {
     this.onLog({
       level: this.parseLogLevel(message),
       message,
-      origin: { component: 'openscad.worker', operation: 'internal' },
+      origin: { component: OpenScadWorker.name, operation: 'internal' },
     });
   }
 

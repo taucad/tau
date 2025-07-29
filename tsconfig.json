@@ -8,6 +8,7 @@
     },
     "include": [
         "vitest.workspace.ts",
-        "scripts/**/*"
+        "scripts/**/*",
+        "tools/**/*"
     ]
 }

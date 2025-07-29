@@ -3,6 +3,9 @@
   "defaultBase": "main",
   "plugins": [
     {
+      "plugin": "./tools/tsup.ts"
+    },
+    {
       "plugin": "@nx/react/router-plugin",
       "options": {
         "buildTargetName": "build",

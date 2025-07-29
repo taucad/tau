@@ -209,9 +209,6 @@ export function GltfMesh({
 
         // Create edge items based on strategy
         if (separateLineSegments.length > 0) {
-          // Use existing LineSegments for edges
-          console.log('Using existing LineSegments for edges');
-
           for (const [index, lineSegment] of separateLineSegments.entries()) {
             const edgeMaterial = new LineBasicMaterial({
               color: 0x24_42_24,
@@ -229,9 +226,6 @@ export function GltfMesh({
             });
           }
         } else {
-          // No LineSegments found - compute edge geometry from all mesh geometries
-          console.log('No LineSegments found, computing edge geometry from meshes');
-
           for (const [index, mesh] of meshData.entries()) {
             // Create edge geometry from mesh faces
             const edgeGeometry = new EdgesGeometry(mesh.geometry, edgeThresholdDegrees);

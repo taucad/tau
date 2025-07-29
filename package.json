@@ -151,7 +151,7 @@
     "rxjs": "^7.8.1",
     "shiki": "^3.7.0",
     "socket.io": "^4.8.1",
-    "sonner": "^1.7.4",
+    "sonner": "^2.0.6",
     "three": "^0.174.0",
     "three-stdlib": "^2.36.0",
     "three-viewport-gizmo": "https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/d5ae66010e7f5f067931aaeb6a74880a73d23b5d",

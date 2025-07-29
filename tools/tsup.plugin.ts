@@ -72,7 +72,7 @@ const createTsupTarget = (configFilePath: string, context: CreateNodesContextV2)
             outputs: ['{projectRoot}/dist'],
             cache: true,
             options: {
-              command: 'if [ "$CI" = "true" ]; then tsup; else tsup --watch; fi',
+              command: 'tsup',
               cwd: projectRoot,
             },
             inputs: [

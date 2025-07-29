@@ -11,9 +11,6 @@ patchedDependencies:
   '@kittycad/lib':
     hash: 1b9189715dfc72da54e8a7cbc9d7e118dd9c52d4504376dc3a2db51ae87954d0
     path: patches/@kittycad__lib.patch
-  replicad@0.18.2:
-    hash: 769234de5352f62bbd6f510a8c77ae4b1910e66e9d9f377c99d963f6347b9dbe
-    path: patches/replicad@0.18.2.patch
 
 importers:
 
@@ -371,11 +368,11 @@ importers:
         specifier: ^2.0.4
         version: 2.0.4(react-router@7.5.3(react-dom@19.0.0(react@19.0.0))(react@19.0.0))
       replicad:
-        specifier: ^0.18.2
-        version: 0.18.2(patch_hash=769234de5352f62bbd6f510a8c77ae4b1910e66e9d9f377c99d963f6347b9dbe)
+        specifier: ^0.19.1
+        version: 0.19.1
       replicad-opencascadejs:
-        specifier: ^0.18.0
-        version: 0.18.0
+        specifier: ^0.19.0
+        version: 0.19.0
       rxjs:
         specifier: ^7.8.1
         version: 7.8.1
@@ -12535,11 +12532,11 @@ packages:
     resolution: {integrity: sha512-yD5BHCe7quCgBph4rMQ+0KkIRKwWCrHDOX1p1Gp6HwjPM5kVoCdKGNhN7ydqqsX6lJEnQDKZ/tFMiEdQ1dvPEw==}
     engines: {node: '>= 0.10'}
 
-  replicad-opencascadejs@0.18.0:
-    resolution: {integrity: sha512-8QW2MOzUs4VNk2Abqqf3A2ra8xEMG8fPUiyfPhKhvQ77RxsBZ4GX4410KCsBWcmRphYJXHUjEJjIYD8UzfcM9A==}
+  replicad-opencascadejs@0.19.0:
+    resolution: {integrity: sha512-Bslw6QsvDR2ctew4xPOI9OJchfo4eLbhvnQwtqMWA6QQjDCAtrT1nW28sBMTwygCT90KjzJWoJdQhvskuOTgQw==}
 
-  replicad@0.18.2:
-    resolution: {integrity: sha512-C3ZQUXSXDEhAJbtTj1qtVp/Ngu5uDYmEVokPDt3aKH5SDn7fEdmrRA6Zvnm1mXQbY2O36fyddNXpkqwmFRlBmw==}
+  replicad@0.19.1:
+    resolution: {integrity: sha512-NdZ3R1M+dXZmTJZ4WtGnIvofnM6v1l1x6yydOoCmedBdopc+ZthsUMh2ps424YAoZz3k9faW+hMzIWpKPinHuA==}
 
   require-directory@2.1.1:
     resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
@@ -28062,9 +28059,9 @@ snapshots:
 
   replace-ext@1.0.1: {}
 
-  replicad-opencascadejs@0.18.0: {}
+  replicad-opencascadejs@0.19.0: {}
 
-  replicad@0.18.2(patch_hash=769234de5352f62bbd6f510a8c77ae4b1910e66e9d9f377c99d963f6347b9dbe):
+  replicad@0.19.1:
     dependencies:
       '@types/opentype.js': 1.3.4
       flatbush: 4.4.0

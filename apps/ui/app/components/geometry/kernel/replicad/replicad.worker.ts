@@ -11,7 +11,6 @@ import type {
   ExtractParametersResult,
   KernelError,
   ExtractNameResult,
-  ExtractSchemaResult,
   ExportFormat,
 } from '~/types/kernel.types.js';
 import { createKernelSuccess, createKernelError, isKernelError } from '~/types/kernel.types.js';
@@ -200,34 +199,6 @@ try {
   } catch {
     return createKernelError({
       message: 'Failed to extract default name from code',
-      startLineNumber: 0,
-      startColumn: 0,
-      type: 'runtime',
-    });
-  }
-};
-
-const extractSchemaFromCode = async (code: string): Promise<ExtractSchemaResult> => {
-  if (/^\s*export\s+/m.test(code)) {
-    const module = await buildEsModule(code);
-    return createKernelSuccess(module.schema);
-  }
-
-  const editedText = `
-${code}
-try {
-  return schema;
-} catch (e) {
-  return;
-}
-  `;
-
-  try {
-    const result = await runInCjsContext(editedText, {});
-    return createKernelSuccess(result ?? {});
-  } catch {
-    return createKernelError({
-      message: 'Failed to extract schema from code',
       startLineNumber: 0,
       startColumn: 0,
       type: 'runtime',
@@ -673,33 +644,6 @@ const exportShape = async (
   }
 };
 
-const faceInfo = (subshapeIndex: number, faceIndex: number, shapeId = 'defaultShape'): unknown | undefined => {
-  const face = shapesMemory[shapeId]?.[subshapeIndex]?.shape.faces[faceIndex];
-  if (!face) {
-    return undefined;
-  }
-
-  return {
-    type: face.geomType,
-    center: face.center.toTuple(),
-    normal: face.normalAt().normalize().toTuple(),
-  };
-};
-
-const edgeInfo = (subshapeIndex: number, edgeIndex: number, shapeId = 'defaultShape'): unknown | undefined => {
-  const edge = shapesMemory[shapeId]?.[subshapeIndex]?.shape.edges[edgeIndex];
-  if (!edge) {
-    return undefined;
-  }
-
-  return {
-    type: edge.geomType,
-    start: edge.startPoint.toTuple(),
-    end: edge.endPoint.toTuple(),
-    direction: edge.tangentAt().normalize().toTuple(),
-  };
-};
-
 const initialize = async (withExceptions: boolean, logCallback: OnWorkerLog): Promise<void> => {
   onLog = logCallback;
   const startTime = performance.now();
@@ -742,10 +686,7 @@ const service = {
   buildShapesFromCode,
   extractParametersFromCode,
   extractDefaultNameFromCode,
-  extractSchemaFromCode,
   exportShape,
-  edgeInfo,
-  faceInfo,
   initialize,
   toggleExceptions,
   isExceptionsEnabled: (): boolean => ocVersions.current === 'withExceptions',

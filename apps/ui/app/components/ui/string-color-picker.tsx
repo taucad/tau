@@ -66,7 +66,7 @@ const rgbToHex = (rgb: RgbColor): string => {
 /**
  * Detect the color format type from a color string using culori's parse API
  */
-// eslint-disable-next-line complexity -- allowable
+
 const getColorFormat = (color: string): string => {
   try {
     const parsed = parse(color);
@@ -93,114 +93,8 @@ const getColorFormat = (color: string): string => {
         return color.trim().toLowerCase().startsWith('hsla(') ? 'HSLA' : 'HSL';
       }
 
-      case 'lab': {
-        return 'LAB';
-      }
-
-      case 'lch': {
-        return 'LCH';
-      }
-
-      case 'oklch': {
-        return 'OKLCH';
-      }
-
-      case 'oklab': {
-        return 'OKLAB';
-      }
-
-      case 'hwb': {
-        return 'HWB';
-      }
-
-      case 'hsv': {
-        return 'HSV';
-      }
-
-      case 'hsi': {
-        return 'HSI';
-      }
-
-      case 'xyz50':
-      case 'xyz65': {
-        return 'XYZ';
-      }
-
-      case 'p3': {
-        return 'P3';
-      }
-
-      case 'a98': {
-        return 'A98';
-      }
-
-      case 'rec2020': {
-        return 'REC2020';
-      }
-
-      case 'prophoto': {
-        return 'PROPHOTO';
-      }
-
-      case 'cubehelix': {
-        return 'CUBEHELIX';
-      }
-
-      case 'yiq': {
-        return 'YIQ';
-      }
-
-      case 'luv': {
-        return 'LUV';
-      }
-
-      case 'lchuv': {
-        return 'LCHUV';
-      }
-
-      case 'jab': {
-        return 'JAB';
-      }
-
-      case 'jch': {
-        return 'JCH';
-      }
-
-      case 'xyb': {
-        return 'XYB';
-      }
-
-      case 'dlab': {
-        return 'DLAB';
-      }
-
-      case 'dlch': {
-        return 'DLCH';
-      }
-
-      case 'lrgb': {
-        return 'LRGB';
-      }
-
-      case 'lab65': {
-        return 'LAB65';
-      }
-
-      case 'lch65': {
-        return 'LCH65';
-      }
-
-      case 'okhsl': {
-        return 'OKHSL';
-      }
-
-      case 'okhsv': {
-        return 'OKHSV';
-      }
-
       default: {
-        const _exhaustiveCheck: never = mode;
-        throw new Error(`Unknown color format: ${String(_exhaustiveCheck)}`);
+        return mode.toUpperCase();
       }
     }
   } catch {

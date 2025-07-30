@@ -9,7 +9,18 @@
     ".react-router/types/**/*"
   ],
   "compilerOptions": {
-    "rootDirs": [".", "./.react-router/types"]
+    "outDir": "./out-tsc/lib",
+    "rootDirs": [".", "./.react-router/types"],
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
+    "types": ["@react-router/node", "vite/client", "node"],
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2024",
+    "baseUrl": ".",
+    "paths": {
+      "#*": ["app/*"]
+    }
   },
   "exclude": [
     "tests/**/*.spec.ts",
@@ -21,13 +32,18 @@
     "tests/**/*.spec.jsx",
     "tests/**/*.test.jsx",
     "vite.config.ts",
-    "src/**/*.test.ts",
-    "src/**/*.spec.ts",
-    "src/**/*.test.tsx",
-    "src/**/*.spec.tsx",
-    "src/**/*.test.js",
-    "src/**/*.spec.js",
-    "src/**/*.test.jsx",
-    "src/**/*.spec.jsx"
+    "app/**/*.test.ts",
+    "app/**/*.spec.ts",
+    "app/**/*.test.tsx",
+    "app/**/*.spec.tsx",
+    "app/**/*.test.js",
+    "app/**/*.spec.js",
+    "app/**/*.test.jsx",
+    "app/**/*.spec.jsx"
+  ],
+  "references": [
+    {
+      "path": "../../libs/tau-examples/tsconfig.lib.json"
+    }
   ]
 }

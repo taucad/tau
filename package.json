@@ -12,7 +12,7 @@
     "test": "nx run-many -t test",
     "typecheck": "nx run-many -t typecheck",
     "mcp:browser": "npx -y @agentdeskai/browser-tools-mcp@1.2.0",
-    "build": "nx build",
+    "build": "nx run-many -t build",
     "extract-replicad-api": "node scripts/extract-replicad-api.ts",
     "analyze-replicad-api": "node scripts/use-extracted-api.ts",
     "ci:affected": "nx affected -t test build lint typecheck",

@@ -6,7 +6,7 @@ import '@testing-library/jest-dom';
 Object.defineProperty(globalThis, 'ENV', {
   writable: true,
   value: {
-    TAU_API_URL: 'http://localhost:3001',
+    TAU_API_URL: 'http://localhost:4000',
     TAU_FRONTEND_URL: 'http://localhost:3000',
     NODE_ENV: 'test',
   },
@@ -40,12 +40,18 @@ Object.defineProperty(globalThis, 'matchMedia', {
 // Mock IntersectionObserver
 globalThis.IntersectionObserver = class IntersectionObserver {
   /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/IntersectionObserver/root) */
-  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- expected mock shape
-  public readonly root: Element | Document | null;
+
+  public get root() {
+    return null;
+  }
+
   /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/IntersectionObserver/rootMargin) */
-  public readonly rootMargin: string;
+  public get rootMargin() {
+    return '0px';
+  }
+
   /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/IntersectionObserver/thresholds) */
-  public readonly thresholds: readonly number[];
+  public readonly thresholds: readonly number[] = [0];
 
   public observe() {
     // No-op

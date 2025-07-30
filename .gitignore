@@ -13,6 +13,7 @@ node_modules
 # Build
 build
 dist
+out-tsc
 
 # Test coverage
 coverage

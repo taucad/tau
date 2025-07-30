@@ -41,6 +41,9 @@
       }
     }
   },
+  "imports": {
+    "#*": ["./src/*"]
+  },
   "dependencies": {},
   "peerDependencies": {},
   "peerDependenciesMeta": {}

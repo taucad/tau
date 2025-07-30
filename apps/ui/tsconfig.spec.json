@@ -1,6 +1,17 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2024",
+    "baseUrl": ".",
+    "paths": {
+      "#*": ["app/*"]
+    },
+    "outDir": "./out-tsc/spec",
+    "rootDirs": [".", "./.react-router/types"],
     "types": [
       "vitest/importMeta",
       "vite/client",
@@ -13,6 +24,7 @@
     "vitest.config.ts",
     "vitest.setup.ts",
     "react-router.config.ts",
+    "./.react-router/types/**/*",
     "app/**/*.ts",
     "app/**/*.tsx",
     "app/**/*.js",
@@ -21,10 +33,6 @@
     "tests/**/*.test.ts",
     "tests/**/*.spec.tsx",
     "tests/**/*.test.tsx",
-    "tests/**/*.spec.js",
-    "tests/**/*.test.js",
-    "tests/**/*.spec.jsx",
-    "tests/**/*.test.jsx",
     "vite-environment.d.ts"
   ]
 }

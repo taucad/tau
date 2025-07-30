@@ -1,18 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "module": "NodeNext",
-    "baseUrl": ".",
-    "paths": {
-      "~/*": ["./app/*"]
-    },
-    // Vite takes care of building everything, not tsc.
-    "noEmit": true,
-    "erasableSyntaxOnly": false // Incompatible with NestJS dependency injection.
-  },
   "files": [],
   "include": [],
   "references": [
+    {
+      "path": "../../libs/tau-examples"
+    },
     {
       "path": "./tsconfig.app.json"
     },

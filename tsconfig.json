@@ -1,14 +1,26 @@
 {
-    "extends": "./tsconfig.base.json",
-    "compilerOptions": {
-        "paths": {
-            // This path mapping exists to make ShadCN be happy with a default tsconfig.json, enabling seamless installs with the default component install command.
-            "~/*": ["./apps/ui/app/*"]
-        }
+  "extends": "./tsconfig.base.json",
+  "references": [
+    {
+      "path": "./apps/ui"
     },
-    "include": [
-        "vitest.workspace.ts",
-        "scripts/**/*",
-        "tools/**/*"
-    ]
+    {
+      "path": "./apps/api"
+    },
+    {
+      "path": "./packages/converter"
+    },
+    {
+      "path": "./libs/tau-examples"
+    },
+    {
+      "path": "./apps/api-e2e"
+    },
+    {
+      "path": "./apps/ui-e2e"
+    }
+  ],
+  "files": [],
+  "include": ["vitest.workspace.ts", "scripts/**/*", "tools/**/*"],
+  "exclude": ["node_modules", "tmp"]
 }

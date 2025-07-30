@@ -1,15 +1,21 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "outDir": "../../dist/out-tsc",
     "module": "NodeNext",
     "types": ["node"],
     "target": "ESNext",
+    "outDir": "./out-tsc/lib",
+    "baseUrl": ".",
+    "paths": {
+      "#*": ["app/*"]
+    },
+    "erasableSyntaxOnly": false // Incompatible with NestJS dependency injection.
   },
   "include": ["app/**/*.ts"],
-  "exclude": [
-    "app/**/*.spec.ts",
-    "app/**/*.test.ts",
-    "vite.config.ts"
+  "exclude": ["app/**/*.spec.ts", "app/**/*.test.ts", "vite.config.ts"],
+  "references": [
+    {
+      "path": "../../libs/tau-examples/tsconfig.lib.json"
+    }
   ]
 }

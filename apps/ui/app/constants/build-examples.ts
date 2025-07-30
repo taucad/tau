@@ -1,4 +1,4 @@
-import { mockModels } from '~/constants/build-code-examples.js';
+import { mockBuilds } from '@taucad/tau-examples';
 import type { Build } from '~/types/build.types.js';
 import type { KernelProvider } from '~/types/kernel.types.js';
 
@@ -38,7 +38,7 @@ const createBuild = (model: Omit<Model, 'language'>, mainFile: string, kernel: K
   };
 };
 
-export const replicadBuilds: Build[] = mockModels.map((model) => {
+export const replicadBuilds: Build[] = mockBuilds.map((model) => {
   const mainFile = 'main.ts';
   const language = 'replicad';
   return createBuild(model, mainFile, language);

@@ -40,6 +40,20 @@
         "targetName": "lint",
         "eslintConfig": "eslint.config.ts"
       }
+    },
+    {
+      "plugin": "@nx/js/typescript",
+      "options": {
+        "typecheck": {
+          "targetName": "typecheck"
+        },
+        "build": {
+          "targetName": "typebuild",
+          "configName": "tsconfig.lib.json",
+          "buildDepsName": "build-deps",
+          "watchDepsName": "watch-deps"
+        }
+      }
     }
   ],
   "targetDefaults": {
@@ -69,6 +83,9 @@
     }
   },
   "nxCloudId": "687b39d7852b9a43a8bba201",
+  "sync": {
+    "applyChanges": true
+  },
   "namedInputs": {
     "sharedGlobals": [
       "{workspaceRoot}/.github/workflows/ci.yml"

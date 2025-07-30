@@ -22,6 +22,7 @@ const config = [
       '**/.env',
       '**/.react-router',
       '**/stats.html',
+      '**/out-tsc',
     ],
   },
   // First, apply XO's base configuration

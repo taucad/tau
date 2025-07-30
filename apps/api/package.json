@@ -1,5 +1,5 @@
 {
-  "name": "@taucad/ui",
+  "name": "@taucad/api",
   "version": "0.0.1",
   "type": "module",
   "private": true,

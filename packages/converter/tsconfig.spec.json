@@ -1,11 +1,18 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "outDir": "./out-tsc/spec",
     "types": [
       "node",
       "vitest/importMeta",
       "vitest"
-    ]
+    ],
+    "module": "NodeNext",
+    "target": "ESNext",
+    "baseUrl": ".",
+    "paths": {
+      "#*": ["src/*"]
+    }
   },
   "include": [
     "vitest.config.ts",

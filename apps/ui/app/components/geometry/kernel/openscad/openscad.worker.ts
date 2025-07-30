@@ -36,19 +36,19 @@ class OpenScadWorker extends KernelWorker {
 
   public override async extractParameters(code: string): Promise<ExtractParametersResult> {
     try {
-      const inst = await this.createInstance();
+      const instance = await this.createInstance();
       const inputFile = '/input.scad';
       const parameterFile = '/params.json';
 
-      inst.FS.writeFile(inputFile, code);
+      instance.FS.writeFile(inputFile, code);
 
-      inst.callMain([inputFile, '-o', parameterFile, '--export-format=param']);
+      instance.callMain([inputFile, '-o', parameterFile, '--export-format=param']);
 
       let jsonSchema: JSONSchema7 = { type: 'object' };
       let defaultParameters: Record<string, unknown> = {};
 
       try {
-        const parameterData = inst.FS.readFile(parameterFile, { encoding: 'utf8' });
+        const parameterData = instance.FS.readFile(parameterFile, { encoding: 'utf8' });
         const parsedExport = JSON.parse(parameterData) as OpenScadParameterExport;
 
         jsonSchema = processOpenScadParameters(parsedExport);

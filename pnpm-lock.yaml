@@ -199,6 +199,9 @@ importers:
       '@statelyai/inspect':
         specifier: ^0.4.0
         version: 0.4.0(ws@8.18.3)(xstate@5.19.3)
+      '@swc/helpers':
+        specifier: ~0.5.15
+        version: 0.5.15
       '@tanstack/react-query':
         specifier: '4'
         version: 4.36.1(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
@@ -473,9 +476,6 @@ importers:
       '@swc/core':
         specifier: ~1.10.15
         version: 1.10.15(@swc/helpers@0.5.15)
-      '@swc/helpers':
-        specifier: ~0.5.15
-        version: 0.5.15
       '@tailwindcss/typography':
         specifier: ^0.5.16
         version: 0.5.16(tailwindcss@4.0.6)

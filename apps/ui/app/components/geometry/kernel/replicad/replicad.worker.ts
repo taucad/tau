@@ -208,7 +208,7 @@ try {
         shapes,
         standardizer,
         (shapesArray) => {
-          this.shapesMemory['defaultShape'] = shapesArray;
+          this.shapesMemory['defaultGeometry'] = shapesArray;
           return shapesArray;
         },
         defaultName,
@@ -258,7 +258,7 @@ try {
 
   public override async exportGeometry(
     fileType: ExportFormat,
-    shapeId = 'defaultShape',
+    geometryId = 'defaultGeometry',
     meshConfig?: {
       /** The mesh tolerance in millimeters for linear distances. */
       linearTolerance: number;
@@ -268,9 +268,9 @@ try {
   ): Promise<ExportGeometryResult> {
     const config = meshConfig ?? { linearTolerance: 0.01, angularTolerance: 30 };
     try {
-      if (!this.shapesMemory[shapeId]) {
+      if (!this.shapesMemory[geometryId]) {
         return createKernelError({
-          message: `Shape ${shapeId} not computed yet`,
+          message: `Shape ${geometryId} not computed yet`,
           startLineNumber: 0,
           startColumn: 0,
           type: 'runtime',
@@ -278,7 +278,7 @@ try {
       }
 
       if (fileType === 'glb' || fileType === 'gltf') {
-        const temporaryShapes = this.shapesMemory[shapeId].map((shapeConfig) => {
+        const temporaryShapes = this.shapesMemory[geometryId].map((shapeConfig) => {
           const { shape } = shapeConfig;
           const faces = shape.mesh({
             tolerance: config.linearTolerance,
@@ -310,14 +310,14 @@ try {
       if (fileType === 'step-assembly') {
         const result = [
           {
-            blob: replicad.exportSTEP(this.shapesMemory[shapeId]),
-            name: shapeId,
+            blob: replicad.exportSTEP(this.shapesMemory[geometryId]),
+            name: geometryId,
           },
         ];
         return createKernelSuccess(result);
       }
 
-      const result = this.shapesMemory[shapeId].map(({ shape, name }) => ({
+      const result = this.shapesMemory[geometryId].map(({ shape, name }) => ({
         blob: this.buildBlob(shape, fileType, {
           tolerance: config.linearTolerance,
           angularTolerance: config.angularTolerance,

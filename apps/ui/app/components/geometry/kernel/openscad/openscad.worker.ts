@@ -73,7 +73,7 @@ class OpenScadWorker extends KernelWorker {
   public override async computeGeometry(
     code: string,
     parameters?: Record<string, unknown>,
-    shapeId = 'defaultShape',
+    geometryId = 'defaultGeometry',
   ): Promise<ComputeGeometryResult> {
     try {
       const trimmedCode = code.trim();
@@ -99,7 +99,7 @@ class OpenScadWorker extends KernelWorker {
       instance.callMain(args);
 
       const offData = instance.FS.readFile(outputFile, { encoding: 'utf8' });
-      this.offDataMemory[shapeId] = offData;
+      this.offDataMemory[geometryId] = offData;
 
       const gltfBlob = await convertOffToGltf(offData, 'glb');
 
@@ -119,13 +119,13 @@ class OpenScadWorker extends KernelWorker {
 
   public override async exportGeometry(
     fileType: ExportFormat,
-    shapeId = 'defaultShape',
+    geometryId = 'defaultGeometry',
   ): Promise<ExportGeometryResult> {
     try {
-      const offData = this.offDataMemory[shapeId];
+      const offData = this.offDataMemory[geometryId];
       if (!offData) {
         return createKernelError({
-          message: `Shape ${shapeId} not computed yet. Please build shapes before exporting.`,
+          message: `Shape ${geometryId} not computed yet. Please build shapes before exporting.`,
           startColumn: 0,
           startLineNumber: 0,
         });

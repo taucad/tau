@@ -67,7 +67,7 @@ class ZooWorker extends KernelWorker<ZooOptions> {
   public override async computeGeometry(
     code: string,
     parameters?: Record<string, unknown>,
-    shapeId = 'defaultShape',
+    geometryId = 'defaultGeometry',
   ): Promise<ComputeGeometryResult> {
     try {
       const trimmedCode = code.trim();
@@ -121,7 +121,7 @@ class ZooWorker extends KernelWorker<ZooOptions> {
           });
         }
 
-        this.gltfDataMemory[shapeId] = gltf.contents;
+        this.gltfDataMemory[geometryId] = gltf.contents;
         const arrayBuffer = new ArrayBuffer(gltf.contents.byteLength);
         const view = new Uint8Array(arrayBuffer);
         view.set(gltf.contents);
@@ -145,13 +145,13 @@ class ZooWorker extends KernelWorker<ZooOptions> {
 
   public override async exportGeometry(
     fileType: ExportFormat,
-    shapeId = 'defaultShape',
+    geometryId = 'defaultGeometry',
   ): Promise<ExportGeometryResult> {
     try {
-      const gltfData = this.gltfDataMemory[shapeId];
+      const gltfData = this.gltfDataMemory[geometryId];
       if (!gltfData) {
         return createKernelError({
-          message: `Shape ${shapeId} not computed yet. Please build shapes before exporting.`,
+          message: `Shape ${geometryId} not computed yet. Please build shapes before exporting.`,
           startColumn: 0,
           startLineNumber: 0,
         });

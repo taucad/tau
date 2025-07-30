@@ -66,13 +66,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * @param code - The code to compute geometry from.
    * @param parameters - The parameters to use when computing geometry.
-   * @param shapeId - The shape ID to use when computing geometry.
+   * @param geometryId - The geometry ID to use when computing geometry.
    * @returns The computed geometry.
    */
   public abstract computeGeometry(
     code: string,
     parameters: Record<string, unknown>,
-    shapeId?: string,
+    geometryId?: string,
   ): Promise<ComputeGeometryResult>;
 
   /**
@@ -87,13 +87,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * Export geometry.
    *
    * @param fileType - The file type to export the geometry as.
-   * @param shapeId - The shape ID to export the geometry from.
+   * @param geometryId - The geometry ID to export the geometry from.
    * @param meshConfig - The mesh configuration to use when exporting the geometry.
    * @returns The exported geometry.
    */
   public abstract exportGeometry(
     fileType: ExportFormat,
-    shapeId?: string,
+    geometryId?: string,
     meshConfig?: { linearTolerance: number; angularTolerance: number },
   ): Promise<ExportGeometryResult>;
 

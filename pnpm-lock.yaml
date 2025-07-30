@@ -391,6 +391,9 @@ importers:
       sonner:
         specifier: ^1.7.4
         version: 1.7.4(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      tailwind-merge:
+        specifier: ^3.3.0
+        version: 3.3.0
       three:
         specifier: ^0.174.0
         version: 0.174.0
@@ -560,9 +563,6 @@ importers:
       rollup-plugin-visualizer:
         specifier: ^6.0.3
         version: 6.0.3(rollup@4.46.1)
-      tailwind-merge:
-        specifier: ^3.3.0
-        version: 3.3.0
       tailwind-scrollbar:
         specifier: ^4.0.0
         version: 4.0.0(react@19.0.0)(tailwindcss@4.0.6)

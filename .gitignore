@@ -26,3 +26,6 @@ stats.html
 
 vite.config.*.timestamp*
 vitest.config.*.timestamp*
+
+# Docker pnpm deploy target directory
+pruned

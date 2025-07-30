@@ -1,8 +1,8 @@
 import { useShikiHighlighter } from 'react-shiki/core';
 import type { ClassValue } from 'clsx';
 import { useTheme } from 'remix-themes';
-import { cn } from '~/utils/ui.js';
-import { highlighter } from '~/lib/shiki.js';
+import { cn } from '#utils/ui.js';
+import { highlighter } from '#lib/shiki.js';
 
 export type CodeLanguage = 'typescript' | 'kcl' | 'javascript' | 'jsx' | 'tsx';
 

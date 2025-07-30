@@ -1,8 +1,8 @@
 import type { SettingsView } from '@daveyplate/better-auth-ui';
 import { SettingsCards, useAuthenticate } from '@daveyplate/better-auth-ui';
 import { Link, useLocation } from 'react-router';
-import { Tabs, TabsList, TabsTrigger, TabsContent, TabsContents } from '~/components/ui/tabs.js';
-import type { Handle } from '~/types/matches.types.js';
+import { Tabs, TabsList, TabsTrigger, TabsContent, TabsContents } from '#components/ui/tabs.js';
+import type { Handle } from '#types/matches.types.js';
 
 type SettingsTab = {
   tabView: SettingsView;

@@ -1,8 +1,8 @@
 import { PackagePlus } from 'lucide-react';
 import { NavLink, useMatch, useNavigate } from 'react-router';
-import { SidebarGroup, SidebarMenuButton } from '~/components/ui/sidebar.js';
-import { KeyShortcut } from '~/components/ui/key-shortcut.js';
-import { useKeydown } from '~/hooks/use-keydown.js';
+import { SidebarGroup, SidebarMenuButton } from '#components/ui/sidebar.js';
+import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { useKeydown } from '#hooks/use-keydown.js';
 
 export function NavChat(): React.JSX.Element {
   const navigate = useNavigate();

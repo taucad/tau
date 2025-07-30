@@ -1,4 +1,4 @@
-import type { ConstantRecord } from '~/types/constant.types.js';
+import type { ConstantRecord } from '#types/constant.types.js';
 
 export const logServiceProvider = {
   console: 'console',

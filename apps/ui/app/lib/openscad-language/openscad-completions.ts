@@ -4,13 +4,13 @@ import {
   documentationDescriptor,
   requirementDescriptor,
   signatureSymbolDescriptor,
-} from '~/lib/openscad-language/openscad-descriptions.js';
-import { openscadSymbols, openscadFunctions, openscadConstants } from '~/lib/openscad-language/openscad-symbols.js';
+} from '#lib/openscad-language/openscad-descriptions.js';
+import { openscadSymbols, openscadFunctions, openscadConstants } from '#lib/openscad-language/openscad-symbols.js';
 import type {
   OpenscadModuleSymbol,
   OpenscadFunctionSymbol,
   OpenscadConstantSymbol,
-} from '~/lib/openscad-language/openscad-symbols.js';
+} from '#lib/openscad-language/openscad-symbols.js';
 import {
   findCurrentModuleFunctionScope,
   isPositionInComment,
@@ -18,7 +18,7 @@ import {
   findUserDefinedItems,
   inferParameterType,
   findParameterCompletions,
-} from '~/lib/openscad-language/openscad-utils.js';
+} from '#lib/openscad-language/openscad-utils.js';
 
 function createDocumentationForSymbol(symbol: OpenscadModuleSymbol | OpenscadFunctionSymbol): string {
   const parts: string[] = [];

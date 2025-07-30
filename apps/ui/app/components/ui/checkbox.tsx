@@ -2,7 +2,7 @@ import * as React from 'react';
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
 import { motion } from 'motion/react';
 import type { HTMLMotionProps } from 'motion/react';
-import { cn } from '~/utils/ui.js';
+import { cn } from '#utils/ui.js';
 
 type CheckboxProps = React.ComponentProps<typeof CheckboxPrimitive.Root> &
   HTMLMotionProps<'button'> & {

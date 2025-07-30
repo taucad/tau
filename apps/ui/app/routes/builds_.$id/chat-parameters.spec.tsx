@@ -2,8 +2,8 @@ import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { ChatParameters } from '~/routes/builds_.$id/chat-parameters.js';
-import { TooltipProvider } from '~/components/ui/tooltip.js';
+import { ChatParameters } from '#routes/builds_.$id/chat-parameters.js';
+import { TooltipProvider } from '#components/ui/tooltip.js';
 
 // Test wrapper component that provides necessary providers
 function TestWrapper({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
@@ -69,7 +69,7 @@ vi.mock('@xstate/react', () => ({
 }));
 
 // Mock the cadActor import
-vi.mock('~/routes/builds_.$id/cad-actor.js', () => ({
+vi.mock('#routes/builds_.$id/cad-actor.js', () => ({
   cadActor: {
     send: vi.fn(),
     getSnapshot: vi.fn(() => mockState),

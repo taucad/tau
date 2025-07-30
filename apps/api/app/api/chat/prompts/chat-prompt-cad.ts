@@ -1,7 +1,7 @@
 import { mockBuilds } from '@taucad/tau-examples';
 // eslint-disable-next-line no-restricted-imports -- expected
 import replicadTypes from '../../../../../../gen/api/replicad/replicad-clean-with-jsdoc.d.ts?raw';
-import type { KernelProvider } from '~/types/kernel.types.js';
+import type { KernelProvider } from '#types/kernel.types.js';
 
 const mockModelsString = mockBuilds
   .map((model) => `<example>\n${model.name}\n\`\`\`javascript\n${model.code}\`\`\`\n</example>`)

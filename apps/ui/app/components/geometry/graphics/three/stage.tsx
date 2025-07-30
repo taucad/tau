@@ -2,9 +2,9 @@ import React, { useMemo, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import * as THREE from 'three';
 import { PerspectiveCamera } from '@react-three/drei';
-import { AxesHelper } from '~/components/geometry/graphics/three/axes-helper.js';
-import { Grid } from '~/components/geometry/graphics/three/grid.js';
-import { useCameraReset } from '~/components/geometry/graphics/three/use-camera-reset.js';
+import { AxesHelper } from '#components/geometry/graphics/three/axes-helper.js';
+import { Grid } from '#components/geometry/graphics/three/grid.js';
+import { useCameraReset } from '#components/geometry/graphics/three/use-camera-reset.js';
 
 export type StageOptions = {
   /**

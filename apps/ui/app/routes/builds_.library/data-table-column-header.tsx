@@ -1,15 +1,15 @@
 import type { Column } from '@tanstack/react-table';
 import type { ReactNode } from 'react';
 import { ArrowDown, ArrowUp, ChevronsUpDown, EyeOff } from 'lucide-react';
-import { cn } from '~/utils/ui.js';
-import { Button } from '~/components/ui/button.js';
+import { cn } from '#utils/ui.js';
+import { Button } from '#components/ui/button.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '~/components/ui/dropdown-menu.js';
+} from '#components/ui/dropdown-menu.js';
 
 type DataTableColumnHeaderProps<TableData, TableValue> = {
   readonly column: Column<TableData, TableValue>;

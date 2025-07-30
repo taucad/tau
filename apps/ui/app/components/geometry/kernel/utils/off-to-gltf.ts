@@ -1,5 +1,5 @@
-import { parseOff } from '~/components/geometry/kernel/utils/import-off.js';
-import { createGlb, createGltf } from '~/components/geometry/kernel/utils/export-glb.js';
+import { parseOff } from '#components/geometry/kernel/utils/import-off.js';
+import { createGlb, createGltf } from '#components/geometry/kernel/utils/export-glb.js';
 
 /**
  * Convert OFF format data to GLTF/GLB blob

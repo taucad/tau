@@ -1,8 +1,8 @@
 import { Search, X } from 'lucide-react';
 import React from 'react';
-import { Input } from '~/components/ui/input.js';
-import { Button } from '~/components/ui/button.js';
-import { cn } from '~/utils/ui.js';
+import { Input } from '#components/ui/input.js';
+import { Button } from '#components/ui/button.js';
+import { cn } from '#utils/ui.js';
 
 export type SearchInputProperties = {
   /**

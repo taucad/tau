@@ -2,9 +2,9 @@ import type { BetterAuthOptions } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import type { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
-import type { DatabaseService } from '~/database/database.service.js';
-import type { AuthService } from '~/auth/auth.service.js';
-import type { Environment } from '~/config/environment.config.js';
+import type { DatabaseService } from '#database/database.service.js';
+import type { AuthService } from '#auth/auth.service.js';
+import type { Environment } from '#config/environment.config.js';
 
 type BetterAuthConfigOptions = {
   databaseService: DatabaseService;

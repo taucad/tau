@@ -1,6 +1,6 @@
-import { cn } from '~/utils/ui.js';
-import type { ExportFormat } from '~/types/kernel.types.js';
-import { stringToColor } from '~/utils/color.utils.js';
+import { cn } from '#utils/ui.js';
+import type { ExportFormat } from '#types/kernel.types.js';
+import { stringToColor } from '#utils/color.utils.js';
 
 export function Format3D(properties: React.SVGProps<SVGSVGElement> & { extension: ExportFormat }): React.JSX.Element {
   const color = stringToColor(properties.extension);

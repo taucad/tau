@@ -3,17 +3,17 @@ import { ArrowRight } from 'lucide-react';
 import { Link } from 'react-router';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
-import { CategoryBadge } from '~/components/category-badge.js';
-import { DataTableColumnHeader } from '~/routes/builds_.library/data-table-column-header.js';
-import { Button } from '~/components/ui/button.js';
-import type { Build } from '~/types/build.types.js';
-import type { Category } from '~/types/cad.types.js';
-import { Checkbox } from '~/components/ui/checkbox.js';
-import { formatRelativeTime } from '~/utils/date.js';
-import type { BuildActions } from '~/routes/builds_.library/route.js';
-import { BuildActionDropdown } from '~/routes/builds_.library/build-action-dropdown.js';
-import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
-import { Input } from '~/components/ui/input.js';
+import { CategoryBadge } from '#components/category-badge.js';
+import { DataTableColumnHeader } from '#routes/builds_.library/data-table-column-header.js';
+import { Button } from '#components/ui/button.js';
+import type { Build } from '#types/build.types.js';
+import type { Category } from '#types/cad.types.js';
+import { Checkbox } from '#components/ui/checkbox.js';
+import { formatRelativeTime } from '#utils/date.js';
+import type { BuildActions } from '#routes/builds_.library/route.js';
+import { BuildActionDropdown } from '#routes/builds_.library/build-action-dropdown.js';
+import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
+import { Input } from '#components/ui/input.js';
 
 // Rename component for table cells
 function BuildNameCell({ build, actions }: { readonly build: Build; readonly actions: BuildActions }) {

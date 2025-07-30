@@ -3,9 +3,9 @@ import type {
   ExportFormat,
   ExportGeometryResult,
   ExtractParametersResult,
-} from '~/types/kernel.types';
-import { logLevels } from '~/types/console.types';
-import type { OnWorkerLog } from '~/types/console.types';
+} from '#types/kernel.types';
+import { logLevels } from '#types/console.types';
+import type { OnWorkerLog } from '#types/console.types';
 
 export abstract class KernelWorker<Options extends Record<string, unknown> = Record<string, never>> {
   /**

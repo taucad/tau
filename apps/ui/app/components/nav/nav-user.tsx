@@ -3,8 +3,8 @@ import type { UserButtonProps } from '@daveyplate/better-auth-ui';
 import { CreditCard, Sparkles } from 'lucide-react';
 import { useContext } from 'react';
 import { Link } from 'react-router';
-import { Button } from '~/components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
+import { Button } from '#components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 
 const additionalUserButtonLinks: UserButtonProps['additionalLinks'] = [
   {

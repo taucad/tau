@@ -1,6 +1,6 @@
 import { OrbitControls } from '@react-three/drei';
 import React from 'react';
-import { ViewportGizmoCube } from '~/components/geometry/graphics/three/viewport-gizmo-cube.js';
+import { ViewportGizmoCube } from '#components/geometry/graphics/three/viewport-gizmo-cube.js';
 
 type ControlsProperties = {
   /**

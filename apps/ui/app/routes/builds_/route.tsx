@@ -1,11 +1,11 @@
 import { Link, Outlet, redirect, useLocation, useNavigate } from 'react-router';
 import { useEffect } from 'react';
 import type { LoaderFunction } from 'react-router';
-import { Button } from '~/components/ui/button.js';
-import type { Handle } from '~/types/matches.types.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { KeyShortcut } from '~/components/ui/key-shortcut.js';
-import { formatKeyCombination } from '~/utils/keys.js';
+import { Button } from '#components/ui/button.js';
+import type { Handle } from '#types/matches.types.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { formatKeyCombination } from '#utils/keys.js';
 
 export const handle: Handle = {
   breadcrumb() {

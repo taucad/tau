@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
-import { DatabaseService } from '~/database/database.service.js';
-import { user } from '~/database/schema.js';
+import { DatabaseService } from '#database/database.service.js';
+import { user } from '#database/schema.js';
 
 @Injectable()
 export class AuthService {

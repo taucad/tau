@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
-import type { StageOptions } from '~/components/geometry/graphics/three/stage.js';
-import { Stage } from '~/components/geometry/graphics/three/stage.js';
-import { Controls } from '~/components/geometry/graphics/three/controls.js';
+import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
+import { Stage } from '#components/geometry/graphics/three/stage.js';
+import { Controls } from '#components/geometry/graphics/three/controls.js';
 
 type SceneProperties = {
   readonly children: ReactNode;

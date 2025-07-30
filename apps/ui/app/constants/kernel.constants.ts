@@ -1,4 +1,4 @@
-import type { ExportFormat, KernelProvider } from '~/types/kernel.types.js';
+import type { ExportFormat, KernelProvider } from '#types/kernel.types.js';
 
 /**
  * Map of export formats to file extensions

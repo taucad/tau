@@ -5,15 +5,15 @@ import React, { useCallback, useMemo, memo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import Form from '@rjsf/core';
 import type { RJSFSchema } from '@rjsf/utils';
-import { toSentenceCase } from '~/utils/string.js';
-import { SearchInput } from '~/components/search-input.js';
-import { Button } from '~/components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { cn } from '~/utils/ui.js';
-import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
-import { templates, uiSchema, widgets } from '~/routes/builds_.$id/rjsf-theme.js';
-import type { RJSFContext } from '~/routes/builds_.$id/rjsf-theme.js';
-import { deleteNestedValue, rjsfIdSeparator, resetArrayItem, rjsfIdPrefix } from '~/routes/builds_.$id/rjsf-utils.js';
+import { toSentenceCase } from '#utils/string.js';
+import { SearchInput } from '#components/search-input.js';
+import { Button } from '#components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { cn } from '#utils/ui.js';
+import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { templates, uiSchema, widgets } from '#routes/builds_.$id/rjsf-theme.js';
+import type { RJSFContext } from '#routes/builds_.$id/rjsf-theme.js';
+import { deleteNestedValue, rjsfIdSeparator, resetArrayItem, rjsfIdPrefix } from '#routes/builds_.$id/rjsf-utils.js';
 
 export const ChatParameters = memo(function () {
   const parameters = useSelector(cadActor, (state) => state.context.parameters);

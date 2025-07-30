@@ -1,19 +1,19 @@
 import { Clipboard, Download, GalleryThumbnails, ImageDown, Menu } from 'lucide-react';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useSelector, useActorRef } from '@xstate/react';
-import { BoxDown } from '~/components/icons/box-down.js';
-import { Button } from '~/components/ui/button.js';
-import { useBuildSelector } from '~/hooks/use-build.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { toast } from '~/components/ui/sonner.js';
-import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
-import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
-import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
-import { downloadBlob } from '~/utils/file.js';
-import { screenshotRequestMachine } from '~/machines/screenshot-request.machine.js';
-import { exportGeometryMachine } from '~/machines/export-geometry.machine.js';
-import type { ExportFormat } from '~/types/kernel.types.js';
-import { extensionFromFormat } from '~/constants/kernel.constants.js';
+import { BoxDown } from '#components/icons/box-down.js';
+import { Button } from '#components/ui/button.js';
+import { useBuildSelector } from '#hooks/use-build.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { toast } from '#components/ui/sonner.js';
+import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { downloadBlob } from '#utils/file.js';
+import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
+import { exportGeometryMachine } from '#machines/export-geometry.machine.js';
+import type { ExportFormat } from '#types/kernel.types.js';
+import { extensionFromFormat } from '#constants/kernel.constants.js';
 
 type ViewerControlItem = {
   id: string;

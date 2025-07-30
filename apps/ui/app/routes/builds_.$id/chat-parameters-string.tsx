@@ -1,5 +1,5 @@
-import { Input } from '~/components/ui/input.js';
-import { isValidColor, StringColorPicker } from '~/components/ui/string-color-picker.js';
+import { Input } from '#components/ui/input.js';
+import { isValidColor, StringColorPicker } from '#components/ui/string-color-picker.js';
 
 type ChatParametersStringProps = {
   readonly value: string;

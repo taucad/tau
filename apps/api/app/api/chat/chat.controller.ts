@@ -6,18 +6,18 @@ import { Command } from '@langchain/langgraph';
 import type { StateSnapshot } from '@langchain/langgraph';
 import type { IterableReadableStream } from '@langchain/core/utils/stream';
 import type { StreamEvent } from '@langchain/core/tracers/log_stream';
-import { tryExtractLastToolResult } from '~/api/chat/utils/extract-tool-result.js';
-import { ToolService, toolChoiceFromToolName } from '~/api/tools/tool.service.js';
-import type { ToolChoiceWithCategory } from '~/api/tools/tool.service.js';
-import { ChatService } from '~/api/chat/chat.service.js';
-import { LangGraphAdapter } from '~/api/chat/utils/langgraph-adapter.js';
+import { tryExtractLastToolResult } from '#api/chat/utils/extract-tool-result.js';
+import { ToolService, toolChoiceFromToolName } from '#api/tools/tool.service.js';
+import type { ToolChoiceWithCategory } from '#api/tools/tool.service.js';
+import { ChatService } from '#api/chat/chat.service.js';
+import { LangGraphAdapter } from '#api/chat/utils/langgraph-adapter.js';
 import {
   convertAiSdkMessagesToLangchainMessages,
   sanitizeMessagesForConversion,
-} from '~/api/chat/utils/convert-messages.js';
-import { objectToXml } from '~/utils/xml.js';
-import { AuthGuard } from '~/auth/auth.guard.js';
-import type { CreateChatDto } from '~/api/chat/chat.dto.js';
+} from '#api/chat/utils/convert-messages.js';
+import { objectToXml } from '#utils/xml.js';
+import { AuthGuard } from '#auth/auth.guard.js';
+import type { CreateChatDto } from '#api/chat/chat.dto.js';
 
 @UseGuards(AuthGuard)
 @Controller({ path: 'chat', version: '1' })

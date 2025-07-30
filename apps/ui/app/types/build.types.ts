@@ -1,6 +1,6 @@
 import type { Message } from '@ai-sdk/react';
-import type { Category } from '~/types/cad.types.js';
-import type { KernelProvider } from '~/types/kernel.types.js';
+import type { Category } from '#types/cad.types.js';
+import type { KernelProvider } from '#types/kernel.types.js';
 
 export type File = {
   content: string;

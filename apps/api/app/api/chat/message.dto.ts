@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod';
-import { kernelProviders } from '~/types/kernel.types.js';
+import { kernelProviders } from '#types/kernel.types.js';
 
 const requiredUnknownSchema = z.union([
   z.string(),

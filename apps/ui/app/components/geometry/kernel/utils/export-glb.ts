@@ -1,7 +1,7 @@
 import type { Primitive } from '@gltf-transform/core';
 import { Document, NodeIO } from '@gltf-transform/core';
-import type { Color, IndexedPolyhedron } from '~/components/geometry/kernel/utils/common.js';
-import { transformVerticesGltf } from '~/components/geometry/kernel/utils/common.js';
+import type { Color, IndexedPolyhedron } from '#components/geometry/kernel/utils/common.js';
+import { transformVerticesGltf } from '#components/geometry/kernel/utils/common.js';
 
 /**
  * Geometry data optimized for glTF primitive creation.

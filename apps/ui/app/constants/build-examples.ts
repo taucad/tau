@@ -1,6 +1,6 @@
 import { mockBuilds } from '@taucad/tau-examples';
-import type { Build } from '~/types/build.types.js';
-import type { KernelProvider } from '~/types/kernel.types.js';
+import type { Build } from '#types/build.types.js';
+import type { KernelProvider } from '#types/kernel.types.js';
 
 // Sample data
 type Model = {

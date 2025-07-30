@@ -1,4 +1,4 @@
-import { httpHeader } from '~/constants/http-header.constant.js';
+import { httpHeader } from '#constants/http-header.constant.js';
 
 /**
  * CORS max age in seconds.

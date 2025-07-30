@@ -1,7 +1,7 @@
-import { KclError, KclWasmError, extractWasmKclError } from '~/components/geometry/kernel/zoo/kcl-errors.js';
-import { createKernelError } from '~/types/kernel.types.js';
-import { sourceRangeToLineColumn } from '~/components/geometry/kernel/zoo/source-range-utils.js';
-import type { KernelStackFrame } from '~/types/kernel.types.js';
+import { KclError, KclWasmError, extractWasmKclError } from '#components/geometry/kernel/zoo/kcl-errors.js';
+import { createKernelError } from '#types/kernel.types.js';
+import { sourceRangeToLineColumn } from '#components/geometry/kernel/zoo/source-range-utils.js';
+import type { KernelStackFrame } from '#types/kernel.types.js';
 
 /**
  * Main error mapping function - converts any error to KclError

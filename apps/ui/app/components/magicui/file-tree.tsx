@@ -1,9 +1,9 @@
 import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import { FileIcon, FolderIcon, FolderOpenIcon } from 'lucide-react';
 import React, { createContext, useCallback, useContext, useEffect, useState, useMemo } from 'react';
-import { Button } from '~/components/ui/button.js';
-import { SidebarMenuButton } from '~/components/ui/sidebar.js';
-import { cn } from '~/utils/ui.js';
+import { Button } from '#components/ui/button.js';
+import { SidebarMenuButton } from '#components/ui/sidebar.js';
+import { cn } from '#utils/ui.js';
 
 type TreeViewElement = {
   id: string;

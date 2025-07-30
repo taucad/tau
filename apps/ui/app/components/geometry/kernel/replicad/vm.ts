@@ -11,8 +11,8 @@
 
 import { init, parse } from 'es-module-lexer';
 import type { ImportSpecifier } from 'es-module-lexer';
-import type { CadModuleExports } from '~/types/cad.types.js';
-import { hashCode } from '~/utils/crypto.js';
+import type { CadModuleExports } from '#types/cad.types.js';
+import { hashCode } from '#utils/crypto.js';
 
 // Module cache
 const moduleCache = new Map<string, CadModuleExports>();

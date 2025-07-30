@@ -1,17 +1,17 @@
 import { expose } from 'comlink';
-import { KclUtils } from '~/components/geometry/kernel/zoo/kcl-utils.js';
+import { KclUtils } from '#components/geometry/kernel/zoo/kcl-utils.js';
 import type {
   ComputeGeometryResult,
   ExportFormat,
   ExportGeometryResult,
   ExtractParametersResult,
-} from '~/types/kernel.types.js';
-import { createKernelError, createKernelSuccess } from '~/types/kernel.types.js';
-import type { GeometryGltf } from '~/types/cad.types.js';
-import { isKclError, extractExecutionError } from '~/components/geometry/kernel/zoo/kcl-errors.js';
-import { convertKclErrorToKernelError, mapErrorToKclError } from '~/components/geometry/kernel/zoo/error-mappers.js';
-import { getErrorPosition } from '~/components/geometry/kernel/zoo/source-range-utils.js';
-import { KernelWorker } from '~/components/geometry/kernel/utils/kernel-worker.js';
+} from '#types/kernel.types.js';
+import { createKernelError, createKernelSuccess } from '#types/kernel.types.js';
+import type { GeometryGltf } from '#types/cad.types.js';
+import { isKclError, extractExecutionError } from '#components/geometry/kernel/zoo/kcl-errors.js';
+import { convertKclErrorToKernelError, mapErrorToKclError } from '#components/geometry/kernel/zoo/error-mappers.js';
+import { getErrorPosition } from '#components/geometry/kernel/zoo/source-range-utils.js';
+import { KernelWorker } from '#components/geometry/kernel/utils/kernel-worker.js';
 
 type ZooOptions = {
   apiKey: string;

@@ -1,6 +1,6 @@
 import { useMatches } from 'react-router';
 import { useMemo } from 'react';
-import type { Handle, TypedUiMatch, TypedUiMatchWithHandle } from '~/types/matches.types.js';
+import type { Handle, TypedUiMatch, TypedUiMatchWithHandle } from '#types/matches.types.js';
 
 /**
  * Use typed matches to get the breadcrumb and action items for the current route

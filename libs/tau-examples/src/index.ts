@@ -1,1 +1,1 @@
-export { mockBuilds } from '#builds/build-code-examples.js';
+export { mockBuilds } from '#build.examples.js';

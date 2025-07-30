@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createOpenAI } from '@ai-sdk/openai';
 import type { OpenAIProvider } from '@ai-sdk/openai';
 import { generateText } from 'ai';
-import type { Environment } from '~/config/environment.config.js';
+import type { Environment } from '#config/environment.config.js';
 
 export type FileEditRequest = {
   targetFile: string;

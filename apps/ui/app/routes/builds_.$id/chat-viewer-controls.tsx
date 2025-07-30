@@ -1,6 +1,6 @@
-import { FovControl } from '~/components/geometry/cad/fov-control.js';
-import { GridSizeIndicator } from '~/components/geometry/cad/grid-control.js';
-import { ResetCameraControl } from '~/components/geometry/cad/reset-camera-control.js';
+import { FovControl } from '#components/geometry/cad/fov-control.js';
+import { GridSizeIndicator } from '#components/geometry/cad/grid-control.js';
+import { ResetCameraControl } from '#components/geometry/cad/reset-camera-control.js';
 
 export function ChatViewerControls(): React.JSX.Element {
   return (

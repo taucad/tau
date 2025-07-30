@@ -1,8 +1,8 @@
 import type { Primitive } from '@gltf-transform/core';
 import { Document, NodeIO } from '@gltf-transform/core';
-import { normalizeColor } from '~/components/geometry/kernel/replicad/utils/normalize-color.js';
-import { transformVerticesGltf } from '~/components/geometry/kernel/utils/common.js';
-import type { Geometry3D } from '~/types/cad.types.js';
+import { normalizeColor } from '#components/geometry/kernel/replicad/utils/normalize-color.js';
+import { transformVerticesGltf } from '#components/geometry/kernel/utils/common.js';
+import type { Geometry3D } from '#types/cad.types.js';
 
 /**
  * Transform a flat array of vertex positions from z-up to y-up coordinate system and convert units

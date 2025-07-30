@@ -1,23 +1,23 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
-import { Button } from '~/components/ui/button.js';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '~/components/ui/card.js';
-import { Input } from '~/components/ui/input.js';
-import { Label } from '~/components/ui/label.js';
-import { Badge } from '~/components/ui/badge.js';
-import { SvgIcon } from '~/components/icons/svg-icon.js';
-import { RadioGroup, RadioGroupItem } from '~/components/ui/radio-group.js';
-import { Textarea } from '~/components/ui/textarea.js';
-import { storage } from '~/db/storage.js';
-import { kernelOptions, getKernelOption } from '~/constants/kernel.constants.js';
-import { toast } from '~/components/ui/sonner.js';
-import type { KernelProvider } from '~/types/kernel.types';
-import type { Handle } from '~/types/matches.types.js';
-import { cn } from '~/utils/ui.js';
-import { useKeydown } from '~/hooks/use-keydown.js';
-import { useCookie } from '~/hooks/use-cookie.js';
-import { cookieName } from '~/constants/cookie.constants.js';
+import { Button } from '#components/ui/button.js';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '#components/ui/card.js';
+import { Input } from '#components/ui/input.js';
+import { Label } from '#components/ui/label.js';
+import { Badge } from '#components/ui/badge.js';
+import { SvgIcon } from '#components/icons/svg-icon.js';
+import { RadioGroup, RadioGroupItem } from '#components/ui/radio-group.js';
+import { Textarea } from '#components/ui/textarea.js';
+import { storage } from '#db/storage.js';
+import { kernelOptions, getKernelOption } from '#constants/kernel.constants.js';
+import { toast } from '#components/ui/sonner.js';
+import type { KernelProvider } from '#types/kernel.types';
+import type { Handle } from '#types/matches.types.js';
+import { cn } from '#utils/ui.js';
+import { useKeydown } from '#hooks/use-keydown.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 export const handle: Handle = {
   breadcrumb() {

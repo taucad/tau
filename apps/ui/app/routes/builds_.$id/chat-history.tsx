@@ -2,18 +2,18 @@ import { memo, useCallback, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { useSelector } from '@xstate/react';
-import { ChatMessage } from '~/routes/builds_.$id/chat-message.js';
-import { ScrollDownButton } from '~/routes/builds_.$id/scroll-down-button.js';
-import { ChatError } from '~/routes/builds_.$id/chat-error.js';
-import { ChatStatus } from '~/routes/builds_.$id/chat-status.js';
-import type { ChatTextareaProperties } from '~/components/chat/chat-textarea.js';
-import { ChatTextarea } from '~/components/chat/chat-textarea.js';
-import { createMessage } from '~/utils/chat.js';
-import { messageRole, messageStatus } from '~/types/chat.types.js';
-import { useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
-import { cn } from '~/utils/ui.js';
-import { ChatSelector } from '~/routes/builds_.$id/chat-selector.js';
-import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
+import { ChatMessage } from '#routes/builds_.$id/chat-message.js';
+import { ScrollDownButton } from '#routes/builds_.$id/scroll-down-button.js';
+import { ChatError } from '#routes/builds_.$id/chat-error.js';
+import { ChatStatus } from '#routes/builds_.$id/chat-status.js';
+import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
+import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { createMessage } from '#utils/chat.js';
+import { messageRole, messageStatus } from '#types/chat.types.js';
+import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
+import { cn } from '#utils/ui.js';
+import { ChatSelector } from '#routes/builds_.$id/chat-selector.js';
+import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 
 // Memoized individual message item component to prevent re-renders
 const MessageItem = memo(function ({ messageId }: { readonly messageId: string }) {

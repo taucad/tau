@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { cn } from '~/utils/ui.js';
+import { cn } from '#utils/ui.js';
 
 function Table({ className, ...properties }: React.ComponentProps<'table'>): React.JSX.Element {
   return (

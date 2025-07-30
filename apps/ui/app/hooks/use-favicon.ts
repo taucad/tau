@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from 'react';
 import { stringToBase64 } from 'uint8array-extras';
-import { useColor } from '~/hooks/use-color.js';
+import { useColor } from '#hooks/use-color.js';
 
 const faviconBase = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" fill="{color}" rx="20%" ry="20%"/>

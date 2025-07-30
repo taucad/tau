@@ -1,16 +1,16 @@
 import { ChevronUp, Filter, Settings, Trash } from 'lucide-react';
 import { useState, useCallback, memo } from 'react';
 import { useSelector } from '@xstate/react';
-import { collapsedConsoleSize } from '~/routes/builds_.$id/chat-view-split.js';
-import { Button } from '~/components/ui/button.js';
-import { Input } from '~/components/ui/input.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { KeyShortcut } from '~/components/ui/key-shortcut.js';
-import { cn } from '~/utils/ui.js';
-import { useLogs } from '~/hooks/use-logs.js';
-import type { LogLevel, LogOrigin } from '~/types/console.types.js';
-import { logLevels } from '~/types/console.types.js';
-import { Badge } from '~/components/ui/badge.js';
+import { collapsedConsoleSize } from '#routes/builds_.$id/chat-view-split.js';
+import { Button } from '#components/ui/button.js';
+import { Input } from '#components/ui/input.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { cn } from '#utils/ui.js';
+import { useLogs } from '#hooks/use-logs.js';
+import type { LogLevel, LogOrigin } from '#types/console.types.js';
+import { logLevels } from '#types/console.types.js';
+import { Badge } from '#components/ui/badge.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,11 +18,11 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '~/components/ui/dropdown-menu.js';
-import { useCookie } from '~/hooks/use-cookie.js';
-import { logActor } from '~/machines/logs.machine.js';
-import { cookieName } from '~/constants/cookie.constants.js';
-import { stringToColor } from '~/utils/color.utils.js';
+} from '#components/ui/dropdown-menu.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { logActor } from '#machines/logs.machine.js';
+import { cookieName } from '#constants/cookie.constants.js';
+import { stringToColor } from '#utils/color.utils.js';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   readonly onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;

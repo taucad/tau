@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import type { ReactNode } from 'react';
-import type { Geometry2D } from '~/types/cad.types.js';
+import type { Geometry2D } from '#types/cad.types.js';
 
 type Viewbox = {
   xMin: number;

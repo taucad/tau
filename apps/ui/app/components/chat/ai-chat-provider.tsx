@@ -13,14 +13,14 @@ import { createActorContext } from '@xstate/react';
 import { setup, assign } from 'xstate';
 import { useEffect } from 'react';
 import type { Message } from '@ai-sdk/react';
-import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
-import { messageStatus } from '~/types/chat.types.js';
+import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { messageStatus } from '#types/chat.types.js';
 
 type UseChatArgs = NonNullable<Parameters<typeof useChat>[0]>;
 type UseChatReturn = ReturnType<typeof useChat>;
 
 // Define the machine context to mirror useChat state
-type ChatMachineContext = {
+export type ChatMachineContext = {
   messages: Message[]; // Keep array for compatibility with useChat
   messagesById: Map<string, Message>; // O(1) lookup map
   messageOrder: string[]; // Preserve message order

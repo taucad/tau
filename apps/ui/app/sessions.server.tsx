@@ -1,6 +1,6 @@
 import { createCookieSessionStorage } from 'react-router';
 import { createThemeSessionResolver } from 'remix-themes';
-import { ENV, metaConfig } from '~/config.js';
+import { ENV, metaConfig } from '#config.js';
 
 const isProduction = ENV.NODE_ENV === 'production';
 

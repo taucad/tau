@@ -1,20 +1,20 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { Code2, SlidersHorizontal } from 'lucide-react';
-import { Button } from '~/components/ui/button.js';
-import { SearchInput } from '~/components/search-input.js';
+import { Button } from '#components/ui/button.js';
+import { SearchInput } from '#components/search-input.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '~/components/ui/dropdown-menu.js';
-import type { KernelProvider } from '~/types/kernel.types.js';
-import { kernelProviders } from '~/types/kernel.types.js';
-import { sampleBuilds } from '~/constants/build-examples.js';
-import { CommunityBuildGrid } from '~/components/project-grid.js';
-import type { Handle } from '~/types/matches.types.js';
+} from '#components/ui/dropdown-menu.js';
+import type { KernelProvider } from '#types/kernel.types.js';
+import { kernelProviders } from '#types/kernel.types.js';
+import { sampleBuilds } from '#constants/build-examples.js';
+import { CommunityBuildGrid } from '#components/project-grid.js';
+import type { Handle } from '#types/matches.types.js';
 
 export const handle: Handle = {
   breadcrumb() {

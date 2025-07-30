@@ -1,14 +1,14 @@
 import { createContext, useCallback, useContext, useMemo } from 'react';
 import { LayoutGrid, MessageCircle, Rows, Settings2 } from 'lucide-react';
-import { KeyShortcut } from '~/components/ui/key-shortcut.js';
-import { useCookie } from '~/hooks/use-cookie.js';
-import { useKeydown } from '~/hooks/use-keydown.js';
-import type { KeyCombination } from '~/utils/keys.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { Button } from '~/components/ui/button.js';
-import { cn } from '~/utils/ui.js';
-import { ChatControls } from '~/routes/builds_.$id/chat-controls.js';
-import { cookieName } from '~/constants/cookie.constants.js';
+import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { useKeydown } from '#hooks/use-keydown.js';
+import type { KeyCombination } from '#utils/keys.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '#components/ui/button.js';
+import { cn } from '#utils/ui.js';
+import { ChatControls } from '#routes/builds_.$id/chat-controls.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 export type ViewMode = 'tabs' | 'split';
 

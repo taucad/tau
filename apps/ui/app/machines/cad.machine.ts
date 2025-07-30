@@ -1,11 +1,11 @@
-import { assign, assertEvent, setup, sendTo, emit, not, enqueueActions } from 'xstate';
+import { assign, assertEvent, setup, sendTo, emit, enqueueActions } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import { kernelMachine } from '~/machines/kernel.machine.js';
-import type { KernelEventExternal } from '~/machines/kernel.machine.js';
-import type { CodeError, Geometry } from '~/types/cad.types.js';
-import type { ExportFormat, KernelError, KernelProvider } from '~/types/kernel.types.js';
-import type { graphicsMachine } from '~/machines/graphics.machine.js';
-import type { logMachine } from '~/machines/logs.machine.js';
+import { kernelMachine } from '#machines/kernel.machine.js';
+import type { KernelEventExternal } from '#machines/kernel.machine.js';
+import type { CodeError, Geometry } from '#types/cad.types.js';
+import type { ExportFormat, KernelError, KernelProvider } from '#types/kernel.types.js';
+import type { graphicsMachine } from '#machines/graphics.machine.js';
+import type { logMachine } from '#machines/logs.machine.js';
 
 // Interface defining the context for the CAD machine
 export type CadContext = {
@@ -221,6 +221,7 @@ export const cadMachine = setup({
   },
   guards: {
     isKernelInitialized: ({ context }) => context.isKernelInitialized,
+    isKernelNotInitialized: ({ context }) => !context.isKernelInitialized,
     isKernelInitializing: ({ context }) => context.isKernelInitializing,
     hasModel: ({ context }) => context.code !== '',
   },
@@ -264,7 +265,7 @@ export const cadMachine = setup({
             actions: ['initializeModel'],
           },
           {
-            guard: not('isKernelInitialized'),
+            guard: 'isKernelNotInitialized',
             // If the kernel isn't already initialized, initialize it.
             actions: ['initializeModel', 'initializeKernel'],
           },

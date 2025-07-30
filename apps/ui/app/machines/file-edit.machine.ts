@@ -1,6 +1,6 @@
 import { setup, fromPromise, assign, assertEvent } from 'xstate';
 import type { DoneActorEvent } from 'xstate';
-import { ENV } from '~/config.js';
+import { ENV } from '#config.js';
 
 // Types for the API request and response
 export type FileEditRequest = {
@@ -24,7 +24,7 @@ type FileEditContext = {
 };
 
 // Events
-type FileEditEvent =
+type FileEditEventInternal =
   | {
       type: 'applyEdit';
       request: FileEditRequest;
@@ -79,6 +79,15 @@ const applyFileEditActor = fromPromise<FileEditResult, FileEditRequest>(async ({
   }
 });
 
+const fileEditActors = {
+  applyFileEditActor,
+} as const;
+type FileEditActorNames = keyof typeof fileEditActors;
+
+type FileEditEventDone = DoneActorEvent<FileEditResult, FileEditActorNames>;
+
+type FileEditEvent = FileEditEventInternal | FileEditEventDone;
+
 export const fileEditMachine = setup({
   types: {
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate config
@@ -113,6 +122,12 @@ export const fileEditMachine = setup({
       result: undefined,
     }),
   },
+  guards: {
+    isFailure({ event }) {
+      assertEvent(event, 'xstate.done.actor.applyFileEditActor');
+      return !event.output.success;
+    },
+  },
 }).createMachine({
   id: 'fileEdit',
   context: {
@@ -138,10 +153,7 @@ export const fileEditMachine = setup({
         onDone: [
           {
             target: 'error',
-            guard({ event }) {
-              const result = event.output;
-              return !result.success;
-            },
+            guard: 'isFailure',
             actions: ['setResult', 'setErrorFromResult'],
           },
           {

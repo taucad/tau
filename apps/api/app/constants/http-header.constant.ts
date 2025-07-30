@@ -1,4 +1,4 @@
-import type { ConstantRecord } from '~/types/constant.types.js';
+import type { ConstantRecord } from '#types/constant.types.js';
 
 /**
  * Headers MUST NOT be prefixed with `X-` per https://datatracker.ietf.org/doc/html/rfc6648.

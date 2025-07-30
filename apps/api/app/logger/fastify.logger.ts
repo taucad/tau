@@ -1,7 +1,7 @@
 import process from 'node:process';
 import type { PinoLoggerOptions } from 'fastify/types/logger.js';
-import type { Environment } from '~/config/environment.config.js';
-import { consoleLoggingConfig, logServiceConfig } from '~/logger/logger-factory.js';
+import type { Environment } from '#config/environment.config.js';
+import { consoleLoggingConfig, logServiceConfig } from '#logger/logger-factory.js';
 
 export function getFastifyLoggingConfig(): PinoLoggerOptions | boolean {
   const envToLogger: Record<Environment['NODE_ENV'], PinoLoggerOptions | boolean> = {

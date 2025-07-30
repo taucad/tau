@@ -3,7 +3,7 @@ import {
   findFunctionDeclaration,
   findModuleDeclaration,
   findVariableDeclaration,
-} from '~/lib/openscad-language/openscad-utils.js';
+} from '#lib/openscad-language/openscad-utils.js';
 
 export const createDefinitionProvider = (monaco: typeof Monaco): Monaco.languages.DefinitionProvider => {
   return {

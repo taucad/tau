@@ -1,12 +1,12 @@
 import { memo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
-import { getRandomExamples } from '~/constants/chat-prompt-examples.js';
-import type { ChatExample } from '~/constants/chat-prompt-examples.js';
-import { Button } from '~/components/ui/button.js';
-import { useChatActions } from '~/components/chat/ai-chat-provider.js';
-import { useModels } from '~/hooks/use-models.js';
-import { createMessage } from '~/utils/chat.js';
-import { messageRole, messageStatus } from '~/types/chat.types.js';
+import { getRandomExamples } from '#constants/chat-prompt-examples.js';
+import type { ChatExample } from '#constants/chat-prompt-examples.js';
+import { Button } from '#components/ui/button.js';
+import { useChatActions } from '#components/chat/ai-chat-provider.js';
+import { useModels } from '#hooks/use-models.js';
+import { createMessage } from '#utils/chat.js';
+import { messageRole, messageStatus } from '#types/chat.types.js';
 
 export const ChatExamples = memo(function () {
   // Use lazy initialization to ensure consistent examples across renders

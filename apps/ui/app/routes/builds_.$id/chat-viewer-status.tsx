@@ -1,7 +1,7 @@
 import { useSelector } from '@xstate/react';
-import type { KernelStackFrame } from '~/types/kernel.types.js';
-import { HammerAnimation } from '~/components/hammer-animation.js';
-import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
+import type { KernelStackFrame } from '#types/kernel.types.js';
+import { HammerAnimation } from '#components/hammer-animation.js';
+import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 
 function StackFrame({ frame, index }: { readonly frame: KernelStackFrame; readonly index: number }): React.JSX.Element {
   const fileName = frame.fileName ?? '<unknown>';

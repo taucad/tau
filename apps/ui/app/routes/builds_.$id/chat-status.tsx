@@ -1,10 +1,10 @@
 import { memo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ClassValue } from 'clsx';
-import { cn } from '~/utils/ui.js';
-import { AnimatedShinyText } from '~/components/magicui/animated-shiny-text.js';
-import { HammerAnimation } from '~/components/hammer-animation.js';
-import { useChatSelector } from '~/components/chat/ai-chat-provider.js';
+import { cn } from '#utils/ui.js';
+import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
+import { HammerAnimation } from '#components/hammer-animation.js';
+import { useChatSelector } from '#components/chat/ai-chat-provider.js';
 
 type ChatStatusProperties = {
   readonly className?: ClassValue;

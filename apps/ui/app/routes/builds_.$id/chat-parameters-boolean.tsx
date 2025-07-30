@@ -1,4 +1,4 @@
-import { Switch } from '~/components/ui/switch.js';
+import { Switch } from '#components/ui/switch.js';
 
 type ChatParametersBooleanProps = {
   // eslint-disable-next-line react/boolean-prop-naming -- not relevant

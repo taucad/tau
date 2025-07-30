@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { convertReplicadShapesToGltf } from '~/components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
-import type { Geometry3D } from '~/types/cad.types.js';
+import { convertReplicadShapesToGltf } from '#components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
+import type { Geometry3D } from '#types/cad.types.js';
 
 describe('convertReplicadShapesToGltf', () => {
   it('should convert empty shapes array to valid GLTF blob', async () => {

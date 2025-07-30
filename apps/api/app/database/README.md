@@ -16,7 +16,7 @@ This module provides a NestJS-compatible database service using Drizzle ORM with
 ### 1. Import the DatabaseModule
 
 ```typescript
-import { DatabaseModule } from '~/database/database.module.js';
+import { DatabaseModule } from '#database/database.module.js';
 
 @Module({
   imports: [DatabaseModule],
@@ -29,7 +29,7 @@ export class YourModule {}
 
 ```typescript
 import { Injectable } from '@nestjs/common';
-import { DatabaseService } from '~/database/database.service.js';
+import { DatabaseService } from '#database/database.service.js';
 
 @Injectable()
 export class YourService {

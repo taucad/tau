@@ -1,12 +1,12 @@
 import { memo, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { Check } from 'lucide-react';
-import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
-import { Badge } from '~/components/ui/badge.js';
-import { SvgIcon } from '~/components/icons/svg-icon.js';
-import type { Model } from '~/hooks/use-models.js';
-import type { ModelProvider } from '~/types/cad.types.js';
-import { useModels } from '~/hooks/use-models.js';
+import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { Badge } from '#components/ui/badge.js';
+import { SvgIcon } from '#components/icons/svg-icon.js';
+import type { Model } from '#hooks/use-models.js';
+import type { ModelProvider } from '#types/cad.types.js';
+import { useModels } from '#hooks/use-models.js';
 
 type ChatModelSelectorProps = {
   readonly onSelect?: (modelId: string) => void;

@@ -2,8 +2,8 @@ import * as React from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { motion } from 'motion/react';
 import type { HTMLMotionProps, Transition } from 'motion/react';
-import { cn } from '~/utils/ui.js';
-import { MotionHighlight, MotionHighlightItem } from '~/components/animate-ui/effects/motion-highlight.js';
+import { cn } from '#utils/ui.js';
+import { MotionHighlight, MotionHighlightItem } from '#components/animate-ui/effects/motion-highlight.js';
 
 type TabsProps = React.ComponentProps<typeof TabsPrimitive.Root>;
 

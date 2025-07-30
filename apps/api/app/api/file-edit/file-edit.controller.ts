@@ -1,7 +1,7 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
-import { FileEditService } from '~/api/file-edit/file-edit.service.js';
-import type { FileEditRequest, FileEditResult } from '~/api/file-edit/file-edit.service.js';
-import { AuthGuard } from '~/auth/auth.guard.js';
+import { FileEditService } from '#api/file-edit/file-edit.service.js';
+import type { FileEditRequest, FileEditResult } from '#api/file-edit/file-edit.service.js';
+import { AuthGuard } from '#auth/auth.guard.js';
 
 @UseGuards(AuthGuard)
 @Controller({ path: 'file-edit', version: '1' })

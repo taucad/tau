@@ -27,8 +27,8 @@ import {
   documentationDescriptor,
   requirementDescriptor,
   signatureSymbolDescriptor,
-} from '~/lib/openscad-language/openscad-descriptions.js';
-import { openscadConstants, openscadFunctions, openscadSymbols } from '~/lib/openscad-language/openscad-symbols.js';
+} from '#lib/openscad-language/openscad-descriptions.js';
+import { openscadConstants, openscadFunctions, openscadSymbols } from '#lib/openscad-language/openscad-symbols.js';
 import {
   findVariableDeclaration,
   findModuleDeclaration,
@@ -37,8 +37,8 @@ import {
   findGroupName,
   isPositionInComment,
   inferParameterType,
-} from '~/lib/openscad-language/openscad-utils.js';
-import type { VariableInfo, ModuleInfo, FunctionInfo } from '~/lib/openscad-language/openscad-utils.js';
+} from '#lib/openscad-language/openscad-utils.js';
+import type { VariableInfo, ModuleInfo, FunctionInfo } from '#lib/openscad-language/openscad-utils.js';
 
 function createGroupHover(
   monaco: typeof Monaco,

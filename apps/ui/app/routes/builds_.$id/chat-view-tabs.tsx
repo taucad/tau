@@ -1,12 +1,12 @@
 import { Eye, Code, Terminal } from 'lucide-react';
-import { ChatConsole } from '~/routes/builds_.$id/chat-console.js';
-import { ChatViewer } from '~/routes/builds_.$id/chat-viewer.js';
-import { useCookie } from '~/hooks/use-cookie.js';
-import type { KeyCombination } from '~/utils/keys.js';
-import { cn } from '~/utils/ui.js';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '~/components/ui/tabs.js';
-import { ChatEditorLayout } from '~/routes/builds_.$id/chat-editor-layout.js';
-import { cookieName } from '~/constants/cookie.constants.js';
+import { ChatConsole } from '#routes/builds_.$id/chat-console.js';
+import { ChatViewer } from '#routes/builds_.$id/chat-viewer.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import type { KeyCombination } from '#utils/keys.js';
+import { cn } from '#utils/ui.js';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '#components/ui/tabs.js';
+import { ChatEditorLayout } from '#routes/builds_.$id/chat-editor-layout.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 type ChatTabs = (typeof tabs)[number]['value'];
 

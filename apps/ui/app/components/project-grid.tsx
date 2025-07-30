@@ -3,17 +3,17 @@ import { Star, GitFork, Eye, Loader2 } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useActor, useSelector } from '@xstate/react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { Button } from '~/components/ui/button.js';
-import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar.js';
-import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '~/components/ui/card.js';
-import { SvgIcon } from '~/components/icons/svg-icon.js';
-import type { Build } from '~/types/build.types.js';
-import type { KernelProvider } from '~/types/kernel.types';
-import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
-import { storage } from '~/db/storage.js';
-import { cadMachine } from '~/machines/cad.machine.js';
-import { HammerAnimation } from '~/components/hammer-animation.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '#components/ui/button.js';
+import { Avatar, AvatarFallback, AvatarImage } from '#components/ui/avatar.js';
+import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '#components/ui/card.js';
+import { SvgIcon } from '#components/icons/svg-icon.js';
+import type { Build } from '#types/build.types.js';
+import type { KernelProvider } from '#types/kernel.types';
+import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
+import { storage } from '#db/storage.js';
+import { cadMachine } from '#machines/cad.machine.js';
+import { HammerAnimation } from '#components/hammer-animation.js';
 
 // Placeholder for language icons
 const kernelIcons: Record<KernelProvider, ComponentType<{ className?: string }>> = {

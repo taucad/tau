@@ -4,8 +4,8 @@ import { useState, useRef, useLayoutEffect } from 'react';
 import type { Mesh, Material, Object3D, LineSegments, BufferGeometry } from 'three';
 import { LineBasicMaterial, EdgesGeometry, Matrix4 } from 'three';
 import { GLTFLoader } from 'three-stdlib';
-import { MatcapMaterial } from '~/components/geometry/graphics/three/matcap-material.js';
-import type { GeometryGltf } from '~/types/cad.types.js';
+import { MatcapMaterial } from '#components/geometry/graphics/three/matcap-material.js';
+import type { GeometryGltf } from '#types/cad.types.js';
 
 type MeshDataItem = {
   readonly geometry: BufferGeometry;

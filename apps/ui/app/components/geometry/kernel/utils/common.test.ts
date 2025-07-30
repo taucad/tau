@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { transformVerticesGltf } from '~/components/geometry/kernel/utils/common.js';
+import { transformVerticesGltf } from '#components/geometry/kernel/utils/common.js';
 
 describe('transformVerticesGltf', () => {
   it('should transform z-up millimeters to y-up meters correctly', () => {

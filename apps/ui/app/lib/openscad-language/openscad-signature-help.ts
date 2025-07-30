@@ -1,14 +1,14 @@
 /* eslint-disable max-params -- TODO: refactor */
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import { requirementDescriptor } from '~/lib/openscad-language/openscad-descriptions.js';
-import { openscadSymbols, openscadFunctions } from '~/lib/openscad-language/openscad-symbols.js';
-import type { OpenscadModuleSymbol, OpenscadFunctionSymbol } from '~/lib/openscad-language/openscad-symbols.js';
+import { requirementDescriptor } from '#lib/openscad-language/openscad-descriptions.js';
+import { openscadSymbols, openscadFunctions } from '#lib/openscad-language/openscad-symbols.js';
+import type { OpenscadModuleSymbol, OpenscadFunctionSymbol } from '#lib/openscad-language/openscad-symbols.js';
 import {
   findModuleDeclaration,
   findFunctionDeclaration,
   inferParameterType,
   findFunctionCall,
-} from '~/lib/openscad-language/openscad-utils.js';
+} from '#lib/openscad-language/openscad-utils.js';
 
 function createSignatureInformation(
   _monacoInstance: typeof Monaco,

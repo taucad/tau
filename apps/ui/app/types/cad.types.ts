@@ -1,5 +1,5 @@
 import { Cog, Zap, Cpu } from 'lucide-react';
-import type { StandardSchemaV1 } from '~/types/schema.types.js';
+import type { StandardSchemaV1 } from '#types/schema.types.js';
 
 export type CodeError = {
   message: string;

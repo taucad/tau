@@ -1,4 +1,4 @@
-import type { Vertex, Face, Color, IndexedPolyhedron } from '~/components/geometry/kernel/utils/common.js';
+import type { Vertex, Face, Color, IndexedPolyhedron } from '#components/geometry/kernel/utils/common.js';
 
 /**
  * Parse OFF (Object File Format) data from string

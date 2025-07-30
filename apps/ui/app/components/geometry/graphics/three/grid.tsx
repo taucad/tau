@@ -2,8 +2,8 @@ import React from 'react';
 import { useSelector } from '@xstate/react';
 import * as THREE from 'three';
 import { Theme, useTheme } from 'remix-themes';
-import { InfiniteGrid } from '~/components/geometry/graphics/three/infinite-grid.js';
-import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
+import { InfiniteGrid } from '#components/geometry/graphics/three/infinite-grid.js';
+import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 
 /**
  * Grid component that renders the infinite grid using sizes from the graphics machine

@@ -1,4 +1,4 @@
-import type { Geometry } from '~/types/cad.types.js';
+import type { Geometry } from '#types/cad.types.js';
 
 export type KernelStackFrame = {
   fileName?: string;

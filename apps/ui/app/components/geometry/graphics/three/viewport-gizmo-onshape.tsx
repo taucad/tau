@@ -7,8 +7,8 @@ import * as THREE from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { ReactNode } from 'react';
 import { Theme, useTheme } from 'remix-themes';
-import { useColor } from '~/hooks/use-color.js';
-import { createViewportGizmoCubeAxes } from '~/components/geometry/graphics/three/viewport-gizmo-cube-axes.js';
+import { useColor } from '#hooks/use-color.js';
+import { createViewportGizmoCubeAxes } from '#components/geometry/graphics/three/viewport-gizmo-cube-axes.js';
 
 type ViewportGizmoOnshapeProps = {
   readonly size?: number;

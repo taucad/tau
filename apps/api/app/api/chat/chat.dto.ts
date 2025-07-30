@@ -1,6 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { uiMessageSchema } from '~/api/chat/message.dto.js';
+import { uiMessageSchema } from '#api/chat/message.dto.js';
 
 const codeErrorSchema = z.object({
   message: z.string(),

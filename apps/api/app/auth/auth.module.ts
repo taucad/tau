@@ -6,13 +6,13 @@ import { DiscoveryModule, DiscoveryService, HttpAdapterHost, MetadataScanner } f
 import { betterAuth } from 'better-auth';
 import type { FastifyReply as Reply, FastifyRequest as Request } from 'fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
-import { getBetterAuthConfig } from '~/config/better-auth.config.js';
-import { authInstanceKey, hookKey, beforeHookKey, afterHookKey } from '~/constants/auth.constant.js';
-import { DatabaseModule } from '~/database/database.module.js';
-import { DatabaseService } from '~/database/database.service.js';
-import { AuthService } from '~/auth/auth.service.js';
-import { BetterAuthService } from '~/auth/better-auth.service.js';
-import type { Environment } from '~/config/environment.config.js';
+import { getBetterAuthConfig } from '#config/better-auth.config.js';
+import { authInstanceKey, hookKey, beforeHookKey, afterHookKey } from '#constants/auth.constant.js';
+import { DatabaseModule } from '#database/database.module.js';
+import { DatabaseService } from '#database/database.service.js';
+import { AuthService } from '#auth/auth.service.js';
+import { BetterAuthService } from '#auth/better-auth.service.js';
+import type { Environment } from '#config/environment.config.js';
 
 type AuthInstance = ReturnType<typeof betterAuth>;
 

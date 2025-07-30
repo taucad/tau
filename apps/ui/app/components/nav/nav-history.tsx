@@ -2,14 +2,14 @@ import { Edit, History, MoreHorizontal, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router';
-import type { Build } from '~/types/build.types.js';
+import type { Build } from '#types/build.types.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '~/components/ui/dropdown-menu.js';
+} from '#components/ui/dropdown-menu.js';
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -18,11 +18,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from '~/components/ui/sidebar.js';
-import { useBuilds } from '~/hooks/use-builds.js';
-import { toast } from '~/components/ui/sonner.js';
-import { groupItemsByTimeHorizon } from '~/utils/temporal.js';
-import { SearchInput } from '~/components/search-input.js';
+} from '#components/ui/sidebar.js';
+import { useBuilds } from '#hooks/use-builds.js';
+import { toast } from '#components/ui/sonner.js';
+import { groupItemsByTimeHorizon } from '#utils/temporal.js';
+import { SearchInput } from '#components/search-input.js';
 
 const buildsPerPage = 5;
 

@@ -1,5 +1,5 @@
-import type { DatabaseType } from '~/database/database.service.js';
-import { DatabaseService } from '~/database/database.service.js';
+import type { DatabaseType } from '#database/database.service.js';
+import { DatabaseService } from '#database/database.service.js';
 
 export const databaseToken = Symbol('DATABASE_TOKEN');
 

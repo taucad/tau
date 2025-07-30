@@ -1,5 +1,5 @@
-import spriteSvg from '~/components/icons/generated/sprite.svg';
-import type { SvgIcons } from '~/components/icons/generated/svg-icons.js';
+import spriteSvg from '#components/icons/generated/sprite.svg';
+import type { SvgIcons } from '#components/icons/generated/svg-icons.js';
 
 export function SvgIcon({
   id,

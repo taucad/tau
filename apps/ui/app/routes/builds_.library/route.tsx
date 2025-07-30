@@ -29,13 +29,13 @@ import {
 } from '@tanstack/react-table';
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import { useActor, useSelector } from '@xstate/react';
-import { createColumns } from '~/routes/builds_.library/columns.js';
-import { CategoryBadge } from '~/components/category-badge.js';
-import { Button, buttonVariants } from '~/components/ui/button.js';
-import { SearchInput } from '~/components/search-input.js';
-import { Input } from '~/components/ui/input.js';
-import { Card, CardContent, CardHeader, CardDescription, CardFooter } from '~/components/ui/card.js';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select.js';
+import { createColumns } from '#routes/builds_.library/columns.js';
+import { CategoryBadge } from '#components/category-badge.js';
+import { Button, buttonVariants } from '#components/ui/button.js';
+import { SearchInput } from '#components/search-input.js';
+import { Input } from '#components/ui/input.js';
+import { Card, CardContent, CardHeader, CardDescription, CardFooter } from '#components/ui/card.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,16 +44,16 @@ import {
   DropdownMenuTrigger,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-} from '~/components/ui/dropdown-menu.js';
-import { cn } from '~/utils/ui.js';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '~/components/ui/tabs.js';
-import type { Category } from '~/types/cad.types.js';
-import { categories } from '~/types/cad.types.js';
-import type { Build } from '~/types/build.types.js';
-import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
-import { useBuilds } from '~/hooks/use-builds.js';
-import { toast } from '~/components/ui/sonner.js';
-import type { Handle } from '~/types/matches.types.js';
+} from '#components/ui/dropdown-menu.js';
+import { cn } from '#utils/ui.js';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '#components/ui/tabs.js';
+import type { Category } from '#types/cad.types.js';
+import { categories } from '#types/cad.types.js';
+import type { Build } from '#types/build.types.js';
+import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
+import { useBuilds } from '#hooks/use-builds.js';
+import { toast } from '#components/ui/sonner.js';
+import type { Handle } from '#types/matches.types.js';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -63,19 +63,19 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '~/components/ui/alert-dialog.js';
-import { BuildProvider } from '~/hooks/use-build.js';
-import { useCookie } from '~/hooks/use-cookie.js';
-import { BuildActionDropdown } from '~/routes/builds_.library/build-action-dropdown.js';
-import { createBuildMutations } from '~/hooks/build-mutations.js';
-import { Checkbox } from '~/components/ui/checkbox.js';
-import { formatRelativeTime } from '~/utils/date.js';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '~/components/ui/table.js';
-import { toSentenceCase } from '~/utils/string.js';
-import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
-import { cadMachine } from '~/machines/cad.machine.js';
-import { HammerAnimation } from '~/components/hammer-animation.js';
-import { cookieName } from '~/constants/cookie.constants.js';
+} from '#components/ui/alert-dialog.js';
+import { BuildProvider } from '#hooks/use-build.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { BuildActionDropdown } from '#routes/builds_.library/build-action-dropdown.js';
+import { createBuildMutations } from '#hooks/build-mutations.js';
+import { Checkbox } from '#components/ui/checkbox.js';
+import { formatRelativeTime } from '#utils/date.js';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '#components/ui/table.js';
+import { toSentenceCase } from '#utils/string.js';
+import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
+import { cadMachine } from '#machines/cad.machine.js';
+import { HammerAnimation } from '#components/hammer-animation.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 export const handle: Handle = {
   breadcrumb() {

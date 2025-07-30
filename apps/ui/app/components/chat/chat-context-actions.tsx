@@ -1,13 +1,13 @@
 import { useCallback, useMemo, useEffect } from 'react';
 import { AtSign, Image, Code, AlertTriangle, AlertCircle, Camera } from 'lucide-react';
 import { useSelector, useActorRef } from '@xstate/react';
-import { TooltipTrigger, TooltipContent, Tooltip } from '~/components/ui/tooltip.js';
-import { Button } from '~/components/ui/button.js';
-import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
-import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
-import { toast } from '~/components/ui/sonner.js';
-import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
-import { orthographicViews, screenshotRequestMachine } from '~/machines/screenshot-request.machine.js';
+import { TooltipTrigger, TooltipContent, Tooltip } from '#components/ui/tooltip.js';
+import { Button } from '#components/ui/button.js';
+import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { toast } from '#components/ui/sonner.js';
+import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { orthographicViews, screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 
 type ChatContextActionsProperties = {
   readonly addImage: (image: string) => void;

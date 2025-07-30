@@ -12,15 +12,15 @@ import type { System } from '@taucad/kcl-wasm-lib/bindings/ModelingCmd';
 import type { Context } from '@taucad/kcl-wasm-lib';
 import type { Models } from '@kittycad/lib';
 import wasmPath from '@taucad/kcl-wasm-lib/kcl.wasm?url';
-import { EngineConnection, MockEngineConnection } from '~/components/geometry/kernel/zoo/engine-connection.js';
-import type { WasmModule } from '~/components/geometry/kernel/zoo/engine-connection.js';
+import { EngineConnection, MockEngineConnection } from '#components/geometry/kernel/zoo/engine-connection.js';
+import type { WasmModule } from '#components/geometry/kernel/zoo/engine-connection.js';
 import {
   KclError,
   KclAuthError,
   KclExportError,
   KclWasmError,
   extractWasmKclError,
-} from '~/components/geometry/kernel/zoo/kcl-errors.js';
+} from '#components/geometry/kernel/zoo/kcl-errors.js';
 
 type OutputFormat3d = Models['OutputFormat3d_type'];
 

@@ -12,20 +12,20 @@ import type {
   KernelError,
   ExtractNameResult,
   ExportFormat,
-} from '~/types/kernel.types.js';
-import { createKernelSuccess, createKernelError, isKernelError } from '~/types/kernel.types.js';
+} from '#types/kernel.types.js';
+import { createKernelSuccess, createKernelError, isKernelError } from '#types/kernel.types.js';
 import {
   initOpenCascade,
   initOpenCascadeWithExceptions,
-} from '~/components/geometry/kernel/replicad/init-open-cascade.js';
-import { runInCjsContext, buildEsModule } from '~/components/geometry/kernel/replicad/vm.js';
-import { renderOutput, ShapeStandardizer } from '~/components/geometry/kernel/replicad/utils/render-output.js';
-import { convertReplicadShapesToGltf } from '~/components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
-import { jsonSchemaFromJson } from '~/utils/schema.js';
-import type { MainResultShapes, ShapeConfig } from '~/components/geometry/kernel/replicad/utils/render-output.js';
-import type { GeometryGltf, Geometry3D, Geometry2D } from '~/types/cad.types.js';
-import type { OnWorkerLog } from '~/types/console.types.js';
-import { KernelWorker } from '~/components/geometry/kernel/utils/kernel-worker.js';
+} from '#components/geometry/kernel/replicad/init-open-cascade.js';
+import { runInCjsContext, buildEsModule } from '#components/geometry/kernel/replicad/vm.js';
+import { renderOutput, ShapeStandardizer } from '#components/geometry/kernel/replicad/utils/render-output.js';
+import { convertReplicadShapesToGltf } from '#components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
+import { jsonSchemaFromJson } from '#utils/schema.js';
+import type { MainResultShapes, ShapeConfig } from '#components/geometry/kernel/replicad/utils/render-output.js';
+import type { GeometryGltf, Geometry3D, Geometry2D } from '#types/cad.types.js';
+import type { OnWorkerLog } from '#types/console.types.js';
+import { KernelWorker } from '#components/geometry/kernel/utils/kernel-worker.js';
 
 type ReplicadOptions = {
   /**

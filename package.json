@@ -198,8 +198,6 @@
     "@types/three": "^0.174.0",
     "@types/uzip": "^0.20201231.2",
     "@types/ws": "^8.18.1",
-    "@vitejs/plugin-react": "^4.3.4",
-    "@vitejs/plugin-react-swc": "^3.7.2",
     "@vitest/coverage-v8": "3.2.4",
     "@vitest/ui": "3.2.4",
     "drizzle-kit": "^0.31.1",

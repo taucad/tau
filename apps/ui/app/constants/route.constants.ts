@@ -1,12 +1,29 @@
 import { BookOpen, Bot, Frame, Hammer, Map, PieChart, UsersRound, Workflow } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import type { KeyCombination } from '#utils/keys.js';
 
-export const navRoutes = {
+type NavRoute = {
+  title: string;
+  url: string;
+  icon: LucideIcon;
+  keyCombination: KeyCombination;
+};
+
+type NavProject = {
+  name: string;
+  url: string;
+  icon: LucideIcon;
+};
+
+export const navRoutes: {
+  navMain: NavRoute[];
+  projects: NavProject[];
+} = {
   navMain: [
     {
       title: 'Builds',
       url: '/builds/library',
       icon: Hammer,
-      isActive: true,
       keyCombination: {
         key: 'b',
         ctrlKey: true,

@@ -97,7 +97,7 @@ const config = [
         },
       ],
 
-      // Enforce that unnecessary conditions are not used.
+      // Enforce that unnecessary conditions are not used. This improves readability and reduces perceived cyclomatic complexity.
       // For example:
       // function bar<T>(arg: string) {
       //   // Arg can never be nullish
@@ -105,7 +105,7 @@ const config = [
       // }
       '@typescript-eslint/no-unnecessary-condition': 'error',
 
-      // Enforce that curly braces are used in all control flow statements.
+      // Enforce that curly braces are used in all control flow statements. This improves readability.
       // For example:
       // if (condition) {
       //   // ...

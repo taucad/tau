@@ -1,4 +1,4 @@
-import type { CSSProperties, JSX, ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
 import type { Hsl, Rgb, Oklch } from 'culori/fn';
 import {
@@ -9,8 +9,8 @@ import {
   convertLchToLab,
   convertRgbToHsl,
 } from 'culori/fn';
-import { useCookie } from '~/hooks/use-cookie.js';
-import { cookieName } from '~/constants/cookie.constants.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 /**
  * Colors are defined in OKLCH space.

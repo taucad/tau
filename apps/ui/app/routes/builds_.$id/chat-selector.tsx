@@ -3,17 +3,17 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
-import { Button } from '~/components/ui/button.js';
-import { useBuild } from '~/hooks/use-build.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { cn } from '~/utils/ui.js';
-import { useChatConstants } from '~/utils/chat.js';
-import type { Chat } from '~/types/build.types.js';
-import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
-import { formatRelativeTime } from '~/utils/date.js';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '~/components/ui/dialog.js';
-import { Input } from '~/components/ui/input.js';
-import { groupItemsByTimeHorizon } from '~/utils/temporal.js';
+import { Button } from '#components/ui/button.js';
+import { useBuild } from '#hooks/use-build.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { cn } from '#utils/ui.js';
+import { useChatConstants } from '#utils/chat.js';
+import type { Chat } from '#types/build.types.js';
+import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { formatRelativeTime } from '#utils/date.js';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '#components/ui/dialog.js';
+import { Input } from '#components/ui/input.js';
+import { groupItemsByTimeHorizon } from '#utils/temporal.js';
 
 export function ChatSelector(): ReactNode {
   const { build, isLoading, activeChat, activeChatId, addChat, setActiveChat, updateChatName, deleteChat } = useBuild();

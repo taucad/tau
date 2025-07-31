@@ -1,19 +1,19 @@
 import type { IChangeEvent } from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
-import { RefreshCcw, ChevronRight, Search, X, Info } from 'lucide-react';
+import { RefreshCcw, ChevronRight, Info } from 'lucide-react';
 import React, { useCallback, useMemo, memo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import Form from '@rjsf/core';
 import type { RJSFSchema } from '@rjsf/utils';
-import { toSentenceCase } from '~/utils/string.js';
-import { Input } from '~/components/ui/input.js';
-import { Button } from '~/components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { cn } from '~/utils/ui.js';
-import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
-import { templates, uiSchema, widgets } from '~/routes/builds_.$id/rjsf-theme.js';
-import type { RJSFContext } from '~/routes/builds_.$id/rjsf-theme.js';
-import { deleteNestedValue, rjsfIdSeparator, resetArrayItem, rjsfIdPrefix } from '~/routes/builds_.$id/rjsf-utils.js';
+import { toSentenceCase } from '#utils/string.js';
+import { SearchInput } from '#components/search-input.js';
+import { Button } from '#components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { cn } from '#utils/ui.js';
+import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { templates, uiSchema, widgets } from '#routes/builds_.$id/rjsf-theme.js';
+import type { RJSFContext } from '#routes/builds_.$id/rjsf-theme.js';
+import { deleteNestedValue, rjsfIdSeparator, resetArrayItem, rjsfIdPrefix } from '#routes/builds_.$id/rjsf-utils.js';
 
 export const ChatParameters = memo(function () {
   const parameters = useSelector(cadActor, (state) => state.context.parameters);
@@ -168,27 +168,13 @@ export const ChatParameters = memo(function () {
         <>
           {/* Search and Controls Bar */}
           <div className={cn('flex w-full flex-row gap-2', containerXpadding, 'py-2')}>
-            <div className="relative w-full">
-              <Input
-                autoComplete="off"
-                type="text"
-                placeholder="Search parameters..."
-                value={searchTerm}
-                className="h-7 w-full bg-background pr-8 pl-8"
-                onChange={handleSearchChange}
-              />
-              <Search className="absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
-              {searchTerm ? (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="absolute top-1/2 right-1 size-5 -translate-y-1/2 p-0 text-muted-foreground hover:text-foreground"
-                  onClick={clearSearch}
-                >
-                  <X className="size-3.5" />
-                </Button>
-              ) : null}
-            </div>
+            <SearchInput
+              placeholder="Search parameters..."
+              value={searchTerm}
+              className="h-7 w-full bg-background"
+              onChange={handleSearchChange}
+              onClear={clearSearch}
+            />
 
             {Object.keys(parameters).length > 0 && (
               <Tooltip>

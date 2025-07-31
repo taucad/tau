@@ -6,14 +6,14 @@ import { streamText } from 'ai';
 import type { CoreMessage } from 'ai';
 import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
 import { ConfigService } from '@nestjs/config';
-import { ModelService } from '~/api/models/model.service.js';
-import type { ToolChoiceWithCategory } from '~/api/tools/tool.service.js';
-import { ToolService } from '~/api/tools/tool.service.js';
-import { nameGenerationSystemPrompt } from '~/api/chat/prompts/chat-prompt-name.js';
-import type { LangGraphAdapterCallbacks } from '~/api/chat/utils/langgraph-adapter.js';
-import { getCadSystemPrompt } from '~/api/chat/prompts/chat-prompt-cad.js';
-import type { Environment } from '~/config/environment.config.js';
-import type { KernelProvider } from '~/types/kernel.types.js';
+import { ModelService } from '#api/models/model.service.js';
+import type { ToolChoiceWithCategory } from '#api/tools/tool.service.js';
+import { ToolService } from '#api/tools/tool.service.js';
+import { nameGenerationSystemPrompt } from '#api/chat/prompts/chat-prompt-name.js';
+import type { LangGraphAdapterCallbacks } from '#api/chat/utils/langgraph-adapter.js';
+import { getCadSystemPrompt } from '#api/chat/prompts/chat-prompt-cad.js';
+import type { Environment } from '#config/environment.config.js';
+import type { KernelProvider } from '#types/kernel.types.js';
 
 @Injectable()
 export class ChatService {

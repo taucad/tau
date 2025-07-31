@@ -7,31 +7,7 @@ type Model = {
   thumbnail: string;
 };
 
-export const cubeCode = `/**
- * Parametric Cube with Filleted Edges
- * A simple cube with adjustable dimensions and rounded edges.
- */
-import { sketchRectangle, EdgeFinder, makePlane } from 'replicad';
-
-export const defaultParams = {
-  length: 100,    // Length of cube sides in mm
-  filletRadius: 5, // Radius for rounded edges in mm
-};
-
-export default function main(p = defaultParams) {
-  // Create base cube shape
-  let shape = sketchRectangle(p.length, p.length, makePlane("XY"))
-    .extrude(p.length)
-    .fillet({
-      radius: p.filletRadius,
-      filter: new EdgeFinder(),
-    });
-
-  return shape;
-}
-`;
-
-export const hollowBoxCode = `/**
+const hollowBoxCode = `/**
  * Parametric Box with Rounded Corners
  * A customizable box with adjustable dimensions and corner radii.
  */
@@ -58,7 +34,7 @@ export default function main(p = defaultParams) {
 }
 `;
 
-export const birdhouseCode = `/**
+const birdhouseCode = `/**
  * Parametric Birdhouse
  * A customizable birdhouse with adjustable dimensions and features.
  */
@@ -124,7 +100,7 @@ export default function main(p = defaultParams) {
 }
 `;
 
-export const drinkingGlassCode = `/**
+const drinkingGlassCode = `/**
  * Parametric Drinking Glass
  * A customizable glass with adjustable dimensions for height, radii, and thickness.
  */
@@ -285,7 +261,7 @@ export default function main(p = defaultParams) {
   return profileBox(profile, base);
 }`;
 
-export const vaseCode = `/**
+const vaseCode = `/**
  * Parametric Vase
  * A vase with adjustable dimensions and rounded edges.
  */
@@ -343,7 +319,7 @@ export default function main(p = defaultParams) {
 }
 `;
 
-export const wavyVase = `/**
+const wavyVase = `/**
  * Parametric Wavy Vase
  * A vase with adjustable dimensions and wavy edges.
  */
@@ -412,7 +388,7 @@ export default function main(p = defaultParams) {
 }
 `;
 
-export const cycloidalGear = `/**
+const cycloidalGear = `/**
  * Parametric Cycloidal Gear
  * A customizable gear using hypocycloid and epicycloid curves.
  */
@@ -481,7 +457,7 @@ export default function main(p = defaultParams) {
 }
 `;
 
-export const bottle = `/**
+const bottle = `/**
  * Parametric Bottle
  * A simple bottle with adjustable dimensions and rounded edges.
  */
@@ -541,7 +517,7 @@ export default function main(p = defaultParams) {
 }
 `;
 
-export const gridfinityBox = `/**
+const gridfinityBox = `/**
  * Parametric Gridfinity Box
  * A customizable storage box compatible with the Gridfinity system.
  */
@@ -786,7 +762,7 @@ export default function main(p = defaultParams) {
 }
 `;
 
-export const decoratedBox = `/**
+const decoratedBox = `/**
  * Decorated Box Model
  * A customizable box with decorative patterns.
  */
@@ -902,7 +878,7 @@ export default function main(p = defaultParams) {
 }
 `;
 
-export const iBeamCode = `/**
+const iBeamCode = `/**
  * Parametric I-Beam (Universal Beam)
  * Customizable with beam dimensions and extrusion length.
  */
@@ -947,7 +923,7 @@ export default function main(p = defaultParams) {
   return ibeam;
 }`;
 
-export const tSlotRailCode = `/**
+const tSlotRailCode = `/**
  * Parametric T-Slot Rail
  * A T-slotted framing rail, or T-slot extrusion, is a rectangular or square aluminum profile with a "T" shaped slot along one or more sides. These slots allow for easy attachment of various hardware components like brackets, connectors, and fasteners, making it a versatile and customizable framing system.
  */
@@ -1003,7 +979,7 @@ export default function main(p = defaultParams) {
   return tSlotRail;
 }`;
 
-export const staircaseCode = `/**
+const staircaseCode = `/**
  * Parametric Staircase Model
  * A customizable staircase with adjustable dimensions, stringers, handrails, and balusters.
  */
@@ -2111,7 +2087,7 @@ export default function main(p = defaultParams) {
 }
 `;
 
-export const mockModels = [
+export const mockBuilds = [
   {
     id: 'bld_birdhouse',
     name: 'Birdhouse',

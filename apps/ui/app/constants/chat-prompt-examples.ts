@@ -1,4 +1,4 @@
-import type { KernelProvider } from '~/types/kernel.types.js';
+import type { KernelProvider } from '#types/kernel.types.js';
 
 export type ChatExample = {
   title: string;

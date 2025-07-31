@@ -1,16 +1,16 @@
 import { ChevronUp, Filter, Settings, Trash } from 'lucide-react';
 import { useState, useCallback, memo } from 'react';
 import { useSelector } from '@xstate/react';
-import { collapsedConsoleSize } from '~/routes/builds_.$id/chat-view-split.js';
-import { Button } from '~/components/ui/button.js';
-import { Input } from '~/components/ui/input.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { KeyShortcut } from '~/components/ui/key-shortcut.js';
-import { cn } from '~/utils/ui.js';
-import { useLogs } from '~/hooks/use-logs.js';
-import type { LogLevel, LogOrigin } from '~/types/console.types.js';
-import { logLevels } from '~/types/console.types.js';
-import { Badge } from '~/components/ui/badge.js';
+import { collapsedConsoleSize } from '#routes/builds_.$id/chat-view-split.js';
+import { Button } from '#components/ui/button.js';
+import { Input } from '#components/ui/input.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { cn } from '#utils/ui.js';
+import { useLogs } from '#hooks/use-logs.js';
+import type { LogLevel, LogOrigin } from '#types/console.types.js';
+import { logLevels } from '#types/console.types.js';
+import { Badge } from '#components/ui/badge.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,10 +18,11 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '~/components/ui/dropdown-menu.js';
-import { useCookie } from '~/hooks/use-cookie.js';
-import { logActor } from '~/machines/logs.machine.js';
-import { cookieName } from '~/constants/cookie.constants.js';
+} from '#components/ui/dropdown-menu.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { logActor } from '#machines/logs.machine.js';
+import { cookieName } from '#constants/cookie.constants.js';
+import { stringToColor } from '#utils/color.utils.js';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   readonly onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -35,35 +36,24 @@ const defaultLogLevels: Record<LogLevel, boolean> = {
   error: true,
   warn: true,
   info: true,
-  debug: true,
-  trace: true,
+  debug: false,
+  trace: false,
 };
 
 // Default values for display configuration
 const defaultDisplayConfig = {
   showTimestamp: true,
-  showComponent: true,
-  showVerbosity: true,
+  showComponent: false,
   showData: true,
 };
 
 // Generate a deterministic color based on the component name
 const getComponentColor = (component: string | undefined): string => {
   if (!component) {
-    return '#6b7280';
-  } // Default gray
-
-  // Simple hash function
-  let hash = 0;
-  for (let index = 0; index < component.length; index++) {
-    const charPoint = component.codePointAt(index) ?? 0;
-    // eslint-disable-next-line no-bitwise -- this is a hash function
-    hash = charPoint + ((hash << 5) - hash);
+    return '#6b7280'; // Default gray
   }
 
-  // Convert to hex color with good saturation and lightness
-  const h = Math.abs(hash) % 360; // Hue between 0-359
-  return `oklch(var(--l-primary) var(--c-primary) ${h})`; // Higher saturation for vibrant colors, light enough for text
+  return stringToColor(component, 0.5);
 };
 
 // Component badge renderer
@@ -76,7 +66,7 @@ function ComponentBadge({ origin }: { readonly origin?: LogOrigin }) {
 
   return (
     <Badge
-      className="text-xs font-normal"
+      className="rounded-sm border-none px-0.5 py-0 text-xs font-normal"
       style={{
         backgroundColor: bgColor,
       }}
@@ -86,42 +76,42 @@ function ComponentBadge({ origin }: { readonly origin?: LogOrigin }) {
   );
 }
 
+const getBadgeColor = (level: LogLevel) => {
+  switch (level) {
+    case logLevels.error: {
+      return 'bg-destructive';
+    }
+
+    case logLevels.warn: {
+      return 'bg-warning';
+    }
+
+    case logLevels.info: {
+      return 'bg-information';
+    }
+
+    case logLevels.debug: {
+      return 'bg-stable';
+    }
+
+    case logLevels.trace: {
+      return 'bg-feature';
+    }
+
+    default: {
+      return 'bg-[grey]';
+    }
+  }
+};
+
 // Verbosity level badge renderer
 function VerbosityBadge({ level }: { readonly level: LogLevel }) {
-  const getBadgeColor = () => {
-    switch (level) {
-      case logLevels.error: {
-        return 'bg-destructive';
-      }
-
-      case logLevels.warn: {
-        return 'bg-warning';
-      }
-
-      case logLevels.info: {
-        return 'bg-information';
-      }
-
-      case logLevels.debug: {
-        return 'bg-stable';
-      }
-
-      case logLevels.trace: {
-        return 'bg-feature';
-      }
-
-      default: {
-        return 'bg-[grey]';
-      }
-    }
-  };
-
   return (
     <Badge
       className={cn(
-        'flex items-center justify-center text-xs font-normal',
+        'flex items-center justify-center p-0 font-mono text-xs font-normal uppercase',
         'w-12', // Fixed width
-        getBadgeColor(),
+        getBadgeColor(level),
         `hover:bg-initial`,
       )}
     >
@@ -130,12 +120,13 @@ function VerbosityBadge({ level }: { readonly level: LogLevel }) {
   );
 }
 
-// Format timestamp with seconds
+// Format timestamp with seconds and milliseconds
 const formatTimestamp = (timestamp: number): string => {
   return new Date(timestamp).toLocaleTimeString(undefined, {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
+    fractionalSecondDigits: 3,
   });
 };
 
@@ -157,7 +148,7 @@ export const ChatConsole = memo(function ({
   const filteredLogs = useSelector(logActor, (state) => {
     const { logs } = state.context;
 
-    return logs.filter((log) => {
+    const filtered = logs.filter((log) => {
       // Check if log level is enabled
       if (!enabledLevels[log.level]) {
         return false;
@@ -170,6 +161,13 @@ export const ChatConsole = memo(function ({
 
       return true;
     });
+
+    let infoCount = 0;
+
+    return filtered.map((log) => ({
+      ...log,
+      infoIndex: infoCount++,
+    }));
   });
 
   // Handle filter changes
@@ -363,22 +361,23 @@ export const ChatConsole = memo(function ({
           </Tooltip>
         </div>
       </div>
-      <div className="flex min-h-0 flex-grow flex-col gap-0.5 overflow-x-hidden overflow-y-auto p-2 pt-0 group-data-[view=split]/console:flex-col-reverse">
+      <div className="flex min-h-0 flex-grow flex-col gap-0.25 overflow-x-hidden overflow-y-auto p-2 pt-0 group-data-[view=split]/console:flex-col-reverse">
         {/* Display console logs */}
         {filteredLogs.length > 0 ? (
           filteredLogs.map((log) => (
             <pre
               key={log.id}
               className={cn(
-                'rounded border-l-2 bg-background px-2 py-1 font-mono text-xs',
-                'group/log cursor-default border-primary hover:bg-muted/20',
+                'rounded bg-background p-1 font-mono text-xs',
+                'group/log cursor-default',
                 'flex-shrink-0 text-wrap',
                 {
-                  'border-destructive': log.level === logLevels.error,
-                  'border-warning': log.level === logLevels.warn,
-                  'border-information': log.level === logLevels.info,
-                  'border-stable': log.level === logLevels.debug,
-                  'border-feature': log.level === logLevels.trace,
+                  'bg-destructive/10 text-destructive hover:bg-destructive/20': log.level === logLevels.error,
+                  'bg-warning/10 text-warning hover:bg-warning/20': log.level === logLevels.warn,
+                  'hover:bg-neutral/10': log.level === logLevels.info,
+                  'bg-neutral/5': log.level === logLevels.info && log.infoIndex % 2 !== 0,
+                  'bg-stable/10 text-stable hover:bg-stable/20': log.level === logLevels.debug,
+                  'bg-feature/10 text-feature hover:bg-feature/20': log.level === logLevels.trace,
                 },
               )}
             >
@@ -386,7 +385,6 @@ export const ChatConsole = memo(function ({
                 {displayConfig.showTimestamp ? (
                   <span className="shrink-0 opacity-60">[{formatTimestamp(log.timestamp)}]</span>
                 ) : null}
-                {displayConfig.showVerbosity ? <VerbosityBadge level={log.level} /> : null}
                 {displayConfig.showComponent ? <ComponentBadge origin={log.origin} /> : null}
                 <span className="mr-auto">{log.message}</span>
               </div>

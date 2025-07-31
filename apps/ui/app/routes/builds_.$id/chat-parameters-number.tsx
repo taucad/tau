@@ -1,6 +1,6 @@
-import { Slider } from '~/components/ui/slider.js';
-import { ChatParametersInputNumber } from '~/routes/builds_.$id/chat-parameters-input-number.js';
-import { cn } from '~/utils/ui.js';
+import { Slider } from '#components/ui/slider.js';
+import { ChatParametersInputNumber } from '#routes/builds_.$id/chat-parameters-input-number.js';
+import { cn } from '#utils/ui.js';
 
 // Slider calculation constants
 /*

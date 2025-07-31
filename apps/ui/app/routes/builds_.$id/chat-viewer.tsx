@@ -1,15 +1,15 @@
 import { memo } from 'react';
 import { useSelector } from '@xstate/react';
-import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
-import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
-import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
-import { ChatViewerStatus } from '~/routes/builds_.$id/chat-viewer-status.js';
-import { ChatViewerControls } from '~/routes/builds_.$id/chat-viewer-controls.js';
-import { HammerAnimation } from '~/components/hammer-animation.js';
-import { SettingsControl } from '~/components/geometry/cad/settings-control.js';
+import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
+import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { ChatViewerStatus } from '#routes/builds_.$id/chat-viewer-status.js';
+import { ChatViewerControls } from '#routes/builds_.$id/chat-viewer-controls.js';
+import { HammerAnimation } from '#components/hammer-animation.js';
+import { SettingsControl } from '#components/geometry/cad/settings-control.js';
 
 export const ChatViewer = memo(function () {
-  const shapes = useSelector(cadActor, (state) => state.context.shapes);
+  const geometries = useSelector(cadActor, (state) => state.context.geometries);
   const status = useSelector(cadActor, (state) => state.value);
 
   // Get all visibility states from graphics machine
@@ -31,12 +31,13 @@ export const ChatViewer = memo(function () {
         ) : (
           <CadViewer
             enableZoom
+            enablePan
             enableGizmo={enableGizmo}
             enableGrid={enableGrid}
             enableAxes={enableAxes}
             enableSurfaces={enableSurfaces}
             enableLines={enableLines}
-            shapes={shapes}
+            geometries={geometries}
           />
         )}
         <SettingsControl className="absolute top-2 right-2" />

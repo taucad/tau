@@ -2,7 +2,9 @@
   "compilerOptions": {
     "rootDir": ".",
     "sourceMap": true,
-    "declaration": false,
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
     "moduleResolution": "nodenext",
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
@@ -16,7 +18,6 @@
     "skipLibCheck": true,
     "skipDefaultLibCheck": true,
     "baseUrl": ".",
-    "paths": {},
     "strict": true,
     "allowJs": false,
     "esModuleInterop": true,
@@ -33,5 +34,4 @@
     "allowUnreachableCode": false,
     "allowUnusedLabels": false
   },
-  "exclude": ["node_modules", "tmp"]
 }

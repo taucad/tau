@@ -335,7 +335,7 @@ export const openscadSymbols: OpenscadModuleSymbol[] = [
     name: 'linear_extrude',
     type: 'module',
     category: 'Extrusion',
-    description: 'Extrudes 2D shapes into 3D',
+    description: 'Extrudes 2D geometries into 3D',
     parameters: [
       { name: 'height', type: 'number', description: 'Extrusion height', required: true },
       { name: 'center', type: 'boolean', description: 'Center on Z axis', required: false, defaultValue: 'false' },
@@ -350,7 +350,7 @@ export const openscadSymbols: OpenscadModuleSymbol[] = [
     name: 'rotate_extrude',
     type: 'module',
     category: 'Extrusion',
-    description: 'Rotates 2D shapes around Y axis',
+    description: 'Rotates 2D geometries around Y axis',
     parameters: [
       { name: 'angle', type: 'number', description: 'Rotation angle in degrees', required: false, defaultValue: '360' },
       { name: 'convexity', type: 'number', description: 'Convexity parameter', required: false },
@@ -363,7 +363,7 @@ export const openscadSymbols: OpenscadModuleSymbol[] = [
     name: 'offset',
     type: 'module',
     category: '2D Operations',
-    description: 'Expands or contracts 2D shapes',
+    description: 'Expands or contracts 2D geometries',
     parameters: [
       {
         name: 'r',
@@ -381,7 +381,7 @@ export const openscadSymbols: OpenscadModuleSymbol[] = [
       },
     ],
     examples: ['offset(r=2) square(10);', 'offset(delta=-1) circle(5);', 'offset(r=1, chamfer=true) polygon(points);'],
-    documentation: 'Creates an offset outline of 2D shapes. Positive values expand, negative values contract.',
+    documentation: 'Creates an offset outline of 2D geometries. Positive values expand, negative values contract.',
   },
   // Other Operations
   {
@@ -415,7 +415,7 @@ export const openscadSymbols: OpenscadModuleSymbol[] = [
       { name: 'cut', type: 'boolean', description: 'Cut projection at z=0', required: false, defaultValue: 'false' },
     ],
     examples: ['projection() cube(10);', 'projection(cut=true) translate([0, 0, 5]) sphere(8);'],
-    documentation: 'Projects 3D objects onto the XY plane to create 2D shapes.',
+    documentation: 'Projects 3D objects onto the XY plane to create 2D geometries.',
   },
 ];
 export const openscadFunctions: OpenscadFunctionSymbol[] = [

@@ -1,6 +1,6 @@
 import type { VariantProps } from 'class-variance-authority';
 import { cva } from 'class-variance-authority';
-import { cn } from '~/utils/ui.js';
+import { cn } from '#utils/ui.js';
 
 const keyboardShortcutVariants = cva(
   // Font

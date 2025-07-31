@@ -1,7 +1,7 @@
-import { KclError, KclWasmError, extractWasmKclError } from '~/components/geometry/kernel/zoo/kcl-errors.js';
-import { createKernelError } from '~/types/kernel.types.js';
-import { sourceRangeToLineColumn } from '~/components/geometry/kernel/zoo/source-range-utils.js';
-import type { KernelStackFrame } from '~/types/kernel.types.js';
+import { KclError, KclWasmError, extractWasmKclError } from '#components/geometry/kernel/zoo/kcl-errors.js';
+import { createKernelError } from '#types/kernel.types.js';
+import { sourceRangeToLineColumn } from '#components/geometry/kernel/zoo/source-range-utils.js';
+import type { KernelStackFrame } from '#types/kernel.types.js';
 
 /**
  * Main error mapping function - converts any error to KclError
@@ -52,7 +52,7 @@ export function convertKclErrorToKernelError(kclError: KclError, code?: string):
     // Create stack string representation if we have stack frames
     if (stackFrames.length > 0) {
       stack = stackFrames
-        .map((frame, index) => {
+        .map((frame) => {
           const location = frame.fileName
             ? `${frame.fileName}:${frame.lineNumber}:${frame.columnNumber}`
             : `<unknown>:${frame.lineNumber}:${frame.columnNumber}`;

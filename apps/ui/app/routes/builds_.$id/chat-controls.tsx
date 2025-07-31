@@ -1,19 +1,19 @@
 import { Clipboard, Download, GalleryThumbnails, ImageDown, Menu } from 'lucide-react';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useSelector, useActorRef } from '@xstate/react';
-import { BoxDown } from '~/components/icons/box-down.js';
-import { Button } from '~/components/ui/button.js';
-import { useBuildSelector } from '~/hooks/use-build.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { toast } from '~/components/ui/sonner.js';
-import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
-import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
-import { ComboBoxResponsive } from '~/components/ui/combobox-responsive.js';
-import { downloadBlob } from '~/utils/file.js';
-import { screenshotRequestMachine } from '~/machines/screenshot-request.machine.js';
-import { exportGeometryMachine } from '~/machines/export-geometry.machine.js';
-import type { ExportFormat } from '~/types/kernel.types.js';
-import { extensionFromFormat } from '~/constants/kernel.constants.js';
+import { BoxDown } from '#components/icons/box-down.js';
+import { Button } from '#components/ui/button.js';
+import { useBuildSelector } from '#hooks/use-build.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { toast } from '#components/ui/sonner.js';
+import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { downloadBlob } from '#utils/file.js';
+import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
+import { exportGeometryMachine } from '#machines/export-geometry.machine.js';
+import type { ExportFormat } from '#types/kernel.types.js';
+import { extensionFromFormat } from '#constants/kernel.constants.js';
 
 type ViewerControlItem = {
   id: string;
@@ -25,7 +25,7 @@ type ViewerControlItem = {
 };
 
 export function ChatControls(): React.JSX.Element {
-  const shapes = useSelector(cadActor, (state) => state.context.shapes);
+  const geometries = useSelector(cadActor, (state) => state.context.geometries);
   const buildName = useBuildSelector((state) => state.build?.name) ?? 'file';
   const updateThumbnail = useBuildSelector((state) => state.updateThumbnail);
   const code = useSelector(cadActor, (state) => state.context.code);
@@ -192,10 +192,10 @@ export function ChatControls(): React.JSX.Element {
     );
   }, [updateThumbnailScreenshot]);
 
-  // Subscribe to the cadActor to update the thumbnail when the shapes change
+  // Subscribe to the cadActor to update the thumbnail when the geometries change
   useEffect(() => {
     const subscription = cadActor.on('geometryEvaluated', (event) => {
-      if (event.shapes.length > 0) {
+      if (event.geometries.length > 0) {
         updateThumbnailScreenshot();
       }
     });
@@ -357,7 +357,7 @@ export function ChatControls(): React.JSX.Element {
         group: 'Export',
         icon: <BoxDown className="mr-2" />,
         action: async () => handleExport(buildName, 'stl'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'download-step',
@@ -365,7 +365,7 @@ export function ChatControls(): React.JSX.Element {
         group: 'Export',
         icon: <BoxDown className="mr-2" />,
         action: async () => handleExport(buildName, 'step'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'download-3mf',
@@ -373,7 +373,7 @@ export function ChatControls(): React.JSX.Element {
         group: 'Export',
         icon: <BoxDown className="mr-2" />,
         action: async () => handleExport(buildName, '3mf'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'update-thumbnail',
@@ -440,7 +440,7 @@ export function ChatControls(): React.JSX.Element {
       handleDownloadPng,
       buildName,
       handleExport,
-      shapes,
+      geometries,
       code,
       handleCopyCodeToClipboard,
       handleDownloadCode,

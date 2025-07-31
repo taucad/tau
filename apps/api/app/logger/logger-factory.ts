@@ -3,9 +3,9 @@ import type { ConfigService } from '@nestjs/config';
 import type { Params } from 'nestjs-pino';
 import type { Options } from 'pino-http';
 import type { PrettyOptions } from 'pino-pretty';
-import { loggingRedactPaths, logServiceProvider } from '~/constants/app.constant.js';
-import type { LogServiceProvider } from '~/constants/app.constant.js';
-import type { Environment } from '~/config/environment.config.js';
+import { loggingRedactPaths, logServiceProvider } from '#constants/app.constant.js';
+import type { LogServiceProvider } from '#constants/app.constant.js';
+import type { Environment } from '#config/environment.config.js';
 
 // https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#logseverity
 const pinoLevelToGoogleLoggingSeverityLookup = Object.freeze({

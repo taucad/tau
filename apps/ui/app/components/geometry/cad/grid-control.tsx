@@ -2,11 +2,11 @@ import React, { useCallback, useState, useEffect } from 'react';
 import type { ClassValue } from 'clsx';
 import { Lock, LockIcon, LockOpen } from 'lucide-react';
 import { useSelector } from '@xstate/react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { Button } from '~/components/ui/button.js';
-import { useCookie } from '~/hooks/use-cookie.js';
-import { formatNumber } from '~/utils/number.js';
-import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '#components/ui/button.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { formatNumber } from '#utils/number.js';
+import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,10 +16,10 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '~/components/ui/dropdown-menu.js';
-import { Switch } from '~/components/ui/switch.js';
-import { cn } from '~/utils/ui.js';
-import { cookieName } from '~/constants/cookie.constants.js';
+} from '#components/ui/dropdown-menu.js';
+import { Switch } from '#components/ui/switch.js';
+import { cn } from '#utils/ui.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 type GridSizeIndicatorProps = {
   /**

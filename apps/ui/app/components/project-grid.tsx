@@ -1,19 +1,19 @@
-import type { ComponentType, JSX } from 'react';
-import { Star, GitFork, Eye } from 'lucide-react';
+import type { ComponentType } from 'react';
+import { Star, GitFork, Eye, Loader2 } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useActor, useSelector } from '@xstate/react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { Button } from '~/components/ui/button.js';
-import { Avatar, AvatarFallback, AvatarImage } from '~/components/ui/avatar.js';
-import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '~/components/ui/card.js';
-import { SvgIcon } from '~/components/icons/svg-icon.js';
-import type { Build } from '~/types/build.types.js';
-import type { KernelProvider } from '~/types/kernel.types';
-import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
-import { storage } from '~/db/storage.js';
-import { cadMachine } from '~/machines/cad.machine.js';
-import { HammerAnimation } from '~/components/hammer-animation.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '#components/ui/button.js';
+import { Avatar, AvatarFallback, AvatarImage } from '#components/ui/avatar.js';
+import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '#components/ui/card.js';
+import { SvgIcon } from '#components/icons/svg-icon.js';
+import type { Build } from '#types/build.types.js';
+import type { KernelProvider } from '#types/kernel.types';
+import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
+import { storage } from '#db/storage.js';
+import { cadMachine } from '#machines/cad.machine.js';
+import { HammerAnimation } from '#components/hammer-animation.js';
 
 // Placeholder for language icons
 const kernelIcons: Record<KernelProvider, ComponentType<{ className?: string }>> = {
@@ -64,11 +64,12 @@ function ProjectCard({
 }: CommunityBuildCardProperties) {
   const [showPreview, setShowPreview] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
+  const [isForking, setIsForking] = useState(false);
   const cardReference = useRef<HTMLDivElement>(null);
 
   // Create a unique instance of the CAD machine for this card using the card's ID
   const [_, send, actorRef] = useActor(cadMachine, { input: { shouldInitializeKernelOnStart: false } });
-  const shapes = useSelector(actorRef, (state) => state.context.shapes);
+  const geometries = useSelector(actorRef, (state) => state.context.geometries);
   const status = useSelector(actorRef, (state) => state.value);
 
   const navigate = useNavigate();
@@ -132,26 +133,38 @@ function ProjectCard({
   }, []);
 
   const handleFork = useCallback(async () => {
-    // Create a new build with forked data
-    const newBuild: Omit<Build, 'id'> = {
-      name: `${name} (Fork)`,
-      description,
-      thumbnail,
-      stars: 0,
-      forks: 0,
-      author, // This should be the current user in a real implementation
-      tags,
-      assets,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      forkedFrom: id,
-      chats,
-    };
+    if (isForking) {
+      return;
+    }
 
-    const createdBuild = await storage.createBuild(newBuild);
-    // Navigate to the new build
-    await navigate(`/builds/${createdBuild.id}`);
-  }, [name, description, thumbnail, author, tags, assets, id, chats, navigate]);
+    setIsForking(true);
+
+    try {
+      // Create a new build with forked data
+      const newBuild: Omit<Build, 'id'> = {
+        name: `${name} (Fork)`,
+        description,
+        thumbnail,
+        stars: 0,
+        forks: 0,
+        author, // This should be the current user in a real implementation
+        tags,
+        assets,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        forkedFrom: id,
+        chats,
+      };
+
+      const createdBuild = await storage.createBuild(newBuild);
+      // Navigate to the new build
+      await navigate(`/builds/${createdBuild.id}`);
+    } catch (error) {
+      console.error('Failed to fork project:', error);
+      // TODO: Show error toast/notification to user
+      setIsForking(false);
+    }
+  }, [name, description, thumbnail, author, tags, assets, id, chats, navigate, isForking]);
 
   const handlePreviewToggle = useCallback(
     (event: React.MouseEvent) => {
@@ -180,8 +193,9 @@ function ProjectCard({
               </div>
             ) : null}
             <CadViewer
+              enablePan={false}
               enableLines={false}
-              shapes={shapes}
+              geometries={geometries}
               className="bg-muted"
               stageOptions={{
                 zoomLevel: 1.5,
@@ -242,13 +256,14 @@ function ProjectCard({
                 variant="outline"
                 size="sm"
                 className="flex items-center gap-1 text-sm text-muted-foreground hover:text-blue"
+                disabled={isForking}
                 onClick={handleFork}
               >
-                <GitFork />
+                {isForking ? <Loader2 className="animate-spin" /> : <GitFork />}
                 {forks}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Fork this project</TooltipContent>
+            <TooltipContent>{isForking ? 'Forking project...' : 'Fork this project'}</TooltipContent>
           </Tooltip>
         </div>
       </CardFooter>

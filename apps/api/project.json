@@ -1,26 +1,12 @@
 {
   "name": "api",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "apps/api/app",
+  "sourceRoot": "apps/api",
   "projectType": "application",
-  "tags": [],
+  "tags": [
+    "type:app"
+  ],
   "targets": {
-    "test": {
-      "outputs": ["{workspaceRoot}/coverage/apps/api"],
-      "options": {},
-      "configurations": {
-        "watch": {
-          "watch": true
-        }
-      }
-    },
-    "build": {
-      "executor": "@nx/vite:build",
-      "outputs": ["{options.outputPath}"],
-      "options": {
-        "outputPath": "dist/apps/api"
-      }
-    },
     "setup-env": {
       "command": "if [ ! -f \"./apps/api/.env\" ]; then cp ./apps/api/.env.example ./apps/api/.env; fi"
     },

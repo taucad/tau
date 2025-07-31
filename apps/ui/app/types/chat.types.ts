@@ -1,6 +1,6 @@
 import type { UIMessage } from 'ai';
-import type { ConstantRecord } from '~/types/constant.types.js';
-import type { KernelProvider } from '~/types/kernel.types.js';
+import type { ConstantRecord } from '#types/constant.types.js';
+import type { KernelProvider } from '#types/kernel.types.js';
 
 export const messageRole = {
   user: 'user',

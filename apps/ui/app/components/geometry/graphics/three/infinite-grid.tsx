@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { Plane } from '@react-three/drei';
 import React from 'react';
-import { Theme, useTheme } from 'remix-themes';
 
 type InfiniteGridProperties = {
   /**
@@ -40,7 +39,7 @@ type InfiniteGridProperties = {
    * 'xzy': Grid on XZ plane with Y as normal (standard front view)
    * @default 'xyz'
    */
-  readonly axes: 'xyz' | 'xzy' | 'yxz' | 'yzx' | 'zxy' | 'zyx';
+  readonly axes: 'xyz' | 'xzy' | 'zyx';
   /**
    * The base opacity of the grid lines.
    * Increasing makes the entire grid more visible/opaque.
@@ -96,7 +95,7 @@ function infiniteGridMaterial({
   fadeEnd,
 }: InfiniteGridProperties) {
   // Validate to ensure axes cannot be used to inject malicious code
-  if (!['xyz', 'xzy', 'yxz', 'yzx', 'zxy', 'zyx'].includes(axes)) {
+  if (!['xyz', 'xzy', 'zyx'].includes(axes)) {
     throw new Error('Invalid axes parameter');
   }
 
@@ -238,21 +237,80 @@ function infiniteGridMaterial({
   return material;
 }
 
+/**
+ * An infinite grid component that renders a ground plane grid with automatic orientation
+ * based on the Three.js up direction. The grid extends infinitely in all directions and
+ * scales dynamically based on camera distance for optimal visibility.
+ *
+ * ### Features:
+ * - **Automatic orientation**: Adapts to Y-up, Z-up, X-up, or any custom up direction
+ * - **Infinite extent**: Grid extends as far as needed based on camera position
+ * - **Dynamic scaling**: Grid size adjusts to camera distance for consistent visibility
+ * - **Dual grid system**: Small and large grid lines with independent sizing and thickness
+ * - **Distance-based fading**: Grid fades out at edges to prevent visual artifacts
+ * - **Customizable appearance**: Configurable colors, opacity, and thickness
+ * - **Performance optimized**: Uses efficient shader-based rendering
+ *
+ * ### Up Direction Handling:
+ * The component automatically detects `THREE.Object3D.DEFAULT_UP` and orients the grid
+ * perpendicular to the up direction:
+ * - Y-up (0,1,0): Grid on XZ plane (standard Three.js)
+ * - Z-up (0,0,1): Grid on XY plane (CAD/engineering)
+ * - X-up (1,0,0): Grid on YZ plane (alternative coordinate systems)
+ *
+ * ### Usage:
+ * ```tsx
+ * <InfiniteGrid
+ *   smallSize={1}
+ *   largeSize={10}
+ *   color={new THREE.Color('grey')}
+ *   smallThickness={1.25}
+ *   largeThickness={2.5}
+ * />
+ * ```
+ *
+ * @param smallSize - Distance between small grid lines
+ * @param largeSize - Distance between large grid lines (should be multiple of smallSize)
+ * @param color - Color of the grid lines
+ */
 export function InfiniteGrid({
   smallSize,
   largeSize,
   smallThickness = 1.25,
   largeThickness = 2.5,
-  axes = 'xyz',
+  color,
   lineOpacity = 0.4,
   minGridDistance = 10,
   gridDistanceMultiplier = 30,
   fadeStart = 0.05,
   fadeEnd = 0.3,
   alphaThreshold = 0.01,
-}: Partial<InfiniteGridProperties> & Pick<InfiniteGridProperties, 'smallSize' | 'largeSize'>): React.JSX.Element {
-  const [theme] = useTheme();
+}: Partial<Omit<InfiniteGridProperties, 'smallSize' | 'largeSize' | 'color'>> &
+  Pick<InfiniteGridProperties, 'smallSize' | 'largeSize' | 'color'>): React.JSX.Element {
   const materialRef = React.useRef<THREE.ShaderMaterial | undefined>(null);
+
+  // Determine axes based on DEFAULT_UP direction
+  const axes = React.useMemo(() => {
+    const up = THREE.Object3D.DEFAULT_UP;
+
+    // Check which component is the up direction and return appropriate axes
+    if (Math.abs(up.y) === 1) {
+      // Y-up: grid on XZ plane
+      return 'xzy' as const;
+    }
+
+    if (Math.abs(up.z) === 1) {
+      // Z-up: grid on XY plane
+      return 'xyz' as const;
+    }
+
+    if (Math.abs(up.x) === 1) {
+      // X-up: grid on YZ plane
+      return 'zyx' as const;
+    }
+
+    throw new Error(`Invalid up direction: [x:${up.x}, y:${up.y}, z:${up.z}]`);
+  }, []);
 
   // Create material with initial properties
   const material = React.useMemo(
@@ -262,7 +320,7 @@ export function InfiniteGrid({
         largeSize,
         smallThickness,
         largeThickness,
-        color: theme === Theme.LIGHT ? new THREE.Color('lightgrey') : new THREE.Color('grey'),
+        color,
         axes,
         lineOpacity,
         minGridDistance,
@@ -276,7 +334,7 @@ export function InfiniteGrid({
       largeSize,
       smallThickness,
       largeThickness,
-      theme,
+      color,
       axes,
       lineOpacity,
       minGridDistance,

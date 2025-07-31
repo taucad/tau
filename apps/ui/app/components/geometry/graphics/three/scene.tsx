@@ -1,13 +1,14 @@
-import type { ReactNode, JSX } from 'react';
-import type { StageOptions } from '~/components/geometry/graphics/three/stage.js';
-import { Stage } from '~/components/geometry/graphics/three/stage.js';
-import { Controls } from '~/components/geometry/graphics/three/controls.js';
+import type { ReactNode } from 'react';
+import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
+import { Stage } from '#components/geometry/graphics/three/stage.js';
+import { Controls } from '#components/geometry/graphics/three/controls.js';
 
 type SceneProperties = {
   readonly children: ReactNode;
   readonly enableGizmo?: boolean;
   readonly enableDamping?: boolean;
   readonly enableZoom?: boolean;
+  readonly enablePan?: boolean;
   readonly enableGrid?: boolean;
   readonly enableAxes?: boolean;
   readonly stageOptions?: StageOptions;
@@ -20,6 +21,7 @@ export function Scene({
   enableGizmo = false,
   enableDamping = false,
   enableZoom = false,
+  enablePan = false,
   enableGrid = false,
   enableAxes = false,
   stageOptions,
@@ -28,7 +30,13 @@ export function Scene({
 }: SceneProperties): React.JSX.Element {
   return (
     <>
-      <Controls enableGizmo={enableGizmo} enableDamping={enableDamping} enableZoom={enableZoom} zoomSpeed={zoomSpeed} />
+      <Controls
+        enableGizmo={enableGizmo}
+        enableDamping={enableDamping}
+        enableZoom={enableZoom}
+        enablePan={enablePan}
+        zoomSpeed={zoomSpeed}
+      />
       <Stage
         stageOptions={stageOptions}
         enableCentering={enableCentering}

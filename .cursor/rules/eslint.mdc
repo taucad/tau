@@ -7,8 +7,8 @@ alwaysApply: false
 
 **Type Imports**: Use `import type` for type-only imports:
 ```diff
-- import { User } from '~/types.js';
-+ import type { User } from '~/types.js';
+- import { User } from '#types.js';
++ import type { User } from '#types.js';
 ```
 
 **Explicit Types**: Always provide explicit return types for exported functions:
@@ -53,10 +53,10 @@ alwaysApply: false
 * `public`
 * `private`
 
-**Absolute Imports**: Use absolute imports with `~/` prefix:
+**Absolute Imports**: Use absolute imports with `#` prefix:
 ```diff
 - import { utils } from '../utils/helper.js';
-+ import { utils } from '~/utils/helper.js';
++ import { utils } from '#utils/helper.js';
 ```
 
 **Unnecessary Conditions**: Don't use optional chaining when value can't be nullish:
@@ -83,13 +83,13 @@ alwaysApply: false
 
 **File Extensions**: Always include `.js` extensions for local imports:
 ```diff
-- import { helper } from '~/utils/helper';
-+ import { helper } from '~/utils/helper.js';
+- import { helper } from '#utils/helper';
++ import { helper } from '#utils/helper.js';
 ```
 
 **Duplicate Imports**: Keep type and value imports separate:
 ```diff
-- import { User, type UserConfig } from '~/types.js';
-+ import { User } from '~/types.js';
-+ import type { UserConfig } from '~/types.js';
+- import { User, type UserConfig } from '#types.js';
++ import { User } from '#types.js';
++ import type { UserConfig } from '#types.js';
 ```

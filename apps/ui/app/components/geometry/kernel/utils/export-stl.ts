@@ -1,4 +1,4 @@
-import type { IndexedPolyhedron } from '~/components/geometry/kernel/utils/common.js';
+import type { IndexedPolyhedron } from '#components/geometry/kernel/utils/common.js';
 
 /**
  * Calculate the normal vector for a triangle

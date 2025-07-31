@@ -1,6 +1,6 @@
 import UZIP from 'uzip';
 import { converter, serializeHex } from 'culori';
-import type { IndexedPolyhedron } from '~/components/geometry/kernel/utils/common.js';
+import type { IndexedPolyhedron } from '#components/geometry/kernel/utils/common.js';
 
 // Convert culori RGB to color objects for distance calculations
 const toRgb = converter('rgb');

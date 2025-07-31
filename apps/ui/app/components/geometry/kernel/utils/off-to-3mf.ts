@@ -1,5 +1,5 @@
-import { parseOff } from '~/components/geometry/kernel/utils/import-off.js';
-import { export3mf } from '~/components/geometry/kernel/utils/export-3mf.js';
+import { parseOff } from '#components/geometry/kernel/utils/import-off.js';
+import { export3mf } from '#components/geometry/kernel/utils/export-3mf.js';
 
 /**
  * Convert OFF format data to 3MF blob

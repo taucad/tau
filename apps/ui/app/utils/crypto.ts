@@ -1,6 +1,9 @@
 /**
  * Fast non-cryptographic hash function using djb2 algorithm
- * Good for cache keys, checksums, and non-security use cases
+ * Good for cache keys, checksums, and non-security use cases.
+ *
+ * Uses 5381 as the initial seed - chosen by Dan Bernstein through empirical testing
+ * for optimal distribution and minimal collisions on typical string datasets.
  */
 export function hashCode(input: string): string {
   let hash = 5381;

@@ -1,6 +1,6 @@
 /* eslint-disable new-cap, @typescript-eslint/naming-convention -- decorators are not constructors */
 import { SetMetadata } from '@nestjs/common';
-import { isPublicAuth, isOptionalAuth } from '~/constants/auth.constant.js';
+import { isPublicAuth, isOptionalAuth } from '#constants/auth.constant.js';
 
 /**
  * Decorator to mark a route as publicly accessible (no authentication required)

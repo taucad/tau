@@ -13,17 +13,17 @@ import type {
 } from '@rjsf/utils';
 import { ChevronRight, RefreshCcwDot } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Button } from '~/components/ui/button.js';
-import { Input } from '~/components/ui/input.js';
-import { ChatParametersBoolean } from '~/routes/builds_.$id/chat-parameters-boolean.js';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select.js';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '~/components/ui/collapsible.js';
-import { cn } from '~/utils/ui.js';
-import { toSentenceCase } from '~/utils/string.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { HighlightText } from '~/components/highlight-text.js';
-import { ChatParameterWidget } from '~/routes/builds_.$id/chat-parameter-widget.js';
-import { rjsfIdToJsonPath, hasCustomValue, rjsfIdPrefix } from '~/routes/builds_.$id/rjsf-utils.js';
+import { Button } from '#components/ui/button.js';
+import { Input } from '#components/ui/input.js';
+import { ChatParametersBoolean } from '#routes/builds_.$id/chat-parameters-boolean.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
+import { cn } from '#utils/ui.js';
+import { toSentenceCase } from '#utils/string.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { HighlightText } from '#components/highlight-text.js';
+import { ChatParameterWidget } from '#routes/builds_.$id/chat-parameter-widget.js';
+import { rjsfIdToJsonPath, hasCustomValue, rjsfIdPrefix } from '#routes/builds_.$id/rjsf-utils.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for formContext
 export type RJSFContext = {

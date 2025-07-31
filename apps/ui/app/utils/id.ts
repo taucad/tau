@@ -1,6 +1,6 @@
 import { generateId } from 'ai';
-import type { IdPrefix } from '~/constants/id.constants.js';
-import { idPrefix } from '~/constants/id.constants.js';
+import type { IdPrefix } from '#constants/id.constants.js';
+import { idPrefix } from '#constants/id.constants.js';
 
 const idLength = 21;
 

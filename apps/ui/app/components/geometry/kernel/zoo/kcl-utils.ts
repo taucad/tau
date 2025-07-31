@@ -12,15 +12,15 @@ import type { System } from '@taucad/kcl-wasm-lib/bindings/ModelingCmd';
 import type { Context } from '@taucad/kcl-wasm-lib';
 import type { Models } from '@kittycad/lib';
 import wasmPath from '@taucad/kcl-wasm-lib/kcl.wasm?url';
-import { EngineConnection, MockEngineConnection } from '~/components/geometry/kernel/zoo/engine-connection.js';
-import type { WasmModule } from '~/components/geometry/kernel/zoo/engine-connection.js';
+import { EngineConnection, MockEngineConnection } from '#components/geometry/kernel/zoo/engine-connection.js';
+import type { WasmModule } from '#components/geometry/kernel/zoo/engine-connection.js';
 import {
   KclError,
   KclAuthError,
   KclExportError,
   KclWasmError,
   extractWasmKclError,
-} from '~/components/geometry/kernel/zoo/kcl-errors.js';
+} from '#components/geometry/kernel/zoo/kcl-errors.js';
 
 type OutputFormat3d = Models['OutputFormat3d_type'];
 
@@ -516,6 +516,7 @@ export class KclUtils {
   /**
    * Create export format configuration based on options
    */
+  // eslint-disable-next-line complexity -- supporting many defaults for exports in readable way
   private createExportFormat(options: ExportOptions): OutputFormat3d {
     const defaultCoords: System = {
       forward: { axis: 'y', direction: 'negative' },
@@ -526,8 +527,8 @@ export class KclUtils {
       case 'gltf': {
         return {
           type: 'gltf',
-          storage: 'binary',
-          presentation: 'pretty',
+          storage: options.storage ?? 'embedded',
+          presentation: options.presentation ?? 'pretty',
         };
       }
 
@@ -535,7 +536,7 @@ export class KclUtils {
         return {
           type: 'obj',
           coords: options.coords ?? defaultCoords,
-          units: 'mm',
+          units: options.units ?? 'mm',
         };
       }
 
@@ -572,7 +573,7 @@ export class KclUtils {
       case 'fbx': {
         return {
           type: 'fbx',
-          storage: 'binary',
+          storage: options.storage ?? 'binary',
           ...(options.deterministic && {
             created: '1970-01-01T00:00:00Z',
           }),

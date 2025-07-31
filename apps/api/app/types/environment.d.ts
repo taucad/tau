@@ -1,4 +1,4 @@
-import type { Environment } from '~/config/environment.config.ts';
+import type { Environment } from '#config/environment.config.ts';
 
 declare global {
   namespace NodeJS {

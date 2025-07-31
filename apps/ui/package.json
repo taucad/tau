@@ -1,8 +1,15 @@
 {
-  "private": true,
-  "name": "ui",
-  "$comment1": "This package.json is currently needed by Remix with NX.",
-  "$comment2": "It is not used for anything else.",
+  "name": "@taucad/ui",
+  "version": "0.0.1",
   "type": "module",
-  "sideEffects": false
+  "private": true,
+  "dependencies": {
+    "@taucad/tau-examples": "workspace:*"
+  },
+  "imports": {
+    "#*": ["./app/*"]
+  },
+  "files": [
+    "build"
+  ]
 }

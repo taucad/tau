@@ -2,8 +2,8 @@
 import type { Models } from '@kittycad/lib';
 import type { Context } from '@taucad/kcl-wasm-lib';
 import { BSON } from 'bson';
-import { binaryToUuid } from '~/utils/binary.js';
-import { KclError, KclAuthError } from '~/components/geometry/kernel/zoo/kcl-errors.js';
+import { binaryToUuid } from '#utils/binary.js';
+import { KclError, KclAuthError } from '#components/geometry/kernel/zoo/kcl-errors.js';
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- required
 export type WasmModule = typeof import('@taucad/kcl-wasm-lib');
@@ -35,7 +35,6 @@ type InitializationContext = {
 
 const authTimeout = 10_000; // 10 second timeout
 const commandTimeout = 30_000; // 30 second timeout
-const pingIntervalMs = 30_000; // 30 second ping interval
 
 const consoleColors = {
   info: '\u001B[32m',
@@ -184,7 +183,10 @@ export class EngineConnection {
     _pathString: string,
   ): Promise<Uint8Array> {
     if (!this.isConnected) {
-      throw KclError.simple('engine', 'Engine not connected');
+      // If the connection is not connected, we need to cleanup and re-initialize.
+      // This lazy initialization ensures we only create and use a connection when it's required.
+      await this.cleanup();
+      await this.initialize();
     }
 
     try {
@@ -241,7 +243,7 @@ export class EngineConnection {
   }
 
   // Store event listeners as arrow functions so they can be properly removed
-  private readonly onWebSocketOpen = (event: Event): void => {
+  private readonly onWebSocketOpen = (_event: Event): void => {
     clg.debug('WebSocket connected');
 
     // Send authentication headers in the exact format expected by the server
@@ -253,11 +255,7 @@ export class EngineConnection {
           Authorization: `Bearer ${this.apiKey}`,
         },
       });
-      this.send({ type: 'ping' });
     }
-
-    // Start ping interval to keep connection alive
-    this.startPingInterval();
   };
 
   private readonly onWebSocketClose = (_event: CloseEvent): void => {
@@ -309,24 +307,6 @@ export class EngineConnection {
   private readonly onWebSocketMessage = (event: MessageEvent): void => {
     this.handleMessage(event);
   };
-
-  private startPingInterval(): void {
-    // Clear existing interval if any
-    if (this.pingIntervalId) {
-      clearInterval(this.pingIntervalId);
-    }
-
-    this.pingIntervalId = setInterval(() => {
-      // Don't start pinging until we're connected
-      if (!this.isConnected) {
-        return;
-      }
-
-      if (this.websocket?.readyState === 1) {
-        this.send({ type: 'ping' });
-      }
-    }, pingIntervalMs);
-  }
 
   private async sendCommand(command: WebSocketRequest): Promise<unknown> {
     clg.req(JSON.stringify(command, null, 2));

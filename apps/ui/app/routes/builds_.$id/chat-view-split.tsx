@@ -1,13 +1,13 @@
 import { useRef, useCallback } from 'react';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
-import { ChatConsole } from '~/routes/builds_.$id/chat-console.js';
-import { ChatViewer } from '~/routes/builds_.$id/chat-viewer.js';
-import type { KeyCombination } from '~/utils/keys.js';
-import { useCookie } from '~/hooks/use-cookie.js';
-import { useKeydown } from '~/hooks/use-keydown.js';
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '~/components/ui/resizable.js';
-import { ChatEditorLayout } from '~/routes/builds_.$id/chat-editor-layout.js';
-import { cookieName } from '~/constants/cookie.constants.js';
+import { ChatConsole } from '#routes/builds_.$id/chat-console.js';
+import { ChatViewer } from '#routes/builds_.$id/chat-viewer.js';
+import type { KeyCombination } from '#utils/keys.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { useKeydown } from '#hooks/use-keydown.js';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '#components/ui/resizable.js';
+import { ChatEditorLayout } from '#routes/builds_.$id/chat-editor-layout.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 const toggleConsoleKeyCombination = {
   key: 'l',

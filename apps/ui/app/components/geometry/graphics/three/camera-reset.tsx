@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 
 /**
- * Resets the camera to a standard position and orientation based on shape dimensions
+ * Resets the camera to a standard position and orientation based on geometry dimensions
  * Adjusts for FOV to maintain consistent framing regardless of perspective setting
  */
 export function resetCamera({
   camera,
-  shapeRadius,
+  geometryRadius,
   rotation,
   perspective,
   setSceneRadius,
@@ -14,7 +14,7 @@ export function resetCamera({
   enableConfiguredAngles,
 }: {
   camera: THREE.Camera;
-  shapeRadius: number;
+  geometryRadius: number;
   rotation: { side: number; vertical: number };
   perspective: {
     offsetRatio: number;
@@ -32,9 +32,9 @@ export function resetCamera({
     return;
   }
 
-  // If the shape radius is less than or requal to 0, we didn't get an object to render.
+  // If the geometry radius is less than or requal to 0, we didn't get an object to render.
   // Leaving it at 0 or less results in undefined camera behavior, so we set it to 1000.
-  const adjustedShapeRadius = shapeRadius <= 0 ? 1000 : shapeRadius;
+  const adjustedGeometryRadius = geometryRadius <= 0 ? 1000 : geometryRadius;
 
   const useConfiguredAngles = enableConfiguredAngles ?? true;
 
@@ -54,7 +54,7 @@ export function resetCamera({
     Math.tan(THREE.MathUtils.degToRad(effectiveFovForAdjustment / 2));
 
   const adjustedOffsetRatio = perspective.offsetRatio * fovAdjustmentFactor;
-  const newDistance = adjustedShapeRadius * adjustedOffsetRatio;
+  const newDistance = adjustedGeometryRadius * adjustedOffsetRatio;
 
   if (useConfiguredAngles) {
     // Use configured rotation angles (side and vertical) for positioning
@@ -84,13 +84,13 @@ export function resetCamera({
 
   camera.zoom = perspective.zoomLevel;
   camera.near = perspective.nearPlane;
-  camera.far = Math.max(perspective.minimumFarPlane, adjustedShapeRadius * perspective.farPlaneRadiusMultiplier);
+  camera.far = Math.max(perspective.minimumFarPlane, adjustedGeometryRadius * perspective.farPlaneRadiusMultiplier);
 
   // Aim the camera at the center of the scene
   camera.lookAt(0, 0, 0);
 
   // Update the scene radius
-  setSceneRadius(shapeRadius);
+  setSceneRadius(geometryRadius);
 
   camera.updateProjectionMatrix();
   invalidate();

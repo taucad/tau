@@ -1,8 +1,8 @@
 import { setup, assign, createActor } from 'xstate';
-import type { LogEntry, LogOptions } from '~/types/console.types.js';
-import { logLevels } from '~/types/console.types.js';
-import { generatePrefixedId } from '~/utils/id.js';
-import { idPrefix } from '~/constants/id.constants.js';
+import type { LogEntry, LogOptions } from '#types/console.types.js';
+import { logLevels } from '#types/console.types.js';
+import { generatePrefixedId } from '#utils/id.js';
+import { idPrefix } from '#constants/id.constants.js';
 
 const defaultMaxLogs = 1000;
 
@@ -18,7 +18,7 @@ type LogMachineEvents =
   | { type: 'addLogs'; entries: Array<{ message: string; options?: LogOptions }> }
   | { type: 'clearLogs' };
 
-const logMachine = setup({
+export const logMachine = setup({
   /* eslint-disable @typescript-eslint/consistent-type-assertions -- Required for XState's type inference */
   types: {
     context: {} as LogMachineContext,

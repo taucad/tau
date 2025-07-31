@@ -1,9 +1,9 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import type { ClassValue } from 'clsx';
 import { Axis3D, Box, Grid3X3, Rotate3D, Settings, PenLine } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { Button } from '~/components/ui/button.js';
-import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '#components/ui/button.js';
+import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,11 +11,11 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '~/components/ui/dropdown-menu.js';
-import { Switch } from '~/components/ui/switch.js';
-import { cn } from '~/utils/ui.js';
-import { useCookie } from '~/hooks/use-cookie.js';
-import { cookieName } from '~/constants/cookie.constants.js';
+} from '#components/ui/dropdown-menu.js';
+import { Switch } from '#components/ui/switch.js';
+import { cn } from '#utils/ui.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 type ViewSettings = {
   surface: boolean;

@@ -1,10 +1,10 @@
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
-import type { StorageProvider } from '~/types/storage.types.js';
-import type { Build } from '~/types/build.types.js';
-import { metaConfig } from '~/config.js';
-import { idPrefix } from '~/constants/id.constants.js';
-import { generatePrefixedId } from '~/utils/id.js';
+import type { StorageProvider } from '#types/storage.types.js';
+import type { Build } from '#types/build.types.js';
+import { metaConfig } from '#config.js';
+import { idPrefix } from '#constants/id.constants.js';
+import { generatePrefixedId } from '#utils/id.js';
 
 export class IndexedDbStorageProvider implements StorageProvider {
   private get dbName() {

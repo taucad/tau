@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import type { StructuredTool } from '@langchain/core/tools';
 import { OpenAI, OpenAIEmbeddings } from '@langchain/openai';
-import { createWebBrowserTool } from '~/api/tools/tools/tool-web-browser.js';
-import { fileEditTool } from '~/api/tools/tools/tool-file-edit.js';
-import { parseWebSearchResults, webSearchTool } from '~/api/tools/tools/tool-web-search.js';
+import { createWebBrowserTool } from '#api/tools/tools/tool-web-browser.js';
+import { fileEditTool } from '#api/tools/tools/tool-file-edit.js';
+import { parseWebSearchResults, webSearchTool } from '#api/tools/tools/tool-web-search.js';
 
 export const toolCategory = {
   webSearch: 'web_search',

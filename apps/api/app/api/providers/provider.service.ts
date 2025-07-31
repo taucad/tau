@@ -9,8 +9,8 @@ import type { ChatOllamaInput } from '@langchain/ollama';
 import { ChatAnthropic } from '@langchain/anthropic';
 import type { ChatAnthropicCallOptions } from '@langchain/anthropic';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import type { Environment } from '~/config/environment.config.ts';
-import type { ProviderId, Provider } from '~/api/providers/provider.schema.js';
+import type { Environment } from '#config/environment.config.ts';
+import type { ProviderId, Provider } from '#api/providers/provider.schema.js';
 
 // Type for mapping provider IDs to their option types
 type ProviderOptionsMap = {

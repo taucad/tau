@@ -1,8 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import type { Build } from '~/types/build.types.js';
-import { storage } from '~/db/storage.js';
-import { createBuildMutations } from '~/hooks/build-mutations.js';
+import type { Build } from '#types/build.types.js';
+import { storage } from '#db/storage.js';
+import { createBuildMutations } from '#hooks/build-mutations.js';
 
 // Function to fetch builds
 export const fetchBuilds = async (options?: { includeDeleted?: boolean }): Promise<Build[]> => {

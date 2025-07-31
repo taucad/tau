@@ -43,7 +43,7 @@ jobs:
       # Nx Affected runs only tasks affected by the changes in this PR/commit
       # Learn more: https://nx.dev/ci/features/affected
       - name: Run affected tasks
-        run: pnpm nx affected -t lint test build
+        run: pnpm nx affected -t lint test build typecheck
 
   # Check what changed to determine what to deploy
   changes:

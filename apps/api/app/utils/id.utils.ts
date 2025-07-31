@@ -1,7 +1,7 @@
 import { generateId } from 'ai';
-import type { IdPrefix } from '~/types/id.types.js';
-import { idPrefix } from '~/constants/id.constants.js';
-import { hexToBase62 } from '~/utils/string.utils.js';
+import type { IdPrefix } from '#types/id.types.js';
+import { idPrefix } from '#constants/id.constants.js';
+import { hexToBase62 } from '#utils/string.utils.js';
 
 const idLength = 21;
 

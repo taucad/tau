@@ -3,8 +3,8 @@ import type { ReactNode } from 'react';
 import { useThree } from '@react-three/fiber';
 import { useActorRef } from '@xstate/react';
 import type { OrbitControls } from 'three-stdlib';
-import { graphicsActor, screenshotCapabilityActor } from '~/routes/builds_.$id/graphics-actor.js';
-import { controlsListenerMachine } from '~/machines/controls-listener.machine.js';
+import { graphicsActor, screenshotCapabilityActor } from '#routes/builds_.$id/graphics-actor.js';
+import { controlsListenerMachine } from '#machines/controls-listener.machine.js';
 
 /**
  * Component that bridges Three.js context with XState actors

@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
-import { Slider } from '~/components/ui/slider.js';
-import { buttonVariants } from '~/components/ui/button.js';
-import { cn } from '~/utils/ui.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
-import { useCookie } from '~/hooks/use-cookie.js';
-import { cookieName } from '~/constants/cookie.constants.js';
+import { Slider } from '#components/ui/slider.js';
+import { buttonVariants } from '#components/ui/button.js';
+import { cn } from '#utils/ui.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 type CameraControlProps = {
   /**

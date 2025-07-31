@@ -1,179 +1,34 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition -- TODO: review these types, some are actually required */
-import { useThree, useFrame } from '@react-three/fiber';
+import { useThree } from '@react-three/fiber';
 import type { GizmoAxisOptions, GizmoOptions } from 'three-viewport-gizmo';
 import { ViewportGizmo } from 'three-viewport-gizmo';
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
 import * as THREE from 'three';
-import { Line2 } from 'three/examples/jsm/lines/Line2.js';
-import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
-import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { ReactNode } from 'react';
 import { Theme, useTheme } from 'remix-themes';
-import { useColor } from '~/hooks/use-color.js';
-
-const createAxesObject = ({
-  axesSize = 2.1,
-  xAxisColor = 'red',
-  yAxisColor = 'green',
-  zAxisColor = 'blue',
-  xLabelColor = 'red',
-  yLabelColor = 'green',
-  zLabelColor = 'blue',
-  lineOpacity = 0.6,
-  lineWidth = 1.5,
-}: {
-  axesSize?: number;
-  xAxisColor?: string;
-  yAxisColor?: string;
-  zAxisColor?: string;
-  xLabelColor?: string;
-  yLabelColor?: string;
-  zLabelColor?: string;
-  lineOpacity?: number;
-  lineWidth?: number;
-}) => {
-  const axesLines = [
-    {
-      id: 'x',
-      points: [new THREE.Vector3(0, 0, 0), new THREE.Vector3(axesSize, 0, 0)],
-      lineColor: xAxisColor,
-      labelColor: xLabelColor,
-      label: 'X',
-    },
-    {
-      id: 'y',
-      points: [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, axesSize, 0)],
-      lineColor: yAxisColor,
-      labelColor: yLabelColor,
-      label: 'Y',
-    },
-    {
-      id: 'z',
-      points: [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, axesSize)],
-      lineColor: zAxisColor,
-      labelColor: zLabelColor,
-      label: 'Z',
-    },
-  ];
-
-  const axes = new THREE.Group();
-  for (const line of axesLines) {
-    // Convert points to flat array for LineGeometry
-    const positions = [];
-    for (const point of line.points) {
-      positions.push(point.x, point.y, point.z);
-    }
-
-    const geometry = new LineGeometry();
-    geometry.setPositions(positions);
-
-    const material = new LineMaterial({
-      color: line.lineColor,
-      linewidth: lineWidth,
-      opacity: lineOpacity,
-      resolution: new THREE.Vector2(axesSize, axesSize),
-    });
-
-    const lineObject = new Line2(geometry, material);
-    axes.add(lineObject);
-
-    // Add text label at the end of each axis
-    const endPoint = line.points[1]!;
-
-    // Create a canvas for the text
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    const textCanvasSize = 64;
-    canvas.width = textCanvasSize;
-    canvas.height = textCanvasSize;
-
-    if (context) {
-      // Set the entire canvas to transparent
-      context.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Draw the text with smaller font size
-      context.fillStyle = line.labelColor;
-      context.font = '100 48px monospace';
-      context.textAlign = 'center';
-      context.textBaseline = 'middle';
-      context.fillText(line.label, textCanvasSize / 2, textCanvasSize / 2);
-    }
-
-    // Create texture from canvas
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-
-    // Create a sprite with the texture
-    const spriteMaterial = new THREE.SpriteMaterial({
-      map: texture,
-      sizeAttenuation: false,
-      depthTest: true,
-      transparent: true,
-    });
-
-    // Set render order to ensure it renders on top
-    const sprite = new THREE.Sprite(spriteMaterial);
-    sprite.renderOrder = 3;
-    sprite.position.copy(endPoint);
-    sprite.scale.set(0.08, 0.06, 1); // Reduced vertical scale from 0.1 to 0.06
-
-    // Add increased offset to move labels further from line ends
-    const direction = new THREE.Vector3().subVectors(endPoint, new THREE.Vector3(0, 0, 0)).normalize();
-    sprite.position.add(direction.multiplyScalar(0.2));
-
-    axes.add(sprite);
-  }
-
-  axes.position.set(-axesSize / 2, -axesSize / 2, -axesSize / 2);
-  return axes;
-};
+import { useColor } from '#hooks/use-color.js';
+import { createViewportGizmoCubeAxes } from '#components/geometry/graphics/three/viewport-gizmo-cube-axes.js';
 
 type ViewportGizmoCubeProps = {
   readonly size?: number;
 };
 
 export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): ReactNode {
-  const { camera, gl, controls, scene } = useThree((state) => ({
+  const { camera, gl, controls, scene, invalidate } = useThree((state) => ({
     camera: state.camera as THREE.PerspectiveCamera,
     gl: state.gl,
     controls: state.controls as OrbitControls,
     scene: state.scene,
+    invalidate: state.invalidate,
   }));
 
-  const gizmoRef = useRef<ViewportGizmo | undefined>(null);
-  const canvasRef = useRef<HTMLCanvasElement | undefined>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | undefined>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
   const { serialized } = useColor();
   const [theme] = useTheme();
 
-  // Define event handlers using useCallback to maintain references
-  const handleStart = useCallback(() => {
-    if (controls.update) {
-      controls.update();
-    }
-  }, [controls]);
-
-  const handleChange = useCallback(() => {
-    if (controls.update) {
-      controls.update();
-    }
-
-    if (gl && scene && camera) {
-      gl.render(scene, camera);
-    }
-  }, [controls, gl, scene, camera]);
-
-  const handleEnd = useCallback(() => {
-    if (controls.update) {
-      controls.update();
-    }
-
-    if (gl && scene && camera) {
-      gl.render(scene, camera);
-    }
-  }, [controls, gl, scene, camera]);
+  const handleChange = useCallback((): void => {
+    invalidate();
+  }, [invalidate]);
 
   // Create DOM overlay for gizmo
   useEffect(() => {
@@ -203,7 +58,6 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
 
     // Append the canvas to the container
     container.append(canvas);
-    canvasRef.current = canvas;
 
     // Create a renderer for the gizmo
     const renderer = new THREE.WebGLRenderer({
@@ -216,7 +70,6 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
     renderer.setPixelRatio(dpr);
     renderer.setAnimationLoop(animation);
     renderer.setClearColor(0x00_00_00, 0);
-    rendererRef.current = renderer;
 
     const faceConfig = {
       color: theme === Theme.DARK ? 0x33_33_33 : 0xdd_dd_dd,
@@ -254,29 +107,27 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
         bottom: 0,
         right: 0,
       },
+      resolution: 256,
       container,
       corners: cornerConfig,
       edges: edgeConfig,
       right: faceConfig,
       top: faceConfig,
-      front: { ...faceConfig, label: 'Back' },
-      back: { ...faceConfig, label: 'Front' },
+      front: faceConfig,
+      back: faceConfig,
       left: faceConfig,
       bottom: faceConfig,
     };
 
     // Create the gizmo
     const gizmo = new ViewportGizmo(camera, renderer, gizmoConfig);
-    gizmoRef.current = gizmo;
 
     // Add event listeners for the gizmo
-    gizmo.addEventListener('start', handleStart);
     gizmo.addEventListener('change', handleChange);
-    gizmo.addEventListener('end', handleEnd);
 
     gizmo.scale.multiplyScalar(0.7);
     gizmo.add(
-      createAxesObject({
+      createViewportGizmoCubeAxes({
         axesSize: 2.1,
         xAxisColor: 'red',
         yAxisColor: 'green',
@@ -291,15 +142,10 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
     // Attach the controls to enable proper interaction
     gizmo.attachControls(controls);
 
-    // Mark initialization as complete
-    setIsInitialized(true);
-
     // Cleanup function
     return () => {
       // Remove event listeners
-      gizmo.removeEventListener('start', handleStart);
       gizmo.removeEventListener('change', handleChange);
-      gizmo.removeEventListener('end', handleEnd);
 
       // Dispose the gizmo
       gizmo.dispose();
@@ -314,14 +160,7 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
         renderer.dispose();
       }
     };
-  }, [camera, gl, controls, scene, serialized.hex, handleStart, handleChange, handleEnd, theme, size]);
-
-  // Render the gizmo in each frame
-  useFrame(() => {
-    if (isInitialized && gizmoRef.current) {
-      gizmoRef.current.render();
-    }
-  });
+  }, [camera, gl, controls, scene, serialized.hex, theme, size, handleChange]);
 
   return null;
 }

@@ -4,20 +4,20 @@ import { createActor } from 'xstate';
 import { PackagePlus } from 'lucide-react';
 // eslint-disable-next-line no-restricted-imports -- allowed for router types
 import type { Route } from './+types/route.js';
-import { ChatInterface } from '~/routes/builds_.$id/chat-interface.js';
-import { BuildProvider, useBuild } from '~/hooks/use-build.js';
-import { Button } from '~/components/ui/button.js';
-import type { Handle } from '~/types/matches.types.js';
-import { useChatConstants } from '~/utils/chat.js';
-import { AiChatProvider, useChatActions, useChatSelector } from '~/components/chat/ai-chat-provider.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
-import { BuildNameEditor } from '~/routes/builds_.$id/build-name-editor.js';
-import { FileExplorerContext } from '~/routes/builds_.$id/graphics-actor.js';
-import { fileEditMachine } from '~/machines/file-edit.machine.js';
-import type { FileEditToolResult } from '~/routes/builds_.$id/chat-message-tool-file-edit.js';
-import { ChatInterfaceControls, ViewContextProvider } from '~/routes/builds_.$id/chat-interface-controls.js';
-import { CommandPaletteTrigger } from '~/routes/builds_.$id/command-palette.js';
+import { ChatInterface } from '#routes/builds_.$id/chat-interface.js';
+import { BuildProvider, useBuild } from '#hooks/use-build.js';
+import { Button } from '#components/ui/button.js';
+import type { Handle } from '#types/matches.types.js';
+import { useChatConstants } from '#utils/chat.js';
+import { AiChatProvider, useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { BuildNameEditor } from '#routes/builds_.$id/build-name-editor.js';
+import { FileExplorerContext } from '#routes/builds_.$id/graphics-actor.js';
+import { fileEditMachine } from '#machines/file-edit.machine.js';
+import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
+import { ChatInterfaceControls, ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
+import { CommandPaletteTrigger } from '#routes/builds_.$id/command-palette.js';
 
 export const handle: Handle = {
   breadcrumb(match) {
@@ -99,7 +99,7 @@ function Chat() {
     // Initialize model
     cadActor.send({
       type: 'initializeModel',
-      code: mechanicalAsset.files[mechanicalAsset.main].content,
+      code: mechanicalAsset.files[mechanicalAsset.main]!.content,
       parameters: mechanicalAsset.parameters,
       kernelType: mechanicalAsset.language,
     });

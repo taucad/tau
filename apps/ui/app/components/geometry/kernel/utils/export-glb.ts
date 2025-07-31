@@ -1,10 +1,66 @@
 import type { Primitive } from '@gltf-transform/core';
 import { Document, NodeIO } from '@gltf-transform/core';
-import type { Color, IndexedPolyhedron } from '~/components/geometry/kernel/utils/common.js';
+import type { Color, IndexedPolyhedron } from '#components/geometry/kernel/utils/common.js';
+import { transformVerticesGltf } from '#components/geometry/kernel/utils/common.js';
 
+/**
+ * Geometry data optimized for glTF primitive creation.
+ *
+ * This represents the final triangulated mesh data that will be directly used
+ * to create glTF primitives. All faces from the original polyhedron are
+ * converted to triangles using fan triangulation.
+ */
 type GeometryData = {
+  /**
+   * Flattened array of vertex positions in 3D space.
+   *
+   * Format: [x1, y1, z1, x2, y2, z2, ...]
+   * - Each vertex uses 3 consecutive Float32 values (x, y, z coordinates)
+   * - Total length = (number of triangles × 3 vertices per triangle × 3 components)
+   * - Used as the POSITION attribute in glTF
+   *
+   * @example
+   * // For 2 triangles:
+   * // Triangle 1: vertices at (0,0,0), (1,0,0), (0,1,0)
+   * // Triangle 2: vertices at (1,0,0), (1,1,0), (0,1,0)
+   * positions = [0,0,0, 1,0,0, 0,1,0, 1,0,0, 1,1,0, 0,1,0]
+   */
   positions: Float32Array;
+
+  /**
+   * Triangle vertex indices for indexed rendering.
+   *
+   * Format: [idx1, idx2, idx3, idx4, idx5, idx6, ...]
+   * - Each triangle uses 3 consecutive indices
+   * - Indices reference positions in the positions array (groups of 3)
+   * - For non-indexed geometry, this is typically sequential: [0,1,2,3,4,5,...]
+   * - Total length = (number of triangles × 3 indices per triangle)
+   *
+   * @example
+   * // For 2 triangles with 6 vertices:
+   * indices = [0,1,2, 3,4,5]
+   * // Triangle 1 uses vertices 0,1,2 from positions array
+   * // Triangle 2 uses vertices 3,4,5 from positions array
+   */
   indices: Uint32Array;
+
+  /**
+   * Per-vertex color data (optional).
+   *
+   * Format: [r1, g1, b1, r2, g2, b2, ...]
+   * - Each vertex uses 3 consecutive Float32 values (RGB components)
+   * - Color values are in range [0.0, 1.0]
+   * - Same length as positions array (both have 3 components per vertex)
+   * - Used as the COLOR_0 attribute in glTF
+   * - If undefined, the primitive will use the material's base color
+   *
+   * Note: Face colors from IndexedPolyhedron are replicated to all vertices
+   * of triangles created from that face during triangulation.
+   *
+   * @example
+   * // For 2 triangles (6 vertices), first triangle red, second blue:
+   * colors = [1,0,0, 1,0,0, 1,0,0, 0,0,1, 0,0,1, 0,0,1]
+   */
   colors?: Float32Array;
 };
 
@@ -84,18 +140,23 @@ function convertMeshToGeometry(meshData: IndexedPolyhedron): GeometryData {
         continue;
       }
 
+      // Transform vertices from z-up to y-up coordinate system and convert units (mm to m)
+      const transformedV1 = transformVerticesGltf(v1);
+      const transformedV2 = transformVerticesGltf(v2);
+      const transformedV3 = transformVerticesGltf(v3);
+
       // Add positions
-      positions[positionIndex++] = v1[0];
-      positions[positionIndex++] = v1[1];
-      positions[positionIndex++] = v1[2];
+      positions[positionIndex++] = transformedV1[0];
+      positions[positionIndex++] = transformedV1[1];
+      positions[positionIndex++] = transformedV1[2];
 
-      positions[positionIndex++] = v2[0];
-      positions[positionIndex++] = v2[1];
-      positions[positionIndex++] = v2[2];
+      positions[positionIndex++] = transformedV2[0];
+      positions[positionIndex++] = transformedV2[1];
+      positions[positionIndex++] = transformedV2[2];
 
-      positions[positionIndex++] = v3[0];
-      positions[positionIndex++] = v3[1];
-      positions[positionIndex++] = v3[2];
+      positions[positionIndex++] = transformedV3[0];
+      positions[positionIndex++] = transformedV3[1];
+      positions[positionIndex++] = transformedV3[2];
 
       // Add colors (same color for all vertices of this triangle)
       vertexColors[colorIndex++] = faceColor[0];
@@ -157,7 +218,61 @@ function createGltfDocument(meshData: IndexedPolyhedron): Document {
     mesh.addPrimitive(primitive);
   }
 
-  scene.addChild(document.createNode().setMesh(mesh));
+  const node = document.createNode().setMesh(mesh);
+  scene.addChild(node);
+
+  // Add lines as a separate mesh if available
+  if (meshData.lines?.positions.length) {
+    const linesMesh = document.createMesh();
+
+    // Create line geometry - convert flat positions to Float32Array and transform coordinates
+    const originalLinePositions = meshData.lines.positions;
+    const linePositions = new Float32Array(originalLinePositions.length);
+
+    // Transform line positions from z-up to y-up coordinate system and convert units (mm to m)
+    for (let i = 0; i < originalLinePositions.length; i += 3) {
+      const x = originalLinePositions[i];
+      const y = originalLinePositions[i + 1];
+      const z = originalLinePositions[i + 2];
+
+      if (x === undefined || y === undefined || z === undefined) {
+        continue;
+      }
+
+      const vertex: [number, number, number] = [x, y, z];
+      const transformed = transformVerticesGltf(vertex);
+      linePositions[i] = transformed[0];
+      linePositions[i + 1] = transformed[1];
+      linePositions[i + 2] = transformed[2];
+    }
+
+    // Create line indices - each pair of positions forms a line
+    const lineIndices = new Uint32Array(linePositions.length / 3);
+    for (let i = 0; i < lineIndices.length; i++) {
+      lineIndices[i] = i;
+    }
+
+    const lineMaterial = document
+      .createMaterial()
+      .setDoubleSided(true)
+      .setAlphaMode('OPAQUE')
+      .setMetallicFactor(0)
+      .setRoughnessFactor(1)
+      .setBaseColorFactor([0.141, 0.259, 0.141, 1]); // #244224 color
+
+    const linePrimitive = document
+      .createPrimitive()
+      .setMode(1) // LINES mode
+      .setMaterial(lineMaterial)
+      .setAttribute('POSITION', document.createAccessor().setType('VEC3').setArray(linePositions))
+      .setIndices(document.createAccessor().setType('SCALAR').setArray(lineIndices));
+
+    linesMesh.addPrimitive(linePrimitive);
+
+    // Add lines mesh to scene with a special name for identification
+    const linesNode = document.createNode().setMesh(linesMesh);
+    scene.addChild(linesNode);
+  }
 
   return document;
 }

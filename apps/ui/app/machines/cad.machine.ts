@@ -1,10 +1,11 @@
-import { assign, assertEvent, setup, sendTo, emit, not, enqueueActions } from 'xstate';
+import { assign, assertEvent, setup, sendTo, emit, enqueueActions } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import { kernelMachine } from '~/machines/kernel.machine.js';
-import type { KernelEventExternal } from '~/machines/kernel.machine.js';
-import type { CodeError, Shape } from '~/types/cad.types.js';
-import type { ExportFormat, KernelError, KernelProvider } from '~/types/kernel.types.js';
-import type { graphicsMachine } from '~/machines/graphics.machine.js';
+import { kernelMachine } from '#machines/kernel.machine.js';
+import type { KernelEventExternal } from '#machines/kernel.machine.js';
+import type { CodeError, Geometry } from '#types/cad.types.js';
+import type { ExportFormat, KernelError, KernelProvider } from '#types/kernel.types.js';
+import type { graphicsMachine } from '#machines/graphics.machine.js';
+import type { logMachine } from '#machines/logs.machine.js';
 
 // Interface defining the context for the CAD machine
 export type CadContext = {
@@ -12,7 +13,7 @@ export type CadContext = {
   screenshot: string | undefined;
   parameters: Record<string, unknown>;
   defaultParameters: Record<string, unknown>;
-  shapes: Shape[];
+  geometries: Geometry[];
   kernelError: KernelError | undefined;
   codeErrors: CodeError[];
   kernelRef: ActorRefFrom<typeof kernelMachine>;
@@ -20,7 +21,8 @@ export type CadContext = {
   shouldInitializeKernelOnStart: boolean;
   isKernelInitializing: boolean;
   isKernelInitialized: boolean;
-  graphicsRef: ActorRefFrom<typeof graphicsMachine> | undefined;
+  graphicsRef?: ActorRefFrom<typeof graphicsMachine>;
+  logActorRef?: ActorRefFrom<typeof logMachine>;
   jsonSchema?: unknown;
   kernelTypeSelected: KernelProvider;
 };
@@ -37,12 +39,14 @@ type CadEvent =
 
 type CadEmitted =
   | { type: 'modelUpdated'; code: string; parameters: Record<string, unknown> }
-  | { type: 'geometryEvaluated'; shapes: Shape[] }
-  | { type: 'geometryExported'; blob: Blob; format: string };
+  | { type: 'geometryEvaluated'; geometries: Geometry[] }
+  | { type: 'geometryExported'; blob: Blob; format: ExportFormat }
+  | { type: 'exportFailed'; error: KernelError };
 
 type CadInput = {
   shouldInitializeKernelOnStart: boolean;
   graphicsRef?: ActorRefFrom<typeof graphicsMachine>;
+  logActorRef?: ActorRefFrom<typeof logMachine>;
 };
 
 // Debounce delay for code changes in milliseconds
@@ -92,6 +96,20 @@ export const cadMachine = setup({
         };
       },
     ),
+    sendKernelLogs: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'kernelLog');
+      if (context.logActorRef) {
+        enqueue.sendTo(context.logActorRef, {
+          type: 'addLog',
+          message: event.message,
+          options: {
+            level: event.level,
+            origin: event.origin,
+            data: event.data,
+          },
+        });
+      }
+    }),
     setCode: assign({
       code({ event }) {
         assertEvent(event, 'setCode');
@@ -113,21 +131,21 @@ export const cadMachine = setup({
       code: context.code,
       parameters: context.parameters,
     })),
-    setShapes: enqueueActions(({ enqueue, event, context }) => {
+    setGeometries: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'geometryComputed');
       enqueue.assign({
-        shapes: event.shapes,
+        geometries: event.geometries,
         kernelError: undefined,
       });
       enqueue.emit({
         type: 'geometryEvaluated' as const,
-        shapes: event.shapes,
+        geometries: event.geometries,
       });
-      // Send shapes to graphics machine
+      // Send geometries to graphics machine
       if (context.graphicsRef) {
         enqueue.sendTo(context.graphicsRef, {
-          type: 'updateShapes',
-          shapes: event.shapes,
+          type: 'updateGeometries',
+          geometries: event.geometries,
         });
       }
     }),
@@ -165,6 +183,16 @@ export const cadMachine = setup({
         format: event.format,
       });
     }),
+    setExportError: enqueueActions(({ enqueue, event }) => {
+      assertEvent(event, 'geometryExportFailed');
+      enqueue.assign({
+        exportedBlob: undefined,
+      });
+      enqueue.emit({
+        type: 'exportFailed' as const,
+        error: event.error,
+      });
+    }),
     initializeKernel: enqueueActions(({ enqueue, context, self }) => {
       enqueue.assign({ isKernelInitializing: true });
       enqueue.sendTo(context.kernelRef, {
@@ -172,28 +200,32 @@ export const cadMachine = setup({
         parentRef: self,
       });
     }),
-    initializeModel: assign(({ event }) => {
+    initializeModel: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'initializeModel');
 
-      return {
+      if (context.logActorRef) {
+        enqueue.sendTo(context.logActorRef, { type: 'clearLogs' });
+      }
+
+      enqueue.assign({
         code: event.code,
         parameters: event.parameters,
         codeErrors: [],
         kernelError: undefined,
-        shapes: [],
+        geometries: [],
         exportedBlob: undefined,
         jsonSchema: undefined,
         kernelTypeSelected: event.kernelType,
-      };
+      });
     }),
   },
   guards: {
     isKernelInitialized: ({ context }) => context.isKernelInitialized,
+    isKernelNotInitialized: ({ context }) => !context.isKernelInitialized,
     isKernelInitializing: ({ context }) => context.isKernelInitializing,
     hasModel: ({ context }) => context.code !== '',
   },
 }).createMachine({
-  /** @xstate-layout N4IgpgJg5mDOIC5QGMCGEB0AnM6CeAxLGAC4DCA9hGANoAMAuoqAA4WwCWJHFAdsyAAeiAJwAWAGwYJAdgCMADgl0RMkQGY5IgDQg8iMQCYFGAKwiJ60-MN0x62QF9HutJhz4ipAAqosqAFtSMCxYeiYkEDZObj4BYQRxKVlFZVUNLV19BFNDUww7cRFDETlFOVMJZ1d0bFwIQmISAFk+VGQKAFEsLApQ8IForh5+SISZSwx7GTELOzoZRcMsgzE6aUrjORk6QzEFQ3VqkDc6zzBBNiwSAHEwCiCSLDwByKHY0dBxiSk6CT2LKY5Oo6HI6OoVgh1GIxBhbJoxOYymDocdTh4GkQABaoFhgTqXPokSCvVjsYZxMaICYiAoVCRyBkwwyWUyQvYyDAyUx0UGgrQyPbqBRo2oAIwArgAzKUhDi8KBechUWiMQbkj7xRBlIFwmTQsoODSyCF6RDmfIiDTFWamRElGSizCSmVyhVK3z+R4hMJqt4akZahCGuRw6xqFmg62Q2a0u0LBSlSwVBamJ0YF2yrDyxWCWAkVDEjCoKXErAACh5dAAlARTpm3VBSVEA5SvqIFOtDCz42pTAoB3JIXJjGZebyJKYgcVzGJ0zheNRs+6YA9SM9OgA3VAAGwlhZJfrJMUDVKhhym6hmc1TIj+bLNCFmnLv-31EityZFLhOtQXS5zAgAGsQl4MAd26XosGbd5T3bc91Eva9lFve9h22QwzAHBl1EMGZNBEecwEXRslUoagYNbT4hEQXDEOmWYUO5V8H2yH4TEWZRlE7bk6CBIiSOXRUmk9QJgn6I8WxPNsaIQpDGN5Zi0MfCZ8m7UpAREAcFDEOQBIA90mlaXh2i6Ho+l9CJjwpajvgwMF6SnaFchhIdHzBXSuRkBR3wkHykzTH90WIgzhNIAARMApVQCUdxIUTvQkqypJsoNzAKDR8JmHZuJ0yFxHyXDKl5RNJyvOcgr-ELSIuK5bnuR5nko6TbOpDiex+CduRmZZHx0kwfL2ScwSBfsKpqdxqqE7FcXxQlrkPZLYJkhIFFDWQLAUSphT5eRIUFfJJH+EqP0FQ59JCSACDzAsixLMtyxrOsqsExb1RaoMJH2KYSlkHZvN0oFIVMKwMC28RdgBKcKnTEIoLIlVmtSs8kmkeQlBUNQCOHOhEzB3YKmclQ7HG39MDhvoPT8MSy0s97kfg1GUgx9Jsfc1Iw1yRM9m7BRcNh8ysCVYzTMgiykc1M8Jno8q5jWRZBXQ0EweOhwFn1TQqkq8nBYIWqiTuNcnheSTltahAJl+f5GKBEEwV67IwT4qZcbvXZwdyQKJowCmhdgHE8QJOq3v9D6pY-OlKkZORmVZfLcYwEQpwmGECv1QKf14FV4EiNx6cl+CAFo3OyQvfnHCvK+MIj8HzuDZJ4qZ7QsPDzE0EvzSMeyVF069hRw9MGyEuuVu1Qn7O2RldKsdIHcQU6m5yhZETvJQLuH0OGdksQZHQ+w4U0Qad+KJPSeC16IBH82uamHSHAHNZcg7nJoTB2c7TUAcQUI7WfcFq+gxrS7JtL6p9OzCmHPCDAmggToz8vIP4zhnBAA */
   id: 'cad',
   entry: enqueueActions(({ enqueue, context, self }) => {
     if (context.shouldInitializeKernelOnStart) {
@@ -205,7 +237,7 @@ export const cadMachine = setup({
     screenshot: undefined,
     parameters: {},
     defaultParameters: {},
-    shapes: [],
+    geometries: [],
     kernelError: undefined,
     codeErrors: [],
     kernelRef: spawn(kernelMachine),
@@ -214,6 +246,7 @@ export const cadMachine = setup({
     isKernelInitializing: false,
     isKernelInitialized: false,
     graphicsRef: input.graphicsRef,
+    logActorRef: input.logActorRef,
     jsonSchema: undefined,
     kernelTypeSelected: 'openscad',
   }),
@@ -232,7 +265,7 @@ export const cadMachine = setup({
             actions: ['initializeModel'],
           },
           {
-            guard: not('isKernelInitialized'),
+            guard: 'isKernelNotInitialized',
             // If the kernel isn't already initialized, initialize it.
             actions: ['initializeModel', 'initializeKernel'],
           },
@@ -258,6 +291,9 @@ export const cadMachine = setup({
           target: 'error',
           actions: 'setKernelError',
         },
+        kernelLog: {
+          actions: 'sendKernelLogs',
+        },
       },
     },
 
@@ -276,10 +312,13 @@ export const cadMachine = setup({
         },
         geometryComputed: {
           target: 'ready',
-          actions: 'setShapes',
+          actions: 'setGeometries',
         },
         parametersParsed: {
           actions: 'setDefaultParameters',
+        },
+        kernelLog: {
+          actions: 'sendKernelLogs',
         },
       },
     },
@@ -305,6 +344,12 @@ export const cadMachine = setup({
         },
         geometryExported: {
           actions: 'setExportedBlob',
+        },
+        geometryExportFailed: {
+          actions: 'setExportError',
+        },
+        kernelLog: {
+          actions: 'sendKernelLogs',
         },
       },
     },
@@ -339,6 +384,9 @@ export const cadMachine = setup({
           actions: 'setParameters',
           reenter: true, // Reset debounce timer when parameters change
         },
+        kernelLog: {
+          actions: 'sendKernelLogs',
+        },
       },
     },
     rendering: {
@@ -350,7 +398,7 @@ export const cadMachine = setup({
         },
         geometryComputed: {
           target: 'ready',
-          actions: 'setShapes',
+          actions: 'setGeometries',
         },
         parametersParsed: {
           actions: 'setDefaultParameters',
@@ -376,6 +424,9 @@ export const cadMachine = setup({
         geometryExported: {
           actions: 'setExportedBlob',
         },
+        kernelLog: {
+          actions: 'sendKernelLogs',
+        },
       },
     },
     error: {
@@ -400,6 +451,12 @@ export const cadMachine = setup({
         },
         geometryExported: {
           actions: 'setExportedBlob',
+        },
+        geometryExportFailed: {
+          actions: 'setExportError',
+        },
+        kernelLog: {
+          actions: 'sendKernelLogs',
         },
       },
     },

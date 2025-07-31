@@ -1,7 +1,7 @@
 import type { MotionProps } from 'motion/react';
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
-import { cn } from '~/utils/ui.js';
+import { cn } from '#utils/ui.js';
 
 type TypingAnimationProps = {
   readonly children: string;
@@ -41,7 +41,7 @@ export function TypingAnimation({
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) {
+        if (entry?.isIntersecting) {
           setTimeout(() => {
             setStarted(true);
           }, delay);

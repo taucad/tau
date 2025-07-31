@@ -1,9 +1,9 @@
 import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import { FileIcon, FolderIcon, FolderOpenIcon } from 'lucide-react';
 import React, { createContext, useCallback, useContext, useEffect, useState, useMemo } from 'react';
-import { Button } from '~/components/ui/button.js';
-import { SidebarMenuButton } from '~/components/ui/sidebar.js';
-import { cn } from '~/utils/ui.js';
+import { Button } from '#components/ui/button.js';
+import { SidebarMenuButton } from '#components/ui/sidebar.js';
+import { cn } from '#utils/ui.js';
 
 type TreeViewElement = {
   id: string;
@@ -143,7 +143,7 @@ function Tree({
           className="flex w-full flex-col gap-1"
           dir={dir as Direction}
           onValueChange={(value) => {
-            setExpandedItems((previous) => [...(previous ?? []), value[0]]);
+            setExpandedItems((previous) => [...(previous ?? []), value[0]!]);
           }}
         >
           {children}
@@ -217,7 +217,7 @@ function Folder({
           defaultValue={expandedItems}
           value={expandedItems}
           onValueChange={(value) => {
-            setExpandedItems?.((previous) => [...(previous ?? []), value[0]]);
+            setExpandedItems?.((previous) => [...(previous ?? []), value[0]!]);
           }}
         >
           {children}

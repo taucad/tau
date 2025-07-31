@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { useSelector } from '@xstate/react';
-import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
+import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 
 /**
  * Internal component that handles the camera matrix manipulation in response to changing field of view.

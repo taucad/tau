@@ -13,6 +13,7 @@ node_modules
 # Build
 build
 dist
+out-tsc
 
 # Test coverage
 coverage
@@ -22,3 +23,9 @@ coverage
 
 # Bundler stats
 stats.html
+
+vite.config.*.timestamp*
+vitest.config.*.timestamp*
+
+# Docker pnpm deploy target directory
+pruned

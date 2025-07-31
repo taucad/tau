@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
-import { ModelController } from '~/api/models/model.controller.js';
-import { ModelService } from '~/api/models/model.service.js';
-import type { Model } from '~/api/models/model.schema.js';
+import { ModelController } from '#api/models/model.controller.js';
+import { ModelService } from '#api/models/model.service.js';
+import type { Model } from '#api/models/model.schema.js';
 
 // Mock data for testing
 const mockModels: Model[] = [

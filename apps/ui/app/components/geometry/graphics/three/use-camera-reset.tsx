@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
 import type { RefObject } from 'react';
-import { resetCamera as resetCameraFn } from '~/components/geometry/graphics/three/camera-reset.js';
-import { cameraCapabilityActor } from '~/routes/builds_.$id/graphics-actor.js';
+import { resetCamera as resetCameraFn } from '#components/geometry/graphics/three/camera-reset.js';
+import { cameraCapabilityActor } from '#routes/builds_.$id/graphics-actor.js';
 
 // Define the specific types needed for camera reset
 type ResetRotation = {
@@ -19,7 +19,7 @@ type ResetPerspective = {
 };
 
 type ResetCameraParameters = {
-  shapeRadius: number;
+  geometryRadius: number;
   rotation: ResetRotation;
   perspective: ResetPerspective;
   setSceneRadius: (radius: number) => void;
@@ -35,7 +35,7 @@ export function useCameraReset(
   const { camera, invalidate } = useThree();
   const isRegistered = useRef(false);
 
-  const { shapeRadius, rotation, perspective, setSceneRadius, originalDistanceReference } = parameters;
+  const { geometryRadius, rotation, perspective, setSceneRadius, originalDistanceReference } = parameters;
 
   // Create the reset function that now accepts an optional options object
   const resetCamera = useCallback(
@@ -47,7 +47,7 @@ export function useCameraReset(
 
       resetCameraFn({
         camera,
-        shapeRadius,
+        geometryRadius,
         rotation,
         perspective,
         setSceneRadius,
@@ -55,7 +55,7 @@ export function useCameraReset(
         enableConfiguredAngles: options?.enableConfiguredAngles,
       });
     },
-    [camera, invalidate, shapeRadius, rotation, perspective, setSceneRadius, originalDistanceReference],
+    [camera, invalidate, geometryRadius, rotation, perspective, setSceneRadius, originalDistanceReference],
   );
 
   // Register the reset function with the camera capability actor only once

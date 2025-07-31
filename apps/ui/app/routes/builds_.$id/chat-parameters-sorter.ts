@@ -3,7 +3,7 @@
  * These should be associated with the feature they describe
  */
 import * as pluralize from 'pluralize';
-import { descriptorTerms, commonGeneralTerms } from '~/constants/build-parameters.js';
+import { descriptorTerms, commonGeneralTerms } from '#constants/build-parameters.js';
 
 /**
  * Normalize a plural word to its singular form using the pluralize library

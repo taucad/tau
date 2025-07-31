@@ -1,22 +1,23 @@
 import { assign, assertEvent, setup, sendTo, fromPromise } from 'xstate';
 import type { Snapshot, ActorRef, OutputFrom, DoneActorEvent } from 'xstate';
-import { wrap } from 'comlink';
+import { proxy, wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import { isBrowser } from 'motion/react';
-import type { Shape } from '~/types/cad.types.js';
-import type { ExportFormat, KernelError, KernelProvider } from '~/types/kernel.types.js';
-import { isKernelSuccess } from '~/types/kernel.types.js';
-import type { BuilderWorkerInterface as ReplicadWorker } from '~/components/geometry/kernel/replicad/replicad.worker.js';
-import ReplicadBuilderWorker from '~/components/geometry/kernel/replicad/replicad.worker.js?worker';
-import type { OpenScadBuilderInterface as OpenSCADWorker } from '~/components/geometry/kernel/openscad/openscad.worker.js';
-import OpenSCADBuilderWorker from '~/components/geometry/kernel/openscad/openscad.worker.js?worker';
-import type { ZooBuilderInterface as ZooWorker } from '~/components/geometry/kernel/zoo/zoo.worker.js';
-import ZooBuilderWorker from '~/components/geometry/kernel/zoo/zoo.worker.js?worker';
-import { assertActorDoneEvent } from '~/lib/xstate.js';
+import type { Geometry } from '#types/cad.types.js';
+import type { ExportFormat, KernelError, KernelProvider } from '#types/kernel.types.js';
+import { isKernelSuccess } from '#types/kernel.types.js';
+import type { ReplicadWorkerInterface as ReplicadWorker } from '#components/geometry/kernel/replicad/replicad.worker.js';
+import ReplicadBuilderWorker from '#components/geometry/kernel/replicad/replicad.worker.js?worker';
+import type { OpenScadBuilderInterface as OpenScadWorker } from '#components/geometry/kernel/openscad/openscad.worker.js';
+import OpenScadBuilderWorker from '#components/geometry/kernel/openscad/openscad.worker.js?worker';
+import type { ZooBuilderInterface as ZooWorker } from '#components/geometry/kernel/zoo/zoo.worker.js';
+import ZooBuilderWorker from '#components/geometry/kernel/zoo/zoo.worker.js?worker';
+import { assertActorDoneEvent } from '#lib/xstate.js';
+import type { LogLevel, LogOrigin, OnWorkerLog } from '#types/console.types.js';
 
 const workers = {
   replicad: ReplicadBuilderWorker,
-  openscad: OpenSCADBuilderWorker,
+  openscad: OpenScadBuilderWorker,
   zoo: ZooBuilderWorker,
 } as const satisfies Partial<Record<KernelProvider, new () => Worker>>;
 
@@ -55,14 +56,26 @@ const createWorkersActor = fromPromise<
 
     // Wrap all workers with comlink
     const wrappedReplicadWorker = wrap<ReplicadWorker>(replicadWorker);
-    const wrappedOpenscadWorker = wrap<OpenSCADWorker>(openscadWorker);
+    const wrappedOpenscadWorker = wrap<OpenScadWorker>(openscadWorker);
     const wrappedZooWorker = wrap<ZooWorker>(zooWorker);
+
+    const onLog: OnWorkerLog = (log) => {
+      if (context.parentRef) {
+        context.parentRef.send({
+          type: 'kernelLog',
+          level: log.level,
+          message: log.message,
+          origin: log.origin,
+          data: log.data,
+        });
+      }
+    };
 
     // Initialize all workers with the default exception handling mode
     await Promise.all([
-      wrappedReplicadWorker.initialize(true),
-      wrappedOpenscadWorker.initialize(),
-      wrappedZooWorker.initialize(),
+      wrappedReplicadWorker.initialize(proxy(onLog), { withExceptions: true }),
+      wrappedOpenscadWorker.initialize(proxy(onLog), {}),
+      wrappedZooWorker.initialize(proxy(onLog), { apiKey: '123' }),
     ]);
 
     // Store references to all workers
@@ -139,7 +152,7 @@ const parseParametersActor = fromPromise<
   }
 
   try {
-    const parametersResult = await wrappedWorker.extractParametersFromCode(event.code);
+    const parametersResult = await wrappedWorker.extractParameters(event.code);
 
     if (isKernelSuccess(parametersResult)) {
       const { defaultParameters, jsonSchema } = parametersResult.data as {
@@ -181,7 +194,7 @@ const parseParametersActor = fromPromise<
 const evaluateCodeActor = fromPromise<
   | {
       type: 'geometryComputed';
-      shapes: Shape[];
+      geometries: Geometry[];
     }
   | {
       type: 'kernelError';
@@ -232,11 +245,11 @@ const evaluateCodeActor = fromPromise<
     ...event.parameters,
   };
 
-  const result = await wrappedWorker.buildShapesFromCode(event.code, mergedParameters);
+  const result = await wrappedWorker.computeGeometry(event.code, mergedParameters);
 
   // Handle the result pattern
   if (isKernelSuccess(result)) {
-    return { type: 'geometryComputed', shapes: result.data };
+    return { type: 'geometryComputed', geometries: result.data };
   }
 
   return {
@@ -246,7 +259,7 @@ const evaluateCodeActor = fromPromise<
 });
 
 const exportGeometryActor = fromPromise<
-  { type: 'geometryExported'; blob: Blob; format: ExportFormat } | { type: 'kernelError'; error: KernelError },
+  { type: 'geometryExported'; blob: Blob; format: ExportFormat } | { type: 'geometryExportFailed'; error: KernelError },
   { context: KernelContext; event: { format: ExportFormat; kernelType: KernelProvider } }
 >(async ({ input }) => {
   const { context, event } = input;
@@ -254,7 +267,7 @@ const exportGeometryActor = fromPromise<
   // Skip in non-browser environments
   if (!isBrowser) {
     return {
-      type: 'kernelError',
+      type: 'geometryExportFailed',
       error: {
         message: 'Not in browser environment',
         startLineNumber: 0,
@@ -269,7 +282,7 @@ const exportGeometryActor = fromPromise<
 
   if (!wrappedWorker) {
     return {
-      type: 'kernelError',
+      type: 'geometryExportFailed',
       error: {
         message: `${event.kernelType} worker not initialized`,
         startLineNumber: 0,
@@ -281,17 +294,31 @@ const exportGeometryActor = fromPromise<
 
   try {
     const { format } = event;
-    // TODO: Add support checking for kernels
-    const result = await wrappedWorker.exportShape(format as 'stl' | 'stl-binary');
+    const supportedFormats = await wrappedWorker.getSupportedExportFormats();
+    if (!supportedFormats.includes(format)) {
+      return {
+        type: 'geometryExportFailed',
+        error: {
+          message: `Unsupported export format: ${format}`,
+          startLineNumber: 0,
+          startColumn: 0,
+          type: 'runtime',
+        },
+      };
+    }
+
+    // TODO: add a proper type guard for the export format
+    const result = await wrappedWorker.exportGeometry(format as never);
 
     if (isKernelSuccess(result)) {
       const { data } = result;
       if (Array.isArray(data) && data.length > 0 && data[0]?.blob) {
+        // TODO: Handle multiple blobs during export
         return { type: 'geometryExported', blob: data[0].blob, format };
       }
 
       return {
-        type: 'kernelError',
+        type: 'geometryExportFailed',
         error: {
           message: 'No geometry data to export',
           startLineNumber: 0,
@@ -301,14 +328,16 @@ const exportGeometryActor = fromPromise<
       };
     }
 
+    console.log('Got Export Error', result);
+
     return {
-      type: 'kernelError',
+      type: 'geometryExportFailed',
       error: result.error,
     };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Failed to export shape';
+    const errorMessage = error instanceof Error ? error.message : 'Failed to export geometry';
     return {
-      type: 'kernelError',
+      type: 'geometryExportFailed',
       error: {
         message: errorMessage,
         startLineNumber: 0,
@@ -337,8 +366,17 @@ type KernelEventInternal =
   | { type: 'parseParameters'; code: string; kernelType: KernelProvider }
   | { type: 'exportGeometry'; format: ExportFormat; kernelType: KernelProvider };
 
+// Define the events that the workers can send to the kernel machine
+type KernelEventWorker = {
+  type: 'kernelLog';
+  level: LogLevel;
+  message: string;
+  origin?: LogOrigin;
+  data?: unknown;
+};
+
 // The kernel machine simply sends the output of the actors to the parent machine.
-export type KernelEventExternal = OutputFrom<(typeof kernelActors)[KernelActorNames]>;
+export type KernelEventExternal = OutputFrom<(typeof kernelActors)[KernelActorNames]> | KernelEventWorker;
 type KernelEventExternalDone = DoneActorEvent<KernelEventExternal, KernelActorNames>;
 
 type KernelEvent = KernelEventExternalDone | KernelEventInternal;
@@ -346,7 +384,7 @@ type KernelEvent = KernelEventExternalDone | KernelEventInternal;
 // Interface defining the context for the Kernel machine
 type KernelContext = {
   workers: Record<KernelProvider, Worker | undefined>;
-  wrappedWorkers: Record<KernelProvider, Remote<ReplicadWorker | OpenSCADWorker | ZooWorker> | undefined>;
+  wrappedWorkers: Record<KernelProvider, Remote<ReplicadWorker | OpenScadWorker | ZooWorker> | undefined>;
   parentRef?: CadActor;
   currentKernelType?: KernelProvider;
 };
@@ -385,18 +423,21 @@ export const kernelMachine = setup({
     }),
     async destroyWorkers({ context }) {
       if (context.workers.replicad) {
+        await context.wrappedWorkers.replicad?.cleanup();
         context.workers.replicad.terminate();
         context.workers.replicad = undefined;
         context.wrappedWorkers.replicad = undefined;
       }
 
       if (context.workers.openscad) {
+        await context.wrappedWorkers.openscad?.cleanup();
         context.workers.openscad.terminate();
         context.workers.openscad = undefined;
         context.wrappedWorkers.openscad = undefined;
       }
 
       if (context.workers.zoo) {
+        await context.wrappedWorkers.zoo?.cleanup();
         context.workers.zoo.terminate();
         context.workers.zoo = undefined;
         context.wrappedWorkers.zoo = undefined;

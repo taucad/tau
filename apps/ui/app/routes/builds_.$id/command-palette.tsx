@@ -14,15 +14,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelector, useActorRef } from '@xstate/react';
 import { Link, useNavigate } from 'react-router';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
-import { BoxDown } from '~/components/icons/box-down.js';
-import { Button } from '~/components/ui/button.js';
-import { useBuildSelector } from '~/hooks/use-build.js';
-import { toast } from '~/components/ui/sonner.js';
-import { cadActor } from '~/routes/builds_.$id/cad-actor.js';
-import { graphicsActor } from '~/routes/builds_.$id/graphics-actor.js';
-import { downloadBlob } from '~/utils/file.js';
-import { screenshotRequestMachine } from '~/machines/screenshot-request.machine.js';
-import { exportGeometryMachine } from '~/machines/export-geometry.machine.js';
+import { Button } from '#components/ui/button.js';
+import { useBuildSelector } from '#hooks/use-build.js';
+import { toast } from '#components/ui/sonner.js';
+import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { downloadBlob } from '#utils/file.js';
+import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
+import { exportGeometryMachine } from '#machines/export-geometry.machine.js';
 import {
   CommandDialog,
   CommandInput,
@@ -30,12 +29,14 @@ import {
   CommandEmpty,
   CommandGroup,
   CommandItem,
-} from '~/components/ui/command.js';
-import { useKeydown } from '~/hooks/use-keydown.js';
-import { KeyShortcut } from '~/components/ui/key-shortcut.js';
-import type { KeyCombination } from '~/utils/keys.js';
-import type { ExportFormat } from '~/types/kernel.types.js';
-import { extensionFromFormat } from '~/constants/kernel.constants.js';
+} from '#components/ui/command.js';
+import { useKeydown } from '#hooks/use-keydown.js';
+import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import type { KeyCombination } from '#utils/keys.js';
+import type { ExportFormat } from '#types/kernel.types.js';
+import { extensionFromFormat } from '#constants/kernel.constants.js';
+import { SvgIcon } from '#components/icons/svg-icon.js';
+import { Format3D } from '#components/icons/format-3d.js';
 
 type CommandPaletteItem = {
   id: string;
@@ -56,7 +57,7 @@ type CommandPaletteProperties = {
 
 export function CommandPalette({ isOpen, onOpenChange }: CommandPaletteProperties): React.JSX.Element {
   const navigate = useNavigate();
-  const shapes = useSelector(cadActor, (state) => state.context.shapes);
+  const geometries = useSelector(cadActor, (state) => state.context.geometries);
   const buildName = useBuildSelector((state) => state.build?.name) ?? 'file';
   const updateThumbnail = useBuildSelector((state) => state.updateThumbnail);
   const code = useSelector(cadActor, (state) => state.context.code);
@@ -362,10 +363,10 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
     onOpenChange(false);
   }, [buildName, screenshotActorRef, onOpenChange]);
 
-  // Subscribe to the cadActor to update the thumbnail when the shapes change
+  // Subscribe to the cadActor to update the thumbnail when the geometries change
   useEffect(() => {
     const subscription = cadActor.on('geometryEvaluated', (event) => {
-      if (event.shapes.length > 0) {
+      if (event.geometries.length > 0) {
         updateThumbnailScreenshot();
       }
     });
@@ -381,47 +382,47 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         id: 'download-stl',
         label: 'Download STL',
         group: 'Export',
-        icon: <BoxDown className="mr-2 size-4" />,
+        icon: <Format3D extension="stl" />,
         action: async () => handleExport(buildName, 'stl'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'download-step',
         label: 'Download STEP',
         group: 'Export',
-        icon: <BoxDown className="mr-2 size-4" />,
+        icon: <Format3D extension="step" />,
         action: async () => handleExport(buildName, 'step'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'download-gltf',
         label: 'Download GLTF',
         group: 'Export',
-        icon: <BoxDown className="mr-2 size-4" />,
+        icon: <SvgIcon id="gltf" />,
         action: async () => handleExport(buildName, 'gltf'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'download-glb',
         label: 'Download GLB',
         group: 'Export',
-        icon: <BoxDown className="mr-2 size-4" />,
+        icon: <SvgIcon id="gltf" />,
         action: async () => handleExport(buildName, 'glb'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'download-3mf',
         label: 'Download 3MF',
         group: 'Export',
-        icon: <BoxDown className="mr-2 size-4" />,
+        icon: <Format3D extension="3mf" />,
         action: async () => handleExport(buildName, '3mf'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'update-thumbnail',
         label: 'Update thumbnail',
         group: 'Preview',
-        icon: <GalleryThumbnails className="mr-2 size-4" />,
+        icon: <GalleryThumbnails />,
         action: handleUpdateThumbnail,
         disabled: !isScreenshotReady,
       },
@@ -429,7 +430,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         id: 'copy-png',
         label: 'Copy PNG to clipboard',
         group: 'Preview',
-        icon: <Clipboard className="mr-2 size-4" />,
+        icon: <Clipboard />,
         action: handleCopyPngToClipboard,
         disabled: !isScreenshotReady,
         visible: import.meta.env.DEV,
@@ -438,7 +439,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         id: 'copy-data-url',
         label: 'Copy data URL to clipboard',
         group: 'Preview',
-        icon: <Clipboard className="mr-2 size-4" />,
+        icon: <Clipboard />,
         action: handleCopyDataUrlToClipboard,
         disabled: !isScreenshotReady,
         visible: import.meta.env.DEV,
@@ -447,7 +448,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         id: 'download-png',
         label: 'Download PNG',
         group: 'Preview',
-        icon: <ImageDown className="mr-2 size-4" />,
+        icon: <ImageDown />,
         action: async () => handleDownloadPng(`${buildName}.png`),
         disabled: !isScreenshotReady,
       },
@@ -455,7 +456,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         id: 'download-multiple-angles',
         label: 'Download multiple angles',
         group: 'Preview',
-        icon: <ImageDown className="mr-2 size-4" />,
+        icon: <ImageDown />,
         action: handleDownloadMultipleAngles,
         disabled: !isScreenshotReady,
       },
@@ -463,7 +464,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         id: 'download-code',
         label: 'Download code',
         group: 'Code',
-        icon: <Download className="mr-2 size-4" />,
+        icon: <Download />,
         action: handleDownloadCode,
         disabled: !code,
       },
@@ -471,7 +472,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         id: 'new-build-from-prompt',
         label: 'New build (from prompt)',
         group: 'Builds',
-        icon: <Plus className="mr-2 size-4" />,
+        icon: <Plus />,
         link: '/',
         shortcut: '⌃N',
       },
@@ -479,14 +480,14 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         id: 'new-build-from-template',
         label: 'New build (from code)',
         group: 'Builds',
-        icon: <Plus className="mr-2 size-4" />,
+        icon: <Plus />,
         link: '/builds/new',
       },
       {
         id: 'all-builds',
         label: 'All builds',
         group: 'Builds',
-        icon: <List className="mr-2 size-4" />,
+        icon: <List />,
         link: '/builds/library',
         shortcut: '⌃B',
       },
@@ -494,7 +495,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         id: 'open-settings',
         label: 'Open settings',
         group: 'Settings',
-        icon: <Cog className="mr-2 size-4" />,
+        icon: <Cog />,
         link: '/settings',
         visible: Boolean(authData),
       },
@@ -502,7 +503,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         id: 'sign-in',
         label: 'Sign in',
         group: 'Settings',
-        icon: <LogIn className="mr-2 size-4" />,
+        icon: <LogIn />,
         link: '/auth/sign-in',
         visible: !authData,
       },
@@ -510,7 +511,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         id: 'sign-out',
         label: 'Sign out',
         group: 'Settings',
-        icon: <LogOut className="mr-2 size-4" />,
+        icon: <LogOut />,
         link: '/auth/sign-out',
         visible: Boolean(authData),
       },
@@ -523,7 +524,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
       handleDownloadPng,
       buildName,
       handleExport,
-      shapes,
+      geometries,
       code,
       handleDownloadCode,
       handleDownloadMultipleAngles,
@@ -576,8 +577,10 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
                     }
                   }}
                 >
-                  {item.icon}
-                  <span>{item.label}</span>
+                  <div className="flex items-center gap-2">
+                    {item.icon}
+                    <span>{item.label}</span>
+                  </div>
                   {item.shortcut ? <KeyShortcut className="ml-auto">{item.shortcut}</KeyShortcut> : null}
                 </CommandItem>
               );
@@ -620,7 +623,7 @@ export function CommandPaletteTrigger(): React.JSX.Element {
           setOpen(true);
         }}
       >
-        <Terminal className="mr-2 size-4" />
+        <Terminal />
         <span className="hidden lg:inline-flex">Search commands...</span>
         <span className="inline-flex lg:hidden">Search...</span>
         <KeyShortcut className="absolute top-1/2 right-2 -translate-y-1/2">{formattedKeyCombination}</KeyShortcut>

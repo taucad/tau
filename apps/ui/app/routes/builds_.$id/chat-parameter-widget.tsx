@@ -1,7 +1,7 @@
 import type { WidgetProps } from '@rjsf/utils';
-import { ChatParametersBoolean } from '~/routes/builds_.$id/chat-parameters-boolean.js';
-import { ChatParametersNumber } from '~/routes/builds_.$id/chat-parameters-number.js';
-import { ChatParametersString } from '~/routes/builds_.$id/chat-parameters-string.js';
+import { ChatParametersBoolean } from '#routes/builds_.$id/chat-parameters-boolean.js';
+import { ChatParametersNumber } from '#routes/builds_.$id/chat-parameters-number.js';
+import { ChatParametersString } from '#routes/builds_.$id/chat-parameters-string.js';
 
 export function ChatParameterWidget(props: WidgetProps): React.JSX.Element {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- RJSF is untyped

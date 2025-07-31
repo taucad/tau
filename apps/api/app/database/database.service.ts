@@ -5,9 +5,9 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import type { OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import type { Environment } from '~/config/environment.config.js';
-import * as schema from '~/database/schema.js';
-import { SqlLogger } from '~/database/database.logger.js';
+import type { Environment } from '#config/environment.config.js';
+import * as schema from '#database/schema.js';
+import { SqlLogger } from '#database/database.logger.js';
 
 export type DatabaseType = ReturnType<typeof drizzle<typeof schema>>;
 

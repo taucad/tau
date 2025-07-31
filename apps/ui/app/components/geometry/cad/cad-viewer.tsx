@@ -1,50 +1,44 @@
-import { ReplicadMesh } from '~/components/geometry/kernel/replicad/replicad-mesh.js';
-import { GltfMesh } from '~/components/geometry/graphics/three/gltf-mesh.js';
-import { ThreeProvider } from '~/components/geometry/graphics/three/three-context.js';
-import type { ThreeViewerProperties } from '~/components/geometry/graphics/three/three-context.js';
-import type { Shape } from '~/types/cad.types.js';
-import { SvgViewer } from '~/components/geometry/graphics/svg/svg-viewer.js';
+import { GltfMesh } from '#components/geometry/graphics/three/gltf-mesh.js';
+import { ThreeProvider } from '#components/geometry/graphics/three/three-context.js';
+import type { ThreeViewerProperties } from '#components/geometry/graphics/three/three-context.js';
+import type { Geometry } from '#types/cad.types.js';
+import { SvgViewer } from '#components/geometry/graphics/svg/svg-viewer.js';
 
 type CadViewerProperties = ThreeViewerProperties & {
-  readonly shapes: Shape[];
+  readonly geometries: Geometry[];
   readonly enableSurfaces?: boolean;
   readonly enableLines?: boolean;
 };
 
 export function CadViewer({
-  shapes,
+  geometries,
   enableSurfaces = true,
   enableLines = true,
   ...properties
 }: CadViewerProperties): React.JSX.Element {
-  const svgShapes = shapes.filter((shape) => shape.type === '2d');
+  const svgGeometries = geometries.filter((geometry) => geometry.type === '2d');
 
-  // If there are any SVG shapes, we render them in a SVG viewer
-  if (svgShapes.length > 0) {
-    return <SvgViewer shapes={svgShapes} />;
+  // If there are any SVG geometries, we render them in a SVG viewer
+  if (svgGeometries.length > 0) {
+    return <SvgViewer geometries={svgGeometries} />;
   }
 
   return (
     <ThreeProvider {...properties}>
-      {shapes.map((shape) => {
-        switch (shape.type) {
-          case '3d': {
-            return (
-              <ReplicadMesh key={shape.name} {...shape} enableSurfaces={enableSurfaces} enableLines={enableLines} />
-            );
-          }
-
+      {geometries.map((geometry, index) => {
+        switch (geometry.type) {
           case 'gltf': {
-            return <GltfMesh key={shape.name} {...shape} enableSurfaces={enableSurfaces} enableLines={enableLines} />;
+            // eslint-disable-next-line react/no-array-index-key -- TODO: add a unique key to the geometry (likely a hash key)
+            return <GltfMesh key={index} {...geometry} enableSurfaces={enableSurfaces} enableLines={enableLines} />;
           }
 
           case '2d': {
-            throw new Error('2D shapes are not supported');
+            throw new Error('2D geometries are not supported');
           }
 
           default: {
-            const neverShape: never = shape;
-            throw new Error(`Unknown shape type: ${JSON.stringify(neverShape)}`);
+            const neverGeometry: never = geometry;
+            throw new Error(`Unknown geometry type: ${JSON.stringify(neverGeometry)}`);
           }
         }
       })}

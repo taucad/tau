@@ -1,0 +1,15 @@
+{
+  "name": "@taucad/api",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@taucad/tau-examples": "workspace:*"
+  },
+  "imports": {
+    "#*": ["./app/*"]
+  },
+  "files": [
+    "dist"
+  ]
+}

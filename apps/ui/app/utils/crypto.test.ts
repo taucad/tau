@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hashCode, hashCodeSecure, generateSecureId, constantTimeEqual } from '~/utils/crypto.js';
+import { hashCode, hashCodeSecure, generateSecureId, constantTimeEqual } from '#utils/crypto.js';
 
 describe('hashCode', () => {
   it('should return a consistent hash for the same input', () => {

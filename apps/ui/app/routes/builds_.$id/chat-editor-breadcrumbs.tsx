@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react';
 import { Fragment } from 'react/jsx-runtime';
 import { ChevronRight, Download } from 'lucide-react';
-import { FileExplorerContext } from '~/routes/builds_.$id/graphics-actor.js';
-import { CopyButton } from '~/components/copy-button.js';
-import { Button } from '~/components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip.js';
-import { toast } from '~/components/ui/sonner.js';
-import { downloadBlob } from '~/utils/file.js';
+import { FileExplorerContext } from '#routes/builds_.$id/graphics-actor.js';
+import { CopyButton } from '#components/copy-button.js';
+import { Button } from '#components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { toast } from '#components/ui/sonner.js';
+import { downloadBlob } from '#utils/file.js';
 
 export function ChatEditorBreadcrumbs(): ReactNode {
   const activeFile = FileExplorerContext.useSelector((state) =>

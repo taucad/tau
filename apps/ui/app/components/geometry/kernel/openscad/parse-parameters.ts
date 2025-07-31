@@ -93,7 +93,7 @@ export function processOpenScadParameters(exportData: OpenScadParameterExport): 
       parameter.group.trim() !== ''
     ) {
       // Group parameters under their group name
-      groups[parameter.group] = {};
+      groups[parameter.group] ??= {};
       groups[parameter.group]![parameter.name] = schemaProperty;
     } else {
       // Global or ungrouped parameters go to root level

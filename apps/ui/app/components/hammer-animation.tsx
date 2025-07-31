@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { cn } from '~/utils/ui.js';
+import { cn } from '#utils/ui.js';
 
 export function HammerAnimation({ className }: { readonly className?: string }): React.JSX.Element {
   const hammerRef = useRef<HTMLDivElement>(null);

@@ -1,5 +1,5 @@
 import { Cog, Zap, Cpu } from 'lucide-react';
-import type { StandardSchemaV1 } from '~/types/schema.types.js';
+import type { StandardSchemaV1 } from '#types/schema.types.js';
 
 export type CodeError = {
   message: string;
@@ -9,7 +9,7 @@ export type CodeError = {
   endColumn: number;
 };
 
-export type Shape2D = {
+export type Geometry2D = {
   type: '2d';
   color?: string;
   format: 'svg';
@@ -17,45 +17,15 @@ export type Shape2D = {
   viewbox: string;
   opacity?: number;
   strokeType?: string;
-  error: boolean;
   name: string;
 };
 
-export type Shape3D = {
-  type: '3d';
-  faces: {
-    triangles: number[];
-    vertices: number[];
-    normals: number[];
-    faceGroups: Array<{
-      start: number;
-      count: number;
-      faceId: number;
-    }>;
-  };
-  edges: {
-    lines: number[];
-    edgeGroups: Array<{
-      start: number;
-      count: number;
-      edgeId: number;
-    }>;
-  };
-  color?: string;
-  opacity?: number;
-  error: boolean;
-  name: string;
-  highlight?: number[];
-};
-
-export type ShapeGltf = {
+export type GeometryGltf = {
   type: 'gltf';
   gltfBlob: Blob;
-  error: boolean;
-  name: string;
 };
 
-export type Shape = Shape2D | Shape3D | ShapeGltf;
+export type Geometry = Geometry2D | GeometryGltf;
 
 export const modelProviders = ['sambanova', 'openai', 'anthropic', 'ollama'] as const;
 export type ModelProvider = (typeof modelProviders)[number];

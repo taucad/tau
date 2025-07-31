@@ -1,13 +1,13 @@
 import { memo } from 'react';
-import { ChatHistory } from '~/routes/builds_.$id/chat-history.js';
-import { ChatViewTabs } from '~/routes/builds_.$id/chat-view-tabs.js';
-import { ChatViewSplit } from '~/routes/builds_.$id/chat-view-split.js';
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '~/components/ui/resizable.js';
-import { cn } from '~/utils/ui.js';
-import { ChatParameters } from '~/routes/builds_.$id/chat-parameters.js';
-import { useCookie } from '~/hooks/use-cookie.js';
-import { useViewContext } from '~/routes/builds_.$id/chat-interface-controls.js';
-import { cookieName } from '~/constants/cookie.constants.js';
+import { ChatHistory } from '#routes/builds_.$id/chat-history.js';
+import { ChatViewTabs } from '#routes/builds_.$id/chat-view-tabs.js';
+import { ChatViewSplit } from '#routes/builds_.$id/chat-view-split.js';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable.js';
+import { cn } from '#utils/ui.js';
+import { ChatParameters } from '#routes/builds_.$id/chat-parameters.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { useViewContext } from '#routes/builds_.$id/chat-interface-controls.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 export const ChatInterface = memo(function () {
   const [chatResizeMain, setChatResizeMain] = useCookie(cookieName.chatResizeMain, [25, 60, 15]);

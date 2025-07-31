@@ -5,7 +5,7 @@ import type { Auth } from 'better-auth';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyRequest } from 'fastify';
 import type { Socket } from 'socket.io';
-import { authInstanceKey, isOptionalAuth, isPublicAuth } from '~/constants/auth.constant.js';
+import { authInstanceKey, isOptionalAuth, isPublicAuth } from '#constants/auth.constant.js';
 
 @Injectable()
 export class AuthGuard implements CanActivate {

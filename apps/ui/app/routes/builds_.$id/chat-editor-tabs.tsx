@@ -1,8 +1,8 @@
 import { X } from 'lucide-react';
 import { useCallback, useEffect, useRef } from 'react';
-import { FileExplorerContext } from '~/routes/builds_.$id/graphics-actor.js';
-import { Button } from '~/components/ui/button.js';
-import { cn } from '~/utils/ui.js';
+import { FileExplorerContext } from '#routes/builds_.$id/graphics-actor.js';
+import { Button } from '#components/ui/button.js';
+import { cn } from '#utils/ui.js';
 
 export function ChatEditorTabs(): React.JSX.Element {
   const openFiles = FileExplorerContext.useSelector((state) => state.context.openFiles);

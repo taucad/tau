@@ -2,23 +2,23 @@ import type { CanvasProps } from '@react-three/fiber';
 import { Canvas } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useEffect, useState } from 'react';
-import { CameraHandler } from '~/components/geometry/graphics/three/camera-handler.js';
-import { Scene } from '~/components/geometry/graphics/three/scene.js';
-import type { StageOptions } from '~/components/geometry/graphics/three/stage.js';
-import rotateIconBase64 from '~/components/geometry/graphics/rotate-icon.svg?base64';
-import { ActorBridge } from '~/components/geometry/graphics/three/actor-bridge.js';
-import { cn } from '~/utils/ui.js';
+import { CameraHandler } from '#components/geometry/graphics/three/camera-handler.js';
+import { Scene } from '#components/geometry/graphics/three/scene.js';
+import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
+import rotateIconBase64 from '#components/geometry/graphics/rotate-icon.svg?base64';
+import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js';
+import { cn } from '#utils/ui.js';
 
 export type ThreeViewerProperties = {
   readonly enableGizmo?: boolean;
   readonly enableGrid?: boolean;
   readonly enableAxes?: boolean;
   readonly enableZoom?: boolean;
+  readonly enablePan?: boolean;
   readonly enableDamping?: boolean;
   readonly className?: string;
   readonly enableCentering?: boolean;
   readonly stageOptions?: StageOptions;
-  readonly defaultCameraAngle?: number;
   readonly zoomSpeed?: number;
 };
 
@@ -30,11 +30,11 @@ export function ThreeProvider({
   enableGrid = false,
   enableAxes = false,
   enableZoom = false,
+  enablePan = false,
   enableDamping = false,
   className,
   stageOptions,
   enableCentering = true,
-  defaultCameraAngle = 60,
   zoomSpeed = 1,
   ...properties
 }: ThreeContextProperties): React.JSX.Element {
@@ -42,7 +42,7 @@ export function ThreeProvider({
   const [isCanvasReady, setIsCanvasReady] = useState(false);
 
   useEffect(() => {
-    THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+    THREE.Object3D.DEFAULT_UP.set(0, 0, 1); // Z-up coordinate system
   }, []);
 
   return (
@@ -69,6 +69,7 @@ export function ThreeProvider({
         enableCentering={enableCentering}
         enableDamping={enableDamping}
         enableZoom={enableZoom}
+        enablePan={enablePan}
         enableGrid={enableGrid}
         enableAxes={enableAxes}
         stageOptions={stageOptions}

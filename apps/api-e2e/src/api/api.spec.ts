@@ -1,11 +1,11 @@
-import axios from 'axios';
+import ky from 'ky';
 import { describe, it, expect } from 'vitest';
 
 describe('GET /api', () => {
   it('should return a message', async () => {
-    const response = await axios.get(`/api`);
+    const response = await ky.get(`/api`);
 
     expect(response.status).toBe(200);
-    expect(response.data).toEqual({ message: 'Hello API' });
+    expect(await response.json()).toEqual({ message: 'Hello API' });
   });
 });

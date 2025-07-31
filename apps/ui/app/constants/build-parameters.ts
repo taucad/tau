@@ -24,9 +24,9 @@ export const dimensionTerms = [
 ];
 
 /**
- * Terms that indicate a parameter modifies shapes
+ * Terms that indicate a parameter modifies geometries
  */
-export const shapeModifierTerms = [
+export const geometryModifierTerms = [
   'rounded',
   'taper',
   'bevel',
@@ -82,6 +82,8 @@ export const unitlessTerms = [
   'divisions',
   'precision',
   'sampling',
+  'opacity',
+  'transparency',
 ];
 
 /**
@@ -136,7 +138,7 @@ export const commonGeneralTerms = [
  */
 export const descriptorTerms = [
   ...dimensionTerms,
-  ...shapeModifierTerms,
+  ...geometryModifierTerms,
   ...countTerms,
   ...angleTerms,
   ...unitlessTerms,

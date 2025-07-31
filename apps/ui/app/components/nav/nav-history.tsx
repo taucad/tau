@@ -1,15 +1,15 @@
-import { Edit, History, MoreHorizontal, Trash2, Search } from 'lucide-react';
+import { Edit, History, MoreHorizontal, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router';
-import type { Build } from '~/types/build.types.js';
+import type { Build } from '#types/build.types.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '~/components/ui/dropdown-menu.js';
+} from '#components/ui/dropdown-menu.js';
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -18,11 +18,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from '~/components/ui/sidebar.js';
-import { useBuilds } from '~/hooks/use-builds.js';
-import { toast } from '~/components/ui/sonner.js';
-import { groupItemsByTimeHorizon } from '~/utils/temporal.js';
-import { Input } from '~/components/ui/input.js';
+} from '#components/ui/sidebar.js';
+import { useBuilds } from '#hooks/use-builds.js';
+import { toast } from '#components/ui/sonner.js';
+import { groupItemsByTimeHorizon } from '#utils/temporal.js';
+import { SearchInput } from '#components/search-input.js';
 
 const buildsPerPage = 5;
 
@@ -113,6 +113,11 @@ export function NavHistory(): ReactNode {
     }
   };
 
+  const handleSearchClear = () => {
+    setSearchQuery('');
+    setVisibleCount(buildsPerPage);
+  };
+
   const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     // Prevent the search from triggering sidebar navigation
     event.stopPropagation();
@@ -124,22 +129,18 @@ export function NavHistory(): ReactNode {
 
   return (
     <>
-      {/* Search input - always show for the first group */}
-      {visibleBuilds.length > 0 && (
-        <SidebarGroup className="-mb-2 group-data-[collapsible=icon]:hidden">
-          <SidebarGroupLabel>Recent Builds</SidebarGroupLabel>
-          <div className="relative">
-            <Search className="absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search builds..."
-              value={searchQuery}
-              className="h-7 pl-7 text-xs"
-              onChange={handleSearchChange}
-              onKeyDown={handleSearchKeyDown}
-            />
-          </div>
-        </SidebarGroup>
-      )}
+      {/* Search input */}
+      <SidebarGroup className="-mb-2 group-data-[collapsible=icon]:hidden">
+        <SidebarGroupLabel>Recent Builds</SidebarGroupLabel>
+        <SearchInput
+          placeholder="Search builds..."
+          value={searchQuery}
+          className="h-7 text-xs"
+          onChange={handleSearchChange}
+          onKeyDown={handleSearchKeyDown}
+          onClear={handleSearchClear}
+        />
+      </SidebarGroup>
 
       {/* Temporal groups */}
       {visibleBuilds.map((group) => (

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { cn } from '~/utils/ui.js';
+import { cn } from '#utils/ui.js';
 
 function Input({ className, type, ...properties }: React.ComponentProps<'input'>): React.JSX.Element {
   return (

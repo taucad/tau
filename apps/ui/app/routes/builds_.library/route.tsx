@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Search,
   Grid,
   Layout,
   Eye,
@@ -30,12 +29,13 @@ import {
 } from '@tanstack/react-table';
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import { useActor, useSelector } from '@xstate/react';
-import { createColumns } from '~/routes/builds_.library/columns.js';
-import { CategoryBadge } from '~/components/category-badge.js';
-import { Button, buttonVariants } from '~/components/ui/button.js';
-import { Input } from '~/components/ui/input.js';
-import { Card, CardContent, CardHeader, CardDescription, CardFooter } from '~/components/ui/card.js';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select.js';
+import { createColumns } from '#routes/builds_.library/columns.js';
+import { CategoryBadge } from '#components/category-badge.js';
+import { Button, buttonVariants } from '#components/ui/button.js';
+import { SearchInput } from '#components/search-input.js';
+import { Input } from '#components/ui/input.js';
+import { Card, CardContent, CardHeader, CardDescription, CardFooter } from '#components/ui/card.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,16 +44,16 @@ import {
   DropdownMenuTrigger,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-} from '~/components/ui/dropdown-menu.js';
-import { cn } from '~/utils/ui.js';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '~/components/ui/tabs.js';
-import type { Category } from '~/types/cad.types.js';
-import { categories } from '~/types/cad.types.js';
-import type { Build } from '~/types/build.types.js';
-import { CadViewer } from '~/components/geometry/cad/cad-viewer.js';
-import { useBuilds } from '~/hooks/use-builds.js';
-import { toast } from '~/components/ui/sonner.js';
-import type { Handle } from '~/types/matches.types.js';
+} from '#components/ui/dropdown-menu.js';
+import { cn } from '#utils/ui.js';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '#components/ui/tabs.js';
+import type { Category } from '#types/cad.types.js';
+import { categories } from '#types/cad.types.js';
+import type { Build } from '#types/build.types.js';
+import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
+import { useBuilds } from '#hooks/use-builds.js';
+import { toast } from '#components/ui/sonner.js';
+import type { Handle } from '#types/matches.types.js';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -63,19 +63,19 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '~/components/ui/alert-dialog.js';
-import { BuildProvider } from '~/hooks/use-build.js';
-import { useCookie } from '~/hooks/use-cookie.js';
-import { BuildActionDropdown } from '~/routes/builds_.library/build-action-dropdown.js';
-import { createBuildMutations } from '~/hooks/build-mutations.js';
-import { Checkbox } from '~/components/ui/checkbox.js';
-import { formatRelativeTime } from '~/utils/date.js';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '~/components/ui/table.js';
-import { toSentenceCase } from '~/utils/string.js';
-import { Popover, PopoverContent, PopoverTrigger } from '~/components/ui/popover.js';
-import { cadMachine } from '~/machines/cad.machine.js';
-import { HammerAnimation } from '~/components/hammer-animation.js';
-import { cookieName } from '~/constants/cookie.constants.js';
+} from '#components/ui/alert-dialog.js';
+import { BuildProvider } from '#hooks/use-build.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { BuildActionDropdown } from '#routes/builds_.library/build-action-dropdown.js';
+import { createBuildMutations } from '#hooks/build-mutations.js';
+import { Checkbox } from '#components/ui/checkbox.js';
+import { formatRelativeTime } from '#utils/date.js';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '#components/ui/table.js';
+import { toSentenceCase } from '#utils/string.js';
+import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
+import { cadMachine } from '#machines/cad.machine.js';
+import { HammerAnimation } from '#components/hammer-animation.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -365,18 +365,19 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <div className="relative flex-grow">
-          <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            autoComplete="off"
-            className="h-7 pl-10"
-            placeholder="Search builds..."
-            value={globalFilter}
-            onChange={(event) => {
-              setGlobalFilter(event.target.value);
-            }}
-          />
-        </div>
+        <SearchInput
+          autoComplete="off"
+          className="h-7"
+          placeholder="Search builds..."
+          value={globalFilter}
+          containerClassName="flex-grow"
+          onChange={(event) => {
+            setGlobalFilter(event.target.value);
+          }}
+          onClear={() => {
+            setGlobalFilter('');
+          }}
+        />
         <div className="flex items-center gap-2">
           {/* Add bulk actions when rows are selected */}
           {table.getFilteredSelectedRowModel().rows.length > 0 && (
@@ -439,7 +440,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
 
       <div className="flex items-center justify-between">
         <div className="flex-1 text-sm text-muted-foreground">
-          {table.getFilteredSelectedRowModel().rows.length} of {table.getFilteredRowModel().rows.length} row(s)
+          {table.getFilteredSelectedRowModel().rows.length} of {table.getFilteredRowModel().rows.length} build(s)
           selected.
         </div>
         <div className="flex items-center space-x-6 lg:space-x-8">
@@ -628,7 +629,7 @@ type BuildLibraryCardProps = {
 
 function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibraryCardProps) {
   const [_, send, actorRef] = useActor(cadMachine, { input: { shouldInitializeKernelOnStart: false } });
-  const shapes = useSelector(actorRef, (state) => state.context.shapes);
+  const geometries = useSelector(actorRef, (state) => state.context.geometries);
 
   const mechanicalAsset = build.assets.mechanical;
   if (!mechanicalAsset) {
@@ -689,7 +690,8 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
               </div>
             ) : null}
             <CadViewer
-              shapes={shapes}
+              geometries={geometries}
+              enablePan={false}
               enableLines={false}
               className="bg-muted"
               stageOptions={{

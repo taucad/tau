@@ -3,8 +3,8 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { ChatParameters } from '~/routes/builds_.$id/chat-parameters.js';
-import { TooltipProvider } from '~/components/ui/tooltip.js';
+import { ChatParameters } from '#routes/builds_.$id/chat-parameters.js';
+import { TooltipProvider } from '#components/ui/tooltip.js';
 
 // Test wrapper component that provides necessary providers
 function TestWrapper({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
@@ -76,7 +76,7 @@ vi.mock('@xstate/react', () => ({
   useSelector: vi.fn(),
 }));
 
-vi.mock('~/routes/builds_.$id/cad-actor.js', () => ({
+vi.mock('#routes/builds_.$id/cad-actor.js', () => ({
   cadActor: {
     send: vi.fn(),
   },
@@ -91,7 +91,7 @@ describe('ChatParameters Search Component', () => {
 
     // Dynamic import and mock setup
     const { useSelector } = await import('@xstate/react');
-    const { cadActor } = await import('~/routes/builds_.$id/cad-actor.js');
+    const { cadActor } = await import('#routes/builds_.$id/cad-actor.js');
 
     // Fix: Mock useSelector to properly handle selector functions
     vi.mocked(useSelector).mockImplementation((_actor, selector) => {

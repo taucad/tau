@@ -55,8 +55,8 @@ alwaysApply: false
 
 **Absolute Imports**: Use absolute imports with `#` prefix:
 ```diff
-- import { utils } from '../utils/helper.js';
-+ import { utils } from '#utils/helper.js';
+- import { hexToRgb } from '../utils/color.utils.js';
++ import { hexToRgb } from '#utils/color.utils.js';
 ```
 
 **Unnecessary Conditions**: Don't use optional chaining when value can't be nullish:

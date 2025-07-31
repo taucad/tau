@@ -1,156 +1,124 @@
 version: 2
 updates:
-  # Root package.json (main dependencies)
-  - package-ecosystem: "npm"
-    directory: "/"
+  - package-ecosystem: 'npm'
+    directory: '/'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
     open-pull-requests-limit: 10
-    versioning-strategy: "increase"
+    versioning-strategy: 'increase'
     commit-message:
-      prefix: "chore"
-      include: "scope"
+      prefix: 'chore'
+      include: 'scope'
     labels:
-      - "dependencies"
-      - "automated"
+      - 'dependencies'
+      - 'automated'
     groups:
-      # Group patch updates together
       patch-updates:
         patterns:
-          - "*"
+          - '*'
         update-types:
-          - "patch"
-      # Group minor updates for related packages
-      nx-ecosystem:
+          - 'patch'
+      nx:
         patterns:
-          - "nx*"
-          - "@nx/*"
+          - '*nx*'
         update-types:
-          - "minor"
-          - "patch"
-      # Group React ecosystem updates
-      react-ecosystem:
+          - 'minor'
+          - 'patch'
+      react:
         patterns:
-          - "react*"
-          - "@types/react*"
-          - "react-*"
+          - '*react*'
         update-types:
-          - "minor"
-          - "patch"
-      # Group testing frameworks
-      testing-frameworks:
+          - 'minor'
+          - 'patch'
+      testing:
         patterns:
-          - "*vitest*"
-          - "@vitest/*"
-          - "playwright*"
-          - "@playwright/*"
+          - '*vitest*'
+          - '*playwright*'
         update-types:
-          - "minor"
-          - "patch"
-      # Group ESLint ecosystem
-      eslint-ecosystem:
+          - 'minor'
+          - 'patch'
+      eslint:
         patterns:
-          - "eslint*"
-          - "@eslint/*"
-          - "eslint-*"
+          - '*eslint*'
         update-types:
-          - "minor"
-          - "patch"
+          - 'minor'
+          - 'patch'
 
-  # UI app package.json (minimal but monitored)
-  - package-ecosystem: "npm"
-    directory: "/apps/ui"
+  - package-ecosystem: 'github-actions'
+    directory: '/'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      interval: 'weekly'
+      day: 'monday'
+      time: '10:00'
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "chore(ui)"
-      include: "scope"
+      prefix: 'ci'
+      include: 'scope'
     labels:
-      - "dependencies"
-      - "ui"
-      - "automated"
+      - 'github-actions'
+      - 'ci'
+      - 'automated'
 
-  # GitHub Actions workflows
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: 'docker'
+    directory: '/apps/api'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "10:00"
+      interval: 'weekly'
+      day: 'monday'
+      time: '11:00'
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "ci"
-      include: "scope"
+      prefix: 'chore(docker)'
+      include: 'scope'
     labels:
-      - "github-actions"
-      - "ci"
-      - "automated"
+      - 'dependencies'
+      - 'docker'
+      - 'automated'
 
-  # Docker dependencies
-  - package-ecosystem: "docker"
-    directory: "/apps/api"
+  - package-ecosystem: 'docker'
+    directory: '/apps/ui'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "11:00"
+      interval: 'weekly'
+      day: 'monday'
+      time: '11:00'
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "chore(docker)"
-      include: "scope"
+      prefix: 'chore(docker)'
+      include: 'scope'
     labels:
-      - "dependencies"
-      - "docker"
-      - "automated"
+      - 'dependencies'
+      - 'docker'
+      - 'automated'
 
-  - package-ecosystem: "docker"
-    directory: "/apps/ui"
+  - package-ecosystem: 'docker'
+    directory: '/infra'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "11:00"
+      interval: 'weekly'
+      day: 'monday'
+      time: '11:00'
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "chore(docker)"
-      include: "scope"
+      prefix: 'chore(infra)'
+      include: 'scope'
     labels:
-      - "dependencies"
-      - "docker"
-      - "automated"
+      - 'dependencies'
+      - 'docker'
+      - 'infrastructure'
+      - 'automated'
 
-  # Docker Compose files
-  - package-ecosystem: "docker"
-    directory: "/infra"
+  - package-ecosystem: 'docker'
+    directory: '/docker/search'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "11:00"
+      interval: 'weekly'
+      day: 'monday'
+      time: '11:00'
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "chore(infra)"
-      include: "scope"
+      prefix: 'chore(search)'
+      include: 'scope'
     labels:
-      - "dependencies"
-      - "docker"
-      - "infrastructure"
-      - "automated"
-
-  - package-ecosystem: "docker"
-    directory: "/docker/search"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "11:00"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "chore(search)"
-      include: "scope"
-    labels:
-      - "dependencies"
-      - "docker"
-      - "search"
-      - "automated" 
+      - 'dependencies'
+      - 'docker'
+      - 'search'
+      - 'automated'

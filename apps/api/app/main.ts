@@ -14,7 +14,7 @@ import { generatePrefixedId } from '#utils/id.utils.js';
 import type { Environment } from '#config/environment.config.js';
 import { getFastifyLoggingConfig } from '#logger/fastify.logger.js';
 import { idPrefix } from '#constants/id.constants.js';
-import { corsAllowedHeaders, corsAllowedMethods, corsMaxAge } from '#constants/cors.constant.js';
+import { corsBaseConfiguration } from '#constants/cors.constant.js';
 import { httpBodyLimit } from '#constants/http-body.constant.js';
 
 async function bootstrap() {
@@ -35,10 +35,7 @@ async function bootstrap() {
 
   app.enableCors({
     origin: [appConfig.get('TAU_FRONTEND_URL', { infer: true })],
-    allowedHeaders: corsAllowedHeaders,
-    methods: corsAllowedMethods,
-    credentials: true,
-    maxAge: corsMaxAge,
+    ...corsBaseConfiguration,
   });
   app.enableVersioning({
     type: VersioningType.URI,

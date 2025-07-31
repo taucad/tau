@@ -70,7 +70,6 @@ function createTransformationMatrix(): Matrix4 {
  */
 export function GltfMesh({
   gltfBlob,
-  name,
   enableSurfaces = true,
   enableLines = true,
 }: GltfMeshProperties): React.JSX.Element {
@@ -293,13 +292,13 @@ export function GltfMesh({
 
   // Show error state with more informative display
   if (error) {
-    console.warn(`GLTF Error for ${name}:`, error);
-    return <group name={`${name}-error`} />;
+    console.warn('GLTF Error:', error);
+    return <group />;
   }
 
   // Manual mesh construction with optimized settings
   return (
-    <group name={name}>
+    <group>
       {/* Render all mesh surfaces */}
       {meshDataItems.map((meshData) => {
         // Determine if material should be transparent

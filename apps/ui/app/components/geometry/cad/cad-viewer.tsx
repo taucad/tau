@@ -25,12 +25,11 @@ export function CadViewer({
 
   return (
     <ThreeProvider {...properties}>
-      {geometries.map((geometry) => {
+      {geometries.map((geometry, index) => {
         switch (geometry.type) {
           case 'gltf': {
-            return (
-              <GltfMesh key={geometry.name} {...geometry} enableSurfaces={enableSurfaces} enableLines={enableLines} />
-            );
+            // eslint-disable-next-line react/no-array-index-key -- TODO: add a unique key to the geometry (likely a hash key)
+            return <GltfMesh key={index} {...geometry} enableSurfaces={enableSurfaces} enableLines={enableLines} />;
           }
 
           case '2d': {

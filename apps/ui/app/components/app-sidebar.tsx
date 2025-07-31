@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { BookOpen, Bot, Frame, Hammer, Map, PieChart, UsersRound, Workflow } from 'lucide-react';
 import { Link } from 'react-router';
 import { ColorToggle } from '#components/nav/color-toggle.js';
 import { NavHistory } from '#components/nav/nav-history.js';
@@ -17,89 +16,7 @@ import {
 import { Tau } from '#components/icons/tau.js';
 import { NavChat } from '#components/nav/nav-chat.js';
 import { ThemeToggle } from '#components/nav/theme-toggle.js';
-
-// This is sample data.
-const data = {
-  navMain: [
-    {
-      title: 'Builds',
-      url: '/builds/library',
-      icon: Hammer,
-      isActive: true,
-      keyCombination: {
-        key: 'b',
-        ctrlKey: true,
-      },
-      // Items: [
-      //   {
-      //     title: 'History',
-      //     url: '/builds/history',
-      //   },
-      //   {
-      //     title: 'Starred',
-      //     url: '/builds/starred',
-      //   },
-      //   {
-      //     title: 'Settings',
-      //     url: '/builds/settings',
-      //   },
-      // ],
-    },
-    {
-      title: 'Community',
-      url: '/builds/community',
-      icon: UsersRound,
-      keyCombination: {
-        key: 'g',
-        ctrlKey: true,
-      },
-    },
-    {
-      title: 'Workflows',
-      url: '/workflows',
-      icon: Workflow,
-      keyCombination: {
-        key: 'w',
-        ctrlKey: true,
-      },
-    },
-    {
-      title: 'Models',
-      url: '/models',
-      icon: Bot,
-      keyCombination: {
-        key: 'm',
-        ctrlKey: true,
-      },
-    },
-    {
-      title: 'Documentation',
-      url: '/docs',
-      icon: BookOpen,
-      keyCombination: {
-        key: 'd',
-        ctrlKey: true,
-      },
-    },
-  ],
-  projects: [
-    {
-      name: 'Design Engineering',
-      url: '/projects/design-engineering',
-      icon: Frame,
-    },
-    {
-      name: 'Sales & Marketing',
-      url: '/projects/sales-marketing',
-      icon: PieChart,
-    },
-    {
-      name: 'Travel',
-      url: '/projects/travel',
-      icon: Map,
-    },
-  ],
-};
+import { navRoutes } from '#constants/route.constants.js';
 
 export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>): React.JSX.Element {
   return (
@@ -121,8 +38,8 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
         </div>
         <div className="flex-1 overflow-y-auto">
           <NavHistory />
-          <NavMain items={data.navMain} />
-          <NavProjects projects={data.projects} />
+          <NavMain items={navRoutes.navMain} />
+          <NavProjects projects={navRoutes.projects} />
         </div>
       </SidebarContent>
       <SidebarFooter className="flex flex-col items-end transition-transform duration-200 ease-linear group-data-[collapsible=icon]:items-center">

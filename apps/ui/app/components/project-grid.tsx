@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { Star, GitFork, Eye, Loader2 } from 'lucide-react';
+import { Star, GitFork, Eye } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useActor, useSelector } from '@xstate/react';
@@ -14,6 +14,7 @@ import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
 import { storage } from '#db/storage.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
+import { LoadingSpinner } from '#components/loading-spinner.js';
 
 // Placeholder for language icons
 const kernelIcons: Record<KernelProvider, ComponentType<{ className?: string }>> = {
@@ -259,7 +260,7 @@ function ProjectCard({
                 disabled={isForking}
                 onClick={handleFork}
               >
-                {isForking ? <Loader2 className="animate-spin" /> : <GitFork />}
+                {isForking ? <LoadingSpinner /> : <GitFork />}
                 {forks}
               </Button>
             </TooltipTrigger>

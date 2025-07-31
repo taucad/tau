@@ -17,7 +17,7 @@ import {
   ArrowDown,
   ArrowUp,
 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   flexRender,
@@ -76,6 +76,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.
 import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { LoadingSpinner } from '#components/loading-spinner.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -642,6 +643,8 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
   const [showPreview, setShowPreview] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(build.name);
+  const navigation = useNavigation();
+  const isNavigatingToBuild = navigation.location?.pathname.includes(`/builds/${build.id}`);
 
   const handleRename = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -756,8 +759,14 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
       <CardFooter className="flex items-center justify-between">
         <Button asChild variant="outline">
           <Link to={`/builds/${build.id}`}>
-            <span>Open</span>
-            <ArrowRight className="size-4" />
+            {isNavigatingToBuild ? (
+              <LoadingSpinner />
+            ) : (
+              <>
+                <span>Open</span>
+                <ArrowRight className="size-4" />
+              </>
+            )}
           </Link>
         </Button>
 

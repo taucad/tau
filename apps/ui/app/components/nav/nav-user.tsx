@@ -2,9 +2,10 @@ import { AuthUIContext, SignedIn, SignedOut, UserAvatar, UserButton } from '@dav
 import type { UserButtonProps } from '@daveyplate/better-auth-ui';
 import { CreditCard, Sparkles } from 'lucide-react';
 import { useContext } from 'react';
-import { Link } from 'react-router';
+import { NavLink } from 'react-router';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { LoadingSpinner } from '#components/loading-spinner.js';
 
 const additionalUserButtonLinks: UserButtonProps['additionalLinks'] = [
   {
@@ -28,16 +29,18 @@ export function NavUser(): React.JSX.Element {
   return (
     <>
       <SignedOut>
-        <Link to="/auth/sign-in">
-          <Button variant="outline" className="select-none">
-            Sign In
-          </Button>
-        </Link>
+        <NavLink to="/auth/sign-in" tabIndex={-1}>
+          {({ isPending }) => (
+            <Button variant="outline" className="select-none">
+              {isPending ? <LoadingSpinner /> : 'Sign In'}
+            </Button>
+          )}
+        </NavLink>
       </SignedOut>
       <SignedOut>
-        <Link to="/auth/sign-up">
-          <Button className="select-none">Sign Up</Button>
-        </Link>
+        <NavLink to="/auth/sign-up" tabIndex={-1}>
+          {({ isPending }) => <Button className="select-none">{isPending ? <LoadingSpinner /> : 'Sign Up'}</Button>}
+        </NavLink>
       </SignedOut>
       <SignedIn>
         <Tooltip>

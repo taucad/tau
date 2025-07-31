@@ -17,7 +17,7 @@ import {
   ArrowDown,
   ArrowUp,
 } from 'lucide-react';
-import { Link, useNavigate, useNavigation } from 'react-router';
+import { Link, NavLink, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   flexRender,
@@ -643,8 +643,6 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
   const [showPreview, setShowPreview] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(build.name);
-  const navigation = useNavigation();
-  const isNavigatingToBuild = navigation.location?.pathname.includes(`/builds/${build.id}`);
 
   const handleRename = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -758,16 +756,14 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
       </CardContent>
       <CardFooter className="flex items-center justify-between">
         <Button asChild variant="outline">
-          <Link to={`/builds/${build.id}`}>
-            {isNavigatingToBuild ? (
-              <LoadingSpinner />
-            ) : (
+          <NavLink to={`/builds/${build.id}`} tabIndex={-1}>
+            {({ isPending }) => (
               <>
+                {isPending ? <LoadingSpinner /> : <ArrowRight className="size-4" />}
                 <span>Open</span>
-                <ArrowRight className="size-4" />
               </>
             )}
-          </Link>
+          </NavLink>
         </Button>
 
         <BuildActionDropdown shouldStopPropagation build={build} actions={actions} />

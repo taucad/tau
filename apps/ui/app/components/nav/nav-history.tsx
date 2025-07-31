@@ -23,6 +23,7 @@ import { useBuilds } from '#hooks/use-builds.js';
 import { toast } from '#components/ui/sonner.js';
 import { groupItemsByTimeHorizon } from '#utils/temporal.js';
 import { SearchInput } from '#components/search-input.js';
+import { LoadingSpinner } from '#components/loading-spinner.js';
 
 const buildsPerPage = 5;
 
@@ -263,9 +264,9 @@ function NavHistoryItem({ build, isEditing, onRename, onRenameSubmit, onRenameCa
         </SidebarMenuButton>
       ) : (
         <NavLink to={`/builds/${build.id}`} tabIndex={-1}>
-          {({ isActive }) => (
+          {({ isActive, isPending }) => (
             <SidebarMenuButton isActive={isActive}>
-              <History className="size-4 shrink-0" />
+              {isPending ? <LoadingSpinner /> : <History className="size-4 shrink-0" />}
               <span className="flex-1 truncate">{build.name}</span>
             </SidebarMenuButton>
           )}

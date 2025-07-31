@@ -1,5 +1,6 @@
 import { Folder, Forward, MoreHorizontal, Trash2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { NavLink } from 'react-router';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,6 +17,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from '#components/ui/sidebar.js';
+import { LoadingSpinner } from '#components/loading-spinner.js';
 
 export function NavProjects({
   projects,
@@ -34,12 +36,14 @@ export function NavProjects({
       <SidebarMenu>
         {projects.map((item) => (
           <SidebarMenuItem key={item.name}>
-            <SidebarMenuButton asChild>
-              <a href={item.url}>
-                <item.icon />
-                <span>{item.name}</span>
-              </a>
-            </SidebarMenuButton>
+            <NavLink to={item.url} tabIndex={-1}>
+              {({ isPending, isActive }) => (
+                <SidebarMenuButton isActive={isActive}>
+                  {isPending ? <LoadingSpinner /> : <item.icon />}
+                  <span>{item.name}</span>
+                </SidebarMenuButton>
+              )}
+            </NavLink>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <SidebarMenuAction shouldShowOnHover>

@@ -16,6 +16,7 @@ import {
 import type { KeyCombination } from '#utils/keys.js';
 import { formatKeyCombination } from '#utils/keys.js';
 import { useKeydown } from '#hooks/use-keydown.js';
+import { LoadingSpinner } from '#components/loading-spinner.js';
 
 export function NavMain({
   items,
@@ -42,7 +43,7 @@ export function NavMain({
             <Collapsible key={item.title} asChild defaultOpen={item.isActive} className="group/collapsible">
               <SidebarMenuItem>
                 <NavLink to={item.url} tabIndex={-1}>
-                  {({ isActive }) => (
+                  {({ isActive, isPending }) => (
                     <CollapsibleTrigger asChild>
                       <SidebarMenuButton
                         isActive={isActive}
@@ -62,7 +63,7 @@ export function NavMain({
                             : undefined
                         }
                       >
-                        {item.icon ? <item.icon className="size-4 shrink-0" /> : null}
+                        {isPending ? <LoadingSpinner /> : item.icon ? <item.icon className="size-4 shrink-0" /> : null}
                         <span className="flex-1 truncate">{item.title}</span>
                         {hasItems ? (
                           <ChevronRight className="ml-2 shrink-0 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
@@ -84,9 +85,10 @@ export function NavMain({
                       {item.items?.map((subItem) => (
                         <SidebarMenuSubItem key={subItem.title}>
                           <NavLink to={subItem.url} tabIndex={-1}>
-                            {({ isActive }) => (
+                            {({ isActive, isPending }) => (
                               <SidebarMenuSubButton asChild isActive={isActive}>
                                 <span className="flex-1">{subItem.title}</span>
+                                {isPending ? <LoadingSpinner /> : null}
                               </SidebarMenuSubButton>
                             )}
                           </NavLink>

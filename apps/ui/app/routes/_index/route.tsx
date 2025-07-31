@@ -1,4 +1,4 @@
-import { Link, useNavigate, useNavigation } from 'react-router';
+import { Link, NavLink, useNavigate } from 'react-router';
 import { useCallback } from 'react';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
@@ -25,8 +25,6 @@ import { LoadingSpinner } from '#components/loading-spinner.js';
 export default function ChatStart(): React.JSX.Element {
   const navigate = useNavigate();
   const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
-  const navigation = useNavigation();
-  const isNavigatingToNewBuild = navigation.location?.pathname.includes(`/builds/new`);
 
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content, model, metadata, imageUrls }) => {
@@ -105,11 +103,13 @@ export default function ChatStart(): React.JSX.Element {
             <Separator />
           </div>
           <div className="flex justify-center">
-            <Link to="/builds/new" tabIndex={-1}>
-              <InteractiveHoverButton className="flex items-center gap-2 font-light [&_svg]:size-6 [&_svg]:stroke-1">
-                {isNavigatingToNewBuild ? <LoadingSpinner /> : 'Build from code'}
-              </InteractiveHoverButton>
-            </Link>
+            <NavLink to="/builds/new" tabIndex={-1}>
+              {({ isPending }) => (
+                <InteractiveHoverButton className="flex items-center gap-2 font-light [&_svg]:size-6 [&_svg]:stroke-1">
+                  {isPending ? <LoadingSpinner /> : 'Build from code'}
+                </InteractiveHoverButton>
+              )}
+            </NavLink>
           </div>
         </AiChatProvider>
       </div>

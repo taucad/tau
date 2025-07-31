@@ -1,18 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { convertReplicadShapesToGltf } from '#components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
+import { convertReplicadGeometriesToGltf } from '#components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
 import type { GeometryReplicad } from '#components/geometry/kernel/replicad/replicad.types.js';
 
 describe('convertReplicadShapesToGltf', () => {
   it('should convert empty geometries array to valid GLTF blob', async () => {
-    const result = await convertReplicadShapesToGltf([], 'glb');
+    const result = await convertReplicadGeometriesToGltf([], 'glb');
 
     expect(result).toBeInstanceOf(Blob);
     expect(result.type).toBe('model/gltf-binary');
     expect(result.size).toBeGreaterThan(0);
   });
 
-  it('should convert a simple cube shape to GLTF', async () => {
-    // Mock a simple cube shape data
+  it('should convert a simple cube geometry to GLTF', async () => {
+    // Mock a simple cube geometry data
     const cubeShape: GeometryReplicad = {
       type: '3d',
       name: 'Test Cube',
@@ -65,7 +65,7 @@ describe('convertReplicadShapesToGltf', () => {
       },
     };
 
-    const result = await convertReplicadShapesToGltf([cubeShape], 'glb');
+    const result = await convertReplicadGeometriesToGltf([cubeShape], 'glb');
 
     expect(result).toBeInstanceOf(Blob);
     expect(result.type).toBe('model/gltf-binary');
@@ -75,7 +75,7 @@ describe('convertReplicadShapesToGltf', () => {
   it('should handle GLTF JSON format output', async () => {
     const simpleShape: GeometryReplicad = {
       type: '3d',
-      name: 'Test Shape',
+      name: 'Test Geometry',
       faces: {
         vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
         triangles: [0, 1, 2],
@@ -88,7 +88,7 @@ describe('convertReplicadShapesToGltf', () => {
       },
     };
 
-    const result = await convertReplicadShapesToGltf([simpleShape], 'gltf');
+    const result = await convertReplicadGeometriesToGltf([simpleShape], 'gltf');
 
     expect(result).toBeInstanceOf(Blob);
     expect(result.type).toBe('model/gltf+json');
@@ -98,7 +98,7 @@ describe('convertReplicadShapesToGltf', () => {
   it('should preserve colors from multiple geometries', async () => {
     const redShape: GeometryReplicad = {
       type: '3d',
-      name: 'Red Shape',
+      name: 'Red Geometry',
       color: '#ff0000',
       faces: {
         vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
@@ -111,7 +111,7 @@ describe('convertReplicadShapesToGltf', () => {
 
     const blueShape: GeometryReplicad = {
       type: '3d',
-      name: 'Blue Shape',
+      name: 'Blue Geometry',
       color: '#0000ff',
       faces: {
         vertices: [2, 0, 0, 3, 0, 0, 2, 1, 0],
@@ -122,22 +122,22 @@ describe('convertReplicadShapesToGltf', () => {
       edges: { lines: [], edgeGroups: [] },
     };
 
-    const result = await convertReplicadShapesToGltf([redShape, blueShape], 'glb');
+    const result = await convertReplicadGeometriesToGltf([redShape, blueShape], 'glb');
 
     expect(result).toBeInstanceOf(Blob);
     expect(result.size).toBeGreaterThan(0);
 
     // The GLTF should contain both geometries combined
     // We can't easily test the internal structure without parsing the GLTF,
-    // but we can verify it's larger than a single shape would be
-    const singleShapeResult = await convertReplicadShapesToGltf([redShape], 'glb');
+    // but we can verify it's larger than a single geometry would be
+    const singleShapeResult = await convertReplicadGeometriesToGltf([redShape], 'glb');
     expect(result.size).toBeGreaterThan(singleShapeResult.size);
   });
 
   it('should preserve edge lines from Shape3D in GLTF conversion', async () => {
     const shapeWithoutLines: GeometryReplicad = {
       type: '3d',
-      name: 'Shape without Lines',
+      name: 'Geometry without Lines',
       faces: {
         vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
         triangles: [0, 1, 2],
@@ -152,7 +152,7 @@ describe('convertReplicadShapesToGltf', () => {
 
     const shapeWithLines: GeometryReplicad = {
       type: '3d',
-      name: 'Shape with Lines',
+      name: 'Geometry with Lines',
       faces: {
         vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
         triangles: [0, 1, 2],
@@ -169,8 +169,8 @@ describe('convertReplicadShapesToGltf', () => {
     };
 
     // Convert both geometries
-    const resultWithoutLines = await convertReplicadShapesToGltf([shapeWithoutLines], 'glb');
-    const resultWithLines = await convertReplicadShapesToGltf([shapeWithLines], 'glb');
+    const resultWithoutLines = await convertReplicadGeometriesToGltf([shapeWithoutLines], 'glb');
+    const resultWithLines = await convertReplicadGeometriesToGltf([shapeWithLines], 'glb');
 
     // Verify both conversions succeed
     expect(resultWithoutLines).toBeInstanceOf(Blob);
@@ -181,12 +181,12 @@ describe('convertReplicadShapesToGltf', () => {
     expect(resultWithLines.type).toBe('model/gltf-binary');
     expect(resultWithLines.size).toBeGreaterThan(0);
 
-    // The shape with lines should produce a larger GLTF file
+    // The geometry with lines should produce a larger GLTF file
     // because it includes additional line data
     expect(resultWithLines.size).toBeGreaterThan(resultWithoutLines.size);
 
     // Also test GLTF format to ensure both formats work
-    const gltfResult = await convertReplicadShapesToGltf([shapeWithLines], 'gltf');
+    const gltfResult = await convertReplicadGeometriesToGltf([shapeWithLines], 'gltf');
     expect(gltfResult).toBeInstanceOf(Blob);
     expect(gltfResult.type).toBe('model/gltf+json');
     expect(gltfResult.size).toBeGreaterThan(0);

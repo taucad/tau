@@ -125,12 +125,11 @@ class ZooWorker extends KernelWorker<ZooOptions> {
         const arrayBuffer = new ArrayBuffer(gltf.contents.byteLength);
         const view = new Uint8Array(arrayBuffer);
         view.set(gltf.contents);
-        const shape: GeometryGltf = {
+        const geometry: GeometryGltf = {
           type: 'gltf',
-          name: 'Shape',
           gltfBlob: new Blob([gltf.contents]),
         };
-        return createKernelSuccess([shape]);
+        return createKernelSuccess([geometry]);
       } catch (error) {
         const kclError = this.handleError(error, code);
         this.error(kclError.error.message, { operation: 'computeGeometry' });
@@ -151,7 +150,7 @@ class ZooWorker extends KernelWorker<ZooOptions> {
       const gltfData = this.gltfDataMemory[geometryId];
       if (!gltfData) {
         return createKernelError({
-          message: `Shape ${geometryId} not computed yet. Please build geometries before exporting.`,
+          message: `Geometry ${geometryId} not computed yet. Please build geometries before exporting.`,
           startColumn: 0,
           startLineNumber: 0,
         });

@@ -21,7 +21,7 @@ export type GraphicsContext = {
   cameraFovAngleComputed: number; // The FOV computed from the camera position and fov
   cameraPosition: number;
   currentZoom: number;
-  shapeRadius: number;
+  geometryRadius: number;
   sceneRadius: number | undefined;
 
   // Visibility state
@@ -45,7 +45,7 @@ export type GraphicsContext = {
     options: ScreenshotOptions;
   };
 
-  // Shape data from CAD
+  // Geometry data from CAD
   geometries: Geometry[];
 };
 
@@ -83,8 +83,8 @@ export type GraphicsEvent =
   | { type: 'registerCameraCapability'; actorRef: AnyActorRef }
   | { type: 'unregisterScreenshotCapability' }
   | { type: 'unregisterCameraCapability' }
-  // Shape updates from CAD
-  | { type: 'updateShapes'; geometries: Geometry[] };
+  // Geometry updates from CAD
+  | { type: 'updateGeometries'; geometries: Geometry[] };
 
 // Emitted events
 export type GraphicsEmitted =
@@ -92,7 +92,7 @@ export type GraphicsEmitted =
   | { type: 'screenshotCompleted'; dataUrls: string[]; requestId: string }
   | { type: 'screenshotFailed'; error: string; requestId: string }
   | { type: 'cameraResetCompleted' }
-  | { type: 'shapeRadiusCalculated'; radius: number };
+  | { type: 'geometryRadiusCalculated'; radius: number };
 
 // Input type
 export type GraphicsInput = {
@@ -152,8 +152,8 @@ function calculateGridSizes(
   };
 }
 
-// Calculate shape radius from geometries
-function calculateShapeRadius(geometries: Geometry[]): number {
+// Calculate geometry radius from geometries
+function calculateGeometryRadius(geometries: Geometry[]): number {
   // This is a placeholder - in reality, this would use Three.js to calculate bounding sphere
   // For now, return a default value
   return geometries.length > 0 ? 100 : 0;
@@ -166,7 +166,7 @@ function calculateShapeRadius(geometries: Geometry[]): number {
  * - Grid sizing and units
  * - Camera position and controls
  * - Screenshot capabilities
- * - Shape rendering from CAD
+ * - Geometry rendering from CAD
  */
 export const graphicsMachine = setup({
   types: {
@@ -277,19 +277,19 @@ export const graphicsMachine = setup({
       // Could emit completion events or re-enable actions after interaction
     },
 
-    updateShapes: enqueueActions(({ enqueue, event }) => {
-      assertEvent(event, 'updateShapes');
+    updateGeometries: enqueueActions(({ enqueue, event }) => {
+      assertEvent(event, 'updateGeometries');
 
-      const shapeRadius = calculateShapeRadius(event.geometries);
+      const geometryRadius = calculateGeometryRadius(event.geometries);
 
       enqueue.assign({
         geometries: event.geometries,
-        shapeRadius,
+        geometryRadius,
       });
 
       enqueue.emit({
-        type: 'shapeRadiusCalculated' as const,
-        radius: shapeRadius,
+        type: 'geometryRadiusCalculated' as const,
+        radius: geometryRadius,
       });
     }),
 
@@ -465,7 +465,7 @@ export const graphicsMachine = setup({
     cameraFovAngleComputed: 75,
     cameraPosition: 1000,
     currentZoom: 1,
-    shapeRadius: 0,
+    geometryRadius: 0,
     sceneRadius: undefined,
 
     // Visibility state
@@ -568,9 +568,9 @@ export const graphicsMachine = setup({
           actions: 'unregisterCameraCapability',
         },
 
-        // Shape updates
-        updateShapes: {
-          actions: 'updateShapes',
+        // Geometry updates
+        updateGeometries: {
+          actions: 'updateGeometries',
         },
       },
     },

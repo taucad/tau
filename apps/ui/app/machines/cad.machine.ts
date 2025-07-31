@@ -131,7 +131,7 @@ export const cadMachine = setup({
       code: context.code,
       parameters: context.parameters,
     })),
-    setShapes: enqueueActions(({ enqueue, event, context }) => {
+    setGeometries: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'geometryComputed');
       enqueue.assign({
         geometries: event.geometries,
@@ -144,7 +144,7 @@ export const cadMachine = setup({
       // Send geometries to graphics machine
       if (context.graphicsRef) {
         enqueue.sendTo(context.graphicsRef, {
-          type: 'updateShapes',
+          type: 'updateGeometries',
           geometries: event.geometries,
         });
       }
@@ -312,7 +312,7 @@ export const cadMachine = setup({
         },
         geometryComputed: {
           target: 'ready',
-          actions: 'setShapes',
+          actions: 'setGeometries',
         },
         parametersParsed: {
           actions: 'setDefaultParameters',
@@ -398,7 +398,7 @@ export const cadMachine = setup({
         },
         geometryComputed: {
           target: 'ready',
-          actions: 'setShapes',
+          actions: 'setGeometries',
         },
         parametersParsed: {
           actions: 'setDefaultParameters',

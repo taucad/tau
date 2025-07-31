@@ -335,7 +335,7 @@ const exportGeometryActor = fromPromise<
       error: result.error,
     };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Failed to export shape';
+    const errorMessage = error instanceof Error ? error.message : 'Failed to export geometry';
     return {
       type: 'geometryExportFailed',
       error: {

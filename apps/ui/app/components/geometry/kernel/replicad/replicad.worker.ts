@@ -20,7 +20,7 @@ import {
 } from '#components/geometry/kernel/replicad/init-open-cascade.js';
 import { runInCjsContext, buildEsModule } from '#components/geometry/kernel/replicad/vm.js';
 import { renderOutput } from '#components/geometry/kernel/replicad/utils/render-output.js';
-import { convertReplicadShapesToGltf } from '#components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
+import { convertReplicadGeometriesToGltf } from '#components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
 import { jsonSchemaFromJson } from '#utils/schema.js';
 import type { InputShape, MainResultShapes } from '#components/geometry/kernel/replicad/utils/render-output.js';
 import type { GeometryGltf, Geometry2D } from '#types/cad.types.js';
@@ -225,7 +225,7 @@ try {
 
       const gltfShapes = [];
       if (shapes3d.length > 0) {
-        const gltfBlob = await convertReplicadShapesToGltf(shapes3d, 'glb');
+        const gltfBlob = await convertReplicadGeometriesToGltf(shapes3d, 'glb');
         const gltfEndTime = performance.now();
         this.log(`GLTF conversion took ${gltfEndTime - gltfStartTime}ms`, {
           operation: 'computeGeometry',
@@ -233,7 +233,6 @@ try {
 
         const shapeGltf: GeometryGltf = {
           type: 'gltf',
-          name: defaultName ?? 'Shape',
           gltfBlob,
         };
         gltfShapes.push(shapeGltf);
@@ -269,7 +268,7 @@ try {
     try {
       if (!this.shapesMemory[geometryId]) {
         return createKernelError({
-          message: `Shape ${geometryId} not computed yet`,
+          message: `Geometry ${geometryId} not computed yet`,
           startLineNumber: 0,
           startColumn: 0,
           type: 'runtime',
@@ -286,7 +285,7 @@ try {
 
           return {
             type: '3d' as const,
-            name: shapeConfig.name ?? 'Shape',
+            name: shapeConfig.name ?? 'Geometry',
             color: (shapeConfig as { color?: string }).color,
             opacity: (shapeConfig as { opacity?: number }).opacity,
             faces,
@@ -297,7 +296,7 @@ try {
           } satisfies GeometryReplicad;
         });
 
-        const gltfBlob = await convertReplicadShapesToGltf(temporaryShapes, fileType);
+        const gltfBlob = await convertReplicadGeometriesToGltf(temporaryShapes, fileType);
         return createKernelSuccess([
           {
             blob: gltfBlob,
@@ -321,7 +320,7 @@ try {
           tolerance: config.linearTolerance,
           angularTolerance: config.angularTolerance,
         }),
-        name: name ?? 'Shape',
+        name: name ?? 'Geometry',
       }));
       return createKernelSuccess(result);
     } catch (error) {

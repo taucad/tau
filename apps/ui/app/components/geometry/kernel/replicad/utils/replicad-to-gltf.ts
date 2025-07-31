@@ -36,8 +36,8 @@ function transformVertexArray(vertices: number[]): Float32Array {
  * Create a glTF primitive directly from replicad Shape3D data
  * This preserves the original triangulation from replicad without re-triangulating
  */
-function createPrimitiveFromReplicadShape(document: Document, shape: GeometryReplicad): Primitive {
-  const { faces } = shape;
+function createPrimitiveFromReplicadShape(document: Document, geometry: GeometryReplicad): Primitive {
+  const { faces } = geometry;
   const { vertices: vertexData, triangles, normals } = faces;
 
   // Convert flat arrays to typed arrays and transform coordinates
@@ -47,19 +47,19 @@ function createPrimitiveFromReplicadShape(document: Document, shape: GeometryRep
 
   // Handle color - normalize and convert to RGB array
   let baseColor: [number, number, number, number] = [0.8, 0.8, 0.8, 1]; // Default light gray
-  if (shape.color) {
+  if (geometry.color) {
     try {
-      const normalizedColor = normalizeColor(shape.color);
+      const normalizedColor = normalizeColor(geometry.color);
       // Convert hex to RGB (normalize color returns hex)
       const hex = normalizedColor.color;
       const r = Number.parseInt(hex.slice(1, 3), 16) / 255;
       const g = Number.parseInt(hex.slice(3, 5), 16) / 255;
       const b = Number.parseInt(hex.slice(5, 7), 16) / 255;
-      // Use alpha from normalization, but allow shape.opacity to override
-      const alpha = shape.opacity ?? normalizedColor.alpha;
+      // Use alpha from normalization, but allow geometry.opacity to override
+      const alpha = geometry.opacity ?? normalizedColor.alpha;
       baseColor = [r, g, b, alpha];
     } catch (error) {
-      console.warn('Failed to parse color:', shape.color, error);
+      console.warn('Failed to parse color:', geometry.color, error);
       throw new Error('Failed to parse color', { cause: error });
     }
   } else {
@@ -74,8 +74,8 @@ function createPrimitiveFromReplicadShape(document: Document, shape: GeometryRep
     .setRoughnessFactor(0.7)
     .setBaseColorFactor(baseColor);
 
-  if (shape.color) {
-    material.setName(shape.color);
+  if (geometry.color) {
+    material.setName(geometry.color);
   } else {
     material.setName(`default`);
   }
@@ -152,18 +152,18 @@ function createGltfDocumentFromReplicadShapes(geometries: GeometryReplicad[]): D
 
   const scene = document.createScene();
 
-  // Process each shape as a separate mesh to preserve individual materials/colors
-  for (const [shapeIndex, shape] of geometries.entries()) {
+  // Process each geomtry as a separate mesh to preserve individual materials/colors
+  for (const [geometryIndex, geomtry] of geometries.entries()) {
     const mesh = document.createMesh();
 
     // Add main surface primitive
-    if (shape.faces.vertices.length > 0 && shape.faces.triangles.length > 0) {
-      const surfacePrimitive = createPrimitiveFromReplicadShape(document, shape);
+    if (geomtry.faces.vertices.length > 0 && geomtry.faces.triangles.length > 0) {
+      const surfacePrimitive = createPrimitiveFromReplicadShape(document, geomtry);
       mesh.addPrimitive(surfacePrimitive);
     }
 
     // Add line primitive for edges if available
-    const linePrimitive = createLinePrimitiveFromReplicadEdges(document, shape.edges, shape.name);
+    const linePrimitive = createLinePrimitiveFromReplicadEdges(document, geomtry.edges, geomtry.name);
     if (linePrimitive) {
       mesh.addPrimitive(linePrimitive);
     }
@@ -172,11 +172,11 @@ function createGltfDocumentFromReplicadShapes(geometries: GeometryReplicad[]): D
     if (mesh.listPrimitives().length > 0) {
       const node = document.createNode().setMesh(mesh);
 
-      // Set node name if shape has a name
-      if (shape.name) {
-        node.setName(shape.name);
+      // Set node name if geomtry has a name
+      if (geomtry.name) {
+        node.setName(geomtry.name);
       } else {
-        node.setName(`Shape_${shapeIndex}`);
+        node.setName(`Shape_${geometryIndex}`);
       }
 
       scene.addChild(node);
@@ -245,7 +245,7 @@ async function createGltfFromReplicadShapes(geometries: GeometryReplicad[]): Pro
  * This function preserves the original triangulation from replicad without re-triangulating,
  * resulting in better rendering quality and performance.
  */
-export async function convertReplicadShapesToGltf(
+export async function convertReplicadGeometriesToGltf(
   geometries: GeometryReplicad[],
   format: 'glb' | 'gltf' = 'glb',
 ): Promise<Blob> {

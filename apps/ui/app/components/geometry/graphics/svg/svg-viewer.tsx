@@ -107,17 +107,17 @@ const dashArray = (strokeType?: string): string | undefined => {
   return undefined;
 };
 
-type ShapePathProps = {
-  readonly shape: Geometry2D;
+type GeometryPathProps = {
+  readonly geometry: Geometry2D;
 };
 
-function ShapePath({ shape }: ShapePathProps): React.ReactElement {
+function GeometryPath({ geometry }: GeometryPathProps): React.ReactElement {
   return (
     <path
-      d={shape.paths.flat(Infinity).join(' ')}
-      strokeDasharray={dashArray(shape.strokeType)}
+      d={geometry.paths.flat(Infinity).join(' ')}
+      strokeDasharray={dashArray(geometry.strokeType)}
       vectorEffect="non-scaling-stroke"
-      style={{ stroke: shape.color }}
+      style={{ stroke: geometry.color }}
     />
   );
 }
@@ -256,27 +256,27 @@ type SvgViewerProps = {
 };
 
 export function SvgViewer({
-  geometries: shapeOrShapes,
+  geometries,
   enableGrid = true,
   enableRawWindow = false,
   defaultColor,
 }: SvgViewerProps): ReactNode {
   const Window = enableRawWindow ? RawCanvas : SvgWindow;
 
-  if (Array.isArray(shapeOrShapes)) {
-    const viewbox = mergeViewboxes(shapeOrShapes.map((s) => s.viewbox));
+  if (Array.isArray(geometries)) {
+    const viewbox = mergeViewboxes(geometries.map((s) => s.viewbox));
     return (
       <Window viewbox={viewbox} enableGrid={enableGrid} defaultColor={defaultColor}>
-        {shapeOrShapes.map((s) => {
-          return <ShapePath key={s.name} shape={s} />;
+        {geometries.map((s) => {
+          return <GeometryPath key={s.name} geometry={s} />;
         })}
       </Window>
     );
   }
 
   return (
-    <Window viewbox={parseViewbox(shapeOrShapes.viewbox)} enableGrid={enableGrid} defaultColor={defaultColor}>
-      <ShapePath shape={shapeOrShapes} />
+    <Window viewbox={parseViewbox(geometries.viewbox)} enableGrid={enableGrid} defaultColor={defaultColor}>
+      <GeometryPath geometry={geometries} />
     </Window>
   );
 }

@@ -23,7 +23,6 @@ export type Geometry2D = {
 export type GeometryGltf = {
   type: 'gltf';
   gltfBlob: Blob;
-  name: string;
 };
 
 export type Geometry = Geometry2D | GeometryGltf;

@@ -26,7 +26,7 @@ export const dimensionTerms = [
 /**
  * Terms that indicate a parameter modifies geometries
  */
-export const shapeModifierTerms = [
+export const geometryModifierTerms = [
   'rounded',
   'taper',
   'bevel',
@@ -138,7 +138,7 @@ export const commonGeneralTerms = [
  */
 export const descriptorTerms = [
   ...dimensionTerms,
-  ...shapeModifierTerms,
+  ...geometryModifierTerms,
   ...countTerms,
   ...angleTerms,
   ...unitlessTerms,

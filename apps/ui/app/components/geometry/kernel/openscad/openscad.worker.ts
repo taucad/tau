@@ -103,13 +103,12 @@ class OpenScadWorker extends KernelWorker {
 
       const gltfBlob = await convertOffToGltf(offData, 'glb');
 
-      const shape: GeometryGltf = {
+      const geometry: GeometryGltf = {
         type: 'gltf',
-        name: 'Shape',
         gltfBlob,
       };
 
-      return createKernelSuccess([shape]);
+      return createKernelSuccess([geometry]);
     } catch (error) {
       this.error('Error while building geometries from code', { data: error });
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -125,7 +124,7 @@ class OpenScadWorker extends KernelWorker {
       const offData = this.offDataMemory[geometryId];
       if (!offData) {
         return createKernelError({
-          message: `Shape ${geometryId} not computed yet. Please build geometries before exporting.`,
+          message: `Geometry ${geometryId} not computed yet. Please build geometries before exporting.`,
           startColumn: 0,
           startLineNumber: 0,
         });

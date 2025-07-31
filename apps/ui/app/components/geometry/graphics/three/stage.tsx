@@ -76,14 +76,14 @@ export function Stage({
   const originalDistanceReference = React.useRef<number | undefined>(undefined);
   const isInitialResetDoneRef = React.useRef<boolean>(false);
 
-  const [{ shapeRadius, sceneRadius }, set] = React.useState<{
+  const [{ geometryRadius, sceneRadius }, set] = React.useState<{
     // The radius of the scene. Used to determine if the camera needs to be updated
     sceneRadius: number | undefined;
-    // The radius of the shape.
-    shapeRadius: number;
+    // The radius of the geometry.
+    geometryRadius: number;
   }>({
     sceneRadius: undefined,
-    shapeRadius: 0,
+    geometryRadius: 0,
   });
 
   const { offsetRatio, nearPlane, minimumFarPlane, farPlaneRadiusMultiplier, zoomLevel, rotation } = useMemo(() => {
@@ -104,7 +104,7 @@ export function Stage({
 
   // Use the camera reset hook
   const resetCamera = useCameraReset({
-    shapeRadius,
+    geometryRadius,
     // Explicitly provide the required properties
     rotation: {
       side: rotation.side,
@@ -151,7 +151,7 @@ export function Stage({
     box3.getBoundingSphere(sphere);
 
     set((previous) => {
-      return { shapeRadius: sphere.radius, sceneRadius: previous.sceneRadius };
+      return { geometryRadius: sphere.radius, sceneRadius: previous.sceneRadius };
     });
   }, [enableCentering, children]);
 
@@ -161,7 +161,7 @@ export function Stage({
   React.useLayoutEffect(() => {
     // If the scene radius is undefined, we need to initialize the camera, so we default to true.
     // Force update when camera type changes
-    const changeRatio = sceneRadius === undefined ? 0 : Math.abs((shapeRadius - sceneRadius) / sceneRadius);
+    const changeRatio = sceneRadius === undefined ? 0 : Math.abs((geometryRadius - sceneRadius) / sceneRadius);
     const isSignificantChange = sceneRadius === undefined ? true : changeRatio > significantRadiusChangeRatio;
 
     if (isSignificantChange) {
@@ -172,7 +172,7 @@ export function Stage({
         isInitialResetDoneRef.current = true;
       }
     }
-  }, [resetCamera, sceneRadius, shapeRadius]);
+  }, [resetCamera, sceneRadius, geometryRadius]);
 
   return (
     <group {...properties}>

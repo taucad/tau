@@ -1,4 +1,4 @@
-// Example of colored shapes in OpenSCAD
+// Example of colored geometries in OpenSCAD
 module colored_cubes() {
     color("red") 
         translate([0, 0, 0]) 

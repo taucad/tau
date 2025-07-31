@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router';
+import { Link, NavLink } from 'react-router';
 import { Code2, SlidersHorizontal } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { SearchInput } from '#components/search-input.js';
@@ -15,15 +15,14 @@ import { kernelProviders } from '#types/kernel.types.js';
 import { sampleBuilds } from '#constants/build-examples.js';
 import { CommunityBuildGrid } from '#components/project-grid.js';
 import type { Handle } from '#types/matches.types.js';
+import { LoadingSpinner } from '#components/loading-spinner.js';
 
 export const handle: Handle = {
   breadcrumb() {
     return (
-      <Link to="/builds/community" tabIndex={-1}>
-        <Button variant="ghost" className="p-2">
-          Community
-        </Button>
-      </Link>
+      <Button asChild variant="ghost" className="p-2">
+        <Link to="/builds/community">Community</Link>
+      </Button>
     );
   },
 };
@@ -93,7 +92,7 @@ export default function CadCommunity(): React.JSX.Element {
           <span className="text-muted-foreground">({sortedProjects.length})</span>
         </div>
         <Button asChild>
-          <Link to="/builds/new">Create New</Link>
+          <NavLink to="/">{({ isPending }) => (isPending ? <LoadingSpinner /> : 'New Build')}</NavLink>
         </Button>
       </div>
 

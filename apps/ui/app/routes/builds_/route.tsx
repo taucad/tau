@@ -11,13 +11,11 @@ export const handle: Handle = {
   breadcrumb() {
     return (
       <Tooltip>
-        <Link to="/builds/library" tabIndex={-1}>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" className="p-2">
-              Builds
-            </Button>
-          </TooltipTrigger>
-        </Link>
+        <TooltipTrigger asChild>
+          <Button asChild variant="ghost" className="p-2">
+            <Link to="/builds/library">Builds</Link>
+          </Button>
+        </TooltipTrigger>
         <TooltipContent className="flex items-center gap-2 align-baseline">
           View all builds{` `}
           <KeyShortcut variant="tooltip">{formatKeyCombination({ key: 'b', ctrlKey: true })}</KeyShortcut>

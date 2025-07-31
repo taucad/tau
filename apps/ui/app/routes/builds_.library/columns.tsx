@@ -1,6 +1,6 @@
 import type { ColumnDef } from '@tanstack/react-table';
 import { ArrowRight } from 'lucide-react';
-import { Link } from 'react-router';
+import { NavLink } from 'react-router';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { CategoryBadge } from '#components/category-badge.js';
@@ -14,6 +14,7 @@ import type { BuildActions } from '#routes/builds_.library/route.js';
 import { BuildActionDropdown } from '#routes/builds_.library/build-action-dropdown.js';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
 import { Input } from '#components/ui/input.js';
+import { LoadingSpinner } from '#components/loading-spinner.js';
 
 // Rename component for table cells
 function BuildNameCell({ build, actions }: { readonly build: Build; readonly actions: BuildActions }) {
@@ -161,12 +162,20 @@ export const createColumns = (actions: BuildActions): Array<ColumnDef<Build>> =>
           <BuildActionDropdown build={build} actions={actions} />
 
           {!isDeleted && (
-            <Link to={`/builds/${build.id}`}>
-              <Button variant="outline" size="sm" className="ml-auto flex items-center gap-1">
-                Open
-                <ArrowRight />
-              </Button>
-            </Link>
+            <Button asChild variant="outline" size="sm" className="ml-auto flex items-center gap-1">
+              <NavLink to={`/builds/${build.id}`}>
+                {({ isPending }) =>
+                  isPending ? (
+                    <LoadingSpinner />
+                  ) : (
+                    <>
+                      Open
+                      <ArrowRight />
+                    </>
+                  )
+                }
+              </NavLink>
+            </Button>
           )}
         </div>
       );

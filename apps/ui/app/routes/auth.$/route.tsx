@@ -16,14 +16,14 @@ export default function AuthPage(): React.JSX.Element {
       <div className="flex flex-col gap-4 p-6 md:p-10">
         <div className="flex justify-center gap-2 md:justify-start">
           <Tooltip>
-            <Link to="/">
-              <TooltipTrigger className="flex items-center gap-2 font-medium">
+            <TooltipTrigger asChild className="flex items-center gap-2 font-medium">
+              <Link to="/">
                 <Tau className="size-7 text-primary" />
                 <h1 className="-mb-0.5 -ml-3 font-mono text-2xl font-semibold tracking-wider text-primary italic group-data-[collapsible=icon]:hidden">
                   au
                 </h1>
-              </TooltipTrigger>
-            </Link>
+              </Link>
+            </TooltipTrigger>
             <TooltipContent side="right">Go home</TooltipContent>
           </Tooltip>
         </div>

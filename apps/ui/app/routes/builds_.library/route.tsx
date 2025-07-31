@@ -81,11 +81,9 @@ import { LoadingSpinner } from '#components/loading-spinner.js';
 export const handle: Handle = {
   breadcrumb() {
     return (
-      <Link to="/builds/library" tabIndex={-1}>
-        <Button variant="ghost" className="p-2">
-          Library
-        </Button>
-      </Link>
+      <Button asChild variant="ghost" className="p-2">
+        <Link to="/builds/library">Library</Link>
+      </Button>
     );
   },
 };
@@ -174,9 +172,9 @@ export default function PersonalCadProjects(): React.JSX.Element {
     <div className="container mx-auto px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-3xl font-bold">Builds</h1>
-        <Link to="/" tabIndex={-1}>
-          <Button>New Build</Button>
-        </Link>
+        <Button asChild>
+          <NavLink to="/">{({ isPending }) => (isPending ? <LoadingSpinner /> : 'New Build')}</NavLink>
+        </Button>
       </div>
 
       <Tabs

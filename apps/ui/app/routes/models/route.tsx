@@ -6,11 +6,9 @@ import type { Handle } from '#types/matches.types.js';
 export const handle: Handle = {
   breadcrumb() {
     return (
-      <Link to="/models" tabIndex={-1}>
-        <Button variant="ghost" className="p-2">
-          Models
-        </Button>
-      </Link>
+      <Button asChild variant="ghost" className="p-2">
+        <Link to="/models">Models</Link>
+      </Button>
     );
   },
 };

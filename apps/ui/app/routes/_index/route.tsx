@@ -116,11 +116,9 @@ export default function ChatStart(): React.JSX.Element {
       <div className="container mx-auto px-4 py-8">
         <div className="mb-2 flex flex-row items-center justify-between">
           <h1 className="text-lg font-medium tracking-tight">From the Community</h1>
-          <Link to="/builds/community" tabIndex={-1}>
-            <Button variant="link" size="lg" className="p-0">
-              View All
-            </Button>
-          </Link>
+          <Button asChild variant="link" size="lg" className="p-0">
+            <Link to="/builds/community">View All</Link>
+          </Button>
         </div>
         <CommunityBuildGrid builds={sampleBuilds} />
       </div>

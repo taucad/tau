@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router';
+import { NavLink, useParams } from 'react-router';
 import { useCallback, useEffect } from 'react';
 import { createActor } from 'xstate';
 import { PackagePlus } from 'lucide-react';
@@ -18,6 +18,7 @@ import { fileEditMachine } from '#machines/file-edit.machine.js';
 import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
 import { ChatInterfaceControls, ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
 import { CommandPaletteTrigger } from '#routes/builds_.$id/command-palette.js';
+import { LoadingSpinner } from '#components/loading-spinner.js';
 
 export const handle: Handle = {
   breadcrumb(match) {
@@ -40,9 +41,9 @@ export const handle: Handle = {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button asChild variant="outline" className="md:hidden" size="icon">
-              <Link to="/">
-                <PackagePlus className="size-4" />
-              </Link>
+              <NavLink to="/builds/new">
+                {({ isPending }) => (isPending ? <LoadingSpinner /> : <PackagePlus className="size-4" />)}
+              </NavLink>
             </Button>
           </TooltipTrigger>
           <TooltipContent>New Build</TooltipContent>

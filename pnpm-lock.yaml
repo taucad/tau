@@ -31,6 +31,9 @@ importers:
       '@daveyplate/better-auth-ui':
         specifier: ^2.0.15
         version: 2.1.2(5b36de0345897ccb554ed923d5ebf9da)
+      '@fastify/cors':
+        specifier: ^11.0.1
+        version: 11.0.1
       '@fastify/helmet':
         specifier: ^13.0.1
         version: 13.0.1

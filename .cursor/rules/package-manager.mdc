@@ -9,6 +9,12 @@ e.g.:
 - Production package: `pnpm install react`
 - Development package: `pnpm install -d eslint`
 
+**Exception**: When installing PRODUCTION packages specifically for projects located under the `packages/` directory, install the package directly in that project's directory instead of the workspace root.
+
+Examples:
+- General workspace dependency: `pnpm install react` (installs in workspace root)
+- Package-specific dependency: `cd packages/converter && pnpm install lodash` (installs in packages/converter/)
+
 # Testing Changes
 As you iterate towards a solution, you should test your changes using NX workspace commands.
 All commands follow the patter of `pnpm nx <command> <project> <options>`.

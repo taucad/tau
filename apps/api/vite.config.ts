@@ -7,6 +7,7 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { VitePluginNode as vitePluginNode } from 'vite-plugin-node';
 import swc from 'unplugin-swc';
+import { corsBaseConfiguration } from '#constants/cors.constant.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -22,6 +23,10 @@ export default defineConfig(({ mode }) => {
     server: {
       // Vite server configs, for details see [vite doc](https://vitejs.dev/config/#server-host)
       port: Number(process.env.PORT),
+      cors: {
+        origin: [process.env.TAU_FRONTEND_URL],
+        ...corsBaseConfiguration,
+      },
     },
     plugins: [
       nxViteTsPaths(),

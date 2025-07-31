@@ -33,6 +33,7 @@
     "@ai-sdk/react": "^1.2.12",
     "@ai-sdk/ui-utils": "^1.2.11",
     "@daveyplate/better-auth-ui": "^2.0.15",
+    "@fastify/cors": "^11.0.1",
     "@fastify/helmet": "^13.0.1",
     "@gltf-transform/core": "^4.2.0",
     "@gltf-transform/extensions": "^4.2.0",

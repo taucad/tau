@@ -5,8 +5,7 @@ import { ENV } from '#config.js';
 import type { loader } from '#root.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
-
-export const defaultChatModel = 'anthropic-claude-4-sonnet-thinking';
+import { defaultChatModel } from '#constants/chat.constants.js';
 
 export type Model = {
   id: string;

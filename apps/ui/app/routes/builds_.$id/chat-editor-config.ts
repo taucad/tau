@@ -1,5 +1,5 @@
 import type { Monaco } from '@monaco-editor/react';
-// eslint-disable-next-line no-restricted-imports -- replicad types are not in the monorepo
+// eslint-disable-next-line no-restricted-imports, @nx/enforce-module-boundaries -- replicad types are not in the monorepo
 import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
 
 // Import zodTypes from '../../../../../node_modules/zod/v4/index.d.ts?raw';

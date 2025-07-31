@@ -3,9 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/api",
   "projectType": "application",
-  "tags": [
-    "type:app"
-  ],
+  "tags": ["scope:api", "type:app"],
   "targets": {
     "setup-env": {
       "command": "if [ ! -f \"./apps/api/.env\" ]; then cp ./apps/api/.env.example ./apps/api/.env; fi"

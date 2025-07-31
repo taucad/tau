@@ -33,5 +33,5 @@
     "noUncheckedIndexedAccess": true,
     "allowUnreachableCode": false,
     "allowUnusedLabels": false
-  },
+  }
 }

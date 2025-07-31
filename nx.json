@@ -38,7 +38,7 @@
       "plugin": "@nx/eslint/plugin",
       "options": {
         "targetName": "lint",
-        "eslintConfig": "eslint.config.ts"
+        "eslintConfig": "eslint.config.mjs"
       }
     },
     {
@@ -58,9 +58,7 @@
   ],
   "targetDefaults": {
     "e2e-ci--**/*": {
-      "dependsOn": [
-        "^build"
-      ]
+      "dependsOn": ["^build"]
     },
     "deploy": {
       "executor": "nx:run-commands",
@@ -87,12 +85,7 @@
     "applyChanges": true
   },
   "namedInputs": {
-    "sharedGlobals": [
-      "{workspaceRoot}/.github/workflows/ci.yml"
-    ],
-    "default": [
-      "{projectRoot}/**/*",
-      "sharedGlobals"
-    ]
+    "sharedGlobals": ["{workspaceRoot}/.github/workflows/ci.yml"],
+    "default": ["{projectRoot}/**/*", "sharedGlobals"]
   }
 }

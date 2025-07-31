@@ -1,5 +1,6 @@
 import xo from 'xo';
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
+import nxEslintPlugin from '@nx/eslint-plugin';
 
 /**
  * @type {import('eslint').Linter.Config[]}
@@ -35,6 +36,47 @@ const config = [
         projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
+    },
+  },
+  {
+    // Apply Nx plugin
+    plugins: {
+      '@nx': nxEslintPlugin,
+    },
+    rules: {
+      '@nx/enforce-module-boundaries': [
+        'error',
+        {
+          allow: [],
+          allowCircularSelfDependency: true,
+          depConstraints: [
+            {
+              sourceTag: 'scope:api',
+              onlyDependOnLibsWithTags: ['scope:shared', 'scope:api'],
+            },
+            {
+              sourceTag: 'scope:ui',
+              onlyDependOnLibsWithTags: ['scope:shared', 'scope:ui'],
+            },
+            {
+              sourceTag: 'type:app',
+              onlyDependOnLibsWithTags: ['type:ui', 'type:lib', 'type:examples'],
+            },
+            {
+              sourceTag: 'type:ui',
+              onlyDependOnLibsWithTags: ['type:ui', 'type:lib'],
+            },
+            {
+              sourceTag: 'type:lib',
+              onlyDependOnLibsWithTags: ['type:lib'],
+            },
+            {
+              sourceTag: 'type:e2e',
+              onlyDependOnLibsWithTags: ['type:app'],
+            },
+          ],
+        },
+      ],
     },
   },
   {

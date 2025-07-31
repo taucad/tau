@@ -3,7 +3,5 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/tau-examples",
   "projectType": "library",
-  "tags": [
-    "type:package"
-  ]
+  "tags": ["scope:shared", "type:examples"]
 }

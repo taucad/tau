@@ -3,14 +3,10 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/ui",
   "projectType": "application",
-  "tags": [
-    "type:app"
-  ],
+  "tags": ["scope:ui", "type:app"],
   "targets": {
     "build": {
-      "outputs": [
-        "{projectRoot}/build"
-      ],
+      "outputs": ["{projectRoot}/build"],
       "options": {
         "env": {
           "NODE_OPTIONS": "--max-old-space-size=4096"
@@ -20,23 +16,15 @@
     "typegen": {
       "executor": "nx:run-commands",
       "cache": true,
-      "inputs": [
-        "{projectRoot}/app/**/*.tsx",
-        "{projectRoot}/app/**/*.ts",
-        "{projectRoot}/react-router.config.ts"
-      ],
-      "outputs": [
-        "{projectRoot}/.react-router/types/**"
-      ],
+      "inputs": ["{projectRoot}/app/**/*.tsx", "{projectRoot}/app/**/*.ts", "{projectRoot}/react-router.config.ts"],
+      "outputs": ["{projectRoot}/.react-router/types/**"],
       "options": {
         "command": "react-router typegen",
         "cwd": "{projectRoot}"
       }
     },
     "typecheck": {
-      "dependsOn": [
-        "typegen"
-      ]
+      "dependsOn": ["typegen"]
     },
     "deploy": {
       "executor": "nx:run-commands",

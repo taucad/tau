@@ -1,5 +1,5 @@
 import { mockBuilds } from '@taucad/tau-examples';
-// eslint-disable-next-line no-restricted-imports -- expected
+// eslint-disable-next-line no-restricted-imports, @nx/enforce-module-boundaries -- expected. TODO: refactor to separate package.
 import replicadTypes from '../../../../../../gen/api/replicad/replicad-clean-with-jsdoc.d.ts?raw';
 import type { KernelProvider } from '#types/kernel.types.js';
 

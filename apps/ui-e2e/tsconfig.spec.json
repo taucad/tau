@@ -2,15 +2,13 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./out-tsc/spec",
-    "types": [
-      "node"
-    ],
     "baseUrl": ".",
     "paths": {
       "#*": ["src/*"]
     }
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "playwright.config.ts",
   ]
 }

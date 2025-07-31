@@ -25,7 +25,7 @@ type ViewerControlItem = {
 };
 
 export function ChatControls(): React.JSX.Element {
-  const shapes = useSelector(cadActor, (state) => state.context.shapes);
+  const geometries = useSelector(cadActor, (state) => state.context.geometries);
   const buildName = useBuildSelector((state) => state.build?.name) ?? 'file';
   const updateThumbnail = useBuildSelector((state) => state.updateThumbnail);
   const code = useSelector(cadActor, (state) => state.context.code);
@@ -192,10 +192,10 @@ export function ChatControls(): React.JSX.Element {
     );
   }, [updateThumbnailScreenshot]);
 
-  // Subscribe to the cadActor to update the thumbnail when the shapes change
+  // Subscribe to the cadActor to update the thumbnail when the geometries change
   useEffect(() => {
     const subscription = cadActor.on('geometryEvaluated', (event) => {
-      if (event.shapes.length > 0) {
+      if (event.geometries.length > 0) {
         updateThumbnailScreenshot();
       }
     });
@@ -357,7 +357,7 @@ export function ChatControls(): React.JSX.Element {
         group: 'Export',
         icon: <BoxDown className="mr-2" />,
         action: async () => handleExport(buildName, 'stl'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'download-step',
@@ -365,7 +365,7 @@ export function ChatControls(): React.JSX.Element {
         group: 'Export',
         icon: <BoxDown className="mr-2" />,
         action: async () => handleExport(buildName, 'step'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'download-3mf',
@@ -373,7 +373,7 @@ export function ChatControls(): React.JSX.Element {
         group: 'Export',
         icon: <BoxDown className="mr-2" />,
         action: async () => handleExport(buildName, '3mf'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'update-thumbnail',
@@ -440,7 +440,7 @@ export function ChatControls(): React.JSX.Element {
       handleDownloadPng,
       buildName,
       handleExport,
-      shapes,
+      geometries,
       code,
       handleCopyCodeToClipboard,
       handleDownloadCode,

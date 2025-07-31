@@ -27,7 +27,7 @@ export type Color = [number, number, number]; // RGB values 0-1
 /**
  * A complete 3D mesh representation using indexed geometry.
  *
- * This is the primary data structure for representing 3D shapes before
+ * This is the primary data structure for representing 3D geometries before
  * conversion to rendering formats like glTF. It uses an indexed approach
  * where faces reference shared vertices by index, which is memory efficient
  * and preserves topological relationships.

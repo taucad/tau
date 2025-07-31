@@ -46,7 +46,7 @@ export type GraphicsContext = {
   };
 
   // Shape data from CAD
-  shapes: Geometry[];
+  geometries: Geometry[];
 };
 
 // Event types
@@ -84,7 +84,7 @@ export type GraphicsEvent =
   | { type: 'unregisterScreenshotCapability' }
   | { type: 'unregisterCameraCapability' }
   // Shape updates from CAD
-  | { type: 'updateShapes'; shapes: Geometry[] };
+  | { type: 'updateShapes'; geometries: Geometry[] };
 
 // Emitted events
 export type GraphicsEmitted =
@@ -152,11 +152,11 @@ function calculateGridSizes(
   };
 }
 
-// Calculate shape radius from shapes
-function calculateShapeRadius(shapes: Geometry[]): number {
+// Calculate shape radius from geometries
+function calculateShapeRadius(geometries: Geometry[]): number {
   // This is a placeholder - in reality, this would use Three.js to calculate bounding sphere
   // For now, return a default value
-  return shapes.length > 0 ? 100 : 0;
+  return geometries.length > 0 ? 100 : 0;
 }
 
 /**
@@ -280,10 +280,10 @@ export const graphicsMachine = setup({
     updateShapes: enqueueActions(({ enqueue, event }) => {
       assertEvent(event, 'updateShapes');
 
-      const shapeRadius = calculateShapeRadius(event.shapes);
+      const shapeRadius = calculateShapeRadius(event.geometries);
 
       enqueue.assign({
-        shapes: event.shapes,
+        geometries: event.geometries,
         shapeRadius,
       });
 
@@ -487,7 +487,7 @@ export const graphicsMachine = setup({
     activeScreenshotRequest: undefined,
 
     // Shapes
-    shapes: [],
+    geometries: [],
   }),
   initial: 'ready',
   states: {

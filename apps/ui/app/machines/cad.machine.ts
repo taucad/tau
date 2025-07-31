@@ -13,7 +13,7 @@ export type CadContext = {
   screenshot: string | undefined;
   parameters: Record<string, unknown>;
   defaultParameters: Record<string, unknown>;
-  shapes: Geometry[];
+  geometries: Geometry[];
   kernelError: KernelError | undefined;
   codeErrors: CodeError[];
   kernelRef: ActorRefFrom<typeof kernelMachine>;
@@ -39,7 +39,7 @@ type CadEvent =
 
 type CadEmitted =
   | { type: 'modelUpdated'; code: string; parameters: Record<string, unknown> }
-  | { type: 'geometryEvaluated'; shapes: Geometry[] }
+  | { type: 'geometryEvaluated'; geometries: Geometry[] }
   | { type: 'geometryExported'; blob: Blob; format: ExportFormat }
   | { type: 'exportFailed'; error: KernelError };
 
@@ -134,18 +134,18 @@ export const cadMachine = setup({
     setShapes: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'geometryComputed');
       enqueue.assign({
-        shapes: event.shapes,
+        geometries: event.geometries,
         kernelError: undefined,
       });
       enqueue.emit({
         type: 'geometryEvaluated' as const,
-        shapes: event.shapes,
+        geometries: event.geometries,
       });
-      // Send shapes to graphics machine
+      // Send geometries to graphics machine
       if (context.graphicsRef) {
         enqueue.sendTo(context.graphicsRef, {
           type: 'updateShapes',
-          shapes: event.shapes,
+          geometries: event.geometries,
         });
       }
     }),
@@ -212,7 +212,7 @@ export const cadMachine = setup({
         parameters: event.parameters,
         codeErrors: [],
         kernelError: undefined,
-        shapes: [],
+        geometries: [],
         exportedBlob: undefined,
         jsonSchema: undefined,
         kernelTypeSelected: event.kernelType,
@@ -237,7 +237,7 @@ export const cadMachine = setup({
     screenshot: undefined,
     parameters: {},
     defaultParameters: {},
-    shapes: [],
+    geometries: [],
     kernelError: undefined,
     codeErrors: [],
     kernelRef: spawn(kernelMachine),

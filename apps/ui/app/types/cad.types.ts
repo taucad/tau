@@ -20,39 +20,13 @@ export type Geometry2D = {
   name: string;
 };
 
-export type Geometry3D = {
-  type: '3d';
-  faces: {
-    triangles: number[];
-    vertices: number[];
-    normals: number[];
-    faceGroups: Array<{
-      start: number;
-      count: number;
-      faceId: number;
-    }>;
-  };
-  edges: {
-    lines: number[];
-    edgeGroups: Array<{
-      start: number;
-      count: number;
-      edgeId: number;
-    }>;
-  };
-  color?: string;
-  opacity?: number;
-  name: string;
-  highlight?: number[];
-};
-
 export type GeometryGltf = {
   type: 'gltf';
   gltfBlob: Blob;
   name: string;
 };
 
-export type Geometry = Geometry2D | Geometry3D | GeometryGltf;
+export type Geometry = Geometry2D | GeometryGltf;
 
 export const modelProviders = ['sambanova', 'openai', 'anthropic', 'ollama'] as const;
 export type ModelProvider = (typeof modelProviders)[number];

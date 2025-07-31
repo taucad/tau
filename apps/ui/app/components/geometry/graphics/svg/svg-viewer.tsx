@@ -249,14 +249,14 @@ function RawCanvas({ viewbox, enableGrid, defaultColor, children }: RawCanvasPro
 }
 
 type SvgViewerProps = {
-  readonly shapes: Geometry2D | Geometry2D[];
+  readonly geometries: Geometry2D | Geometry2D[];
   readonly enableGrid?: boolean;
   readonly enableRawWindow?: boolean;
   readonly defaultColor?: string;
 };
 
 export function SvgViewer({
-  shapes: shapeOrShapes,
+  geometries: shapeOrShapes,
   enableGrid = true,
   enableRawWindow = false,
   defaultColor,

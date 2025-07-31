@@ -47,7 +47,7 @@ This demonstrates how to use the extracted data programmatically.
 The extraction organizes APIs into logical categories:
 
 1. **Drawing & Sketching** - Functions for 2D drawing and sketching
-2. **Primitives & Makers** - Functions that create basic 3D shapes
+2. **Primitives & Makers** - Functions that create basic 3D geometries
 3. **3D Operations** - Extrusion, revolution, lofting operations
 4. **Transformations** - Move, rotate, scale, mirror operations
 5. **Modifications** - Fillet, chamfer, cut, fuse operations

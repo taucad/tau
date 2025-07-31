@@ -9,7 +9,7 @@ import { HammerAnimation } from '#components/hammer-animation.js';
 import { SettingsControl } from '#components/geometry/cad/settings-control.js';
 
 export const ChatViewer = memo(function () {
-  const shapes = useSelector(cadActor, (state) => state.context.shapes);
+  const geometries = useSelector(cadActor, (state) => state.context.geometries);
   const status = useSelector(cadActor, (state) => state.value);
 
   // Get all visibility states from graphics machine
@@ -37,7 +37,7 @@ export const ChatViewer = memo(function () {
             enableAxes={enableAxes}
             enableSurfaces={enableSurfaces}
             enableLines={enableLines}
-            shapes={shapes}
+            geometries={geometries}
           />
         )}
         <SettingsControl className="absolute top-2 right-2" />

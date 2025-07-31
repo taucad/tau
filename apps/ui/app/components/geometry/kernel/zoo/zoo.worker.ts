@@ -151,7 +151,7 @@ class ZooWorker extends KernelWorker<ZooOptions> {
       const gltfData = this.gltfDataMemory[geometryId];
       if (!gltfData) {
         return createKernelError({
-          message: `Shape ${geometryId} not computed yet. Please build shapes before exporting.`,
+          message: `Shape ${geometryId} not computed yet. Please build geometries before exporting.`,
           startColumn: 0,
           startLineNumber: 0,
         });

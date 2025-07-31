@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { convertReplicadShapesToGltf } from '#components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
-import type { Geometry3D } from '#types/cad.types.js';
+import type { GeometryReplicad } from '#components/geometry/kernel/replicad/replicad.types.js';
 
 describe('convertReplicadShapesToGltf', () => {
-  it('should convert empty shapes array to valid GLTF blob', async () => {
+  it('should convert empty geometries array to valid GLTF blob', async () => {
     const result = await convertReplicadShapesToGltf([], 'glb');
 
     expect(result).toBeInstanceOf(Blob);
@@ -13,7 +13,7 @@ describe('convertReplicadShapesToGltf', () => {
 
   it('should convert a simple cube shape to GLTF', async () => {
     // Mock a simple cube shape data
-    const cubeShape: Geometry3D = {
+    const cubeShape: GeometryReplicad = {
       type: '3d',
       name: 'Test Cube',
       color: '#ff0000',
@@ -73,7 +73,7 @@ describe('convertReplicadShapesToGltf', () => {
   });
 
   it('should handle GLTF JSON format output', async () => {
-    const simpleShape: Geometry3D = {
+    const simpleShape: GeometryReplicad = {
       type: '3d',
       name: 'Test Shape',
       faces: {
@@ -95,8 +95,8 @@ describe('convertReplicadShapesToGltf', () => {
     expect(result.size).toBeGreaterThan(0);
   });
 
-  it('should preserve colors from multiple shapes', async () => {
-    const redShape: Geometry3D = {
+  it('should preserve colors from multiple geometries', async () => {
+    const redShape: GeometryReplicad = {
       type: '3d',
       name: 'Red Shape',
       color: '#ff0000',
@@ -109,7 +109,7 @@ describe('convertReplicadShapesToGltf', () => {
       edges: { lines: [], edgeGroups: [] },
     };
 
-    const blueShape: Geometry3D = {
+    const blueShape: GeometryReplicad = {
       type: '3d',
       name: 'Blue Shape',
       color: '#0000ff',
@@ -127,7 +127,7 @@ describe('convertReplicadShapesToGltf', () => {
     expect(result).toBeInstanceOf(Blob);
     expect(result.size).toBeGreaterThan(0);
 
-    // The GLTF should contain both shapes combined
+    // The GLTF should contain both geometries combined
     // We can't easily test the internal structure without parsing the GLTF,
     // but we can verify it's larger than a single shape would be
     const singleShapeResult = await convertReplicadShapesToGltf([redShape], 'glb');
@@ -135,7 +135,7 @@ describe('convertReplicadShapesToGltf', () => {
   });
 
   it('should preserve edge lines from Shape3D in GLTF conversion', async () => {
-    const shapeWithoutLines: Geometry3D = {
+    const shapeWithoutLines: GeometryReplicad = {
       type: '3d',
       name: 'Shape without Lines',
       faces: {
@@ -150,7 +150,7 @@ describe('convertReplicadShapesToGltf', () => {
       },
     };
 
-    const shapeWithLines: Geometry3D = {
+    const shapeWithLines: GeometryReplicad = {
       type: '3d',
       name: 'Shape with Lines',
       faces: {
@@ -168,7 +168,7 @@ describe('convertReplicadShapesToGltf', () => {
       },
     };
 
-    // Convert both shapes
+    // Convert both geometries
     const resultWithoutLines = await convertReplicadShapesToGltf([shapeWithoutLines], 'glb');
     const resultWithLines = await convertReplicadShapesToGltf([shapeWithLines], 'glb');
 

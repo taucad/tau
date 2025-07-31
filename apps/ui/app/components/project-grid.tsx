@@ -69,7 +69,7 @@ function ProjectCard({
 
   // Create a unique instance of the CAD machine for this card using the card's ID
   const [_, send, actorRef] = useActor(cadMachine, { input: { shouldInitializeKernelOnStart: false } });
-  const shapes = useSelector(actorRef, (state) => state.context.shapes);
+  const geometries = useSelector(actorRef, (state) => state.context.geometries);
   const status = useSelector(actorRef, (state) => state.value);
 
   const navigate = useNavigate();
@@ -195,7 +195,7 @@ function ProjectCard({
             <CadViewer
               enablePan={false}
               enableLines={false}
-              shapes={shapes}
+              geometries={geometries}
               className="bg-muted"
               stageOptions={{
                 zoomLevel: 1.5,

@@ -34,7 +34,7 @@ export const kernelOptions: KernelOption[] = [
     description: 'Constructive Solid Geometry for 3D printing',
     mainFile: 'main.scad',
     longDescription:
-      'Uses Constructive Solid Geometry (CSG) - build complex shapes by combining basic primitives with boolean operations. Outputs mesh files perfect for 3D printing.',
+      'Uses Constructive Solid Geometry (CSG) - build complex geometries by combining basic primitives with boolean operations. Outputs mesh files perfect for 3D printing.',
     emptyCode: ``,
     recommended: '3D Printing & Prototyping',
     tags: ['Constructive Solid Geometry', 'Mesh Export', 'Scripting', '3D Printing'],

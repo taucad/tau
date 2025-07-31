@@ -1,24 +1,18 @@
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment -- TODO: fix these types
-// @ts-nocheck
-import type { Shape as ReplicadShape, Drawing, Face, Wire, AnyShape, Vertex, exportSTEP } from 'replicad';
-import { Sketch, EdgeFinder, FaceFinder, Sketches, CompoundSketch } from 'replicad';
+import type { AnyShape, Drawing } from 'replicad';
 import type { SetRequired } from 'type-fest';
 import { normalizeColor } from '#components/geometry/kernel/replicad/utils/normalize-color.js';
-import type { Geometry2D, Geometry3D } from '#types/cad.types.js';
+import type { Geometry2D } from '#types/cad.types.js';
+import type { GeometryReplicad } from '#components/geometry/kernel/replicad/replicad.types.js';
 
-type Shape = ReplicadShape<never>;
-type Meshable = SetRequired<Shape, 'mesh' | 'meshEdges'>;
+type Meshable = SetRequired<AnyShape, 'mesh' | 'meshEdges'>;
 
 type Svgable = SetRequired<Drawing, 'toSVGPaths' | 'toSVGViewBox'>;
 
-type InputShape = {
-  shape: Shape;
+export type InputShape = {
+  shape: AnyShape;
   name?: string;
   color?: string;
   opacity?: number;
-  highlight?: unknown;
-  highlightEdge?: unknown;
-  highlightFace?: unknown;
   strokeType?: string;
 };
 
@@ -35,12 +29,9 @@ type MeshableConfiguration = {
   shape: Meshable;
   color?: string;
   opacity?: number;
-  highlight?: unknown;
 };
 
-export type ShapeConfig = Exclude<Parameters<typeof exportSTEP>[0], undefined>[number];
-
-export type MainResultShapes = Shape | Shape[] | InputShape | InputShape[];
+export type MainResultShapes = AnyShape | AnyShape[] | InputShape | InputShape[];
 
 const isSvgable = (shape: unknown): shape is Svgable => {
   return Boolean((shape as Svgable).toSVGPaths) && Boolean((shape as Svgable).toSVGViewBox);
@@ -57,9 +48,9 @@ const isInputShape = (shape: unknown): shape is InputShape => {
 
 function createBasicShapeConfig(
   inputShapes: MainResultShapes,
-  baseName = 'Shape',
+  baseName = 'AnyShape',
 ): Array<InputShape & { name: string }> {
-  let shapes: Array<Shape | InputShape> = [];
+  let shapes: Array<AnyShape | InputShape> = [];
 
   // We accept a single shape or an array of shapes
   shapes = Array.isArray(inputShapes) ? inputShapes : [inputShapes];
@@ -86,12 +77,10 @@ function createBasicShapeConfig(
     });
 }
 
-function normalizeColorAndOpacity<T extends Record<string, unknown>>(
-  shape: T,
-): T & { color: string | undefined; opacity: number | undefined } {
+function normalizeColorAndOpacity<T extends InputShape>(shape: T): InputShape {
   const { color, opacity, ...rest } = shape;
 
-  const normalizedColor: undefined | { color: string; alpha: number } = color && normalizeColor(color);
+  const normalizedColor: undefined | { color: string; alpha: number } = color ? normalizeColor(color) : undefined;
   let configuredOpacity: undefined | number = opacity;
   if (normalizedColor && normalizedColor.alpha !== 1) {
     configuredOpacity = opacity ?? normalizedColor.alpha;
@@ -102,83 +91,6 @@ function normalizeColorAndOpacity<T extends Record<string, unknown>>(
     color: normalizedColor?.color,
     opacity: configuredOpacity,
   };
-}
-
-function normalizeHighlight<T extends Record<string, unknown>>(config: T) {
-  const { highlight: inputHighlight, highlightEdge, highlightFace, ...rest } = config;
-
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- TODO: fix these
-  const highlight: { find: (s: unknown) => unknown } =
-    (inputHighlight && typeof inputHighlight.find === 'function') ??
-    highlightEdge?.(new EdgeFinder()) ??
-    highlightFace?.(new FaceFinder());
-
-  return {
-    ...rest,
-    highlight,
-  };
-}
-
-function checkShapeConfigIsValid<T extends Record<string, unknown> & { shape: unknown }>(
-  shape: T,
-): shape is T & { shape: Meshable | Svgable } {
-  return isSvgable(shape.shape) || isMeshable(shape.shape);
-}
-
-const adaptSketch = (shape: Shape) => {
-  if (!(shape instanceof Sketch)) {
-    return shape;
-  }
-
-  if (shape.wire.isClosed) {
-    return shape.face();
-  }
-
-  return shape.wire;
-};
-
-const adaptSketches = (shape: Shape) => {
-  const isSketches = shape instanceof Sketches || shape instanceof CompoundSketch;
-  if (!isSketches) {
-    return shape;
-  }
-
-  return shape.wires;
-};
-
-export class ShapeStandardizer {
-  private shapeAdapters: {
-    sketch: (shape: Shape) => Shape | Face | Wire;
-    sketches: (shape: Shape) => Shape | (Wire[] & (() => AnyShape)) | (Wire[] & Vertex);
-  };
-
-  public constructor() {
-    this.shapeAdapters = {
-      sketch: adaptSketch,
-      sketches: adaptSketches,
-    };
-  }
-
-  public registerAdapter(name: string, adapter: (shape: unknown) => unknown): void {
-    this.shapeAdapters[name] = adapter;
-  }
-
-  public standardizeShape<T extends { shape: unknown }>(shapes: T[]): Array<T & { shape: Meshable | Svgable }> {
-    return shapes
-      .map(({ shape, ...rest }) => ({
-        shape: this.adaptShape(shape),
-        ...rest,
-      }))
-      .filter((element): element is T & { shape: Meshable | Svgable } => checkShapeConfigIsValid(element));
-  }
-
-  private adaptShape(shape: Shape) {
-    for (const adaptor of Object.values(this.shapeAdapters)) {
-      shape = adaptor(shape);
-    }
-
-    return shape;
-  }
 }
 
 function renderSvg(shapeConfig: SvgShapeConfiguration): Geometry2D {
@@ -192,13 +104,12 @@ function renderSvg(shapeConfig: SvgShapeConfiguration): Geometry2D {
     format: 'svg',
     paths: shape.toSVGPaths() as string[],
     viewbox: shape.toSVGViewBox(),
-    error: false,
   };
 }
 
 function renderMesh(shapeConfig: MeshableConfiguration) {
-  const { name, shape, color, opacity, highlight } = shapeConfig;
-  const shapeInfo: Geometry3D = {
+  const { name, shape, color, opacity } = shapeConfig;
+  const geometry: GeometryReplicad = {
     type: '3d',
     name,
     color,
@@ -213,67 +124,49 @@ function renderMesh(shapeConfig: MeshableConfiguration) {
       lines: [],
       edgeGroups: [],
     },
-    error: false,
-    highlight: undefined,
   };
 
   try {
-    shapeInfo.faces = shape.mesh({
+    geometry.faces = shape.mesh({
       tolerance: 0.1,
       angularTolerance: 30,
     });
-    shapeInfo.edges = shape.meshEdges({
+    geometry.edges = shape.meshEdges({
       tolerance: 0.1,
       angularTolerance: 30,
     });
   } catch (error) {
     console.error(error);
-    shapeInfo.error = true;
-    return shapeInfo;
+    return geometry;
   }
 
-  if (highlight) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call -- TODO: fix these
-      shapeInfo.highlight = highlight
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- TODO: fix these
-        .find((element) => shape(element))
-        .map((s: unknown) => {
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- TODO: fix these
-          return s.hashCode;
-        });
-    } catch (error) {
-      console.error(error);
-    }
-  }
-
-  return shapeInfo;
+  return geometry;
 }
 
-export function render(shapes: ShapeConfig[]): Array<Geometry2D | Geometry3D> {
-  return shapes.map((shapeConfig: ShapeConfig) => {
+export function render(shapes: InputShape[]): Array<Geometry2D | GeometryReplicad> {
+  return shapes.map((shapeConfig) => {
     if (isSvgable(shapeConfig.shape)) {
-      return renderSvg(shapeConfig as SvgShapeConfiguration);
+      // TODO: fix this type
+      return renderSvg(shapeConfig as unknown as SvgShapeConfiguration);
     }
 
-    return renderMesh(shapeConfig as MeshableConfiguration);
+    if (isMeshable(shapeConfig.shape)) {
+      // TODO: fix this type
+      return renderMesh(shapeConfig as unknown as MeshableConfiguration);
+    }
+
+    throw new Error('Invalid shape');
   });
 }
 
 export function renderOutput(
   shapes: MainResultShapes,
-  shapeStandardizer?: ShapeStandardizer,
-  beforeRender?: (shapes: ShapeConfig[]) => ShapeConfig[],
-  defaultName = 'Shape',
-): Array<Geometry2D | Geometry3D> {
-  const standardizer = shapeStandardizer ?? new ShapeStandardizer();
+  beforeRender?: (shapes: InputShape[]) => InputShape[],
+  defaultName = 'AnyShape',
+): Array<Geometry2D | GeometryReplicad> {
+  const baseShape = createBasicShapeConfig(shapes, defaultName).map((element) => normalizeColorAndOpacity(element));
 
-  const baseShape = createBasicShapeConfig(shapes, defaultName)
-    .map((element) => normalizeColorAndOpacity(element))
-    .map((element) => normalizeHighlight(element));
-  const standardizedShapes = standardizer.standardizeShape(baseShape);
-
-  const config = beforeRender ? beforeRender(standardizedShapes) : standardizedShapes;
+  const config = beforeRender ? beforeRender(baseShape) : baseShape;
 
   return render(config);
 }

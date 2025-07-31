@@ -2,7 +2,7 @@ import type { Primitive } from '@gltf-transform/core';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { normalizeColor } from '#components/geometry/kernel/replicad/utils/normalize-color.js';
 import { transformVerticesGltf } from '#components/geometry/kernel/utils/common.js';
-import type { Geometry3D } from '#types/cad.types.js';
+import type { GeometryReplicad } from '#components/geometry/kernel/replicad/replicad.types.js';
 
 /**
  * Transform a flat array of vertex positions from z-up to y-up coordinate system and convert units
@@ -36,7 +36,7 @@ function transformVertexArray(vertices: number[]): Float32Array {
  * Create a glTF primitive directly from replicad Shape3D data
  * This preserves the original triangulation from replicad without re-triangulating
  */
-function createPrimitiveFromReplicadShape(document: Document, shape: Geometry3D): Primitive {
+function createPrimitiveFromReplicadShape(document: Document, shape: GeometryReplicad): Primitive {
   const { faces } = shape;
   const { vertices: vertexData, triangles, normals } = faces;
 
@@ -106,7 +106,7 @@ function createPrimitiveFromReplicadShape(document: Document, shape: Geometry3D)
  */
 function createLinePrimitiveFromReplicadEdges(
   document: Document,
-  edges: Geometry3D['edges'],
+  edges: GeometryReplicad['edges'],
   name: string,
 ): Primitive | undefined {
   if (edges.lines.length === 0) {
@@ -146,14 +146,14 @@ function createLinePrimitiveFromReplicadEdges(
  * Create a GLTF document directly from replicad Shape3D data
  * This preserves the original triangulation without re-triangulating
  */
-function createGltfDocumentFromReplicadShapes(shapes: Geometry3D[]): Document {
+function createGltfDocumentFromReplicadShapes(geometries: GeometryReplicad[]): Document {
   const document = new Document();
   document.createBuffer();
 
   const scene = document.createScene();
 
   // Process each shape as a separate mesh to preserve individual materials/colors
-  for (const [shapeIndex, shape] of shapes.entries()) {
+  for (const [shapeIndex, shape] of geometries.entries()) {
     const mesh = document.createMesh();
 
     // Add main surface primitive
@@ -187,19 +187,19 @@ function createGltfDocumentFromReplicadShapes(shapes: Geometry3D[]): Document {
 }
 
 /**
- * Convert replicad shapes to GLB blob format (preserving original triangulation)
+ * Convert replicad geometries to GLB blob format (preserving original triangulation)
  */
-async function createGlbFromReplicadShapes(shapes: Geometry3D[]): Promise<Blob> {
-  const document = createGltfDocumentFromReplicadShapes(shapes);
+async function createGlbFromReplicadShapes(geometries: GeometryReplicad[]): Promise<Blob> {
+  const document = createGltfDocumentFromReplicadShapes(geometries);
   const glbBuffer = await new NodeIO().writeBinary(document);
   return new Blob([glbBuffer], { type: 'model/gltf-binary' });
 }
 
 /**
- * Convert replicad shapes to GLTF blob format (preserving original triangulation)
+ * Convert replicad geometries to GLTF blob format (preserving original triangulation)
  */
-async function createGltfFromReplicadShapes(shapes: Geometry3D[]): Promise<Blob> {
-  const document = createGltfDocumentFromReplicadShapes(shapes);
+async function createGltfFromReplicadShapes(geometries: GeometryReplicad[]): Promise<Blob> {
+  const document = createGltfDocumentFromReplicadShapes(geometries);
 
   // Use writeJSON which returns both the JSON and binary data
   const gltfData = await new NodeIO().writeJSON(document);
@@ -237,18 +237,21 @@ async function createGltfFromReplicadShapes(shapes: Geometry3D[]): Promise<Blob>
 }
 
 /**
- * Convert replicad shapes to GLTF blob format
- * @param shapes - Array of Shape3D objects from replicad
+ * Convert replicad geometries to GLTF blob format
+ * @param geometries - Array of Shape3D objects from replicad
  * @param format - Output format: 'glb' for binary, 'gltf' for JSON
  * @returns GLTF blob
  *
  * This function preserves the original triangulation from replicad without re-triangulating,
  * resulting in better rendering quality and performance.
  */
-export async function convertReplicadShapesToGltf(shapes: Geometry3D[], format: 'glb' | 'gltf' = 'glb'): Promise<Blob> {
+export async function convertReplicadShapesToGltf(
+  geometries: GeometryReplicad[],
+  format: 'glb' | 'gltf' = 'glb',
+): Promise<Blob> {
   if (format === 'gltf') {
-    return createGltfFromReplicadShapes(shapes);
+    return createGltfFromReplicadShapes(geometries);
   }
 
-  return createGlbFromReplicadShapes(shapes);
+  return createGlbFromReplicadShapes(geometries);
 }

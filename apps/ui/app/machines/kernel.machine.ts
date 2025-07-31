@@ -194,7 +194,7 @@ const parseParametersActor = fromPromise<
 const evaluateCodeActor = fromPromise<
   | {
       type: 'geometryComputed';
-      shapes: Geometry[];
+      geometries: Geometry[];
     }
   | {
       type: 'kernelError';
@@ -249,7 +249,7 @@ const evaluateCodeActor = fromPromise<
 
   // Handle the result pattern
   if (isKernelSuccess(result)) {
-    return { type: 'geometryComputed', shapes: result.data };
+    return { type: 'geometryComputed', geometries: result.data };
   }
 
   return {

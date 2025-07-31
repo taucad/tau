@@ -629,7 +629,7 @@ type BuildLibraryCardProps = {
 
 function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibraryCardProps) {
   const [_, send, actorRef] = useActor(cadMachine, { input: { shouldInitializeKernelOnStart: false } });
-  const shapes = useSelector(actorRef, (state) => state.context.shapes);
+  const geometries = useSelector(actorRef, (state) => state.context.geometries);
 
   const mechanicalAsset = build.assets.mechanical;
   if (!mechanicalAsset) {
@@ -690,7 +690,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
               </div>
             ) : null}
             <CadViewer
-              shapes={shapes}
+              geometries={geometries}
               enablePan={false}
               enableLines={false}
               className="bg-muted"

@@ -24,7 +24,7 @@ export const dimensionTerms = [
 ];
 
 /**
- * Terms that indicate a parameter modifies shapes
+ * Terms that indicate a parameter modifies geometries
  */
 export const shapeModifierTerms = [
   'rounded',

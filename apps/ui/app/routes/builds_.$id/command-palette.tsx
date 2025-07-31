@@ -57,7 +57,7 @@ type CommandPaletteProperties = {
 
 export function CommandPalette({ isOpen, onOpenChange }: CommandPaletteProperties): React.JSX.Element {
   const navigate = useNavigate();
-  const shapes = useSelector(cadActor, (state) => state.context.shapes);
+  const geometries = useSelector(cadActor, (state) => state.context.geometries);
   const buildName = useBuildSelector((state) => state.build?.name) ?? 'file';
   const updateThumbnail = useBuildSelector((state) => state.updateThumbnail);
   const code = useSelector(cadActor, (state) => state.context.code);
@@ -363,10 +363,10 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
     onOpenChange(false);
   }, [buildName, screenshotActorRef, onOpenChange]);
 
-  // Subscribe to the cadActor to update the thumbnail when the shapes change
+  // Subscribe to the cadActor to update the thumbnail when the geometries change
   useEffect(() => {
     const subscription = cadActor.on('geometryEvaluated', (event) => {
-      if (event.shapes.length > 0) {
+      if (event.geometries.length > 0) {
         updateThumbnailScreenshot();
       }
     });
@@ -384,7 +384,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         group: 'Export',
         icon: <Format3D extension="stl" />,
         action: async () => handleExport(buildName, 'stl'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'download-step',
@@ -392,7 +392,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         group: 'Export',
         icon: <Format3D extension="step" />,
         action: async () => handleExport(buildName, 'step'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'download-gltf',
@@ -400,7 +400,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         group: 'Export',
         icon: <SvgIcon id="gltf" />,
         action: async () => handleExport(buildName, 'gltf'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'download-glb',
@@ -408,7 +408,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         group: 'Export',
         icon: <SvgIcon id="gltf" />,
         action: async () => handleExport(buildName, 'glb'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'download-3mf',
@@ -416,7 +416,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         group: 'Export',
         icon: <Format3D extension="3mf" />,
         action: async () => handleExport(buildName, '3mf'),
-        disabled: shapes.length === 0,
+        disabled: geometries.length === 0,
       },
       {
         id: 'update-thumbnail',
@@ -524,7 +524,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
       handleDownloadPng,
       buildName,
       handleExport,
-      shapes,
+      geometries,
       code,
       handleDownloadCode,
       handleDownloadMultipleAngles,

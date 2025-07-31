@@ -19,13 +19,14 @@ import {
   initOpenCascadeWithExceptions,
 } from '#components/geometry/kernel/replicad/init-open-cascade.js';
 import { runInCjsContext, buildEsModule } from '#components/geometry/kernel/replicad/vm.js';
-import { renderOutput, ShapeStandardizer } from '#components/geometry/kernel/replicad/utils/render-output.js';
+import { renderOutput } from '#components/geometry/kernel/replicad/utils/render-output.js';
 import { convertReplicadShapesToGltf } from '#components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
 import { jsonSchemaFromJson } from '#utils/schema.js';
-import type { MainResultShapes, ShapeConfig } from '#components/geometry/kernel/replicad/utils/render-output.js';
-import type { GeometryGltf, Geometry3D, Geometry2D } from '#types/cad.types.js';
+import type { InputShape, MainResultShapes } from '#components/geometry/kernel/replicad/utils/render-output.js';
+import type { GeometryGltf, Geometry2D } from '#types/cad.types.js';
 import type { OnWorkerLog } from '#types/console.types.js';
 import { KernelWorker } from '#components/geometry/kernel/utils/kernel-worker.js';
+import type { GeometryReplicad } from '#components/geometry/kernel/replicad/replicad.types.js';
 
 type ReplicadOptions = {
   /**
@@ -55,7 +56,7 @@ class ReplicadWorker extends KernelWorker<ReplicadOptions> {
   ];
 
   private replicadHasOc = false;
-  private shapesMemory: Record<string, ShapeConfig[]> = {};
+  private shapesMemory: Record<string, InputShape[]> = {};
   private readonly ocVersions: {
     withExceptions: Promise<OpenCascadeInstanceWithExceptions> | undefined;
     single: Promise<OpenCascadeInstance> | undefined;
@@ -181,7 +182,6 @@ try {
 
       let shapes: MainResultShapes;
       let defaultName: string | undefined;
-      const standardizer = new ShapeStandardizer();
 
       try {
         const runCodeStartTime = performance.now();
@@ -206,7 +206,6 @@ try {
       const renderStartTime = performance.now();
       const renderedShapes = renderOutput(
         shapes,
-        standardizer,
         (shapesArray) => {
           this.shapesMemory['defaultGeometry'] = shapesArray;
           return shapesArray;
@@ -217,7 +216,7 @@ try {
       this.log(`Render output took ${renderEndTime - renderStartTime}ms`, { operation: 'computeGeometry' });
 
       const gltfStartTime = performance.now();
-      const shapes3d = renderedShapes.filter((shape): shape is Geometry3D => shape.type === '3d');
+      const shapes3d = renderedShapes.filter((shape): shape is GeometryReplicad => shape.type === '3d');
       const shapes2d = renderedShapes.filter((shape): shape is Geometry2D => shape.type === '2d');
 
       if (shapes3d.length === 0 && shapes2d.length === 0) {
@@ -295,7 +294,7 @@ try {
               lines: [],
               edgeGroups: [],
             },
-          } satisfies Geometry3D;
+          } satisfies GeometryReplicad;
         });
 
         const gltfBlob = await convertReplicadShapesToGltf(temporaryShapes, fileType);

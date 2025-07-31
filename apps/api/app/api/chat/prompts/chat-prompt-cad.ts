@@ -44,7 +44,7 @@ Your code output must be written in **OpenSCAD syntax**. OpenSCAD uses a C-like 
 Key OpenSCAD syntax elements:
 - Variables are declared with variable_name = value;
 - Modules are defined with module module_name(parameters) { ... }
-- Basic shapes: cube(), sphere(), cylinder()
+- Basic geometries: cube(), sphere(), cylinder()
 - Boolean operations: union(), difference(), intersection()
 - Transformations: translate(), rotate(), scale(), mirror()
 - Control structures: for(), if()
@@ -75,11 +75,11 @@ difference() {
     modelingStrategy: `
 <modeling_strategy>
 ## OpenSCAD Design Philosophy: Constructive Solid Geometry (CSG)
-Your modeling approach should follow OpenSCAD's CSG methodology, which builds complex shapes by combining simple primitives using boolean operations:
+Your modeling approach should follow OpenSCAD's CSG methodology, which builds complex geometries by combining simple primitives using boolean operations:
 
-**Primitive Creation** - Start with basic shapes like cube(), sphere(), cylinder(), and polygon()
-**Transformation** - Use translate(), rotate(), scale() to position and orient shapes
-**Boolean Operations** - Combine shapes using union(), difference(), and intersection()
+**Primitive Creation** - Start with basic geometries like cube(), sphere(), cylinder(), and polygon()
+**Transformation** - Use translate(), rotate(), scale() to position and orient geometries
+**Boolean Operations** - Combine geometries using union(), difference(), and intersection()
 **Parameterization** - Use variables and modules to make designs adjustable
 **Iteration** - Use for() loops to create patterns and repeated elements
 **Conditional Logic** - Use if() statements to create adaptive designs
@@ -110,7 +110,7 @@ Your goal is to create models that are parametric, precise, and follow OpenSCAD 
     parameterNamingConvention: 'snake_case',
     parameterNamingExample: '`baluster_diameter` rather than `bal_diam`',
     implementationApproach:
-      'Break down the model into basic shapes and plan the CSG operations needed to achieve the final result.',
+      'Break down the model into basic geometries and plan the CSG operations needed to achieve the final result.',
     mainFunctionDescription: 'module or code should use variables for key dimensions',
   },
   replicad: {
@@ -144,7 +144,7 @@ Examples of correct JavaScript output:
 Your modeling approach should follow the Resilient Modeling Strategy (RMS), which ensures that your geometry remains stable and processable by the CAD kernel. Think of this as building a house - you start with the foundation and work your way up in a logical sequence:
 
 **Reference features** come first - these are your planning elements like layouts, reference images, or surface models that guide the overall design.
-**Core features** form the backbone of your model - these are the main prismatic shapes that define the fundamental form, size, and orientation of what you're creating.
+**Core features** form the backbone of your model - these are the main prismatic geometries that define the fundamental form, size, and orientation of what you're creating.
 **Surface features** add sophistication - these include profiles, paths, and control curves that create complex surfaces and modify the basic shape.
 **Detail features** add functionality - these are elements like bosses, slots, holes, and other features that attach to or modify the core geometry.
 **Modify features** provide refinement - operations like drafts, mirrors, patterns, and other transformations that enhance or replicate geometry.

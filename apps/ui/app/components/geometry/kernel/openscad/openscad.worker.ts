@@ -111,7 +111,7 @@ class OpenScadWorker extends KernelWorker {
 
       return createKernelSuccess([shape]);
     } catch (error) {
-      this.error('Error while building shapes from code', { data: error });
+      this.error('Error while building geometries from code', { data: error });
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return createKernelError({ message: errorMessage, startColumn: 0, startLineNumber: 0 });
     }
@@ -125,7 +125,7 @@ class OpenScadWorker extends KernelWorker {
       const offData = this.offDataMemory[geometryId];
       if (!offData) {
         return createKernelError({
-          message: `Shape ${geometryId} not computed yet. Please build shapes before exporting.`,
+          message: `Shape ${geometryId} not computed yet. Please build geometries before exporting.`,
           startColumn: 0,
           startLineNumber: 0,
         });

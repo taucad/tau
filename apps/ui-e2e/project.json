@@ -5,6 +5,5 @@
   "sourceRoot": "apps/ui-e2e/src",
   "tags": ["scope:ui", "type:e2e"],
   "implicitDependencies": ["ui"],
-  "// targets": "to see all targets run: nx show project ui-e2e --web",
   "targets": {}
 }

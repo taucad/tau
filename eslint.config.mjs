@@ -178,9 +178,19 @@ const config = [
         },
       ],
 
-      // Supporting monorepo with both workspace and project level dependencies.
-      'import-x/no-extraneous-dependencies': ['error', { packageDir: ['.', '../..'] }],
-      'n/no-extraneous-import': 'off', // Disabled as it conflicts with import-x/no-extraneous-dependencies.
+      // Applications and libraries can depend on workspace package.json dependencies.
+      'import-x/no-extraneous-dependencies': [
+        'error',
+        {
+          packageDir: ['.', '../..'], // Include the '../..' path as we want to include the root package.json.
+          devDependencies: true,
+          optionalDependencies: false,
+          peerDependencies: false,
+          includeTypes: true,
+          includeInternal: true,
+        },
+      ],
+      'n/no-extraneous-import': 'off', // Disabled as it has no monorepo support.
     },
   },
   {
@@ -229,6 +239,26 @@ const config = [
       ],
       // DefaultProps is deprecated and irrelevant when using functional components.
       'react/require-default-props': 'off',
+    },
+  },
+  {
+    // Packages
+    files: ['packages/**/*.{ts,tsx}'],
+    ignores: ['packages/**/*.{spec,test,config}.{ts,tsx}'], // Only lint the source files.
+    rules: {
+      // Packages MUST declare all their dependencies in the package.json, as they are
+      // published and consumers will not have access to the monorepo.
+      'import-x/no-extraneous-dependencies': [
+        'error',
+        {
+          packageDir: ['.'], // Exclude the '../..' path as we want to exclude the root package.json.
+          devDependencies: true,
+          optionalDependencies: false,
+          peerDependencies: false,
+          includeTypes: true,
+          includeInternal: true,
+        },
+      ],
     },
   },
 ];

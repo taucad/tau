@@ -1,6 +1,6 @@
 # Replicad Public API Reference
 
-Total APIs: 202
+Total APIs: 205
 
 ## 3D Operations
 
@@ -101,19 +101,6 @@ export declare const drawRectangle: typeof drawRoundedRectangle;
 
 ---
 
-### sketchRectangle
-
-**Type:** constant
-
-**Usage Count:** 7
-
-**Signature:**
-```typescript
-export declare const sketchRectangle: (xLength: number, yLength: number, planeConfig?: PlaneConfig) => Sketch;
-```
-
----
-
 ### drawPolysides
 
 **Type:** function
@@ -145,6 +132,19 @@ export declare const sketchCircle: (radius: number, planeConfig?: PlaneConfig) =
 
 ---
 
+### sketchRectangle
+
+**Type:** constant
+
+**Usage Count:** 5
+
+**Signature:**
+```typescript
+export declare const sketchRectangle: (xLength: number, yLength: number, planeConfig?: PlaneConfig) => Sketch;
+```
+
+---
+
 ### drawParametricFunction
 
 **Type:** constant
@@ -153,10 +153,11 @@ export declare const sketchCircle: (radius: number, planeConfig?: PlaneConfig) =
 
 **Signature:**
 ```typescript
-export declare const drawParametricFunction: (func: (t: number) => Point2D, { pointsCount, start, stop }?: {
+export declare const drawParametricFunction: (func: (t: number) => Point2D, { pointsCount, start, stop, closeShape }?: {
     pointsCount?: number | undefined;
     start?: number | undefined;
     stop?: number | undefined;
+    closeShape?: boolean | undefined;
 }, approximationConfig?: BSplineApproximationConfig) => Drawing;
 ```
 
@@ -357,7 +358,7 @@ export declare class Drawing implements DrawingInterface {
     toSVG(margin?: number): string;
     toSVGViewBox(margin?: number): string;
     toSVGPaths(): string[] | string[][];
-    offset(distance: number): Drawing;
+    offset(distance: number, offsetConfig?: Offset2DConfig): Drawing;
     approximate(target: "svg" | "arcs", options?: ApproximationOptions): Drawing;
     get blueprint(): Blueprint;
 }
@@ -420,7 +421,9 @@ export declare class DrawingPen extends BaseSketcher2d implements GenericSketche
 
 **Signature:**
 ```typescript
-export declare const drawPointsInterpolation: (points: Point2D[], approximationConfig?: BSplineApproximationConfig) => Drawing;
+export declare const drawPointsInterpolation: (points: Point2D[], approximationConfig?: BSplineApproximationConfig, options?: {
+    closeShape?: boolean;
+}) => Drawing;
 ```
 
 ---
@@ -725,7 +728,7 @@ export declare function textBlueprints(text: string, { startX, startY, fontSize,
 
 **Type:** class
 
-**Usage Count:** 12
+**Usage Count:** 10
 
 **Signature:**
 ```typescript
@@ -795,11 +798,11 @@ export declare const addHolesInFace: (face: Face, holes: Wire[]) => Face;
 
 **Signature:**
 ```typescript
-export declare const combineFinderFilters: <Type, T>(filters: {
+export declare const combineFinderFilters: <Type, T, R = number>(filters: {
     filter: Finder<Type, T>;
-    radius: number;
+    radius: R;
 }[]) => [
-    (v: Type) => number,
+    (v: Type) => R | null,
     () => void
 ];
 ```
@@ -1235,8 +1238,8 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> {
         thickness: number;
     }, tolerance?: number): Shape3D;
     shell(thickness: number, finderFcn: (f: FaceFinder) => FaceFinder, tolerance?: number): Shape3D;
-    fillet(radiusConfig: RadiusConfig, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
-    chamfer(radiusConfig: RadiusConfig, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
+    fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
+    chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
 }
 ```
 
@@ -1555,6 +1558,11 @@ declare type StandardPlane = "XY" | "XZ" | "YZ";
 **Signature:**
 ```typescript
 export declare class Vertex extends Shape<TopoDS_Vertex> {
+    asTuple(): [
+        number,
+        number,
+        number
+    ];
 }
 ```
 
@@ -1847,7 +1855,7 @@ export declare function intersect2D(first: Shape2D, second: Shape2D): Blueprint 
 
 **Type:** function
 
-**Usage Count:** 9
+**Usage Count:** 7
 
 **Signature:**
 ```typescript
@@ -1863,7 +1871,7 @@ export declare function makePlane(plane: Plane): Plane;
 
 **Type:** function
 
-**Usage Count:** 9
+**Usage Count:** 7
 
 **Signature:**
 ```typescript
@@ -2704,6 +2712,29 @@ export declare function cast(shape: TopoDS_Shape): AnyShape;
 
 ---
 
+### ChamferRadius
+
+**Type:** type
+
+**Usage Count:** 0
+
+**Signature:**
+```typescript
+export declare type ChamferRadius = number | {
+    distances: [
+        number,
+        number
+    ];
+    selectedFace: (f: FaceFinder) => FaceFinder;
+} | {
+    distance: number;
+    angle: number;
+    selectedFace: (f: FaceFinder) => FaceFinder;
+};
+```
+
+---
+
 ### complexExtrude
 
 **Type:** function
@@ -3019,6 +3050,22 @@ export declare function downcast(shape: TopoDS_Shape): GenericTopo;
 
 ---
 
+### FilletRadius
+
+**Type:** type
+
+**Usage Count:** 0
+
+**Signature:**
+```typescript
+export declare type FilletRadius = number | [
+    number,
+    number
+];
+```
+
+---
+
 ### FilterFcn
 
 **Type:** type
@@ -3183,7 +3230,7 @@ export declare interface GenericSweepConfig {
 
 **Signature:**
 ```typescript
-declare type GenericTopo = TopoDS_Face | TopoDS_Shape | TopoDS_Edge | TopoDS_Wire | TopoDS_Shell | TopoDS_Vertex | TopoDS_Solid | TopoDS_Compound | TopoDS_CompSolid;
+declare type GenericTopo = TopoDS_Vertex | TopoDS_Face | TopoDS_Shape | TopoDS_Edge | TopoDS_Wire | TopoDS_Shell | TopoDS_Vertex | TopoDS_Solid | TopoDS_Compound | TopoDS_CompSolid;
 ```
 
 ---
@@ -3287,6 +3334,21 @@ export declare interface LoftConfig {
 
 ---
 
+### Offset2DConfig
+
+**Type:** interface
+
+**Usage Count:** 0
+
+**Signature:**
+```typescript
+declare interface Offset2DConfig {
+    lineJoinType?: "miter" | "bevel" | "round";
+}
+```
+
+---
+
 ### ProjectionCamera
 
 **Type:** class
@@ -3334,9 +3396,9 @@ export declare const RAD2DEG: number;
 
 **Signature:**
 ```typescript
-export declare type RadiusConfig = ((e: Edge) => number | null) | number | {
+export declare type RadiusConfig<R = number> = ((e: Edge) => R | null) | R | {
     filter: EdgeFinder;
-    radius: number;
+    radius: R;
     keep?: boolean;
 };
 ```

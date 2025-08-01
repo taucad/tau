@@ -14,8 +14,6 @@ export declare class EdgeFinder extends Finder3d<Edge> {
     inPlane(inputPlane: PlaneName | Plane, origin?: Point | number): this;
     shouldKeep(element: Edge): boolean;
 }
-export declare function makePlane(plane: Plane): Plane;
-export declare function makePlane(plane?: PlaneName, origin?: Point | number): Plane;
 export declare class FaceFinder extends Finder3d<Face> {
     clone(): FaceFinder;
     parallelTo(plane: Plane | StandardPlane | Face): this;
@@ -25,11 +23,13 @@ export declare class FaceFinder extends Finder3d<Face> {
 }
 export declare function rotate(shape: TopoDS_Shape, angle: number, position?: Point, direction?: Point): TopoDS_Shape;
 export declare const drawRectangle: typeof drawRoundedRectangle;
-export declare const sketchRectangle: (xLength: number, yLength: number, planeConfig?: PlaneConfig) => Sketch;
+export declare function makePlane(plane: Plane): Plane;
+export declare function makePlane(plane?: PlaneName, origin?: Point | number): Plane;
 export declare const assembleWire: (listOfEdges: (Edge | Wire)[]) => Wire;
 export declare function drawPolysides(radius: number, sidesCount: number, sagitta?: number): Drawing;
 export declare const makeFace: (wire: Wire, holes?: Wire[]) => Face;
 export declare const sketchCircle: (radius: number, planeConfig?: PlaneConfig) => Sketch;
+export declare const sketchRectangle: (xLength: number, yLength: number, planeConfig?: PlaneConfig) => Sketch;
 export declare function makeSolid(facesOrShells: Array<Face | Shell>): Solid;
 export declare function mirror(shape: TopoDS_Shape, inputPlane?: Plane | PlaneName | Point, origin?: Point): TopoDS_Shape;
 export declare class Plane {
@@ -96,10 +96,11 @@ export declare class Sketcher implements GenericSketcher<Sketch> {
     close(): Sketch;
     closeWithMirror(): Sketch;
 }
-export declare const drawParametricFunction: (func: (t: number) => Point2D, { pointsCount, start, stop }?: {
+export declare const drawParametricFunction: (func: (t: number) => Point2D, { pointsCount, start, stop, closeShape }?: {
     pointsCount?: number | undefined;
     start?: number | undefined;
     stop?: number | undefined;
+    closeShape?: boolean | undefined;
 }, approximationConfig?: BSplineApproximationConfig) => Drawing;
 export declare const makeCylinder: (radius: number, height: number, location?: Point, direction?: Point) => Solid;
 export declare const polysideInnerRadius: (outerRadius: number, sidesCount: number, sagitta?: number) => number;
@@ -233,8 +234,8 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> {
         thickness: number;
     }, tolerance?: number): Shape3D;
     shell(thickness: number, finderFcn: (f: FaceFinder) => FaceFinder, tolerance?: number): Shape3D;
-    fillet(radiusConfig: RadiusConfig, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
-    chamfer(radiusConfig: RadiusConfig, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
+    fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
+    chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
 }
 export declare const addHolesInFace: (face: Face, holes: Wire[]) => Face;
 export declare type AnyShape = Vertex | Edge | Wire | Face | Shell | Solid | CompSolid | Compound;
@@ -376,11 +377,22 @@ export declare interface BSplineApproximationConfig {
     ];
 }
 export declare function cast(shape: TopoDS_Shape): AnyShape;
-export declare const combineFinderFilters: <Type, T>(filters: {
+export declare type ChamferRadius = number | {
+    distances: [
+        number,
+        number
+    ];
+    selectedFace: (f: FaceFinder) => FaceFinder;
+} | {
+    distance: number;
+    angle: number;
+    selectedFace: (f: FaceFinder) => FaceFinder;
+};
+export declare const combineFinderFilters: <Type, T, R = number>(filters: {
     filter: Finder<Type, T>;
-    radius: number;
+    radius: R;
 }[]) => [
-    (v: Type) => number,
+    (v: Type) => R | null,
     () => void
 ];
 export declare function complexExtrude(wire: Wire, center: Point, normal: Point, profileShape: ExtrusionProfile | undefined, shellMode: true): [
@@ -538,7 +550,7 @@ export declare class Drawing implements DrawingInterface {
     toSVG(margin?: number): string;
     toSVGViewBox(margin?: number): string;
     toSVGPaths(): string[] | string[][];
-    offset(distance: number): Drawing;
+    offset(distance: number, offsetConfig?: Offset2DConfig): Drawing;
     approximate(target: "svg" | "arcs", options?: ApproximationOptions): Drawing;
     get blueprint(): Blueprint;
 }
@@ -565,7 +577,9 @@ export declare class DrawingPen extends BaseSketcher2d implements GenericSketche
     closeWithMirror(): Drawing;
     closeWithCustomCorner(radius: number, mode?: "fillet" | "chamfer"): Drawing;
 }
-export declare const drawPointsInterpolation: (points: Point2D[], approximationConfig?: BSplineApproximationConfig) => Drawing;
+export declare const drawPointsInterpolation: (points: Point2D[], approximationConfig?: BSplineApproximationConfig, options?: {
+    closeShape?: boolean;
+}) => Drawing;
 export declare function drawProjection(shape: AnyShape, projectionCamera?: ProjectionPlane | ProjectionCamera): {
     visible: Drawing;
     hidden: Drawing;
@@ -618,6 +632,10 @@ export declare interface FaceTriangulation {
     trianglesIndexes: number[];
     verticesNormals: number[];
 }
+export declare type FilletRadius = number | [
+    number,
+    number
+];
 export declare type FilterFcn<Type> = {
     element: Type;
     normal: Vector | null;
@@ -705,7 +723,7 @@ export declare interface GenericSweepConfig {
     support?: TopoDS_Shape;
     forceProfileSpineOthogonality?: boolean;
 }
-declare type GenericTopo = TopoDS_Face | TopoDS_Shape | TopoDS_Edge | TopoDS_Wire | TopoDS_Shell | TopoDS_Vertex | TopoDS_Solid | TopoDS_Compound | TopoDS_CompSolid;
+declare type GenericTopo = TopoDS_Vertex | TopoDS_Face | TopoDS_Shape | TopoDS_Edge | TopoDS_Wire | TopoDS_Shell | TopoDS_Vertex | TopoDS_Solid | TopoDS_Compound | TopoDS_CompSolid;
 export declare const getFont: (fontFamily?: string) => opentype_2.Font;
 export declare const getOC: () => OpenCascadeInstance;
 export declare const HASH_CODE_MAX = 2147483647;
@@ -767,6 +785,9 @@ export declare function measureShapeLinearProperties(shape: AnyShape): LinearPhy
 export declare function measureShapeSurfaceProperties(shape: Face | Shape3D): SurfacePhysicalProperties;
 export declare function measureShapeVolumeProperties(shape: Shape3D): VolumePhysicalProperties;
 export declare function measureVolume(shape: Shape3D): number;
+declare interface Offset2DConfig {
+    lineJoinType?: "miter" | "bevel" | "round";
+}
 export declare const organiseBlueprints: (blueprints: Blueprint[]) => Blueprints;
 declare class PhysicalProperties extends WrappingObj<GProp_GProps> {
     get centerOfMass(): [
@@ -808,9 +829,9 @@ export declare class ProjectionCamera extends WrappingObj<gp_Ax2> {
 }
 export declare type ProjectionPlane = "XY" | "XZ" | "YZ" | "YX" | "ZX" | "ZY" | "front" | "back" | "top" | "bottom" | "left" | "right";
 export declare const RAD2DEG: number;
-export declare type RadiusConfig = ((e: Edge) => number | null) | number | {
+export declare type RadiusConfig<R = number> = ((e: Edge) => R | null) | R | {
     filter: EdgeFinder;
-    radius: number;
+    radius: R;
     keep?: boolean;
 };
 export declare const roundedRectangleBlueprint: (width: number, height: number, r?: number | {
@@ -944,6 +965,11 @@ declare type UVBounds = {
     vMax: number;
 };
 export declare class Vertex extends Shape<TopoDS_Vertex> {
+    asTuple(): [
+        number,
+        number,
+        number
+    ];
 }
 export declare class VolumePhysicalProperties extends PhysicalProperties {
     get volume(): number;

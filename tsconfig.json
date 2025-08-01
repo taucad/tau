@@ -18,6 +18,9 @@
     },
     {
       "path": "./apps/ui-e2e"
+    },
+    {
+      "path": "./libs/api-extractor"
     }
   ],
   "files": [],

@@ -4,6 +4,9 @@
   "include": [],
   "references": [
     {
+      "path": "../../libs/api-extractor"
+    },
+    {
       "path": "../../libs/tau-examples"
     },
     {

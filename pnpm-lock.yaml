@@ -620,15 +620,23 @@ importers:
 
   apps/api:
     dependencies:
+      '@taucad/api-extractor':
+        specifier: workspace:*
+        version: link:../../libs/api-extractor
       '@taucad/tau-examples':
         specifier: workspace:*
         version: link:../../libs/tau-examples
 
   apps/ui:
     dependencies:
+      '@taucad/api-extractor':
+        specifier: workspace:*
+        version: link:../../libs/api-extractor
       '@taucad/tau-examples':
         specifier: workspace:*
         version: link:../../libs/tau-examples
+
+  libs/api-extractor: {}
 
   libs/tau-examples: {}
 

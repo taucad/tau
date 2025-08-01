@@ -1,0 +1,23 @@
+{
+  "name": "api-extractor",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/api-extractor",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:lib"],
+  "targets": {
+    "extract": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-replicad-api.ts",
+        "cwd": "libs/api-extractor"
+      }
+    },
+    "analyze": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/use-extracted-api.ts",
+        "cwd": "libs/api-extractor"
+      }
+    }
+  }
+}

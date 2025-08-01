@@ -1,8 +1,8 @@
 {
   "metadata": {
-    "extractionDate": "2025-07-02T03:58:46.336Z",
+    "extractionDate": "2025-07-31T23:59:41.071Z",
     "extractionMethod": "TypeScript Compiler API (Filtered)",
-    "totalApis": 202,
+    "totalApis": 205,
     "usedApis": 30,
     "filtering": {
       "removedPrivateProtected": true,
@@ -99,45 +99,8 @@
       "category": "Finders & Filters",
       "signature": "export declare class EdgeFinder extends Finder3d<Edge> {\n    clone(): EdgeFinder;\n    inDirection(direction: Direction_2 | Point): this;\n    ofLength(length: number | ((l: number) => boolean)): this;\n    ofCurveType(curveType: CurveType): this;\n    parallelTo(plane: Plane | StandardPlane | Face): this;\n    inPlane(inputPlane: PlaneName | Plane, origin?: Point | number): this;\n    shouldKeep(element: Edge): boolean;\n}",
       "signatureWithJSDoc": "/**\n * With an EdgeFinder you can apply a set of filters to find specific edges\n * within a shape.\n *\n * @category Finders\n */\nexport declare class EdgeFinder extends Finder3d<Edge> {\n    clone(): EdgeFinder;\n    /**\n     * Filter to find edges that are in a certain direction\n     *\n     * @category Filter\n     */\n    inDirection(direction: Direction_2 | Point): this;\n    /**\n     * Filter to find edges of a certain length\n     *\n     * @category Filter\n     */\n    ofLength(length: number | ((l: number) => boolean)): this;\n    /**\n     * Filter to find edges that are of a cetain curve type.\n     *\n     * @category Filter\n     */\n    ofCurveType(curveType: CurveType): this;\n    /**\n     * Filter to find edges that are parallel to a plane.\n     *\n     * Note that this will work only in lines (but the method does not\n     * check this assumption).\n     *\n     * @category Filter\n     */\n    parallelTo(plane: Plane | StandardPlane | Face): this;\n    /**\n     * Filter to find edges that within a plane.\n     *\n     * Note that this will work only in lines (but the method does not\n     * check this assumption).\n     *\n     * @category Filter\n     */\n    inPlane(inputPlane: PlaneName | Plane, origin?: Point | number): this;\n    shouldKeep(element: Edge): boolean;\n}",
-      "usageCount": 12,
+      "usageCount": 10,
       "jsDoc": "Finders"
-    },
-    {
-      "name": "makePlane",
-      "type": "function",
-      "category": "Primitives & Makers",
-      "signature": "export declare function makePlane(plane: Plane): Plane;",
-      "signatureWithJSDoc": "export declare function makePlane(plane: Plane): Plane;",
-      "parameters": [
-        {
-          "name": "plane",
-          "type": "Plane",
-          "optional": false
-        }
-      ],
-      "returnType": "Plane",
-      "usageCount": 9
-    },
-    {
-      "name": "makePlane",
-      "type": "function",
-      "category": "Primitives & Makers",
-      "signature": "export declare function makePlane(plane?: PlaneName, origin?: Point | number): Plane;",
-      "signatureWithJSDoc": "export declare function makePlane(plane?: PlaneName, origin?: Point | number): Plane;",
-      "parameters": [
-        {
-          "name": "plane",
-          "type": "PlaneName",
-          "optional": true
-        },
-        {
-          "name": "origin",
-          "type": "Point | number",
-          "optional": true
-        }
-      ],
-      "returnType": "Plane",
-      "usageCount": 9
     },
     {
       "name": "FaceFinder",
@@ -188,13 +151,41 @@
       "usageCount": 7
     },
     {
-      "name": "sketchRectangle",
-      "type": "constant",
-      "category": "Drawing & Sketching",
-      "signature": "export declare const sketchRectangle: (xLength: number, yLength: number, planeConfig?: PlaneConfig) => Sketch;",
-      "signatureWithJSDoc": "/**\n * Creates the `Sketch` of a rectangle in a defined plane\n *\n * @category Sketching\n */\nexport declare const sketchRectangle: (xLength: number, yLength: number, planeConfig?: PlaneConfig) => Sketch;",
-      "usageCount": 7,
-      "jsDoc": "Sketching"
+      "name": "makePlane",
+      "type": "function",
+      "category": "Primitives & Makers",
+      "signature": "export declare function makePlane(plane: Plane): Plane;",
+      "signatureWithJSDoc": "export declare function makePlane(plane: Plane): Plane;",
+      "parameters": [
+        {
+          "name": "plane",
+          "type": "Plane",
+          "optional": false
+        }
+      ],
+      "returnType": "Plane",
+      "usageCount": 7
+    },
+    {
+      "name": "makePlane",
+      "type": "function",
+      "category": "Primitives & Makers",
+      "signature": "export declare function makePlane(plane?: PlaneName, origin?: Point | number): Plane;",
+      "signatureWithJSDoc": "export declare function makePlane(plane?: PlaneName, origin?: Point | number): Plane;",
+      "parameters": [
+        {
+          "name": "plane",
+          "type": "PlaneName",
+          "optional": true
+        },
+        {
+          "name": "origin",
+          "type": "Point | number",
+          "optional": true
+        }
+      ],
+      "returnType": "Plane",
+      "usageCount": 7
     },
     {
       "name": "assembleWire",
@@ -249,11 +240,20 @@
       "jsDoc": "Sketching"
     },
     {
+      "name": "sketchRectangle",
+      "type": "constant",
+      "category": "Drawing & Sketching",
+      "signature": "export declare const sketchRectangle: (xLength: number, yLength: number, planeConfig?: PlaneConfig) => Sketch;",
+      "signatureWithJSDoc": "/**\n * Creates the `Sketch` of a rectangle in a defined plane\n *\n * @category Sketching\n */\nexport declare const sketchRectangle: (xLength: number, yLength: number, planeConfig?: PlaneConfig) => Sketch;",
+      "usageCount": 5,
+      "jsDoc": "Sketching"
+    },
+    {
       "name": "makeSolid",
       "type": "function",
       "category": "Primitives & Makers",
       "signature": "export declare function makeSolid(facesOrShells: Array<Face | Shell>): Solid;",
-      "signatureWithJSDoc": "/** Welds faces and shells into a single shell and then makes a solid.\n *\n * @param facesOrShells - An array of faces and shells to be welded.\n * @returns A solid that contains all the faces and shells.\n **/\nexport declare function makeSolid(facesOrShells: Array<Face | Shell>): Solid;",
+      "signatureWithJSDoc": "/** Welds faces and shells into a single shell and then makes a solid.\n *\n * @param facesOrShells - An array of faces and shells to be welded.\n * @returns A solid that contains all the faces and shells.\n *\n * @category Solids\n **/\nexport declare function makeSolid(facesOrShells: Array<Face | Shell>): Solid;",
       "parameters": [
         {
           "name": "facesOrShells",
@@ -263,7 +263,7 @@
       ],
       "returnType": "Solid",
       "usageCount": 4,
-      "jsDoc": "- An array of faces and shells to be welded. A solid that contains all the faces and shells."
+      "jsDoc": "- An array of faces and shells to be welded. A solid that contains all the faces and shells. Solids"
     },
     {
       "name": "mirror",
@@ -320,8 +320,8 @@
       "name": "drawParametricFunction",
       "type": "constant",
       "category": "Drawing & Sketching",
-      "signature": "export declare const drawParametricFunction: (func: (t: number) => Point2D, { pointsCount, start, stop }?: {\n    pointsCount?: number | undefined;\n    start?: number | undefined;\n    stop?: number | undefined;\n}, approximationConfig?: BSplineApproximationConfig) => Drawing;",
-      "signatureWithJSDoc": "/**\n * Creates the `Drawing` of parametric function\n *\n * The drawing will be a spline approximating the function. Note that the\n * degree should be at maximum 3 if you need to export the drawing as an SVG.\n *\n * @category Drawing\n */\nexport declare const drawParametricFunction: (func: (t: number) => Point2D, { pointsCount, start, stop }?: {\n    pointsCount?: number | undefined;\n    start?: number | undefined;\n    stop?: number | undefined;\n}, approximationConfig?: BSplineApproximationConfig) => Drawing;",
+      "signature": "export declare const drawParametricFunction: (func: (t: number) => Point2D, { pointsCount, start, stop, closeShape }?: {\n    pointsCount?: number | undefined;\n    start?: number | undefined;\n    stop?: number | undefined;\n    closeShape?: boolean | undefined;\n}, approximationConfig?: BSplineApproximationConfig) => Drawing;",
+      "signatureWithJSDoc": "/**\n * Creates the `Drawing` of parametric function\n *\n * The drawing will be a spline approximating the function. Note that the\n * degree should be at maximum 3 if you need to export the drawing as an SVG.\n *\n * @category Drawing\n */\nexport declare const drawParametricFunction: (func: (t: number) => Point2D, { pointsCount, start, stop, closeShape }?: {\n    pointsCount?: number | undefined;\n    start?: number | undefined;\n    stop?: number | undefined;\n    closeShape?: boolean | undefined;\n}, approximationConfig?: BSplineApproximationConfig) => Drawing;",
       "usageCount": 2,
       "jsDoc": "Drawing"
     },
@@ -330,8 +330,9 @@
       "type": "constant",
       "category": "Primitives & Makers",
       "signature": "export declare const makeCylinder: (radius: number, height: number, location?: Point, direction?: Point) => Solid;",
-      "signatureWithJSDoc": "export declare const makeCylinder: (radius: number, height: number, location?: Point, direction?: Point) => Solid;",
-      "usageCount": 2
+      "signatureWithJSDoc": "/**\n * Creates a cylinder with the given radius and height.\n *\n * @category Solids\n */\nexport declare const makeCylinder: (radius: number, height: number, location?: Point, direction?: Point) => Solid;",
+      "usageCount": 2,
+      "jsDoc": "Solids"
     },
     {
       "name": "polysideInnerRadius",
@@ -362,8 +363,9 @@
       "type": "constant",
       "category": "Primitives & Makers",
       "signature": "export declare const makeSphere: (radius: number) => Solid;",
-      "signatureWithJSDoc": "export declare const makeSphere: (radius: number) => Solid;",
-      "usageCount": 1
+      "signatureWithJSDoc": "/**\n * Creates a sphere with the given radius.\n *\n * @category Solids\n */\nexport declare const makeSphere: (radius: number) => Solid;",
+      "usageCount": 1,
+      "jsDoc": "Solids"
     },
     {
       "name": "revolution",
@@ -428,8 +430,8 @@
       "name": "_3DShape",
       "type": "class",
       "category": "Geometry Types",
-      "signature": "export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> {\n    fuse(other: Shape3D, { optimisation, }?: {\n        optimisation?: \"none\" | \"commonFace\" | \"sameFace\";\n    }): Shape3D;\n    cut(tool: Shape3D, { optimisation, }?: {\n        optimisation?: \"none\" | \"commonFace\" | \"sameFace\";\n    }): Shape3D;\n    intersect(tool: AnyShape): AnyShape;\n    shell(config: {\n        filter: FaceFinder;\n        thickness: number;\n    }, tolerance?: number): Shape3D;\n    shell(thickness: number, finderFcn: (f: FaceFinder) => FaceFinder, tolerance?: number): Shape3D;\n    fillet(radiusConfig: RadiusConfig, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n    chamfer(radiusConfig: RadiusConfig, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n}",
-      "signatureWithJSDoc": "export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> {\n    /**\n     * Builds a new shape out of the two, fused, shapes\n     *\n     * @category Shape Modifications\n     */\n    fuse(other: Shape3D, { optimisation, }?: {\n        optimisation?: \"none\" | \"commonFace\" | \"sameFace\";\n    }): Shape3D;\n    /**\n     * Builds a new shape by removing the tool tape from this shape\n     *\n     * @category Shape Modifications\n     */\n    cut(tool: Shape3D, { optimisation, }?: {\n        optimisation?: \"none\" | \"commonFace\" | \"sameFace\";\n    }): Shape3D;\n    /**\n     * Builds a new shape by intersecting this shape and another\n     *\n     * @category Shape Modifications\n     */\n    intersect(tool: AnyShape): AnyShape;\n    /**\n     * Hollows out the current shape, removing the faces found by the `filter` and\n     * keeping a border of `thickness`\n     *\n     * @category Shape Modifications\n     */\n    shell(config: {\n        filter: FaceFinder;\n        thickness: number;\n    }, tolerance?: number): Shape3D;\n    shell(thickness: number, finderFcn: (f: FaceFinder) => FaceFinder, tolerance?: number): Shape3D;\n    /**\n     * Creates a new shapes with some edges filletted, as specified in the\n     * radius config.\n     *\n     * If the radius is a filter finder object (with an EdgeFinder as filter,\n     * and a radius to specifiy the fillet radius), the fillet will only be\n     * applied to the edges as selected by the finder. The finder will be\n     * deleted unless it is explicitly specified to `keep` it.\n     *\n     * If the radius is a number all the edges will be filletted.\n     *\n     * If the radius is a function edges will be filletted according to the\n     * value returned by the function (0 or null will not add any fillet).\n     *\n     * @category Shape Modifications\n     */\n    fillet(radiusConfig: RadiusConfig, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n    /**\n     * Creates a new shapes with some edges chamfered, as specified in the\n     * radius config.\n     *\n     * If the radius is a filter finder object (with an EdgeFinder as filter,\n     * and a radius to specifiy the chamfer radius), the fillet will only be\n     * applied to the edges as selected by the finder. The finder will be\n     * deleted unless it is explicitly specified to `keep` it.\n     *\n     * If the radius is a number all the edges will be chamfered.\n     *\n     * If the radius is a function edges will be chamfered according to the\n     * value returned by the function (0 or null will not add any chamfer).\n     *\n     * @category Shape Modifications\n     */\n    chamfer(radiusConfig: RadiusConfig, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n}",
+      "signature": "export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> {\n    fuse(other: Shape3D, { optimisation, }?: {\n        optimisation?: \"none\" | \"commonFace\" | \"sameFace\";\n    }): Shape3D;\n    cut(tool: Shape3D, { optimisation, }?: {\n        optimisation?: \"none\" | \"commonFace\" | \"sameFace\";\n    }): Shape3D;\n    intersect(tool: AnyShape): AnyShape;\n    shell(config: {\n        filter: FaceFinder;\n        thickness: number;\n    }, tolerance?: number): Shape3D;\n    shell(thickness: number, finderFcn: (f: FaceFinder) => FaceFinder, tolerance?: number): Shape3D;\n    fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n    chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n}",
+      "signatureWithJSDoc": "export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> {\n    /**\n     * Builds a new shape out of the two, fused, shapes\n     *\n     * @category Shape Modifications\n     */\n    fuse(other: Shape3D, { optimisation, }?: {\n        optimisation?: \"none\" | \"commonFace\" | \"sameFace\";\n    }): Shape3D;\n    /**\n     * Builds a new shape by removing the tool tape from this shape\n     *\n     * @category Shape Modifications\n     */\n    cut(tool: Shape3D, { optimisation, }?: {\n        optimisation?: \"none\" | \"commonFace\" | \"sameFace\";\n    }): Shape3D;\n    /**\n     * Builds a new shape by intersecting this shape and another\n     *\n     * @category Shape Modifications\n     */\n    intersect(tool: AnyShape): AnyShape;\n    /**\n     * Hollows out the current shape, removing the faces found by the `filter` and\n     * keeping a border of `thickness`\n     *\n     * @category Shape Modifications\n     */\n    shell(config: {\n        filter: FaceFinder;\n        thickness: number;\n    }, tolerance?: number): Shape3D;\n    shell(thickness: number, finderFcn: (f: FaceFinder) => FaceFinder, tolerance?: number): Shape3D;\n    /**\n     * Creates a new shapes with some edges filletted, as specified in the\n     * radius config.\n     *\n     * If the radius is a filter finder object (with an EdgeFinder as filter,\n     * and a radius to specifiy the fillet radius), the fillet will only be\n     * applied to the edges as selected by the finder. The finder will be\n     * deleted unless it is explicitly specified to `keep` it.\n     *\n     * If the radius is a number all the edges will be filletted.\n     *\n     * If the radius is a function edges will be filletted according to the\n     * value returned by the function (0 or null will not add any fillet).\n     *\n     * @category Shape Modifications\n     */\n    fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n    /**\n     * Creates a new shapes with some edges chamfered, as specified in the\n     * radius config.\n     *\n     * If the radius is a filter finder object (with an EdgeFinder as filter,\n     * and a radius to specifiy the chamfer radius), the fillet will only be\n     * applied to the edges as selected by the finder. The finder will be\n     * deleted unless it is explicitly specified to `keep` it.\n     *\n     * If the radius is a number all the edges will be chamfered.\n     *\n     * If the radius is a function edges will be chamfered according to the\n     * value returned by the function (0 or null will not add any chamfer).\n     *\n     * @category Shape Modifications\n     */\n    chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n}",
       "usageCount": 0
     },
     {
@@ -585,12 +587,21 @@
       "usageCount": 0
     },
     {
+      "name": "ChamferRadius",
+      "type": "type",
+      "category": "Utilities",
+      "signature": "export declare type ChamferRadius = number | {\n    distances: [\n        number,\n        number\n    ];\n    selectedFace: (f: FaceFinder) => FaceFinder;\n} | {\n    distance: number;\n    angle: number;\n    selectedFace: (f: FaceFinder) => FaceFinder;\n};",
+      "signatureWithJSDoc": "/**\n * We can defined a chamfer with only a number - in that case it will be\n * symmetric\n *\n * We can also define a chamfer with two distances, in that case the chamfer\n * will be asymmetric, and the first distance will be used for selected face.\n *\n * We can also define a chamfer with a distance and an angle, in that case\n * the chamfer will be asymmetric, and the distance will be used\n * for selected face.\n *\n * Note that the selected face is a function that takes a FaceFinder, and if\n * this fails, you might expect an error.\n *\n */\nexport declare type ChamferRadius = number | {\n    distances: [\n        number,\n        number\n    ];\n    selectedFace: (f: FaceFinder) => FaceFinder;\n} | {\n    distance: number;\n    angle: number;\n    selectedFace: (f: FaceFinder) => FaceFinder;\n};",
+      "usageCount": 0
+    },
+    {
       "name": "combineFinderFilters",
       "type": "constant",
       "category": "Finders & Filters",
-      "signature": "export declare const combineFinderFilters: <Type, T>(filters: {\n    filter: Finder<Type, T>;\n    radius: number;\n}[]) => [\n    (v: Type) => number,\n    () => void\n];",
-      "signatureWithJSDoc": "/**\n * Combine a set of finder filters (defined with radius) to pass as a filter\n * function.\n *\n * It returns the filter, as well as a cleanup function.\n */\nexport declare const combineFinderFilters: <Type, T>(filters: {\n    filter: Finder<Type, T>;\n    radius: number;\n}[]) => [\n    (v: Type) => number,\n    () => void\n];",
-      "usageCount": 0
+      "signature": "export declare const combineFinderFilters: <Type, T, R = number>(filters: {\n    filter: Finder<Type, T>;\n    radius: R;\n}[]) => [\n    (v: Type) => R | null,\n    () => void\n];",
+      "signatureWithJSDoc": "/**\n * Combine a set of finder filters (defined with radius) to pass as a filter\n * function.\n *\n * @param filters - An array of objects containing a filter and its radius.\n * @returns A tuple containing a filter function and a cleanup function.\n *\n * @category Finders\n */\nexport declare const combineFinderFilters: <Type, T, R = number>(filters: {\n    filter: Finder<Type, T>;\n    radius: R;\n}[]) => [\n    (v: Type) => R | null,\n    () => void\n];",
+      "usageCount": 0,
+      "jsDoc": "- An array of objects containing a filter and its radius. A tuple containing a filter function and a cleanup function. Finders"
     },
     {
       "name": "complexExtrude",
@@ -899,7 +910,7 @@
       "type": "function",
       "category": "Drawing & Sketching",
       "signature": "export declare function drawFaceOutline(face: Face): Drawing;",
-      "signatureWithJSDoc": "export declare function drawFaceOutline(face: Face): Drawing;",
+      "signatureWithJSDoc": "/**\n * Creates the `Drawing` out of a face\n *\n * @category Drawing\n */\nexport declare function drawFaceOutline(face: Face): Drawing;",
       "parameters": [
         {
           "name": "face",
@@ -908,15 +919,17 @@
         }
       ],
       "returnType": "Drawing",
-      "usageCount": 0
+      "usageCount": 0,
+      "jsDoc": "Drawing"
     },
     {
       "name": "Drawing",
       "type": "class",
       "category": "Drawing & Sketching",
-      "signature": "export declare class Drawing implements DrawingInterface {\n    constructor(innerShape?: Shape2D);\n    clone(): Drawing;\n    get boundingBox(): BoundingBox2d;\n    stretch(ratio: number, direction: Point2D, origin: Point2D): Drawing;\n    get repr(): string;\n    rotate(angle: number, center?: Point2D): Drawing;\n    translate(xDist: number, yDist: number): Drawing;\n    translate(translationVector: Point2D): Drawing;\n    scale(scaleFactor: number, center?: Point2D): Drawing;\n    mirror(centerOrDirection: Point2D, origin?: Point2D, mode?: \"center\" | \"plane\"): Drawing;\n    cut(other: Drawing): Drawing;\n    fuse(other: Drawing): Drawing;\n    intersect(other: Drawing): Drawing;\n    fillet(radius: number, filter?: (c: CornerFinder) => CornerFinder): Drawing;\n    chamfer(radius: number, filter?: (c: CornerFinder) => CornerFinder): Drawing;\n    sketchOnPlane(inputPlane: Plane): SketchInterface | Sketches;\n    sketchOnPlane(inputPlane?: PlaneName, origin?: Point | number): SketchInterface | Sketches;\n    sketchOnFace(face: Face, scaleMode: ScaleMode): SketchInterface | Sketches;\n    toSVG(margin?: number): string;\n    toSVGViewBox(margin?: number): string;\n    toSVGPaths(): string[] | string[][];\n    offset(distance: number): Drawing;\n    approximate(target: \"svg\" | \"arcs\", options?: ApproximationOptions): Drawing;\n    get blueprint(): Blueprint;\n}",
-      "signatureWithJSDoc": "export declare class Drawing implements DrawingInterface {\n    constructor(innerShape?: Shape2D);\n    clone(): Drawing;\n    get boundingBox(): BoundingBox2d;\n    stretch(ratio: number, direction: Point2D, origin: Point2D): Drawing;\n    get repr(): string;\n    rotate(angle: number, center?: Point2D): Drawing;\n    translate(xDist: number, yDist: number): Drawing;\n    translate(translationVector: Point2D): Drawing;\n    scale(scaleFactor: number, center?: Point2D): Drawing;\n    mirror(centerOrDirection: Point2D, origin?: Point2D, mode?: \"center\" | \"plane\"): Drawing;\n    /**\n     * Builds a new drawing by cuting another drawing into this one\n     *\n     * @category Drawing Modifications\n     */\n    cut(other: Drawing): Drawing;\n    /**\n     * Builds a new drawing by merging another drawing into this one\n     *\n     * @category Drawing Modifications\n     */\n    fuse(other: Drawing): Drawing;\n    /**\n     * Builds a new drawing by intersection this drawing with another\n     *\n     * @category Drawing Modifications\n     */\n    intersect(other: Drawing): Drawing;\n    /**\n     * Creates a new drawing with some corners filletted, as specified by the\n     * radius and the corner finder function\n     *\n     * @category Drawing Modifications\n     */\n    fillet(radius: number, filter?: (c: CornerFinder) => CornerFinder): Drawing;\n    /**\n     * Creates a new drawing with some corners filletted, as specified by the\n     * radius and the corner finder function\n     *\n     * @category Drawing Modifications\n     */\n    chamfer(radius: number, filter?: (c: CornerFinder) => CornerFinder): Drawing;\n    sketchOnPlane(inputPlane: Plane): SketchInterface | Sketches;\n    sketchOnPlane(inputPlane?: PlaneName, origin?: Point | number): SketchInterface | Sketches;\n    sketchOnFace(face: Face, scaleMode: ScaleMode): SketchInterface | Sketches;\n    toSVG(margin?: number): string;\n    toSVGViewBox(margin?: number): string;\n    toSVGPaths(): string[] | string[][];\n    offset(distance: number): Drawing;\n    approximate(target: \"svg\" | \"arcs\", options?: ApproximationOptions): Drawing;\n    get blueprint(): Blueprint;\n}",
-      "usageCount": 0
+      "signature": "export declare class Drawing implements DrawingInterface {\n    constructor(innerShape?: Shape2D);\n    clone(): Drawing;\n    get boundingBox(): BoundingBox2d;\n    stretch(ratio: number, direction: Point2D, origin: Point2D): Drawing;\n    get repr(): string;\n    rotate(angle: number, center?: Point2D): Drawing;\n    translate(xDist: number, yDist: number): Drawing;\n    translate(translationVector: Point2D): Drawing;\n    scale(scaleFactor: number, center?: Point2D): Drawing;\n    mirror(centerOrDirection: Point2D, origin?: Point2D, mode?: \"center\" | \"plane\"): Drawing;\n    cut(other: Drawing): Drawing;\n    fuse(other: Drawing): Drawing;\n    intersect(other: Drawing): Drawing;\n    fillet(radius: number, filter?: (c: CornerFinder) => CornerFinder): Drawing;\n    chamfer(radius: number, filter?: (c: CornerFinder) => CornerFinder): Drawing;\n    sketchOnPlane(inputPlane: Plane): SketchInterface | Sketches;\n    sketchOnPlane(inputPlane?: PlaneName, origin?: Point | number): SketchInterface | Sketches;\n    sketchOnFace(face: Face, scaleMode: ScaleMode): SketchInterface | Sketches;\n    toSVG(margin?: number): string;\n    toSVGViewBox(margin?: number): string;\n    toSVGPaths(): string[] | string[][];\n    offset(distance: number, offsetConfig?: Offset2DConfig): Drawing;\n    approximate(target: \"svg\" | \"arcs\", options?: ApproximationOptions): Drawing;\n    get blueprint(): Blueprint;\n}",
+      "signatureWithJSDoc": "/**\n * @categoryDescription Drawing\n *\n * Drawing are shapes in the 2D space. You can either use a \"builder pen\" to\n * draw a shape, or use some of the canned shapes like circles or rectangles.\n */\nexport declare class Drawing implements DrawingInterface {\n    constructor(innerShape?: Shape2D);\n    clone(): Drawing;\n    get boundingBox(): BoundingBox2d;\n    stretch(ratio: number, direction: Point2D, origin: Point2D): Drawing;\n    get repr(): string;\n    rotate(angle: number, center?: Point2D): Drawing;\n    translate(xDist: number, yDist: number): Drawing;\n    translate(translationVector: Point2D): Drawing;\n    scale(scaleFactor: number, center?: Point2D): Drawing;\n    mirror(centerOrDirection: Point2D, origin?: Point2D, mode?: \"center\" | \"plane\"): Drawing;\n    /**\n     * Builds a new drawing by cuting another drawing into this one\n     *\n     * @category Drawing Modifications\n     */\n    cut(other: Drawing): Drawing;\n    /**\n     * Builds a new drawing by merging another drawing into this one\n     *\n     * @category Drawing Modifications\n     */\n    fuse(other: Drawing): Drawing;\n    /**\n     * Builds a new drawing by intersection this drawing with another\n     *\n     * @category Drawing Modifications\n     */\n    intersect(other: Drawing): Drawing;\n    /**\n     * Creates a new drawing with some corners filletted, as specified by the\n     * radius and the corner finder function\n     *\n     * @category Drawing Modifications\n     */\n    fillet(radius: number, filter?: (c: CornerFinder) => CornerFinder): Drawing;\n    /**\n     * Creates a new drawing with some corners filletted, as specified by the\n     * radius and the corner finder function\n     *\n     * @category Drawing Modifications\n     */\n    chamfer(radius: number, filter?: (c: CornerFinder) => CornerFinder): Drawing;\n    sketchOnPlane(inputPlane: Plane): SketchInterface | Sketches;\n    sketchOnPlane(inputPlane?: PlaneName, origin?: Point | number): SketchInterface | Sketches;\n    sketchOnFace(face: Face, scaleMode: ScaleMode): SketchInterface | Sketches;\n    toSVG(margin?: number): string;\n    toSVGViewBox(margin?: number): string;\n    toSVGPaths(): string[] | string[][];\n    offset(distance: number, offsetConfig?: Offset2DConfig): Drawing;\n    approximate(target: \"svg\" | \"arcs\", options?: ApproximationOptions): Drawing;\n    get blueprint(): Blueprint;\n}",
+      "usageCount": 0,
+      "jsDoc": "Drawing\r\n\r\nDrawing are shapes in the 2D space. You can either use a \"builder pen\" to\r\ndraw a shape, or use some of the canned shapes like circles or rectangles."
     },
     {
       "name": "DrawingInterface",
@@ -931,15 +944,16 @@
       "type": "class",
       "category": "Drawing & Sketching",
       "signature": "export declare class DrawingPen extends BaseSketcher2d implements GenericSketcher<Drawing> {\n    constructor(origin?: Point2D);\n    done(): Drawing;\n    close(): Drawing;\n    closeWithMirror(): Drawing;\n    closeWithCustomCorner(radius: number, mode?: \"fillet\" | \"chamfer\"): Drawing;\n}",
-      "signatureWithJSDoc": "export declare class DrawingPen extends BaseSketcher2d implements GenericSketcher<Drawing> {\n    constructor(origin?: Point2D);\n    done(): Drawing;\n    close(): Drawing;\n    closeWithMirror(): Drawing;\n    /**\n     * Stop drawing, make sure the sketch is closed (by adding a straight line to\n     * from the last point to the first), change the corner between the last and the\n     * first segments and returns the sketch.\n     */\n    closeWithCustomCorner(radius: number, mode?: \"fillet\" | \"chamfer\"): Drawing;\n}",
-      "usageCount": 0
+      "signatureWithJSDoc": "/**\n * DrawingPen is a helper class to draw in 2D. It is used to create drawings\n * by exposing a builder interface. It is not a drawing itself, but it can be\n * used to create a drawing.\n *\n * @category Drawing\n */\nexport declare class DrawingPen extends BaseSketcher2d implements GenericSketcher<Drawing> {\n    constructor(origin?: Point2D);\n    done(): Drawing;\n    close(): Drawing;\n    closeWithMirror(): Drawing;\n    /**\n     * Stop drawing, make sure the sketch is closed (by adding a straight line to\n     * from the last point to the first), change the corner between the last and the\n     * first segments and returns the sketch.\n     */\n    closeWithCustomCorner(radius: number, mode?: \"fillet\" | \"chamfer\"): Drawing;\n}",
+      "usageCount": 0,
+      "jsDoc": "Drawing"
     },
     {
       "name": "drawPointsInterpolation",
       "type": "constant",
       "category": "Drawing & Sketching",
-      "signature": "export declare const drawPointsInterpolation: (points: Point2D[], approximationConfig?: BSplineApproximationConfig) => Drawing;",
-      "signatureWithJSDoc": "/**\n * Creates the `Drawing` by interpolating points as a curve\n *\n * The drawing will be a spline approximating the points. Note that the\n * degree should be at maximum 3 if you need to export the drawing as an SVG.\n *\n * @category Drawing\n */\nexport declare const drawPointsInterpolation: (points: Point2D[], approximationConfig?: BSplineApproximationConfig) => Drawing;",
+      "signature": "export declare const drawPointsInterpolation: (points: Point2D[], approximationConfig?: BSplineApproximationConfig, options?: {\n    closeShape?: boolean;\n}) => Drawing;",
+      "signatureWithJSDoc": "/**\n * Creates the `Drawing` by interpolating points as a curve\n *\n * The drawing will be a spline approximating the points. Note that the\n * degree should be at maximum 3 if you need to export the drawing as an SVG.\n *\n * @category Drawing\n */\nexport declare const drawPointsInterpolation: (points: Point2D[], approximationConfig?: BSplineApproximationConfig, options?: {\n    closeShape?: boolean;\n}) => Drawing;",
       "usageCount": 0,
       "jsDoc": "Drawing"
     },
@@ -948,7 +962,7 @@
       "type": "function",
       "category": "Drawing & Sketching",
       "signature": "export declare function drawProjection(shape: AnyShape, projectionCamera?: ProjectionPlane | ProjectionCamera): {\n    visible: Drawing;\n    hidden: Drawing;\n};",
-      "signatureWithJSDoc": "export declare function drawProjection(shape: AnyShape, projectionCamera?: ProjectionPlane | ProjectionCamera): {\n    visible: Drawing;\n    hidden: Drawing;\n};",
+      "signatureWithJSDoc": "/**\n * Creates the `Drawing` of a projection of a shape on a plane.\n *\n * The projection is done by projecting the edges of the shape on the plane.\n *\n * @category Drawing\n */\nexport declare function drawProjection(shape: AnyShape, projectionCamera?: ProjectionPlane | ProjectionCamera): {\n    visible: Drawing;\n    hidden: Drawing;\n};",
       "parameters": [
         {
           "name": "shape",
@@ -962,7 +976,8 @@
         }
       ],
       "returnType": "{\r\n    visible: Drawing;\r\n    hidden: Drawing;\r\n}",
-      "usageCount": 0
+      "usageCount": 0,
+      "jsDoc": "Drawing"
     },
     {
       "name": "drawSingleCircle",
@@ -1093,6 +1108,14 @@
       "category": "Finders & Filters",
       "signature": "export declare interface FaceTriangulation {\n    vertices: number[];\n    trianglesIndexes: number[];\n    verticesNormals: number[];\n}",
       "signatureWithJSDoc": "export declare interface FaceTriangulation {\n    vertices: number[];\n    trianglesIndexes: number[];\n    verticesNormals: number[];\n}",
+      "usageCount": 0
+    },
+    {
+      "name": "FilletRadius",
+      "type": "type",
+      "category": "Utilities",
+      "signature": "export declare type FilletRadius = number | [\n    number,\n    number\n];",
+      "signatureWithJSDoc": "export declare type FilletRadius = number | [\n    number,\n    number\n];",
       "usageCount": 0
     },
     {
@@ -1234,8 +1257,8 @@
       "name": "GenericTopo",
       "type": "type",
       "category": "Utilities",
-      "signature": "declare type GenericTopo = TopoDS_Face | TopoDS_Shape | TopoDS_Edge | TopoDS_Wire | TopoDS_Shell | TopoDS_Vertex | TopoDS_Solid | TopoDS_Compound | TopoDS_CompSolid;",
-      "signatureWithJSDoc": "declare type GenericTopo = TopoDS_Face | TopoDS_Shape | TopoDS_Edge | TopoDS_Wire | TopoDS_Shell | TopoDS_Vertex | TopoDS_Solid | TopoDS_Compound | TopoDS_CompSolid;",
+      "signature": "declare type GenericTopo = TopoDS_Vertex | TopoDS_Face | TopoDS_Shape | TopoDS_Edge | TopoDS_Wire | TopoDS_Shell | TopoDS_Vertex | TopoDS_Solid | TopoDS_Compound | TopoDS_CompSolid;",
+      "signatureWithJSDoc": "declare type GenericTopo = TopoDS_Vertex | TopoDS_Face | TopoDS_Shape | TopoDS_Edge | TopoDS_Wire | TopoDS_Shell | TopoDS_Vertex | TopoDS_Solid | TopoDS_Compound | TopoDS_CompSolid;",
       "usageCount": 0
     },
     {
@@ -1498,8 +1521,9 @@
       "type": "constant",
       "category": "Primitives & Makers",
       "signature": "export declare const makeBox: (corner1: Point, corner2: Point) => Solid;",
-      "signatureWithJSDoc": "export declare const makeBox: (corner1: Point, corner2: Point) => Solid;",
-      "usageCount": 0
+      "signatureWithJSDoc": "/**\n * Creates a box with the given corner points.\n *\n * @category Solids\n */\nexport declare const makeBox: (corner1: Point, corner2: Point) => Solid;",
+      "usageCount": 0,
+      "jsDoc": "Solids"
     },
     {
       "name": "makeBSplineApproximation",
@@ -1562,8 +1586,9 @@
       "type": "constant",
       "category": "Primitives & Makers",
       "signature": "export declare const makeEllipsoid: (aLength: number, bLength: number, cLength: number) => Solid;",
-      "signatureWithJSDoc": "export declare const makeEllipsoid: (aLength: number, bLength: number, cLength: number) => Solid;",
-      "usageCount": 0
+      "signatureWithJSDoc": "/**\n * Creates an ellipsoid with the given lengths of the axes.\n *\n * @category Solids\n */\nexport declare const makeEllipsoid: (aLength: number, bLength: number, cLength: number) => Solid;",
+      "usageCount": 0,
+      "jsDoc": "Solids"
     },
     {
       "name": "makeHelix",
@@ -1785,6 +1810,14 @@
       "jsDoc": "Measure"
     },
     {
+      "name": "Offset2DConfig",
+      "type": "interface",
+      "category": "Utilities",
+      "signature": "declare interface Offset2DConfig {\n    lineJoinType?: \"miter\" | \"bevel\" | \"round\";\n}",
+      "signatureWithJSDoc": "declare interface Offset2DConfig {\n    lineJoinType?: \"miter\" | \"bevel\" | \"round\";\n}",
+      "usageCount": 0
+    },
+    {
       "name": "organiseBlueprints",
       "type": "constant",
       "category": "Drawing & Sketching",
@@ -1868,8 +1901,8 @@
       "name": "RadiusConfig",
       "type": "type",
       "category": "Utilities",
-      "signature": "export declare type RadiusConfig = ((e: Edge) => number | null) | number | {\n    filter: EdgeFinder;\n    radius: number;\n    keep?: boolean;\n};",
-      "signatureWithJSDoc": "/**\n * A generic way to define radii for fillet or chamfer (the operation)\n *\n * If the radius is a filter finder object (with an EdgeFinder as filter, and\n * a radius to specify the fillet radius), the operation will only be applied\n * to the edges as selected by the finder. The finder will be deleted unless it\n * is explicitly specified to `keep` it.\n *\n * If the radius is a number all the edges will be targetted for the operation.\n *\n * If the radius is a function edges will be filletted or chamfered according\n * to the value returned by the function (0 or null will not add any fillet).\n */\nexport declare type RadiusConfig = ((e: Edge) => number | null) | number | {\n    filter: EdgeFinder;\n    radius: number;\n    keep?: boolean;\n};",
+      "signature": "export declare type RadiusConfig<R = number> = ((e: Edge) => R | null) | R | {\n    filter: EdgeFinder;\n    radius: R;\n    keep?: boolean;\n};",
+      "signatureWithJSDoc": "/**\n * A generic way to define radii for fillet or chamfer (the operation)\n *\n * If the radius is a filter finder object (with an EdgeFinder as filter, and\n * a radius to specify the fillet radius), the operation will only be applied\n * to the edges as selected by the finder. The finder will be deleted unless it\n * is explicitly specified to `keep` it.\n *\n * If the radius is a number all the edges will be targetted for the operation.\n *\n * If the radius is a function edges will be filletted or chamfered according\n * to the value returned by the function (0 or null will not add any fillet).\n */\nexport declare type RadiusConfig<R = number> = ((e: Edge) => R | null) | R | {\n    filter: EdgeFinder;\n    radius: R;\n    keep?: boolean;\n};",
       "usageCount": 0
     },
     {
@@ -1975,8 +2008,9 @@
       "type": "constant",
       "category": "Drawing & Sketching",
       "signature": "export declare const sketchHelix: (pitch: number, height: number, radius: number, center?: Point, dir?: Point, lefthand?: boolean) => Sketch;",
-      "signatureWithJSDoc": "export declare const sketchHelix: (pitch: number, height: number, radius: number, center?: Point, dir?: Point, lefthand?: boolean) => Sketch;",
-      "usageCount": 0
+      "signatureWithJSDoc": "/**\n * Creates the `Sketch` of a helix\n *\n * @category Sketching\n */\nexport declare const sketchHelix: (pitch: number, height: number, radius: number, center?: Point, dir?: Point, lefthand?: boolean) => Sketch;",
+      "usageCount": 0,
+      "jsDoc": "Sketching"
     },
     {
       "name": "SketchInterface",
@@ -2250,8 +2284,8 @@
       "name": "Vertex",
       "type": "class",
       "category": "Geometry Types",
-      "signature": "export declare class Vertex extends Shape<TopoDS_Vertex> {\n}",
-      "signatureWithJSDoc": "export declare class Vertex extends Shape<TopoDS_Vertex> {\n}",
+      "signature": "export declare class Vertex extends Shape<TopoDS_Vertex> {\n    asTuple(): [\n        number,\n        number,\n        number\n    ];\n}",
+      "signatureWithJSDoc": "export declare class Vertex extends Shape<TopoDS_Vertex> {\n    asTuple(): [\n        number,\n        number,\n        number\n    ];\n}",
       "usageCount": 0
     },
     {
@@ -3118,6 +3152,12 @@
         "type": "function",
         "nodeType": "FunctionDeclaration",
         "reason": "exported function"
+      },
+      {
+        "name": "ChamferRadius",
+        "type": "type",
+        "nodeType": "TypeAliasDeclaration",
+        "reason": "exported type alias"
       },
       {
         "name": "combineFinderFilters",
@@ -4158,6 +4198,12 @@
         "reason": "exported interface"
       },
       {
+        "name": "FilletRadius",
+        "type": "type",
+        "nodeType": "TypeAliasDeclaration",
+        "reason": "exported type alias"
+      },
+      {
         "name": "FilterFcn",
         "type": "type",
         "nodeType": "TypeAliasDeclaration",
@@ -4672,6 +4718,12 @@
         "type": "function",
         "nodeType": "FunctionDeclaration",
         "reason": "exported function"
+      },
+      {
+        "name": "Offset2DConfig",
+        "type": "interface",
+        "nodeType": "InterfaceDeclaration",
+        "reason": "exported interface"
       },
       {
         "name": "organiseBlueprints",
@@ -5890,6 +5942,12 @@
         "type": "class",
         "nodeType": "ClassDeclaration",
         "reason": "exported class"
+      },
+      {
+        "name": "Vertex.asTuple",
+        "type": "class member",
+        "nodeType": "MethodDeclaration",
+        "reason": "public member"
       },
       {
         "name": "Vertex",

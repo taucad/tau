@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import process from 'node:process';
 
 type ExtractedApiData = {
@@ -23,8 +24,10 @@ type ExtractedApiData = {
 // Example usage functions for the extracted API data
 class ReplicadApiHelper {
   private readonly apiData: ExtractedApiData;
+  private readonly apiDataPath: string;
 
-  public constructor(private readonly apiDataPath = './replicad-api-data.json') {
+  public constructor() {
+    this.apiDataPath = join(import.meta.dirname, 'generated/replicad/replicad-ts-api-data.json');
     this.apiData = JSON.parse(readFileSync(this.apiDataPath, 'utf8')) as ExtractedApiData;
   }
 
@@ -57,11 +60,16 @@ class ReplicadApiHelper {
     const summary: Record<string, { total: number; core: number; used: number }> = {};
 
     for (const api of this.apiData.apis) {
-      summary[api.category] ||= { total: 0, core: 0, used: 0 };
+      summary[api.category] ??= { total: 0, core: 0, used: 0 };
 
-      summary[api.category].total++;
-      if (api.isCore) summary[api.category].core++;
-      if (api.usageCount > 0) summary[api.category].used++;
+      summary[api.category]!.total++;
+      if (api.isCore) {
+        summary[api.category]!.core++;
+      }
+
+      if (api.usageCount > 0) {
+        summary[api.category]!.used++;
+      }
     }
 
     return summary;

@@ -4,6 +4,7 @@
   "type": "module",
   "private": true,
   "dependencies": {
+    "@taucad/api-extractor": "workspace:*",
     "@taucad/tau-examples": "workspace:*"
   },
   "imports": {

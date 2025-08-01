@@ -1,7 +1,8 @@
 import { mockBuilds } from '@taucad/tau-examples';
-// eslint-disable-next-line no-restricted-imports, @nx/enforce-module-boundaries -- expected. TODO: refactor to separate package.
-import replicadTypes from '../../../../../../gen/api/replicad/replicad-clean-with-jsdoc.d.ts?raw';
+import { replicadTypesCleanJsDoc } from '@taucad/api-extractor';
 import type { KernelProvider } from '#types/kernel.types.js';
+
+console.log({ replicadTypesCleanJsDoc });
 
 const mockModelsString = mockBuilds
   .map((model) => `<example>\n${model.name}\n\`\`\`javascript\n${model.code}\`\`\`\n</example>`)
@@ -156,7 +157,7 @@ This systematic approach ensures that your models are not only geometrically sou
 <technical_resources>
 You have access to the complete Replicad type definitions:
 <replicad_typescript_types>
-${replicadTypes}
+${replicadTypesCleanJsDoc}
 </replicad_typescript_types>
 
 Here are proven examples to guide your approach:

@@ -3,17 +3,17 @@
 ==================================================
 
 📈 OVERALL STATISTICS:
-  Total nodes processed: 667
-  Nodes kept: 609 (91.3%)
-  Nodes removed: 58 (8.7%)
+  Total nodes processed: 671
+  Nodes kept: 613 (91.4%)
+  Nodes removed: 58 (8.6%)
 
 📊 BREAKDOWN BY TYPE:
   class:
     Kept: 45/45 (100.0%)
     Removed: 0/45 (0.0%)
   class member:
-    Kept: 407/465 (87.5%)
-    Removed: 58/465 (12.5%)
+    Kept: 408/466 (87.6%)
+    Removed: 58/466 (12.4%)
   constant:
     Kept: 67/67 (100.0%)
     Removed: 0/67 (0.0%)
@@ -21,11 +21,11 @@
     Kept: 49/49 (100.0%)
     Removed: 0/49 (0.0%)
   interface:
-    Kept: 13/13 (100.0%)
-    Removed: 0/13 (0.0%)
+    Kept: 14/14 (100.0%)
+    Removed: 0/14 (0.0%)
   type:
-    Kept: 28/28 (100.0%)
-    Removed: 0/28 (0.0%)
+    Kept: 30/30 (100.0%)
+    Removed: 0/30 (0.0%)
 
 🚫 REMOVAL REASONS:
   protected member: 42 nodes

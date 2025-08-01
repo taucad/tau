@@ -70,8 +70,6 @@ export declare class EdgeFinder extends Finder3d<Edge> {
     inPlane(inputPlane: PlaneName | Plane, origin?: Point | number): this;
     shouldKeep(element: Edge): boolean;
 }
-export declare function makePlane(plane: Plane): Plane;
-export declare function makePlane(plane?: PlaneName, origin?: Point | number): Plane;
 /**
  * With a FaceFinder you can apply a set of filters to find specific faces
  * within a shape.
@@ -106,12 +104,8 @@ export declare class FaceFinder extends Finder3d<Face> {
 }
 export declare function rotate(shape: TopoDS_Shape, angle: number, position?: Point, direction?: Point): TopoDS_Shape;
 export declare const drawRectangle: typeof drawRoundedRectangle;
-/**
- * Creates the `Sketch` of a rectangle in a defined plane
- *
- * @category Sketching
- */
-export declare const sketchRectangle: (xLength: number, yLength: number, planeConfig?: PlaneConfig) => Sketch;
+export declare function makePlane(plane: Plane): Plane;
+export declare function makePlane(plane?: PlaneName, origin?: Point | number): Plane;
 export declare const assembleWire: (listOfEdges: (Edge | Wire)[]) => Wire;
 /**
  * Creates the `Drawing` of an polygon in a defined plane
@@ -129,10 +123,18 @@ export declare const makeFace: (wire: Wire, holes?: Wire[]) => Face;
  * @category Sketching
  */
 export declare const sketchCircle: (radius: number, planeConfig?: PlaneConfig) => Sketch;
+/**
+ * Creates the `Sketch` of a rectangle in a defined plane
+ *
+ * @category Sketching
+ */
+export declare const sketchRectangle: (xLength: number, yLength: number, planeConfig?: PlaneConfig) => Sketch;
 /** Welds faces and shells into a single shell and then makes a solid.
  *
  * @param facesOrShells - An array of faces and shells to be welded.
  * @returns A solid that contains all the faces and shells.
+ *
+ * @category Solids
  **/
 export declare function makeSolid(facesOrShells: Array<Face | Shell>): Solid;
 export declare function mirror(shape: TopoDS_Shape, inputPlane?: Plane | PlaneName | Point, origin?: Point): TopoDS_Shape;
@@ -218,11 +220,17 @@ export declare class Sketcher implements GenericSketcher<Sketch> {
  *
  * @category Drawing
  */
-export declare const drawParametricFunction: (func: (t: number) => Point2D, { pointsCount, start, stop }?: {
+export declare const drawParametricFunction: (func: (t: number) => Point2D, { pointsCount, start, stop, closeShape }?: {
     pointsCount?: number | undefined;
     start?: number | undefined;
     stop?: number | undefined;
+    closeShape?: boolean | undefined;
 }, approximationConfig?: BSplineApproximationConfig) => Drawing;
+/**
+ * Creates a cylinder with the given radius and height.
+ *
+ * @category Solids
+ */
 export declare const makeCylinder: (radius: number, height: number, location?: Point, direction?: Point) => Solid;
 /**
  * Helper function to compute the inner radius of a polyside (even if a sagitta
@@ -258,6 +266,11 @@ export declare class Vector extends WrappingObj<gp_Vec> {
     toDir(): gp_Dir;
     rotate(angle: number, center?: Point, direction?: Point): Vector;
 }
+/**
+ * Creates a sphere with the given radius.
+ *
+ * @category Solids
+ */
 export declare const makeSphere: (radius: number) => Solid;
 export declare const revolution: (face: Face, center?: Point, direction?: Point, angle?: number) => Shape3D;
 export declare function scale(shape: TopoDS_Shape, center: Point, scale: number): TopoDS_Shape;
@@ -500,7 +513,7 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> {
      *
      * @category Shape Modifications
      */
-    fillet(radiusConfig: RadiusConfig, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
+    fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
     /**
      * Creates a new shapes with some edges chamfered, as specified in the
      * radius config.
@@ -517,7 +530,7 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> {
      *
      * @category Shape Modifications
      */
-    chamfer(radiusConfig: RadiusConfig, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
+    chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
 }
 export declare const addHolesInFace: (face: Face, holes: Wire[]) => Face;
 export declare type AnyShape = Vertex | Edge | Wire | Face | Shell | Solid | CompSolid | Compound;
@@ -674,16 +687,45 @@ export declare interface BSplineApproximationConfig {
 }
 export declare function cast(shape: TopoDS_Shape): AnyShape;
 /**
+ * We can defined a chamfer with only a number - in that case it will be
+ * symmetric
+ *
+ * We can also define a chamfer with two distances, in that case the chamfer
+ * will be asymmetric, and the first distance will be used for selected face.
+ *
+ * We can also define a chamfer with a distance and an angle, in that case
+ * the chamfer will be asymmetric, and the distance will be used
+ * for selected face.
+ *
+ * Note that the selected face is a function that takes a FaceFinder, and if
+ * this fails, you might expect an error.
+ *
+ */
+export declare type ChamferRadius = number | {
+    distances: [
+        number,
+        number
+    ];
+    selectedFace: (f: FaceFinder) => FaceFinder;
+} | {
+    distance: number;
+    angle: number;
+    selectedFace: (f: FaceFinder) => FaceFinder;
+};
+/**
  * Combine a set of finder filters (defined with radius) to pass as a filter
  * function.
  *
- * It returns the filter, as well as a cleanup function.
+ * @param filters - An array of objects containing a filter and its radius.
+ * @returns A tuple containing a filter function and a cleanup function.
+ *
+ * @category Finders
  */
-export declare const combineFinderFilters: <Type, T>(filters: {
+export declare const combineFinderFilters: <Type, T, R = number>(filters: {
     filter: Finder<Type, T>;
-    radius: number;
+    radius: R;
 }[]) => [
-    (v: Type) => number,
+    (v: Type) => R | null,
     () => void
 ];
 export declare function complexExtrude(wire: Wire, center: Point, normal: Point, profileShape: ExtrusionProfile | undefined, shellMode: true): [
@@ -863,7 +905,18 @@ export declare function downcast(shape: TopoDS_Shape): GenericTopo;
  * @category Drawing
  */
 export declare function drawEllipse(majorRadius: number, minorRadius: number): Drawing;
+/**
+ * Creates the `Drawing` out of a face
+ *
+ * @category Drawing
+ */
 export declare function drawFaceOutline(face: Face): Drawing;
+/**
+ * @categoryDescription Drawing
+ *
+ * Drawing are shapes in the 2D space. You can either use a "builder pen" to
+ * draw a shape, or use some of the canned shapes like circles or rectangles.
+ */
 export declare class Drawing implements DrawingInterface {
     constructor(innerShape?: Shape2D);
     clone(): Drawing;
@@ -913,7 +966,7 @@ export declare class Drawing implements DrawingInterface {
     toSVG(margin?: number): string;
     toSVGViewBox(margin?: number): string;
     toSVGPaths(): string[] | string[][];
-    offset(distance: number): Drawing;
+    offset(distance: number, offsetConfig?: Offset2DConfig): Drawing;
     approximate(target: "svg" | "arcs", options?: ApproximationOptions): Drawing;
     get blueprint(): Blueprint;
 }
@@ -962,6 +1015,13 @@ export declare interface DrawingInterface {
      */
     toSVGPaths(): string[] | string[][];
 }
+/**
+ * DrawingPen is a helper class to draw in 2D. It is used to create drawings
+ * by exposing a builder interface. It is not a drawing itself, but it can be
+ * used to create a drawing.
+ *
+ * @category Drawing
+ */
 export declare class DrawingPen extends BaseSketcher2d implements GenericSketcher<Drawing> {
     constructor(origin?: Point2D);
     done(): Drawing;
@@ -982,7 +1042,16 @@ export declare class DrawingPen extends BaseSketcher2d implements GenericSketche
  *
  * @category Drawing
  */
-export declare const drawPointsInterpolation: (points: Point2D[], approximationConfig?: BSplineApproximationConfig) => Drawing;
+export declare const drawPointsInterpolation: (points: Point2D[], approximationConfig?: BSplineApproximationConfig, options?: {
+    closeShape?: boolean;
+}) => Drawing;
+/**
+ * Creates the `Drawing` of a projection of a shape on a plane.
+ *
+ * The projection is done by projecting the edges of the shape on the plane.
+ *
+ * @category Drawing
+ */
 export declare function drawProjection(shape: AnyShape, projectionCamera?: ProjectionPlane | ProjectionCamera): {
     visible: Drawing;
     hidden: Drawing;
@@ -1073,6 +1142,10 @@ export declare interface FaceTriangulation {
     trianglesIndexes: number[];
     verticesNormals: number[];
 }
+export declare type FilletRadius = number | [
+    number,
+    number
+];
 export declare type FilterFcn<Type> = {
     element: Type;
     normal: Vector | null;
@@ -1497,7 +1570,7 @@ export declare interface GenericSweepConfig {
     support?: TopoDS_Shape;
     forceProfileSpineOthogonality?: boolean;
 }
-declare type GenericTopo = TopoDS_Face | TopoDS_Shape | TopoDS_Edge | TopoDS_Wire | TopoDS_Shell | TopoDS_Vertex | TopoDS_Solid | TopoDS_Compound | TopoDS_CompSolid;
+declare type GenericTopo = TopoDS_Vertex | TopoDS_Face | TopoDS_Shape | TopoDS_Edge | TopoDS_Wire | TopoDS_Shell | TopoDS_Vertex | TopoDS_Solid | TopoDS_Compound | TopoDS_CompSolid;
 export declare const getFont: (fontFamily?: string) => opentype_2.Font;
 export declare const getOC: () => OpenCascadeInstance;
 export declare const HASH_CODE_MAX = 2147483647;
@@ -1552,6 +1625,11 @@ export declare const makeAx2: (center: Point, dir: Point, xDir?: Point) => gp_Ax
 export declare const makeAx3: (center: Point, dir: Point, xDir?: Point) => gp_Ax3;
 export declare const makeBaseBox: (xLength: number, yLength: number, zLength: number) => Shape3D;
 export declare const makeBezierCurve: (points: Point[]) => Edge;
+/**
+ * Creates a box with the given corner points.
+ *
+ * @category Solids
+ */
 export declare const makeBox: (corner1: Point, corner2: Point) => Solid;
 export declare const makeBSplineApproximation: (points: Point[], { tolerance, smoothing, degMax, degMin, }?: BSplineApproximationConfig) => Edge;
 export declare const makeCircle: (radius: number, center?: Point, normal?: Point) => Edge;
@@ -1559,6 +1637,11 @@ export declare const makeCompound: (shapeArray: AnyShape[]) => AnyShape;
 export declare function makeDirection(p: Direction): Point;
 export declare const makeEllipse: (majorRadius: number, minorRadius: number, center?: Point, normal?: Point, xDir?: Point) => Edge;
 export declare const makeEllipseArc: (majorRadius: number, minorRadius: number, startAngle: number, endAngle: number, center?: Point, normal?: Point, xDir?: Point) => Edge;
+/**
+ * Creates an ellipsoid with the given lengths of the axes.
+ *
+ * @category Solids
+ */
 export declare const makeEllipsoid: (aLength: number, bLength: number, cLength: number) => Solid;
 export declare const makeHelix: (pitch: number, height: number, radius: number, center?: Point, dir?: Point, lefthand?: boolean) => Wire;
 export declare const makeLine: (v1: Point, v2: Point) => Edge;
@@ -1600,6 +1683,9 @@ export declare function measureShapeVolumeProperties(shape: Shape3D): VolumePhys
  * @category Measure
  */
 export declare function measureVolume(shape: Shape3D): number;
+declare interface Offset2DConfig {
+    lineJoinType?: "miter" | "bevel" | "round";
+}
 /**
  * Groups an array of blueprints such that blueprints that correspond to holes
  * in other blueprints are set in a `CompoundBlueprint`.
@@ -1661,9 +1747,9 @@ export declare const RAD2DEG: number;
  * If the radius is a function edges will be filletted or chamfered according
  * to the value returned by the function (0 or null will not add any fillet).
  */
-export declare type RadiusConfig = ((e: Edge) => number | null) | number | {
+export declare type RadiusConfig<R = number> = ((e: Edge) => R | null) | R | {
     filter: EdgeFinder;
-    radius: number;
+    radius: R;
     keep?: boolean;
 };
 export declare const roundedRectangleBlueprint: (width: number, height: number, r?: number | {
@@ -1738,6 +1824,11 @@ export declare class Sketches {
  * @category Sketching
  */
 export declare const sketchFaceOffset: (face: Face, offset: number) => Sketch;
+/**
+ * Creates the `Sketch` of a helix
+ *
+ * @category Sketching
+ */
 export declare const sketchHelix: (pitch: number, height: number, radius: number, center?: Point, dir?: Point, lefthand?: boolean) => Sketch;
 export declare interface SketchInterface {
     /**
@@ -1878,6 +1969,11 @@ declare type UVBounds = {
     vMax: number;
 };
 export declare class Vertex extends Shape<TopoDS_Vertex> {
+    asTuple(): [
+        number,
+        number,
+        number
+    ];
 }
 export declare class VolumePhysicalProperties extends PhysicalProperties {
     get volume(): number;

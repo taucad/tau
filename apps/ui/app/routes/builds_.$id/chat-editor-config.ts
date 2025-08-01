@@ -1,6 +1,5 @@
 import type { Monaco } from '@monaco-editor/react';
-// eslint-disable-next-line no-restricted-imports, @nx/enforce-module-boundaries -- replicad types are not in the monorepo
-import replicadTypes from '../../../../../node_modules/replicad/dist/replicad.d.ts?raw';
+import { replicadTypesOriginal } from '@taucad/api-extractor';
 
 // Import zodTypes from '../../../../../node_modules/zod/v4/index.d.ts?raw';
 
@@ -18,7 +17,7 @@ export const registerMonaco = async (monaco: Monaco): Promise<void> => {
   monaco.languages.typescript.typescriptDefaults.setEagerModelSync(true);
   monaco.languages.typescript.typescriptDefaults.setExtraLibs([
     {
-      content: `declare module 'replicad' { ${replicadTypes} }`,
+      content: `declare module 'replicad' { ${replicadTypesOriginal} }`,
       filePath: 'file:///node_modules/replicad/index.d.ts',
     },
     {

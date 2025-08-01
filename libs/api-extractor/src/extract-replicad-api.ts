@@ -77,15 +77,15 @@ function groupApisByCategory(apis: ExtractedApi[]): Record<string, ExtractedApi[
   const categories: Record<string, ExtractedApi[]> = {};
 
   for (const api of apis) {
-    const category = api.category ?? 'Uncategorized';
-    categories[category] ||= [];
+    const { category } = api;
+    categories[category] ??= [];
     categories[category].push(api);
   }
 
   // Sort categories and APIs within each category
   const sortedCategories: Record<string, ExtractedApi[]> = {};
   for (const category of Object.keys(categories).sort()) {
-    sortedCategories[category] = categories[category].sort(
+    sortedCategories[category] = categories[category]!.sort(
       (a, b) => b.usageCount - a.usageCount || a.name.localeCompare(b.name),
     );
   }
@@ -95,15 +95,42 @@ function groupApisByCategory(apis: ExtractedApi[]): Record<string, ExtractedApi[
 
 function categorizeApi(name: string): string {
   // Simple automatic categorization based on name patterns
-  if (/^draw[A-Z]|^sketch[A-Z]|Blueprint|Drawing|Pen/.test(name)) return 'Drawing & Sketching';
-  if (/^make[A-Z]|Circle|Rectangle|Polygon|Box|Cylinder|Sphere/.test(name)) return 'Primitives & Makers';
-  if (/extrude|revolve|shell|loft|sweep|Extrusion/.test(name)) return '3D Operations';
-  if (/fillet|chamfer|cut|fuse|intersect|offset/.test(name)) return 'Modifications';
-  if (/translate|rotate|scale|mirror|Transformation/.test(name)) return 'Transformations';
-  if (/Finder|Edge|Face|Wire|Corner/.test(name)) return 'Finders & Filters';
-  if (/measure|distance|area|volume|length|Properties/.test(name)) return 'Measurements';
-  if (/Point|Vector|Plane|Shape|Vertex|Edge|Wire|Face|Shell|Solid/.test(name)) return 'Geometry Types';
-  if (/import|export|STEP|STL|mesh|blob/.test(name)) return 'Import/Export';
+  if (/^draw[A-Z]|^sketch[A-Z]|Blueprint|Drawing|Pen/.test(name)) {
+    return 'Drawing & Sketching';
+  }
+
+  if (/^make[A-Z]|Circle|Rectangle|Polygon|Box|Cylinder|Sphere/.test(name)) {
+    return 'Primitives & Makers';
+  }
+
+  if (/extrude|revolve|shell|loft|sweep|Extrusion/.test(name)) {
+    return '3D Operations';
+  }
+
+  if (/fillet|chamfer|cut|fuse|intersect|offset/.test(name)) {
+    return 'Modifications';
+  }
+
+  if (/translate|rotate|scale|mirror|Transformation/.test(name)) {
+    return 'Transformations';
+  }
+
+  if (/Finder|Edge|Face|Wire|Corner/.test(name)) {
+    return 'Finders & Filters';
+  }
+
+  if (/measure|distance|area|volume|length|Properties/.test(name)) {
+    return 'Measurements';
+  }
+
+  if (/Point|Vector|Plane|Shape|Vertex|Edge|Wire|Face|Shell|Solid/.test(name)) {
+    return 'Geometry Types';
+  }
+
+  if (/import|export|STEP|STL|mesh|blob/.test(name)) {
+    return 'Import/Export';
+  }
+
   return 'Utilities';
 }
 
@@ -119,7 +146,10 @@ function countUsage(name: string, buildExamples: string[]): number {
 }
 
 function getTypeText(typeNode: ts.TypeNode | undefined, sourceFile: ts.SourceFile): string {
-  if (!typeNode) return 'any';
+  if (!typeNode) {
+    return 'any';
+  }
+
   return typeNode.getText(sourceFile);
 }
 
@@ -145,7 +175,10 @@ function extractJsDoc(node: ts.Node): string | undefined {
 }
 
 // Check if a class member should be excluded
-function shouldExcludeMember(member: ts.ClassElement, _sourceFile: ts.SourceFile): { exclude: boolean; reason: string } {
+function shouldExcludeMember(
+  member: ts.ClassElement,
+  _sourceFile: ts.SourceFile,
+): { exclude: boolean; reason: string } {
   const memberName = getMemberName(member);
 
   // Check for "oc" property
@@ -418,7 +451,10 @@ function extractAPIFromTypeScript(
   return {
     apis: apis.sort((a, b) => {
       // Sort by usage count, then alphabetically
-      if (a.usageCount !== b.usageCount) return b.usageCount - a.usageCount;
+      if (a.usageCount !== b.usageCount) {
+        return b.usageCount - a.usageCount;
+      }
+
       return a.name.localeCompare(b.name);
     }),
     stats,
@@ -452,19 +488,19 @@ function generateStatsReport(stats: NodeStats): string {
   const removedByType: Record<string, number> = {};
 
   for (const item of stats.kept) {
-    keptByType[item.type] = (keptByType[item.type] || 0) + 1;
+    keptByType[item.type] = (keptByType[item.type] ?? 0) + 1;
   }
 
   for (const item of stats.removed) {
-    removedByType[item.type] = (removedByType[item.type] || 0) + 1;
+    removedByType[item.type] = (removedByType[item.type] ?? 0) + 1;
   }
 
   report += `📊 BREAKDOWN BY TYPE:\n`;
   const allTypes = new Set([...Object.keys(keptByType), ...Object.keys(removedByType)]);
 
   for (const type of [...allTypes].sort()) {
-    const kept = keptByType[type] || 0;
-    const removed = removedByType[type] || 0;
+    const kept = keptByType[type] ?? 0;
+    const removed = removedByType[type] ?? 0;
     const total = kept + removed;
     report += `  ${type}:\n`;
     report += `    Kept: ${kept}/${total} (${((kept / total) * 100).toFixed(1)}%)\n`;
@@ -475,7 +511,7 @@ function generateStatsReport(stats: NodeStats): string {
   report += `\n🚫 REMOVAL REASONS:\n`;
   const removalReasons: Record<string, number> = {};
   for (const item of stats.removed) {
-    removalReasons[item.reason] = (removalReasons[item.reason] || 0) + 1;
+    removalReasons[item.reason] = (removalReasons[item.reason] ?? 0) + 1;
   }
 
   for (const [reason, count] of Object.entries(removalReasons).sort((a, b) => b[1] - a[1])) {
@@ -489,11 +525,11 @@ function main() {
   try {
     console.log('🔍 Extracting Replicad Public APIs using TypeScript Compiler API (with filtering)...\n');
 
-    const typeDefinitionsPath = join(process.cwd(), 'node_modules/replicad/dist/replicad.d.ts');
-    const buildExamplesPath = join(process.cwd(), 'apps/ui/app/constants/build-code-examples.ts');
+    const typeDefinitionsPath = join(import.meta.dirname, '../../../node_modules/replicad/dist/replicad.d.ts');
+    const buildExamplesPath = join(import.meta.dirname, '../../tau-examples/src/build.examples.ts');
 
     // Create output directory
-    const outputDir = join(process.cwd(), 'gen/api/replicad');
+    const outputDir = join(import.meta.dirname, 'generated/replicad');
     mkdirSync(outputDir, { recursive: true });
     console.log(`📁 Created output directory: ${outputDir}`);
 
@@ -518,7 +554,7 @@ function main() {
     // Generate clean TypeScript definitions (with JSDoc)
     console.log('📝 Generating clean TypeScript definitions with JSDoc...');
     const cleanDefinitionsWithJSDoc = generateCleanTypeDefinitionsWithJSDoc(extractedApis);
-    const cleanApiWithJSDocPath = join(outputDir, 'replicad-clean-with-jsdoc.d.ts');
+    const cleanApiWithJSDocPath = join(outputDir, 'replicad-clean-jsdoc.d.ts');
     writeFileSync(cleanApiWithJSDocPath, cleanDefinitionsWithJSDoc);
     console.log(`✅ Clean definitions with JSDoc saved to ${cleanApiWithJSDocPath}`);
 

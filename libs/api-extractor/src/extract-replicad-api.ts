@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
-import * as ts from 'typescript';
+import ts from 'typescript';
 
 type ExtractedApi = {
   name: string;

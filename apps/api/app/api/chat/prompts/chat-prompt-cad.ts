@@ -2,8 +2,6 @@ import { mockBuilds } from '@taucad/tau-examples';
 import { replicadTypesCleanJsDoc } from '@taucad/api-extractor';
 import type { KernelProvider } from '#types/kernel.types.js';
 
-console.log({ replicadTypesCleanJsDoc });
-
 const mockModelsString = mockBuilds
   .map((model) => `<example>\n${model.name}\n\`\`\`javascript\n${model.code}\`\`\`\n</example>`)
   .join('\n\n');

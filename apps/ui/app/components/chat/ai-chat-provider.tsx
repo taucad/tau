@@ -485,7 +485,7 @@ function ChatSyncWrapper({
   // Queue sync on key changes (XState will handle debouncing)
   useEffect(() => {
     queueSyncChatState();
-  }, [chat.messages, chat.input, chat.status, chat.error, chat.data]);
+  }, [chat.messages, chat.input, chat.status, chat.error, chat.data, queueSyncChatState]);
 
   return children as React.JSX.Element;
 }
@@ -562,51 +562,5 @@ export function useChatActions(): {
         modelId,
       });
     },
-  };
-}
-
-// Hook for accessing the actor ref directly (for advanced use cases)
-export function useChatActorRef(): ReturnType<typeof AiChatContext.useActorRef> {
-  return AiChatContext.useActorRef();
-}
-
-// Legacy compatibility - simple hook that returns the useChat-like interface
-export function useAiChat(): {
-  messages: Message[];
-  input: string;
-  isLoading: boolean;
-  error: Error | undefined;
-  data: unknown;
-  status: UseChatReturn['status'];
-  append: (message: Parameters<UseChatReturn['append']>[0]) => void;
-  reload: () => void;
-  stop: () => void;
-  setInput: (input: string) => void;
-  setMessages: (messages: Message[]) => void;
-  setData: (data: Parameters<UseChatReturn['setData']>[0]) => void;
-  handleSubmit: () => void;
-} {
-  const messages = useChatSelector((state) => state.context.messages);
-  const input = useChatSelector((state) => state.context.input);
-  const isLoading = useChatSelector((state) => state.context.isLoading);
-  const error = useChatSelector((state) => state.context.error);
-  const data = useChatSelector((state) => state.context.data);
-  const status = useChatSelector((state) => state.context.status);
-  const actions = useChatActions();
-
-  return {
-    messages,
-    input,
-    isLoading,
-    error,
-    data,
-    status,
-    append: actions.append,
-    reload: actions.reload,
-    stop: actions.stop,
-    setInput: actions.setInput,
-    setMessages: actions.setMessages,
-    setData: actions.setData,
-    handleSubmit: actions.submit,
   };
 }

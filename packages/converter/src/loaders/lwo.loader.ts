@@ -8,8 +8,7 @@ export class LwoLoader extends ThreeJsBaseLoader<LWO> {
   private readonly loader = new LWOLoader();
 
   protected async parseAsync(data: Uint8Array): Promise<LWO> {
-    const arrayBuffer = this.toArrayBuffer(data);
-
+    const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
     return this.withPromise(() => this.loader.parse(arrayBuffer, '', ''));
   }
 

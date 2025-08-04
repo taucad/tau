@@ -12,8 +12,7 @@ export class ThreeDmLoader extends ThreeJsBaseLoader<Object3D> {
   }
 
   protected async parseAsync(data: Uint8Array): Promise<Object3D> {
-    const arrayBuffer = this.toArrayBuffer(data);
-
+    const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
     return new Promise((resolve) => {
       this.loader.parse(arrayBuffer, (object: Object3D) => {
         resolve(object);

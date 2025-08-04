@@ -10,7 +10,7 @@ export class VoxLoader extends ThreeJsBaseLoader<VoxChunk[]> {
   private readonly loader = new VOXLoader();
 
   protected async parseAsync(data: Uint8Array): Promise<VoxChunk[]> {
-    const arrayBuffer = this.toArrayBuffer(data);
+    const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
     return this.withPromise(() => this.loader.parse(arrayBuffer) as VoxChunk[]);
   }
 

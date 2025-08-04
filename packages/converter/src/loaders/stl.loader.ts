@@ -7,8 +7,7 @@ export class StlLoader extends ThreeJsBaseLoader<BufferGeometry> {
   private readonly loader = new STLLoader();
 
   protected async parseAsync(data: Uint8Array): Promise<BufferGeometry> {
-    const arrayBuffer = this.toArrayBuffer(data);
-
+    const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
     return this.withPromise(() => this.loader.parse(arrayBuffer));
   }
 

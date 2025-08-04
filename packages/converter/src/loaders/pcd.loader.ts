@@ -6,8 +6,7 @@ export class PcdLoader extends ThreeJsBaseLoader<Points> {
   private readonly loader = new PCDLoader();
 
   protected async parseAsync(data: Uint8Array): Promise<Points> {
-    const arrayBuffer = this.toArrayBuffer(data);
-
+    const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
     return this.withPromise(() => this.loader.parse(arrayBuffer));
   }
 

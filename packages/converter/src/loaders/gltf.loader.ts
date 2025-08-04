@@ -10,13 +10,13 @@ export class GltfLoader extends ThreeJsBaseLoader<GLTF> {
   public constructor() {
     super();
     // Set the decoder path for DRACO - this may need to be configurable
-    this.dracoLoader.setDecoderPath('/Users/rifont/git/tau/packages/converter/src/assets/draco3d/');
+    this.dracoLoader.setDecoderPath('file://Users/rifont/git/tau/packages/converter/src/assets/draco3d/');
+    this.dracoLoader.setDecoderConfig({ type: 'js' });
     this.loader.setDRACOLoader(this.dracoLoader);
   }
 
   protected async parseAsync(data: Uint8Array): Promise<GLTF> {
-    const arrayBuffer = this.toArrayBuffer(data);
-
+    const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
     return this.loader.parseAsync(arrayBuffer, '');
   }
 

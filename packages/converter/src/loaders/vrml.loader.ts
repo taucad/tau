@@ -6,8 +6,7 @@ export class VrmlLoader extends ThreeJsBaseLoader<Scene> {
   private readonly loader = new VRMLLoader();
 
   protected async parseAsync(data: Uint8Array): Promise<Scene> {
-    const arrayBuffer = this.toArrayBuffer(data);
-    const text = new TextDecoder().decode(arrayBuffer);
+    const text = this.uint8ArrayToText(data);
     return this.withPromise(() => this.loader.parse(text, ''));
   }
 

@@ -41,8 +41,18 @@ export abstract class ThreeJsBaseLoader<ParseResult = unknown, Options = Record<
    * @param data - The Uint8Array to convert.
    * @returns The ArrayBuffer representation.
    */
-  protected toArrayBuffer(data: Uint8Array): ArrayBuffer {
+  protected uint8ArrayToArrayBuffer(data: Uint8Array): ArrayBuffer {
     return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+  }
+
+  /**
+   * Convert Uint8Array to text.
+   *
+   * @param data - The Uint8Array to convert.
+   * @returns The text representation.
+   */
+  protected uint8ArrayToText(data: Uint8Array): string {
+    return new TextDecoder().decode(data);
   }
 
   /**

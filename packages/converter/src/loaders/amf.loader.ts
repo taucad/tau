@@ -6,8 +6,7 @@ export class AmfLoader extends ThreeJsBaseLoader<Group> {
   private readonly loader = new AMFLoader();
 
   protected async parseAsync(data: Uint8Array): Promise<Group> {
-    const arrayBuffer = this.toArrayBuffer(data);
-
+    const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
     return this.withPromise(() => this.loader.parse(arrayBuffer));
   }
 

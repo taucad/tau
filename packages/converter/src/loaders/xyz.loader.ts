@@ -7,8 +7,7 @@ export class XyzLoader extends ThreeJsBaseLoader<BufferGeometry> {
   private readonly loader = new XYZLoader();
 
   protected async parseAsync(data: Uint8Array): Promise<BufferGeometry> {
-    const arrayBuffer = this.toArrayBuffer(data);
-    const text = new TextDecoder().decode(arrayBuffer);
+    const text = this.uint8ArrayToText(data);
     return this.withPromise(
       () =>
         this.loader.parse(text, () => {

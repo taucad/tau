@@ -8,9 +8,7 @@ export class BvhLoader extends ThreeJsBaseLoader<BVH> {
   private readonly loader = new BVHLoader();
 
   protected async parseAsync(data: Uint8Array): Promise<BVH> {
-    const arrayBuffer = this.toArrayBuffer(data);
-    const text = new TextDecoder().decode(arrayBuffer);
-
+    const text = this.uint8ArrayToText(data);
     return this.withPromise(() => this.loader.parse(text));
   }
 

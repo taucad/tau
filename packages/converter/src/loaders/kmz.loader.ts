@@ -7,8 +7,7 @@ export class KmzLoader extends ThreeJsBaseLoader<Collada> {
   private readonly loader = new KMZLoader();
 
   protected async parseAsync(data: Uint8Array): Promise<Collada> {
-    const arrayBuffer = this.toArrayBuffer(data);
-
+    const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
     return this.withPromise(() => this.loader.parse(arrayBuffer));
   }
 

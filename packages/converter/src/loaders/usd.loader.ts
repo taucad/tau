@@ -9,7 +9,7 @@ export class UsdLoader extends ThreeJsBaseLoader<Object3D> {
   private readonly loader = new USDLoader() as USDZLoaderType;
 
   protected async parseAsync(data: Uint8Array): Promise<Object3D> {
-    const arrayBuffer = this.toArrayBuffer(data);
+    const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
     return this.withPromise(() => this.loader.parse(arrayBuffer));
   }
 

@@ -7,9 +7,7 @@ export class ColladaLoader extends ThreeJsBaseLoader<Collada> {
   private readonly loader = new ColladaLoaderThreeJs();
 
   protected async parseAsync(data: Uint8Array): Promise<Collada> {
-    const arrayBuffer = this.toArrayBuffer(data);
-    const text = new TextDecoder().decode(arrayBuffer);
-
+    const text = this.uint8ArrayToText(data);
     return this.withPromise(() => this.loader.parse(text, ''));
   }
 

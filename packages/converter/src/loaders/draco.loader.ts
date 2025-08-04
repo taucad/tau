@@ -17,8 +17,7 @@ export class DracoLoader extends ThreeJsBaseLoader<BufferGeometry> {
   }
 
   protected async parseAsync(data: Uint8Array): Promise<BufferGeometry> {
-    const arrayBuffer = this.toArrayBuffer(data);
-
+    const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
     return new Promise((resolve, reject) => {
       this.loader.parse(
         arrayBuffer,

@@ -31,7 +31,6 @@
     "tests/**/*.test.js",
     "tests/**/*.spec.jsx",
     "tests/**/*.test.jsx",
-    "vite.config.ts",
     "app/**/*.test.ts",
     "app/**/*.spec.ts",
     "app/**/*.test.tsx",

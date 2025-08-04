@@ -33,6 +33,7 @@ const createCopyTarget = (configFilePath: string): CreateNodesResult | undefined
               cwd: projectRoot,
             },
             inputs: [
+              '{projectRoot}/copy-files-from-to.cjson',
               {
                 externalDependencies: ['copy-files-from-to'],
               },

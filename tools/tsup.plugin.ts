@@ -77,6 +77,7 @@ const createTsupTarget = (configFilePath: string, context: CreateNodesContextV2)
             },
             inputs: [
               ...('production' in namedInputs ? ['default', '^production'] : ['default', '^default']),
+              '{projectRoot}/tsup.config.ts',
               {
                 externalDependencies: ['tsup'],
               },

@@ -1,6 +1,7 @@
 import xo from 'xo';
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
 import nxEslintPlugin from '@nx/eslint-plugin';
+import noBarrelFilesPlugin from 'eslint-plugin-no-barrel-files';
 
 /**
  * @type {import('eslint').Linter.Config[]}
@@ -29,6 +30,7 @@ const config = [
   },
   // First, apply XO's base configuration
   ...xo.xoToEslintConfig([{ space: true, react: true, prettier: 'compat' }]),
+  noBarrelFilesPlugin.flat,
   eslintPluginPrettierRecommended,
   {
     // Ensure TypeScript support is properly configured

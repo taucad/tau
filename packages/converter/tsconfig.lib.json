@@ -4,27 +4,14 @@
     "outDir": "./out-tsc/lib",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": [
-      "DOM",
-      "DOM.Iterable",
-      "ES2024"
-    ],
-    "types": [
-      "node",
-    ],
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
+    "types": ["node"],
     "target": "ESNext",
     "baseUrl": ".",
     "paths": {
-      "#*": [
-        "src/*"
-      ]
+      "#*": ["src/*"]
     }
   },
-  "include": [
-    "src/**/*.ts"
-  ],
-  "exclude": [
-    "src/**/*.spec.ts",
-    "src/**/*.test.ts",
-  ]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"]
 }

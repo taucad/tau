@@ -2,11 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./out-tsc/spec",
-    "types": [
-      "node",
-      "vitest/importMeta",
-      "vitest"
-    ],
+    "types": ["node", "vitest/importMeta", "vitest"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
@@ -27,6 +23,6 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "src/**/*.js",
-    "src/**/*.jsx",
+    "src/**/*.jsx"
   ]
 }

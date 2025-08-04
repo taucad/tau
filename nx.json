@@ -87,6 +87,9 @@
   "sync": {
     "applyChanges": true
   },
+  "tui": {
+    "enabled": false
+  },
   "namedInputs": {
     "sharedGlobals": ["{workspaceRoot}/.github/workflows/ci.yml"],
     "default": ["{projectRoot}/**/*", "sharedGlobals"]

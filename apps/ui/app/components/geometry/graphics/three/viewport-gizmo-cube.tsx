@@ -4,7 +4,7 @@ import type { GizmoAxisOptions, GizmoOptions } from 'three-viewport-gizmo';
 import { ViewportGizmo } from 'three-viewport-gizmo';
 import { useEffect, useCallback } from 'react';
 import * as THREE from 'three';
-import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import type { OrbitControls } from 'three/addons';
 import type { ReactNode } from 'react';
 import { Theme, useTheme } from 'remix-themes';
 import { useColor } from '#hooks/use-color.js';

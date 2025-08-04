@@ -6,6 +6,9 @@
       "plugin": "./tools/tsup.plugin.ts"
     },
     {
+      "plugin": "./tools/copy-files-from-to.plugin.ts"
+    },
+    {
       "plugin": "@nx/react/router-plugin",
       "options": {
         "buildTargetName": "build",

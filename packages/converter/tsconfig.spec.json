@@ -7,7 +7,9 @@
       "vitest/importMeta",
       "vitest"
     ],
-    "module": "NodeNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
     "target": "ESNext",
     "baseUrl": ".",
     "paths": {
@@ -16,6 +18,7 @@
   },
   "include": [
     "vitest.config.ts",
+    "vitest.setup.ts",
     "tsup.config.ts",
     "src/**/*.test.ts",
     "src/**/*.spec.ts",

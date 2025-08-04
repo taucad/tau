@@ -10,6 +10,7 @@ const baseConfig: Options = {
   minifyWhitespace: true,
   minifyIdentifiers: true,
   minifySyntax: true,
+  publicDir: 'src/assets',
 };
 
 export const cjsConfig: Options = {

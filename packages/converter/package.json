@@ -42,9 +42,17 @@
     }
   },
   "imports": {
-    "#*": ["./src/*"]
+    "#*": [
+      "./src/*"
+    ]
   },
-  "dependencies": {},
-  "peerDependencies": {},
-  "peerDependenciesMeta": {}
+  "dependencies": {
+    "assimpjs": "^0.0.10",
+    "occt-import-js": "^0.0.23",
+    "rhino3dm": "^8.17.0",
+    "three": "^0.179.0",
+    "three-stdlib": "^2.36.0",
+    "web-ifc": "^0.0.70",
+    "xstate": "^5.19.3"
+  }
 }

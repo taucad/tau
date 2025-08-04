@@ -5,7 +5,8 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 export default defineConfig({
   plugins: [nxViteTsPaths(), tsconfigPaths()],
   test: {
-    environment: 'node',
+    globals: true,
+    environment: 'jsdom',
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],

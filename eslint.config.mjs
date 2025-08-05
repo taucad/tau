@@ -26,6 +26,7 @@ const config = [
       '**/stats.html',
       '**/out-tsc',
       '**/generated',
+      '**/assets',
     ],
   },
   // First, apply XO's base configuration

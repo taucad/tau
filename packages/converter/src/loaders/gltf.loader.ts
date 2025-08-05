@@ -13,7 +13,6 @@ export class GltfLoader extends ThreeJsBaseLoader<GLTF> {
   }
 
   protected async parseAsync(data: Uint8Array): Promise<GLTF> {
-    // Set the decoder path for DRACO - this may need to be configurable
     await this.dracoLoader.initialize();
     this.loader.setDRACOLoader(this.dracoLoader);
 

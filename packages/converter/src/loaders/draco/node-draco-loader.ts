@@ -1,8 +1,3 @@
-/* eslint-disable max-depth -- this is a copied function. */
-/* eslint-disable import-x/no-extraneous-dependencies -- this is misconfigured - TODO: fix */
-/* eslint-disable @typescript-eslint/naming-convention -- draco3d uses c++ style */
-/* eslint-disable max-params -- draco3d uses c++ style */
-/* eslint-disable new-cap -- draco3d uses c++ style */
 // Copyright 2016 The Draco Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,10 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/* eslint-disable @typescript-eslint/naming-convention -- draco3d uses c++ style */
+/* eslint-disable max-params -- draco3d uses c++ style */
+/* eslint-disable new-cap -- draco3d uses c++ style */
+
 import * as THREE from 'three';
-import type { BufferGeometry, LoadingManager } from 'three';
+import type { BufferGeometry } from 'three';
 import type { Attribute, Decoder, DecoderBuffer, DecoderModule, DracoArray, Mesh, PointCloud } from 'draco3dgltf';
 import draco3d from 'draco3dgltf';
+import { DRACOLoader } from 'three/examples/jsm/Addons.js';
+import { Color, ColorManagement, LinearSRGBColorSpace, SRGBColorSpace } from 'three';
 
 type AttributeType =
   | Float32ArrayConstructor
@@ -40,43 +41,42 @@ type TypedAttribute =
   | THREE.Uint16BufferAttribute
   | THREE.Uint32BufferAttribute;
 
-type GeometryBuffer = {
-  [name: string]: THREE.BufferAttribute | undefined;
+type GeometryBuffer = Record<string, THREE.BufferAttribute | undefined> & {
   indices?: Uint32Array;
 };
-export class NodeDracoLoader {
-  public timeLoaded = 0;
-  public manager: LoadingManager;
-  public materials: THREE.Material[] | undefined = undefined;
+
+export class NodeDracoLoader extends DRACOLoader {
   public verbosity = 0;
   public attributeOptions: Record<string, { skipDequantization?: boolean }> = {};
   public drawMode: THREE.TrianglesDrawModes = THREE.TrianglesDrawMode;
 
-  private path = '';
   private decoderModule!: DecoderModule;
-  private readonly nativeAttributeMap: Record<string, string> = {
+
+  private readonly defaultAttributeIDs: Record<string, string> = {
     position: 'POSITION',
     normal: 'NORMAL',
     color: 'COLOR',
     uv: 'TEX_COORD',
   };
 
-  public constructor(manager?: LoadingManager) {
-    this.manager = manager ?? THREE.DefaultLoadingManager;
-  }
+  private readonly defaultAttributeTypes: Record<string, AttributeType> = {
+    position: Float32Array,
+    normal: Float32Array,
+    color: Float32Array,
+    uv: Float32Array,
+  };
 
   public async initialize(): Promise<void> {
     this.decoderModule = await draco3d.createDecoderModule();
   }
 
-  public load(
+  public override load(
     url: string,
     onLoad: (geometry: BufferGeometry) => void,
     onProgress?: (event: ProgressEvent) => void,
     onError?: (error: unknown) => void,
   ): void {
     const loader = new THREE.FileLoader(this.manager);
-    loader.setPath(this.path);
     loader.setResponseType('arraybuffer');
     loader.load(
       url,
@@ -88,11 +88,6 @@ export class NodeDracoLoader {
       onProgress,
       onError,
     );
-  }
-
-  public setPath(value: string): this {
-    this.path = value;
-    return this;
   }
 
   public setVerbosity(level: number): this {
@@ -110,8 +105,9 @@ export class NodeDracoLoader {
     return this;
   }
 
-  public preload(): void {
-    // No-op - required by DRACOLoader interface
+  public override preload(): this {
+    // No WASM preload needed for Node.js
+    return this;
   }
 
   public decodeDracoFile(
@@ -119,27 +115,36 @@ export class NodeDracoLoader {
     callback: (geometry: BufferGeometry) => void,
     attributeUniqueIdMap?: Record<string, number>,
     attributeTypeMap?: Record<string, AttributeType>,
+    vertexColorSpace: string = LinearSRGBColorSpace,
   ): void {
-    this.decodeDracoFileInternal(rawBuffer, this.decoderModule, callback, attributeUniqueIdMap, attributeTypeMap);
+    this.decodeDracoFileInternal(
+      rawBuffer,
+      this.decoderModule,
+      callback,
+      attributeUniqueIdMap,
+      attributeTypeMap,
+      vertexColorSpace,
+    );
   }
 
   private decodeDracoFileInternal(
     rawBuffer: ArrayBuffer,
-    dracoDecoder: DecoderModule,
+    decoderModule: DecoderModule,
     callback: (geometry: BufferGeometry) => void,
     attributeUniqueIdMap?: Record<string, number>,
     attributeTypeMap?: Record<string, AttributeType>,
+    vertexColorSpace: string = LinearSRGBColorSpace,
   ): void {
-    const buffer = new dracoDecoder.DecoderBuffer();
+    const buffer = new decoderModule.DecoderBuffer();
     buffer.Init(new Int8Array(rawBuffer), rawBuffer.byteLength);
-    const decoder = new dracoDecoder.Decoder();
+    const decoder = new decoderModule.Decoder();
 
     const geometryType = decoder.GetEncodedGeometryType(buffer);
-    if (geometryType === dracoDecoder.TRIANGULAR_MESH) {
+    if (geometryType === decoderModule.TRIANGULAR_MESH) {
       if (this.verbosity > 0) {
         console.info('Loaded a mesh.');
       }
-    } else if (geometryType === dracoDecoder.POINT_CLOUD) {
+    } else if (geometryType === decoderModule.POINT_CLOUD) {
       if (this.verbosity > 0) {
         console.info('Loaded a point cloud.');
       }
@@ -151,12 +156,13 @@ export class NodeDracoLoader {
 
     callback(
       this.convertDracoGeometryTo3JS(
-        dracoDecoder,
+        decoderModule,
         decoder,
         geometryType,
         buffer,
         attributeUniqueIdMap,
         attributeTypeMap,
+        vertexColorSpace,
       ),
     );
   }
@@ -170,6 +176,7 @@ export class NodeDracoLoader {
     attribute: Attribute,
     geometry: BufferGeometry,
     geometryBuffer: GeometryBuffer,
+    vertexColorSpace: string,
   ): void {
     const numberComponents = attribute.num_components();
     const numberPoints = dracoGeometry.num_points();
@@ -177,8 +184,8 @@ export class NodeDracoLoader {
     let attributeData: DracoArray;
     let TypedBufferAttribute: new (...args: any[]) => TypedAttribute;
 
-    switch (String(attributeType)) {
-      case 'Float32Array': {
+    switch (attributeType) {
+      case Float32Array: {
         attributeData = new dracoDecoder.DracoFloat32Array();
         decoder.GetAttributeFloatForAllPoints(dracoGeometry, attribute, attributeData);
         geometryBuffer[attributeName] = new THREE.Float32BufferAttribute(
@@ -189,7 +196,7 @@ export class NodeDracoLoader {
         break;
       }
 
-      case 'Int8Array': {
+      case Int8Array: {
         attributeData = new dracoDecoder.DracoInt8Array();
         decoder.GetAttributeInt8ForAllPoints(dracoGeometry, attribute, attributeData);
         geometryBuffer[attributeName] = new THREE.Int8BufferAttribute(new Int8Array(numberValues), numberComponents);
@@ -197,7 +204,7 @@ export class NodeDracoLoader {
         break;
       }
 
-      case 'Int16Array': {
+      case Int16Array: {
         attributeData = new dracoDecoder.DracoInt16Array();
         decoder.GetAttributeInt16ForAllPoints(dracoGeometry, attribute, attributeData);
         geometryBuffer[attributeName] = new THREE.Int16BufferAttribute(new Int16Array(numberValues), numberComponents);
@@ -205,7 +212,7 @@ export class NodeDracoLoader {
         break;
       }
 
-      case 'Int32Array': {
+      case Int32Array: {
         attributeData = new dracoDecoder.DracoInt32Array();
         decoder.GetAttributeInt32ForAllPoints(dracoGeometry, attribute, attributeData);
         geometryBuffer[attributeName] = new THREE.Int32BufferAttribute(new Int32Array(numberValues), numberComponents);
@@ -213,7 +220,7 @@ export class NodeDracoLoader {
         break;
       }
 
-      case 'Uint8Array': {
+      case Uint8Array: {
         attributeData = new dracoDecoder.DracoUInt8Array();
         decoder.GetAttributeUInt8ForAllPoints(dracoGeometry, attribute, attributeData);
         geometryBuffer[attributeName] = new THREE.Uint8BufferAttribute(new Uint8Array(numberValues), numberComponents);
@@ -221,7 +228,7 @@ export class NodeDracoLoader {
         break;
       }
 
-      case 'Uint16Array': {
+      case Uint16Array: {
         attributeData = new dracoDecoder.DracoUInt16Array();
         decoder.GetAttributeUInt16ForAllPoints(dracoGeometry, attribute, attributeData);
         geometryBuffer[attributeName] = new THREE.Uint16BufferAttribute(
@@ -232,7 +239,7 @@ export class NodeDracoLoader {
         break;
       }
 
-      case 'Uint32Array': {
+      case Uint32Array: {
         attributeData = new dracoDecoder.DracoUInt32Array();
         decoder.GetAttributeUInt32ForAllPoints(dracoGeometry, attribute, attributeData);
         geometryBuffer[attributeName] = new THREE.Uint32BufferAttribute(
@@ -254,10 +261,18 @@ export class NodeDracoLoader {
       geometryBuffer[attributeName].array[i] = attributeData.GetValue(i);
     }
 
-    geometry.setAttribute(
-      attributeName,
-      new TypedBufferAttribute(geometryBuffer[attributeName].array, geometryBuffer[attributeName].itemSize),
+    const bufferAttribute = new TypedBufferAttribute(
+      geometryBuffer[attributeName].array,
+      geometryBuffer[attributeName].itemSize,
     );
+
+    // Handle color space conversion
+    if (attributeName === 'color') {
+      this.assignVertexColorSpace(bufferAttribute, vertexColorSpace);
+      bufferAttribute.normalized = !(geometryBuffer[attributeName].array instanceof Float32Array);
+    }
+
+    geometry.setAttribute(attributeName, bufferAttribute);
     dracoDecoder.destroy(attributeData);
   }
 
@@ -269,6 +284,7 @@ export class NodeDracoLoader {
     buffer: DecoderBuffer,
     attributeUniqueIdMap?: Record<string, number>,
     attributeTypeMap?: Record<string, AttributeType>,
+    vertexColorSpace: string = LinearSRGBColorSpace,
   ): BufferGeometry {
     let dracoGeometry;
     let decodingStatus;
@@ -314,78 +330,110 @@ export class NodeDracoLoader {
       throw new Error(errorMessage);
     }
 
-    const posAttribute = decoder.GetAttribute(dracoGeometry, posAttId);
-
     const geometryBuffer: GeometryBuffer = {};
     const geometry = new THREE.BufferGeometry();
 
-    if (attributeUniqueIdMap && attributeTypeMap) {
-      for (const attributeName in attributeUniqueIdMap) {
-        if (Object.hasOwn(attributeUniqueIdMap, attributeName)) {
-          const attributeType = attributeTypeMap[attributeName]!;
-          const attributeId = attributeUniqueIdMap[attributeName]!;
-          const attribute = decoder.GetAttributeByUniqueId(dracoGeometry, attributeId);
-          this.addAttributeToGeometry(
-            dracoDecoder,
-            decoder,
-            dracoGeometry,
-            attributeName,
-            attributeType,
-            attribute,
-            geometry,
-            geometryBuffer,
-          );
-        }
-      }
-    } else {
-      for (const attributeName in this.nativeAttributeMap) {
-        if (Object.hasOwn(this.nativeAttributeMap, attributeName)) {
-          const attId = decoder.GetAttributeId(dracoGeometry, dracoDecoder[this.nativeAttributeMap[attributeName]]);
-          if (attId !== -1) {
-            if (this.verbosity > 0) {
-              console.info(`Loaded ${attributeName} attribute.`);
-            }
+    // Use provided attribute maps or defaults
+    const attributeIDs = attributeUniqueIdMap ?? this.defaultAttributeIDs;
+    const attributeTypes = attributeTypeMap ?? this.defaultAttributeTypes;
+    const useUniqueIDs = Boolean(attributeUniqueIdMap);
 
-            const attribute = decoder.GetAttribute(dracoGeometry, attId);
-            this.addAttributeToGeometry(
-              dracoDecoder,
-              decoder,
-              dracoGeometry,
-              attributeName,
-              Float32Array,
-              attribute,
-              geometry,
-              geometryBuffer,
-            );
+    // Gather all vertex attributes.
+    for (const attributeName in attributeIDs) {
+      if (!Object.hasOwn(attributeIDs, attributeName)) {
+        continue;
+      }
+
+      const attributeTypeString = attributeTypes[attributeName];
+      if (!attributeTypeString) {
+        continue;
+      }
+
+      const attributeType = this.getAttributeType(attributeTypeString);
+      let attribute;
+      let attributeID;
+
+      if (useUniqueIDs) {
+        const uniqueIdMap = attributeIDs as Record<string, number>;
+        attributeID = uniqueIdMap[attributeName];
+        if (attributeID === undefined) {
+          continue;
+        }
+
+        attribute = decoder.GetAttributeByUniqueId(dracoGeometry, attributeID);
+      } else {
+        const stringIdMap = attributeIDs as Record<string, string>;
+        const dracoAttributeKey = stringIdMap[attributeName];
+        if (!dracoAttributeKey) {
+          continue;
+        }
+
+        // Map string keys to draco constants
+        let dracoConstant: number;
+        switch (dracoAttributeKey) {
+          case 'POSITION': {
+            dracoConstant = dracoDecoder.POSITION;
+            break;
+          }
+
+          case 'NORMAL': {
+            dracoConstant = dracoDecoder.NORMAL;
+            break;
+          }
+
+          case 'COLOR': {
+            dracoConstant = dracoDecoder.COLOR;
+            break;
+          }
+
+          case 'TEX_COORD': {
+            dracoConstant = dracoDecoder.TEX_COORD;
+            break;
+          }
+
+          default: {
+            continue;
           }
         }
+
+        attributeID = decoder.GetAttributeId(dracoGeometry, dracoConstant);
+        if (attributeID === -1) {
+          continue;
+        }
+
+        attribute = decoder.GetAttribute(dracoGeometry, attributeID);
       }
+
+      if (this.verbosity > 0) {
+        console.info(`Loaded ${attributeName} attribute.`);
+      }
+
+      this.addAttributeToGeometry(
+        dracoDecoder,
+        decoder,
+        dracoGeometry,
+        attributeName,
+        attributeType,
+        attribute,
+        geometry,
+        geometryBuffer,
+        vertexColorSpace,
+      );
     }
 
     if (geometryType === dracoDecoder.TRIANGULAR_MESH) {
-      if (this.drawMode === THREE.TriangleStripDrawMode) {
-        const stripsArray = new dracoDecoder.DracoInt32Array();
-        decoder.GetTriangleStripsFromMesh(dracoGeometry, stripsArray);
-        geometryBuffer.indices = new Uint32Array(stripsArray.size());
-        for (let i = 0; i < stripsArray.size(); ++i) {
-          geometryBuffer.indices[i] = stripsArray.GetValue(i);
-        }
-
-        dracoDecoder.destroy(stripsArray);
-      } else {
-        const numberIndices = numberFaces * 3;
-        geometryBuffer.indices = new Uint32Array(numberIndices);
-        const ia = new dracoDecoder.DracoInt32Array();
-        for (let i = 0; i < numberFaces; ++i) {
-          decoder.GetFaceFromMesh(dracoGeometry as Mesh, i, ia);
-          const index = i * 3;
-          geometryBuffer.indices[index] = ia.GetValue(0);
-          geometryBuffer.indices[index + 1] = ia.GetValue(1);
-          geometryBuffer.indices[index + 2] = ia.GetValue(2);
-        }
-
-        dracoDecoder.destroy(ia);
+      const numberIndices = numberFaces * 3;
+      geometryBuffer.indices = new Uint32Array(numberIndices);
+      const ia = new dracoDecoder.DracoInt32Array();
+      for (let i = 0; i < numberFaces; ++i) {
+        decoder.GetFaceFromMesh(dracoGeometry as Mesh, i, ia);
+        const index = i * 3;
+        geometryBuffer.indices[index] = ia.GetValue(0);
+        geometryBuffer.indices[index + 1] = ia.GetValue(1);
+        geometryBuffer.indices[index + 2] = ia.GetValue(2);
       }
+
+      dracoDecoder.destroy(ia);
     }
 
     if (geometryType === dracoDecoder.TRIANGULAR_MESH && geometryBuffer.indices) {
@@ -397,19 +445,6 @@ export class NodeDracoLoader {
       );
     }
 
-    const posTransform = new dracoDecoder.AttributeQuantizationTransform();
-    if (posTransform.InitFromAttribute(posAttribute)) {
-      const geometryPosition = geometry.attributes['position'] as THREE.BufferAttribute;
-      geometryPosition.isQuantized = true;
-      geometryPosition.maxRange = posTransform.range();
-      geometryPosition.numQuantizationBits = posTransform.quantization_bits();
-      geometryPosition.minValues = new Float32Array(3);
-      for (let i = 0; i < 3; ++i) {
-        geometryPosition.minValues[i] = posTransform.min_value(i);
-      }
-    }
-
-    dracoDecoder.destroy(posTransform);
     dracoDecoder.destroy(decoder);
     dracoDecoder.destroy(dracoGeometry);
 
@@ -421,5 +456,62 @@ export class NodeDracoLoader {
   } {
     this.attributeOptions[attributeName] ??= {};
     return this.attributeOptions[attributeName];
+  }
+
+  private getAttributeType(typeName: string | AttributeType): AttributeType {
+    if (typeof typeName === 'function') {
+      return typeName;
+    }
+
+    switch (typeName) {
+      case 'Float32Array': {
+        return Float32Array;
+      }
+
+      case 'Int8Array': {
+        return Int8Array;
+      }
+
+      case 'Int16Array': {
+        return Int16Array;
+      }
+
+      case 'Int32Array': {
+        return Int32Array;
+      }
+
+      case 'Uint8Array': {
+        return Uint8Array;
+      }
+
+      case 'Uint16Array': {
+        return Uint16Array;
+      }
+
+      case 'Uint32Array': {
+        return Uint32Array;
+      }
+
+      default: {
+        return Float32Array;
+      }
+    }
+  }
+
+  private assignVertexColorSpace(attribute: THREE.BufferAttribute, inputColorSpace: string): void {
+    // While .drc files do not specify colorspace, the only 'official' tooling
+    // is PLY and OBJ converters, which use sRGB. We'll assume sRGB when a .drc
+    // file is passed into .load() or .parse(). GLTFLoader uses internal APIs
+    // to decode geometry, and vertex colors are already Linear-sRGB in there.
+    if (inputColorSpace !== SRGBColorSpace) {
+      return;
+    }
+
+    const color = new Color();
+    for (let i = 0, il = attribute.count; i < il; i++) {
+      color.fromBufferAttribute(attribute, i);
+      ColorManagement.colorSpaceToWorking(color, SRGBColorSpace);
+      attribute.setXYZ(i, color.r, color.g, color.b);
+    }
   }
 }

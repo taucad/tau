@@ -3,8 +3,8 @@ import { Vector3, Mesh } from 'three';
 import type { BufferGeometry, Object3D } from 'three';
 import type { InputFile } from '#types.js';
 import { importThreeJs, threejsImportFomats } from '#threejs-import.js';
-import { createThreeTestUtils, loadFixture } from '#threejs-test.utils.test.js';
-import type { LoaderTestCase, StructureExpectation } from '#threejs-test.utils.test.js';
+import { createThreeTestUtils, loadFixture } from '#threejs-test.utils.js';
+import type { LoaderTestCase, StructureExpectation } from '#threejs-test.utils.js';
 
 // ============================================================================
 // Test Configuration Registry

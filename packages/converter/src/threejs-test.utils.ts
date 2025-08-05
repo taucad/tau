@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BufferGeometry, Object3D } from 'three';
-import { Box3, Vector3, Mesh } from 'three';
+import { Box3, Mesh, Vector3 } from 'three';
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- test utils
 import { expect } from 'vitest';
 import type { ThreejsImportFormat } from '#threejs-import.js';
 // ============================================================================

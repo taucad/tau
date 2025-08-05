@@ -3,8 +3,8 @@ import { Vector3, Mesh } from 'three';
 import type { BufferGeometry, Object3D } from 'three';
 import type { InputFile } from '#types.js';
 import { importThreeJs, threejsImportFomats } from '#threejs-import.js';
-import { createThreeTestUtils, loadFixture } from '#threejs-test.utils.js';
-import type { GeometryExpectation, LoaderTestCase, StructureExpectation } from '#threejs-test.utils.js';
+import { createThreeTestUtils, loadFixture } from '#threejs-test.utils.test.js';
+import type { LoaderTestCase, StructureExpectation } from '#threejs-test.utils.test.js';
 
 // ============================================================================
 // Test Configuration Registry
@@ -20,9 +20,8 @@ const loaderTestCases: LoaderTestCase[] = [
       faceCount: 12,
       meshCount: 1,
       boundingBox: {
-        size: [0.02, 0.02, 0.02],
-        center: [0, 0.01, 0],
-        tolerance: 0.02,
+        size: [0.002, 0.002, 0.002],
+        center: [0, 0, 0.001],
       },
     },
     structure: {
@@ -44,9 +43,8 @@ const loaderTestCases: LoaderTestCase[] = [
       faceCount: 12,
       meshCount: 1,
       boundingBox: {
-        size: [0.02, 0.02, 0.02],
-        center: [0, 0.01, 0],
-        tolerance: 0.02,
+        size: [0.002, 0.002, 0.002],
+        center: [0, 0, 0.001],
       },
     },
     structure: {
@@ -69,7 +67,7 @@ const loaderTestCases: LoaderTestCase[] = [
       meshCount: 1,
       boundingBox: {
         size: [0.002, 0.002, 0.002],
-        center: [0, 0.001, 0],
+        center: [0, 0, 0.001],
       },
     },
     structure: {
@@ -99,7 +97,6 @@ const loaderTestCases: LoaderTestCase[] = [
       type: 'Mesh',
     },
   },
-  // Easy to add new loaders:
   {
     format: 'obj',
     fixtureName: 'cube.obj',
@@ -518,54 +515,80 @@ const loaderTestCases: LoaderTestCase[] = [
 ];
 
 // ============================================================================
-// Test Runners
+// Individual Test Helpers (Single Responsibility)
 // ============================================================================
 
-const runGeometryTests = (
-  object3d: Object3D,
-  expectations: GeometryExpectation,
-  utils: ReturnType<typeof createThreeTestUtils>,
-): void => {
-  const stats = utils.getGeometryStats(object3d);
+const createGeometryTestHelpers = (utils: ReturnType<typeof createThreeTestUtils>) => ({
+  expectVertexCount(object3d: Object3D, expectedCount: number): void {
+    const stats = utils.getGeometryStats(object3d);
+    expect(stats.vertexCount).toBe(expectedCount);
+  },
 
-  expect(stats.vertexCount).toBe(expectations.vertexCount);
+  expectFaceCount(object3d: Object3D, expectedCount: number): void {
+    const stats = utils.getGeometryStats(object3d);
+    expect(Math.round(stats.faceCount)).toBe(expectedCount);
+  },
 
-  expect(Math.round(stats.faceCount)).toBe(expectations.faceCount);
+  expectMeshCount(object3d: Object3D, expectedCount: number): void {
+    const stats = utils.getGeometryStats(object3d);
+    expect(stats.meshCount).toBe(expectedCount);
+  },
 
-  expect(stats.meshCount).toBe(expectations.meshCount);
+  expectBoundingBoxSize(object3d: Object3D, expectedSize: [number, number, number], tolerance?: number): void {
+    const boundingBox = utils.getBoundingBox(object3d);
+    const size = boundingBox.getSize(new Vector3());
+    const actualTolerance = tolerance ?? utils.epsilon;
 
-  const boundingBox = utils.getBoundingBox(object3d);
-  const size = boundingBox.getSize(new Vector3());
-  const center = boundingBox.getCenter(new Vector3());
-  const tolerance = expectations.boundingBox.tolerance ?? utils.epsilon;
+    const [expectedWidth, expectedHeight, expectedDepth] = expectedSize;
+    utils.expectVector3ToBeCloseTo(
+      size,
+      new Vector3(expectedWidth, expectedHeight, expectedDepth),
+      'bounding box size',
+      actualTolerance,
+    );
+  },
 
-  const [expectedWidth, expectedHeight, expectedDepth] = expectations.boundingBox.size;
-  utils.expectVector3ToBeCloseTo(size, new Vector3(expectedWidth, expectedHeight, expectedDepth), tolerance);
+  expectBoundingBoxCenter(object3d: Object3D, expectedCenter: [number, number, number], tolerance?: number): void {
+    const boundingBox = utils.getBoundingBox(object3d);
+    const center = boundingBox.getCenter(new Vector3());
+    const actualTolerance = tolerance ?? utils.epsilon;
 
-  const [expectedCenterX, expectedCenterY, expectedCenterZ] = expectations.boundingBox.center;
-  utils.expectVector3ToBeCloseTo(center, new Vector3(expectedCenterX, expectedCenterY, expectedCenterZ), tolerance);
-};
+    const [expectedCenterX, expectedCenterY, expectedCenterZ] = expectedCenter;
+    utils.expectVector3ToBeCloseTo(
+      center,
+      new Vector3(expectedCenterX, expectedCenterY, expectedCenterZ),
+      'bounding box center',
+      actualTolerance,
+    );
+  },
+});
 
-const runStructureTests = (object3d: Object3D, expectations: StructureExpectation): void => {
-  expect(object3d.type).toBe(expectations.type);
+const createStructureTestHelpers = () => ({
+  expectObjectType(object3d: Object3D, expectedType: string): void {
+    expect(object3d.type).toBe(expectedType);
+  },
 
-  if (expectations.name !== undefined) {
-    expect(object3d.name).toBe(expectations.name);
-  }
+  expectObjectName(object3d: Object3D, expectedName: string): void {
+    expect(object3d.name).toBe(expectedName);
+  },
 
-  if (expectations.children) {
-    for (const [index, childExpectation] of expectations.children.entries()) {
-      const child = object3d.children[index];
-      if (child) {
-        runStructureTests(child, childExpectation as StructureExpectation);
+  expectChildrenCount(object3d: Object3D, expectedCount: number): void {
+    expect(object3d.children.length).toBe(expectedCount);
+  },
+
+  expectChildAtIndex(object3d: Object3D, index: number, childExpectation: StructureExpectation): void {
+    const child = object3d.children[index];
+    expect(child).toBeDefined();
+
+    if (child) {
+      expect(child.type).toBe(childExpectation.type);
+
+      if (childExpectation.name !== undefined) {
+        expect(child.name).toBe(childExpectation.name);
       }
     }
-  }
-
-  if (expectations.children?.length !== undefined) {
-    expect(object3d.children.length).toBe(expectations.children.length);
-  }
-};
+  },
+});
 
 // ============================================================================
 // Parameterized Tests
@@ -573,13 +596,10 @@ const runStructureTests = (object3d: Object3D, expectations: StructureExpectatio
 
 describe('threejs-import', () => {
   const utils = createThreeTestUtils();
+  const geometryHelpers = createGeometryTestHelpers(utils);
+  const structureHelpers = createStructureTestHelpers();
 
-  // Filter to only test formats that are currently enabled
-  const enabledTestCases = loaderTestCases.filter((testCase) =>
-    threejsImportFomats.includes(testCase.format as 'gltf' | 'stl'),
-  );
-
-  describe.each(enabledTestCases)('$format loader', (testCase) => {
+  describe.each(loaderTestCases)('$format loader', (testCase) => {
     const { format, fixtureName, description, geometry, structure, skip } = testCase;
 
     const testFunction = skip ? it.skip : it;
@@ -596,23 +616,61 @@ describe('threejs-import', () => {
         data: loadFixture(fixtureName),
       };
 
-      object3d = await importThreeJs(inputFile, format as 'gltf' | 'stl');
+      object3d = await importThreeJs(inputFile, format);
     });
 
     testFunction(`should successfully import ${description ?? fixtureName}`, () => {
       expect(object3d).toBeDefined();
     });
 
+    // Geometry tests - each aspect gets its own test case
     if (geometry) {
-      testFunction('should have correct geometric properties', () => {
-        runGeometryTests(object3d, geometry, utils);
+      testFunction('should have correct vertex count', () => {
+        geometryHelpers.expectVertexCount(object3d, geometry.vertexCount);
+      });
+
+      testFunction('should have correct face count', () => {
+        geometryHelpers.expectFaceCount(object3d, geometry.faceCount);
+      });
+
+      testFunction('should have correct mesh count', () => {
+        geometryHelpers.expectMeshCount(object3d, geometry.meshCount);
+      });
+
+      testFunction('should have correct bounding box size', () => {
+        geometryHelpers.expectBoundingBoxSize(object3d, geometry.boundingBox.size, geometry.boundingBox.tolerance);
+      });
+
+      testFunction('should have correct bounding box center', () => {
+        geometryHelpers.expectBoundingBoxCenter(object3d, geometry.boundingBox.center, geometry.boundingBox.tolerance);
       });
     }
 
+    // Structure tests - each aspect gets its own test case
     if (structure) {
-      testFunction('should maintain correct object structure', () => {
-        runStructureTests(object3d, structure);
+      testFunction('should have correct object type', () => {
+        structureHelpers.expectObjectType(object3d, structure.type);
       });
+
+      if (structure.name !== undefined) {
+        testFunction('should have correct object name', () => {
+          structureHelpers.expectObjectName(object3d, structure.name!);
+        });
+      }
+
+      if (structure.children !== undefined) {
+        testFunction('should have correct number of children', () => {
+          structureHelpers.expectChildrenCount(object3d, structure.children!.length);
+        });
+
+        // Test each child individually
+        for (const [index, childExpectation] of structure.children.entries()) {
+          // eslint-disable-next-line @typescript-eslint/no-loop-func -- vitest ensures test closure, so this is safe
+          testFunction(`should have correct child structure at index ${index}`, () => {
+            structureHelpers.expectChildAtIndex(object3d, index, childExpectation as StructureExpectation);
+          });
+        }
+      }
     }
 
     testFunction('should produce consistent results across multiple imports', async () => {
@@ -621,7 +679,7 @@ describe('threejs-import', () => {
         data: loadFixture(fixtureName),
       };
 
-      const object3d2 = await importThreeJs(inputFile, format as 'gltf' | 'stl');
+      const object3d2 = await importThreeJs(inputFile, format);
 
       const signature1 = utils.createGeometrySignature(object3d);
       const signature2 = utils.createGeometrySignature(object3d2);
@@ -629,20 +687,46 @@ describe('threejs-import', () => {
       expect(signature1).toEqual(signature2);
     });
 
-    testFunction('should have valid mesh geometry', () => {
+    testFunction('should have valid mesh position attributes', () => {
+      let hasValidMesh = false;
+      object3d.traverse((child) => {
+        if (child instanceof Mesh) {
+          hasValidMesh = true;
+          const geometry = child.geometry as BufferGeometry;
+          const position = geometry.getAttribute('position');
+          expect(position).toBeDefined();
+        }
+      });
+      expect(hasValidMesh).toBe(true);
+    });
+
+    testFunction('should have positive vertex counts in meshes', () => {
+      object3d.traverse((child) => {
+        if (child instanceof Mesh) {
+          const geometry = child.geometry as BufferGeometry;
+          const position = geometry.getAttribute('position');
+          expect(position.count).toBeGreaterThan(0);
+        }
+      });
+    });
+
+    testFunction('should have properly triangulated mesh geometry', () => {
+      object3d.traverse((child) => {
+        if (child instanceof Mesh) {
+          const geometry = child.geometry as BufferGeometry;
+          const position = geometry.getAttribute('position');
+          const facePoints = testCase.geometry?.facePoints ?? 3;
+          expect(position.count % facePoints).toBe(0);
+        }
+      });
+    });
+
+    testFunction('should have finite coordinate values', () => {
       object3d.traverse((child) => {
         if (child instanceof Mesh) {
           const geometry = child.geometry as BufferGeometry;
           const position = geometry.getAttribute('position');
 
-          expect(position).toBeDefined();
-          expect(position.count).toBeGreaterThan(0);
-
-          const facePoints = testCase.geometry?.facePoints ?? 3;
-          // Verify vertex count is divisible by 3 (triangulated mesh)
-          expect(position.count % facePoints).toBe(0);
-
-          // Verify all coordinates are finite numbers
           for (const value of position.array) {
             expect(Number.isFinite(value)).toBe(true);
           }
@@ -663,13 +747,9 @@ describe('threejs-import', () => {
 
   // Integration test for all enabled formats
   it('should test all declared formats', () => {
-    const enabledFormats = enabledTestCases.map((tc) => tc.format);
+    const enabledFormats = loaderTestCases.map((tc) => tc.format);
     const declaredFormats = threejsImportFomats;
 
-    // Expect(enabledFormats.sort()).toEqual(declaredFormats.sort());
-
-    for (const format of declaredFormats) {
-      expect(enabledFormats).toContain(format);
-    }
+    expect([...new Set(enabledFormats)].sort()).toEqual([...new Set(declaredFormats)].sort());
   });
 });

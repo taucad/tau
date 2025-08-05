@@ -52,7 +52,7 @@ export const loadFixture = (fixtureName: string): Uint8Array => {
 export const createThreeTestUtils = (): {
   getBoundingBox: (object: Object3D) => Box3;
   getGeometryStats: (object: Object3D) => { vertexCount: number; faceCount: number; meshCount: number };
-  expectVector3ToBeCloseTo: (actual: Vector3, expected: Vector3, precision?: number) => void;
+  expectVector3ToBeCloseTo: (actual: Vector3, expected: Vector3, subject: string, precision?: number) => void;
   getObjectStructure: (object: Object3D) => Record<string, unknown>;
   createGeometrySignature: (object: Object3D) => GeometryExpectation;
   epsilon: number;
@@ -91,10 +91,19 @@ export const createThreeTestUtils = (): {
     return { vertexCount, faceCount, meshCount };
   };
 
-  const expectVector3ToBeCloseTo = (actual: Vector3, expected: Vector3, precision = epsilon): void => {
-    expect(Math.abs(actual.x - expected.x)).toBeLessThan(precision);
-    expect(Math.abs(actual.y - expected.y)).toBeLessThan(precision);
-    expect(Math.abs(actual.z - expected.z)).toBeLessThan(precision);
+  const expectVector3ToBeCloseTo = (actual: Vector3, expected: Vector3, subject: string, precision = epsilon): void => {
+    expect(
+      Math.abs(actual.x - expected.x),
+      `${subject}: Expected [X: ${actual.x}]. Actual [X: ${expected.x}]\n`,
+    ).toBeLessThan(precision);
+    expect(
+      Math.abs(actual.y - expected.y),
+      `${subject}: Expected [Y: ${actual.y}]. Actual [Y: ${expected.y}]\n`,
+    ).toBeLessThan(precision);
+    expect(
+      Math.abs(actual.z - expected.z),
+      `${subject}: Expected [Z: ${actual.z}]. Actual [Z: ${expected.z}]\n`,
+    ).toBeLessThan(precision);
   };
 
   const getObjectStructure = (object: Object3D): Record<string, unknown> => {

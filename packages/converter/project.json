@@ -7,7 +7,7 @@
   "targets": {
     "build": {
       "dependsOn": ["copy-assets"],
-      "outputs": ["./src/assets/**"]
+      "outputs": ["{projectRoot}/src/assets/**"]
     }
   }
 }

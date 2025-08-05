@@ -1,6 +1,6 @@
 import { JSDOM } from 'jsdom';
 
-// TODO: replace with a lighter weight parser.
+// TODO: replace with a lighter weight parser, like https://www.npmjs.com/package/parse5.
 globalThis.DOMParser = new JSDOM().window.DOMParser;
 // Used by three.js
 globalThis.ProgressEvent = class MockProgressEvent extends Event {

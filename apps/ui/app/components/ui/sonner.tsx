@@ -25,4 +25,5 @@ function Toaster({ ...properties }: ToasterProperties): React.JSX.Element {
 }
 
 export { Toaster };
+// eslint-disable-next-line no-barrel-files/no-barrel-files -- keeping all toast exports in one file
 export { toast } from 'sonner';

@@ -64,19 +64,19 @@ const loaderTestCases: LoaderTestCase[] = [
     fixtureName: 'cube-draco.glb',
     description: 'Simple cube from GLB format with Draco compression',
     geometry: {
-      vertexCount: 24,
-      faceCount: 8,
+      vertexCount: 36,
+      faceCount: 12,
       meshCount: 1,
       boundingBox: {
-        size: [0.02, 0.02, 0.02],
-        center: [0, 0.01, 0],
+        size: [0.002, 0.002, 0.002],
+        center: [0, 0.001, 0],
       },
     },
     structure: {
       type: 'Group',
       children: [
         {
-          name: 'cube',
+          name: 'node',
           type: 'Mesh',
         },
       ],
@@ -449,16 +449,22 @@ const loaderTestCases: LoaderTestCase[] = [
     format: 'vox',
     fixtureName: 'cube.vox',
     description: 'VOX format is not supported yet.',
-    skip: true,
-    skipReason: 'VOX loader is not implemented yet.',
     geometry: {
-      vertexCount: 0,
-      faceCount: 0,
-      meshCount: 0,
+      vertexCount: 144,
+      faceCount: 48,
+      meshCount: 1,
       boundingBox: {
-        size: [0, 0, 0],
-        center: [0, 0, 0],
+        size: [2, 2, 2],
+        center: [0, 0, 1],
       },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Mesh',
+        },
+      ],
     },
   },
   {

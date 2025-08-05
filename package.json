@@ -190,6 +190,7 @@
     "@testing-library/react": "16.2.0",
     "@testing-library/user-event": "^14.6.1",
     "@types/culori": "^4.0.0",
+    "@types/draco3dgltf": "^1.4.3",
     "@types/emscripten": "^1.40.1",
     "@types/json-schema": "^7.0.15",
     "@types/node": "~24.0.15",

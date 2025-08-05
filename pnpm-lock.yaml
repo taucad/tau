@@ -494,6 +494,9 @@ importers:
       '@types/culori':
         specifier: ^4.0.0
         version: 4.0.0
+      '@types/draco3dgltf':
+        specifier: ^1.4.3
+        version: 1.4.3
       '@types/emscripten':
         specifier: ^1.40.1
         version: 1.40.1
@@ -654,6 +657,9 @@ importers:
       assimpjs:
         specifier: ^0.0.10
         version: 0.0.10
+      draco3dgltf:
+        specifier: ^1.5.7
+        version: 1.5.7
       occt-import-js:
         specifier: ^0.0.23
         version: 0.0.23
@@ -5751,6 +5757,9 @@ packages:
   '@types/draco3d@1.4.10':
     resolution: {integrity: sha512-AX22jp8Y7wwaBgAixaSvkoG4M/+PlAcm3Qs4OW8yT9DM4xUpWKeFhLueTAyZF39pviAdcDdeJoACapiAceqNcw==}
 
+  '@types/draco3dgltf@1.4.3':
+    resolution: {integrity: sha512-JTY574f8xRI9+bOsDajeVSQ/gnIo0q3dt/MAJhNRKWJKdH2TAP3hld+lQ+eQnG9Eb6Ae493EiKi2oDZZpciQgw==}
+
   '@types/emscripten@1.40.1':
     resolution: {integrity: sha512-sr53lnYkQNhjHNN0oJDdUm5564biioI5DuOpycufDVK7D3y+GR3oUswe2rlwY1nPNyusHbrJ9WoTyIHl4/Bpwg==}
 
@@ -7792,6 +7801,9 @@ packages:
 
   draco3d@1.5.7:
     resolution: {integrity: sha512-m6WCKt/erDXcw+70IJXnG7M3awwQPAsZvJGX5zY7beBqpELw6RDGkYVU0W43AFxye4pDZ5i2Lbyc/NNGqwjUVQ==}
+
+  draco3dgltf@1.5.7:
+    resolution: {integrity: sha512-LeqcpmoHIyYUi0z70/H3tMkGj8QhqVxq6FJGPjlzR24BNkQ6jyMheMvFKJBI0dzGZrEOUyQEmZ8axM1xRrbRiw==}
 
   drizzle-kit@0.31.4:
     resolution: {integrity: sha512-tCPWVZWZqWVx2XUsVpJRnH9Mx0ClVOf5YUHerZ5so1OKSlqww4zy1R5ksEdGRcO3tM3zj0PYN6V48TbQCL1RfA==}
@@ -19866,6 +19878,10 @@ snapshots:
 
   '@types/draco3d@1.4.10': {}
 
+  '@types/draco3dgltf@1.4.3':
+    dependencies:
+      '@types/draco3d': 1.4.10
+
   '@types/emscripten@1.40.1': {}
 
   '@types/eslint-scope@3.7.7':
@@ -22074,6 +22090,8 @@ snapshots:
   dotenv@16.4.7: {}
 
   draco3d@1.5.7: {}
+
+  draco3dgltf@1.5.7: {}
 
   drizzle-kit@0.31.4:
     dependencies:

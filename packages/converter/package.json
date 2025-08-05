@@ -49,6 +49,7 @@
   "dependencies": {
     "assimpjs": "^0.0.10",
     "draco3dgltf": "^1.5.7",
+    "jsdom": "~26.0.0",
     "occt-import-js": "^0.0.23",
     "rhino3dm": "^8.17.0",
     "three": "^0.179.0",

@@ -500,6 +500,9 @@ importers:
       '@types/emscripten':
         specifier: ^1.40.1
         version: 1.40.1
+      '@types/jsdom':
+        specifier: ^21.1.7
+        version: 21.1.7
       '@types/json-schema':
         specifier: ^7.0.15
         version: 7.0.15
@@ -623,9 +626,6 @@ importers:
       vitest:
         specifier: 3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.0.15)(@vitest/ui@3.2.4)(happy-dom@16.8.1)(jiti@2.4.2)(jsdom@26.0.0(canvas@3.1.2))(less@4.1.3)(lightningcss@1.29.1)(sass-embedded@1.87.0)(sass@1.87.0)(stylus@0.64.0)(terser@5.43.1)(tsx@4.20.3)(yaml@2.7.0)
-      vitest-canvas-mock:
-        specifier: ^0.3.3
-        version: 0.3.3(vitest@3.2.4)
       webpack-cli:
         specifier: ^6.0.1
         version: 6.0.1(webpack@5.99.9)
@@ -663,6 +663,9 @@ importers:
       draco3dgltf:
         specifier: ^1.5.7
         version: 1.5.7
+      jsdom:
+        specifier: ~26.0.0
+        version: 26.0.0(canvas@3.1.2)
       occt-import-js:
         specifier: ^0.0.23
         version: 0.0.23
@@ -5820,6 +5823,9 @@ packages:
   '@types/jest@29.5.14':
     resolution: {integrity: sha512-ZN+4sdnLUbo8EVvVc2ao0GFW6oVrQRPn4K2lglySj7APvSrgzxHiNNK99us4WDMi57xxA2yggblIAMNhXOotLQ==}
 
+  '@types/jsdom@21.1.7':
+    resolution: {integrity: sha512-yOriVnggzrnQ3a9OKOCxaVuSug3w3/SbOj5i7VwXWZEyUNl3bLF9V3MfxGbZKuwqJOQyRfqXyROBB1CoZLFWzA==}
+
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
@@ -7451,9 +7457,6 @@ packages:
     resolution: {integrity: sha512-/Tb/JcjK111nNScGob5MNtsntNM1aCNUDipB/TkwZFhyDrrE47SOx/18wF2bbjgc3ZzCSKW1T5nt5EbFoAz/Vg==}
     engines: {node: '>=4'}
     hasBin: true
-
-  cssfontparser@1.2.1:
-    resolution: {integrity: sha512-6tun4LoZnj7VN6YeegOVb67KBX/7JJsqvj+pv3ZA7F878/eN33AbGa5b/S/wXxS/tcp8nc40xRUrsPlxIyNUPg==}
 
   cssnano-preset-default@6.1.2:
     resolution: {integrity: sha512-1C0C+eNaeN8OcHQa193aRgYexyJtU8XwbdieEjClw+J9d94E41LwT6ivKH0WT+fYwYWB0Zp3I3IZ7tI/BbUbrg==}
@@ -9606,9 +9609,6 @@ packages:
   javascript-stringify@2.1.0:
     resolution: {integrity: sha512-JVAfqNPTvNq3sB/VHQJAFxN/sPgKnsKrCwyRt15zwNCdrMMJDdcEOdubuy+DuJYYdm0ox1J4uzEuYKkN+9yhVg==}
 
-  jest-canvas-mock@2.5.2:
-    resolution: {integrity: sha512-vgnpPupjOL6+L5oJXzxTxFrlGEIbHdZqFU+LFNdtLxZ3lRDCl17FlTMM7IatoRQkrcyOTMlDinjUguqmQ6bR2A==}
-
   jest-circus@30.0.5:
     resolution: {integrity: sha512-h/sjXEs4GS+NFFfqBDYT7y5Msfxh04EwWLhQi0F8kuWpe+J/7tICSlswU8qvBqumR3kFgHbfu7vU6qruWWBPug==}
     engines: {node: ^18.14.0 || ^20.0.0 || ^22.0.0 || >=24.0.0}
@@ -10799,9 +10799,6 @@ packages:
     resolution: {integrity: sha512-fDIM/gihdQMFoN+KeFu2ATATBSKFFHqirLBNlmLqpYnsF6HFEKv6FvnUkxAR7p/hDs7MRSlILDhwjDDxPwURAw==}
     peerDependencies:
       monaco-editor: '>=0.41.0'
-
-  moo-color@1.0.3:
-    resolution: {integrity: sha512-i/+ZKXMDf6aqYtBhuOcej71YSlbjT3wCO/4H1j8rPvxDJEifdwgg5MaFyu6iYAT8GBZJg2z0dkgK4YMzvURALQ==}
 
   morgan@1.10.0:
     resolution: {integrity: sha512-AbegBVI4sh6El+1gNwvD5YIck7nSA36weD7xvIxG4in80j/UoK8AEGaWnnz8v1GxonMCltmlNs5ZKbGvl9b1XQ==}
@@ -14102,11 +14099,6 @@ packages:
       yaml:
         optional: true
 
-  vitest-canvas-mock@0.3.3:
-    resolution: {integrity: sha512-3P968tYBpqYyzzOaVtqnmYjqbe13576/fkjbDEJSfQAkHtC5/UjuRHOhFEN/ZV5HVZIkaROBUWgazDKJ+Ibw+Q==}
-    peerDependencies:
-      vitest: '*'
-
   vitest@3.2.4:
     resolution: {integrity: sha512-LUCP5ev3GURDysTWiP47wRRUpLKMOfPh+yKTx3kVIEiu5KOMeqzpnYNsKyOoVrULivR8tLcks4+lga33Whn90A==}
     engines: {node: ^18.0.0 || ^20.0.0 || >=22.0.0}
@@ -15561,7 +15553,7 @@ snapshots:
       '@babel/parser': 7.26.8
       '@babel/template': 7.26.8
       '@babel/types': 7.26.8
-      debug: 4.4.0
+      debug: 4.4.1
       globals: 11.12.0
     transitivePeerDependencies:
       - supports-color
@@ -19756,7 +19748,7 @@ snapshots:
 
   '@tokenizer/inflate@0.2.7':
     dependencies:
-      debug: 4.4.0
+      debug: 4.4.1
       fflate: 0.8.2
       token-types: 6.0.0
     transitivePeerDependencies:
@@ -19980,6 +19972,12 @@ snapshots:
     dependencies:
       expect: 29.7.0
       pretty-format: 29.7.0
+
+  '@types/jsdom@21.1.7':
+    dependencies:
+      '@types/node': 24.0.15
+      '@types/tough-cookie': 4.0.5
+      parse5: 7.2.1
 
   '@types/json-schema@7.0.15': {}
 
@@ -21801,8 +21799,6 @@ snapshots:
   css.escape@1.5.1: {}
 
   cssesc@3.0.0: {}
-
-  cssfontparser@1.2.1: {}
 
   cssnano-preset-default@6.1.2(postcss@8.5.6):
     dependencies:
@@ -23819,7 +23815,7 @@ snapshots:
   http-proxy-agent@7.0.2:
     dependencies:
       agent-base: 7.1.3
-      debug: 4.4.0
+      debug: 4.4.1
     transitivePeerDependencies:
       - supports-color
 
@@ -23876,7 +23872,7 @@ snapshots:
   https-proxy-agent@7.0.6:
     dependencies:
       agent-base: 7.1.3
-      debug: 4.4.0
+      debug: 4.4.1
     transitivePeerDependencies:
       - supports-color
 
@@ -24326,11 +24322,6 @@ snapshots:
       minimatch: 3.1.2
 
   javascript-stringify@2.1.0: {}
-
-  jest-canvas-mock@2.5.2:
-    dependencies:
-      cssfontparser: 1.2.1
-      moo-color: 1.0.3
 
   jest-circus@30.0.5(babel-plugin-macros@3.1.0):
     dependencies:
@@ -26077,10 +26068,6 @@ snapshots:
     dependencies:
       '@monacopilot/core': 1.1.23
       monaco-editor: 0.52.2
-
-  moo-color@1.0.3:
-    dependencies:
-      color-name: 1.1.4
 
   morgan@1.10.0:
     dependencies:
@@ -29658,11 +29645,6 @@ snapshots:
       terser: 5.43.1
       tsx: 4.20.3
       yaml: 2.7.0
-
-  vitest-canvas-mock@0.3.3(vitest@3.2.4):
-    dependencies:
-      jest-canvas-mock: 2.5.2
-      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.0.15)(@vitest/ui@3.2.4)(happy-dom@16.8.1)(jiti@2.4.2)(jsdom@26.0.0(canvas@3.1.2))(less@4.1.3)(lightningcss@1.29.1)(sass-embedded@1.87.0)(sass@1.87.0)(stylus@0.64.0)(terser@5.43.1)(tsx@4.20.3)(yaml@2.7.0)
 
   vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.0.15)(@vitest/ui@3.2.4)(happy-dom@16.8.1)(jiti@2.4.2)(jsdom@26.0.0(canvas@3.1.2))(less@4.1.3)(lightningcss@1.29.1)(sass-embedded@1.87.0)(sass@1.87.0)(stylus@0.64.0)(terser@5.43.1)(tsx@4.20.3)(yaml@2.7.0):
     dependencies:

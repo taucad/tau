@@ -20,8 +20,8 @@ const loaderTestCases: LoaderTestCase[] = [
       faceCount: 12,
       meshCount: 1,
       boundingBox: {
-        size: [0.002, 0.002, 0.002],
-        center: [0, 0, 0.001],
+        size: [2, 2, 2],
+        center: [0, 1, 0],
       },
     },
     structure: {
@@ -43,8 +43,8 @@ const loaderTestCases: LoaderTestCase[] = [
       faceCount: 12,
       meshCount: 1,
       boundingBox: {
-        size: [0.002, 0.002, 0.002],
-        center: [0, 0, 0.001],
+        size: [2, 2, 2],
+        center: [0, 1, 0],
       },
     },
     structure: {
@@ -66,8 +66,8 @@ const loaderTestCases: LoaderTestCase[] = [
       faceCount: 12,
       meshCount: 1,
       boundingBox: {
-        size: [0.002, 0.002, 0.002],
-        center: [0, 0, 0.001],
+        size: [2, 2, 2],
+        center: [0, 1, 0],
       },
     },
     structure: {

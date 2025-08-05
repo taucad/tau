@@ -623,6 +623,9 @@ importers:
       vitest:
         specifier: 3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.0.15)(@vitest/ui@3.2.4)(happy-dom@16.8.1)(jiti@2.4.2)(jsdom@26.0.0(canvas@3.1.2))(less@4.1.3)(lightningcss@1.29.1)(sass-embedded@1.87.0)(sass@1.87.0)(stylus@0.64.0)(terser@5.43.1)(tsx@4.20.3)(yaml@2.7.0)
+      vitest-canvas-mock:
+        specifier: ^0.3.3
+        version: 0.3.3(vitest@3.2.4)
       webpack-cli:
         specifier: ^6.0.1
         version: 6.0.1(webpack@5.99.9)
@@ -7449,6 +7452,9 @@ packages:
     engines: {node: '>=4'}
     hasBin: true
 
+  cssfontparser@1.2.1:
+    resolution: {integrity: sha512-6tun4LoZnj7VN6YeegOVb67KBX/7JJsqvj+pv3ZA7F878/eN33AbGa5b/S/wXxS/tcp8nc40xRUrsPlxIyNUPg==}
+
   cssnano-preset-default@6.1.2:
     resolution: {integrity: sha512-1C0C+eNaeN8OcHQa193aRgYexyJtU8XwbdieEjClw+J9d94E41LwT6ivKH0WT+fYwYWB0Zp3I3IZ7tI/BbUbrg==}
     engines: {node: ^14 || ^16 || >=18.0}
@@ -9600,6 +9606,9 @@ packages:
   javascript-stringify@2.1.0:
     resolution: {integrity: sha512-JVAfqNPTvNq3sB/VHQJAFxN/sPgKnsKrCwyRt15zwNCdrMMJDdcEOdubuy+DuJYYdm0ox1J4uzEuYKkN+9yhVg==}
 
+  jest-canvas-mock@2.5.2:
+    resolution: {integrity: sha512-vgnpPupjOL6+L5oJXzxTxFrlGEIbHdZqFU+LFNdtLxZ3lRDCl17FlTMM7IatoRQkrcyOTMlDinjUguqmQ6bR2A==}
+
   jest-circus@30.0.5:
     resolution: {integrity: sha512-h/sjXEs4GS+NFFfqBDYT7y5Msfxh04EwWLhQi0F8kuWpe+J/7tICSlswU8qvBqumR3kFgHbfu7vU6qruWWBPug==}
     engines: {node: ^18.14.0 || ^20.0.0 || ^22.0.0 || >=24.0.0}
@@ -10790,6 +10799,9 @@ packages:
     resolution: {integrity: sha512-fDIM/gihdQMFoN+KeFu2ATATBSKFFHqirLBNlmLqpYnsF6HFEKv6FvnUkxAR7p/hDs7MRSlILDhwjDDxPwURAw==}
     peerDependencies:
       monaco-editor: '>=0.41.0'
+
+  moo-color@1.0.3:
+    resolution: {integrity: sha512-i/+ZKXMDf6aqYtBhuOcej71YSlbjT3wCO/4H1j8rPvxDJEifdwgg5MaFyu6iYAT8GBZJg2z0dkgK4YMzvURALQ==}
 
   morgan@1.10.0:
     resolution: {integrity: sha512-AbegBVI4sh6El+1gNwvD5YIck7nSA36weD7xvIxG4in80j/UoK8AEGaWnnz8v1GxonMCltmlNs5ZKbGvl9b1XQ==}
@@ -14089,6 +14101,11 @@ packages:
         optional: true
       yaml:
         optional: true
+
+  vitest-canvas-mock@0.3.3:
+    resolution: {integrity: sha512-3P968tYBpqYyzzOaVtqnmYjqbe13576/fkjbDEJSfQAkHtC5/UjuRHOhFEN/ZV5HVZIkaROBUWgazDKJ+Ibw+Q==}
+    peerDependencies:
+      vitest: '*'
 
   vitest@3.2.4:
     resolution: {integrity: sha512-LUCP5ev3GURDysTWiP47wRRUpLKMOfPh+yKTx3kVIEiu5KOMeqzpnYNsKyOoVrULivR8tLcks4+lga33Whn90A==}
@@ -21785,6 +21802,8 @@ snapshots:
 
   cssesc@3.0.0: {}
 
+  cssfontparser@1.2.1: {}
+
   cssnano-preset-default@6.1.2(postcss@8.5.6):
     dependencies:
       browserslist: 4.24.4
@@ -24308,6 +24327,11 @@ snapshots:
 
   javascript-stringify@2.1.0: {}
 
+  jest-canvas-mock@2.5.2:
+    dependencies:
+      cssfontparser: 1.2.1
+      moo-color: 1.0.3
+
   jest-circus@30.0.5(babel-plugin-macros@3.1.0):
     dependencies:
       '@jest/environment': 30.0.5
@@ -26053,6 +26077,10 @@ snapshots:
     dependencies:
       '@monacopilot/core': 1.1.23
       monaco-editor: 0.52.2
+
+  moo-color@1.0.3:
+    dependencies:
+      color-name: 1.1.4
 
   morgan@1.10.0:
     dependencies:
@@ -29630,6 +29658,11 @@ snapshots:
       terser: 5.43.1
       tsx: 4.20.3
       yaml: 2.7.0
+
+  vitest-canvas-mock@0.3.3(vitest@3.2.4):
+    dependencies:
+      jest-canvas-mock: 2.5.2
+      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.0.15)(@vitest/ui@3.2.4)(happy-dom@16.8.1)(jiti@2.4.2)(jsdom@26.0.0(canvas@3.1.2))(less@4.1.3)(lightningcss@1.29.1)(sass-embedded@1.87.0)(sass@1.87.0)(stylus@0.64.0)(terser@5.43.1)(tsx@4.20.3)(yaml@2.7.0)
 
   vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.0.15)(@vitest/ui@3.2.4)(happy-dom@16.8.1)(jiti@2.4.2)(jsdom@26.0.0(canvas@3.1.2))(less@4.1.3)(lightningcss@1.29.1)(sass-embedded@1.87.0)(sass@1.87.0)(stylus@0.64.0)(terser@5.43.1)(tsx@4.20.3)(yaml@2.7.0):
     dependencies:

@@ -5,8 +5,7 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 export default defineConfig({
   plugins: [nxViteTsPaths(), tsconfigPaths()],
   test: {
-    globals: true,
-    environment: 'jsdom',
+    environment: 'happy-dom',
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],
@@ -14,6 +13,7 @@ export default defineConfig({
       ignoreSourceErrors: true,
     },
     reporters: ['verbose'],
+    setupFiles: ['vitest.setup.ts'],
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../coverage/packages/converter',

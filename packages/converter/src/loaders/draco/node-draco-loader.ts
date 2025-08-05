@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Derived from https://gist.github.com/donmccurdy/323c6363ac7ca8a7de6a3362d7fdddb4
+
 /* eslint-disable @typescript-eslint/naming-convention -- draco3d uses c++ style */
 /* eslint-disable max-params -- draco3d uses c++ style */
 /* eslint-disable new-cap -- draco3d uses c++ style */

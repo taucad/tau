@@ -12,6 +12,7 @@ import {
 } from 'three';
 
 /**
+ * Original code from:
  * https://github.com/gkjohnson/collada-exporter-js
  *
  * Usage:
@@ -21,6 +22,9 @@ import {
  *
  * Format Definition:
  *  https://www.khronos.org/collada/
+ *
+ * Typescript code from:
+ * https://github.com/pmndrs/three-stdlib/blob/e6653ce06ece56e5bb392d42b979294f489a1c5e/src/exporters/ColladaExporter.ts
  */
 
 export type ColladaExporterOptions = {

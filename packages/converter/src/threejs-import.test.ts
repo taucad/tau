@@ -671,7 +671,7 @@ const loaderTestCases: LoaderTestCase[] = [
   {
     format: 'vox',
     fixtureName: 'cube.vox',
-    description: 'VOX format is not supported yet.',
+    description: 'Simple cube from VOX format',
     geometry: {
       vertexCount: 144,
       faceCount: 48,

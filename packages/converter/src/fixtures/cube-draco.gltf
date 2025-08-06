@@ -1,0 +1,140 @@
+{
+  "extensionsUsed": [
+    "KHR_draco_mesh_compression",
+    "KHR_materials_transmission",
+    "KHR_materials_clearcoat",
+    "KHR_materials_ior",
+    "KHR_materials_specular",
+    "KHR_materials_emissive_strength",
+    "KHR_texture_transform"
+  ],
+  "extensionsRequired": [
+    "KHR_draco_mesh_compression"
+  ],
+  "accessors": [
+    {
+      "componentType": 5126,
+      "count": 36,
+      "type": "VEC3",
+      "max": [
+        0.001,
+        0.002,
+        0.001
+      ],
+      "min": [
+        -0.001,
+        0.0,
+        -0.001
+      ]
+    },
+    {
+      "componentType": 5125,
+      "count": 12,
+      "type": "SCALAR",
+      "max": [
+        35.0
+      ],
+      "min": [
+        0.0
+      ]
+    },
+    {
+      "componentType": 5126,
+      "count": 36,
+      "type": "VEC3",
+      "max": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "min": [
+        -1.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "asset": {
+    "version": "2.0"
+  },
+  "buffers": [
+    {
+      "uri": "data:application/octet-stream;base64,RFJBQ08CAgEBAAAAJAwBDAAABf////8P/wLMQAEBAAL/AAEAAAABAAkDAAACAQEJAwABAwEBAQEEAzEhARDRDhbYV638sxWgDGKMoTPqzdGIVE2QiNStAAAAAP8HAABvEoO6AAAAAG8Sg7pvEgM7CwYDAQEDAQFAAQD/AAAAfwAAAP8CgEII",
+      "byteLength": 135
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 135
+    }
+  ],
+  "materials": [
+    {
+      "name": "DefaultMaterial",
+      "extensions": {
+        "KHR_materials_transmission": {},
+        "KHR_materials_clearcoat": {},
+        "KHR_materials_ior": {
+          "ior": 1.0
+        },
+        "KHR_materials_specular": {
+          "specularFactor": 0.5,
+          "specularColorFactor": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      "pbrMetallicRoughness": {
+        "metallicFactor": 0.0
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 2
+          },
+          "indices": 1,
+          "material": 0,
+          "extensions": {
+            "KHR_draco_mesh_compression": {
+              "bufferView": 0,
+              "attributes": {
+                "POSITION": 0,
+                "NORMAL": 1
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0,
+      "name": "node"
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9729
+    }
+  ],
+  "scene": 0,
+  "scenes": [
+    {
+      "nodes": [
+        0
+      ],
+      "extensions": {}
+    }
+  ],
+  "extensions": {}
+}

@@ -3,8 +3,8 @@
   "compilerOptions": {
     "outDir": "./out-tsc/spec",
     "types": ["node", "vitest/importMeta", "vitest"],
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
     "target": "ESNext",
     "baseUrl": ".",

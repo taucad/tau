@@ -64,7 +64,6 @@ export default defineConfig(({ mode }) => {
     worker: {
       // Workers need their own plugins.
       // https://vite.dev/config/worker-options.html#worker-plugins
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- false positive
       plugins: () => [nxViteTsPaths(), tsconfigPaths()],
       format: 'es',
     },

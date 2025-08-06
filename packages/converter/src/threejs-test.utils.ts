@@ -35,6 +35,12 @@ export type StructureExpectation = {
 
 export type LoaderTestCase = {
   format: ThreejsImportFormat;
+  /**
+   * Optional variant of the test case.
+   *
+   * For example, a test case for a cube can have a variant for a mesh, a NURBS, etc.
+   */
+  variant?: 'binary' | 'ascii' | 'mesh' | 'nurbs' | 'textures' | 'draco';
   fixtureName: string;
   description?: string;
   geometry?: GeometryExpectation;

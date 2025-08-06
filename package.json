@@ -155,7 +155,6 @@
     "sonner": "^2.0.6",
     "tailwind-merge": "^3.3.0",
     "three": "^0.179.0",
-    "three-stdlib": "^2.36.0",
     "three-viewport-gizmo": "https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/d5ae66010e7f5f067931aaeb6a74880a73d23b5d",
     "uint8array-extras": "^1.4.0",
     "uzip": "^0.20201231.0",

@@ -1,7 +1,7 @@
 import { setup, sendTo, fromCallback } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import * as THREE from 'three';
-import type { OrbitControls } from 'three-stdlib';
+import type { OrbitControls } from 'three/addons';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 
 type ControlsListenerInput = {

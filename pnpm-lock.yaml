@@ -397,9 +397,6 @@ importers:
       three:
         specifier: ^0.179.0
         version: 0.179.0
-      three-stdlib:
-        specifier: ^2.36.0
-        version: 2.36.0(three@0.179.0)
       three-viewport-gizmo:
         specifier: https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/d5ae66010e7f5f067931aaeb6a74880a73d23b5d
         version: https://codeload.github.com/taucad/three-viewport-gizmo/tar.gz/d5ae66010e7f5f067931aaeb6a74880a73d23b5d(three@0.179.0)
@@ -675,9 +672,6 @@ importers:
       three:
         specifier: ^0.179.0
         version: 0.179.0
-      three-stdlib:
-        specifier: ^2.36.0
-        version: 2.36.0(three@0.179.0)
       web-ifc:
         specifier: ^0.0.70
         version: 0.0.70

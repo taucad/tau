@@ -12,6 +12,7 @@
       "#*": ["src/*"]
     }
   },
+  "files": ["src/types/occt-import-js.d.ts"],
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"]
 }

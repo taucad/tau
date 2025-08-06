@@ -23,6 +23,7 @@ import { VoxLoader } from '#loaders/vox.loader.js';
 import { VrmlLoader } from '#loaders/vrml.loader.js';
 import { VtkLoader } from '#loaders/vtk.loader.js';
 import { XyzLoader } from '#loaders/xyz.loader.js';
+import { OcctLoader } from '#loaders/occt.loader.js';
 
 const loaderFromInputFormat = {
   // eslint-disable-next-line @typescript-eslint/naming-convention -- 3dm is a valid format
@@ -46,6 +47,11 @@ const loaderFromInputFormat = {
   pcd: new PcdLoader(),
   ply: new PlyLoader(),
   stl: new StlLoader(),
+  step: new OcctLoader(),
+  stp: new OcctLoader(),
+  iges: new OcctLoader(),
+  igs: new OcctLoader(),
+  brep: new OcctLoader(),
   usda: new UsdzLoader(),
   usdc: new UsdzLoader(),
   usdz: new UsdzLoader(),
@@ -62,6 +68,8 @@ export const threejsImportFomats = Object.keys(loaderFromInputFormat) as Threejs
 
 export const importThreeJs = async (file: InputFile, format: ThreejsImportFormat): Promise<Object3D> => {
   const loader = loaderFromInputFormat[format];
+
+  loader.initialize({ format });
 
   const result = await loader.loadAsync(file.data);
 

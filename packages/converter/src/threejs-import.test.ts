@@ -294,6 +294,91 @@ const loaderTestCases: LoaderTestCase[] = [
     },
   },
   {
+    format: 'step',
+    fixtureName: 'cube.step',
+    description: 'Simple cube from STEP format',
+    geometry: {
+      vertexCount: 24,
+      faceCount: 8,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, 0, 1],
+      },
+    },
+    structure: {
+      type: 'Group',
+    },
+  },
+  {
+    format: 'stp',
+    fixtureName: 'cube.stp',
+    description: 'Simple cube from STP format',
+    geometry: {
+      vertexCount: 24,
+      faceCount: 8,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, 0, 1],
+      },
+    },
+    structure: {
+      type: 'Group',
+    },
+  },
+  {
+    format: 'iges',
+    fixtureName: 'cube.iges',
+    description: 'Simple cube from IGE format',
+    geometry: {
+      vertexCount: 24,
+      faceCount: 8,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, 0, 1],
+      },
+    },
+    structure: {
+      type: 'Group',
+    },
+  },
+  {
+    format: 'igs',
+    fixtureName: 'cube.igs',
+    description: 'Simple cube from IGS format',
+    geometry: {
+      vertexCount: 24,
+      faceCount: 8,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, 0, 1],
+      },
+    },
+    structure: {
+      type: 'Group',
+    },
+  },
+  {
+    format: 'brep',
+    fixtureName: 'cube.brep',
+    description: 'Simple cube from BREP format',
+    geometry: {
+      vertexCount: 24,
+      faceCount: 8,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, 0, 1],
+      },
+    },
+    structure: {
+      type: 'Group',
+    },
+  },
+  {
     format: 'gcode',
     fixtureName: 'cube.gcode',
     description: 'Simple cube from GCODE format',

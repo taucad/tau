@@ -1,18 +1,14 @@
 import type { Object3D } from 'three';
-import type { ColladaExporterOptions } from 'three-stdlib';
-import { ColladaExporter as ThreeColladaExporter } from 'three-stdlib';
 import { BaseExporter } from '#exporters/base.exporter.js';
+import type { ColladaExporterOptions } from '#exporters/collada/collada-exporter.js';
+import { ColladaExporter } from '#exporters/collada/collada-exporter.js';
 
-/**
- * Three.js USDZ exporter implementation.
- * Exports 3D objects to Universal Scene Description (USDZ) format.
- */
-export class ColladaExporter extends BaseExporter<ColladaExporterOptions> {
-  private readonly exporter: ThreeColladaExporter;
+export class DaeExporter extends BaseExporter<ColladaExporterOptions> {
+  private readonly exporter: ColladaExporter;
 
   public constructor() {
     super();
-    this.exporter = new ThreeColladaExporter();
+    this.exporter = new ColladaExporter();
   }
 
   public async parseAsync(object: Object3D, options?: Partial<ColladaExporterOptions>): Promise<Uint8Array> {

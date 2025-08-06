@@ -1,7 +1,7 @@
 import type { Object3D } from 'three';
 import type { BaseExporter } from '#exporters/base.exporter.js';
 import type { OutputFormat } from '#types.js';
-import { ColladaExporter } from '#exporters/collada.exporter.js';
+import { DaeExporter } from '#exporters/dae.exporter.js';
 import { GltfExporter } from '#exporters/gltf.exporter.js';
 import { ObjExporter } from '#exporters/obj.exporter.js';
 import { PlyExporter } from '#exporters/ply.exporter.js';
@@ -25,7 +25,8 @@ const createGltfExporter = (): GltfExporter => {
   return exporter;
 };
 
-const createObjectExporter = (): ObjExporter => {
+// eslint-disable-next-line unicorn/prevent-abbreviations -- obj is a valid name
+const createObjExporter = (): ObjExporter => {
   const exporter = new ObjExporter();
   exporter.initialize({});
   return exporter;
@@ -49,8 +50,8 @@ const createUsdzExporter = (): UsdzExporter => {
   return exporter;
 };
 
-const createColladaExporter = (): ColladaExporter => {
-  const exporter = new ColladaExporter();
+const createDaeExporter = (): DaeExporter => {
+  const exporter = new DaeExporter();
   exporter.initialize({});
   return exporter;
 };
@@ -58,11 +59,11 @@ const createColladaExporter = (): ColladaExporter => {
 const exportConfigs = {
   glb: { exporter: createGlbExporter() },
   gltf: { exporter: createGltfExporter() },
-  obj: { exporter: createObjectExporter() },
+  obj: { exporter: createObjExporter() },
   stl: { exporter: createStlExporter() },
   ply: { exporter: createPlyExporter() },
   usdz: { exporter: createUsdzExporter() },
-  dae: { exporter: createColladaExporter() },
+  dae: { exporter: createDaeExporter() },
 } as const satisfies Partial<Record<OutputFormat, ExportConfig>>;
 
 type ThreejsExportFormat = keyof typeof exportConfigs;

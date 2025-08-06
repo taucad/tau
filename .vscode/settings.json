@@ -5,5 +5,13 @@
   "javascript.preferences.importModuleSpecifier": "non-relative",
   "nxConsole.generateAiAgentRules": true,
   "typescript.tsdk": "node_modules/typescript/lib",
-  "eslint.validate": ["json"]
+  "eslint.validate": [
+    "json"
+  ],
+  // Monorepo support with top-level eslint config
+  "eslint.workingDirectories": [
+    {
+      "mode": "auto"
+    }
+  ],
 }

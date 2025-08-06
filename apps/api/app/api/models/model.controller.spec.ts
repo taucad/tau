@@ -10,7 +10,10 @@ const mockModels: Model[] = [
   {
     id: 'anthropic-claude-4-sonnet',
     name: 'Claude 4 Sonnet',
-    provider: 'anthropic',
+    provider: {
+      id: 'anthropic',
+      name: 'Anthropic',
+    },
     model: 'claude-sonnet-4',
     details: {
       family: 'Claude',
@@ -33,7 +36,10 @@ const mockModels: Model[] = [
   {
     id: 'openai-gpt-4o',
     name: 'GPT-4o',
-    provider: 'openai',
+    provider: {
+      id: 'openai',
+      name: 'OpenAI',
+    },
     model: 'gpt-4o',
     details: {
       family: 'GPT-4o',
@@ -138,7 +144,7 @@ describe('ModelController', () => {
       // Assert
       expect(modelService.getModels).toHaveBeenCalledTimes(1);
 
-      const providers = result.map((model) => model.provider);
+      const providers = result.map((model) => model.provider.id);
       expect(providers).toContain('anthropic');
       expect(providers).toContain('openai');
     });

@@ -36,6 +36,11 @@ export const modelDetailsSchema = z.object({
   }),
 });
 
+const modelProviderSchema = z.object({
+  id: providerIdSchema,
+  name: z.string().describe('The name of the provider'),
+});
+
 export const modelSchema = z.object({
   id: z.string().describe('The unique identifier of the model'),
   name: z.string().describe('The human readable name of the model'),
@@ -43,7 +48,7 @@ export const modelSchema = z.object({
   modifiedAt: z.string().describe('The modified at of the model').optional(),
   size: z.number().describe('The size of the model in bytes').optional(),
   digest: z.string().describe('The digest hash of the model').optional(),
-  provider: providerIdSchema,
+  provider: modelProviderSchema,
   details: modelDetailsSchema,
   configuration: modelConfigurationSchema,
   support: modelSupportSchema.optional(),

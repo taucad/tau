@@ -27,9 +27,6 @@ export type GeometryGltf = {
 
 export type Geometry = Geometry2D | GeometryGltf;
 
-export const modelProviders = ['sambanova', 'openai', 'anthropic', 'ollama'] as const;
-export type ModelProvider = (typeof modelProviders)[number];
-
 export const categories = {
   mechanical: { icon: Cog, color: 'text-blue' },
   electrical: { icon: Zap, color: 'text-yellow' },

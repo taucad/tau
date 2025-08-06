@@ -13,13 +13,13 @@ import { cn } from '#utils/ui.js';
 import { markdownViewerLinks } from '#components/markdown-viewer.js';
 import { Toaster } from '#components/ui/sonner.js';
 import { webManifestLinks } from '#routes/manifest[.webmanifest].js';
-import type { Model } from '#hooks/use-models.js';
 import { getModels } from '#hooks/use-models.js';
 import { ColorProvider, useColor } from '#hooks/use-color.js';
 import { useFavicon } from '#hooks/use-favicon.js';
 import { TooltipProvider } from '#components/ui/tooltip.js';
 import { AppError } from '#components/error-page.js';
 import { AuthConfigProvider } from '#providers/auth-provider.js';
+import type { Model } from '#types/model.types.js';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: globalStylesUrl },

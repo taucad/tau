@@ -4,9 +4,9 @@ import { Check } from 'lucide-react';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Badge } from '#components/ui/badge.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import type { Model } from '#hooks/use-models.js';
-import type { ModelProvider } from '#types/cad.types.js';
 import { useModels } from '#hooks/use-models.js';
+import { toSentenceCase } from '#utils/string.js';
+import type { Model } from '#types/model.types.js';
 
 type ChatModelSelectorProps = {
   readonly onSelect?: (modelId: string) => void;
@@ -26,11 +26,11 @@ export const ChatModelSelector = memo(function ({
 
   const providerModelsMap = new Map<string, Model[]>();
   for (const model of models) {
-    if (!providerModelsMap.has(model.provider)) {
-      providerModelsMap.set(model.provider, []);
+    if (!providerModelsMap.has(model.provider.id)) {
+      providerModelsMap.set(model.provider.id, []);
     }
 
-    providerModelsMap.get(model.provider)?.push(model);
+    providerModelsMap.get(model.provider.id)?.push(model);
   }
 
   const handleSelectModel = useCallback(
@@ -49,13 +49,13 @@ export const ChatModelSelector = memo(function ({
     <ComboBoxResponsive
       popoverContentClassName="w-[300px]"
       groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({
-        name: provider,
+        name: toSentenceCase(provider),
         items: models,
       }))}
       renderLabel={(item, selectedItem) => (
         <span className="flex w-full items-center justify-between text-xs">
           <div className="flex items-center gap-2">
-            <SvgIcon id={item.provider as ModelProvider} />
+            <SvgIcon id={item.provider.id} />
             <span className="font-mono">{item.name}</span>
           </div>
           <div className="flex items-center gap-2">

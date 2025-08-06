@@ -4,7 +4,6 @@ import { Badge } from '#components/ui/badge.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter, Table } from '#components/ui/table.js';
 import { useModels } from '#hooks/use-models.js';
-import type { ModelProvider } from '#types/cad.types.js';
 import type { MessageAnnotation } from '#types/chat.types.js';
 import { formatCurrency } from '#utils/currency.js';
 import { formatNumber } from '#utils/number.js';
@@ -37,10 +36,7 @@ export function ChatMessageAnnotationUsage({
                 <h4 className="font-medium">Usage Details</h4>
                 {model ? (
                   <div className="flex items-baseline gap-2 text-xs">
-                    <SvgIcon
-                      id={model.provider as ModelProvider}
-                      className="size-4 translate-y-[0.25em] text-muted-foreground"
-                    />
+                    <SvgIcon id={model.provider.id} className="size-4 translate-y-[0.25em] text-muted-foreground" />
                     <span className="font-mono">{model.name}</span>
                   </div>
                 ) : null}
@@ -189,10 +185,7 @@ export function ChatMessageAnnotationUsageAggregated({
             <h4 className="font-medium">Usage Details ({usageAnnotations.length} x tools)</h4>
             {modelInfo.length === 1 ? (
               <div className="flex items-baseline gap-2 text-xs">
-                <SvgIcon
-                  id={modelInfo[0]!.provider as ModelProvider}
-                  className="size-4 translate-y-[0.25em] text-muted-foreground"
-                />
+                <SvgIcon id={modelInfo[0]!.provider.id} className="size-4 translate-y-[0.25em] text-muted-foreground" />
                 <span className="font-mono">{modelInfo[0]!.name}</span>
               </div>
             ) : modelInfo.length > 1 ? (

@@ -4,7 +4,7 @@ import { USDLoader } from 'three/addons';
 import type { USDZLoader as USDZLoaderType } from 'three/addons';
 import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
 
-export class UsdLoader extends ThreeJsBaseLoader<Object3D> {
+export class UsdzLoader extends ThreeJsBaseLoader<Object3D> {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- three types are behind.
   private readonly loader = new USDLoader() as USDZLoaderType;
 

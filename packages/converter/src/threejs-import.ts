@@ -18,7 +18,7 @@ import { StlLoader } from '#loaders/stl.loader.js';
 import { ThreeDmLoader } from '#loaders/3dm.loader.js';
 import { ThreeDsLoader } from '#loaders/3ds.loader.js';
 import { ThreeMfLoader } from '#loaders/3mf.loader.js';
-import { UsdLoader } from '#loaders/usd.loader.js';
+import { UsdzLoader } from '#loaders/usdz.loader.js';
 import { VoxLoader } from '#loaders/vox.loader.js';
 import { VrmlLoader } from '#loaders/vrml.loader.js';
 import { VtkLoader } from '#loaders/vtk.loader.js';
@@ -46,9 +46,9 @@ const loaderFromInputFormat = {
   pcd: new PcdLoader(),
   ply: new PlyLoader(),
   stl: new StlLoader(),
-  usda: new UsdLoader(),
-  usdc: new UsdLoader(),
-  usdz: new UsdLoader(),
+  usda: new UsdzLoader(),
+  usdc: new UsdzLoader(),
+  usdz: new UsdzLoader(),
   vox: new VoxLoader(),
   vtk: new VtkLoader(),
   vtp: new VtkLoader(),

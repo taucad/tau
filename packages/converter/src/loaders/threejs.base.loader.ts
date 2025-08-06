@@ -1,7 +1,7 @@
 import type { Object3D } from 'three';
 import type { InputFormat } from '#types.js';
 
-type BaseOptions = {
+export type BaseLoaderOptions = {
   format: InputFormat;
 };
 
@@ -12,7 +12,7 @@ type BaseOptions = {
  * @template ParseResult - The intermediate result type from the underlying loader
  * @template Options - The options type specific to each loader implementation
  */
-export abstract class ThreeJsBaseLoader<ParseResult = unknown, Options extends BaseOptions = BaseOptions> {
+export abstract class ThreeJsBaseLoader<ParseResult = unknown, Options extends BaseLoaderOptions = BaseLoaderOptions> {
   /**
    * The options passed to the loader. These are specific to each loader implementation.
    */

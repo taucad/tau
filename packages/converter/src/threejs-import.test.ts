@@ -3,7 +3,7 @@ import { Vector3, Mesh } from 'three';
 import type { BufferGeometry, Object3D } from 'three';
 import type { InputFile } from '#types.js';
 import { importThreeJs, threejsImportFomats } from '#threejs-import.js';
-import { createThreeTestUtils, loadFixture } from '#threejs-test.utils.js';
+import { createThreeTestUtils, loadTestData } from '#threejs-test.utils.js';
 import type { LoaderTestCase, StructureExpectation } from '#threejs-test.utils.js';
 
 // ============================================================================
@@ -246,6 +246,34 @@ const loaderTestCases: LoaderTestCase[] = [
         size: [2, 2, 2],
         center: [0, 0, 1],
       },
+    },
+  },
+  {
+    format: '3dm',
+    variant: 'instance',
+    async dataSource() {
+      const { createCubeInstanceFixture } = await import('#fixtures/rhino3dm/cube-instance.js');
+      return createCubeInstanceFixture();
+    },
+    description: 'Multiple instanced cubes from programmatic 3DM',
+    geometry: {
+      vertexCount: 180, // Original mesh + 4 instances
+      faceCount: 60, // Original mesh + 4 instances
+      meshCount: 5, // Original mesh + 4 instance references
+      boundingBox: {
+        size: [12, 7, 2],
+        center: [5, 2.5, 1],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        { type: 'Mesh', name: 'TestCube' },
+        { type: 'Mesh', name: 'TestCube' },
+        { type: 'Mesh', name: 'TestCube' },
+        { type: 'Mesh', name: 'TestCube' },
+        { type: 'Mesh', name: 'TestCube' },
+      ],
     },
   },
   {
@@ -876,9 +904,10 @@ describe('threejs-import', () => {
           return;
         }
 
+        const data = await loadTestData(testCase);
         const inputFile: InputFile = {
-          name: fixtureName,
-          data: loadFixture(fixtureName),
+          name: fixtureName ?? `${format}-${testCase.variant ?? 'default'}`,
+          data,
         };
 
         object3d = await importThreeJs(inputFile, format);
@@ -943,9 +972,10 @@ describe('threejs-import', () => {
       }
 
       it('should produce consistent results across multiple imports', async () => {
+        const data = await loadTestData(testCase);
         const inputFile: InputFile = {
-          name: fixtureName,
-          data: loadFixture(fixtureName),
+          name: fixtureName ?? `${format}-${testCase.variant ?? 'default'}`,
+          data,
         };
 
         const object3d2 = await importThreeJs(inputFile, format);

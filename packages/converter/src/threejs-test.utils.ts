@@ -40,8 +40,12 @@ export type LoaderTestCase = {
    *
    * For example, a test case for a cube can have a variant for a mesh, a NURBS, etc.
    */
-  variant?: 'binary' | 'ascii' | 'mesh' | 'brep' | 'textures' | 'draco' | 'subd' | 'extrusion';
-  fixtureName: string;
+  variant?: 'binary' | 'ascii' | 'mesh' | 'brep' | 'textures' | 'draco' | 'subd' | 'extrusion' | 'instance';
+  fixtureName?: string;
+  /**
+   * Programmatic data source instead of file fixture
+   */
+  dataSource?: () => Promise<Uint8Array>;
   description?: string;
   geometry?: GeometryExpectation;
   structure?: StructureExpectation;
@@ -53,6 +57,18 @@ export const loadFixture = (fixtureName: string): Uint8Array => {
   const fixturePath = join(import.meta.dirname, 'fixtures', fixtureName);
   const fileData = readFileSync(fixturePath);
   return new Uint8Array(fileData);
+};
+
+export const loadTestData = async (testCase: LoaderTestCase): Promise<Uint8Array> => {
+  if (testCase.dataSource) {
+    return testCase.dataSource();
+  }
+
+  if (testCase.fixtureName) {
+    return loadFixture(testCase.fixtureName);
+  }
+
+  throw new Error('Test case must have either fixtureName or dataSource');
 };
 
 // Test utilities factory

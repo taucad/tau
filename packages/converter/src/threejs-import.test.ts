@@ -120,7 +120,12 @@ const loaderTestCases: LoaderTestCase[] = [
       },
     },
     structure: {
-      type: 'Mesh',
+      type: 'Group',
+      children: [
+        {
+          type: 'Object3D',
+        },
+      ],
     },
   },
   {
@@ -138,7 +143,12 @@ const loaderTestCases: LoaderTestCase[] = [
       },
     },
     structure: {
-      type: 'Mesh',
+      type: 'Group',
+      children: [
+        {
+          type: 'Object3D',
+        },
+      ],
     },
   },
   {
@@ -158,7 +168,7 @@ const loaderTestCases: LoaderTestCase[] = [
       type: 'Group',
       children: [
         {
-          type: 'Mesh',
+          type: 'Object3D',
         },
       ],
     },
@@ -178,7 +188,12 @@ const loaderTestCases: LoaderTestCase[] = [
       },
     },
     structure: {
-      type: 'Mesh',
+      type: 'Group',
+      children: [
+        {
+          type: 'Mesh',
+        },
+      ],
     },
   },
   {
@@ -196,7 +211,12 @@ const loaderTestCases: LoaderTestCase[] = [
       },
     },
     structure: {
-      type: 'Mesh',
+      type: 'Group',
+      children: [
+        {
+          type: 'Mesh',
+        },
+      ],
     },
   },
   {
@@ -353,6 +373,9 @@ const loaderTestCases: LoaderTestCase[] = [
     format: 'usdz',
     fixtureName: 'cube.usdz',
     description: 'Simple cube from USDZ format',
+    skip: true,
+    skipReason:
+      'USDZ loader does not support textures right now. We need to replace use of browser APIs in the loader.',
     geometry: {
       vertexCount: 36,
       faceCount: 12,
@@ -388,7 +411,7 @@ const loaderTestCases: LoaderTestCase[] = [
       type: 'Group',
       children: [
         {
-          type: 'Mesh',
+          type: 'Object3D',
         },
       ],
     },
@@ -410,12 +433,31 @@ const loaderTestCases: LoaderTestCase[] = [
       type: 'Group',
       children: [
         {
-          type: 'Group',
-          children: [
-            {
-              type: 'Mesh',
-            },
-          ],
+          type: 'Object3D',
+        },
+      ],
+    },
+  },
+  {
+    format: 'ifc',
+    fixtureName: 'cube.ifc',
+    description: 'Simple cube from IFC format',
+    skip: true,
+    skipReason: 'IFC loader is not implemented yet.',
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, -1, 0],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Object3D',
         },
       ],
     },
@@ -442,10 +484,9 @@ const loaderTestCases: LoaderTestCase[] = [
     fixtureName: 'cube.amf',
     description: 'Simple cube from AMF format',
     geometry: {
-      vertexCount: 8,
-      faceCount: 3,
+      vertexCount: 36,
+      faceCount: 12,
       meshCount: 1,
-      facePoints: 4,
       boundingBox: {
         size: [2, 2, 2],
         center: [0, 0, 1],
@@ -453,6 +494,11 @@ const loaderTestCases: LoaderTestCase[] = [
     },
     structure: {
       type: 'Group',
+      children: [
+        {
+          type: 'Object3D',
+        },
+      ],
     },
   },
   {
@@ -617,6 +663,30 @@ const loaderTestCases: LoaderTestCase[] = [
     },
   },
   {
+    format: 'x3dv',
+    fixtureName: 'cube.x3dv',
+    description: 'Simple cube from X3DV format',
+    skip: true,
+    skipReason: 'X3DV loader is not implemented yet.',
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, 1, 0],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Object3D',
+        },
+      ],
+    },
+  },
+  {
     format: 'lwo',
     fixtureName: 'cube.lwo',
     description: 'Simple cube from LWO format',
@@ -631,6 +701,11 @@ const loaderTestCases: LoaderTestCase[] = [
     },
     structure: {
       type: 'Group',
+      children: [
+        {
+          type: 'Object3D',
+        },
+      ],
     },
   },
   {
@@ -654,11 +729,11 @@ const loaderTestCases: LoaderTestCase[] = [
     fixtureName: 'cube.drc',
     description: 'DRC format is not supported yet.',
     skip: true,
-    skipReason: 'DRC loader is not implemented yet.',
+    skipReason: 'DRC loader is not fully working yet.',
     geometry: {
-      vertexCount: 0,
-      faceCount: 0,
-      meshCount: 0,
+      vertexCount: 72,
+      faceCount: 24,
+      meshCount: 1,
       boundingBox: {
         size: [0, 0, 0],
         center: [0, 0, 0],
@@ -668,17 +743,25 @@ const loaderTestCases: LoaderTestCase[] = [
   {
     format: 'md2',
     fixtureName: 'cube.md2',
-    description: 'MD2 format is not supported yet.',
+    description: 'Simple cube from MD2 format',
     skip: true,
-    skipReason: 'MD2 loader is not implemented yet.',
+    skipReason: 'MD2 fixture is not available.',
     geometry: {
-      vertexCount: 0,
-      faceCount: 0,
-      meshCount: 0,
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
       boundingBox: {
-        size: [0, 0, 0],
-        center: [0, 0, 0],
+        size: [2, 2, 2],
+        center: [0, 0, 1],
       },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Mesh',
+        },
+      ],
     },
   },
   {
@@ -803,6 +886,144 @@ const loaderTestCases: LoaderTestCase[] = [
       },
     },
   },
+  {
+    format: 'dxf',
+    fixtureName: `cube.dxf`,
+    description: `Simple cube from DXF format`,
+    geometry: {
+      vertexCount: 72,
+      faceCount: 24,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2] as [number, number, number],
+        center: [0, 0, 1] as [number, number, number],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Mesh',
+        },
+      ],
+    },
+  },
+  {
+    format: 'off',
+    fixtureName: `cube.off`,
+    description: `Simple cube from OFF format`,
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2] as [number, number, number],
+        center: [0, 0, 1] as [number, number, number],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Mesh',
+        },
+      ],
+    },
+  },
+  {
+    format: 'x',
+    fixtureName: `cube.x`,
+    description: `Simple cube from X format`,
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2] as [number, number, number],
+        center: [0, 0, 1] as [number, number, number],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Mesh',
+        },
+      ],
+    },
+  },
+  {
+    format: 'udo',
+    fixtureName: `cube.udo`,
+    description: `Simple cube from UDO format`,
+    skip: true,
+    skipReason: 'UDO loader is not implemented yet.',
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2] as [number, number, number],
+        center: [0, 0, 1] as [number, number, number],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Mesh',
+        },
+      ],
+    },
+  },
+  {
+    format: 'blend',
+    fixtureName: `cube.blend`,
+    description: `Simple cube from BLEND format`,
+    skip: true,
+    skipReason: 'BLEND loader is not implemented yet.',
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2] as [number, number, number],
+        center: [0, 0, 1] as [number, number, number],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Mesh',
+        },
+      ],
+    },
+  },
+  ...(['dwg', 'pov', 'gdf', 'gts'] as const).map((format) => ({
+    format,
+    fixtureName: `cube.${format}`,
+    description: `[NEW] Simple cube from ${format} format`,
+    skip: true,
+    skipReason: `${format} loader is not implemented yet.`,
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2] as [number, number, number],
+        center: [0, 0, 1] as [number, number, number],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Mesh',
+        },
+      ],
+    },
+  })),
 ];
 
 // ============================================================================

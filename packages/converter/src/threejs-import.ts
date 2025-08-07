@@ -1,52 +1,41 @@
+/* eslint-disable @typescript-eslint/naming-convention -- formats can be valid identifiers */
 import type { Object3D } from 'three';
 import type { InputFile, InputFormat } from '#types.js';
 import type { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
-import { AmfLoader } from '#loaders/amf.loader.js';
 import { BvhLoader } from '#loaders/bvh.loader.js';
-import { ColladaLoader } from '#loaders/collada.loader.js';
 import { DracoLoader } from '#loaders/draco.loader.js';
-import { FbxLoader } from '#loaders/fbx.loader.js';
 import { GcodeLoader } from '#loaders/gcode.loader.js';
 import { GltfLoader } from '#loaders/gltf.loader.js';
 import { KmzLoader } from '#loaders/kmz.loader.js';
-import { LwoLoader } from '#loaders/lwo.loader.js';
-import { Md2Loader } from '#loaders/md2.loader.js';
-import { ObjLoader } from '#loaders/obj.loader.js';
 import { PcdLoader } from '#loaders/pcd.loader.js';
-import { PlyLoader } from '#loaders/ply.loader.js';
-import { StlLoader } from '#loaders/stl.loader.js';
 import { ThreeDmLoader } from '#loaders/3dm.loader.js';
-import { ThreeDsLoader } from '#loaders/3ds.loader.js';
-import { ThreeMfLoader } from '#loaders/3mf.loader.js';
 import { UsdzLoader } from '#loaders/usdz.loader.js';
 import { VoxLoader } from '#loaders/vox.loader.js';
 import { VrmlLoader } from '#loaders/vrml.loader.js';
 import { VtkLoader } from '#loaders/vtk.loader.js';
 import { XyzLoader } from '#loaders/xyz.loader.js';
 import { OcctLoader } from '#loaders/occt.loader.js';
+import { AssimpLoader } from '#loaders/assimp.loader.js';
 
 const loaderFromInputFormat = {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- 3dm is a valid format
   '3dm': new ThreeDmLoader(),
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- 3mf is a valid format
-  '3mf': new ThreeMfLoader(),
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- 3ds is a valid format
-  '3ds': new ThreeDsLoader(),
-  amf: new AmfLoader(),
+  '3mf': new AssimpLoader(),
+  '3ds': new AssimpLoader(),
+  amf: new AssimpLoader(),
   bvh: new BvhLoader(),
-  dae: new ColladaLoader(),
+  dae: new AssimpLoader(),
   drc: new DracoLoader(),
-  fbx: new FbxLoader(),
+  fbx: new AssimpLoader(),
   gcode: new GcodeLoader(),
   gltf: new GltfLoader(),
   glb: new GltfLoader(),
   kmz: new KmzLoader(),
-  lwo: new LwoLoader(),
-  md2: new Md2Loader(),
-  obj: new ObjLoader(),
+  lwo: new AssimpLoader(),
+  md2: new AssimpLoader(),
+  obj: new AssimpLoader(),
   pcd: new PcdLoader(),
-  ply: new PlyLoader(),
-  stl: new StlLoader(),
+  ply: new AssimpLoader(),
+  stl: new AssimpLoader(),
   step: new OcctLoader(),
   stp: new OcctLoader(),
   iges: new OcctLoader(),
@@ -60,7 +49,35 @@ const loaderFromInputFormat = {
   vtp: new VtkLoader(),
   wrl: new VrmlLoader(),
   xyz: new XyzLoader(),
-} as const satisfies Partial<Record<InputFormat, ThreeJsBaseLoader>>;
+
+  blend: new AssimpLoader(),
+  cd: new AssimpLoader(),
+  dwg: new AssimpLoader(),
+  dxf: new AssimpLoader(),
+  exr: new AssimpLoader(),
+  gdf: new AssimpLoader(),
+  gts: new AssimpLoader(),
+  ifc: new AssimpLoader(),
+  inc: new AssimpLoader(),
+  ldr: new AssimpLoader(),
+  max: new AssimpLoader(),
+  mtl: new AssimpLoader(),
+  off: new AssimpLoader(),
+  udo: new AssimpLoader(),
+  x: new AssimpLoader(),
+  x3dv: new AssimpLoader(),
+  pov: new AssimpLoader(),
+  rib: new AssimpLoader(),
+  nrrd: new AssimpLoader(),
+  pdb: new AssimpLoader(),
+  shapr: new AssimpLoader(),
+  skp: new AssimpLoader(),
+  svg: new AssimpLoader(),
+  vda: new AssimpLoader(),
+  x_t: new AssimpLoader(),
+  xaml: new AssimpLoader(),
+  xgl: new AssimpLoader(),
+} as const satisfies Record<InputFormat, ThreeJsBaseLoader>;
 
 export type ThreejsImportFormat = keyof typeof loaderFromInputFormat;
 

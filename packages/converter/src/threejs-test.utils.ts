@@ -101,15 +101,15 @@ export const createThreeTestUtils = (): {
   const expectVector3ToBeCloseTo = (actual: Vector3, expected: Vector3, subject: string, precision = epsilon): void => {
     expect(
       Math.abs(actual.x - expected.x),
-      `${subject}: Expected [X: ${actual.x}]. Actual [X: ${expected.x}]\n`,
+      `${subject}: Expected [X: ${expected.x}]. Actual [X: ${actual.x}]\n`,
     ).toBeLessThan(precision);
     expect(
       Math.abs(actual.y - expected.y),
-      `${subject}: Expected [Y: ${actual.y}]. Actual [Y: ${expected.y}]\n`,
+      `${subject}: Expected [Y: ${expected.y}]. Actual [Y: ${actual.y}]\n`,
     ).toBeLessThan(precision);
     expect(
       Math.abs(actual.z - expected.z),
-      `${subject}: Expected [Z: ${actual.z}]. Actual [Z: ${expected.z}]\n`,
+      `${subject}: Expected [Z: ${expected.z}]. Actual [Z: ${actual.z}]\n`,
     ).toBeLessThan(precision);
   };
 

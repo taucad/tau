@@ -201,13 +201,46 @@ const loaderTestCases: LoaderTestCase[] = [
   },
   {
     format: '3dm',
-    fixtureName: 'cube.3dm',
-    description: 'Simple cube from 3DM format',
+    variant: 'brep',
+    fixtureName: 'cube-brep.3dm',
+    description: 'Simple cube from BREP 3DM format',
     skip: true,
-    skipReason: '3DM loader not working with WASM right now.',
+    skipReason: 'BREP geometry is not supported for conversion.',
     geometry: {
-      vertexCount: 24,
-      faceCount: 8,
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, 0, 1],
+      },
+    },
+  },
+  {
+    format: '3dm',
+    variant: 'extrusion',
+    fixtureName: 'cube-extrusion.3dm',
+    description: 'Simple cube from EXTRUSION 3DM format',
+    skip: true,
+    skipReason: 'Extrusion geometry is not supported for conversion.',
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, 0, 1],
+      },
+    },
+  },
+  {
+    format: '3dm',
+    variant: 'mesh',
+    fixtureName: 'cube-mesh.3dm',
+    description: 'Simple cube from MESH 3DM format',
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
       meshCount: 1,
       boundingBox: {
         size: [2, 2, 2],
@@ -466,8 +499,8 @@ const loaderTestCases: LoaderTestCase[] = [
   },
   {
     format: 'iges',
-    variant: 'nurbs',
-    fixtureName: 'cube-nurbs.iges',
+    variant: 'brep',
+    fixtureName: 'cube-brep.iges',
     description: 'Simple cube from NURBS IGE format',
     geometry: {
       vertexCount: 24,
@@ -485,8 +518,8 @@ const loaderTestCases: LoaderTestCase[] = [
   },
   {
     format: 'igs',
-    variant: 'nurbs',
-    fixtureName: 'cube-nurbs.igs',
+    variant: 'brep',
+    fixtureName: 'cube-brep.igs',
     description: 'Simple cube from NURBS IGS format',
     geometry: {
       vertexCount: 24,
@@ -693,41 +726,45 @@ const loaderTestCases: LoaderTestCase[] = [
   {
     format: 'vtk',
     fixtureName: 'cube.vtk',
-    description: 'VTK format is not supported yet.',
-    skip: true,
-    skipReason: 'VTK loader is not implemented yet.',
+    description: 'Simple cube from VTK format',
     geometry: {
-      vertexCount: 0,
-      faceCount: 0,
-      meshCount: 0,
+      vertexCount: 8,
+      faceCount: 3,
+      meshCount: 1,
+      facePoints: 4,
       boundingBox: {
-        size: [0, 0, 0],
-        center: [0, 0, 0],
+        size: [2, 2, 2],
+        center: [0, 0, 1],
       },
+    },
+    structure: {
+      type: 'Mesh',
     },
   },
   {
     format: 'vtp',
     fixtureName: 'cube.vtp',
-    description: 'VTP format is not supported yet.',
-    skip: true,
-    skipReason: 'VTP loader is not implemented yet.',
+    description: 'Simple cube from VTP format',
     geometry: {
-      vertexCount: 0,
-      faceCount: 0,
-      meshCount: 0,
+      vertexCount: 8,
+      faceCount: 3,
+      meshCount: 1,
+      facePoints: 4,
       boundingBox: {
-        size: [0, 0, 0],
-        center: [0, 0, 0],
+        size: [2, 2, 2],
+        center: [0, 0, 1],
       },
+    },
+    structure: {
+      type: 'Mesh',
     },
   },
   {
     format: 'xyz',
     fixtureName: 'cube.xyz',
-    description: 'XYZ format is not supported yet.',
+    description: 'Simple cube from XYZ format',
     skip: true,
-    skipReason: 'XYZ loader is not implemented yet.',
+    skipReason: 'XYZ loader requires point cloud testing.',
     geometry: {
       vertexCount: 0,
       faceCount: 0,
@@ -826,10 +863,11 @@ describe('threejs-import', () => {
   const structureHelpers = createStructureTestHelpers();
 
   for (const testCase of loaderTestCases) {
-    describe(`'${testCase.format}' loader${testCase.variant ? ` (${testCase.variant})` : ''}`, () => {
+    const describeFunction = testCase.skip ? describe.skip : describe;
+    const variantDescription = testCase.variant ? ` (${testCase.variant})` : '';
+    const skipDescription = testCase.skip ? ` [SKIPPED]: ${testCase.skipReason}` : '';
+    describeFunction(`'${testCase.format}' loader${variantDescription}${skipDescription}`, () => {
       const { format, fixtureName, description, geometry, structure, skip } = testCase;
-
-      const testFunction = skip ? it.skip : it;
 
       let object3d: Object3D;
 
@@ -846,29 +884,29 @@ describe('threejs-import', () => {
         object3d = await importThreeJs(inputFile, format);
       });
 
-      testFunction(`should successfully import ${description ?? fixtureName}`, () => {
+      it(`should successfully import ${description ?? fixtureName}`, () => {
         expect(object3d).toBeDefined();
       });
 
       // Geometry tests - each aspect gets its own test case
       if (geometry) {
-        testFunction('should have correct vertex count', () => {
+        it('should have correct vertex count', () => {
           geometryHelpers.expectVertexCount(object3d, geometry.vertexCount);
         });
 
-        testFunction('should have correct face count', () => {
+        it('should have correct face count', () => {
           geometryHelpers.expectFaceCount(object3d, geometry.faceCount);
         });
 
-        testFunction('should have correct mesh count', () => {
+        it('should have correct mesh count', () => {
           geometryHelpers.expectMeshCount(object3d, geometry.meshCount);
         });
 
-        testFunction('should have correct bounding box size', () => {
+        it('should have correct bounding box size', () => {
           geometryHelpers.expectBoundingBoxSize(object3d, geometry.boundingBox.size, geometry.boundingBox.tolerance);
         });
 
-        testFunction('should have correct bounding box center', () => {
+        it('should have correct bounding box center', () => {
           geometryHelpers.expectBoundingBoxCenter(
             object3d,
             geometry.boundingBox.center,
@@ -879,32 +917,32 @@ describe('threejs-import', () => {
 
       // Structure tests - each aspect gets its own test case
       if (structure) {
-        testFunction('should have correct object type', () => {
+        it('should have correct object type', () => {
           structureHelpers.expectObjectType(object3d, structure.type);
         });
 
         if (structure.name !== undefined) {
-          testFunction('should have correct object name', () => {
+          it('should have correct object name', () => {
             structureHelpers.expectObjectName(object3d, structure.name!);
           });
         }
 
         if (structure.children !== undefined) {
-          testFunction('should have correct number of children', () => {
+          it('should have correct number of children', () => {
             structureHelpers.expectChildrenCount(object3d, structure.children!.length);
           });
 
           // Test each child individually
           for (const [index, childExpectation] of structure.children.entries()) {
             // eslint-disable-next-line @typescript-eslint/no-loop-func -- vitest ensures test closure, so this is safe
-            testFunction(`should have correct child structure at index ${index}`, () => {
+            it(`should have correct child structure at index ${index}`, () => {
               structureHelpers.expectChildAtIndex(object3d, index, childExpectation as StructureExpectation);
             });
           }
         }
       }
 
-      testFunction('should produce consistent results across multiple imports', async () => {
+      it('should produce consistent results across multiple imports', async () => {
         const inputFile: InputFile = {
           name: fixtureName,
           data: loadFixture(fixtureName),
@@ -918,7 +956,7 @@ describe('threejs-import', () => {
         expect(signature1).toEqual(signature2);
       });
 
-      testFunction('should have valid mesh position attributes', () => {
+      it('should have valid mesh position attributes', () => {
         let hasValidMesh = false;
         object3d.traverse((child) => {
           if (child instanceof Mesh) {
@@ -931,7 +969,7 @@ describe('threejs-import', () => {
         expect(hasValidMesh).toBe(true);
       });
 
-      testFunction('should have positive vertex counts in meshes', () => {
+      it('should have positive vertex counts in meshes', () => {
         object3d.traverse((child) => {
           if (child instanceof Mesh) {
             const geometry = child.geometry as BufferGeometry;
@@ -941,7 +979,7 @@ describe('threejs-import', () => {
         });
       });
 
-      testFunction('should have properly triangulated mesh geometry', () => {
+      it('should have properly triangulated mesh geometry', () => {
         object3d.traverse((child) => {
           if (child instanceof Mesh) {
             const geometry = child.geometry as BufferGeometry;
@@ -952,7 +990,7 @@ describe('threejs-import', () => {
         });
       });
 
-      testFunction('should have finite coordinate values', () => {
+      it('should have finite coordinate values', () => {
         object3d.traverse((child) => {
           if (child instanceof Mesh) {
             const geometry = child.geometry as BufferGeometry;

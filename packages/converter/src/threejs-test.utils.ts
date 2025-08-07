@@ -40,7 +40,7 @@ export type LoaderTestCase = {
    *
    * For example, a test case for a cube can have a variant for a mesh, a NURBS, etc.
    */
-  variant?: 'binary' | 'ascii' | 'mesh' | 'nurbs' | 'textures' | 'draco';
+  variant?: 'binary' | 'ascii' | 'mesh' | 'brep' | 'textures' | 'draco' | 'subd' | 'extrusion';
   fixtureName: string;
   description?: string;
   geometry?: GeometryExpectation;

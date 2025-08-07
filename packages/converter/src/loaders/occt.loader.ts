@@ -12,7 +12,19 @@ type OcctOptions = {
 
 export class OcctLoader extends ThreeJsBaseLoader<ImportResult, OcctOptions> {
   protected async parseAsync(data: Uint8Array, options: OcctOptions): Promise<ImportResult> {
-    const occt = await occtimportjs();
+    // Configure the module to suppress console output
+    const moduleConfig = {
+      // Suppress console.log output from the WASM module
+      print() {
+        // Suppress stdout
+      },
+      printErr() {
+        // Suppress stderr
+      },
+    };
+
+    // Initialize OCCT with the custom module configuration
+    const occt = await occtimportjs(moduleConfig);
 
     // Choose the appropriate method based on the file format
     let result: ImportResult;

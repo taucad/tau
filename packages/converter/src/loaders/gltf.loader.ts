@@ -7,7 +7,8 @@ import type { BaseLoaderOptions } from '#loaders/threejs.base.loader.js';
 import { NodeDracoLoader } from '#loaders/draco/node-draco-loader.js';
 
 type GltfLoaderOptions = {
-  transformYUpToZUp?: boolean;
+  transformYtoZup?: boolean;
+  scaleMetersToMillimeters?: boolean;
 } & BaseLoaderOptions;
 
 export class GltfLoader extends ThreeJsBaseLoader<GLTF, GltfLoaderOptions> {
@@ -15,13 +16,15 @@ export class GltfLoader extends ThreeJsBaseLoader<GLTF, GltfLoaderOptions> {
   private readonly dracoLoader = new NodeDracoLoader();
 
   /**
-   * Create a transformation matrix to convert from y-up (glTF format) to z-up (app coordinate system)
-   * and scale from meters back to millimeters.
-   *
+   * Transformation matrix to convert from y-up (glTF format) to z-up (app coordinate system)
    * Y-up to Z-up transformation: x' = x, y' = -z, z' = y
-   * Unit conversion: meters to millimeters (multiply by 1000)
    */
-  private readonly transformationMatrix = new Matrix4().set(1000, 0, 0, 0, 0, 0, -1000, 0, 0, 1000, 0, 0, 0, 0, 0, 1);
+  private readonly coordinateTransformMatrix = new Matrix4().set(1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1);
+
+  /**
+   * Scaling matrix to convert from meters to millimeters (multiply by 1000)
+   */
+  private readonly scalingMatrix = new Matrix4().makeScale(1000, 1000, 1000);
 
   protected async parseAsync(data: Uint8Array): Promise<GLTF> {
     await this.dracoLoader.initialize();
@@ -32,15 +35,22 @@ export class GltfLoader extends ThreeJsBaseLoader<GLTF, GltfLoaderOptions> {
   }
 
   protected mapToObject(parseResult: GLTF): Object3D {
-    if (this.options.transformYUpToZUp ?? true) {
-      // Apply transformation to all geometries in the scene
-      parseResult.scene.traverse((child) => {
-        if (child.type === 'Mesh') {
-          const mesh = child as Mesh;
-          mesh.geometry.applyMatrix4(this.transformationMatrix);
+    // Apply transformations to all geometries in the scene
+    parseResult.scene.traverse((child) => {
+      if (child.type === 'Mesh') {
+        const mesh = child as Mesh;
+
+        // Apply coordinate system transformation (Y-up to Z-up)
+        if (this.options.transformYtoZup ?? true) {
+          mesh.geometry.applyMatrix4(this.coordinateTransformMatrix);
         }
-      });
-    }
+
+        // Apply scaling transformation (meters to millimeters)
+        if (this.options.scaleMetersToMillimeters ?? true) {
+          mesh.geometry.applyMatrix4(this.scalingMatrix);
+        }
+      }
+    });
 
     return parseResult.scene;
   }

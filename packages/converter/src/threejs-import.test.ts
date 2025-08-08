@@ -373,9 +373,50 @@ const loaderTestCases: LoaderTestCase[] = [
     format: 'usdz',
     fixtureName: 'cube.usdz',
     description: 'Simple cube from USDZ format',
-    skip: true,
-    skipReason:
-      'USDZ loader does not support textures right now. We need to replace use of browser APIs in the loader.',
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, 0, 1],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Object3D',
+        },
+      ],
+    },
+  },
+  {
+    format: 'usda',
+    fixtureName: 'cube.usda',
+    description: 'USDA format is not supported yet.',
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, 0, 1],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Object3D',
+        },
+      ],
+    },
+  },
+  {
+    format: 'usdc',
+    fixtureName: 'cube.usdc',
+    description: 'USDC format is not supported yet.',
     geometry: {
       vertexCount: 36,
       faceCount: 12,
@@ -442,8 +483,6 @@ const loaderTestCases: LoaderTestCase[] = [
     format: 'ifc',
     fixtureName: 'cube.ifc',
     description: 'Simple cube from IFC format',
-    skip: true,
-    skipReason: 'IFC loader is not implemented yet.',
     geometry: {
       vertexCount: 36,
       faceCount: 12,
@@ -666,24 +705,17 @@ const loaderTestCases: LoaderTestCase[] = [
     format: 'x3dv',
     fixtureName: 'cube.x3dv',
     description: 'Simple cube from X3DV format',
-    skip: true,
-    skipReason: 'X3DV loader is not implemented yet.',
     geometry: {
-      vertexCount: 36,
-      faceCount: 12,
-      meshCount: 1,
+      vertexCount: 597,
+      faceCount: 199,
+      meshCount: 2,
       boundingBox: {
-        size: [2, 2, 2],
-        center: [0, 1, 0],
+        size: [20_000, 20_000, 20_000],
+        center: [0, 0, 0],
       },
     },
     structure: {
-      type: 'Group',
-      children: [
-        {
-          type: 'Object3D',
-        },
-      ],
+      type: 'Scene',
     },
   },
   {
@@ -770,38 +802,6 @@ const loaderTestCases: LoaderTestCase[] = [
     description: 'PCD format is not supported yet.',
     skip: true,
     skipReason: 'PCD loader is not implemented yet.',
-    geometry: {
-      vertexCount: 0,
-      faceCount: 0,
-      meshCount: 0,
-      boundingBox: {
-        size: [0, 0, 0],
-        center: [0, 0, 0],
-      },
-    },
-  },
-  {
-    format: 'usda',
-    fixtureName: 'cube.usda',
-    description: 'USDA format is not supported yet.',
-    skip: true,
-    skipReason: 'USDA loader is not implemented yet.',
-    geometry: {
-      vertexCount: 0,
-      faceCount: 0,
-      meshCount: 0,
-      boundingBox: {
-        size: [0, 0, 0],
-        center: [0, 0, 0],
-      },
-    },
-  },
-  {
-    format: 'usdc',
-    fixtureName: 'cube.usdc',
-    description: 'USDC format is not supported yet.',
-    skip: true,
-    skipReason: 'USDC loader is not implemented yet.',
     geometry: {
       vertexCount: 0,
       faceCount: 0,

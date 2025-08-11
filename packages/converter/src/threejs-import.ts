@@ -2,14 +2,12 @@
 import type { Object3D } from 'three';
 import type { InputFile, InputFormat } from '#types.js';
 import type { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
-import { BvhLoader } from '#loaders/bvh.loader.js';
 import { DracoLoader } from '#loaders/draco.loader.js';
 import { GcodeLoader } from '#loaders/gcode.loader.js';
 import { GltfLoader } from '#loaders/gltf.loader.js';
 import { KmzLoader } from '#loaders/kmz.loader.js';
 import { PcdLoader } from '#loaders/pcd.loader.js';
 import { ThreeDmLoader } from '#loaders/3dm.loader.js';
-import { UsdzLoader } from '#loaders/usdz.loader.js';
 import { VoxLoader } from '#loaders/vox.loader.js';
 import { VrmlLoader } from '#loaders/vrml.loader.js';
 import { VtkLoader } from '#loaders/vtk.loader.js';
@@ -22,7 +20,7 @@ const loaderFromInputFormat = {
   '3mf': new AssimpLoader(),
   '3ds': new AssimpLoader(),
   amf: new AssimpLoader(),
-  bvh: new BvhLoader(),
+  bvh: new AssimpLoader(),
   dae: new AssimpLoader(),
   drc: new DracoLoader(),
   fbx: new AssimpLoader(),

@@ -481,22 +481,44 @@ const loaderTestCases: LoaderTestCase[] = [
   },
   {
     format: 'ifc',
-    fixtureName: 'cube.ifc',
-    description: 'Simple cube from IFC format',
+    fixtureName: 'cube-freecad.ifc',
+    description: 'Simple cube from IFC format (FreeCad)',
     geometry: {
       vertexCount: 36,
       faceCount: 12,
       meshCount: 1,
       boundingBox: {
         size: [2, 2, 2],
-        center: [0, -1, 0],
+        center: [0, 0, 1],
       },
     },
     structure: {
       type: 'Group',
       children: [
         {
-          type: 'Object3D',
+          type: 'Mesh',
+        },
+      ],
+    },
+  },
+  {
+    format: 'ifc',
+    fixtureName: 'cube-blender.ifc',
+    description: 'Simple cube from IFC format (Blender)',
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, 0, 1],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Mesh',
         },
       ],
     },

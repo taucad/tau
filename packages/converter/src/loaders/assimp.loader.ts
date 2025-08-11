@@ -21,6 +21,7 @@ export class AssimpLoader extends ThreeJsBaseLoader<Object3D, AssimpOptions> {
     '3ds': true,
     fbx: true,
     usdz: true,
+    ifc: true,
   };
 
   /**

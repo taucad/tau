@@ -655,8 +655,8 @@ importers:
   packages/converter:
     dependencies:
       assimpjs:
-        specifier: ^0.0.10
-        version: 0.0.10
+        specifier: https://codeload.github.com/taucad/assimpjs/tar.gz/e04b28c02c29cdbf10428166d38e4f1fe8365b20
+        version: https://codeload.github.com/taucad/assimpjs/tar.gz/e04b28c02c29cdbf10428166d38e4f1fe8365b20
       draco3dgltf:
         specifier: ^1.5.7
         version: 1.5.7
@@ -6661,8 +6661,9 @@ packages:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
 
-  assimpjs@0.0.10:
-    resolution: {integrity: sha512-iY8M+eQzdCvfSkdduj6sPmIbP2fIn40PK6JRrAMxBawL3tHG6Mm0qvitkxB3ZoFBug5o7IdbzQK+jujZTopGPQ==}
+  assimpjs@https://codeload.github.com/taucad/assimpjs/tar.gz/e04b28c02c29cdbf10428166d38e4f1fe8365b20:
+    resolution: {tarball: https://codeload.github.com/taucad/assimpjs/tar.gz/e04b28c02c29cdbf10428166d38e4f1fe8365b20}
+    version: 0.0.11
 
   ast-v8-to-istanbul@0.3.3:
     resolution: {integrity: sha512-MuXMrSLVVoA6sYN/6Hke18vMzrT4TZNbZIj/hvh0fnYFpO+/kFXcLIaiPwXXWaQUPg4yJD8fj+lfJ7/1EBconw==}
@@ -20884,7 +20885,7 @@ snapshots:
 
   assertion-error@2.0.1: {}
 
-  assimpjs@0.0.10: {}
+  assimpjs@https://codeload.github.com/taucad/assimpjs/tar.gz/e04b28c02c29cdbf10428166d38e4f1fe8365b20: {}
 
   ast-v8-to-istanbul@0.3.3:
     dependencies:

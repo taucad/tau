@@ -352,10 +352,8 @@ const loaderTestCases: LoaderTestCase[] = [
   {
     format: 'fbx',
     variant: 'textures',
-    fixtureName: 'cube-with-textures.fbx',
+    fixtureName: 'cube-textures.fbx',
     description: 'Simple cube from ASCII FBX format with textures',
-    skip: true,
-    skipReason: 'FBX loader does not support textures right now. We need to replace use of browser APIs in the loader.',
     geometry: {
       vertexCount: 36,
       faceCount: 12,

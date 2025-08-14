@@ -9,7 +9,6 @@ import { KmzLoader } from '#loaders/kmz.loader.js';
 import { PcdLoader } from '#loaders/pcd.loader.js';
 import { ThreeDmLoader } from '#loaders/3dm.loader.js';
 import { VoxLoader } from '#loaders/vox.loader.js';
-import { VrmlLoader } from '#loaders/vrml.loader.js';
 import { VtkLoader } from '#loaders/vtk.loader.js';
 import { XyzLoader } from '#loaders/xyz.loader.js';
 import { OcctLoader } from '#loaders/occt.loader.js';
@@ -45,12 +44,14 @@ const loaderFromInputFormat = {
   vox: new VoxLoader(),
   vtk: new VtkLoader(),
   vtp: new VtkLoader(),
-  wrl: new VrmlLoader(),
+  wrl: new AssimpLoader(),
   xyz: new XyzLoader(),
   off: new AssimpLoader(),
   x: new AssimpLoader(),
   dxf: new AssimpLoader(),
-  x3dv: new VrmlLoader(),
+  x3d: new AssimpLoader(),
+  x3db: new AssimpLoader(),
+  x3dv: new AssimpLoader(),
   ifc: new AssimpLoader(),
 
   blend: new AssimpLoader(),
@@ -69,6 +70,7 @@ const loaderFromInputFormat = {
   nrrd: new AssimpLoader(),
   pdb: new AssimpLoader(),
   shapr: new AssimpLoader(),
+  sldprt: new AssimpLoader(),
   skp: new AssimpLoader(),
   svg: new AssimpLoader(),
   vda: new AssimpLoader(),

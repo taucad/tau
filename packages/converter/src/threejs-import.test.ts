@@ -711,16 +711,16 @@ const loaderTestCases: LoaderTestCase[] = [
     fixtureName: 'cube.wrl',
     description: 'Simple cube from VRML format',
     geometry: {
-      vertexCount: 597,
-      faceCount: 199,
-      meshCount: 2,
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
       boundingBox: {
-        size: [20_000, 20_000, 20_000],
-        center: [0, 0, 0],
+        size: [2, 2, 2],
+        center: [0, 0, 1],
       },
     },
     structure: {
-      type: 'Scene',
+      type: 'Group',
     },
   },
   {
@@ -728,16 +728,62 @@ const loaderTestCases: LoaderTestCase[] = [
     fixtureName: 'cube.x3dv',
     description: 'Simple cube from X3DV format',
     geometry: {
-      vertexCount: 597,
-      faceCount: 199,
-      meshCount: 2,
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
       boundingBox: {
-        size: [20_000, 20_000, 20_000],
-        center: [0, 0, 0],
+        size: [2, 2, 2],
+        center: [0, 0, 1],
       },
     },
     structure: {
-      type: 'Scene',
+      type: 'Group',
+    },
+  },
+  {
+    format: 'x3d',
+    fixtureName: 'cube.x3d',
+    description: 'Simple cube from X3D format',
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, 0, 1],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Object3D',
+        },
+      ],
+    },
+  },
+  {
+    format: 'x3db',
+    fixtureName: 'cube.x3db',
+    description: 'Simple cube from X3DB format',
+    skip: true,
+    skipReason: 'X3DB loader is not implemented yet.',
+    geometry: {
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+      boundingBox: {
+        size: [2, 2, 2],
+        center: [0, 0, 1],
+      },
+    },
+    structure: {
+      type: 'Group',
+      children: [
+        {
+          type: 'Object3D',
+        },
+      ],
     },
   },
   {
@@ -1024,7 +1070,7 @@ const loaderTestCases: LoaderTestCase[] = [
       ],
     },
   },
-  ...(['dwg', 'pov', 'gdf', 'gts'] as const).map((format) => ({
+  ...(['dwg', 'pov', 'gdf', 'gts','x_t','xaml','xgl','vda','svg','sldprt','skp','shapr','rib','pdb','nrrd','mtl','max','ldr','inc','exr','cd'] as const).map((format) => ({
     format,
     fixtureName: `cube.${format}`,
     description: `[NEW] Simple cube from ${format} format`,

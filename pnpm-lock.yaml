@@ -660,9 +660,6 @@ importers:
       draco3dgltf:
         specifier: ^1.5.7
         version: 1.5.7
-      jsdom:
-        specifier: ~26.0.0
-        version: 26.0.0(canvas@3.1.2)
       occt-import-js:
         specifier: ^0.0.23
         version: 0.0.23

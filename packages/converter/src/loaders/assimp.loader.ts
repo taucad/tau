@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- some formats are named like this */
 /* eslint-disable new-cap -- External library uses PascalCase method names */
 import type { Object3D } from 'three';
-import assimpjs from 'assimpjs';
+import assimpjs from 'assimpjs/all';
 import type { InputFormat } from '#types.js';
 import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
 import { GltfLoader } from '#loaders/gltf.loader.js';

@@ -47,7 +47,7 @@
     ]
   },
   "dependencies": {
-    "assimpjs": "https://codeload.github.com/taucad/assimpjs/tar.gz/e04b28c02c29cdbf10428166d38e4f1fe8365b20",
+    "assimpjs": "https://codeload.github.com/taucad/assimpjs/tar.gz/3ef539594c48cca4810fdac8a1bb359a504315d3",
     "draco3dgltf": "^1.5.7",
     "occt-import-js": "^0.0.23",
     "rhino3dm": "^8.17.0",

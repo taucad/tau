@@ -1,4 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- External library uses PascalCase method names */
+
+// Base module with all type definitions
 declare module 'assimpjs' {
   export type AssimpResult = {
     IsSuccess(): boolean;
@@ -22,4 +24,10 @@ declare module 'assimpjs' {
 
   function assimpjs(): Promise<AssimpJS>;
   export default assimpjs;
+}
+
+// Re-export everything from the base module
+declare module 'assimpjs/all' {
+  export * from 'assimpjs';
+  export { default } from 'assimpjs';
 }

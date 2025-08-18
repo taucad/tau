@@ -494,7 +494,7 @@ const loaderTestCases: LoaderTestCase[] = [
       type: 'Group',
       children: [
         {
-          type: 'Mesh',
+          type: 'Object3D',
         },
       ],
     },
@@ -516,7 +516,7 @@ const loaderTestCases: LoaderTestCase[] = [
       type: 'Group',
       children: [
         {
-          type: 'Mesh',
+          type: 'Object3D',
         },
       ],
     },

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { PartialDeep } from 'type-fest';
 import type { BufferGeometry, Object3D } from 'three';
 import { Box3, Mesh, Vector3 } from 'three';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- test utils
@@ -59,6 +60,19 @@ export const loadFixture = (fixtureName: string): Uint8Array => {
   return new Uint8Array(fileData);
 };
 
+// Helper for creating geometry variants with overrides
+export const createGeometryVariant = (
+  base: GeometryExpectation,
+  overrides: PartialDeep<GeometryExpectation>
+): GeometryExpectation => ({
+  ...base,
+  ...overrides,
+  boundingBox: {
+    ...base.boundingBox,
+    ...overrides.boundingBox,
+  },
+});
+
 export const loadTestData = async (testCase: LoaderTestCase): Promise<Uint8Array> => {
   if (testCase.dataSource) {
     return testCase.dataSource();
@@ -78,6 +92,19 @@ export const createThreeTestUtils = (): {
   expectVector3ToBeCloseTo: (actual: Vector3, expected: Vector3, subject: string, precision?: number) => void;
   getObjectStructure: (object: Object3D) => Record<string, unknown>;
   createGeometrySignature: (object: Object3D) => GeometryExpectation;
+  createGeometryTestHelpers: () => {
+    expectVertexCount: (object3d: Object3D, expectedCount: number) => void;
+    expectFaceCount: (object3d: Object3D, expectedCount: number) => void;
+    expectMeshCount: (object3d: Object3D, expectedCount: number) => void;
+    expectBoundingBoxSize: (object3d: Object3D, expectedSize: [number, number, number], tolerance?: number) => void;
+    expectBoundingBoxCenter: (object3d: Object3D, expectedCenter: [number, number, number], tolerance?: number) => void;
+  };
+  createStructureTestHelpers: () => {
+    expectObjectType: (object3d: Object3D, expectedType: string) => void;
+    expectObjectName: (object3d: Object3D, expectedName: string) => void;
+    expectChildrenCount: (object3d: Object3D, expectedCount: number) => void;
+    expectChildAtIndex: (object3d: Object3D, index: number, childExpectation: StructureExpectation) => void;
+  };
   epsilon: number;
 } => {
   const epsilon = 1e-6;
@@ -177,12 +204,87 @@ export const createThreeTestUtils = (): {
     };
   };
 
+  // Test helper functions
+  const createGeometryTestHelpers = () => ({
+    expectVertexCount(object3d: Object3D, expectedCount: number): void {
+      const stats = getGeometryStats(object3d);
+      expect(stats.vertexCount).toBe(expectedCount);
+    },
+
+    expectFaceCount(object3d: Object3D, expectedCount: number): void {
+      const stats = getGeometryStats(object3d);
+      expect(Math.round(stats.faceCount)).toBe(expectedCount);
+    },
+
+    expectMeshCount(object3d: Object3D, expectedCount: number): void {
+      const stats = getGeometryStats(object3d);
+      expect(stats.meshCount).toBe(expectedCount);
+    },
+
+    expectBoundingBoxSize(object3d: Object3D, expectedSize: [number, number, number], tolerance?: number): void {
+      const boundingBox = getBoundingBox(object3d);
+      const size = boundingBox.getSize(new Vector3());
+      const actualTolerance = tolerance ?? epsilon;
+
+      const [expectedWidth, expectedHeight, expectedDepth] = expectedSize;
+      expectVector3ToBeCloseTo(
+        size,
+        new Vector3(expectedWidth, expectedHeight, expectedDepth),
+        'bounding box size',
+        actualTolerance,
+      );
+    },
+
+    expectBoundingBoxCenter(object3d: Object3D, expectedCenter: [number, number, number], tolerance?: number): void {
+      const boundingBox = getBoundingBox(object3d);
+      const center = boundingBox.getCenter(new Vector3());
+      const actualTolerance = tolerance ?? epsilon;
+
+      const [expectedCenterX, expectedCenterY, expectedCenterZ] = expectedCenter;
+      expectVector3ToBeCloseTo(
+        center,
+        new Vector3(expectedCenterX, expectedCenterY, expectedCenterZ),
+        'bounding box center',
+        actualTolerance,
+      );
+    },
+  });
+
+  const createStructureTestHelpers = () => ({
+    expectObjectType(object3d: Object3D, expectedType: string): void {
+      expect(object3d.type).toBe(expectedType);
+    },
+
+    expectObjectName(object3d: Object3D, expectedName: string): void {
+      expect(object3d.name).toBe(expectedName);
+    },
+
+    expectChildrenCount(object3d: Object3D, expectedCount: number): void {
+      expect(object3d.children.length).toBe(expectedCount);
+    },
+
+    expectChildAtIndex(object3d: Object3D, index: number, childExpectation: StructureExpectation): void {
+      const child = object3d.children[index];
+      expect(child).toBeDefined();
+
+      if (child) {
+        expect(child.type).toBe(childExpectation.type);
+
+        if (childExpectation.name !== undefined) {
+          expect(child.name).toBe(childExpectation.name);
+        }
+      }
+    },
+  });
+
   return {
     getBoundingBox,
     getGeometryStats,
     expectVector3ToBeCloseTo,
     getObjectStructure,
     createGeometrySignature,
+    createGeometryTestHelpers,
+    createStructureTestHelpers,
     epsilon,
   };
 };

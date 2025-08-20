@@ -42,7 +42,7 @@ export type LoaderTestCase = {
    *
    * For example, a test case for a cube can have a variant for a mesh, a NURBS, etc.
    */
-  variant?: 'binary' | 'ascii' | 'mesh' | 'brep' | 'textures' | 'draco' | 'subd' | 'extrusion' | 'instance';
+  variant?: 'binary' | 'ascii' | 'mesh' | 'brep' | 'textures' | 'materials' | 'animations' | 'draco' | 'subd' | 'extrusion' | 'instance' | 'freecad' | 'blender';
   /**
    * Multiple fixture files for multi-file formats (e.g., ["cube.obj", "cube.mtl"])
    */

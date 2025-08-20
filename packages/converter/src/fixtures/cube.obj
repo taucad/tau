@@ -1,6 +1,5 @@
 # Rhino
 
-mtllib cube.mtl
 usemtl DefaultMaterial
 v 1 2 -1
 v -1 2 -1

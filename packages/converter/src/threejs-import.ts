@@ -11,6 +11,7 @@ import { VoxLoader } from '#loaders/vox.loader.js';
 import { VtkLoader } from '#loaders/vtk.loader.js';
 import { OcctLoader } from '#loaders/occt.loader.js';
 import { AssimpLoader } from '#loaders/assimp.loader.js';
+import { UnimplementedLoader } from '#loaders/unimplemented.loader.js';
 
 const loaderFromInputFormat = {
   '3dm': new ThreeDmLoader(),
@@ -21,6 +22,7 @@ const loaderFromInputFormat = {
   amf: new AssimpLoader(),
   brep: new OcctLoader(),
   bvh: new AssimpLoader(),
+  cob: new AssimpLoader(),
   dae: new AssimpLoader(),
   drc: new DracoLoader(),
   dxf: new AssimpLoader(),
@@ -58,25 +60,23 @@ const loaderFromInputFormat = {
   x3dv: new AssimpLoader(),
   xgl: new AssimpLoader(),
 
-  blend: new AssimpLoader(),
-  cd: new AssimpLoader(),
-  dwg: new AssimpLoader(),
-  gdf: new AssimpLoader(),
-  gts: new AssimpLoader(),
-  inc: new AssimpLoader(),
-  ldr: new AssimpLoader(),
-  max: new AssimpLoader(),
-  mtl: new AssimpLoader(),
-  pdb: new AssimpLoader(),
-  rib: new AssimpLoader(),
-  shapr: new AssimpLoader(),
-  skp: new AssimpLoader(),
-  sldprt: new AssimpLoader(),
-  svg: new AssimpLoader(),
-  udo: new AssimpLoader(),
-  vda: new AssimpLoader(),
-  x_t: new AssimpLoader(),
-  xaml: new AssimpLoader(),
+  blend: new UnimplementedLoader('Blender .blend files are not supported due to lack of support for newer Blender file formats in the current loader.'),
+  dwg: new UnimplementedLoader('AutoCAD .dwg files are not implemented. This proprietary format requires specialized CAD file parsing capabilities.'),
+  gdf: new UnimplementedLoader('Graphics Data Format .gdf files are not implemented. This format requires additional development work.'),
+  gts: new UnimplementedLoader('GNU Triangulated Surface .gts files are not implemented. This format requires specialized mesh processing capabilities.'),
+  inc: new UnimplementedLoader('Include .inc files are not implemented. This format is typically used for data inclusion rather than standalone 3D models.'),
+  ldr: new UnimplementedLoader('LEGO Digital Designer .ldr files are not implemented. This format requires specialized LEGO brick processing capabilities.'),
+  mtl: new UnimplementedLoader('Material Template Library .mtl files are not implemented as standalone models. MTL files are typically material definitions that accompany OBJ files.'),
+  pdb: new UnimplementedLoader('Protein Data Bank .pdb files are not implemented. This format is designed for molecular data, not 3D models.'),
+  udo: new UnimplementedLoader('User Defined Object .udo files are not implemented. This format requires additional development work.'),
+  xaml: new UnimplementedLoader('Extensible Application Markup Language .xaml files are not implemented for 3D model conversion.'),
+  
+  // Proprietary formats
+  max: new UnimplementedLoader('3ds Max .max files are not implemented. This proprietary format requires specialized Autodesk file parsing capabilities.'),
+  shapr: new UnimplementedLoader('Shapr3D .shapr files are not implemented. This proprietary format requires specialized CAD file parsing capabilities.'),
+  skp: new UnimplementedLoader('SketchUp .skp files are not implemented. This proprietary format requires specialized SketchUp file parsing capabilities.'),
+  sldprt: new UnimplementedLoader('SolidWorks .sldprt files are not implemented. This proprietary format requires specialized CAD file parsing capabilities.'),
+  x_t: new UnimplementedLoader('Parasolid .x_t files are not implemented. This proprietary format requires specialized CAD kernel integration.'),
 } as const satisfies Record<InputFormat, ThreeJsBaseLoader>;
 
 export type ThreejsImportFormat = keyof typeof loaderFromInputFormat;

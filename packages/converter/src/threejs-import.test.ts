@@ -132,6 +132,16 @@ const loaderTestCases: LoaderTestCase[] = [
   createCubeTestCase('ogex', { structure: 'groupWithObject3D' }),
   createCubeTestCase('mesh.xml', { structure: 'groupWithMesh' }),
 
+  createCubeTestCase('cob', { structure: 'groupWithObject3D' }),
+
+  createCubeTestCase('drc', {
+    geometry: createGeometryVariant(STANDARD_CUBE_GEOMETRY, {
+      vertexCount: 24,
+      faceCount: 8
+    }),
+    structure: { type: 'Mesh' },
+  }),
+
   createCubeTestCase('dxf', {
     geometry: createGeometryVariant(STANDARD_CUBE_GEOMETRY, {
       vertexCount: 72,
@@ -198,6 +208,21 @@ const loaderTestCases: LoaderTestCase[] = [
     },
   },
 
+  createCubeTestCase('bvh', {
+    geometry: createGeometryVariant(STANDARD_CUBE_GEOMETRY, {
+      vertexCount: 120,
+      faceCount: 40,
+      boundingBox: {
+        size: [2.482842803001404, 2.4000000953674316, 2.400000050663948],
+        center: [-0.041421353816986084, 0, 1]
+      }
+    }),
+    structure: {
+      type: 'Group',
+      children: [{ type: 'Bone' }]
+    }
+  }),
+
   createCubeTestCase('step', {
     geometry: STEP_CUBE_GEOMETRY,
     structure: 'groupWithMesh'
@@ -251,11 +276,31 @@ const loaderTestCases: LoaderTestCase[] = [
   // ========================================================================
   // UNSUPPORTED FORMATS
   // ========================================================================
-  createSkippedTestCase('kmz', 'KMZ loader currently requires DOM parser, which is not available in Node.js.'),
-  createSkippedTestCase('gcode', 'GCODE loader does not appear to produce correct geometry right now.'),
+
+  // Tested but invalid formats
   createSkippedTestCase('blend', 'BLEND loader does not support latest Blender file format.'),
-  ...(['bvh', 'drc', 'md2', 'udo', 'dwg', 'gdf', 'gts', 'x_t', 'xaml', 'vda', 'svg', 'sldprt', 'skp', 'shapr', 'rib', 'pdb', 'mtl', 'max', 'ldr', 'inc', 'cd'] as const)
-    .map(format => createSkippedTestCase(format, `${format} loader is not implemented yet.`)),
+  createSkippedTestCase('kmz', 'KMZ loader currently requires DOM parser, which is not available in Node.js.'),
+  
+  // Fixtures not available
+  createSkippedTestCase('md2', 'MD2 fixture is not available.'),
+
+  // TODO formats
+  createSkippedTestCase('dwg', 'Autocad .dwg files are not implemented yet.'),
+  createSkippedTestCase('gdf', 'Graphics Data Format .gdf files are not implemented yet.'),
+  createSkippedTestCase('gts', 'GNU Triangulated Surface .gts files are not implemented yet.'),
+  createSkippedTestCase('inc', 'Include .inc files are not implemented yet.'),
+  createSkippedTestCase('ldr', 'LEGO Digital Designer .ldr files are not implemented yet.'),
+  createSkippedTestCase('mtl', 'Material Template Library .mtl files are not implemented yet.'),
+  createSkippedTestCase('pdb', 'Protein Data Bank .pdb files are not implemented yet.'),
+  createSkippedTestCase('udo', 'User Defined Object .udo files are not implemented yet.'),
+  createSkippedTestCase('xaml', 'Extensible Application Markup Language .xaml files are not implemented yet.'),
+
+  // Proprietary formats
+  createSkippedTestCase('max', '3ds Max loader is not implemented yet.'),
+  createSkippedTestCase('shapr', 'Shapr3D loader is not implemented yet.'),
+  createSkippedTestCase('skp', 'SketchUp .skp files are not implemented yet.'),
+  createSkippedTestCase('sldprt', 'SolidWorks loader is not implemented yet.'),
+  createSkippedTestCase('x_t', 'Parasolid loader is not implemented yet.'),
 ];
 
 // ============================================================================

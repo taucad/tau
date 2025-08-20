@@ -14,7 +14,6 @@ export const supportedInputFormats = [
   'dwg',
   'dxf',
   'fbx',
-  'gcode',
   'gdf',
   'glb',
   'gltf',

@@ -1,3 +1,10 @@
+/**
+ * Lists all supported formats and their loaders.
+ * 
+ * For a list of many 3D file formats, see:
+ * @see https://en.wikipedia.org/wiki/List_of_file_formats#Graphics
+ */
+
 /* eslint-disable @typescript-eslint/naming-convention -- formats can be valid identifiers */
 import type { Object3D } from 'three';
 import type { InputFile, InputFormat } from '#types.js';
@@ -27,13 +34,11 @@ const loaderFromInputFormat = {
   drc: new DracoLoader(),
   dxf: new AssimpLoader(),
   fbx: new AssimpLoader(),
-  gcode: new GcodeLoader(),
   glb: new GltfLoader(),
   gltf: new GltfLoader(),
   ifc: new AssimpLoader(),
   iges: new OcctLoader(),
   igs: new OcctLoader(),
-  kmz: new KmzLoader(),
   lwo: new AssimpLoader(),
   md2: new AssimpLoader(),
   md5mesh: new AssimpLoader(),
@@ -60,7 +65,11 @@ const loaderFromInputFormat = {
   x3dv: new AssimpLoader(),
   xgl: new AssimpLoader(),
 
+  // Need fixing
+  kmz: new KmzLoader(),
   blend: new UnimplementedLoader('Blender .blend files are not supported due to lack of support for newer Blender file formats in the current loader.'),
+
+  // TODO formats
   dwg: new UnimplementedLoader('AutoCAD .dwg files are not implemented. This proprietary format requires specialized CAD file parsing capabilities.'),
   gdf: new UnimplementedLoader('Graphics Data Format .gdf files are not implemented. This format requires additional development work.'),
   gts: new UnimplementedLoader('GNU Triangulated Surface .gts files are not implemented. This format requires specialized mesh processing capabilities.'),

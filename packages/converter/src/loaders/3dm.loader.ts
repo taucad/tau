@@ -1,5 +1,6 @@
 import type { Object3D, Group } from 'three';
 import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
+import type { InputFile } from '#types.js';
 import { Three3dmLoader } from '#loaders/3dm/3dm-three-loader.js';
 
 /**
@@ -8,7 +9,8 @@ import { Three3dmLoader } from '#loaders/3dm/3dm-three-loader.js';
 export class ThreeDmLoader extends ThreeJsBaseLoader<Group> {
   private readonly loader = new Three3dmLoader();
 
-  protected async parseAsync(data: Uint8Array): Promise<Group> {
+  protected async parseAsync(files: InputFile[]): Promise<Group> {
+    const { data } = this.findPrimaryFile(files);
     return this.loader.parseAsync(data);
   }
 

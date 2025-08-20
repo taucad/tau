@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { Mesh } from 'three';
 import type { BufferGeometry, Object3D } from 'three';
-import type { InputFile, InputFormat } from '#types.js';
+import type { InputFormat } from '#types.js';
 import { importThreeJs, threejsImportFomats } from '#threejs-import.js';
 import { createThreeTestUtils, loadTestData, createGeometryVariant } from '#threejs-test.utils.js';
 import type { LoaderTestCase, StructureExpectation, GeometryExpectation } from '#threejs-test.utils.js';
@@ -85,6 +85,18 @@ const loaderTestCases: LoaderTestCase[] = [
   createCubeTestCase('stl', { variant: 'ascii', structure: 'groupWithObject3D' }),
 
   createCubeTestCase('obj', { structure: 'groupWithObject3D' }),
+  
+  // Multi-file OBJ + MTL test
+  {
+    format: 'obj',
+    files: ['cube.obj', 'cube.mtl'],
+    description: 'OBJ with MTL material file',
+    geometry: STANDARD_CUBE_GEOMETRY,
+    structure: {
+      type: 'Group',
+      children: [{ type: 'Object3D' }],
+    },
+  },
 
   createCubeTestCase('ply', { variant: 'binary', structure: 'groupWithMesh' }),
   createCubeTestCase('ply', { variant: 'ascii', structure: 'groupWithMesh' }),
@@ -290,7 +302,6 @@ const loaderTestCases: LoaderTestCase[] = [
   createSkippedTestCase('gts', 'GNU Triangulated Surface .gts files are not implemented yet.'),
   createSkippedTestCase('inc', 'Include .inc files are not implemented yet.'),
   createSkippedTestCase('ldr', 'LEGO Digital Designer .ldr files are not implemented yet.'),
-  createSkippedTestCase('mtl', 'Material Template Library .mtl files are not implemented yet.'),
   createSkippedTestCase('pdb', 'Protein Data Bank .pdb files are not implemented yet.'),
   createSkippedTestCase('udo', 'User Defined Object .udo files are not implemented yet.'),
   createSkippedTestCase('xaml', 'Extensible Application Markup Language .xaml files are not implemented yet.'),
@@ -321,13 +332,8 @@ describe('threejs-import', () => {
       beforeEach(async () => {
         if (testCase.skip) return;
 
-        const data = await loadTestData(testCase);
-        const inputFile: InputFile = {
-          name: testCase.fixtureName ?? `${testCase.format}-${testCase.variant ?? 'default'}`,
-          data,
-        };
-
-        object3d = await importThreeJs(inputFile, testCase.format);
+        const files = await loadTestData(testCase);
+        object3d = await importThreeJs(files, testCase.format);
       });
 
       it(`should successfully import ${testCase.description ?? testCase.fixtureName}`, () => {
@@ -388,13 +394,8 @@ describe('threejs-import', () => {
 
       // Validation tests
       it('should produce consistent results across multiple imports', async () => {
-        const data = await loadTestData(testCase);
-        const inputFile: InputFile = {
-          name: testCase.fixtureName ?? `${testCase.format}-${testCase.variant ?? 'default'}`,
-          data,
-        };
-
-        const object3d2 = await importThreeJs(inputFile, testCase.format);
+        const files = await loadTestData(testCase);
+        const object3d2 = await importThreeJs(files, testCase.format);
         const signature1 = utils.createGeometrySignature(object3d);
         const signature2 = utils.createGeometrySignature(object3d2);
 
@@ -465,5 +466,20 @@ describe('threejs-import', () => {
     const declaredFormats = threejsImportFomats;
 
     expect([...new Set(enabledFormats)].sort()).toEqual([...new Set(declaredFormats)].sort());
+  });
+
+  it('should throw error when primary file is missing', async () => {
+    // Test with a file that doesn't match the expected format (using DRC format which uses findPrimaryFile directly)
+    const wrongFiles = [{
+      name: 'test.txt',
+      data: new Uint8Array([1, 2, 3])
+    }];
+
+    await expect(importThreeJs(wrongFiles, 'drc')).rejects.toThrow('No .DRC file found in file set');
+  });
+
+  it('should throw error when file array is empty', async () => {
+    // Test with 3DM format which uses findPrimaryFile directly
+    await expect(importThreeJs([], '3dm')).rejects.toThrow('No .3DM file found in file set');
   });
 });

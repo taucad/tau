@@ -10,7 +10,6 @@ import type { Object3D } from 'three';
 import type { InputFile, InputFormat } from '#types.js';
 import type { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
 import { DracoLoader } from '#loaders/draco.loader.js';
-import { GcodeLoader } from '#loaders/gcode.loader.js';
 import { GltfLoader } from '#loaders/gltf.loader.js';
 import { KmzLoader } from '#loaders/kmz.loader.js';
 import { ThreeDmLoader } from '#loaders/3dm.loader.js';
@@ -75,7 +74,6 @@ const loaderFromInputFormat = {
   gts: new UnimplementedLoader('GNU Triangulated Surface .gts files are not implemented. This format requires specialized mesh processing capabilities.'),
   inc: new UnimplementedLoader('Include .inc files are not implemented. This format is typically used for data inclusion rather than standalone 3D models.'),
   ldr: new UnimplementedLoader('LEGO Digital Designer .ldr files are not implemented. This format requires specialized LEGO brick processing capabilities.'),
-  mtl: new UnimplementedLoader('Material Template Library .mtl files are not implemented as standalone models. MTL files are typically material definitions that accompany OBJ files.'),
   pdb: new UnimplementedLoader('Protein Data Bank .pdb files are not implemented. This format is designed for molecular data, not 3D models.'),
   udo: new UnimplementedLoader('User Defined Object .udo files are not implemented. This format requires additional development work.'),
   xaml: new UnimplementedLoader('Extensible Application Markup Language .xaml files are not implemented for 3D model conversion.'),
@@ -92,12 +90,12 @@ export type ThreejsImportFormat = keyof typeof loaderFromInputFormat;
 
 export const threejsImportFomats = Object.keys(loaderFromInputFormat) as ThreejsImportFormat[];
 
-export const importThreeJs = async (file: InputFile, format: ThreejsImportFormat): Promise<Object3D> => {
+export const importThreeJs = async (files: InputFile[], format: ThreejsImportFormat): Promise<Object3D> => {
   const loader = loaderFromInputFormat[format];
 
   loader.initialize({ format });
 
-  const result = await loader.loadAsync(file.data);
+  const result = await loader.loadAsync(files);
 
   return result;
 };

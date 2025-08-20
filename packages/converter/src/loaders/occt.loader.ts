@@ -3,7 +3,7 @@ import type { Object3D } from 'three';
 import { BufferGeometry, Float32BufferAttribute, Group, Mesh, MeshStandardMaterial } from 'three';
 import occtimportjs from 'occt-import-js';
 import type { ImportResult } from 'occt-import-js';
-import type { InputFormat } from '#types.js';
+import type { InputFormat, InputFile } from '#types.js';
 import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
 
 type OcctOptions = {
@@ -11,7 +11,8 @@ type OcctOptions = {
 };
 
 export class OcctLoader extends ThreeJsBaseLoader<ImportResult, OcctOptions> {
-  protected async parseAsync(data: Uint8Array, options: OcctOptions): Promise<ImportResult> {
+  protected async parseAsync(files: InputFile[], options: OcctOptions): Promise<ImportResult> {
+    const { data } = this.findPrimaryFile(files);
     // Configure the module to suppress console output
     const moduleConfig = {
       // Suppress console.log output from the WASM module

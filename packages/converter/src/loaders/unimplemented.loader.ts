@@ -1,5 +1,5 @@
 import type { Object3D } from 'three';
-import type { InputFormat } from '#types.js';
+import type { InputFormat, InputFile } from '#types.js';
 import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
 
 type UnimplementedOptions = {
@@ -21,7 +21,7 @@ export class UnimplementedLoader extends ThreeJsBaseLoader<Object3D, Unimplement
     this.errorMessage = errorMessage;
   }
 
-  protected async parseAsync(_data: Uint8Array, _options: UnimplementedOptions): Promise<Object3D> {
+  protected async parseAsync(_files: InputFile[], _options: UnimplementedOptions): Promise<Object3D> {
     throw new Error(this.errorMessage);
   }
 

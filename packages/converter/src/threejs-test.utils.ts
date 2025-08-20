@@ -6,6 +6,7 @@ import { Box3, Mesh, Vector3 } from 'three';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- test utils
 import { expect } from 'vitest';
 import type { ThreejsImportFormat } from '#threejs-import.js';
+import type { InputFile } from '#types.js';
 // ============================================================================
 // Test Framework Types & Utilities
 // ============================================================================
@@ -42,6 +43,13 @@ export type LoaderTestCase = {
    * For example, a test case for a cube can have a variant for a mesh, a NURBS, etc.
    */
   variant?: 'binary' | 'ascii' | 'mesh' | 'brep' | 'textures' | 'draco' | 'subd' | 'extrusion' | 'instance';
+  /**
+   * Multiple fixture files for multi-file formats (e.g., ["cube.obj", "cube.mtl"])
+   */
+  files?: string[];
+  /**
+   * Single fixture file (for backward compatibility)
+   */
   fixtureName?: string;
   /**
    * Programmatic data source instead of file fixture
@@ -73,16 +81,27 @@ export const createGeometryVariant = (
   },
 });
 
-export const loadTestData = async (testCase: LoaderTestCase): Promise<Uint8Array> => {
+export const loadTestData = async (testCase: LoaderTestCase): Promise<InputFile[]> => {
   if (testCase.dataSource) {
-    return testCase.dataSource();
+    const data = await testCase.dataSource();
+    return [{ name: `input.${testCase.format}`, data }];
+  }
+
+  if (testCase.files) {
+    return testCase.files.map(filename => ({
+      name: filename,
+      data: loadFixture(filename)
+    }));
   }
 
   if (testCase.fixtureName) {
-    return loadFixture(testCase.fixtureName);
+    return [{
+      name: testCase.fixtureName,
+      data: loadFixture(testCase.fixtureName)
+    }];
   }
 
-  throw new Error('Test case must have either fixtureName or dataSource');
+  throw new Error('Test case must specify files, fixtureName, or dataSource');
 };
 
 // Test utilities factory

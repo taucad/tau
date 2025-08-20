@@ -29,7 +29,6 @@ export const supportedInputFormats = [
   'md2',
   'md5mesh',
   'mesh.xml',
-  'mtl',
   'nff',
   'obj',
   'off',

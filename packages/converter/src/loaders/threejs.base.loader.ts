@@ -1,5 +1,5 @@
 import type { Object3D } from 'three';
-import type { InputFormat } from '#types.js';
+import type { InputFormat, InputFile } from '#types.js';
 
 export type BaseLoaderOptions = {
   format: InputFormat;
@@ -28,15 +28,15 @@ export abstract class ThreeJsBaseLoader<ParseResult = unknown, Options extends B
   }
 
   /**
-   * Load and parse data from a Uint8Array and return Three.js Object3D array.
+   * Load and parse files and return Three.js Object3D.
    *
-   * @param data - The binary data to load.
+   * @param files - The input files to load (can be single file or multiple files).
    * @param options - Optional runtime options that may override initialization options.
-   * @returns A promise that resolves to an array of Three.js Object3D objects.
+   * @returns A promise that resolves to a Three.js Object3D object.
    */
-  public async loadAsync(data: Uint8Array, options?: Partial<Options>): Promise<Object3D> {
+  public async loadAsync(files: InputFile[], options?: Partial<Options>): Promise<Object3D> {
     const mergedOptions = this.mergeOptions(options);
-    const parseResult = await this.parseAsync(data, mergedOptions);
+    const parseResult = await this.parseAsync(files, mergedOptions);
     return this.mapToObject(parseResult, mergedOptions);
   }
 
@@ -90,13 +90,71 @@ export abstract class ThreeJsBaseLoader<ParseResult = unknown, Options extends B
   }
 
   /**
-   * Parse the binary data using the underlying loader.
+   * Find the primary file for the current format from the input files array.
+   * Looks for a file with an extension matching the current format.
    *
-   * @param data - The binary data to parse.
+   * @param files - The input files to search.
+   * @returns The primary file for this format.
+   * @throws Error if no suitable file is found.
+   */
+  protected findPrimaryFile(files: InputFile[]): InputFile {
+    return this.requireFileByExtension(files, this.options.format);
+  }
+
+  /**
+   * Find a file by its extension from the input files array.
+   *
+   * @param files - The input files to search.
+   * @param extension - The file extension to look for (with or without dot).
+   * @returns The first file matching the extension, or undefined if not found.
+   */
+  protected findFileByExtension(files: InputFile[], extension: string): InputFile | undefined {
+    const normalizedExtension = extension.startsWith('.') ? extension.slice(1) : extension;
+    return files.find((file) => {
+      const fileExtension = file.name.split('.').pop()?.toLowerCase();
+      return fileExtension === normalizedExtension.toLowerCase();
+    });
+  }
+
+  /**
+   * Find a file by its extension from the input files array, throwing if not found.
+   *
+   * @param files - The input files to search.
+   * @param extension - The file extension to look for (with or without dot).
+   * @returns The first file matching the extension.
+   * @throws Error if no file with the extension is found.
+   */
+  protected requireFileByExtension(files: InputFile[], extension: string): InputFile {
+    const file = this.findFileByExtension(files, extension);
+    if (!file) {
+      const normalizedExtension = extension.startsWith('.') ? extension : `.${extension}`;
+      throw new Error(`No ${normalizedExtension.toUpperCase()} file found in file set`);
+    }
+    return file;
+  }
+
+  /**
+   * Create a map of filename to file data for easy lookup.
+   *
+   * @param files - The input files to map.
+   * @returns A map with filename as key and file data as value.
+   */
+  protected createFileMap(files: InputFile[]): Map<string, Uint8Array> {
+    const fileMap = new Map<string, Uint8Array>();
+    for (const file of files) {
+      fileMap.set(file.name, file.data);
+    }
+    return fileMap;
+  }
+
+  /**
+   * Parse the input files using the underlying loader.
+   *
+   * @param files - The input files to parse.
    * @param options - The merged options for parsing.
    * @returns A promise that resolves to the intermediate parse result.
    */
-  protected abstract parseAsync(data: Uint8Array, options: Options): Promise<ParseResult>;
+  protected abstract parseAsync(files: InputFile[], options: Options): Promise<ParseResult>;
 
   /**
    * Map the parse result to an array of Three.js Object3D objects.

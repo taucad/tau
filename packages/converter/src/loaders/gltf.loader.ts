@@ -4,6 +4,7 @@ import type { GLTF } from 'three/addons';
 import { Matrix4 } from 'three';
 import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
 import type { BaseLoaderOptions } from '#loaders/threejs.base.loader.js';
+import type { InputFile } from '#types.js';
 import { NodeDracoLoader } from '#loaders/draco/node-draco-loader.js';
 
 type GltfLoaderOptions = {
@@ -26,10 +27,11 @@ export class GltfLoader extends ThreeJsBaseLoader<GLTF, GltfLoaderOptions> {
    */
   private readonly scalingMatrix = new Matrix4().makeScale(1000, 1000, 1000);
 
-  protected async parseAsync(data: Uint8Array): Promise<GLTF> {
+  protected async parseAsync(files: InputFile[]): Promise<GLTF> {
     await this.dracoLoader.initialize();
     this.loader.setDRACOLoader(this.dracoLoader);
 
+    const { data } = this.findPrimaryFile(files);
     const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
     return this.loader.parseAsync(arrayBuffer, '');
   }

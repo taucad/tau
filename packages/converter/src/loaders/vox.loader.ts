@@ -3,13 +3,15 @@ import { Group } from 'three';
 import { VOXLoader, VOXMesh } from 'three/addons';
 import type { Chunk } from 'three/addons';
 import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
+import type { InputFile } from '#types.js';
 
 type VoxChunk = Chunk; // VOX chunk type from the loader
 
 export class VoxLoader extends ThreeJsBaseLoader<VoxChunk[]> {
   private readonly loader = new VOXLoader();
 
-  protected async parseAsync(data: Uint8Array): Promise<VoxChunk[]> {
+  protected async parseAsync(files: InputFile[]): Promise<VoxChunk[]> {
+    const { data } = this.findPrimaryFile(files);
     const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
     return this.withPromise(() => this.loader.parse(arrayBuffer) as VoxChunk[]);
   }

@@ -2,7 +2,7 @@
 /* eslint-disable new-cap -- External library uses PascalCase method names */
 import type { Object3D } from 'three';
 import assimpjs from 'assimpjs/all';
-import type { InputFormat } from '#types.js';
+import type { InputFormat, InputFile } from '#types.js';
 import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
 import { GltfLoader } from '#loaders/gltf.loader.js';
 
@@ -37,15 +37,16 @@ export class AssimpLoader extends ThreeJsBaseLoader<Object3D, AssimpOptions> {
 
   private readonly gltfLoader = new GltfLoader();
 
-  protected async parseAsync(data: Uint8Array, options: AssimpOptions): Promise<Object3D> {
+  protected async parseAsync(files: InputFile[], options: AssimpOptions): Promise<Object3D> {
     // Initialize assimpjs
     const ajs = await assimpjs();
 
-    // Create file list with the input file
+    // Create file list with all input files, preserving original filenames
     const fileList = new ajs.FileList();
-    const fileName = `model.${options.format}`;
-
-    fileList.AddFile(fileName, data);
+    
+    for (const file of files) {
+      fileList.AddFile(file.name, file.data);
+    }
 
     // Convert to GLB format using assimpjs
     const result = ajs.ConvertFileList(fileList, 'glb2');
@@ -64,8 +65,8 @@ export class AssimpLoader extends ThreeJsBaseLoader<Object3D, AssimpOptions> {
     const scaleMetersToMillimeters = this.getScaleMetersToMillimeters(options.format);
 
     // Initialize and use the GLTF loader to convert GLB data to Three.js Object3D
-    this.gltfLoader.initialize({ format: 'gltf', transformYtoZup, scaleMetersToMillimeters });
-    return this.gltfLoader.loadAsync(glbData);
+    this.gltfLoader.initialize({ format: 'glb', transformYtoZup, scaleMetersToMillimeters });
+    return this.gltfLoader.loadAsync([{ name: 'converted.glb', data: glbData }]);
   }
 
   protected mapToObject(parseResult: Object3D): Object3D {

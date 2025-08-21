@@ -1,4 +1,5 @@
 import type { Object3D } from 'three';
+import type { OutputFile } from '#types.js';
 
 /**
  * Base abstract class for Three.js exporters.
@@ -26,23 +27,25 @@ export abstract class BaseExporter<Options = Record<string, never>> {
    *
    * @param object - The Three.js Object3D to export.
    * @param options - Optional runtime options that may override initialization options.
-   * @returns A promise that resolves to the exported data as a Uint8Array.
+   * @returns A promise that resolves to an array of exported files.
    */
-  public abstract parseAsync(object: Object3D, options?: Partial<Options>): Promise<Uint8Array>;
+  public abstract parseAsync(object: Object3D, options?: Partial<Options>): Promise<OutputFile[]>;
 
   /**
-   * Get the file extension for this exporter.
+   * Helper method to create an OutputFile with proper naming.
    *
-   * @returns The file extension (without the dot).
+   * @param basename - The base name for the file (without extension).
+   * @param extension - The file extension (with or without dot).
+   * @param data - The file data.
+   * @returns An OutputFile object.
    */
-  public abstract getFileExtension(): string;
-
-  /**
-   * Get the MIME type for this exporter.
-   *
-   * @returns The MIME type for the exported format.
-   */
-  public abstract getMimeType(): string;
+  protected createOutputFile(basename: string, extension: string, data: Uint8Array): OutputFile {
+    const cleanExtension = extension.startsWith('.') ? extension.slice(1) : extension;
+    return {
+      name: `${basename}.${cleanExtension}`,
+      data,
+    };
+  }
 
   /**
    * Merge runtime options with initialization options.

@@ -2,6 +2,7 @@ import type { Object3D } from 'three';
 import type { GLTFExporterOptions } from 'three/addons';
 import { GLTFExporter } from 'three/addons';
 import { BaseExporter } from '#exporters/base.exporter.js';
+import type { OutputFile } from '#types.js';
 
 /**
  * Three.js GLTF/GLB exporter implementation.
@@ -15,27 +16,26 @@ export class GltfExporter extends BaseExporter<GLTFExporterOptions> {
     this.exporter = new GLTFExporter();
   }
 
-  public async parseAsync(object: Object3D, options?: Partial<GLTFExporterOptions>): Promise<Uint8Array> {
+  public async parseAsync(object: Object3D, options?: Partial<GLTFExporterOptions>): Promise<OutputFile[]> {
     const mergedOptions = this.mergeOptions(options);
     const { binary } = mergedOptions;
 
     const result = await this.exporter.parseAsync(object, mergedOptions);
 
     if (binary) {
-      // GLB format - binary output
-      return new Uint8Array(result as ArrayBuffer);
+      // GLB format - single binary file
+      const glbData = new Uint8Array(result as ArrayBuffer);
+      return [this.createOutputFile('model', 'glb', glbData)];
     }
 
-    // GLTF format - JSON output, needs text encoding
+    // GLTF format - JSON output
     const jsonString = JSON.stringify(result as Record<string, unknown>);
-    return new TextEncoder().encode(jsonString);
+    const gltfData = new TextEncoder().encode(jsonString);
+    
+    // For now, return single GLTF file. 
+    // TODO: In future, detect and extract separate .bin files and textures
+    return [this.createOutputFile('model', 'gltf', gltfData)];
   }
 
-  public getFileExtension(): string {
-    return this.options.binary ? 'glb' : 'gltf';
-  }
 
-  public getMimeType(): string {
-    return this.options.binary ? 'model/gltf-binary' : 'model/gltf+json';
-  }
 }

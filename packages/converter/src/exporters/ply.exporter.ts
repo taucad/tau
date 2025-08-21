@@ -2,6 +2,7 @@ import type { Object3D } from 'three';
 import type { PLYExporterOptions } from 'three/addons';
 import { PLYExporter } from 'three/addons';
 import { BaseExporter } from '#exporters/base.exporter.js';
+import type { OutputFile } from '#types.js';
 
 /**
  * Three.js PLY exporter implementation.
@@ -15,7 +16,7 @@ export class PlyExporter extends BaseExporter<PLYExporterOptions> {
     this.exporter = new PLYExporter();
   }
 
-  public async parseAsync(object: Object3D, options?: Partial<PLYExporterOptions>): Promise<Uint8Array> {
+  public async parseAsync(object: Object3D, options?: Partial<PLYExporterOptions>): Promise<OutputFile[]> {
     const mergedOptions = this.mergeOptions(options);
 
     // PLYExporter uses a callback pattern, handle it with a promise
@@ -42,14 +43,7 @@ export class PlyExporter extends BaseExporter<PLYExporterOptions> {
       }
     });
 
-    return new TextEncoder().encode(result);
-  }
-
-  public getFileExtension(): string {
-    return 'ply';
-  }
-
-  public getMimeType(): string {
-    return 'model/ply';
+    const plyData = new TextEncoder().encode(result);
+    return [this.createOutputFile('model', 'ply', plyData)];
   }
 }

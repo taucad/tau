@@ -1,6 +1,7 @@
 import type { Object3D } from 'three';
 import { OBJExporter } from 'three/addons';
 import { BaseExporter } from '#exporters/base.exporter.js';
+import type { OutputFile } from '#types.js';
 
 /**
  * Three.js OBJ exporter implementation.
@@ -15,16 +16,11 @@ export class ObjExporter extends BaseExporter {
     this.exporter = new OBJExporter();
   }
 
-  public async parseAsync(object: Object3D, _options?: unknown): Promise<Uint8Array> {
+  public async parseAsync(object: Object3D, _options?: unknown): Promise<OutputFile[]> {
     const result = this.exporter.parse(object);
-    return new TextEncoder().encode(result);
-  }
-
-  public getFileExtension(): string {
-    return 'obj';
-  }
-
-  public getMimeType(): string {
-    return 'model/obj';
+    const objData = new TextEncoder().encode(result);
+    
+    // TODO: In future, could split materials into separate .mtl file
+    return [this.createOutputFile('model', 'obj', objData)];
   }
 }

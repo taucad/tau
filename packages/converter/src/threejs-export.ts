@@ -1,6 +1,6 @@
 import type { Object3D } from 'three';
 import type { BaseExporter } from '#exporters/base.exporter.js';
-import type { OutputFormat } from '#types.js';
+import type { OutputFormat, OutputFile } from '#types.js';
 import { DaeExporter } from '#exporters/dae.exporter.js';
 import { GltfExporter } from '#exporters/gltf.exporter.js';
 import { ObjExporter } from '#exporters/obj.exporter.js';
@@ -66,7 +66,7 @@ const exportConfigs = {
   dae: { exporter: createDaeExporter() },
 } as const satisfies Partial<Record<OutputFormat, ExportConfig>>;
 
-type ThreejsExportFormat = keyof typeof exportConfigs;
+export type ThreejsExportFormat = keyof typeof exportConfigs;
 
 export const threejsExportFormats = Object.keys(exportConfigs) as ThreejsExportFormat[];
 
@@ -75,9 +75,9 @@ export const threejsExportFormats = Object.keys(exportConfigs) as ThreejsExportF
  *
  * @param object - The Three.js Object3D to export.
  * @param format - The target export format.
- * @returns A promise that resolves to the exported data as a Uint8Array.
+ * @returns A promise that resolves to an array of exported files.
  */
-export const exportThreeJs = async (object: Object3D, format: ThreejsExportFormat): Promise<Uint8Array> => {
+export const exportThreeJs = async (object: Object3D, format: ThreejsExportFormat): Promise<OutputFile[]> => {
   const config = exportConfigs[format];
 
   try {

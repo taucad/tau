@@ -82,14 +82,14 @@ export type InputFile = {
   data: Uint8Array;
 };
 
+export type OutputFile = {
+  name: string;
+  data: Uint8Array;
+};
+
 export type ConvertOptions = {
   outputFormat: OutputFormat;
   onProgress?: (progress: number, message: string) => void;
-};
-
-export type OutputFile = {
-  name: string;
-  data: Uint8Array | ArrayBuffer;
 };
 
 export const getSupportedInputFormats = (): readonly InputFormat[] => {

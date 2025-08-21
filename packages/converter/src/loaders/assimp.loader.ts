@@ -56,7 +56,7 @@ export class AssimpLoader extends ThreeJsBaseLoader<Object3D, AssimpOptions> {
       throw new Error(`Failed to convert ${options.format} file: ${result.GetErrorCode()}`);
     }
 
-    // Get the GLB data
+    // Get the GLB data, GLB only supports single file
     const resultFile = result.GetFile(0);
 
     const glbData = resultFile.GetContent();

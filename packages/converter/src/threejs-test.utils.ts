@@ -42,7 +42,22 @@ export type LoaderTestCase = {
    *
    * For example, a test case for a cube can have a variant for a mesh, a NURBS, etc.
    */
-  variant?: 'binary' | 'ascii' | 'mesh' | 'brep' | 'textures' | 'materials' | 'animations' | 'draco' | 'subd' | 'extrusion' | 'instance' | 'freecad' | 'blender';
+  variant?: 
+    | 'binary' 
+    | 'ascii' 
+    | 'mesh'
+    | 'brep' 
+    | 'textures'
+    | 'materials'
+    | 'animations'
+    | 'draco'
+    | 'subd'
+    | 'extrusion'
+    | 'instance'
+    | 'freecad'
+    | 'blender'
+    | 'millimeters' // For file formats that can declare custom units
+    | 'centimeters';
   /**
    * Multiple fixture files for multi-file formats (e.g., ["cube.obj", "cube.mtl"])
    */

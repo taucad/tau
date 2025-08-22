@@ -28,13 +28,6 @@ export class AssimpLoader extends ThreeJsBaseLoader<Object3D, AssimpOptions> {
     ase: true,
   };
 
-  /**
-   * @description Whether the format requires scaling from meters to millimeters.
-   */
-  private static readonly scaleMetersToMillimetersRequired: Partial<Record<InputFormat, boolean>> = {
-    dae: true,
-  };
-
   private readonly gltfLoader = new GltfLoader();
 
   protected async parseAsync(files: InputFile[], options: AssimpOptions): Promise<Object3D> {
@@ -62,10 +55,9 @@ export class AssimpLoader extends ThreeJsBaseLoader<Object3D, AssimpOptions> {
     const glbData = resultFile.GetContent();
 
     const transformYtoZup = this.getTransformYtoZup(options.format);
-    const scaleMetersToMillimeters = this.getScaleMetersToMillimeters(options.format);
 
     // Initialize and use the GLTF loader to convert GLB data to Three.js Object3D
-    this.gltfLoader.initialize({ format: 'glb', transformYtoZup, scaleMetersToMillimeters });
+    this.gltfLoader.initialize({ format: 'glb', transformYtoZup, scaleMetersToMillimeters: false });
     return this.gltfLoader.loadAsync([{ name: 'converted.glb', data: glbData }]);
   }
 
@@ -75,9 +67,5 @@ export class AssimpLoader extends ThreeJsBaseLoader<Object3D, AssimpOptions> {
 
   private getTransformYtoZup(format: InputFormat): boolean {
     return AssimpLoader.transformYtoZupRequired[format] ?? false;
-  }
-
-  private getScaleMetersToMillimeters(format: InputFormat): boolean {
-    return AssimpLoader.scaleMetersToMillimetersRequired[format] ?? false;
   }
 }

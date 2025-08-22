@@ -135,6 +135,16 @@ const loaderTestCases: LoaderTestCase[] = [
   createCubeTestCase('x3dv', { structure: 'groupWithMesh' }),
 
   createCubeTestCase('dae', { structure: 'groupWithObject3D' }),
+  createCubeTestCase('dae', { variant: 'millimeters', structure: 'groupWithObject3D',
+    geometry: createGeometryVariant(STANDARD_CUBE_GEOMETRY, {
+      // This is incorrect - the Assimp DAE loader should be accounting for the unit scaling.
+      // TODO: fix this in the Assimp DAE loader.
+      boundingBox: {
+        size: [0.002, 0.002, 0.002],
+        center: [0, 0, 0.001],
+      },
+    })
+   }),
 
   createCubeTestCase('usdz', { structure: 'groupWithObject3D' }),
   createCubeTestCase('usda', { structure: 'groupWithObject3D' }),

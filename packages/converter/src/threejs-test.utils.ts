@@ -119,6 +119,23 @@ export const loadTestData = async (testCase: LoaderTestCase): Promise<InputFile[
   throw new Error('Test case must specify files, fixtureName, or dataSource');
 };
 
+/**
+ * Calculate bounding box for a Three.js Object3D, ensuring geometry bounding boxes are computed
+ */
+export const getBoundingBox = (object: Object3D): Box3 => {
+  const box = new Box3();
+  object.traverse((child) => {
+    if (child instanceof Mesh) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- three.js types
+      child.geometry.computeBoundingBox();
+      if (child.geometry.boundingBox) {
+        box.expandByObject(child);
+      }
+    }
+  });
+  return box;
+};
+
 // Test utilities factory
 export const createThreeTestUtils = (): {
   getBoundingBox: (object: Object3D) => Box3;
@@ -142,20 +159,6 @@ export const createThreeTestUtils = (): {
   epsilon: number;
 } => {
   const epsilon = 1e-6;
-
-  const getBoundingBox = (object: Object3D): Box3 => {
-    const box = new Box3();
-    object.traverse((child) => {
-      if (child instanceof Mesh) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- three.js types
-        child.geometry.computeBoundingBox();
-        if (child.geometry.boundingBox) {
-          box.expandByObject(child);
-        }
-      }
-    });
-    return box;
-  };
 
   const getGeometryStats = (object: Object3D) => {
     let vertexCount = 0;

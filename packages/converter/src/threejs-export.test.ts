@@ -1,10 +1,10 @@
 import { expect, describe, it, beforeEach } from 'vitest';
 import type { Object3D } from 'three';
-import { Box3, Vector3, Object3D as ThreeObject3D } from 'three';
+import { Vector3, Object3D as ThreeObject3D } from 'three';
 import { importThreeJs } from '#threejs-import.js';
 import { exportThreeJs, threejsExportFormats, type ThreejsExportFormat } from '#threejs-export.js';
 import type { OutputFile, InputFile } from '#types.js';
-import { loadFixture } from '#threejs-test.utils.js';
+import { loadFixture, getBoundingBox } from '#threejs-test.utils.js';
 import { GltfLoader } from '#loaders/gltf.loader.js';
 
 // ============================================================================
@@ -22,7 +22,6 @@ type ExportTestCase = {
   
   // Expected output
   expectedFiles: {
-    count: number;
     primaryExtension: string;
     expectedNames: string[]; // Specific expected file names
   };
@@ -39,10 +38,6 @@ type ExportTestCase = {
     materials: {
       preservesMaterialCount: boolean;
       preservesBasicProperties: boolean; // color, opacity, etc.
-    };
-    structure: {
-      preservesHierarchy: boolean;
-      preservesNames: boolean;
     };
   };
 };
@@ -152,26 +147,13 @@ const assertGeometryProperties = async (
   original.updateMatrixWorld(true);
   roundTrip.updateMatrixWorld(true);
   
-  const originalBox = new Box3().setFromObject(original);
-  const roundTripBox = new Box3().setFromObject(roundTrip);
+  const originalBox = getBoundingBox(original);
+  const roundTripBox = getBoundingBox(roundTrip);
   
   const sizeOriginal = originalBox.getSize(new Vector3());
   const sizeRoundTrip = roundTripBox.getSize(new Vector3());
   
-  // Debug logging for bounding box analysis
-  console.log('=== BOUNDING BOX ANALYSIS ===');
-  console.log('Original bounding box min:', originalBox.min.toArray());
-  console.log('Original bounding box max:', originalBox.max.toArray());
-  console.log('Original size:', sizeOriginal.toArray());
-  console.log('Round-trip bounding box min:', roundTripBox.min.toArray());
-  console.log('Round-trip bounding box max:', roundTripBox.max.toArray());
-  console.log('Round-trip size:', sizeRoundTrip.toArray());
-  
   const sizeDiff = sizeOriginal.distanceTo(sizeRoundTrip);
-  console.log('Size difference:', sizeDiff);
-  console.log('Tolerance:', expectations.boundingBoxTolerance);
-  console.log('============================');
-  
   expect(sizeDiff).toBeLessThanOrEqual(expectations.boundingBoxTolerance);
 };
 
@@ -202,27 +184,98 @@ const assertMaterialProperties = (
   // TODO: Add more material property assertions as needed
 };
 
+
+// ============================================================================
+// Test Case Templates & Factories
+// ============================================================================
+
+const STANDARD_GEOMETRY_EXPECTATIONS = {
+  vertexCountTolerance: 0,
+  faceCountTolerance: 0,
+  boundingBoxTolerance: 0.001,
+  preservesNormals: true,
+  preservesUVs: true,
+} as const;
+
+const STANDARD_MATERIAL_EXPECTATIONS = {
+  preservesMaterialCount: true,
+  preservesBasicProperties: true,
+} as const;
+
+const LIMITED_MATERIAL_EXPECTATIONS = {
+  preservesMaterialCount: false,
+  preservesBasicProperties: false,
+} as const;
+
+const LOSSY_GEOMETRY_EXPECTATIONS = {
+  ...STANDARD_GEOMETRY_EXPECTATIONS,
+  preservesNormals: false,
+  preservesUVs: false,
+} as const;
+
 /**
- * Assert structural properties are preserved
+ * Create a variant of expectations with overrides
  */
-const assertStructuralProperties = (
-  original: Object3D,
-  roundTrip: Object3D,
-  expectations: ExportTestCase['expectations']['structure']
-) => {
-  if (expectations.preservesHierarchy) {
-    // Count total objects in hierarchy
-    let originalCount = 0;
-    let roundTripCount = 0;
-    
-    original.traverse(() => originalCount++);
-    roundTrip.traverse(() => roundTripCount++);
-    
-    expect(roundTripCount).toBe(originalCount);
-  }
+const createExpectationVariant = <T extends Record<string, any>>(
+  base: T,
+  overrides: Partial<T>
+): T => ({
+  ...base,
+  ...overrides,
+});
+
+/**
+ * Factory function for creating export test cases with sensible defaults
+ */
+const createExportTestCase = (
+  format: ThreejsExportFormat,
+  options: {
+    fixture?: ExportTestCase['fixture'];
+    description?: string;
+    skip?: boolean;
+    skipReason?: string;
+    expectedFiles?: {
+      primaryExtension?: string;
+      expectedNames?: string[];
+    };
+    expectations?: {
+      geometry?: Partial<ExportTestCase['expectations']['geometry']>;
+      materials?: Partial<ExportTestCase['expectations']['materials']>;
+    };
+  } = {}
+): ExportTestCase => {
+  const fixture = options.fixture ?? 'cube';
+  const primaryExtension = options.expectedFiles?.primaryExtension ?? format;
   
-  // TODO: Add more structural assertions as needed
+  // Default file naming pattern
+  const getDefaultFileNames = (format: ThreejsExportFormat): string[] => {
+    return [`result.${format}`];
+  };
+
+  return {
+    format,
+    fixture,
+    description: options.description ?? `${format.toUpperCase()} export with basic ${fixture}`,
+    skip: options.skip,
+    skipReason: options.skipReason,
+    expectedFiles: {
+      primaryExtension,
+      expectedNames: options.expectedFiles?.expectedNames ?? getDefaultFileNames(format),
+    },
+    expectations: {
+      geometry: createExpectationVariant(
+        STANDARD_GEOMETRY_EXPECTATIONS,
+        options.expectations?.geometry ?? {}
+      ),
+      materials: createExpectationVariant(
+        STANDARD_MATERIAL_EXPECTATIONS,
+        options.expectations?.materials ?? {}
+      ),
+    },
+  };
 };
+
+
 
 // ============================================================================
 // Test Cases Definition
@@ -230,161 +283,55 @@ const assertStructuralProperties = (
 
 const exportTestCases: ExportTestCase[] = [
   // GLTF/GLB Formats - Skip due to Node.js compatibility issues  
-  {
-    format: 'glb',
-    fixture: 'cube',
-    description: 'GLB export with basic cube',
+  createExportTestCase('glb', {
     skip: true,
     skipReason: 'GLTFExporter requires FileReader API, not available in Node.js',
     expectedFiles: {
-      count: 1,
-      primaryExtension: 'glb',
       expectedNames: ['model.glb']
-    },
-    expectations: {
-      geometry: {
-        vertexCountTolerance: 0,
-        faceCountTolerance: 0,
-        boundingBoxTolerance: 0.001,
-        preservesNormals: true,
-        preservesUVs: true
-      },
-      materials: {
-        preservesMaterialCount: true,
-        preservesBasicProperties: true
-      },
-      structure: {
-        preservesHierarchy: true,
-        preservesNames: false // GLB may not preserve all names
-      }
     }
-  },
-  
-  {
-    format: 'gltf',
-    fixture: 'cube',
-    description: 'GLTF export with basic cube',
+  }),
+  createExportTestCase('gltf', {
     skip: true,
     skipReason: 'GLTFExporter requires FileReader API, not available in Node.js',
     expectedFiles: {
-      count: 1, // For now, until we implement .bin separation
-      primaryExtension: 'gltf',
       expectedNames: ['model.gltf']
-    },
-    expectations: {
-      geometry: {
-        vertexCountTolerance: 0,
-        faceCountTolerance: 0,
-        boundingBoxTolerance: 0.001,
-        preservesNormals: true,
-        preservesUVs: true
-      },
-      materials: {
-        preservesMaterialCount: true,
-        preservesBasicProperties: true
-      },
-      structure: {
-        preservesHierarchy: true,
-        preservesNames: false
-      }
     }
-  },
+  }),
   
   // STL Format
-  {
-    format: 'stl',
-    fixture: 'cube',
-    description: 'STL export with basic cube',
-    expectedFiles: {
-      count: 1,
-      primaryExtension: 'stl',
-      expectedNames: ['result.stl']
-    },
+  createExportTestCase('stl', {
     expectations: {
       geometry: {
-        vertexCountTolerance: 0, // STL may duplicate vertices at edges
-        faceCountTolerance: 0,
-        boundingBoxTolerance: 0.001,
         preservesNormals: false, // STL recalculates normals
         preservesUVs: false // STL doesn't support UVs
       },
-      materials: {
-        preservesMaterialCount: false, // STL doesn't support materials
-        preservesBasicProperties: false
-      },
-      structure: {
-        preservesHierarchy: false, // STL flattens to single mesh
-        preservesNames: false
-      }
+      materials: LIMITED_MATERIAL_EXPECTATIONS, // STL doesn't support materials
     }
-  },
+  }),
   
   // OBJ Format
-  {
-    format: 'obj',
-    fixture: 'cube',
-    description: 'OBJ export with basic cube',
+  createExportTestCase('obj', {
     expectedFiles: {
-      count: 2, // .obj + .mtl files
-      primaryExtension: 'obj',
       expectedNames: ['result.obj', 'result.mtl']
     },
     expectations: {
-      geometry: {
-        vertexCountTolerance: 0,
-        faceCountTolerance: 0,
-        boundingBoxTolerance: 0.001,
-        preservesNormals: true,
-        preservesUVs: true
-      },
-      materials: {
-        preservesMaterialCount: false, // Basic OBJ export may not preserve materials
-        preservesBasicProperties: false
-      },
-      structure: {
-        preservesHierarchy: false, // OBJ typically flattens hierarchy
-        preservesNames: true
-      }
+      materials: LIMITED_MATERIAL_EXPECTATIONS, // Basic OBJ export may not preserve materials
     }
-  },
+  }),
   
-  // PLY Format - Skip due to Node.js compatibility issues
-  {
-    format: 'ply',
-    fixture: 'cube',
-    description: 'PLY export with basic cube',
-    expectedFiles: {
-      count: 1,
-      primaryExtension: 'ply',
-      expectedNames: ['result.ply']
-    },
+  // PLY Format
+  createExportTestCase('ply', {
     expectations: {
       geometry: {
-        vertexCountTolerance: 0,
-        faceCountTolerance: 0,
-        boundingBoxTolerance: 0.001,
-        preservesNormals: true,
         preservesUVs: false // PLY may not preserve UVs consistently
       },
-      materials: {
-        preservesMaterialCount: false, // PLY has limited material support
-        preservesBasicProperties: false
-      },
-      structure: {
-        preservesHierarchy: false,
-        preservesNames: false
-      }
+      materials: LIMITED_MATERIAL_EXPECTATIONS, // PLY has limited material support
     }
-  },
+  }),
   
   // USDZ Format
-  {
-    format: 'usdz',
-    fixture: 'cube',
-    description: 'USDZ export with basic cube',
+  createExportTestCase('usdz', {
     expectedFiles: {
-      count: 1,
-      primaryExtension: 'usdz',
       expectedNames: ['model.usdz']
     },
     expectations: {
@@ -392,193 +339,35 @@ const exportTestCases: ExportTestCase[] = [
         vertexCountTolerance: 36,
         faceCountTolerance: 12, // USDZ may modify face count during export/import
         boundingBoxTolerance: 0.35, // TODO: debug this tolerance
-        preservesNormals: true,
-        preservesUVs: true
       },
       materials: {
         preservesMaterialCount: false,
         preservesBasicProperties: true
       },
-      structure: {
-        preservesHierarchy: false, // USDZ import may change hierarchy structure
-        preservesNames: true
-      }
     }
-  },
+  }),
   
-  // DAE Format
-  {
-    format: 'dae',
-    fixture: 'cube',
-    description: 'DAE export with basic cube',
-    expectedFiles: {
-      count: 1,
-      primaryExtension: 'dae',
-      expectedNames: ['result.dae']
-    },
+  // Standard formats that preserve everything
+  createExportTestCase('dae'),
+  createExportTestCase('fbx'),
+  createExportTestCase('x'),
+  createExportTestCase('x3d'),
+  
+  // 3DS Format - doesn't preserve normals
+  createExportTestCase('3ds', {
     expectations: {
       geometry: {
-        vertexCountTolerance: 0,
-        faceCountTolerance: 0,
-        boundingBoxTolerance: 0.001,
-        preservesNormals: true,
-        preservesUVs: true
-      },
-      materials: {
-        preservesMaterialCount: true,
-        preservesBasicProperties: true
-      },
-      structure: {
-        preservesHierarchy: false,
-        preservesNames: false
-      }
-    }
-  },
-  
-  // FBX Format
-  {
-    format: 'fbx',
-    fixture: 'cube',
-    description: 'FBX export with basic cube',
-    expectedFiles: {
-      count: 1,
-      primaryExtension: 'fbx',
-      expectedNames: ['result.fbx']
-    },
-    expectations: {
-      geometry: {
-        vertexCountTolerance: 0,
-        faceCountTolerance: 0,
-        boundingBoxTolerance: 0.001,
-        preservesNormals: true,
-        preservesUVs: true
-      },
-      materials: {
-        preservesMaterialCount: true,
-        preservesBasicProperties: true
-      },
-      structure: {
-        preservesHierarchy: false,
-        preservesNames: false
-      }
-    }
-  },
-  
-  // X Format
-  {
-    format: 'x',
-    fixture: 'cube',
-    description: 'X export with basic cube',
-    expectedFiles: {
-      count: 1,
-      primaryExtension: 'x',
-      expectedNames: ['result.x']
-    },
-    expectations: {
-      geometry: {
-        vertexCountTolerance: 0,
-        faceCountTolerance: 0,
-        boundingBoxTolerance: 0.001,
-        preservesNormals: true,
-        preservesUVs: true
-      },
-      materials: {
-        preservesMaterialCount: true,
-        preservesBasicProperties: true
-      },
-      structure: {
-        preservesHierarchy: false,
-        preservesNames: false
-      }
-    }
-  },
-  
-  // X3D Format
-  {
-    format: 'x3d',
-    fixture: 'cube',
-    description: 'X3D export with basic cube',
-    expectedFiles: {
-      count: 1,
-      primaryExtension: 'x3d',
-      expectedNames: ['result.x3d']
-    },
-    expectations: {
-      geometry: {
-        vertexCountTolerance: 0,
-        faceCountTolerance: 0,
-        boundingBoxTolerance: 0.001,
-        preservesNormals: true,
-        preservesUVs: true
-      },
-      materials: {
-        preservesMaterialCount: true,
-        preservesBasicProperties: true
-      },
-      structure: {
-        preservesHierarchy: false,
-        preservesNames: false
-      }
-    }
-  },
-  
-  // 3DS Format
-  {
-    format: '3ds',
-    fixture: 'cube',
-    description: '3DS export with basic cube',
-    expectedFiles: {
-      count: 1,
-      primaryExtension: '3ds',
-      expectedNames: ['result.3ds']
-    },
-    expectations: {
-      geometry: {
-        vertexCountTolerance: 0,
-        faceCountTolerance: 0,
-        boundingBoxTolerance: 0.001,
         preservesNormals: false,
-        preservesUVs: true
-      },
-      materials: {
-        preservesMaterialCount: true,
-        preservesBasicProperties: true
-      },
-      structure: {
-        preservesHierarchy: false,
-        preservesNames: false
       }
     }
-  },
+  }),
   
-  // STP Format
-  {
-    format: 'stp',
-    fixture: 'cube',
-    description: 'STP export with basic cube',
-    expectedFiles: {
-      count: 1,
-      primaryExtension: 'stp',
-      expectedNames: ['result.stp']
-    },
+  // STP Format - CAD format with limited capabilities
+  createExportTestCase('stp', {
     expectations: {
-      geometry: {
-        vertexCountTolerance: 0,
-        faceCountTolerance: 0,
-        boundingBoxTolerance: 0.001,
-        preservesNormals: false,
-        preservesUVs: false
-      },
-      materials: {
-        preservesMaterialCount: true,
-        preservesBasicProperties: true
-      },
-      structure: {
-        preservesHierarchy: false,
-        preservesNames: false
-      }
+      geometry: LOSSY_GEOMETRY_EXPECTATIONS,
     }
-  }
+  })
 ];
 
 // ============================================================================
@@ -617,7 +406,7 @@ describe('threejs-export', () => {
       });
       
       it('should produce correct number of output files', () => {
-        expect(exportedFiles.length).toBe(testCase.expectedFiles.count);
+        expect(exportedFiles.length).toBe(testCase.expectedFiles.expectedNames.length);
       });
       
       it('should have correct file names and extensions', () => {
@@ -654,9 +443,7 @@ describe('threejs-export', () => {
         assertMaterialProperties(originalObject, roundTripObject, testCase.expectations.materials);
       });
       
-      it('should handle structural properties correctly', () => {
-        assertStructuralProperties(originalObject, roundTripObject, testCase.expectations.structure);
-      });
+
     });
   }
   

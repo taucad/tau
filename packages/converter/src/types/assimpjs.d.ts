@@ -11,6 +11,7 @@ declare module 'assimpjs' {
 
   export type AssimpFile = {
     GetContent(): Uint8Array;
+    GetPath(): string;
   };
 
   export type FileList = {
@@ -28,6 +29,12 @@ declare module 'assimpjs' {
 
 // Re-export everything from the base module
 declare module 'assimpjs/all' {
+  export * from 'assimpjs';
+  export { default } from 'assimpjs';
+}
+
+// Re-export everything from the base module
+declare module 'assimpjs/exporter' {
   export * from 'assimpjs';
   export { default } from 'assimpjs';
 }

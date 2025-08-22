@@ -1,24 +1,34 @@
-import type { Object3D } from 'three';
 import type { USDZExporterOptions } from 'three/addons';
 import { USDZExporter } from 'three/addons';
 import { BaseExporter } from '#exporters/base.exporter.js';
+import { GltfLoader } from '#loaders/gltf.loader.js';
 import type { OutputFile } from '#types.js';
 
 /**
  * Three.js USDZ exporter implementation.
- * Exports 3D objects to Universal Scene Description (USDZ) format.
+ * Exports GLB data to Universal Scene Description (USDZ) format.
  */
 export class UsdzExporter extends BaseExporter<USDZExporterOptions> {
   private readonly exporter: USDZExporter;
+  private readonly loader: GltfLoader;
 
   public constructor() {
     super();
     this.exporter = new USDZExporter();
+    this.loader = new GltfLoader();
+    this.loader.initialize({ format: 'glb', scaleMetersToMillimeters: true });
   }
 
-  public async parseAsync(object: Object3D, options?: Partial<USDZExporterOptions>): Promise<OutputFile[]> {
+  public async parseAsync(glbData: Uint8Array, options?: Partial<USDZExporterOptions>): Promise<OutputFile[]> {
+    if (glbData.length === 0) {
+      throw new Error('GLB data cannot be empty');
+    }
+
     const mergedOptions = this.mergeOptions(options);
 
+    // Load GLB data to Object3D first
+    const object = await this.loader.loadAsync([{ name: 'input.glb', data: glbData }]);
+    
     const usdzData = await this.exporter.parseAsync(object, mergedOptions);
     return [this.createOutputFile('model', 'usdz', usdzData)];
   }

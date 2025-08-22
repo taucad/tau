@@ -1,9 +1,8 @@
-import type { Object3D } from 'three';
 import type { OutputFile } from '#types.js';
 
 /**
- * Base abstract class for Three.js exporters.
- * Provides a unified interface for exporting 3D objects to various formats.
+ * Base abstract class for 3D exporters.
+ * Provides a unified interface for exporting 3D data from GLB format to various formats.
  *
  * @template Options - The options type specific to each exporter implementation
  */
@@ -18,18 +17,19 @@ export abstract class BaseExporter<Options = Record<string, never>> {
    *
    * @param options - The options passed to the exporter. These are specific to each exporter implementation.
    */
-  public initialize(options: Options): void {
+  public initialize(options: Options): BaseExporter<Options> {
     this.options = options;
+    return this;
   }
 
   /**
-   * Parse a 3D object and export it to the target format.
+   * Parse GLB data and export it to the target format.
    *
-   * @param object - The Three.js Object3D to export.
+   * @param glbData - The GLB data as Uint8Array to export.
    * @param options - Optional runtime options that may override initialization options.
    * @returns A promise that resolves to an array of exported files.
    */
-  public abstract parseAsync(object: Object3D, options?: Partial<Options>): Promise<OutputFile[]>;
+  public abstract parseAsync(glbData: Uint8Array, options?: Partial<Options>): Promise<OutputFile[]>;
 
   /**
    * Helper method to create an OutputFile with proper naming.

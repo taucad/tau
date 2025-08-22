@@ -54,6 +54,7 @@ export const supportedOutputFormats = [
   'ply',
   'stl',
   'stp',
+  'usdz',
   'x',
   'x3d',
 ] as const;

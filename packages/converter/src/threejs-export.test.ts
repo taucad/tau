@@ -1,10 +1,11 @@
 import { expect, describe, it, beforeEach } from 'vitest';
 import type { Object3D } from 'three';
-import { Box3, Vector3 } from 'three';
+import { Box3, Vector3, Object3D as ThreeObject3D } from 'three';
 import { importThreeJs } from '#threejs-import.js';
 import { exportThreeJs, threejsExportFormats, type ThreejsExportFormat } from '#threejs-export.js';
 import type { OutputFile, InputFile } from '#types.js';
 import { loadFixture } from '#threejs-test.utils.js';
+import { GltfLoader } from '#loaders/gltf.loader.js';
 
 // ============================================================================
 // Types for Export Testing
@@ -23,7 +24,7 @@ type ExportTestCase = {
   expectedFiles: {
     count: number;
     primaryExtension: string;
-    allExtensions?: string[];
+    expectedNames: string[]; // Specific expected file names
   };
   
   // Round-trip assertions
@@ -62,25 +63,39 @@ const loadTestFixture = (fixture: ExportTestCase['fixture']): InputFile[] => {
 };
 
 /**
- * Import a test fixture into a Three.js Object3D
+ * Load GLB data from test fixture
  */
-const importTestFixture = async (fixture: ExportTestCase['fixture']): Promise<Object3D> => {
-  const files = loadTestFixture(fixture);
-  return importThreeJs(files, 'glb');
+const loadGlbFixture = (fixture: ExportTestCase['fixture']): Uint8Array => {
+  const filename = `${fixture}.glb`;
+  return loadFixture(filename);
 };
 
 /**
- * Perform round-trip test: Import → Export → Import → Compare
+ * Import a test fixture into a Three.js Object3D (for comparison purposes)
+ */
+const importTestFixture = async (fixture: ExportTestCase['fixture']): Promise<Object3D> => {
+  const files = loadTestFixture(fixture);
+  return new GltfLoader().initialize({ format: 'glb', transformYtoZup: false, scaleMetersToMillimeters: false }).loadAsync(files);
+};
+
+/**
+ * Perform round-trip test: GLB → Export → Import → Compare
  */
 const performRoundTripTest = async (
-  originalObject: Object3D,
+  glbData: Uint8Array,
   format: ThreejsExportFormat
 ): Promise<{ 
   exportedFiles: OutputFile[],
   roundTripObject: Object3D 
 }> => {
-  // Export the object
-  const exportedFiles = await exportThreeJs(originalObject, format);
+  // Export the GLB data
+  const exportedFiles = await exportThreeJs(glbData, format);
+  
+  // If no files were exported, return empty result
+  if (exportedFiles.length === 0) {
+    const emptyObject = new ThreeObject3D();
+    return { exportedFiles, roundTripObject: emptyObject };
+  }
   
   // Convert OutputFiles to InputFiles for re-import
   const inputFiles: InputFile[] = exportedFiles.map(file => ({
@@ -103,11 +118,11 @@ const assertGeometryProperties = async (
   expectations: ExportTestCase['expectations']['geometry']
 ) => {
   // Helper to count vertices and faces recursively
-  const countGeometry = (obj: Object3D) => {
+  const countGeometry = (object3d: Object3D) => {
     let vertexCount = 0;
     let faceCount = 0;
     
-    obj.traverse((child) => {
+    object3d.traverse((child) => {
       if ('geometry' in child && child.geometry) {
         const geometry = child.geometry as any;
         if (geometry.attributes?.position) {
@@ -122,15 +137,15 @@ const assertGeometryProperties = async (
     return { vertexCount, faceCount };
   };
   
-  const originalGeom = countGeometry(original);
-  const roundTripGeom = countGeometry(roundTrip);
+  const originalGeometry = countGeometry(original);
+  const roundTripGeometry = countGeometry(roundTrip);
   
   // Check vertex count within tolerance
-  const vertexDiff = Math.abs(originalGeom.vertexCount - roundTripGeom.vertexCount);
+  const vertexDiff = Math.abs(originalGeometry.vertexCount - roundTripGeometry.vertexCount);
   expect(vertexDiff).toBeLessThanOrEqual(expectations.vertexCountTolerance);
   
   // Check face count within tolerance
-  const faceDiff = Math.abs(originalGeom.faceCount - roundTripGeom.faceCount);
+  const faceDiff = Math.abs(originalGeometry.faceCount - roundTripGeometry.faceCount);
   expect(faceDiff).toBeLessThanOrEqual(expectations.faceCountTolerance);
   
   // Check bounding boxes
@@ -143,7 +158,20 @@ const assertGeometryProperties = async (
   const sizeOriginal = originalBox.getSize(new Vector3());
   const sizeRoundTrip = roundTripBox.getSize(new Vector3());
   
+  // Debug logging for bounding box analysis
+  console.log('=== BOUNDING BOX ANALYSIS ===');
+  console.log('Original bounding box min:', originalBox.min.toArray());
+  console.log('Original bounding box max:', originalBox.max.toArray());
+  console.log('Original size:', sizeOriginal.toArray());
+  console.log('Round-trip bounding box min:', roundTripBox.min.toArray());
+  console.log('Round-trip bounding box max:', roundTripBox.max.toArray());
+  console.log('Round-trip size:', sizeRoundTrip.toArray());
+  
   const sizeDiff = sizeOriginal.distanceTo(sizeRoundTrip);
+  console.log('Size difference:', sizeDiff);
+  console.log('Tolerance:', expectations.boundingBoxTolerance);
+  console.log('============================');
+  
   expect(sizeDiff).toBeLessThanOrEqual(expectations.boundingBoxTolerance);
 };
 
@@ -210,7 +238,8 @@ const exportTestCases: ExportTestCase[] = [
     skipReason: 'GLTFExporter requires FileReader API, not available in Node.js',
     expectedFiles: {
       count: 1,
-      primaryExtension: 'glb'
+      primaryExtension: 'glb',
+      expectedNames: ['model.glb']
     },
     expectations: {
       geometry: {
@@ -239,7 +268,8 @@ const exportTestCases: ExportTestCase[] = [
     skipReason: 'GLTFExporter requires FileReader API, not available in Node.js',
     expectedFiles: {
       count: 1, // For now, until we implement .bin separation
-      primaryExtension: 'gltf'
+      primaryExtension: 'gltf',
+      expectedNames: ['model.gltf']
     },
     expectations: {
       geometry: {
@@ -267,11 +297,12 @@ const exportTestCases: ExportTestCase[] = [
     description: 'STL export with basic cube',
     expectedFiles: {
       count: 1,
-      primaryExtension: 'stl'
+      primaryExtension: 'stl',
+      expectedNames: ['result.stl']
     },
     expectations: {
       geometry: {
-        vertexCountTolerance: 100, // STL may duplicate vertices at edges
+        vertexCountTolerance: 0, // STL may duplicate vertices at edges
         faceCountTolerance: 0,
         boundingBoxTolerance: 0.001,
         preservesNormals: false, // STL recalculates normals
@@ -294,8 +325,9 @@ const exportTestCases: ExportTestCase[] = [
     fixture: 'cube',
     description: 'OBJ export with basic cube',
     expectedFiles: {
-      count: 1, // Single file for now, could be 2 with MTL
-      primaryExtension: 'obj'
+      count: 2, // .obj + .mtl files
+      primaryExtension: 'obj',
+      expectedNames: ['result.obj', 'result.mtl']
     },
     expectations: {
       geometry: {
@@ -321,11 +353,10 @@ const exportTestCases: ExportTestCase[] = [
     format: 'ply',
     fixture: 'cube',
     description: 'PLY export with basic cube',
-    skip: true,
-    skipReason: 'PLYExporter requires requestAnimationFrame API, not available in Node.js',
     expectedFiles: {
       count: 1,
-      primaryExtension: 'ply'
+      primaryExtension: 'ply',
+      expectedNames: ['result.ply']
     },
     expectations: {
       geometry: {
@@ -353,18 +384,19 @@ const exportTestCases: ExportTestCase[] = [
     description: 'USDZ export with basic cube',
     expectedFiles: {
       count: 1,
-      primaryExtension: 'usdz'
+      primaryExtension: 'usdz',
+      expectedNames: ['model.usdz']
     },
     expectations: {
       geometry: {
-        vertexCountTolerance: 50, // USDZ may modify vertex count during export/import
-        faceCountTolerance: 15, // USDZ may modify face count during export/import
-        boundingBoxTolerance: 5.0, // USDZ may significantly change bounding box during export/import
+        vertexCountTolerance: 36,
+        faceCountTolerance: 12, // USDZ may modify face count during export/import
+        boundingBoxTolerance: 0.35, // TODO: debug this tolerance
         preservesNormals: true,
         preservesUVs: true
       },
       materials: {
-        preservesMaterialCount: false, // USDZ may not preserve material count exactly
+        preservesMaterialCount: false,
         preservesBasicProperties: true
       },
       structure: {
@@ -374,16 +406,15 @@ const exportTestCases: ExportTestCase[] = [
     }
   },
   
-  // DAE Format - Skip due to Node.js compatibility issues
+  // DAE Format
   {
     format: 'dae',
     fixture: 'cube',
     description: 'DAE export with basic cube',
-    skip: true,
-    skipReason: 'ColladaExporter requires requestAnimationFrame API, not available in Node.js',
     expectedFiles: {
       count: 1,
-      primaryExtension: 'dae'
+      primaryExtension: 'dae',
+      expectedNames: ['result.dae']
     },
     expectations: {
       geometry: {
@@ -398,8 +429,153 @@ const exportTestCases: ExportTestCase[] = [
         preservesBasicProperties: true
       },
       structure: {
-        preservesHierarchy: true,
-        preservesNames: true
+        preservesHierarchy: false,
+        preservesNames: false
+      }
+    }
+  },
+  
+  // FBX Format
+  {
+    format: 'fbx',
+    fixture: 'cube',
+    description: 'FBX export with basic cube',
+    expectedFiles: {
+      count: 1,
+      primaryExtension: 'fbx',
+      expectedNames: ['result.fbx']
+    },
+    expectations: {
+      geometry: {
+        vertexCountTolerance: 0,
+        faceCountTolerance: 0,
+        boundingBoxTolerance: 0.001,
+        preservesNormals: true,
+        preservesUVs: true
+      },
+      materials: {
+        preservesMaterialCount: true,
+        preservesBasicProperties: true
+      },
+      structure: {
+        preservesHierarchy: false,
+        preservesNames: false
+      }
+    }
+  },
+  
+  // X Format
+  {
+    format: 'x',
+    fixture: 'cube',
+    description: 'X export with basic cube',
+    expectedFiles: {
+      count: 1,
+      primaryExtension: 'x',
+      expectedNames: ['result.x']
+    },
+    expectations: {
+      geometry: {
+        vertexCountTolerance: 0,
+        faceCountTolerance: 0,
+        boundingBoxTolerance: 0.001,
+        preservesNormals: true,
+        preservesUVs: true
+      },
+      materials: {
+        preservesMaterialCount: true,
+        preservesBasicProperties: true
+      },
+      structure: {
+        preservesHierarchy: false,
+        preservesNames: false
+      }
+    }
+  },
+  
+  // X3D Format
+  {
+    format: 'x3d',
+    fixture: 'cube',
+    description: 'X3D export with basic cube',
+    expectedFiles: {
+      count: 1,
+      primaryExtension: 'x3d',
+      expectedNames: ['result.x3d']
+    },
+    expectations: {
+      geometry: {
+        vertexCountTolerance: 0,
+        faceCountTolerance: 0,
+        boundingBoxTolerance: 0.001,
+        preservesNormals: true,
+        preservesUVs: true
+      },
+      materials: {
+        preservesMaterialCount: true,
+        preservesBasicProperties: true
+      },
+      structure: {
+        preservesHierarchy: false,
+        preservesNames: false
+      }
+    }
+  },
+  
+  // 3DS Format
+  {
+    format: '3ds',
+    fixture: 'cube',
+    description: '3DS export with basic cube',
+    expectedFiles: {
+      count: 1,
+      primaryExtension: '3ds',
+      expectedNames: ['result.3ds']
+    },
+    expectations: {
+      geometry: {
+        vertexCountTolerance: 0,
+        faceCountTolerance: 0,
+        boundingBoxTolerance: 0.001,
+        preservesNormals: false,
+        preservesUVs: true
+      },
+      materials: {
+        preservesMaterialCount: true,
+        preservesBasicProperties: true
+      },
+      structure: {
+        preservesHierarchy: false,
+        preservesNames: false
+      }
+    }
+  },
+  
+  // STP Format
+  {
+    format: 'stp',
+    fixture: 'cube',
+    description: 'STP export with basic cube',
+    expectedFiles: {
+      count: 1,
+      primaryExtension: 'stp',
+      expectedNames: ['result.stp']
+    },
+    expectations: {
+      geometry: {
+        vertexCountTolerance: 0,
+        faceCountTolerance: 0,
+        boundingBoxTolerance: 0.001,
+        preservesNormals: false,
+        preservesUVs: false
+      },
+      materials: {
+        preservesMaterialCount: true,
+        preservesBasicProperties: true
+      },
+      structure: {
+        preservesHierarchy: false,
+        preservesNames: false
       }
     }
   }
@@ -420,15 +596,17 @@ describe('threejs-export', () => {
       }
       
       let originalObject: Object3D;
+      let glbData: Uint8Array;
       let exportedFiles: OutputFile[];
       let roundTripObject: Object3D;
       
       beforeEach(async () => {
-        // Import the test fixture
+        // Load GLB data and import for comparison
+        glbData = loadGlbFixture(testCase.fixture);
         originalObject = await importTestFixture(testCase.fixture);
         
-        // Perform round-trip export/import
-        const result = await performRoundTripTest(originalObject, testCase.format);
+        // Perform round-trip export/import using GLB data
+        const result = await performRoundTripTest(glbData, testCase.format);
         exportedFiles = result.exportedFiles;
         roundTripObject = result.roundTripObject;
       });
@@ -442,7 +620,13 @@ describe('threejs-export', () => {
         expect(exportedFiles.length).toBe(testCase.expectedFiles.count);
       });
       
-      it('should have correct primary file extension', () => {
+      it('should have correct file names and extensions', () => {
+        // Check that we have the expected file names
+        const actualNames = exportedFiles.map(f => f.name).sort();
+        const expectedNames = [...testCase.expectedFiles.expectedNames].sort();
+        expect(actualNames).toEqual(expectedNames);
+        
+        // Also check primary extension exists
         const primaryFile = exportedFiles.find(f => 
           f.name.endsWith(`.${testCase.expectedFiles.primaryExtension}`)
         );
@@ -499,8 +683,8 @@ describe('threejs-export', () => {
     expect([...new Set(testedFormats)].sort()).toEqual([...new Set(declaredFormats)].sort());
   });
   
-  it('should throw error when object is null or undefined', async () => {
-    await expect(exportThreeJs(null as any, 'glb')).rejects.toThrow();
-    await expect(exportThreeJs(undefined as any, 'glb')).rejects.toThrow();
+  it('should throw error when GLB data is empty', async () => {
+    const emptyGlbData = new Uint8Array(0);
+    await expect(exportThreeJs(emptyGlbData, 'glb')).rejects.toThrow('GLB data cannot be empty');
   });
 });

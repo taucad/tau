@@ -23,8 +23,9 @@ export abstract class ThreeJsBaseLoader<ParseResult = unknown, Options extends B
    *
    * @param options - The options passed to the loader. These are specific to each loader implementation.
    */
-  public initialize(options: Options): void {
+  public initialize(options: Options): ThreeJsBaseLoader<ParseResult, Options> {
     this.options = options;
+    return this;
   }
 
   /**

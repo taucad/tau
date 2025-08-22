@@ -317,29 +317,7 @@ const loaderTestCases: LoaderTestCase[] = [
   // UNSUPPORTED FORMATS
   // ========================================================================
 
-  // Tested but invalid formats
-  createSkippedTestCase('blend', 'BLEND loader does not support latest Blender file format.'),
-  createSkippedTestCase('kmz', 'KMZ loader currently requires DOM parser, which is not available in Node.js.'),
-  
-  // Fixtures not available
   createSkippedTestCase('md2', 'MD2 fixture is not available.'),
-
-  // TODO formats
-  createSkippedTestCase('dwg', 'Autocad .dwg files are not implemented yet.'),
-  createSkippedTestCase('gdf', 'Graphics Data Format .gdf files are not implemented yet.'),
-  createSkippedTestCase('gts', 'GNU Triangulated Surface .gts files are not implemented yet.'),
-  createSkippedTestCase('inc', 'Include .inc files are not implemented yet.'),
-  createSkippedTestCase('ldr', 'LEGO Digital Designer .ldr files are not implemented yet.'),
-  createSkippedTestCase('pdb', 'Protein Data Bank .pdb files are not implemented yet.'),
-  createSkippedTestCase('udo', 'User Defined Object .udo files are not implemented yet.'),
-  createSkippedTestCase('xaml', 'Extensible Application Markup Language .xaml files are not implemented yet.'),
-
-  // Proprietary formats
-  createSkippedTestCase('max', '3ds Max loader is not implemented yet.'),
-  createSkippedTestCase('shapr', 'Shapr3D loader is not implemented yet.'),
-  createSkippedTestCase('skp', 'SketchUp .skp files are not implemented yet.'),
-  createSkippedTestCase('sldprt', 'SolidWorks loader is not implemented yet.'),
-  createSkippedTestCase('x_t', 'Parasolid loader is not implemented yet.'),
 ];
 
 // ============================================================================

@@ -401,7 +401,6 @@ const createExportTestCase = (
 // ============================================================================
 
 const exportTestCases: ExportTestCase[] = [
-  // GLTF/GLB Formats - Now supported with gltf-transform
   createExportTestCase('glb', {
     expectedFiles: {
       expectedNames: ['model.glb'],
@@ -428,9 +427,9 @@ const exportTestCases: ExportTestCase[] = [
     expectations: {
       geometry: {
         ...STANDARD_GEOMETRY_EXPECTATIONS,
-        hasUvAttribute: false, // STL doesn't support UVs
+        hasUvAttribute: false,
       },
-      materials: LIMITED_MATERIAL_EXPECTATIONS, // STL doesn't support materials
+      materials: LIMITED_MATERIAL_EXPECTATIONS,
     },
   }),
 
@@ -440,7 +439,7 @@ const exportTestCases: ExportTestCase[] = [
       expectedNames: ['result.obj', 'result.mtl'],
     },
     expectations: {
-      materials: MULTI_MATERIAL_EXPECTATIONS, // OBJ export creates multiple default materials
+      materials: MULTI_MATERIAL_EXPECTATIONS,
     },
   }),
 
@@ -449,9 +448,9 @@ const exportTestCases: ExportTestCase[] = [
     expectations: {
       geometry: {
         ...STANDARD_GEOMETRY_EXPECTATIONS,
-        hasUvAttribute: false, // PLY UVs are less reliable
+        hasUvAttribute: false,
       },
-      materials: LIMITED_MATERIAL_EXPECTATIONS, // PLY has limited material support
+      materials: LIMITED_MATERIAL_EXPECTATIONS,
     },
   }),
 
@@ -478,7 +477,7 @@ const exportTestCases: ExportTestCase[] = [
   // Standard formats that preserve everything
   createExportTestCase('dae', {
     expectations: {
-      materials: MULTI_MATERIAL_EXPECTATIONS, // DAE creates multiple default materials
+      materials: MULTI_MATERIAL_EXPECTATIONS,
     },
   }),
   createExportTestCase('fbx'),
@@ -488,11 +487,7 @@ const exportTestCases: ExportTestCase[] = [
   // 3DS Format - doesn't preserve attributes well and may add default materials
   createExportTestCase('3ds', {
     expectations: {
-      geometry: {
-        ...STANDARD_GEOMETRY_EXPECTATIONS,
-        // 3DS actually does preserve normals (test revealed this)
-      },
-      materials: MULTI_MATERIAL_EXPECTATIONS, // 3DS creates multiple default materials
+      materials: MULTI_MATERIAL_EXPECTATIONS,
     },
   }),
 
@@ -500,7 +495,7 @@ const exportTestCases: ExportTestCase[] = [
   createExportTestCase('stp', {
     expectations: {
       geometry: {
-        ...STANDARD_GEOMETRY_EXPECTATIONS, // STP actually preserves normals (test revealed this)
+        ...STANDARD_GEOMETRY_EXPECTATIONS,
         meshCountTolerance: 15, // CAD formats often subdivide geometry into multiple meshes
       },
       materials: {

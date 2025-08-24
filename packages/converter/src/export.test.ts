@@ -456,24 +456,24 @@ const exportTestCases: ExportTestCase[] = [
   }),
 
   // USDZ Format
-  // createExportTestCase('usdz', {
-  //   expectedFiles: {
-  //     expectedNames: ['model.usdz'],
-  //   },
-  //   skip: true,
-  //   skipReason: 'USDZ exporter does not produce valid geometry.',
-  //   expectations: {
-  //     geometry: {
-  //       vertexCountTolerance: 0,
-  //       meshCountTolerance: 0, // USDZ may modify mesh count during export/import
-  //       boundingBoxTolerance: 0.001, // TODO: debug this tolerance
-  //     },
-  //     materials: {
-  //       expectedMaterialCount: 0,
-  //       expectedTextureCount: 0,
-  //     },
-  //   },
-  // }),
+  createExportTestCase('usdz', {
+    expectedFiles: {
+      expectedNames: ['model.usdz'],
+    },
+    skip: true,
+    skipReason: 'USDZ exporter does not produce valid geometry.',
+    expectations: {
+      geometry: {
+        vertexCountTolerance: 0,
+        meshCountTolerance: 0, // USDZ may modify mesh count during export/import
+        boundingBoxTolerance: 0.001, // TODO: debug this tolerance
+      },
+      materials: {
+        expectedMaterialCount: 0,
+        expectedTextureCount: 0,
+      },
+    },
+  }),
 
   // Standard formats that preserve everything
   createExportTestCase('dae', {

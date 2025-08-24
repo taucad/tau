@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import type { InputFormat, OutputFormat } from '#types.js';
+import type { InputFormat, OutputFile, OutputFormat } from '#types.js';
 import {
   convertFile,
   importToGlb,
@@ -112,7 +112,7 @@ const loadTestFile = (format: InputFormat) => {
 /**
  * Validate that output files are properly formatted.
  */
-const validateOutputFiles = (files: unknown[], expectedFormat: OutputFormat) => {
+const validateOutputFiles = (files: OutputFile[], expectedFormat: OutputFormat) => {
   expect(files).toBeDefined();
   expect(Array.isArray(files)).toBe(true);
   expect(files.length).toBeGreaterThan(0);
@@ -235,7 +235,7 @@ describe('File Conversion Integration', () => {
       validateGlbData(glb);
 
       // For GLB input, output should be identical to input
-      expect(glb).toEqual(inputFiles[0].data);
+      expect(glb).toEqual(inputFiles[0]!.data);
     });
   });
 
@@ -272,8 +272,8 @@ describe('File Conversion Integration', () => {
     it('should handle GLB pass-through optimization', async () => {
       const outputFiles = await exportFromGlb(testGlb, 'glb');
       expect(outputFiles).toHaveLength(1);
-      expect(outputFiles[0].name).toBe('model.glb');
-      expect(outputFiles[0].data).toEqual(testGlb);
+      expect(outputFiles[0]!.name).toBe('model.glb');
+      expect(outputFiles[0]!.data).toEqual(testGlb);
     });
   });
 
@@ -293,7 +293,7 @@ describe('File Conversion Integration', () => {
         validateOutputFiles(roundTripFiles, 'obj');
 
         // Basic validation that we got valid output
-        expect(roundTripFiles[0].data.length).toBeGreaterThan(100);
+        expect(roundTripFiles[0]!.data.length).toBeGreaterThan(100);
       } catch (error) {
         if (error instanceof Error && error.message.includes('not implemented')) {
           console.warn(`Skipping round-trip test: ${error.message}`);

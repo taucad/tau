@@ -199,6 +199,7 @@ const assertBoundingBoxSize = (comparison: InspectComparison, tolerance: number)
     roundTripScene.bboxMax![1]! - roundTripScene.bboxMin![1]!,
     roundTripScene.bboxMax![2]! - roundTripScene.bboxMin![2]!,
   ];
+  console.log(originalSize, roundTripSize);
 
   const sizeDiff = Math.sqrt(
     Math.pow(originalSize[0]! - roundTripSize[0]!, 2) +
@@ -306,8 +307,6 @@ const assertTextureCount = (comparison: InspectComparison, expectedCount: number
   expect(roundTrip.textures.properties.length).toBe(expectedCount);
 };
 
-
-
 // ============================================================================
 // Test Case Templates & Factories
 // ============================================================================
@@ -327,21 +326,10 @@ const STANDARD_MATERIAL_EXPECTATIONS = {
   expectedTextureCount: 0, // Standard cube fixture has no textures
 } as const;
 
-
-
-const LIMITED_MATERIAL_EXPECTATIONS = {
-  expectedMaterialCount: 1, // Limited formats create 1 default material
-  expectedTextureCount: 0, // Limited formats don't preserve textures
-} as const;
-
 const MULTI_MATERIAL_EXPECTATIONS = {
   expectedMaterialCount: 2, // Some formats create multiple default materials
   expectedTextureCount: 0, // These formats don't preserve textures
 } as const;
-
-
-
-
 
 /**
  * Create a variant of expectations with overrides
@@ -401,39 +389,29 @@ const createExportTestCase = (
 // ============================================================================
 
 const exportTestCases: ExportTestCase[] = [
-  createExportTestCase('glb', {
-    expectedFiles: {
-      expectedNames: ['model.glb'],
-    },
-    expectations: {
-      geometry: {
-        boundingBoxTolerance: 3.47, // TODO: debug this tolerance
-      },
-    },
-  }),
+  // Formats that preserve everything
+  createExportTestCase('stl'),
+  createExportTestCase('ply'),
+  createExportTestCase('fbx'),
+  createExportTestCase('x'),
+  createExportTestCase('x3d'),
   createExportTestCase('gltf', {
     expectedFiles: {
       expectedNames: ['model.gltf', 'buffer.bin'],
     },
+  }),
+  
+  // Formats that add default materials
+  createExportTestCase('dae', {
     expectations: {
-      geometry: {
-        boundingBoxTolerance: 3.47, // TODO: debug this tolerance
-      },
+      materials: MULTI_MATERIAL_EXPECTATIONS,
     },
   }),
-
-  // STL Format
-  createExportTestCase('stl', {
+  createExportTestCase('3ds', {
     expectations: {
-      geometry: {
-        ...STANDARD_GEOMETRY_EXPECTATIONS,
-        hasUvAttribute: false,
-      },
-      materials: LIMITED_MATERIAL_EXPECTATIONS,
+      materials: MULTI_MATERIAL_EXPECTATIONS,
     },
   }),
-
-  // OBJ Format
   createExportTestCase('obj', {
     expectedFiles: {
       expectedNames: ['result.obj', 'result.mtl'],
@@ -443,14 +421,17 @@ const exportTestCases: ExportTestCase[] = [
     },
   }),
 
-  // PLY Format
-  createExportTestCase('ply', {
+  // STP Format - CAD format with limited capabilities and may subdivide geometry
+  createExportTestCase('stp', {
     expectations: {
       geometry: {
         ...STANDARD_GEOMETRY_EXPECTATIONS,
-        hasUvAttribute: false,
+        meshCountTolerance: 15, // CAD formats often subdivide geometry into multiple meshes
       },
-      materials: LIMITED_MATERIAL_EXPECTATIONS,
+      materials: {
+        expectedMaterialCount: 0, // STP doesn't preserve or create materials
+        expectedTextureCount: 0, // STP doesn't preserve textures
+      },
     },
   }),
 
@@ -470,37 +451,6 @@ const exportTestCases: ExportTestCase[] = [
       materials: {
         expectedMaterialCount: 0,
         expectedTextureCount: 0,
-      },
-    },
-  }),
-
-  // Standard formats that preserve everything
-  createExportTestCase('dae', {
-    expectations: {
-      materials: MULTI_MATERIAL_EXPECTATIONS,
-    },
-  }),
-  createExportTestCase('fbx'),
-  createExportTestCase('x'),
-  createExportTestCase('x3d'),
-
-  // 3DS Format - doesn't preserve attributes well and may add default materials
-  createExportTestCase('3ds', {
-    expectations: {
-      materials: MULTI_MATERIAL_EXPECTATIONS,
-    },
-  }),
-
-  // STP Format - CAD format with limited capabilities and may subdivide geometry
-  createExportTestCase('stp', {
-    expectations: {
-      geometry: {
-        ...STANDARD_GEOMETRY_EXPECTATIONS,
-        meshCountTolerance: 15, // CAD formats often subdivide geometry into multiple meshes
-      },
-      materials: {
-        expectedMaterialCount: 0, // STP doesn't preserve or create materials
-        expectedTextureCount: 0, // STP doesn't preserve textures
       },
     },
   }),

@@ -112,7 +112,7 @@ const loadTestFile = (format: InputFormat) => {
 /**
  * Validate that output files are properly formatted.
  */
-const validateOutputFiles = (files: OutputFile[], expectedFormat: OutputFormat) => {
+const validateOutputFiles = (files: OutputFile[], _expectedFormat: OutputFormat) => {
   expect(files).toBeDefined();
   expect(Array.isArray(files)).toBe(true);
   expect(files.length).toBeGreaterThan(0);

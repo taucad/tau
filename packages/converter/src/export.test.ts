@@ -399,6 +399,11 @@ const exportTestCases: ExportTestCase[] = [
       expectedNames: ['model.gltf', 'buffer.bin'],
     },
   }),
+  createExportTestCase('glb', {
+    expectedFiles: {
+      expectedNames: ['model.glb'],
+    },
+  }),
   
   // Formats that add default materials
   createExportTestCase('dae', {

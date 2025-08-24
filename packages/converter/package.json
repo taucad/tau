@@ -52,7 +52,6 @@
     "@gltf-transform/functions": "^4.2.1",
     "assimpjs": "https://codeload.github.com/taucad/assimpjs/tar.gz/cf36dc8e4ef85f1153d041defac70bb1bc1c6454",
     "draco3dgltf": "^1.5.7",
-    "gl-matrix": "^3.4.4",
     "occt-import-js": "^0.0.23",
     "rhino3dm": "^8.17.0",
     "three": "^0.179.0"

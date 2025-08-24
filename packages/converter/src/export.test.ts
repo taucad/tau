@@ -199,7 +199,6 @@ const assertBoundingBoxSize = (comparison: InspectComparison, tolerance: number)
     roundTripScene.bboxMax![1]! - roundTripScene.bboxMin![1]!,
     roundTripScene.bboxMax![2]! - roundTripScene.bboxMin![2]!,
   ];
-  console.log(originalSize, roundTripSize);
 
   const sizeDiff = Math.sqrt(
     Math.pow(originalSize[0]! - roundTripSize[0]!, 2) +

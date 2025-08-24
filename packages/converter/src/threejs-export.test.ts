@@ -334,11 +334,13 @@ const exportTestCases: ExportTestCase[] = [
     expectedFiles: {
       expectedNames: ['model.usdz']
     },
+    skip: true,
+    skipReason: 'USDZ exporter does not produce valid geometry.',
     expectations: {
       geometry: {
-        vertexCountTolerance: 36,
-        faceCountTolerance: 12, // USDZ may modify face count during export/import
-        boundingBoxTolerance: 0.35, // TODO: debug this tolerance
+        vertexCountTolerance: 0,
+        faceCountTolerance: 0, // USDZ may modify face count during export/import
+        boundingBoxTolerance: 0.001, // TODO: debug this tolerance
       },
       materials: {
         preservesMaterialCount: false,

@@ -1,7 +1,12 @@
 import type { Mesh, Object3D } from 'three';
 import { GLTFLoader } from 'three/addons';
-import type { GLTF } from 'three/addons';
 import { Matrix4 } from 'three';
+import type { Document } from '@gltf-transform/core';
+import { NodeIO } from '@gltf-transform/core';
+import { KHRONOS_EXTENSIONS } from '@gltf-transform/extensions';
+import { unpartition } from '@gltf-transform/functions';
+import draco3d from 'draco3dgltf';
+import { createCoordinateTransform, createScalingTransform } from '#gltf.transforms.js';
 import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
 import type { BaseLoaderOptions } from '#loaders/threejs.base.loader.js';
 import type { InputFile } from '#types.js';
@@ -12,7 +17,7 @@ type GltfLoaderOptions = {
   scaleMetersToMillimeters?: boolean;
 } & BaseLoaderOptions;
 
-export class GltfLoader extends ThreeJsBaseLoader<GLTF, GltfLoaderOptions> {
+export class GltfLoader extends ThreeJsBaseLoader<Uint8Array, GltfLoaderOptions> {
   private readonly loader = new GLTFLoader();
   private readonly dracoLoader = new NodeDracoLoader();
 
@@ -27,33 +32,85 @@ export class GltfLoader extends ThreeJsBaseLoader<GLTF, GltfLoaderOptions> {
    */
   private readonly scalingMatrix = new Matrix4().makeScale(1000, 1000, 1000);
 
-  protected async parseAsync(files: InputFile[]): Promise<GLTF> {
+  protected async parseAsync(files: InputFile[]): Promise<Uint8Array> {
+    const io = new NodeIO().registerExtensions(KHRONOS_EXTENSIONS).registerDependencies({
+      'draco3d.decoder': await draco3d.createDecoderModule(),
+      'draco3d.encoder': await draco3d.createEncoderModule(),
+    });
+    const { data, name } = this.findPrimaryFile(files);
+
+    // Determine if this is a GLTF (JSON) or GLB (binary) file
+    const isGltf = name.toLowerCase().endsWith('.gltf');
+    let document: Document;
+
+    if (isGltf) {
+      // For GLTF files, convert to text and use readJSON
+      const jsonText = new TextDecoder().decode(data);
+      const json = JSON.parse(jsonText);
+      
+      // Build resources map from additional files (e.g., .bin files)
+      const resources: Record<string, Uint8Array> = {};
+      files.forEach((file) => {
+        if (file.name !== name) {
+          // Add other files as resources using their filename as the URI
+          // gltf-transform expects Uint8Array, not ArrayBuffer
+          resources[file.name] = file.data;
+        }
+      });
+      
+      document = await io.readJSON({ json, resources });
+    } else {
+      // For GLB files, use readBinary
+      document = await io.readBinary(data);
+    }
+
+    // Apply transformations
+    await document.transform(
+      unpartition(), // Consolidate buffers and embed binaries
+      createCoordinateTransform(this.options.transformYtoZup ?? true),
+      createScalingTransform(this.options.scaleMetersToMillimeters ?? true),
+    );
+
+    // Export the transformed document back to GLB
+    const transformedGlb = await io.writeBinary(document);
+    return new Uint8Array(transformedGlb);
+  }
+
+  protected mapToGlb(parseResult: Uint8Array): Uint8Array {
+    return parseResult;
+  }
+
+  /**
+   * Load GLB data and return Object3D with transformations applied.
+   * This method is used by other loaders that need to apply transformations.
+   */
+  public async loadAsObject3D(
+    glbData: Uint8Array,
+    options?: { transformYtoZup?: boolean; scaleMetersToMillimeters?: boolean },
+  ): Promise<Object3D> {
     await this.dracoLoader.initialize();
     this.loader.setDRACOLoader(this.dracoLoader);
 
-    const { data } = this.findPrimaryFile(files);
-    const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
-    return this.loader.parseAsync(arrayBuffer, '');
-  }
+    const arrayBuffer = this.uint8ArrayToArrayBuffer(glbData);
+    const gltf = await this.loader.parseAsync(arrayBuffer, '');
 
-  protected mapToObject(parseResult: GLTF): Object3D {
     // Apply transformations to all geometries in the scene
-    parseResult.scene.traverse((child) => {
+    gltf.scene.traverse((child) => {
       if (child.type === 'Mesh') {
         const mesh = child as Mesh;
 
         // Apply coordinate system transformation (Y-up to Z-up)
-        if (this.options.transformYtoZup ?? true) {
+        if (options?.transformYtoZup ?? this.options.transformYtoZup ?? true) {
           mesh.geometry.applyMatrix4(this.coordinateTransformMatrix);
         }
 
         // Apply scaling transformation (meters to millimeters)
-        if (this.options.scaleMetersToMillimeters ?? true) {
+        if (options?.scaleMetersToMillimeters ?? this.options.scaleMetersToMillimeters ?? true) {
           mesh.geometry.applyMatrix4(this.scalingMatrix);
         }
       }
     });
 
-    return parseResult.scene;
+    return gltf.scene;
   }
 }

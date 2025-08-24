@@ -1,12 +1,11 @@
 /**
  * Lists all supported formats and their loaders.
- * 
+ *
  * For a list of many 3D file formats, see:
  * @see https://en.wikipedia.org/wiki/List_of_file_formats#Graphics
  */
 
 /* eslint-disable @typescript-eslint/naming-convention -- formats can be valid identifiers */
-import type { Object3D } from 'three';
 import type { InputFile, InputFormat } from '#types.js';
 import type { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
 import { DracoLoader } from '#loaders/draco.loader.js';
@@ -75,20 +74,20 @@ const loaderFromInputFormat = {
   // pdb: new UnimplementedLoader('Protein Data Bank .pdb files are not implemented. This format is designed for molecular data, not 3D models.'),
   // udo: new UnimplementedLoader('User Defined Object .udo files are not implemented. This format requires additional development work.'),
   // xaml: new UnimplementedLoader('Extensible Application Markup Language .xaml files are not implemented for 3D model conversion.'),
-  
+
   // Proprietary formats
   // max: new UnimplementedLoader('3ds Max .max files are not implemented. This proprietary format requires specialized Autodesk file parsing capabilities.'),
   // shapr: new UnimplementedLoader('Shapr3D .shapr files are not implemented. This proprietary format requires specialized CAD file parsing capabilities.'),
   // skp: new UnimplementedLoader('SketchUp .skp files are not implemented. This proprietary format requires specialized SketchUp file parsing capabilities.'),
   // sldprt: new UnimplementedLoader('SolidWorks .sldprt files are not implemented. This proprietary format requires specialized CAD file parsing capabilities.'),
   // x_t: new UnimplementedLoader('Parasolid .x_t files are not implemented. This proprietary format requires specialized CAD kernel integration.'),
-} as const satisfies Record<InputFormat, ThreeJsBaseLoader>;
+} as const satisfies Partial<Record<InputFormat, ThreeJsBaseLoader>>;
 
 export type ThreejsImportFormat = keyof typeof loaderFromInputFormat;
 
 export const threejsImportFomats = Object.keys(loaderFromInputFormat) as ThreejsImportFormat[];
 
-export const importThreeJs = async (files: InputFile[], format: ThreejsImportFormat): Promise<Object3D> => {
+export const importThreeJs = async (files: InputFile[], format: ThreejsImportFormat): Promise<Uint8Array> => {
   const loader = loaderFromInputFormat[format];
 
   loader.initialize({ format });

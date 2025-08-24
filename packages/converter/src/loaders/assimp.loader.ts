@@ -1,16 +1,15 @@
 /* eslint-disable @typescript-eslint/naming-convention -- some formats are named like this */
 /* eslint-disable new-cap -- External library uses PascalCase method names */
-import type { Object3D } from 'three';
 import assimpjs from 'assimpjs/all';
 import type { InputFormat, InputFile } from '#types.js';
+import { applyGlbTransforms } from '#gltf.transforms.js';
 import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
-import { GltfLoader } from '#loaders/gltf.loader.js';
 
 type AssimpOptions = {
   format: InputFormat;
 };
 
-export class AssimpLoader extends ThreeJsBaseLoader<Object3D, AssimpOptions> {
+export class AssimpLoader extends ThreeJsBaseLoader<Uint8Array, AssimpOptions> {
   /**
    * @description Whether the format requires a Y-to-Z up transformation.
    */
@@ -28,15 +27,13 @@ export class AssimpLoader extends ThreeJsBaseLoader<Object3D, AssimpOptions> {
     ase: true,
   };
 
-  private readonly gltfLoader = new GltfLoader();
-
-  protected async parseAsync(files: InputFile[], options: AssimpOptions): Promise<Object3D> {
+  protected async parseAsync(files: InputFile[], options: AssimpOptions): Promise<Uint8Array> {
     // Initialize assimpjs
     const ajs = await assimpjs();
 
     // Create file list with all input files, preserving original filenames
     const fileList = new ajs.FileList();
-    
+
     for (const file of files) {
       fileList.AddFile(file.name, file.data);
     }
@@ -51,21 +48,27 @@ export class AssimpLoader extends ThreeJsBaseLoader<Object3D, AssimpOptions> {
 
     // Get the GLB data, GLB only supports single file
     const resultFile = result.GetFile(0);
-
     const glbData = resultFile.GetContent();
 
+    // Apply coordinate transformations for formats that require Y-to-Z up conversion
     const transformYtoZup = this.getTransformYtoZup(options.format);
 
-    // Initialize and use the GLTF loader to convert GLB data to Three.js Object3D
-    this.gltfLoader.initialize({ format: 'glb', transformYtoZup, scaleMetersToMillimeters: false });
-    return this.gltfLoader.loadAsync([{ name: 'converted.glb', data: glbData }]);
-  }
+    if (transformYtoZup) {
+      // Apply gltf-transform transformations to the GLB data
+      return applyGlbTransforms(glbData, {
+        transformYtoZup: true,
+        scaleMetersToMillimeters: false,
+      });
+    }
 
-  protected mapToObject(parseResult: Object3D): Object3D {
-    return parseResult;
+    return glbData;
   }
 
   private getTransformYtoZup(format: InputFormat): boolean {
     return AssimpLoader.transformYtoZupRequired[format] ?? false;
+  }
+
+  protected mapToGlb(parseResult: Uint8Array): Uint8Array {
+    return parseResult;
   }
 }

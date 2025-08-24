@@ -17,7 +17,7 @@ export abstract class BaseExporter<Options = Record<string, never>> {
    *
    * @param options - The options passed to the exporter. These are specific to each exporter implementation.
    */
-  public initialize(options: Options): BaseExporter<Options> {
+  public initialize(options: Options): this {
     this.options = options;
     return this;
   }

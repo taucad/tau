@@ -42,11 +42,11 @@ export type LoaderTestCase = {
    *
    * For example, a test case for a cube can have a variant for a mesh, a NURBS, etc.
    */
-  variant?: 
-    | 'binary' 
-    | 'ascii' 
+  variant?:
+    | 'binary'
+    | 'ascii'
     | 'mesh'
-    | 'brep' 
+    | 'brep'
     | 'textures'
     | 'materials'
     | 'animations'
@@ -86,7 +86,7 @@ export const loadFixture = (fixtureName: string): Uint8Array => {
 // Helper for creating geometry variants with overrides
 export const createGeometryVariant = (
   base: GeometryExpectation,
-  overrides: PartialDeep<GeometryExpectation>
+  overrides: PartialDeep<GeometryExpectation>,
 ): GeometryExpectation => ({
   ...base,
   ...overrides,
@@ -103,20 +103,37 @@ export const loadTestData = async (testCase: LoaderTestCase): Promise<InputFile[
   }
 
   if (testCase.files) {
-    return testCase.files.map(filename => ({
+    return testCase.files.map((filename) => ({
       name: filename,
-      data: loadFixture(filename)
+      data: loadFixture(filename),
     }));
   }
 
   if (testCase.fixtureName) {
-    return [{
-      name: testCase.fixtureName,
-      data: loadFixture(testCase.fixtureName)
-    }];
+    return [
+      {
+        name: testCase.fixtureName,
+        data: loadFixture(testCase.fixtureName),
+      },
+    ];
   }
 
   throw new Error('Test case must specify files, fixtureName, or dataSource');
+};
+
+/**
+ * Validate that GLB data is properly formatted.
+ */
+export const validateGlbData = (glb: Uint8Array): void => {
+  expect(glb).toBeDefined();
+  expect(glb).toBeInstanceOf(Uint8Array);
+  expect(glb.length).toBeGreaterThan(0);
+
+  // Basic GLB header validation (first 4 bytes should be 'glTF')
+  if (glb.length >= 4) {
+    const header = new TextDecoder().decode(glb.slice(0, 4));
+    expect(header).toBe('glTF');
+  }
 };
 
 /**

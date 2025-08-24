@@ -3,9 +3,11 @@ import { Mesh, Points, MeshStandardMaterial, PointsMaterial } from 'three';
 import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
 import type { InputFile } from '#types.js';
 import { NodeDracoLoader } from '#loaders/draco/node-draco-loader.js';
+import { GltfExporter } from '#exporters/gltf.exporter.js';
 
 export class DracoLoader extends ThreeJsBaseLoader<BufferGeometry> {
   private readonly loader = new NodeDracoLoader();
+  private readonly gltfExporter = new GltfExporter();
 
   public dispose(): void {
     this.loader.dispose();
@@ -23,27 +25,25 @@ export class DracoLoader extends ThreeJsBaseLoader<BufferGeometry> {
           resolve(geometry);
         },
         (error: unknown) => {
-          if (error instanceof ErrorEvent) {
-            reject(new Error(`Failed to parse DRACO data: ${error.message}`));
-          } else {
-            reject(new Error(`Failed to parse DRACO data: ${String(error)}`));
-          }
+          reject(new Error(`Failed to decode Draco geometry: ${String(error)}`));
         },
       );
     });
   }
 
-  protected mapToObject(parseResult: BufferGeometry): Object3D {
+  protected async mapToGlb(parseResult: BufferGeometry): Promise<Uint8Array> {
     // Check if geometry has indices (is a mesh) or is a point cloud
-    if (parseResult.index !== null) {
+    let object3d: Object3D;
+    if (parseResult.index === null) {
+      const material = new PointsMaterial({ size: 0.01 });
+      material.vertexColors = parseResult.hasAttribute('color');
+      object3d = new Points(parseResult, material);
+    } else {
       const material = new MeshStandardMaterial();
-      const mesh = new Mesh(parseResult, material);
-      return mesh;
+      object3d = new Mesh(parseResult, material);
     }
 
-    const material = new PointsMaterial({ size: 0.01 });
-    material.vertexColors = parseResult.hasAttribute('color');
-    const points = new Points(parseResult, material);
-    return points;
+    // Generate GLB from the created Object3D using our GltfExporter
+    return this.gltfExporter.exportObject3DToGlb(object3d);
   }
 }

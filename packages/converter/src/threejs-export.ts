@@ -24,7 +24,6 @@ const exportConfigs = {
   
   // '3mf': { exporter: new AssimpExporter().initialize({ format: '3mf' }) }, // Fix assimp 3mf exporter
   // '3dm': { exporter: new AssimpExporter().initialize({ format: '3dm' }) }, // Integrate 3dm exporter into assimp
-
 } as const satisfies Partial<Record<OutputFormat, ExportConfig>>;
 
 export type ThreejsExportFormat = keyof typeof exportConfigs;

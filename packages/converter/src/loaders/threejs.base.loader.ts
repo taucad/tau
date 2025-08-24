@@ -1,4 +1,3 @@
-import type { Object3D } from 'three';
 import type { InputFormat, InputFile } from '#types.js';
 
 export type BaseLoaderOptions = {
@@ -23,22 +22,22 @@ export abstract class ThreeJsBaseLoader<ParseResult = unknown, Options extends B
    *
    * @param options - The options passed to the loader. These are specific to each loader implementation.
    */
-  public initialize(options: Options): ThreeJsBaseLoader<ParseResult, Options> {
+  public initialize(options: Options): this {
     this.options = options;
     return this;
   }
 
   /**
-   * Load and parse files and return Three.js Object3D.
+   * Load and parse files and return GLB data.
    *
    * @param files - The input files to load (can be single file or multiple files).
    * @param options - Optional runtime options that may override initialization options.
-   * @returns A promise that resolves to a Three.js Object3D object.
+   * @returns A promise that resolves to GLB data as Uint8Array.
    */
-  public async loadAsync(files: InputFile[], options?: Partial<Options>): Promise<Object3D> {
+  public async loadAsync(files: InputFile[], options?: Partial<Options>): Promise<Uint8Array> {
     const mergedOptions = this.mergeOptions(options);
     const parseResult = await this.parseAsync(files, mergedOptions);
-    return this.mapToObject(parseResult, mergedOptions);
+    return this.mapToGlb(parseResult, mergedOptions);
   }
 
   /**
@@ -131,6 +130,7 @@ export abstract class ThreeJsBaseLoader<ParseResult = unknown, Options extends B
       const normalizedExtension = extension.startsWith('.') ? extension : `.${extension}`;
       throw new Error(`No ${normalizedExtension.toUpperCase()} file found in file set`);
     }
+
     return file;
   }
 
@@ -145,6 +145,7 @@ export abstract class ThreeJsBaseLoader<ParseResult = unknown, Options extends B
     for (const file of files) {
       fileMap.set(file.name, file.data);
     }
+
     return fileMap;
   }
 
@@ -158,12 +159,12 @@ export abstract class ThreeJsBaseLoader<ParseResult = unknown, Options extends B
   protected abstract parseAsync(files: InputFile[], options: Options): Promise<ParseResult>;
 
   /**
-   * Map the parse result to an array of Three.js Object3D objects.
+   * Map the parse result to GLB data.
    * The parseResult type is equivalent to the resolved value of parseAsync.
    *
    * @param parseResult - The result from the underlying loader (same type as parseAsync return).
    * @param options - The merged options for mapping.
-   * @returns An array of Three.js Object3D objects.
+   * @returns GLB data as Uint8Array.
    */
-  protected abstract mapToObject(parseResult: ParseResult, options: Options): Object3D;
+  protected abstract mapToGlb(parseResult: ParseResult, options: Options): Uint8Array | Promise<Uint8Array>;
 }

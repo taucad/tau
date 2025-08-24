@@ -27,8 +27,8 @@ export class UsdzExporter extends BaseExporter<USDZExporterOptions> {
     const mergedOptions = this.mergeOptions(options);
 
     // Load GLB data to Object3D first
-    const object = await this.loader.loadAsync([{ name: 'input.glb', data: glbData }]);
-    
+    const object = await this.loader.loadAsObject3D(glbData);
+
     const usdzData = await this.exporter.parseAsync(object, mergedOptions);
     return [this.createOutputFile('model', 'usdz', usdzData)];
   }

@@ -1,21 +1,10 @@
-/* eslint-disable @typescript-eslint/naming-convention -- External library uses PascalCase method names */
 /* eslint-disable new-cap -- External library uses PascalCase method names */
 import assimpjsExporter from 'assimpjs/exporter';
 import { BaseExporter } from '#exporters/base.exporter.js';
 import type { OutputFile } from '#types.js';
 
 // Supported assimp export formats based on the test file
-export const assimpExportFormats = [
-  'obj',
-  'ply', 
-  'stl',
-  'fbx',
-  'dae',
-  'x',
-  'x3d',
-  '3ds',
-  'stp',
-] as const;
+export const assimpExportFormats = ['obj', 'ply', 'stl', 'fbx', 'dae', 'x', 'x3d', '3ds', 'stp'] as const;
 
 export type AssimpExportFormat = (typeof assimpExportFormats)[number];
 
@@ -60,7 +49,7 @@ export class AssimpExporter extends BaseExporter<AssimpExporterOptions> {
         const file = result.GetFile(i);
         const fileName = file.GetPath();
         const content = file.GetContent();
-        
+
         outputFiles.push({
           name: fileName,
           data: content,

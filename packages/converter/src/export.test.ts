@@ -4,18 +4,18 @@ import { NodeIO } from '@gltf-transform/core';
 import { KHRONOS_EXTENSIONS } from '@gltf-transform/extensions';
 import { inspect } from '@gltf-transform/functions';
 import type { InspectReport } from '@gltf-transform/functions';
-import { importThreeJs } from '#threejs-import.js';
-import { exportThreeJs, threejsExportFormats } from '#threejs-export.js';
-import type { ThreejsExportFormat } from '#threejs-export.js';
+import { importFiles } from '#import.js';
+import { exportFiles, supportedExportFormats } from '#export.js';
+import type { SupportedExportFormat } from '#export.js';
 import type { OutputFile, InputFile } from '#types.js';
-import { loadFixture } from '#threejs-test.utils.js';
+import { loadFixture } from '#test.utils.js';
 
 // ============================================================================
 // Types for Export Testing
 // ============================================================================
 
 type ExportTestCase = {
-  format: ThreejsExportFormat;
+  format: SupportedExportFormat;
   description?: string;
   skip?: boolean;
   skipReason?: string;
@@ -95,7 +95,7 @@ const getInspectReport = async (glbData: Uint8Array): Promise<InspectReport> => 
  */
 const performRoundTripTest = async (
   glbData: Uint8Array,
-  format: ThreejsExportFormat,
+  format: SupportedExportFormat,
 ): Promise<{
   exportedFiles: OutputFile[];
   roundTripGlbData: Uint8Array;
@@ -105,7 +105,7 @@ const performRoundTripTest = async (
   const originalReport = await getInspectReport(glbData);
 
   // Export the GLB data
-  const exportedFiles = await exportThreeJs(glbData, format);
+  const exportedFiles = await exportFiles(glbData, format);
 
   // If no files were exported, return empty result
   if (exportedFiles.length === 0) {
@@ -131,7 +131,7 @@ const performRoundTripTest = async (
   }));
 
   // Re-import the exported files
-  const roundTripGlbData = await importThreeJs(inputFiles, format);
+  const roundTripGlbData = await importFiles(inputFiles, format);
   const roundTripReport = await getInspectReport(roundTripGlbData);
 
   return {
@@ -355,7 +355,7 @@ const createExpectationVariant = <T extends Record<string, unknown>>(base: T, ov
  * Factory function for creating export test cases with sensible defaults
  */
 const createExportTestCase = (
-  format: ThreejsExportFormat,
+  format: SupportedExportFormat,
   options: {
     fixture?: ExportTestCase['fixture'];
     description?: string;
@@ -375,7 +375,7 @@ const createExportTestCase = (
   const primaryExtension = options.expectedFiles?.primaryExtension ?? format;
 
   // Default file naming pattern
-  const getDefaultFileNames = (format: ThreejsExportFormat): string[] => {
+  const getDefaultFileNames = (format: SupportedExportFormat): string[] => {
     return [`result.${format}`];
   };
 
@@ -515,7 +515,7 @@ const exportTestCases: ExportTestCase[] = [
 // Main Test Suite
 // ============================================================================
 
-describe('threejs-export', () => {
+describe('exportFiles', () => {
   for (const testCase of exportTestCases) {
     describe(`'${testCase.format}' exporter`, () => {
       if (testCase.skip) {
@@ -642,13 +642,13 @@ describe('threejs-export', () => {
 
   it('should test all declared export formats', () => {
     const testedFormats = exportTestCases.map((tc) => tc.format);
-    const declaredFormats = threejsExportFormats;
+    const declaredFormats = supportedExportFormats;
 
     expect([...new Set(testedFormats)].sort()).toEqual([...new Set(declaredFormats)].sort());
   });
 
   it('should throw error when GLB data is empty', async () => {
     const emptyGlbData = new Uint8Array(0);
-    await expect(exportThreeJs(emptyGlbData, 'glb')).rejects.toThrow('GLB data cannot be empty');
+    await expect(exportFiles(emptyGlbData, 'glb')).rejects.toThrow('GLB data cannot be empty');
   });
 });

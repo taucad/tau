@@ -5,7 +5,7 @@ import type { BufferGeometry, Object3D } from 'three';
 import { Box3, Mesh, Vector3 } from 'three';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- test utils
 import { expect } from 'vitest';
-import type { ThreejsImportFormat } from '#threejs-import.js';
+import type { SupportedImportFormat } from '#import.js';
 import type { InputFile } from '#types.js';
 // ============================================================================
 // Test Framework Types & Utilities
@@ -36,7 +36,7 @@ export type StructureExpectation = {
 };
 
 export type LoaderTestCase = {
-  format: ThreejsImportFormat;
+  format: SupportedImportFormat;
   /**
    * Optional variant of the test case.
    *

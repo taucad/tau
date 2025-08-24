@@ -26,9 +26,9 @@ const exportConfigs = {
   // '3dm': { exporter: new AssimpExporter().initialize({ format: '3dm' }) }, // Integrate 3dm exporter into assimp
 } as const satisfies Partial<Record<OutputFormat, ExportConfig>>;
 
-export type ThreejsExportFormat = keyof typeof exportConfigs;
+export type SupportedExportFormat = keyof typeof exportConfigs;
 
-export const threejsExportFormats = Object.keys(exportConfigs) as ThreejsExportFormat[];
+export const supportedExportFormats = Object.keys(exportConfigs) as SupportedExportFormat[];
 
 /**
  * Export GLB data to the specified format.
@@ -37,7 +37,7 @@ export const threejsExportFormats = Object.keys(exportConfigs) as ThreejsExportF
  * @param format - The target export format.
  * @returns A promise that resolves to an array of exported files.
  */
-export const exportThreeJs = async (glbData: Uint8Array, format: ThreejsExportFormat): Promise<OutputFile[]> => {
+export const exportFiles = async (glbData: Uint8Array, format: SupportedExportFormat): Promise<OutputFile[]> => {
   const config = exportConfigs[format];
 
   try {

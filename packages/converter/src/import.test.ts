@@ -2,9 +2,9 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import { Mesh } from 'three';
 import type { BufferGeometry, Object3D } from 'three';
 import type { InputFormat } from '#types.js';
-import { importThreeJs, threejsImportFomats } from '#threejs-import.js';
-import { createThreeTestUtils, loadTestData, createGeometryVariant, validateGlbData } from '#threejs-test.utils.js';
-import type { LoaderTestCase, StructureExpectation, GeometryExpectation } from '#threejs-test.utils.js';
+import { importFiles, supportedImportFomats } from '#import.js';
+import { createThreeTestUtils, loadTestData, createGeometryVariant, validateGlbData } from '#test.utils.js';
+import type { LoaderTestCase, StructureExpectation, GeometryExpectation } from '#test.utils.js';
 import { GltfLoader } from '#loaders/gltf.loader.js';
 
 // ============================================================================
@@ -390,7 +390,7 @@ const loaderTestCases: LoaderTestCase[] = [
 // Main Test Suite
 // ============================================================================
 
-describe('threejs-import', () => {
+describe('importFiles', () => {
   const utils = createThreeTestUtils();
   const gltfLoader = new GltfLoader();
 
@@ -413,7 +413,7 @@ describe('threejs-import', () => {
         }
 
         const files = await loadTestData(testCase);
-        glbData = await importThreeJs(files, testCase.format);
+        glbData = await importFiles(files, testCase.format);
         object3d = await gltfLoader.loadAsObject3D(glbData, {
           transformYtoZup: false,
           scaleMetersToMillimeters: false,
@@ -491,7 +491,7 @@ describe('threejs-import', () => {
       // Validation tests
       it('should produce consistent results across multiple imports', async () => {
         const files = await loadTestData(testCase);
-        const glbData2 = await importThreeJs(files, testCase.format);
+        const glbData2 = await importFiles(files, testCase.format);
         const object3d2 = await gltfLoader.loadAsObject3D(glbData2, {
           transformYtoZup: false,
           scaleMetersToMillimeters: false,
@@ -563,7 +563,7 @@ describe('threejs-import', () => {
 
   it('should test all declared formats', () => {
     const enabledFormats = loaderTestCases.map((tc) => tc.format);
-    const declaredFormats = threejsImportFomats;
+    const declaredFormats = supportedImportFomats;
 
     expect([...new Set(enabledFormats)].sort()).toEqual([...new Set(declaredFormats)].sort());
   });
@@ -577,11 +577,11 @@ describe('threejs-import', () => {
       },
     ];
 
-    await expect(importThreeJs(wrongFiles, 'drc')).rejects.toThrow('No .DRC file found in file set');
+    await expect(importFiles(wrongFiles, 'drc')).rejects.toThrow('No .DRC file found in file set');
   });
 
   it('should throw error when file array is empty', async () => {
     // Test with 3DM format which uses findPrimaryFile directly
-    await expect(importThreeJs([], '3dm')).rejects.toThrow('No .3DM file found in file set');
+    await expect(importFiles([], '3dm')).rejects.toThrow('No .3DM file found in file set');
   });
 });

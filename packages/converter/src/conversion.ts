@@ -1,6 +1,6 @@
 import type { InputFile, OutputFile, InputFormat, OutputFormat } from '#types.js';
-import { importThreeJs, threejsImportFomats } from '#threejs-import.js';
-import { exportThreeJs, threejsExportFormats } from '#threejs-export.js';
+import { importFiles, supportedImportFomats } from '#import.js';
+import { exportFiles, supportedExportFormats } from '#export.js';
 
 /**
  * Convert files from one format to another.
@@ -16,12 +16,12 @@ export const convertFile = async (
   outputFormat: OutputFormat,
 ): Promise<OutputFile[]> => {
   // Validate input format
-  if (!threejsImportFomats.includes(inputFormat)) {
+  if (!supportedImportFomats.includes(inputFormat)) {
     throw new Error(`Unsupported input format: ${inputFormat}`);
   }
 
   // Validate output format
-  if (!threejsExportFormats.includes(outputFormat)) {
+  if (!supportedExportFormats.includes(outputFormat)) {
     throw new Error(`Unsupported output format: ${outputFormat}`);
   }
 
@@ -34,8 +34,8 @@ export const convertFile = async (
   }
 
   // Standard conversion pipeline
-  const glb = await importThreeJs(inputFiles, inputFormat);
-  return exportThreeJs(glb, outputFormat);
+  const glb = await importFiles(inputFiles, inputFormat);
+  return exportFiles(glb, outputFormat);
 };
 
 /**
@@ -47,7 +47,7 @@ export const convertFile = async (
  */
 export const importToGlb = async (inputFiles: InputFile[], inputFormat: InputFormat): Promise<Uint8Array> => {
   // Validate input format
-  if (!threejsImportFomats.includes(inputFormat)) {
+  if (!supportedImportFomats.includes(inputFormat)) {
     throw new Error(`Unsupported input format: ${inputFormat}`);
   }
 
@@ -62,7 +62,7 @@ export const importToGlb = async (inputFiles: InputFile[], inputFormat: InputFor
   }
 
   // Standard import pipeline
-  const glb = await importThreeJs(inputFiles, inputFormat);
+  const glb = await importFiles(inputFiles, inputFormat);
   return glb;
 };
 
@@ -75,7 +75,7 @@ export const importToGlb = async (inputFiles: InputFile[], inputFormat: InputFor
  */
 export const exportFromGlb = async (glbData: Uint8Array, outputFormat: OutputFormat): Promise<OutputFile[]> => {
   // Validate output format
-  if (!threejsExportFormats.includes(outputFormat)) {
+  if (!supportedExportFormats.includes(outputFormat)) {
     throw new Error(`Unsupported output format: ${outputFormat}`);
   }
 
@@ -90,7 +90,7 @@ export const exportFromGlb = async (glbData: Uint8Array, outputFormat: OutputFor
   }
 
   // Standard export pipeline
-  return exportThreeJs(glbData, outputFormat);
+  return exportFiles(glbData, outputFormat);
 };
 
 /**
@@ -99,7 +99,7 @@ export const exportFromGlb = async (glbData: Uint8Array, outputFormat: OutputFor
  * @returns Array of supported input format strings.
  */
 export const getSupportedInputFormats = (): readonly InputFormat[] => {
-  return threejsImportFomats;
+  return supportedImportFomats;
 };
 
 /**
@@ -108,7 +108,7 @@ export const getSupportedInputFormats = (): readonly InputFormat[] => {
  * @returns Array of supported output format strings.
  */
 export const getSupportedOutputFormats = (): readonly OutputFormat[] => {
-  return threejsExportFormats;
+  return supportedExportFormats;
 };
 
 /**
@@ -118,7 +118,7 @@ export const getSupportedOutputFormats = (): readonly OutputFormat[] => {
  * @returns True if the format is supported.
  */
 export const isInputFormatSupported = (format: string): format is InputFormat => {
-  return threejsImportFomats.includes(format as InputFormat);
+  return supportedImportFomats.includes(format as InputFormat);
 };
 
 /**
@@ -128,5 +128,5 @@ export const isInputFormatSupported = (format: string): format is InputFormat =>
  * @returns True if the format is supported.
  */
 export const isOutputFormatSupported = (format: string): format is OutputFormat => {
-  return threejsExportFormats.includes(format as OutputFormat);
+  return supportedExportFormats.includes(format as OutputFormat);
 };

@@ -83,11 +83,11 @@ const loaderFromInputFormat = {
   // x_t: new UnimplementedLoader('Parasolid .x_t files are not implemented. This proprietary format requires specialized CAD kernel integration.'),
 } as const satisfies Partial<Record<InputFormat, ThreeJsBaseLoader>>;
 
-export type ThreejsImportFormat = keyof typeof loaderFromInputFormat;
+export type SupportedImportFormat = keyof typeof loaderFromInputFormat;
 
-export const threejsImportFomats = Object.keys(loaderFromInputFormat) as ThreejsImportFormat[];
+export const supportedImportFomats = Object.keys(loaderFromInputFormat) as SupportedImportFormat[];
 
-export const importThreeJs = async (files: InputFile[], format: ThreejsImportFormat): Promise<Uint8Array> => {
+export const importFiles = async (files: InputFile[], format: SupportedImportFormat): Promise<Uint8Array> => {
   const loader = loaderFromInputFormat[format];
 
   loader.initialize({ format });

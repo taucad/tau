@@ -9,7 +9,7 @@ import {
   isInputFormatSupported,
   isOutputFormatSupported,
 } from '#conversion.js';
-import { loadFixture } from '#threejs-test.utils.js';
+import { loadFixture } from '#test.utils.js';
 
 // ============================================================================
 // Test Configuration

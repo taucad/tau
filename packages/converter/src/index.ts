@@ -10,8 +10,8 @@ export {
 } from '#conversion.js';
 
 // Direct access to import and export pipelines
-export { importThreeJs, threejsImportFomats } from '#threejs-import.js';
-export { exportThreeJs, threejsExportFormats } from '#threejs-export.js';
+export { importFiles, supportedImportFomats } from '#import.js';
+export { exportFiles, supportedExportFormats } from '#export.js';
 
 // Types
 export type { InputFormat, OutputFormat, InputFile, OutputFile, ConvertOptions } from '#types.js';

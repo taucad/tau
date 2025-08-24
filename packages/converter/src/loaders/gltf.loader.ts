@@ -7,8 +7,8 @@ import { KHRONOS_EXTENSIONS } from '@gltf-transform/extensions';
 import { unpartition } from '@gltf-transform/functions';
 import draco3d from 'draco3dgltf';
 import { createCoordinateTransform, createScalingTransform } from '#gltf.transforms.js';
-import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
-import type { BaseLoaderOptions } from '#loaders/threejs.base.loader.js';
+import { BaseLoader } from '#loaders/base.loader.js';
+import type { BaseLoaderOptions } from '#loaders/base.loader.js';
 import type { InputFile } from '#types.js';
 import { NodeDracoLoader } from '#loaders/draco/node-draco-loader.js';
 
@@ -17,7 +17,7 @@ type GltfLoaderOptions = {
   scaleMetersToMillimeters?: boolean;
 } & BaseLoaderOptions;
 
-export class GltfLoader extends ThreeJsBaseLoader<Uint8Array, GltfLoaderOptions> {
+export class GltfLoader extends BaseLoader<Uint8Array, GltfLoaderOptions> {
   private readonly loader = new GLTFLoader();
   private readonly dracoLoader = new NodeDracoLoader();
 

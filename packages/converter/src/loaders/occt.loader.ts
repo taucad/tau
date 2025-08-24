@@ -3,13 +3,13 @@ import { Document, NodeIO } from '@gltf-transform/core';
 import occtimportjs from 'occt-import-js';
 import type { ImportResult as OcctImportResult } from 'occt-import-js';
 import type { InputFormat, InputFile } from '#types.js';
-import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
+import { BaseLoader } from '#loaders/base.loader.js';
 
 type OcctOptions = {
   format: InputFormat;
 };
 
-export class OcctLoader extends ThreeJsBaseLoader<OcctImportResult, OcctOptions> {
+export class OcctLoader extends BaseLoader<OcctImportResult, OcctOptions> {
   private readonly io = new NodeIO();
 
   protected async parseAsync(files: InputFile[], options: OcctOptions): Promise<OcctImportResult> {

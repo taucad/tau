@@ -5,13 +5,13 @@ export type BaseLoaderOptions = {
 };
 
 /**
- * Base abstract class for Three.js loaders.
+ * Base abstract class for loaders.
  * Provides a unified interface for loading 3D objects from various formats.
  *
  * @template ParseResult - The intermediate result type from the underlying loader
  * @template Options - The options type specific to each loader implementation
  */
-export abstract class ThreeJsBaseLoader<ParseResult = unknown, Options extends BaseLoaderOptions = BaseLoaderOptions> {
+export abstract class BaseLoader<ParseResult = unknown, Options extends BaseLoaderOptions = BaseLoaderOptions> {
   /**
    * The options passed to the loader. These are specific to each loader implementation.
    */

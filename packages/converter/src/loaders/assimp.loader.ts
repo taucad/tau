@@ -3,13 +3,13 @@
 import assimpjs from 'assimpjs/all';
 import type { InputFormat, InputFile } from '#types.js';
 import { applyGlbTransforms } from '#gltf.transforms.js';
-import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
+import { BaseLoader } from '#loaders/base.loader.js';
 
 type AssimpOptions = {
   format: InputFormat;
 };
 
-export class AssimpLoader extends ThreeJsBaseLoader<Uint8Array, AssimpOptions> {
+export class AssimpLoader extends BaseLoader<Uint8Array, AssimpOptions> {
   /**
    * @description Whether the format requires a Y-to-Z up transformation.
    */

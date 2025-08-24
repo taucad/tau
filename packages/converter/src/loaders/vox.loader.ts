@@ -1,13 +1,13 @@
 import { Group } from 'three';
 import { VOXLoader, VOXMesh } from 'three/addons';
 import type { Chunk } from 'three/addons';
-import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
+import { BaseLoader } from '#loaders/base.loader.js';
 import type { InputFile } from '#types.js';
 import { GltfExporter } from '#exporters/gltf.exporter.js';
 
 type VoxChunk = Chunk; // VOX chunk type from the loader
 
-export class VoxLoader extends ThreeJsBaseLoader<VoxChunk[]> {
+export class VoxLoader extends BaseLoader<VoxChunk[]> {
   private readonly loader = new VOXLoader();
   private readonly gltfExporter = new GltfExporter();
 

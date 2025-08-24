@@ -1,11 +1,11 @@
 import type { BufferGeometry, Object3D } from 'three';
 import { Mesh, Points, MeshStandardMaterial, PointsMaterial } from 'three';
-import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
+import { BaseLoader } from '#loaders/base.loader.js';
 import type { InputFile } from '#types.js';
 import { NodeDracoLoader } from '#loaders/draco/node-draco-loader.js';
 import { GltfExporter } from '#exporters/gltf.exporter.js';
 
-export class DracoLoader extends ThreeJsBaseLoader<BufferGeometry> {
+export class DracoLoader extends BaseLoader<BufferGeometry> {
   private readonly loader = new NodeDracoLoader();
   private readonly gltfExporter = new GltfExporter();
 

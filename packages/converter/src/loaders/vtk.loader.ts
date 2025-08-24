@@ -1,11 +1,11 @@
 import type { BufferGeometry } from 'three';
 import { Mesh, MeshStandardMaterial } from 'three';
 import { VTKLoader } from 'three/addons';
-import { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
+import { BaseLoader } from '#loaders/base.loader.js';
 import type { InputFile } from '#types.js';
 import { GltfExporter } from '#exporters/gltf.exporter.js';
 
-export class VtkLoader extends ThreeJsBaseLoader<BufferGeometry> {
+export class VtkLoader extends BaseLoader<BufferGeometry> {
   private readonly loader = new VTKLoader();
   private readonly gltfExporter = new GltfExporter();
 

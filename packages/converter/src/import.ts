@@ -7,7 +7,7 @@
 
 /* eslint-disable @typescript-eslint/naming-convention -- formats can be valid identifiers */
 import type { InputFile, InputFormat } from '#types.js';
-import type { ThreeJsBaseLoader } from '#loaders/threejs.base.loader.js';
+import type { BaseLoader } from '#loaders/base.loader.js';
 import { DracoLoader } from '#loaders/draco.loader.js';
 import { GltfLoader } from '#loaders/gltf.loader.js';
 import { ThreeDmLoader } from '#loaders/3dm.loader.js';
@@ -81,7 +81,7 @@ const loaderFromInputFormat = {
   // skp: new UnimplementedLoader('SketchUp .skp files are not implemented. This proprietary format requires specialized SketchUp file parsing capabilities.'),
   // sldprt: new UnimplementedLoader('SolidWorks .sldprt files are not implemented. This proprietary format requires specialized CAD file parsing capabilities.'),
   // x_t: new UnimplementedLoader('Parasolid .x_t files are not implemented. This proprietary format requires specialized CAD kernel integration.'),
-} as const satisfies Partial<Record<InputFormat, ThreeJsBaseLoader>>;
+} as const satisfies Partial<Record<InputFormat, BaseLoader>>;
 
 export type SupportedImportFormat = keyof typeof loaderFromInputFormat;
 

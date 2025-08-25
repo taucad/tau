@@ -304,18 +304,17 @@ const loaderTestCases: LoaderTestCase[] = [
 
   createCubeTestCase('3dm', {
     variant: 'mesh',
-    skip: true,
-    skipReason: '3DM format temporarily disabled - requires GLTFExporter polyfills',
+    structure: 'directMesh',
   }),
   createCubeTestCase('3dm', {
     variant: 'brep',
     skip: true,
-    skipReason: '3DM format temporarily disabled - requires GLTFExporter polyfills',
+    skipReason: 'BREP geometry requires Rhino compute service for conversion',
   }),
   createCubeTestCase('3dm', {
     variant: 'extrusion',
     skip: true,
-    skipReason: '3DM format temporarily disabled - requires GLTFExporter polyfills',
+    skipReason: 'Extrusion geometry requires Rhino compute service for meshing',
   }),
   {
     format: '3dm',
@@ -332,19 +331,14 @@ const loaderTestCases: LoaderTestCase[] = [
       boundingBox: { size: [12, 7, 2], center: [5, 2.5, 1] },
     },
     structure: {
-      rootNodes: [{
-        type: 'ContainerNode',
-        children: [
-          { type: 'MeshNode', name: 'TestCube' },
-          { type: 'MeshNode', name: 'TestCube' },
-          { type: 'MeshNode', name: 'TestCube' },
-          { type: 'MeshNode', name: 'TestCube' },
-          { type: 'MeshNode', name: 'TestCube' },
-        ]
-      }]
+      rootNodes: [
+        { type: 'MeshNode', name: 'TestCube' },
+        { type: 'MeshNode', name: 'TestCube' },
+        { type: 'MeshNode', name: 'TestCube' },
+        { type: 'MeshNode', name: 'TestCube' },
+        { type: 'MeshNode', name: 'TestCube' },
+      ]
     },
-    skip: true,
-    skipReason: '3DM format temporarily disabled - requires GLTFExporter polyfills',
   },
 
   createCubeTestCase('bvh', {

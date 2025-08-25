@@ -5,7 +5,7 @@ import draco3d from 'draco3dgltf';
 import { createCoordinateTransform, createScalingTransform } from '#gltf.transforms.js';
 import { BaseLoader } from '#loaders/base.loader.js';
 import type { BaseLoaderOptions } from '#loaders/base.loader.js';
-import type { InputFile } from '#types.js';
+import type { File } from '#types.js';
 import { allExtensions } from '#gltf.extensions.js';
 
 type GltfLoaderOptions = {
@@ -14,7 +14,7 @@ type GltfLoaderOptions = {
 } & BaseLoaderOptions;
 
 export class GltfLoader extends BaseLoader<Uint8Array, GltfLoaderOptions> {
-  protected async parseAsync(files: InputFile[]): Promise<Uint8Array> {
+  protected async parseAsync(files: File[]): Promise<Uint8Array> {
     const io = new NodeIO().registerExtensions(allExtensions).registerDependencies({
       'draco3d.decoder': await draco3d.createDecoderModule(),
       'draco3d.encoder': await draco3d.createEncoderModule(),

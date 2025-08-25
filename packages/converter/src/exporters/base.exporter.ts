@@ -1,4 +1,4 @@
-import type { OutputFile } from '#types.js';
+import type { File } from '#types.js';
 
 /**
  * Base abstract class for 3D exporters.
@@ -29,7 +29,7 @@ export abstract class BaseExporter<Options = Record<string, never>> {
    * @param options - Optional runtime options that may override initialization options.
    * @returns A promise that resolves to an array of exported files.
    */
-  public abstract parseAsync(glbData: Uint8Array, options?: Partial<Options>): Promise<OutputFile[]>;
+  public abstract parseAsync(glbData: Uint8Array, options?: Partial<Options>): Promise<File[]>;
 
   /**
    * Helper method to create an OutputFile with proper naming.
@@ -39,7 +39,7 @@ export abstract class BaseExporter<Options = Record<string, never>> {
    * @param data - The file data.
    * @returns An OutputFile object.
    */
-  protected createOutputFile(basename: string, extension: string, data: Uint8Array): OutputFile {
+  protected createOutputFile(basename: string, extension: string, data: Uint8Array): File {
     const cleanExtension = extension.startsWith('.') ? extension.slice(1) : extension;
     return {
       name: `${basename}.${cleanExtension}`,

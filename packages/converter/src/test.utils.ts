@@ -5,7 +5,7 @@ import type { PartialDeep } from 'type-fest';
 import { expect } from 'vitest';
 import type { InspectReport } from '@gltf-transform/functions';
 import type { SupportedImportFormat } from '#import.js';
-import type { InputFile } from '#types.js';
+import type { File } from '#types.js';
 import {
   validateGlbData,
   getInspectReport,
@@ -99,7 +99,7 @@ export const createGeometryVariant = (
   },
 });
 
-export const loadTestData = async (testCase: LoaderTestCase): Promise<InputFile[]> => {
+export const loadTestData = async (testCase: LoaderTestCase): Promise<File[]> => {
   if (testCase.dataSource) {
     const data = await testCase.dataSource();
     return [{ name: `input.${testCase.format}`, data }];

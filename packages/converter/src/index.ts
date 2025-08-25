@@ -14,4 +14,4 @@ export { importFiles, supportedImportFomats } from '#import.js';
 export { exportFiles, supportedExportFormats } from '#export.js';
 
 // Types
-export type { InputFormat, OutputFormat, InputFile, OutputFile, ConvertOptions } from '#types.js';
+export type { InputFormat, OutputFormat, File } from '#types.js';

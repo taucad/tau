@@ -1,7 +1,7 @@
 import type { BufferGeometry, Object3D } from 'three';
 import { Mesh, Points, MeshStandardMaterial, PointsMaterial } from 'three';
 import { BaseLoader } from '#loaders/base.loader.js';
-import type { InputFile } from '#types.js';
+import type { File } from '#types.js';
 import { NodeDracoLoader } from '#loaders/draco/node-draco-loader.js';
 import { GltfExporter } from '#exporters/gltf.exporter.js';
 
@@ -13,7 +13,7 @@ export class DracoLoader extends BaseLoader<BufferGeometry> {
     this.loader.dispose();
   }
 
-  protected async parseAsync(files: InputFile[]): Promise<BufferGeometry> {
+  protected async parseAsync(files: File[]): Promise<BufferGeometry> {
     await this.loader.initialize();
 
     const { data } = this.findPrimaryFile(files);

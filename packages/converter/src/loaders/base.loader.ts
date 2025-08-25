@@ -1,4 +1,4 @@
-import type { InputFormat, InputFile } from '#types.js';
+import type { InputFormat, File } from '#types.js';
 
 export type BaseLoaderOptions = {
   format: InputFormat;
@@ -34,7 +34,7 @@ export abstract class BaseLoader<ParseResult = unknown, Options extends BaseLoad
    * @param options - Optional runtime options that may override initialization options.
    * @returns A promise that resolves to GLB data as Uint8Array.
    */
-  public async loadAsync(files: InputFile[], options?: Partial<Options>): Promise<Uint8Array> {
+  public async loadAsync(files: File[], options?: Partial<Options>): Promise<Uint8Array> {
     const mergedOptions = this.mergeOptions(options);
     const parseResult = await this.parseAsync(files, mergedOptions);
     return this.mapToGlb(parseResult, mergedOptions);
@@ -97,7 +97,7 @@ export abstract class BaseLoader<ParseResult = unknown, Options extends BaseLoad
    * @returns The primary file for this format.
    * @throws Error if no suitable file is found.
    */
-  protected findPrimaryFile(files: InputFile[]): InputFile {
+  protected findPrimaryFile(files: File[]): File {
     return this.requireFileByExtension(files, this.options.format);
   }
 
@@ -108,7 +108,7 @@ export abstract class BaseLoader<ParseResult = unknown, Options extends BaseLoad
    * @param extension - The file extension to look for (with or without dot).
    * @returns The first file matching the extension, or undefined if not found.
    */
-  protected findFileByExtension(files: InputFile[], extension: string): InputFile | undefined {
+  protected findFileByExtension(files: File[], extension: string): File | undefined {
     const normalizedExtension = extension.startsWith('.') ? extension.slice(1) : extension;
     return files.find((file) => {
       const fileExtension = file.name.split('.').pop()?.toLowerCase();
@@ -124,7 +124,7 @@ export abstract class BaseLoader<ParseResult = unknown, Options extends BaseLoad
    * @returns The first file matching the extension.
    * @throws Error if no file with the extension is found.
    */
-  protected requireFileByExtension(files: InputFile[], extension: string): InputFile {
+  protected requireFileByExtension(files: File[], extension: string): File {
     const file = this.findFileByExtension(files, extension);
     if (!file) {
       const normalizedExtension = extension.startsWith('.') ? extension : `.${extension}`;
@@ -140,7 +140,7 @@ export abstract class BaseLoader<ParseResult = unknown, Options extends BaseLoad
    * @param files - The input files to map.
    * @returns A map with filename as key and file data as value.
    */
-  protected createFileMap(files: InputFile[]): Map<string, Uint8Array> {
+  protected createFileMap(files: File[]): Map<string, Uint8Array> {
     const fileMap = new Map<string, Uint8Array>();
     for (const file of files) {
       fileMap.set(file.name, file.data);
@@ -156,7 +156,7 @@ export abstract class BaseLoader<ParseResult = unknown, Options extends BaseLoad
    * @param options - The merged options for parsing.
    * @returns A promise that resolves to the intermediate parse result.
    */
-  protected abstract parseAsync(files: InputFile[], options: Options): Promise<ParseResult>;
+  protected abstract parseAsync(files: File[], options: Options): Promise<ParseResult>;
 
   /**
    * Map the parse result to GLB data.

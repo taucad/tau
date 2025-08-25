@@ -1,6 +1,6 @@
 import type { Group } from 'three';
 import { BaseLoader } from '#loaders/base.loader.js';
-import type { InputFile } from '#types.js';
+import type { File } from '#types.js';
 import { Three3dmLoader } from '#loaders/3dm/3dm-three-loader.js';
 import { GltfExporter } from '#exporters/gltf.exporter.js';
 
@@ -11,7 +11,7 @@ export class ThreeDmLoader extends BaseLoader<Group> {
   private readonly loader = new Three3dmLoader();
   private readonly gltfExporter = new GltfExporter();
 
-  protected async parseAsync(files: InputFile[]): Promise<Group> {
+  protected async parseAsync(files: File[]): Promise<Group> {
     const { data } = this.findPrimaryFile(files);
     return this.loader.parseAsync(data);
   }

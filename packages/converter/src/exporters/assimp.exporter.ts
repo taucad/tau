@@ -1,7 +1,7 @@
 /* eslint-disable new-cap -- External library uses PascalCase method names */
 import assimpjsExporter from 'assimpjs/exporter';
 import { BaseExporter } from '#exporters/base.exporter.js';
-import type { OutputFile } from '#types.js';
+import type { File } from '#types.js';
 
 // Supported assimp export formats based on the test file
 export const assimpExportFormats = ['obj', 'ply', 'stl', 'fbx', 'dae', 'x', 'x3d', '3ds', 'stp'] as const;
@@ -17,7 +17,7 @@ type AssimpExporterOptions = {
  * Uses assimpjs exporter which takes GLTF/GLB as input and exports to the target format.
  */
 export class AssimpExporter extends BaseExporter<AssimpExporterOptions> {
-  public async parseAsync(glbData: Uint8Array, options?: Partial<AssimpExporterOptions>): Promise<OutputFile[]> {
+  public async parseAsync(glbData: Uint8Array, options?: Partial<AssimpExporterOptions>): Promise<File[]> {
     if (glbData.length === 0) {
       throw new Error('GLB data cannot be empty');
     }
@@ -42,7 +42,7 @@ export class AssimpExporter extends BaseExporter<AssimpExporterOptions> {
       }
 
       // Extract all exported files
-      const outputFiles: OutputFile[] = [];
+      const outputFiles: File[] = [];
       const fileCount = result.FileCount();
 
       for (let i = 0; i < fileCount; i++) {

@@ -1,4 +1,4 @@
-import type { InputFile, OutputFile, InputFormat, OutputFormat } from '#types.js';
+import type { File, InputFormat, OutputFormat } from '#types.js';
 import { importFiles, supportedImportFomats } from '#import.js';
 import { exportFiles, supportedExportFormats } from '#export.js';
 
@@ -11,10 +11,10 @@ import { exportFiles, supportedExportFormats } from '#export.js';
  * @returns A promise that resolves to an array of output files.
  */
 export const convertFile = async (
-  inputFiles: InputFile[],
+  inputFiles: File[],
   inputFormat: InputFormat,
   outputFormat: OutputFormat,
-): Promise<OutputFile[]> => {
+): Promise<File[]> => {
   // Validate input format
   if (!supportedImportFomats.includes(inputFormat)) {
     throw new Error(`Unsupported input format: ${inputFormat}`);
@@ -45,7 +45,7 @@ export const convertFile = async (
  * @param inputFormat - The input format.
  * @returns A promise that resolves to GLB data.
  */
-export const importToGlb = async (inputFiles: InputFile[], inputFormat: InputFormat): Promise<Uint8Array> => {
+export const importToGlb = async (inputFiles: File[], inputFormat: InputFormat): Promise<Uint8Array> => {
   // Validate input format
   if (!supportedImportFomats.includes(inputFormat)) {
     throw new Error(`Unsupported input format: ${inputFormat}`);
@@ -73,7 +73,7 @@ export const importToGlb = async (inputFiles: InputFile[], inputFormat: InputFor
  * @param outputFormat - The output format.
  * @returns A promise that resolves to an array of output files.
  */
-export const exportFromGlb = async (glbData: Uint8Array, outputFormat: OutputFormat): Promise<OutputFile[]> => {
+export const exportFromGlb = async (glbData: Uint8Array, outputFormat: OutputFormat): Promise<File[]> => {
   // Validate output format
   if (!supportedExportFormats.includes(outputFormat)) {
     throw new Error(`Unsupported output format: ${outputFormat}`);

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- some formats are named like this */
 /* eslint-disable new-cap -- External library uses PascalCase method names */
 import assimpjs from 'assimpjs/all';
-import type { InputFormat, InputFile } from '#types.js';
+import type { InputFormat, File } from '#types.js';
 import { applyGlbTransforms } from '#gltf.transforms.js';
 import { BaseLoader } from '#loaders/base.loader.js';
 
@@ -27,7 +27,7 @@ export class AssimpLoader extends BaseLoader<Uint8Array, AssimpOptions> {
     ase: true,
   };
 
-  protected async parseAsync(files: InputFile[], options: AssimpOptions): Promise<Uint8Array> {
+  protected async parseAsync(files: File[], options: AssimpOptions): Promise<Uint8Array> {
     // Initialize assimpjs
     const ajs = await assimpjs();
 

@@ -6,7 +6,7 @@
  */
 
 /* eslint-disable @typescript-eslint/naming-convention -- formats can be valid identifiers */
-import type { InputFile, InputFormat } from '#types.js';
+import type { File, InputFormat } from '#types.js';
 import type { BaseLoader } from '#loaders/base.loader.js';
 import { DracoLoader } from '#loaders/draco.loader.js';
 import { GltfLoader } from '#loaders/gltf.loader.js';
@@ -82,7 +82,7 @@ export type SupportedImportFormat = keyof typeof loaderFromInputFormat;
 
 export const supportedImportFomats = Object.keys(loaderFromInputFormat) as SupportedImportFormat[];
 
-export const importFiles = async (files: InputFile[], format: SupportedImportFormat): Promise<Uint8Array> => {
+export const importFiles = async (files: File[], format: SupportedImportFormat): Promise<Uint8Array> => {
   const loader = loaderFromInputFormat[format];
 
   loader.initialize({ format });

@@ -3,7 +3,7 @@ import type { InspectReport } from '@gltf-transform/functions';
 import { importFiles } from '#import.js';
 import { exportFiles, supportedExportFormats } from '#export.js';
 import type { SupportedExportFormat } from '#export.js';
-import type { OutputFile, InputFile } from '#types.js';
+import type { File } from '#types.js';
 import { loadFixture } from '#test.utils.js';
 import { getInspectReport } from '#gltf.utils.js';
 
@@ -71,7 +71,7 @@ const performRoundTripTest = async (
   glbData: Uint8Array,
   format: SupportedExportFormat,
 ): Promise<{
-  exportedFiles: OutputFile[];
+  exportedFiles: File[];
   roundTripGlbData: Uint8Array;
   comparison: InspectComparison;
 }> => {
@@ -99,7 +99,7 @@ const performRoundTripTest = async (
   }
 
   // Convert OutputFiles to InputFiles for re-import
-  const inputFiles: InputFile[] = exportedFiles.map((file) => ({
+  const inputFiles: File[] = exportedFiles.map((file) => ({
     name: file.name,
     data: file.data,
   }));
@@ -429,7 +429,7 @@ describe('exportFiles', () => {
       }
 
       let glbData: Uint8Array;
-      let exportedFiles: OutputFile[];
+      let exportedFiles: File[];
       let roundTripGlbData: Uint8Array;
       let comparison: InspectComparison;
 

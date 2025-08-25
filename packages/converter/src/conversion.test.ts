@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import type { InputFormat, OutputFile, OutputFormat } from '#types.js';
+import type { InputFormat, File, OutputFormat } from '#types.js';
 import {
   convertFile,
   importToGlb,
@@ -109,7 +109,7 @@ const loadTestFile = (format: InputFormat) => {
 /**
  * Validate that output files are properly formatted.
  */
-const validateOutputFiles = (files: OutputFile[], _expectedFormat: OutputFormat) => {
+const validateOutputFiles = (files: File[], _expectedFormat: OutputFormat) => {
   expect(files).toBeDefined();
   expect(Array.isArray(files)).toBe(true);
   expect(files.length).toBeGreaterThan(0);

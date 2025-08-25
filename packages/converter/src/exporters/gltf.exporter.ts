@@ -4,7 +4,7 @@ import { GLTFExporter } from 'three/addons';
 import { NodeIO } from '@gltf-transform/core';
 import { createReverseCoordinateTransform, createReverseScalingTransform } from '#gltf.transforms.js';
 import { BaseExporter } from '#exporters/base.exporter.js';
-import type { OutputFile } from '#types.js';
+import type { File } from '#types.js';
 import { allExtensions } from '#gltf.extensions.js';
 
 /**
@@ -21,7 +21,7 @@ export class GltfExporter extends BaseExporter<GLTFExporterOptions> {
     this.threeExporter = new GLTFExporter(); // Keep for backward compatibility
   }
 
-  public async parseAsync(glbData: Uint8Array, options?: Partial<GLTFExporterOptions>): Promise<OutputFile[]> {
+  public async parseAsync(glbData: Uint8Array, options?: Partial<GLTFExporterOptions>): Promise<File[]> {
     if (glbData.length === 0) {
       throw new Error('GLB data cannot be empty');
     }
@@ -48,7 +48,7 @@ export class GltfExporter extends BaseExporter<GLTFExporterOptions> {
         // GLTF format - write as GLTF JSON
         const gltfResult = await this.io.writeJSON(document);
         
-        const outputFiles: OutputFile[] = [];
+        const outputFiles: File[] = [];
         
         // Main GLTF JSON file
         const jsonString = JSON.stringify(gltfResult.json, null, 2);

@@ -2,7 +2,7 @@
 import { Document, NodeIO } from '@gltf-transform/core';
 import occtimportjs from 'occt-import-js';
 import type { ImportResult as OcctImportResult } from 'occt-import-js';
-import type { InputFormat, InputFile } from '#types.js';
+import type { InputFormat, File } from '#types.js';
 import { BaseLoader } from '#loaders/base.loader.js';
 
 type OcctOptions = {
@@ -12,7 +12,7 @@ type OcctOptions = {
 export class OcctLoader extends BaseLoader<OcctImportResult, OcctOptions> {
   private readonly io = new NodeIO();
 
-  protected async parseAsync(files: InputFile[], options: OcctOptions): Promise<OcctImportResult> {
+  protected async parseAsync(files: File[], options: OcctOptions): Promise<OcctImportResult> {
     const { data } = this.findPrimaryFile(files);
     // Configure the module to suppress console output
     const moduleConfig = {

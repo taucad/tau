@@ -1,5 +1,5 @@
 import type { BaseExporter } from '#exporters/base.exporter.js';
-import type { OutputFormat, OutputFile } from '#types.js';
+import type { OutputFormat, File } from '#types.js';
 import { GltfExporter } from '#exporters/gltf.exporter.js';
 import { AssimpExporter } from '#exporters/assimp.exporter.js';
 
@@ -35,7 +35,7 @@ export const supportedExportFormats = Object.keys(exportConfigs) as SupportedExp
  * @param format - The target export format.
  * @returns A promise that resolves to an array of exported files.
  */
-export const exportFiles = async (glbData: Uint8Array, format: SupportedExportFormat): Promise<OutputFile[]> => {
+export const exportFiles = async (glbData: Uint8Array, format: SupportedExportFormat): Promise<File[]> => {
   const config = exportConfigs[format];
 
   try {

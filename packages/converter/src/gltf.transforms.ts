@@ -1,7 +1,7 @@
 import { NodeIO } from '@gltf-transform/core';
-import { KHRONOS_EXTENSIONS } from '@gltf-transform/extensions';
 import { transformMesh } from '@gltf-transform/functions';
 import type { mat4, Document } from '@gltf-transform/core';
+import { allExtensions } from '#gltf.extensions.js';
 
 /**
  * Shared gltf-transform utilities for applying coordinate system and scaling transformations
@@ -124,7 +124,7 @@ export async function applyGlbTransforms(glbData: Uint8Array, options: GlbTransf
   }
 
   // Create NodeIO with extensions support
-  const io = new NodeIO().registerExtensions(KHRONOS_EXTENSIONS);
+  const io = new NodeIO().registerExtensions(allExtensions);
 
   try {
     // Load the GLTF document

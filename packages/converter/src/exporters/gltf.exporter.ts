@@ -2,10 +2,10 @@ import type { Object3D } from 'three';
 import type { GLTFExporterOptions } from 'three/addons';
 import { GLTFExporter } from 'three/addons';
 import { NodeIO } from '@gltf-transform/core';
-import { KHRONOS_EXTENSIONS } from '@gltf-transform/extensions';
 import { createReverseCoordinateTransform, createReverseScalingTransform } from '#gltf.transforms.js';
 import { BaseExporter } from '#exporters/base.exporter.js';
 import type { OutputFile } from '#types.js';
+import { allExtensions } from '#gltf.extensions.js';
 
 /**
  * GLTF exporter implementation using gltf-transform.
@@ -17,7 +17,7 @@ export class GltfExporter extends BaseExporter<GLTFExporterOptions> {
 
   public constructor() {
     super();
-    this.io = new NodeIO().registerExtensions(KHRONOS_EXTENSIONS);
+    this.io = new NodeIO().registerExtensions(allExtensions);
     this.threeExporter = new GLTFExporter(); // Keep for backward compatibility
   }
 

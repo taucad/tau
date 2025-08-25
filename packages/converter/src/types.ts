@@ -33,9 +33,6 @@ export const supportedInputFormats = [
   'usda',
   'usdc',
   'usdz',
-  'vox',
-  'vtk',
-  'vtp',
   'wrl',
   'x',
   'x3d',
@@ -54,7 +51,6 @@ export const supportedOutputFormats = [
   'ply',
   'stl',
   'stp',
-  'usdz',
   'x',
   'x3d',
 ] as const;

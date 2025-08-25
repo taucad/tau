@@ -1,12 +1,21 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PartialDeep } from 'type-fest';
-import type { BufferGeometry, Object3D } from 'three';
-import { Box3, Mesh, Vector3 } from 'three';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- test utils
 import { expect } from 'vitest';
+import type { InspectReport } from '@gltf-transform/functions';
 import type { SupportedImportFormat } from '#import.js';
 import type { InputFile } from '#types.js';
+import {
+  validateGlbData,
+  getInspectReport,
+  getGeometryStatsFromInspect,
+  getBoundingBoxFromInspect,
+  hasAttribute,
+  getDocumentStructure,
+  validateGltfScene,
+} from '#gltf.utils.js';
+import type { GltfSceneStructure } from '#gltf.utils.js';
 // ============================================================================
 // Test Framework Types & Utilities
 // ============================================================================
@@ -27,12 +36,6 @@ export type GeometryExpectation = {
     center: [number, number, number];
     tolerance?: number;
   };
-};
-
-export type StructureExpectation = {
-  type: string;
-  name?: string;
-  children?: Array<Partial<StructureExpectation>>;
 };
 
 export type LoaderTestCase = {
@@ -72,7 +75,7 @@ export type LoaderTestCase = {
   dataSource?: () => Promise<Uint8Array>;
   description?: string;
   geometry?: GeometryExpectation;
-  structure?: StructureExpectation;
+  structure?: GltfSceneStructure;
   skip?: boolean;
   skipReason?: string;
 };
@@ -121,183 +124,114 @@ export const loadTestData = async (testCase: LoaderTestCase): Promise<InputFile[
   throw new Error('Test case must specify files, fixtureName, or dataSource');
 };
 
-/**
- * Validate that GLB data is properly formatted.
- */
-export const validateGlbData = (glb: Uint8Array): void => {
-  expect(glb).toBeDefined();
-  expect(glb).toBeInstanceOf(Uint8Array);
-  expect(glb.length).toBeGreaterThan(0);
+// validateGlbData is now imported from gltf.utils.js
 
-  // Basic GLB header validation (first 4 bytes should be 'glTF')
-  if (glb.length >= 4) {
-    const header = new TextDecoder().decode(glb.slice(0, 4));
-    expect(header).toBe('glTF');
-  }
-};
+// getBoundingBox functionality is now handled by getBoundingBoxFromInspect in gltf.utils.js
 
-/**
- * Calculate bounding box for a Three.js Object3D, ensuring geometry bounding boxes are computed
- */
-export const getBoundingBox = (object: Object3D): Box3 => {
-  const box = new Box3();
-  object.traverse((child) => {
-    if (child instanceof Mesh) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- three.js types
-      child.geometry.computeBoundingBox();
-      if (child.geometry.boundingBox) {
-        box.expandByObject(child);
-      }
-    }
-  });
-  return box;
-};
-
-// Test utilities factory
-export const createThreeTestUtils = (): {
-  getBoundingBox: (object: Object3D) => Box3;
-  getGeometryStats: (object: Object3D) => { vertexCount: number; faceCount: number; meshCount: number };
-  expectVector3ToBeCloseTo: (actual: Vector3, expected: Vector3, subject: string, precision?: number) => void;
-  getObjectStructure: (object: Object3D) => Record<string, unknown>;
-  createGeometrySignature: (object: Object3D) => GeometryExpectation;
+// GLTF test utilities factory using gltf-transform inspect reports
+export const createInspectTestUtils = (): {
+  getInspectReport: (glbData: Uint8Array) => Promise<InspectReport>;
+  createInspectSignature: (report: InspectReport) => GeometryExpectation;
   createGeometryTestHelpers: () => {
-    expectVertexCount: (object3d: Object3D, expectedCount: number) => void;
-    expectFaceCount: (object3d: Object3D, expectedCount: number) => void;
-    expectMeshCount: (object3d: Object3D, expectedCount: number) => void;
-    expectBoundingBoxSize: (object3d: Object3D, expectedSize: [number, number, number], tolerance?: number) => void;
-    expectBoundingBoxCenter: (object3d: Object3D, expectedCenter: [number, number, number], tolerance?: number) => void;
+    expectVertexCount: (report: InspectReport, expectedCount: number) => void;
+    expectFaceCount: (report: InspectReport, expectedCount: number) => void;
+    expectMeshCount: (report: InspectReport, expectedCount: number) => void;
+    expectBoundingBoxSize: (report: InspectReport, expectedSize: [number, number, number], tolerance?: number) => void;
+    expectBoundingBoxCenter: (report: InspectReport, expectedCenter: [number, number, number], tolerance?: number) => void;
   };
   createStructureTestHelpers: () => {
-    expectObjectType: (object3d: Object3D, expectedType: string) => void;
-    expectObjectName: (object3d: Object3D, expectedName: string) => void;
-    expectChildrenCount: (object3d: Object3D, expectedCount: number) => void;
-    expectChildAtIndex: (object3d: Object3D, index: number, childExpectation: StructureExpectation) => void;
+    expectMeshCount: (report: InspectReport, expectedCount: number) => void;
+    expectHasPositionAttribute: (report: InspectReport) => void;
+    expectHasNormalAttribute: (report: InspectReport, shouldHave: boolean) => void;
+    expectHasUvAttribute: (report: InspectReport, shouldHave: boolean) => void;
+    // GLTF scene structure methods
+    expectRootNodeCount: (glbData: Uint8Array, expectedCount: number) => Promise<void>;
+    expectFullStructure: (glbData: Uint8Array, expectedStructure: GltfSceneStructure) => Promise<void>;
   };
   epsilon: number;
 } => {
   const epsilon = 1e-6;
 
-  const getGeometryStats = (object: Object3D) => {
-    let vertexCount = 0;
-    let faceCount = 0;
-    let meshCount = 0;
-
-    object.traverse((child) => {
-      if (child instanceof Mesh) {
-        meshCount++;
-        const geometry = child.geometry as BufferGeometry;
-        const positionAttribute = geometry.getAttribute('position');
-        vertexCount += positionAttribute.count;
-        faceCount += positionAttribute.count / 3;
-      }
-    });
-
-    return { vertexCount, faceCount, meshCount };
-  };
-
-  const expectVector3ToBeCloseTo = (actual: Vector3, expected: Vector3, subject: string, precision = epsilon): void => {
+  const expectVector3ToBeCloseTo = (actual: [number, number, number], expected: [number, number, number], subject: string, precision = epsilon): void => {
     expect(
-      Math.abs(actual.x - expected.x),
-      `${subject}: Expected [X: ${expected.x}]. Actual [X: ${actual.x}]\n`,
+      Math.abs(actual[0] - expected[0]),
+      `${subject}: Expected [X: ${expected[0]}]. Actual [X: ${actual[0]}]\n`,
     ).toBeLessThan(precision);
     expect(
-      Math.abs(actual.y - expected.y),
-      `${subject}: Expected [Y: ${expected.y}]. Actual [Y: ${actual.y}]\n`,
+      Math.abs(actual[1] - expected[1]),
+      `${subject}: Expected [Y: ${expected[1]}]. Actual [Y: ${actual[1]}]\n`,
     ).toBeLessThan(precision);
     expect(
-      Math.abs(actual.z - expected.z),
-      `${subject}: Expected [Z: ${expected.z}]. Actual [Z: ${actual.z}]\n`,
+      Math.abs(actual[2] - expected[2]),
+      `${subject}: Expected [Z: ${expected[2]}]. Actual [Z: ${actual[2]}]\n`,
     ).toBeLessThan(precision);
   };
 
-  const getObjectStructure = (object: Object3D): Record<string, unknown> => {
-    const baseStructure = {
-      name: object.name,
-      type: object.type,
-      childCount: object.children.length,
-      children: object.children.map((child) => getObjectStructure(child)),
-    };
+  // GLTF structure analysis via gltf-transform inspect reports
 
-    if (object instanceof Mesh) {
-      return {
-        ...baseStructure,
-        geometry: {
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- three.js types
-          type: object.geometry.type,
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call -- three.js types
-          vertexCount: object.geometry.getAttribute('position')?.count ?? 0,
-        },
-        material: {
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- three.js types
-          type: object.material?.type ?? 'unknown',
-        },
-      };
-    }
-
-    return baseStructure;
-  };
-
-  const createGeometrySignature = (object: Object3D): GeometryExpectation => {
-    const stats = getGeometryStats(object);
-    const boundingBox = getBoundingBox(object);
-    const size = boundingBox.getSize(new Vector3());
-    const center = boundingBox.getCenter(new Vector3());
+  const createGeometrySignatureFromInspect = (report: InspectReport): GeometryExpectation => {
+    const stats = getGeometryStatsFromInspect(report);
+    const boundingBox = getBoundingBoxFromInspect(report);
 
     return {
       vertexCount: stats.vertexCount,
-      faceCount: Math.round(stats.faceCount),
+      faceCount: stats.faceCount,
       meshCount: stats.meshCount,
       boundingBox: {
-        size: [Math.round(size.x * 1000) / 1000, Math.round(size.y * 1000) / 1000, Math.round(size.z * 1000) / 1000],
-        center: [
-          Math.round(center.x * 1000) / 1000,
-          Math.round(center.y * 1000) / 1000,
-          Math.round(center.z * 1000) / 1000,
-        ],
+        size: boundingBox ? [
+          Math.round(boundingBox.size[0] * 1000) / 1000,
+          Math.round(boundingBox.size[1] * 1000) / 1000,
+          Math.round(boundingBox.size[2] * 1000) / 1000,
+        ] : [0, 0, 0],
+        center: boundingBox ? [
+          Math.round(boundingBox.center[0] * 1000) / 1000,
+          Math.round(boundingBox.center[1] * 1000) / 1000,
+          Math.round(boundingBox.center[2] * 1000) / 1000,
+        ] : [0, 0, 0],
       },
     };
   };
 
-  // Test helper functions
+  // Pure GLTF structure validation utilities
+
+  // GLTF geometry test helper functions
   const createGeometryTestHelpers = () => ({
-    expectVertexCount(object3d: Object3D, expectedCount: number): void {
-      const stats = getGeometryStats(object3d);
+    expectVertexCount(report: InspectReport, expectedCount: number): void {
+      const stats = getGeometryStatsFromInspect(report);
       expect(stats.vertexCount).toBe(expectedCount);
     },
 
-    expectFaceCount(object3d: Object3D, expectedCount: number): void {
-      const stats = getGeometryStats(object3d);
-      expect(Math.round(stats.faceCount)).toBe(expectedCount);
+    expectFaceCount(report: InspectReport, expectedCount: number): void {
+      const stats = getGeometryStatsFromInspect(report);
+      expect(stats.faceCount).toBe(expectedCount);
     },
 
-    expectMeshCount(object3d: Object3D, expectedCount: number): void {
-      const stats = getGeometryStats(object3d);
+    expectMeshCount(report: InspectReport, expectedCount: number): void {
+      const stats = getGeometryStatsFromInspect(report);
       expect(stats.meshCount).toBe(expectedCount);
     },
 
-    expectBoundingBoxSize(object3d: Object3D, expectedSize: [number, number, number], tolerance?: number): void {
-      const boundingBox = getBoundingBox(object3d);
-      const size = boundingBox.getSize(new Vector3());
+    expectBoundingBoxSize(report: InspectReport, expectedSize: [number, number, number], tolerance?: number): void {
+      const boundingBox = getBoundingBoxFromInspect(report);
+      expect(boundingBox).toBeDefined();
+      
       const actualTolerance = tolerance ?? epsilon;
-
-      const [expectedWidth, expectedHeight, expectedDepth] = expectedSize;
       expectVector3ToBeCloseTo(
-        size,
-        new Vector3(expectedWidth, expectedHeight, expectedDepth),
+        boundingBox!.size,
+        expectedSize,
         'bounding box size',
         actualTolerance,
       );
     },
 
-    expectBoundingBoxCenter(object3d: Object3D, expectedCenter: [number, number, number], tolerance?: number): void {
-      const boundingBox = getBoundingBox(object3d);
-      const center = boundingBox.getCenter(new Vector3());
+    expectBoundingBoxCenter(report: InspectReport, expectedCenter: [number, number, number], tolerance?: number): void {
+      const boundingBox = getBoundingBoxFromInspect(report);
+      expect(boundingBox).toBeDefined();
+      
       const actualTolerance = tolerance ?? epsilon;
-
-      const [expectedCenterX, expectedCenterY, expectedCenterZ] = expectedCenter;
       expectVector3ToBeCloseTo(
-        center,
-        new Vector3(expectedCenterX, expectedCenterY, expectedCenterZ),
+        boundingBox!.center,
+        expectedCenter,
         'bounding box center',
         actualTolerance,
       );
@@ -305,40 +239,50 @@ export const createThreeTestUtils = (): {
   });
 
   const createStructureTestHelpers = () => ({
-    expectObjectType(object3d: Object3D, expectedType: string): void {
-      expect(object3d.type).toBe(expectedType);
+    expectMeshCount(report: InspectReport, expectedCount: number): void {
+      expect(report.meshes.properties.length).toBe(expectedCount);
     },
 
-    expectObjectName(object3d: Object3D, expectedName: string): void {
-      expect(object3d.name).toBe(expectedName);
+    expectHasPositionAttribute(report: InspectReport): void {
+      expect(report.meshes.properties.length).toBeGreaterThan(0);
+      const mesh = report.meshes.properties[0]!;
+      expect(hasAttribute(mesh, 'position')).toBe(true);
     },
 
-    expectChildrenCount(object3d: Object3D, expectedCount: number): void {
-      expect(object3d.children.length).toBe(expectedCount);
+    expectHasNormalAttribute(report: InspectReport, shouldHave: boolean): void {
+      expect(report.meshes.properties.length).toBeGreaterThan(0);
+      const mesh = report.meshes.properties[0]!;
+      expect(hasAttribute(mesh, 'normal')).toBe(shouldHave);
     },
 
-    expectChildAtIndex(object3d: Object3D, index: number, childExpectation: StructureExpectation): void {
-      const child = object3d.children[index];
-      expect(child).toBeDefined();
+    expectHasUvAttribute(report: InspectReport, shouldHave: boolean): void {
+      expect(report.meshes.properties.length).toBeGreaterThan(0);
+      const mesh = report.meshes.properties[0]!;
+      const hasUv = hasAttribute(mesh, 'texcoord') || hasAttribute(mesh, 'uv');
+      expect(hasUv).toBe(shouldHave);
+    },
 
-      if (child) {
-        expect(child.type).toBe(childExpectation.type);
+    // GLTF scene structure validation methods
 
-        if (childExpectation.name !== undefined) {
-          expect(child.name).toBe(childExpectation.name);
-        }
-      }
+    async expectRootNodeCount(glbData: Uint8Array, expectedCount: number): Promise<void> {
+      const structure = await getDocumentStructure(glbData);
+      expect(structure.rootNodes.length).toBe(expectedCount);
+    },
+
+    async expectFullStructure(glbData: Uint8Array, expectedStructure: GltfSceneStructure): Promise<void> {
+      const actualStructure = await getDocumentStructure(glbData);
+      validateGltfScene(actualStructure, expectedStructure);
     },
   });
 
   return {
-    getBoundingBox,
-    getGeometryStats,
-    expectVector3ToBeCloseTo,
-    getObjectStructure,
-    createGeometrySignature,
+    getInspectReport,
+    createInspectSignature: createGeometrySignatureFromInspect,
     createGeometryTestHelpers,
     createStructureTestHelpers,
     epsilon,
   };
 };
+
+// Export validateGlbData for backward compatibility
+export { validateGlbData };

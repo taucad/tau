@@ -1,14 +1,11 @@
 import { expect, describe, it, beforeEach } from 'vitest';
-import type { Document } from '@gltf-transform/core';
-import { NodeIO } from '@gltf-transform/core';
-import { KHRONOS_EXTENSIONS } from '@gltf-transform/extensions';
-import { inspect } from '@gltf-transform/functions';
 import type { InspectReport } from '@gltf-transform/functions';
 import { importFiles } from '#import.js';
 import { exportFiles, supportedExportFormats } from '#export.js';
 import type { SupportedExportFormat } from '#export.js';
 import type { OutputFile, InputFile } from '#types.js';
 import { loadFixture } from '#test.utils.js';
+import { getInspectReport } from '#gltf.utils.js';
 
 // ============================================================================
 // Types for Export Testing
@@ -60,34 +57,11 @@ type InspectComparison = {
 // ============================================================================
 
 /**
- * Create a NodeIO instance for gltf-transform operations
- */
-const createNodeIO = (): NodeIO => {
-  return new NodeIO().registerExtensions(KHRONOS_EXTENSIONS);
-};
-
-/**
  * Load GLB data from test fixture
  */
 const loadGlbFixture = (fixture: ExportTestCase['fixture']): Uint8Array => {
   const filename = `${fixture}.glb`;
   return loadFixture(filename);
-};
-
-/**
- * Convert GLB data to gltf-transform Document
- */
-const glbToDocument = async (glbData: Uint8Array): Promise<Document> => {
-  const io = createNodeIO();
-  return await io.readBinary(glbData);
-};
-
-/**
- * Get inspect report from GLB data
- */
-const getInspectReport = async (glbData: Uint8Array): Promise<InspectReport> => {
-  const document = await glbToDocument(glbData);
-  return inspect(document);
 };
 
 /**
@@ -435,26 +409,6 @@ const exportTestCases: ExportTestCase[] = [
       materials: {
         expectedMaterialCount: 0, // STP doesn't preserve or create materials
         expectedTextureCount: 0, // STP doesn't preserve textures
-      },
-    },
-  }),
-
-  // USDZ Format
-  createExportTestCase('usdz', {
-    expectedFiles: {
-      expectedNames: ['model.usdz'],
-    },
-    skip: true,
-    skipReason: 'USDZ exporter does not produce valid geometry.',
-    expectations: {
-      geometry: {
-        vertexCountTolerance: 0,
-        meshCountTolerance: 0, // USDZ may modify mesh count during export/import
-        boundingBoxTolerance: 0.001, // TODO: debug this tolerance
-      },
-      materials: {
-        expectedMaterialCount: 0,
-        expectedTextureCount: 0,
       },
     },
   }),

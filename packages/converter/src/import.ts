@@ -11,8 +11,6 @@ import type { BaseLoader } from '#loaders/base.loader.js';
 import { DracoLoader } from '#loaders/draco.loader.js';
 import { GltfLoader } from '#loaders/gltf.loader.js';
 import { ThreeDmLoader } from '#loaders/3dm.loader.js';
-import { VoxLoader } from '#loaders/vox.loader.js';
-import { VtkLoader } from '#loaders/vtk.loader.js';
 import { OcctLoader } from '#loaders/occt.loader.js';
 import { AssimpLoader } from '#loaders/assimp.loader.js';
 
@@ -51,9 +49,6 @@ const loaderFromInputFormat = {
   usda: new AssimpLoader(),
   usdc: new AssimpLoader(),
   usdz: new AssimpLoader(),
-  vox: new VoxLoader(),
-  vtk: new VtkLoader(),
-  vtp: new VtkLoader(),
   wrl: new AssimpLoader(),
   x: new AssimpLoader(),
   x3d: new AssimpLoader(),

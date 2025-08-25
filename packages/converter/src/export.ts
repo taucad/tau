@@ -2,7 +2,6 @@ import type { BaseExporter } from '#exporters/base.exporter.js';
 import type { OutputFormat, OutputFile } from '#types.js';
 import { GltfExporter } from '#exporters/gltf.exporter.js';
 import { AssimpExporter } from '#exporters/assimp.exporter.js';
-import { UsdzExporter } from '#exporters/usdz.exporter.js';
 
 type ExportConfig = {
   exporter: BaseExporter<unknown>;
@@ -18,7 +17,6 @@ const exportConfigs = {
   ply: { exporter: new AssimpExporter().initialize({ format: 'ply' }) },
   stl: { exporter: new AssimpExporter().initialize({ format: 'stl' }) },
   stp: { exporter: new AssimpExporter().initialize({ format: 'stp' }) },
-  usdz: { exporter: new UsdzExporter().initialize({}) },
   x: { exporter: new AssimpExporter().initialize({ format: 'x' }) },
   x3d: { exporter: new AssimpExporter().initialize({ format: 'x3d' }) },
   

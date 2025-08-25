@@ -284,8 +284,6 @@ const loaderTestCases: LoaderTestCase[] = [
     structure: { 
       rootNodes: [{ type: 'MeshNode' }]
     },
-    skip: true,
-    skipReason: 'DRC format temporarily disabled - requires GLTFExporter polyfills',
   }),
 
   createCubeTestCase('dxf', {

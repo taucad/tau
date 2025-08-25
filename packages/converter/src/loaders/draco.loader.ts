@@ -1,49 +1,50 @@
-import type { BufferGeometry, Object3D } from 'three';
-import { Mesh, Points, MeshStandardMaterial, PointsMaterial } from 'three';
-import { BaseLoader } from '#loaders/base.loader.js';
+import type { Document } from '@gltf-transform/core';
+import { BaseLoader, type BaseLoaderOptions } from '#loaders/base.loader.js';
 import type { File } from '#types.js';
-import { NodeDracoLoader } from '#loaders/draco/node-draco-loader.js';
-import { GltfExporter } from '#exporters/gltf.exporter.js';
+import { GltfDracoDecoder } from '#loaders/draco/gltf-draco-decoder.js';
+import { createNodeIO } from '#gltf.utils.js';
+import { createCoordinateTransform, createScalingTransform } from '#gltf.transforms.js';
 
-export class DracoLoader extends BaseLoader<BufferGeometry> {
-  private readonly loader = new NodeDracoLoader();
-  private readonly gltfExporter = new GltfExporter();
+type DracoLoaderOptions = {
+  transformYtoZup?: boolean;
+  scaleMetersToMillimeters?: boolean;
+} & BaseLoaderOptions;
 
-  public dispose(): void {
-    this.loader.dispose();
-  }
+export class DracoLoader extends BaseLoader<Document, DracoLoaderOptions> {
+  private readonly decoder = new GltfDracoDecoder();
 
-  protected async parseAsync(files: File[]): Promise<BufferGeometry> {
-    await this.loader.initialize();
+  protected async parseAsync(files: File[], _options: DracoLoaderOptions): Promise<Document> {
+    await this.decoder.initialize();
+    this.decoder.setVerbosity(0);
 
     const { data } = this.findPrimaryFile(files);
     const arrayBuffer = this.uint8ArrayToArrayBuffer(data);
-    return new Promise((resolve, reject) => {
-      this.loader.parse(
-        arrayBuffer,
-        (geometry: BufferGeometry) => {
-          resolve(geometry);
-        },
-        (error: unknown) => {
-          reject(new Error(`Failed to decode Draco geometry: ${String(error)}`));
-        },
-      );
-    });
+
+    try {
+      // Decode Draco file to get raw geometry data
+      const decodedData = await this.decoder.decodeDracoFile(arrayBuffer);
+
+      // Create glTF Document from decoded data
+      const document = await this.decoder.createGltfDocument(decodedData);
+
+      return document;
+    } catch (error) {
+      throw new Error(`Failed to decode Draco geometry: ${String(error)}`);
+    }
   }
 
-  protected async mapToGlb(parseResult: BufferGeometry): Promise<Uint8Array> {
-    // Check if geometry has indices (is a mesh) or is a point cloud
-    let object3d: Object3D;
-    if (parseResult.index === null) {
-      const material = new PointsMaterial({ size: 0.01 });
-      material.vertexColors = parseResult.hasAttribute('color');
-      object3d = new Points(parseResult, material);
-    } else {
-      const material = new MeshStandardMaterial();
-      object3d = new Mesh(parseResult, material);
-    }
+  protected async mapToGlb(document: Document, options: DracoLoaderOptions): Promise<Uint8Array> {
+    const io = await createNodeIO();
 
-    // Generate GLB from the created Object3D using our GltfExporter
-    return this.gltfExporter.exportObject3DToGlb(object3d);
+    // For DRC files, transformations are typically not needed by default
+    // since they are already in the expected coordinate system and units
+    await document.transform(
+      createCoordinateTransform(options.transformYtoZup ?? false),
+      createScalingTransform(options.scaleMetersToMillimeters ?? false),
+    );
+
+    // Export to GLB
+    const glb = await io.writeBinary(document);
+    return new Uint8Array(glb);
   }
 }

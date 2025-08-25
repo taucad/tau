@@ -37,9 +37,8 @@ const TEST_FORMAT_COMBINATIONS = [
   { input: 'step' as InputFormat, output: 'obj' as OutputFormat },
 
   // Specialized → Various outputs - TODO: Add these back in
+  { input: 'drc' as InputFormat, output: 'stl' as OutputFormat },
   // { input: '3dm' as InputFormat, output: 'glb' as OutputFormat },
-  // { input: 'vox' as InputFormat, output: 'obj' as OutputFormat },
-  // { input: 'drc' as InputFormat, output: 'stl' as OutputFormat },
 ] as const;
 
 /**

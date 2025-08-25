@@ -1,11 +1,12 @@
-import type { Object3D } from 'three';
-import type { GLTFExporterOptions } from 'three/addons';
-import { GLTFExporter } from 'three/addons';
 import { NodeIO } from '@gltf-transform/core';
 import { createReverseCoordinateTransform, createReverseScalingTransform } from '#gltf.transforms.js';
 import { BaseExporter } from '#exporters/base.exporter.js';
 import type { File } from '#types.js';
 import { allExtensions } from '#gltf.extensions.js';
+
+type GLTFExporterOptions = {
+  binary?: boolean;
+};
 
 /**
  * GLTF exporter implementation using gltf-transform.
@@ -13,12 +14,10 @@ import { allExtensions } from '#gltf.extensions.js';
  */
 export class GltfExporter extends BaseExporter<GLTFExporterOptions> {
   private readonly io: NodeIO;
-  private readonly threeExporter: GLTFExporter; // Keep for Object3D export compatibility
 
   public constructor() {
     super();
     this.io = new NodeIO().registerExtensions(allExtensions);
-    this.threeExporter = new GLTFExporter(); // Keep for backward compatibility
   }
 
   public async parseAsync(glbData: Uint8Array, options?: Partial<GLTFExporterOptions>): Promise<File[]> {
@@ -71,16 +70,5 @@ export class GltfExporter extends BaseExporter<GLTFExporterOptions> {
     } catch (error) {
       throw new Error(`Failed to process GLB data: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }
-
-  /**
-   * Export Object3D directly to GLB format.
-   * This method is used by other loaders that need to export transformed Object3D to GLB.
-   * Uses Three.js GLTFExporter for Object3D compatibility.
-   */
-  public async exportObject3DToGlb(object3d: Object3D, options?: Partial<GLTFExporterOptions>): Promise<Uint8Array> {
-    const mergedOptions = this.mergeOptions({ ...options, binary: true });
-    const result = await this.threeExporter.parseAsync(object3d, mergedOptions);
-    return new Uint8Array(result as ArrayBuffer);
   }
 }

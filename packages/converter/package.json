@@ -53,7 +53,6 @@
     "assimpjs": "https://codeload.github.com/taucad/assimpjs/tar.gz/cf36dc8e4ef85f1153d041defac70bb1bc1c6454",
     "draco3dgltf": "^1.5.7",
     "occt-import-js": "^0.0.23",
-    "rhino3dm": "^8.17.0",
-    "three": "^0.179.0"
+    "rhino3dm": "^8.17.0"
   }
 }

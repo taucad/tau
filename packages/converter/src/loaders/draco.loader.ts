@@ -1,19 +1,13 @@
 import type { Document } from '@gltf-transform/core';
-import { BaseLoader, type BaseLoaderOptions } from '#loaders/base.loader.js';
+import { BaseLoader } from '#loaders/base.loader.js';
 import type { File } from '#types.js';
 import { GltfDracoDecoder } from '#loaders/draco/gltf-draco-decoder.js';
 import { createNodeIO } from '#gltf.utils.js';
-import { createCoordinateTransform, createScalingTransform } from '#gltf.transforms.js';
 
-type DracoLoaderOptions = {
-  transformYtoZup?: boolean;
-  scaleMetersToMillimeters?: boolean;
-} & BaseLoaderOptions;
-
-export class DracoLoader extends BaseLoader<Document, DracoLoaderOptions> {
+export class DracoLoader extends BaseLoader<Document> {
   private readonly decoder = new GltfDracoDecoder();
 
-  protected async parseAsync(files: File[], _options: DracoLoaderOptions): Promise<Document> {
+  protected async parseAsync(files: File[]): Promise<Document> {
     await this.decoder.initialize();
     this.decoder.setVerbosity(0);
 
@@ -33,15 +27,8 @@ export class DracoLoader extends BaseLoader<Document, DracoLoaderOptions> {
     }
   }
 
-  protected async mapToGlb(document: Document, options: DracoLoaderOptions): Promise<Uint8Array> {
+  protected async mapToGlb(document: Document): Promise<Uint8Array> {
     const io = await createNodeIO();
-
-    // For DRC files, transformations are typically not needed by default
-    // since they are already in the expected coordinate system and units
-    await document.transform(
-      createCoordinateTransform(options.transformYtoZup ?? false),
-      createScalingTransform(options.scaleMetersToMillimeters ?? false),
-    );
 
     // Export to GLB
     const glb = await io.writeBinary(document);

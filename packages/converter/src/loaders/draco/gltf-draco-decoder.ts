@@ -13,7 +13,6 @@
 // limitations under the License.
 
 // Pure gltf-transform implementation for Draco decoding
-// Derived from node-draco-loader.ts but using gltf-transform instead of Three.js
 
 /* eslint-disable @typescript-eslint/naming-convention -- draco3d uses c++ style */
 /* eslint-disable max-params -- draco3d uses c++ style */

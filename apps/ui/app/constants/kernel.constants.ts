@@ -1,4 +1,4 @@
-import type { ExportFormat, KernelProvider } from '#types/kernel.types.js';
+import type { BackendProvider, ExportFormat, KernelProvider } from '#types/kernel.types.js';
 
 /**
  * Map of export formats to file extensions
@@ -19,6 +19,7 @@ export type KernelOption = {
   name: string;
   description: string;
   mainFile: string;
+  backendProvider: BackendProvider;
   longDescription: string;
   emptyCode: string;
   recommended: string;
@@ -33,8 +34,9 @@ export const kernelOptions: KernelOption[] = [
     name: 'OpenSCAD',
     description: 'Constructive Solid Geometry for 3D printing',
     mainFile: 'main.scad',
+    backendProvider: 'manifold',
     longDescription:
-      'Uses Constructive Solid Geometry (CSG) - build complex geometries by combining basic primitives with boolean operations. Outputs mesh files perfect for 3D printing.',
+      'Constructive Solid Geometry (CSG) - build complex geometries by combining basic primitives with boolean operations. Outputs mesh files perfect for 3D printing.',
     emptyCode: ``,
     recommended: '3D Printing & Prototyping',
     tags: ['Constructive Solid Geometry', 'Mesh Export', 'Scripting', '3D Printing'],
@@ -50,8 +52,9 @@ export const kernelOptions: KernelOption[] = [
     name: 'Replicad',
     description: 'TypeScript-based CAD for precise engineering',
     mainFile: 'main.ts',
+    backendProvider: 'opencascade',
     longDescription:
-      'Uses Boundary Representation (BRep) for mathematically exact geometry. Perfect for engineering applications requiring precise measurements and tolerances.',
+      'Boundary Representation (BRep) for mathematically exact geometry. Perfect for engineering applications requiring precise measurements and tolerances.',
     emptyCode: `import {} from 'replicad';
 
 export const defaultParams = {};
@@ -70,10 +73,11 @@ export default function main(p = defaultParams) {}
   {
     id: 'zoo',
     name: 'Zoo (KCL)',
-    description: 'KittyCAD Language for cloud-native CAD modeling',
+    description: 'Cloud-native CAD modeling',
     mainFile: 'main.kcl',
+    backendProvider: 'zoo',
     longDescription:
-      'Uses KittyCAD Language (KCL) for cloud-native CAD modeling with precise parametric geometry. Designed for modern CAD workflows with AI integration and collaborative features.',
+      'Cloud-native CAD modeling with precise parametric geometry. Designed for modern CAD workflows with AI integration and collaborative features.',
     emptyCode: `@settings(defaultLengthUnit = mm)
 `,
     recommended: 'Cloud-native & AI-driven CAD',

@@ -15,7 +15,7 @@ const buttonVariants = cva(
         outline:
           'border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/60',
         // A variant of the outline, used when overlaying onto a canvas
-        overlay: 'border bg-muted shadow-xs hover:bg-accent hover:text-accent-foreground',
+        overlay: 'border bg-sidebar shadow-xs hover:bg-accent hover:text-accent-foreground',
         secondary: 'bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80',
         neutral: 'bg-accent/70 text-foreground shadow-xs hover:bg-accent',
         ghost: 'hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50',

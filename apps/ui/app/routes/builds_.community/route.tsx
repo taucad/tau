@@ -20,7 +20,7 @@ import { LoadingSpinner } from '#components/loading-spinner.js';
 export const handle: Handle = {
   breadcrumb() {
     return (
-      <Button asChild variant="ghost" className="p-2">
+      <Button asChild variant="ghost">
         <Link to="/builds/community">Community</Link>
       </Button>
     );

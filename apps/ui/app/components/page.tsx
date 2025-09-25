@@ -70,7 +70,15 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
               </span>
             ) : null}
             <Breadcrumb>
-              <BreadcrumbList className="sm:gap-0">
+              <BreadcrumbList className={
+                cn(
+                  "sm:gap-0",
+                  "[&_[data-slot=button]]:h-7 [&_[data-slot=button]]:p-2 [&_[data-slot=button]]:rounded-md",
+                  "[&_[data-slot='tooltip-trigger']]:h-7 [&_[data-slot='tooltip-trigger']]:p-2 [&_[data-slot='tooltip-trigger']]:rounded-md",
+                  "[&_[data-slot='breadcrumb-link']]:h-7 [&_[data-slot='breadcrumb-link']]:p-2 [&_[data-slot='breadcrumb-link']]:rounded-md",
+                  "[&_[data-slot=input]]:h-7 [&_[data-slot=input]]:rounded-md"
+                )}
+              >
                 {breadcrumbItems.map((match) => (
                   <Fragment key={match.id}>
                     <BreadcrumbSeparator className="hidden first:hidden md:block" />

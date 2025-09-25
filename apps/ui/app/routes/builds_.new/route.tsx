@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
 import { Button } from '#components/ui/button.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '#components/ui/card.js';
@@ -21,7 +21,10 @@ import { cookieName } from '#constants/cookie.constants.js';
 
 export const handle: Handle = {
   breadcrumb() {
-    return <span className="p-2 text-sm font-medium">New</span>;
+    return (
+      <Button asChild variant="ghost">
+        <Link to="/builds/new">New</Link>
+      </Button>)
   },
 };
 

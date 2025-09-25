@@ -12,7 +12,7 @@ export const handle: Handle = {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button asChild variant="ghost" className="p-2">
+          <Button asChild variant="ghost">
             <Link to="/builds/library">Builds</Link>
           </Button>
         </TooltipTrigger>

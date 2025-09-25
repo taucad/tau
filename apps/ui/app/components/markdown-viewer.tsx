@@ -51,10 +51,10 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
             // eslint-disable-next-line @typescript-eslint/no-base-to-string -- TODO: revisit this
             const text = String(children).replace(/\n$/, '');
 
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- see above
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- see TODO above
             return match ? (
               <div className="border-neutral-200 @container/code overflow-hidden rounded-md border font-sans">
-                <div className="sticky top-0 flex flex-row items-center justify-between border-b border-neutral/20 py-1 pr-1 pl-3 text-foreground/50">
+                <div className="sticky top-0 flex flex-row items-center justify-between border-b border-neutral/20 py-1 pr-1 pl-2 text-foreground/50">
                   <div className="text-xs">{language}</div>
                   {/* <div className="flex flex-row gap-1">
                     <CopyButton
@@ -71,7 +71,7 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
                 {...rest}
                 className={cn(
                   className,
-                  'rounded-sm bg-neutral/20 px-1 py-0.5 font-normal text-foreground/80 before:content-none after:content-none',
+                  'rounded-xs bg-neutral/20 px-1 py-0.5 font-normal text-foreground/80 before:content-none after:content-none',
                 )}
               >
                 {children}

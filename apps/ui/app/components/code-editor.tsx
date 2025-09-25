@@ -43,7 +43,7 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): React.
         // Override the background color of the Monaco editor
         '[&_.monaco-editor]:![--vscode-editor-background:var(--background)]',
         '[&_.monaco-editor]:![--vscode-editorStickyScroll-background:var(--background)]',
-        '[&_.monaco-editor]:![--vscode-breadcrumb-background:var(--background)]',
+        '[&_.monaco-editor]:![--vscode-breadcrumb-background:transparent]',
         '[&_.monaco-editor]:![--vscode-multiDiffEditor-background:var(--background)]',
         '[&_.monaco-editor]:![--vscode-editorMarkerNavigation-background:var(--background)]',
         '[&_.monaco-editor]:![--vscode-editorGutter-background:var(--background)]',
@@ -51,14 +51,11 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): React.
         '[&_.monaco-editor-background.textAreaCover.line-numbers]:!hidden',
         // Disable ::before pseudo-elements on line numbers
         '[&_.line-numbers::before]:!hidden',
-        // Scroll decoration appears after scrolling from top, replace shadow with top border
-        '[&_.scroll-decoration]:!border-t',
-        '[&_.scroll-decoration]:![box-shadow:none]',
         // Existing scrollbar styles
         '[&_.monaco-scrollable-element_>_.scrollbar]:!bg-(--scrollbar-track)',
         '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:!bg-(--scrollbar-thumb)/80',
         // Apply rounded corners to scrollbar sliders
-        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:rounded-sm',
+        '[&_.monaco-scrollable-element_>_.scrollbar_>_.slider]:rounded-[0.25rem]',
         // Ensure scrollbars don't overlap content
         '[&_.monaco-scrollable-element]:overflow-hidden',
         className,

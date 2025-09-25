@@ -5,6 +5,16 @@
 @plugin '@tailwindcss/typography';
 
 :root {
+  /* Radius */
+  --radius-4xl: calc(var(--radius-3xl) + 0.5rem);
+  --radius-3xl: calc(var(--radius-2xl) + 0.5rem);
+  --radius-2xl: calc(var(--radius-xl) + 0.25rem);
+  --radius-xl: calc(var(--radius-lg) + 0.25rem);
+  --radius-lg: calc(var(--radius-md) + 0.125rem);
+  --radius-md: calc(var(--radius-sm) + 0.125rem);
+  --radius-sm: calc(var(--radius-xs) + 0.125rem);
+  --radius-xs: 0.5rem;
+
   /* Base color hues */
   --hue-primary: 266deg;
   --hue-secondary: calc(var(--hue-primary) - 86deg); /* Results in ~180deg - true teal */
@@ -89,7 +99,7 @@
   --card-foreground: oklch(var(--l-deepest) 0.02 var(--hue-neutral));
 
   /* Sidebar specific */
-  --sidebar-background: oklch(var(--l-base) 0.005 var(--hue-neutral));
+  --sidebar-background: oklch(var(--l-surface) 0.005 var(--hue-neutral));
   --sidebar-foreground: oklch(var(--l-high) 0.02 var(--hue-neutral));
   --sidebar-primary: oklch(var(--l-deepest) 0.02 var(--hue-neutral));
   --sidebar-primary-foreground: oklch(var(--l-surface) 0.01 var(--hue-neutral));

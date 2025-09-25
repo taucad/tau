@@ -1,24 +1,27 @@
-import { NavLink, useParams } from 'react-router';
+import { useParams } from 'react-router';
 import { useCallback, useEffect } from 'react';
 import { createActor } from 'xstate';
-import { PackagePlus } from 'lucide-react';
 // eslint-disable-next-line no-restricted-imports -- allowed for router types
 import type { Route } from './+types/route.js';
 import { ChatInterface } from '#routes/builds_.$id/chat-interface.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
-import { Button } from '#components/ui/button.js';
 import type { Handle } from '#types/matches.types.js';
 import { useChatConstants } from '#utils/chat.js';
 import { AiChatProvider, useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { BuildNameEditor } from '#routes/builds_.$id/build-name-editor.js';
 import { FileExplorerContext } from '#routes/builds_.$id/graphics-actor.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
-import { ChatInterfaceControls, ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
+import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
 import { CommandPaletteTrigger } from '#routes/builds_.$id/command-palette.js';
-import { LoadingSpinner } from '#components/loading-spinner.js';
+import { Button } from '#components/ui/button.js';
+import { ArrowUpRight } from 'lucide-react';
+import { Github } from '#components/icons/github.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { toast } from 'sonner';
+import { useKeydown } from '#hooks/use-keydown.js';
+import { ChatControls } from '#routes/builds_.$id/chat-controls.js';
 
 export const handle: Handle = {
   breadcrumb(match) {
@@ -34,21 +37,24 @@ export const handle: Handle = {
     const { id } = match.params as Route.LoaderArgs['params'];
 
     return (
-      <BuildProvider buildId={id}>
-        <ViewContextProvider>
-          <ChatInterfaceControls />
-        </ViewContextProvider>
+      <>
+        <BuildProvider buildId={id}>
+          <ChatControls />
+        </BuildProvider>
+        <Button onClick={() => {
+          toast.info('Publishing coming soon!');
+        }} className="hidden md:flex">Publish <ArrowUpRight /></Button>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button asChild variant="outline" className="md:hidden" size="icon">
-              <NavLink to="/builds/new">
-                {({ isPending }) => (isPending ? <LoadingSpinner /> : <PackagePlus className="size-4" />)}
-              </NavLink>
+            <Button onClick={() => {
+              toast.info('Github connection coming soon!');
+            }} variant='outline' size="icon" className="hidden md:flex">
+              <Github />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>New Build</TooltipContent>
+          <TooltipContent>Connect to Github</TooltipContent>
         </Tooltip>
-      </BuildProvider>
+      </>
     );
   },
   commandPalette(match) {
@@ -69,6 +75,16 @@ function Chat() {
   const messages = useChatSelector((state) => state.context.messages);
   const status = useChatSelector((state) => state.context.status);
   const { setMessages, reload } = useChatActions();
+
+  useKeydown(
+    {
+      key: 's',
+      metaKey: true,
+    },
+    () => {
+      toast.success('Your work is saved automatically');
+    },
+  );
 
   // Subscribe the build to persist code & parameters changes
   useEffect(() => {
@@ -148,12 +164,10 @@ function Chat() {
   return <ChatInterface />;
 }
 
-export default function ChatRoute(): React.JSX.Element {
-  const { id } = useParams();
-
-  if (!id) {
-    throw new Error('No build id provided');
-  }
+// Wrapper component that has access to build context and can configure AiChatProvider
+function ChatWithProvider() {
+  const { activeChatId } = useBuild();
+  const { id: buildId } = useParams();
 
   // Tool call handler that integrates with the new architecture
   const onToolCall = useCallback(async ({ toolCall }: { toolCall: { toolName: string; args: unknown } }) => {
@@ -216,15 +230,31 @@ export default function ChatRoute(): React.JSX.Element {
     return undefined;
   }, []);
 
+  // Use chat ID when available, fallback to build ID
+  // Backend can distinguish: chat IDs start with "chat_", build IDs start with "bld_"
+  const threadId = activeChatId || buildId!;
+
+  return (
+    <AiChatProvider value={{ ...useChatConstants, id: threadId, onToolCall }}>
+      <ViewContextProvider>
+        <FileExplorerContext.Provider>
+          <Chat />
+        </FileExplorerContext.Provider>
+      </ViewContextProvider>
+    </AiChatProvider>
+  );
+}
+
+export default function ChatRoute(): React.JSX.Element {
+  const { id } = useParams();
+
+  if (!id) {
+    throw new Error('No build id provided');
+  }
+
   return (
     <BuildProvider buildId={id}>
-      <AiChatProvider value={{ ...useChatConstants, id, onToolCall }}>
-        <ViewContextProvider>
-          <FileExplorerContext.Provider>
-            <Chat />
-          </FileExplorerContext.Provider>
-        </ViewContextProvider>
-      </AiChatProvider>
+      <ChatWithProvider />
     </BuildProvider>
   );
 }

@@ -32,7 +32,7 @@ export default function AuthPage(): React.JSX.Element {
             pathname={pathname}
             className="w-full max-w-md"
             callbackURL={ENV.TAU_FRONTEND_URL}
-            classNames={{ form: { secondaryButton: 'bg-neutral/20 hover:bg-neutral/30' } }}
+            classNames={{ form: { secondaryButton: 'bg-neutral/20 text-foreground hover:bg-neutral/30' } }}
           />
         </div>
       </div>

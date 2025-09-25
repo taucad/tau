@@ -66,6 +66,7 @@ export const handle: Handle = {
       </BuildProvider>
     );
   },
+  enableFloatingSidebar: true,
 };
 
 function Chat() {

@@ -178,7 +178,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
         targetFile?: string;
       };
       return (
-        <div className="@container/code flex h-7 w-full flex-row items-center gap-1 overflow-hidden rounded-md border bg-neutral/10 pr-1 pl-3 text-xs text-muted-foreground">
+        <div className="@container/code flex h-7 w-full flex-row items-center gap-1 overflow-hidden rounded-md border bg-neutral/10 pr-1 pl-2 text-xs text-muted-foreground">
           <StatusIcon chatStatus={status} toolStatus={part.toolInvocation.state} />
           <Filename targetFile={targetFile} chatStatus={status} toolStatus={part.toolInvocation.state} />
         </div>

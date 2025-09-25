@@ -10,16 +10,15 @@ import {
   BreadcrumbSeparator,
 } from '#components/ui/breadcrumb.js';
 import { Separator } from '#components/ui/separator.js';
-import { sidebarToggleKeyCombo, SidebarInset, SidebarProvider, SidebarTrigger } from '#components/ui/sidebar.js';
+import { SidebarInset, SidebarProvider, SidebarTrigger } from '#components/ui/sidebar.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Badge } from '#components/ui/badge.js';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { formatKeyCombination } from '#utils/keys.js';
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
 import { NavUser } from '#components/nav/nav-user.js';
+import { cn } from '#utils/ui.js';
 
-export const headerHeight = 'calc(var(--spacing) * 11)';
+export const headerHeight = 'calc(var(--spacing) * 12)';
 
 export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Element {
   const {
@@ -30,6 +29,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     commandPaletteItems,
     hasCommandPaletteItems,
     noPageWrapper,
+    enableFloatingSidebar,
   } = useTypedMatches((handles) => ({
     breadcrumbItems: handles.breadcrumb,
     hasBreadcrumbItems: handles.breadcrumb.length > 0,
@@ -38,6 +38,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     commandPaletteItems: handles.commandPalette,
     hasCommandPaletteItems: handles.commandPalette.length > 0,
     noPageWrapper: handles.noPageWrapper.some((match) => match.handle.noPageWrapper === true),
+    enableFloatingSidebar: handles.enableFloatingSidebar.some((match) => match.handle.enableFloatingSidebar === true),
   }));
 
   const isOnline = useNetworkConnectivity();
@@ -50,20 +51,11 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset
-        className="w-[calc(100dvw-var(--sidebar-width-current)-1px)]"
         style={{ '--header-height': headerHeight }}
       >
-        <header className="relative flex h-[var(--header-height)] shrink-0 items-center justify-between gap-2 border-b-[1px] border-border transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-11">
-          <div className="flex items-center gap-1 px-4">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <SidebarTrigger className="-ml-2" />
-              </TooltipTrigger>
-              <TooltipContent>
-                Toggle sidebar{' '}
-                <KeyShortcut variant="tooltip">{formatKeyCombination(sidebarToggleKeyCombo)}</KeyShortcut>
-              </TooltipContent>
-            </Tooltip>
+        <header className="absolute top-0 w-full z-20 flex h-[var(--header-height)] shrink-0 items-center justify-between gap-2 pointer-events-none">
+          <div className="flex items-center p-0.25 gap-0.25 md:gap-1 h-8 ml-2 md:ml-[var(--sidebar-width-current)] transition-all duration-200 ease-linear pl-2.75 rounded-lg bg-sidebar border pointer-events-auto">
+            <SidebarTrigger className="-ml-2.5" />
             {hasBreadcrumbItems ? (
               <span className="h-4">
                 <Separator orientation="vertical" />
@@ -92,7 +84,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
           </div>
 
           {/* Centered Command Palette */}
-          <div className="absolute top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2">
+          <div className="absolute top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 pointer-events-auto">
             {hasCommandPaletteItems ? (
               <div className="flex items-center gap-2">
                 {commandPaletteItems.map((match) => (
@@ -102,15 +94,13 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
             ) : null}
           </div>
 
-          <div className="flex items-center gap-2 px-2">
+          <div className="flex items-center gap-2 px-2 pointer-events-auto">
             {!isOnline && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span>
-                    <Badge className="font-mono font-normal" variant="outline">
-                      OFFLINE
-                    </Badge>
-                  </span>
+                  <Badge className="font-mono font-normal" variant="outline">
+                    OFFLINE
+                  </Badge>
                 </TooltipTrigger>
                 <TooltipContent>You are offline. Reconnect to access online features.</TooltipContent>
               </Tooltip>
@@ -126,7 +116,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
             <NavUser />
           </div>
         </header>
-        <section className="h-[calc(100dvh-var(--header-height)-1px)] overflow-y-auto">
+        <section className={cn("h-dvh overflow-y-auto", !enableFloatingSidebar && 'md:ml-(--sidebar-width-current) h-[calc(100dvh-var(--header-height)-1px)] mt-[var(--header-height)]')}>
           {error === undefined ? <Outlet /> : error}
         </section>
       </SidebarInset>

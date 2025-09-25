@@ -7,6 +7,7 @@ export type Handle = {
   actions?: (match: UIMatch) => ReactNode;
   commandPalette?: (match: UIMatch) => ReactNode;
   noPageWrapper?: boolean;
+  enableFloatingSidebar?: boolean;
 };
 
 export type TypedUiMatch = UIMatch & {

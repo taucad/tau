@@ -2,7 +2,6 @@ import * as React from 'react';
 import { Link } from 'react-router';
 import { ColorToggle } from '#components/nav/color-toggle.js';
 import { NavHistory } from '#components/nav/nav-history.js';
-import { headerHeight } from '#components/page.js';
 import { NavMain } from '#components/nav/nav-main.js';
 import { NavProjects } from '#components/nav/nav-projects.js';
 import {
@@ -20,8 +19,8 @@ import { navRoutes } from '#constants/route.constants.js';
 
 export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>): React.JSX.Element {
   return (
-    <Sidebar collapsible="icon" {...properties}>
-      <SidebarHeader style={{ height: headerHeight }} className="border-b border-border">
+    <Sidebar variant='floating' collapsible='offcanvas' {...properties}>
+      <SidebarHeader>
         <SidebarMenuButton
           asChild
           tooltip="Home"
@@ -29,9 +28,6 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
         >
           <Link to="/">
             <Tau className="overflow-clip rounded-md text-primary" />
-            <h1 className="-mb-0.5 -ml-1 font-mono text-[calc(var(--spacing)*6)] font-semibold tracking-wider text-primary italic group-data-[collapsible=icon]:hidden">
-              au
-            </h1>
             <span className="sr-only">Home</span>
           </Link>
         </SidebarMenuButton>
@@ -46,7 +42,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
           <NavProjects projects={navRoutes.projects} />
         </div>
       </SidebarContent>
-      <SidebarFooter className="flex flex-col items-end transition-transform duration-200 ease-linear group-data-[collapsible=icon]:items-center">
+      <SidebarFooter className="flex flex-col items-end">
         <ColorToggle />
         <ThemeToggle />
       </SidebarFooter>

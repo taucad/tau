@@ -142,12 +142,12 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
               <span
                 className={cn(
                   getTextSizeClass(localizedSmallGridSize),
-                  'absolute top-[calc(var(--spacing)*2)] left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center',
+                  'absolute top-[calc(var(--spacing)*3)] left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center',
                 )}
               >
                 <span>{localizedSmallGridSize}</span>
               </span>
-              <span className="absolute bottom-[calc(var(--spacing)*0.25)] left-1/2 flex -translate-x-1/2 items-center gap-0.5 text-[calc(var(--spacing)*3)]">
+              <span className="absolute bottom-[calc(var(--spacing)*1)] left-1/2 flex -translate-x-1/2 items-center gap-0.5 text-[calc(var(--spacing)*2)]">
                 {unit}
                 {isGridSizeLocked ? <LockIcon className="size-2" /> : null}
               </span>

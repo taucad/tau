@@ -47,7 +47,7 @@ export function FovControl({ defaultAngle, className }: Omit<CameraControlProps,
               size: 'sm',
             }),
             className,
-            'group relative w-fit gap-0 overflow-hidden p-0 hover:overflow-visible max-md:overflow-visible',
+            'group relative w-fit gap-0 overflow-hidden p-0 px-1.5 hover:overflow-visible max-md:overflow-visible',
             'flex items-center',
             'hover:cursor-pointer',
           )}

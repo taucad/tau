@@ -60,7 +60,7 @@ export function ChatParametersInputNumber({
   return (
     <div
       className={cn(
-        'group relative flex flex-row items-center rounded-md',
+        'group/input relative flex flex-row items-center rounded-md',
         'focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
       )}
     >
@@ -69,7 +69,7 @@ export function ChatParametersInputNumber({
           className={cn(
             baseIndicatorClass,
             'rounded-l-md border-r-0',
-            'transition-[color,box-shadow] group-focus-within:z-10 group-focus-within:border-ring',
+            'group-focus-within/input:border-ring',
             'cursor-text',
           )}
           onClick={handleIndicatorClick}
@@ -92,7 +92,7 @@ export function ChatParametersInputNumber({
       />
       {!isCount && (
         <span
-          className={cn(baseIndicatorClass, 'rounded-r-md border-l-0', 'group-focus-within:border-ring', 'cursor-text')}
+          className={cn(baseIndicatorClass, 'rounded-r-md border-l-0', 'group-focus-within/input:border-ring', 'cursor-text')}
           onClick={handleIndicatorClick}
         >
           {isAngle ? (

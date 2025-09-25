@@ -18,7 +18,7 @@ export function KernelSelector({
   onClose,
 }: KernelSelectorProperties): React.JSX.Element {
   return (
-    <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+    <div className="grid grid-cols-3 gap-3 lg:grid-cols-3">
       {kernelOptions.map((option) => (
         <HoverCard key={option.id}>
           <HoverCardTrigger asChild>
@@ -26,8 +26,8 @@ export function KernelSelector({
               variant="outline"
               size="sm"
               className={cn(
-                'flex h-auto min-h-12 flex-col items-center justify-center gap-2 rounded-lg border-border p-3 transition-all hover:border-primary/50 hover:bg-primary/5',
-                selectedKernel === option.id && 'border-ring bg-primary/5 ring-[3px] ring-ring/50',
+                'flex h-auto min-h-9 flex-col items-center justify-center gap-2 rounded-lg border-border p-2 transition-all hover:border-primary/50 hover:bg-primary/5',
+                selectedKernel === option.id && 'border-ring bg-primary/5 ring-3 ring-ring/50',
               )}
               onClick={() => {
                 onKernelChange(option.id);
@@ -38,10 +38,9 @@ export function KernelSelector({
                 <SvgIcon id={option.id} className="size-5" />
                 <span className="text-sm font-medium">{option.name}</span>
               </div>
-              <span className="text-xs text-wrap text-muted-foreground">{option.description}</span>
             </Button>
           </HoverCardTrigger>
-          <HoverCardContent className="w-80">
+          <HoverCardContent side="top" className="w-120">
             <div className="space-y-4">
               <div className="flex items-start gap-4">
                 <SvgIcon id={option.id} className="size-12 min-w-12 rounded-lg bg-muted p-2" />

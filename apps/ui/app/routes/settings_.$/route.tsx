@@ -3,6 +3,7 @@ import { SettingsCards, useAuthenticate } from '@daveyplate/better-auth-ui';
 import { Link, useLocation } from 'react-router';
 import { Tabs, TabsList, TabsTrigger, TabsContent, TabsContents } from '#components/ui/tabs.js';
 import type { Handle } from '#types/matches.types.js';
+import { Button } from '#components/ui/button.js';
 
 type SettingsTab = {
   tabView: SettingsView;
@@ -43,6 +44,10 @@ const nonAuthTabs: Array<Omit<SettingsTab, 'tabView'>> = [
     label: 'Billing',
     href: '/settings/billing',
   },
+  {
+    label: 'Appearance',
+    href: '/settings/appearance',
+  }
 ];
 
 const allTabs = [...authTabs, ...nonAuthTabs];
@@ -57,7 +62,11 @@ export const handle: Handle = {
     const currentTab = allTabs.find((tab) => tab.href === location.pathname);
     const label = currentTab?.label ?? defaultLabel;
 
-    return <span className="p-2 text-sm font-medium">{label}</span>;
+    return (
+      <Button asChild variant="ghost">
+        <Link to={location.pathname}>{label}</Link>
+      </Button>
+    );
   },
 };
 

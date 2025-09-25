@@ -1,11 +1,16 @@
 import { useEffect } from 'react';
-import { Outlet, redirect, useLocation, useNavigate } from 'react-router';
+import { Link, Outlet, redirect, useLocation, useNavigate } from 'react-router';
 import type { LoaderFunction } from 'react-router';
 import type { Handle } from '#types/matches.types.js';
+import { Button } from '#components/ui/button.js';
 
 export const handle: Handle = {
   breadcrumb() {
-    return <span className="p-2 text-sm font-medium">Settings</span>;
+    return (
+      <Button asChild variant="ghost">
+        <Link to="/settings">Settings</Link>
+      </Button>
+    );
   },
 };
 

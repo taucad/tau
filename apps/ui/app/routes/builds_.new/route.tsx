@@ -9,6 +9,7 @@ import { Badge } from '#components/ui/badge.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { RadioGroup, RadioGroupItem } from '#components/ui/radio-group.js';
 import { Textarea } from '#components/ui/textarea.js';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '#components/ui/accordion.js';
 import { storage } from '#db/storage.js';
 import { kernelOptions, getKernelOption } from '#constants/kernel.constants.js';
 import { toast } from '#components/ui/sonner.js';
@@ -27,6 +28,45 @@ export const handle: Handle = {
       </Button>)
   },
 };
+
+// Reusable component for kernel details content
+function KernelDetailsContent({ kernelId }: { readonly kernelId: KernelProvider }): React.JSX.Element {
+  const selectedOption = getKernelOption(kernelId);
+  return (
+    <div className="space-y-4">
+      <p className="text-sm leading-relaxed text-muted-foreground">{selectedOption.longDescription}</p>
+
+      <div className="space-y-3">
+        <Badge variant="outline" className="text-xs font-medium text-primary">
+          Best for: {selectedOption.recommended}
+        </Badge>
+
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium">Tags:</h4>
+          <div className="flex flex-wrap gap-1">
+            {selectedOption.tags.map((tag) => (
+              <Badge key={tag} variant="secondary" className="text-xs">
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium">Key Features:</h4>
+          <ul className="space-y-1 text-sm text-muted-foreground">
+            {selectedOption.features.map((feature) => (
+              <li key={feature} className="flex items-center gap-2">
+                <div className="size-1.5 shrink-0 rounded-full bg-primary/60" />
+                <span>{feature}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // Custom hook for build creation logic
 function useBuildCreation() {
@@ -119,7 +159,7 @@ export default function BuildsNew(): React.JSX.Element {
   );
 
   return (
-    <div className="container mx-auto max-w-4xl px-4 py-8">
+    <div className="container mx-auto max-w-4xl px-4 pb-8">
       <div className="mb-8 text-center">
         <h1 className="mb-2 text-3xl font-semibold tracking-tight">Create New Build</h1>
         <p className="text-muted-foreground">Choose a CAD kernel and start building</p>
@@ -128,10 +168,6 @@ export default function BuildsNew(): React.JSX.Element {
       <div className="space-y-6">
         {/* Build Details */}
         <Card>
-          <CardHeader>
-            <CardTitle>Build Details</CardTitle>
-            <CardDescription>Give your build a name and description</CardDescription>
-          </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="build-name">Build Name *</Label>
@@ -171,73 +207,112 @@ export default function BuildsNew(): React.JSX.Element {
             <CardDescription>Select the technology that best fits your build needs</CardDescription>
           </CardHeader>
           <CardContent>
-            <RadioGroup
-              value={selectedKernel}
-              className="space-y-4"
-              onValueChange={(value) => {
-                setSelectedKernel(value as KernelProvider);
-              }}
-            >
-              {kernelOptions.map((option) => (
-                <div key={option.id} className="space-y-3">
-                  <Label
-                    htmlFor={option.id}
-                    className={cn(
-                      'relative block cursor-pointer rounded-lg border p-4 transition-all',
-                      selectedKernel === option.id
-                        ? 'border-ring bg-primary/5 ring-[3px] ring-ring/50 dark:bg-primary/10'
-                        : 'border-border hover:border-primary/50',
-                    )}
-                  >
-                    <RadioGroupItem value={option.id} id={option.id} className="absolute top-4 left-4 z-10" />
-                    <div className="flex flex-col space-y-3 pl-8">
-                      <div className="flex items-start gap-4 sm:items-center">
-                        <SvgIcon id={option.id} className="size-12 min-w-12 rounded-lg bg-muted p-2" />
-                        <div>
-                          <h3 className="text-lg font-semibold">{option.name}</h3>
-                          <p className="text-sm text-muted-foreground italic">{option.description}</p>
+            {/* Mobile Accordion Layout */}
+            <div className="block md:hidden">
+              <RadioGroup
+                value={selectedKernel}
+                onValueChange={(value) => {
+                  setSelectedKernel(value as KernelProvider);
+                }}
+              >
+                <Accordion 
+                  type="single" 
+                  value={selectedKernel} 
+                  onValueChange={(value) => {
+                    if (value) {
+                      setSelectedKernel(value as KernelProvider);
+                    }
+                  }}
+                  className="space-y-2"
+                >
+                  {kernelOptions.map((option) => (
+                    <AccordionItem 
+                      key={option.id} 
+                      value={option.id} 
+                      className={cn(
+                        'border rounded-lg transition-all',
+                        selectedKernel === option.id && 'border-ring bg-primary/5 ring-3 ring-ring/50',
+                      )}
+                    >
+                      <AccordionTrigger 
+                        className={cn(
+                          'flex h-auto cursor-pointer items-start justify-between gap-3 rounded-lg border-0 p-4 text-left transition-all hover:no-underline',
+                          'bg-transparent hover:bg-transparent data-[state=open]:bg-transparent',
+                        )}
+                      >
+                        <div className="flex items-start gap-3 flex-1">
+                          <RadioGroupItem value={option.id} id={`mobile-${option.id}`} className="mt-1" />
+                          <SvgIcon id={option.id} className="size-6 shrink-0 mt-0.5" />
+                          <div className="flex flex-col gap-1 min-w-0 w-full">
+                            <div className="flex items-start justify-between gap-2 w-full">
+                              <span className="text-sm font-medium">{option.name}</span>
+                              <span className="text-xs text-muted-foreground/70 font-mono">
+                                {option.backendProvider}
+                              </span>
+                            </div>
+                            <span className="text-xs text-muted-foreground leading-relaxed">
+                              {option.description}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                      <div className="w-full space-y-2">
-                        <p className="text-sm leading-relaxed font-normal text-muted-foreground">
-                          {option.longDescription}
-                        </p>
-                        <div className="flex flex-wrap gap-1">
-                          {option.tags.map((tag) => (
-                            <Badge key={tag} variant="secondary" className="text-xs">
-                              {tag}
-                            </Badge>
-                          ))}
-                        </div>
-                        <Badge variant="outline" className="text-xs font-medium text-primary">
-                          Best for: {option.recommended}
-                        </Badge>
-                      </div>
-                    </div>
-                  </Label>
+                      </AccordionTrigger>
+                      <AccordionContent className="px-4 pb-4">
+                        <KernelDetailsContent kernelId={option.id} />
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              </RadioGroup>
+            </div>
 
-                  {/* Feature list and examples */}
-                  {selectedKernel === option.id && (
-                    <div className="mx-4 space-y-3 border-t border-primary/20 pt-4">
-                      <h4 className="mb-2 text-center text-sm font-medium">Key Features:</h4>
-                      <ul className="space-y-1 text-sm text-muted-foreground">
-                        {option.features.map((feature) => (
-                          <li key={feature} className="flex items-center justify-center gap-2">
-                            <div className="size-1.5 shrink-0 rounded-full bg-primary/60" />
-                            <span className="text-center">{feature}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </RadioGroup>
+            {/* Desktop Side-by-Side Layout */}
+            <div className="hidden md:flex md:gap-6">
+              {/* Left side - Radio Group */}
+              <div className="flex flex-col gap-2 md:min-w-80">
+                <RadioGroup
+                  value={selectedKernel}
+                  className="space-y-2"
+                  onValueChange={(value) => {
+                    setSelectedKernel(value as KernelProvider);
+                  }}
+                >
+                  {kernelOptions.map((option) => (
+                    <Label
+                      key={option.id}
+                      htmlFor={option.id}
+                      className={cn(
+                        'flex h-auto cursor-pointer items-start justify-start gap-3 rounded-lg border p-4 text-left transition-all hover:border-primary/50 hover:bg-primary/5',
+                        selectedKernel === option.id && 'border-ring bg-primary/5 ring-3 ring-ring/50',
+                      )}
+                    >
+                      <RadioGroupItem value={option.id} id={option.id} className="mt-1" />
+                      <SvgIcon id={option.id} className="size-6 shrink-0 mt-0.5" />
+                      <div className="flex flex-col gap-1 min-w-0 w-full">
+                        <div className="flex items-start justify-between gap-2 w-full">
+                          <span className="text-sm font-medium">{option.name}</span>
+                          <span className="text-xs text-muted-foreground/70 font-mono">
+                            {option.backendProvider}
+                          </span>
+                        </div>
+                        <span className="text-xs text-muted-foreground leading-relaxed">
+                          {option.description}
+                        </span>
+                      </div>
+                    </Label>
+                  ))}
+                </RadioGroup>
+              </div>
+
+              {/* Right side - Content panel */}
+              <div className="flex-1 rounded-lg border border-border bg-card p-6">
+                <KernelDetailsContent kernelId={selectedKernel} />
+              </div>
+            </div>
           </CardContent>
         </Card>
 
         {/* Action Buttons */}
-        <div className="flex justify-between gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:gap-4">
           <Button variant="outline" disabled={isCreating} onClick={handleCancel}>
             Cancel
           </Button>

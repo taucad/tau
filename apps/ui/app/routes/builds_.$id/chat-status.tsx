@@ -19,7 +19,7 @@ export const ChatStatus = memo(function ({ className }: ChatStatusProperties) {
       <AnimatePresence>
         {isVisible ? (
           <motion.div
-            className="absolute inset-x-0 mx-3.5 flex items-center justify-start overflow-clip rounded-2xl border bg-background text-sm text-muted-foreground"
+            className="absolute inset-x-0 mx-3.5 flex items-center justify-start overflow-clip rounded-t-2xl border bg-background text-sm text-muted-foreground"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}

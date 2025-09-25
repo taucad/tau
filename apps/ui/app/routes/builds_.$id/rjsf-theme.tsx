@@ -74,7 +74,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
               <Button
                 variant="ghost"
                 size="xs"
-                className="text-muted-foreground opacity-70 transition-opacity hover:opacity-100"
+                className="text-muted-foreground"
                 onClick={handleReset}
               >
                 <RefreshCcwDot className="size-3.5" />

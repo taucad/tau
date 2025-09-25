@@ -444,7 +444,7 @@ export const ChatTextarea = memo(function ({
         <Textarea
           ref={textareaReference}
           className={cn(
-            'mt-2 mb-10 size-full max-h-48 min-h-14 resize-none border-none px-4 pt-1 pb-1 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
+            'mt-2 mb-10 size-full max-h-48 min-h-14 resize-none bg-transparent dark:bg-transparent border-none px-4 pt-1 pb-1 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
             (images.length > 0 || enableContextActions) && 'mt-6 pt-5',
           )}
           rows={3}

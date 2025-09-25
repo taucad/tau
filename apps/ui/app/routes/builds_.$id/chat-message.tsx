@@ -52,6 +52,13 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
 
   const isUser = message.role === messageRole.user;
 
+  const handleEditClick = () => {
+    if (!isUser) {
+      return;
+    }
+    setIsEditing((previous) => !previous);
+  };
+
   return (
     <article
       className={cn(
@@ -65,7 +72,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
           // Only make the text area full when editing.
           isEditing && 'w-full',
           // Only the assistant messages should take up the full width.
-          !isUser && 'w-full',
+          'w-full',
         )}
       >
         <When shouldRender={isUser ? isEditing : false}>
@@ -82,7 +89,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
           />
         </When>
         <When shouldRender={!isEditing}>
-          <div className={cn('flex flex-col gap-2', isUser && 'rounded-xl bg-neutral/20 p-2')}>
+          <div className={cn('flex flex-col gap-2', isUser && 'rounded-xl bg-neutral/20 p-2 hover:bg-neutral/30 border hover:border-primary cursor-pointer')} onClick={handleEditClick}>
             {message.experimental_attachments?.map((attachment, index) => {
               return (
                 <HoverCard

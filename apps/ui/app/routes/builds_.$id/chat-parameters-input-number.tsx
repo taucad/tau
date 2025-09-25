@@ -61,7 +61,7 @@ export function ChatParametersInputNumber({
     <div
       className={cn(
         'group relative flex flex-row items-center rounded-md',
-        'focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50',
+        'focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
       )}
     >
       {isCount ? (

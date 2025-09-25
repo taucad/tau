@@ -79,7 +79,7 @@
   --verified: oklch(var(--l-medium) 0.25 var(--hue-verified));
 
   --input: oklch(var(--l-subtle) 0.01 var(--hue-neutral));
-  --ring: oklch(0.55 0.2 var(--hue-primary));
+  --ring: oklch(var(--l-medium) 0.2 var(--hue-primary));
 
   /* Component specific */
   --popover: oklch(var(--l-base) 0 var(--hue-neutral));
@@ -96,7 +96,7 @@
   --sidebar-accent: oklch(var(--l-subtle) 0.02 var(--hue-neutral));
   --sidebar-accent-foreground: oklch(var(--l-deepest) 0.02 var(--hue-neutral));
   --sidebar-border: oklch(var(--l-subtle) 0.02 var(--hue-neutral));
-  --sidebar-ring: oklch(0.55 0.2 var(--hue-primary));
+  --sidebar-ring: oklch(var(--l-medium) 0.2 var(--hue-primary));
 
   /* Scrollbar specific */
   --scrollbar-thumb: var(--border);

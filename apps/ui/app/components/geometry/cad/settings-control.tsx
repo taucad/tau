@@ -118,7 +118,7 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent side="left">Viewer Settings</TooltipContent>
+        <TooltipContent side="left">Viewer settings</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
         align="start"

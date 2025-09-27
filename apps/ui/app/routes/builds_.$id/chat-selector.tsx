@@ -192,7 +192,7 @@ export function ChatSelector(): ReactNode {
                 </Button>
               </TooltipTrigger>
             </ComboBoxResponsive>
-            <TooltipContent side="bottom">Search chats</TooltipContent>
+            <TooltipContent side="top">Search chats</TooltipContent>
           </Tooltip>
         </div>
 
@@ -203,7 +203,7 @@ export function ChatSelector(): ReactNode {
                 <Plus className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">
+            <TooltipContent side="top">
               New chat{' '}
               <KeyShortcut variant="tooltip" className="ml-1">
                 {formattedKeyCombination}

@@ -1,82 +1,130 @@
 import { memo } from 'react';
 import { ChatHistory } from '#routes/builds_.$id/chat-history.js';
-import { ChatViewTabs } from '#routes/builds_.$id/chat-view-tabs.js';
-import { ChatViewSplit } from '#routes/builds_.$id/chat-view-split.js';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable.js';
-import { cn } from '#utils/ui.js';
 import { ChatParameters } from '#routes/builds_.$id/chat-parameters.js';
-import { useCookie } from '#hooks/use-cookie.js';
 import { useViewContext } from '#routes/builds_.$id/chat-interface-controls.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { ChatViewer } from '#routes/builds_.$id/chat-viewer.js';
+import { ChatEditorLayout } from '#routes/builds_.$id/chat-editor-layout.js';
+import { SettingsControl } from '#components/geometry/cad/settings-control.js';
+import { ChatViewerStatus } from '#routes/builds_.$id/chat-viewer-status.js';
+import { ChatViewerControls } from '#routes/builds_.$id/chat-viewer-controls.js';
+import { ChatStackTrace } from '#routes/builds_.$id/chat-stack-trace.js';
+import { ChatEditorObjectTree } from '#routes/builds_.$id/chat-editor-object-tree.js';
+import { ChatEditorDetails } from '#routes/builds_.$id/chat-editor-details.js';
+import { cn } from '#utils/ui.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { FloatingPanelTrigger } from '#components/ui/floating-panel.js';
+import { FileBox, MessageCircle, Settings2, Code2, Info } from 'lucide-react';
 
 export const ChatInterface = memo(function () {
-  const [chatResizeMain, setChatResizeMain] = useCookie(cookieName.chatResizeMain, [25, 60, 15]);
-  const { isChatOpen, isParametersOpen, viewMode } = useViewContext();
+  const { isChatOpen, toggleChatOpen, isParametersOpen, toggleParametersOpen, isEditorOpen, toggleEditorOpen, isExplorerOpen, toggleExplorerOpen, isDetailsOpen, toggleDetailsOpen } = useViewContext();
+  const [chatResizeLeft, setChatResizeLeft] = useCookie(cookieName.chatRsLeft, [30, 20, 50]);
+  const [chatResizeRight, setChatResizeRight] = useCookie(cookieName.chatRsRight, [50, 30, 20, 0]);
 
   return (
-    <ResizablePanelGroup
-      direction="horizontal"
-      className="group/chat-layout relative flex flex-1 bg-background"
-      autoSaveId={cookieName.chatResizeMain}
-      data-chat-open={isChatOpen}
-      data-parameters-open={isParametersOpen}
-      data-view-mode={viewMode}
-      onLayout={setChatResizeMain}
-    >
-      <ResizablePanel
-        order={1}
-        minSize={15}
-        maxSize={50}
-        defaultSize={chatResizeMain[0]}
-        className={cn('group-data-[chat-open=false]/chat-layout:hidden')}
-        id="chat-history"
+    <div className="group/chat-layout relative size-full flex flex-col">
+      {/* Viewer - inset completely to occupy the background fully */}
+      <div className="absolute inset-0 size-full">
+        <ChatViewer />
+      </div>
+
+      {/* Left-side ResizablePanelGroup */}
+      <ResizablePanelGroup direction="horizontal" autoSaveId={cookieName.chatRsLeft} className="absolute gap-1 top-(--header-height) left-2 md:left-(--sidebar-width-current) h-[calc(100dvh-(--spacing(14)))]! w-[50%]! md:w-[calc(50%-0.25rem)]! transition-all duration-200 ease-linear overflow-visible! pointer-events-none" onLayout={setChatResizeLeft}
       >
-        <ChatHistory />
-      </ResizablePanel>
+        <ResizablePanel style={{ ...(!isChatOpen ? { display: 'none' } : {}) }} order={1} id="history" minSize={25} defaultSize={chatResizeLeft[0]} className='pointer-events-auto'>
+          <ChatHistory />
+        </ResizablePanel>
 
-      <ResizableHandle className={cn('hidden', 'group-data-[chat-open=true]/chat-layout:md:flex')} />
+        <ResizableHandle variant='floating' className={cn(isChatOpen ? 'hover:after:opacity-100' : 'hidden')} />
 
-      <ResizablePanel
-        order={2}
-        defaultSize={chatResizeMain[1]}
-        className={cn(
-          'relative h-full flex-col',
-          'group-data-[chat-open=true]/chat-layout:hidden',
-          'group-data-[chat-open=true]/chat-layout:md:flex',
-        )}
-        id="chat-main"
+        <ResizablePanel style={{ ...(!isExplorerOpen ? { display: 'none' } : {}) }} order={2} id="object-tree" minSize={20} maxSize={30} defaultSize={chatResizeLeft[1]} className='pointer-events-auto'>
+          <ChatEditorObjectTree />
+        </ResizablePanel>
+
+        <ResizableHandle variant='floating' className={cn(isExplorerOpen ? 'hover:after:opacity-100' : 'hidden')} />
+
+        <ResizablePanel order={3} id="spacer" defaultSize={chatResizeLeft[2]} minSize={0} className='relative overflow-visible!'>
+          {/* Top-left Content */}
+          <div className='absolute top-0 left-0 flex flex-col gap-2 pointer-events-auto'>
+            <FloatingPanelTrigger
+              icon={MessageCircle}
+              tooltipContent={`${isChatOpen ? 'Close' : 'Open'} Chat`}
+              onClick={toggleChatOpen}
+              isOpen={isChatOpen}
+              tooltipSide="right"
+            />
+            <FloatingPanelTrigger
+              icon={FileBox}
+              tooltipContent={`${isExplorerOpen ? 'Close' : 'Open'} Explorer`}
+              onClick={toggleExplorerOpen}
+              isOpen={isExplorerOpen}
+              tooltipSide="right"
+            />
+          </div>
+
+          {/* Bottom-left Content */}
+          <div className='absolute bottom-0 left-0 flex flex-col gap-2 pointer-events-auto'>
+            <ChatStackTrace />
+            <ChatViewerControls />
+          </div>
+
+        </ResizablePanel>
+      </ResizablePanelGroup>
+
+      {/* Right-side ResizablePanelGroup */}
+      <ResizablePanelGroup
+        direction="horizontal"
+        autoSaveId={cookieName.chatRsRight}
+        className="absolute gap-1 top-(--header-height) right-2 h-[calc(100dvh-(--spacing(14)))]! w-[50%]! md:w-[calc(50%-0.25rem)]! transition-all duration-200 ease-linear overflow-visible! pointer-events-none"
+        onLayout={setChatResizeRight}
       >
-        {viewMode === 'tabs' ? (
-          <>
-            <div className={cn('relative h-full', isParametersOpen && 'max-md:h-[40%] max-md:border-b')}>
-              <ChatViewTabs />
-            </div>
-            {isParametersOpen ? (
-              <div className="hidden max-md:block max-md:h-[60%] max-md:overflow-y-auto">
-                <ChatParameters />
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <ChatViewSplit />
-        )}
-      </ResizablePanel>
+        {/* Spacer panel for open buttons */}
+        <ResizablePanel order={1} id="spacer-right" defaultSize={chatResizeRight[0]} minSize={0} className='relative overflow-visible!'>
+          {/* Top-right Content */}
+          <div className='absolute top-0 right-0 flex flex-col gap-2 pointer-events-auto'>
+            <SettingsControl />
+            <FloatingPanelTrigger
+              icon={Settings2}
+              tooltipContent={`${isParametersOpen ? 'Close' : 'Open'} Parameters`}
+              onClick={toggleParametersOpen}
+              isOpen={isParametersOpen}
+            />
+            <FloatingPanelTrigger
+              icon={Code2}
+              tooltipContent={`${isEditorOpen ? 'Close' : 'Open'} Editor`}
+              onClick={toggleEditorOpen}
+              isOpen={isEditorOpen}
+            />
+            <FloatingPanelTrigger
+              icon={Info}
+              tooltipContent={`${isDetailsOpen ? 'Close' : 'Open'} Details`}
+              onClick={toggleDetailsOpen}
+              isOpen={isDetailsOpen}
+            />
+          </div>
+        </ResizablePanel>
 
-      <ResizableHandle className={cn('hidden group-data-[parameters-open=true]/chat-layout:md:flex')} />
+        <ResizableHandle variant='floating' className={cn(isParametersOpen ? 'hover:after:opacity-100' : 'hidden')} />
+        <ResizablePanel style={{ ...(!isParametersOpen ? { display: 'none' } : {}) }} order={2} id="parameters" minSize={20} maxSize={40} defaultSize={chatResizeRight[1]} className='pointer-events-auto'>
+          <ChatParameters />
+        </ResizablePanel>
 
-      <ResizablePanel
-        order={3}
-        minSize={10}
-        maxSize={30}
-        defaultSize={chatResizeMain[2]}
-        className={cn(
-          'hidden w-64 shrink-0 flex-col text-sm xl:w-96',
-          'group-data-[parameters-open=true]/chat-layout:md:flex',
-        )}
-        id="chat-parameters"
-      >
-        <ChatParameters />
-      </ResizablePanel>
-    </ResizablePanelGroup>
+        <ResizableHandle variant='floating' className={cn(isEditorOpen ? 'hover:after:opacity-100' : 'hidden')} />
+        <ResizablePanel style={{ ...(!isEditorOpen ? { display: 'none' } : {}) }} order={3} id="editor-layout" minSize={25} maxSize={50} defaultSize={chatResizeRight[2]} className='pointer-events-auto'>
+          <ChatEditorLayout />
+        </ResizablePanel>
+
+        <ResizableHandle variant='floating' className={cn(isDetailsOpen ? 'hover:after:opacity-100' : 'hidden')} />
+        <ResizablePanel style={{ ...(!isDetailsOpen ? { display: 'none' } : {}) }} order={4} id="details" minSize={20} maxSize={35} defaultSize={chatResizeRight[3]} className='pointer-events-auto'>
+          <ChatEditorDetails />
+        </ResizablePanel>
+      </ResizablePanelGroup>
+
+      {/* Centered Content */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 md:top-[90%] md:left-[50%] md:-translate-x-[50%] md:-translate-y-[90%]">
+        <ChatViewerStatus />
+      </div>
+    </div>
   );
 });

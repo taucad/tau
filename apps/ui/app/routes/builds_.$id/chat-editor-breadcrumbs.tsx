@@ -7,6 +7,7 @@ import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { toast } from '#components/ui/sonner.js';
 import { downloadBlob } from '#utils/file.js';
+import { FloatingPanelContentHeader, FloatingPanelContentTitle } from '#components/ui/floating-panel.js';
 
 export function ChatEditorBreadcrumbs(): ReactNode {
   const activeFile = FileExplorerContext.useSelector((state) =>
@@ -36,8 +37,8 @@ export function ChatEditorBreadcrumbs(): ReactNode {
   };
 
   return (
-    <div className="flex h-11 flex-row items-center justify-between pr-2 pl-4 text-sm text-muted-foreground">
-      <div className="flex flex-row items-center gap-0.5">
+    <FloatingPanelContentHeader side="right">
+      <FloatingPanelContentTitle className="flex flex-row items-center gap-0.5">
         {displayPath ? (
           parts.map((part, index) => (
             <Fragment key={part}>
@@ -49,20 +50,20 @@ export function ChatEditorBreadcrumbs(): ReactNode {
           // Maintain height with invisible content when empty
           <span className="opacity-0">placeholder</span>
         )}
-      </div>
+      </FloatingPanelContentTitle>
 
       {Boolean(activeFile) && (
         <div className="flex flex-row items-center gap-1">
           <CopyButton
             size="icon"
             variant="ghost"
-            className="size-7"
+            className="size-7 rounded-sm"
             getText={() => activeFile!.content}
             tooltip="Copy"
           />
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="icon" variant="ghost" className="size-7" onClick={handleDownloadCode}>
+              <Button size="icon" variant="ghost" className="size-7 rounded-sm" onClick={handleDownloadCode}>
                 <Download className="size-4" />
               </Button>
             </TooltipTrigger>
@@ -70,6 +71,6 @@ export function ChatEditorBreadcrumbs(): ReactNode {
           </Tooltip>
         </div>
       )}
-    </div>
+    </FloatingPanelContentHeader>
   );
 }

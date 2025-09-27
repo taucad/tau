@@ -1,6 +1,6 @@
 import type { IChangeEvent } from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
-import { RefreshCcw, ChevronRight, Info } from 'lucide-react';
+import { RefreshCcw, ChevronRight, Info, Settings2 } from 'lucide-react';
 import React, { useCallback, useMemo, memo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import Form from '@rjsf/core';
@@ -9,18 +9,35 @@ import { toSentenceCase } from '#utils/string.js';
 import { SearchInput } from '#components/search-input.js';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle } from '#components/ui/floating-panel.js';
+import { useKeydown } from '#hooks/use-keydown.js';
+import type { KeyCombination } from '#utils/keys.js';
 import { cn } from '#utils/ui.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { templates, uiSchema, widgets } from '#routes/builds_.$id/rjsf-theme.js';
 import type { RJSFContext } from '#routes/builds_.$id/rjsf-theme.js';
 import { deleteNestedValue, rjsfIdSeparator, resetArrayItem, rjsfIdPrefix } from '#routes/builds_.$id/rjsf-utils.js';
+import { useViewContext } from '#routes/builds_.$id/chat-interface-controls.js';
 
-export const ChatParameters = memo(function () {
+const toggleParametersKeyCombination = {
+  key: 'x',
+  ctrlKey: true,
+} satisfies KeyCombination;
+
+export const ChatParameters = memo(function (props: { readonly className?: string }) {
+  const { className } = props;
+  const { toggleParametersOpen, isParametersOpen } = useViewContext();
   const parameters = useSelector(cadActor, (state) => state.context.parameters);
   const defaultParameters = useSelector(cadActor, (state) => state.context.defaultParameters);
   const jsonSchema = useSelector(cadActor, (state) => state.context.jsonSchema);
   const [allExpanded, setAllExpanded] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+
+  const { formattedKeyCombination: formattedParametersKeyCombination } = useKeydown(
+    toggleParametersKeyCombination,
+    toggleParametersOpen,
+  );
 
   const setParameters = useCallback((newParameters: Record<string, unknown>) => {
     cadActor.send({ type: 'setParameters', parameters: newParameters });
@@ -159,95 +176,111 @@ export const ChatParameters = memo(function () {
   };
 
   return (
-    <div className="flex h-full flex-col">
-      <div className={cn('border-b text-base font-medium text-muted-foreground', containerXpadding)}>
-        <h2 className="flex h-11 items-center">Parameters</h2>
-      </div>
+    <FloatingPanel open={isParametersOpen} onOpenChange={toggleParametersOpen} className={className}>
+      <FloatingPanelClose
+        side="right"
+        align="start"
+        icon={Settings2}
+        tooltipContent={(isOpen) => (
+          <>
+            {isOpen ? 'Close' : 'Open'} Parameters{' '}
+            <KeyShortcut variant="tooltip" className="ml-1">
+              {formattedParametersKeyCombination}
+            </KeyShortcut>
+          </>
+        )}
+      />
+      <FloatingPanelContent className='text-sm'>
+        {/* Header */}
+        <FloatingPanelContentHeader side="right">
+          <FloatingPanelContentTitle>Parameters</FloatingPanelContentTitle>
+        </FloatingPanelContentHeader>
 
-      {hasParameters ? (
-        <>
-          {/* Search and Controls Bar */}
-          <div className={cn('flex w-full flex-row gap-2', containerXpadding, 'py-2')}>
-            <SearchInput
-              placeholder="Search parameters..."
-              value={searchTerm}
-              className="h-7 w-full bg-background"
-              onChange={handleSearchChange}
-              onClear={clearSearch}
-            />
+        {hasParameters ? (
+          <>
+            {/* Search and Controls Bar */}
+            <div className={cn('flex w-full flex-row gap-2', containerXpadding, 'py-2')}>
+              <SearchInput
+                placeholder="Search parameters..."
+                value={searchTerm}
+                className="h-8 w-full bg-background"
+                onChange={handleSearchChange}
+                onClear={clearSearch}
+              />
 
-            {Object.keys(parameters).length > 0 && (
+              {Object.keys(parameters).length > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="overlay"
+                      size="icon"
+                      className="text-muted-foreground transition-colors hover:text-foreground"
+                      onClick={resetAllParameters}
+                    >
+                      <RefreshCcw />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side='bottom'>Reset all parameters</TooltipContent>
+                </Tooltip>
+              )}
+
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="overlay"
                     size="icon"
                     className="text-muted-foreground transition-colors hover:text-foreground"
-                    onClick={resetAllParameters}
+                    aria-expanded={allExpanded}
+                    onClick={toggleAllGroups}
                   >
-                    <RefreshCcw />
+                    <ChevronRight
+                      className={cn('size-4 transition-transform duration-300 ease-in-out', allExpanded && 'rotate-90')}
+                    />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Reset all parameters</TooltipContent>
+                <TooltipContent side='bottom'>{allExpanded ? 'Collapse all' : 'Expand all'}</TooltipContent>
               </Tooltip>
-            )}
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="overlay"
-                  size="icon"
-                  className="text-muted-foreground transition-colors hover:text-foreground"
-                  aria-expanded={allExpanded}
-                  onClick={toggleAllGroups}
-                >
-                  <ChevronRight
-                    className={cn('size-4 transition-transform duration-300 ease-in-out', allExpanded && 'rotate-90')}
-                  />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{allExpanded ? 'Collapse all' : 'Expand all'}</TooltipContent>
-            </Tooltip>
-          </div>
-          {!hasSearchResults && searchTerm ? (
-            <div className={cn('py-4 text-center text-muted-foreground', containerXpadding)}>
-              No parameters matching &quot;{searchTerm}&quot;
             </div>
-          ) : (
-            <Form<Record<string, unknown>, RJSFSchema, RJSFContext>
-              // @ts-expect-error -- TODO: fix this
-              validator={validator}
-              // @ts-expect-error -- TODO: fix this
-              templates={templates}
-              schema={jsonSchema}
-              // @ts-expect-error -- TODO: fix this
-              uiSchema={uiSchema}
-              idPrefix={rjsfIdPrefix}
-              idSeparator={rjsfIdSeparator}
-              widgets={widgets}
-              formData={mergedData}
-              formContext={formContext}
-              className={cn('flex size-full flex-col gap-2 overflow-y-auto pb-2', containerXpadding)}
-              onChange={handleChange}
-              onSubmit={handleSubmit}
-            />
-          )}
-        </>
-      ) : (
-        <div
-          className={cn(
-            'm-4 mt-2 flex h-full flex-col items-center justify-center rounded-md border border-dashed p-8 text-center md:m-2',
-            containerXpadding,
-            containerYpadding,
-          )}
-        >
-          <div className="mb-3 rounded-full bg-muted/50 p-2">
-            <Info className="size-6 text-muted-foreground" strokeWidth={1.5} />
+            {!hasSearchResults && searchTerm ? (
+              <div className={cn('py-4 text-center text-muted-foreground', containerXpadding)}>
+                No parameters matching &quot;{searchTerm}&quot;
+              </div>
+            ) : (
+              <Form<Record<string, unknown>, RJSFSchema, RJSFContext>
+                // @ts-expect-error -- TODO: fix this
+                validator={validator}
+                // @ts-expect-error -- TODO: fix this
+                templates={templates}
+                schema={jsonSchema}
+                // @ts-expect-error -- TODO: fix this
+                uiSchema={uiSchema}
+                idPrefix={rjsfIdPrefix}
+                idSeparator={rjsfIdSeparator}
+                widgets={widgets}
+                formData={mergedData}
+                formContext={formContext}
+                className={cn('flex size-full flex-col gap-2 overflow-y-auto pb-2', containerXpadding)}
+                onChange={handleChange}
+                onSubmit={handleSubmit}
+              />
+            )}
+          </>
+        ) : (
+          <div
+            className={cn(
+              'm-4 mt-2 flex h-full flex-col items-center justify-center rounded-md border border-dashed p-8 text-center md:m-2',
+              containerXpadding,
+              containerYpadding,
+            )}
+          >
+            <div className="mb-3 rounded-full bg-muted/50 p-2">
+              <Info className="size-6 text-muted-foreground" strokeWidth={1.5} />
+            </div>
+            <h3 className="mb-1 text-base font-medium">No parameters available</h3>
+            <p className="text-muted-foreground">Parameters will appear here when they become available for this model</p>
           </div>
-          <h3 className="mb-1 text-base font-medium">No parameters available</h3>
-          <p className="text-muted-foreground">Parameters will appear here when they become available for this model</p>
-        </div>
-      )}
-    </div>
+        )}
+      </FloatingPanelContent>
+    </FloatingPanel>
   );
 });

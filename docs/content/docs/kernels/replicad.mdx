@@ -1,0 +1,34 @@
+---
+title: Replicad Kernel
+description: The default CAD kernel providing parametric TypeScript/JavaScript API backed by OpenCascade.js.
+---
+
+## Features
+
+- **Parametric modeling** with full TypeScript support
+- **Boolean operations** for complex geometry creation
+- **STEP export** for professional CAD workflows
+- **Mesh generation** with high-quality tessellation
+
+## Usage
+
+The Replicad kernel is used by default. You can explicitly specify it:
+
+```ts
+send({
+  type: 'initializeModel',
+  code: `
+    const box = makeCube(10);
+    const cylinder = makeCylinder(5, 15);
+    const result = box.cut(cylinder);
+  `,
+  parameters: {},
+  kernelType: 'replicad',
+});
+```
+
+## API Documentation
+
+Tau includes a comprehensive RAG (Retrieval-Augmented Generation) system that provides intelligent API documentation retrieval. The system automatically finds relevant Replicad API functions based on your queries, ensuring accurate and contextual code generation.
+
+For a complete API reference, see the [Replicad documentation](https://replicad.xyz/).

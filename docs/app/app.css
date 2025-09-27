@@ -1,0 +1,61 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+/* Tau Color System - matching main app design */
+:root {
+  /* Base color hues - matching your global.css */
+  --hue-primary: 266deg;
+  --hue-secondary: calc(var(--hue-primary) - 86deg); /* Results in ~180deg - true teal */
+  --hue-neutral: calc(var(--hue-primary) - 10deg);
+  
+  /* Primary colors */
+  --color-fd-primary: oklch(0.5719 0.1898 var(--hue-primary));
+  --color-fd-primary-foreground: oklch(95% 1% var(--hue-neutral));
+  
+  /* Secondary/accent colors */
+  /* --color-fd-secondary: oklch(90% 12% var(--hue-secondary));
+  --color-fd-secondary-foreground: oklch(8% 1% var(--hue-neutral)); */
+  
+  /* Background colors */
+  --color-fd-background: oklch(100% 0.5% var(--hue-neutral));
+  --color-fd-foreground: oklch(8% 2% var(--hue-neutral));
+  
+  /* Muted colors */
+  --color-fd-muted: oklch(96% 1% var(--hue-neutral));
+  --color-fd-muted-foreground: oklch(45% 2% var(--hue-neutral));
+  
+  /* Border colors */
+  --color-fd-border: oklch(90% 1% var(--hue-neutral));
+  
+  /* Card colors */
+  --color-fd-card: oklch(100% 0% var(--hue-neutral));
+  --color-fd-card-foreground: oklch(8% 2% var(--hue-neutral));
+  
+  /* Accent colors for highlights */
+  --color-fd-accent: oklch(96% 1.5% var(--hue-neutral));
+  --color-fd-accent-foreground: oklch(8% 2% var(--hue-neutral));
+}
+
+.dark {
+  /* Dark mode adjustments - inverted lightness levels */
+  --color-fd-primary: oklch(72% 18.98% var(--hue-primary));
+  --color-fd-primary-foreground: oklch(8% 1% var(--hue-neutral));
+  
+  --color-fd-secondary: oklch(80% 12% var(--hue-secondary));
+  --color-fd-secondary-foreground: oklch(21% 1% var(--hue-neutral));
+  
+  --color-fd-background: oklch(21% 5% var(--hue-neutral));
+  --color-fd-foreground: oklch(95% 2% var(--hue-neutral));
+  
+  --color-fd-muted: oklch(28% 1% var(--hue-neutral));
+  --color-fd-muted-foreground: oklch(58% 2% var(--hue-neutral));
+  
+  --color-fd-border: oklch(33% 1% var(--hue-neutral));
+  
+  --color-fd-card: oklch(21% 0% var(--hue-neutral));
+  --color-fd-card-foreground: oklch(95% 2% var(--hue-neutral));
+  
+  --color-fd-accent: oklch(28% 1.5% var(--hue-neutral));
+  --color-fd-accent-foreground: oklch(95% 2% var(--hue-neutral));
+}

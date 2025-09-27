@@ -4,7 +4,7 @@ import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
-      title: <Tau className='text-fd-primary size-6' />,
+      title: <Tau className='text-fd-primary size-8' />,
     },
   };
 }

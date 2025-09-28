@@ -50,7 +50,7 @@ export const metaConfig = {
   /**
    * The URL to the GitHub repository.
    */
-  githubUrl: 'https://github.com/opensrchq/tau',
+  githubUrl: 'https://github.com/taucad/tau',
   /**
    * The description of the app. Used for SEO and other metadata such as PWA and app store descriptions.
    */

@@ -7,6 +7,8 @@ import devtoolsJson from 'vite-plugin-devtools-json';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import tailwindcss from '@tailwindcss/vite';
 import { visualizer } from 'rollup-plugin-visualizer';
+import mdx from 'fumadocs-mdx/vite';
+import * as MdxConfig from './app/lib/fumadocs/source.config';
 // Import viteSvgSpriteWrapper from 'vite-svg-sprite-wrapper';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
@@ -46,6 +48,7 @@ export default defineConfig(({ mode }) => {
       nxViteTsPaths(),
       tsconfigPaths(),
       // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
+      mdx(MdxConfig, {'configPath': path.resolve(__dirname, './app/lib/fumadocs/source.config.ts')}), // Fumadocs
       tailwindcss(),
       devtoolsJson(),
       visualizer({

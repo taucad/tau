@@ -1,8 +1,17 @@
+@import 'fumadocs-ui/style.css';
 @import 'tailwindcss';
+
+/*
+  These imports are recommended by Fumadocs, but fail.
+  @see https://github.com/fuma-nama/fumadocs/issues/1828
+*/
+/* @import 'fumadocs-ui/css/shadcn.css'; */
+/* @import 'fumadocs-ui/css/preset.css'; */
 @import 'tw-animate-css';
 @source "../../../../node_modules/@daveyplate/better-auth-ui";
 
-@plugin '@tailwindcss/typography';
+/* Disabled due to conflict with Fumadocs - https://fumadocs.dev/docs/ui/theme#typography */
+/* @plugin '@tailwindcss/typography'; */
 
 :root {
   /* Radius */
@@ -214,6 +223,24 @@
   --animate-gradient: gradient 5s ease infinite;
   --animate-bounce-subtle: gentle-bounce 2s infinite;
   --animate-shiny-text: shiny-text 1.2s linear infinite;
+
+  /* Fumadocs Docs */
+  --color-fd-primary: var(--primary);
+  --color-fd-primary-foreground: var(--primary-foreground);
+  --color-fd-secondary: var(--secondary);
+  --color-fd-secondary-foreground: var(--secondary-foreground);
+  --color-fd-background: var(--background);
+  --color-fd-foreground: var(--foreground);
+  --color-fd-muted: var(--muted);
+  --color-fd-muted-foreground: var(--muted-foreground);
+  --color-fd-border: var(--border);
+  --color-fd-card: var(--card);
+  --color-fd-card-foreground: var(--card-foreground);
+  --color-fd-accent: var(--accent);
+  --color-fd-accent-foreground: var(--accent-foreground);
+  --color-fd-ring: var(--ring);
+  --color-fd-popover: var(--popover);
+  --color-fd-popover-foreground: var(--popover-foreground);
 
   @keyframes gradient {
 

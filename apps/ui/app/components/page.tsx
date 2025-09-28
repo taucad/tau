@@ -71,14 +71,24 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                   "[&_[data-slot=input]]:h-7 [&_[data-slot=input]]:rounded-md"
                 )}
               >
-                {breadcrumbItems.map((match) => (
-                  <Fragment key={match.id}>
-                    <BreadcrumbSeparator className="hidden first:hidden md:block" />
-                    <BreadcrumbItem className="hidden last:block md:block">
-                      <BreadcrumbLink asChild>{match.handle.breadcrumb?.(match)}</BreadcrumbLink>
-                    </BreadcrumbItem>
-                  </Fragment>
-                ))}
+                {breadcrumbItems.map((match) => {
+                  const breadcrumb = match.handle.breadcrumb?.(match);
+                  // Normalize to always be an array
+                  const breadcrumbArray = Array.isArray(breadcrumb) ? breadcrumb : [breadcrumb];
+                  
+                  return (
+                    <Fragment key={match.id}>
+                      {breadcrumbArray.map((item, index) => (
+                        <Fragment key={`${match.id}-${index}`}>
+                          <BreadcrumbSeparator className="hidden first:hidden md:block" />
+                          <BreadcrumbItem className="hidden last:block md:block">
+                            <BreadcrumbLink asChild>{item}</BreadcrumbLink>
+                          </BreadcrumbItem>
+                        </Fragment>
+                      ))}
+                    </Fragment>
+                  );
+                })}
               </BreadcrumbList>
             </Breadcrumb>
           </div>

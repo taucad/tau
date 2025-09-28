@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import type { SetNonNullable } from 'type-fest';
 
 export type Handle = {
-  breadcrumb?: (match: UIMatch) => ReactNode;
+  breadcrumb?: (match: UIMatch) => ReactNode | ReactNode[];
   actions?: (match: UIMatch) => ReactNode;
   commandPalette?: (match: UIMatch) => ReactNode;
   noPageWrapper?: boolean;

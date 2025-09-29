@@ -227,8 +227,9 @@
   /* Fumadocs Docs */
   --color-fd-primary: var(--primary);
   --color-fd-primary-foreground: var(--primary-foreground);
-  --color-fd-secondary: var(--secondary);
-  --color-fd-secondary-foreground: var(--secondary-foreground);
+  /* We use the default secondary color from Fumadocs */
+  /* --color-fd-secondary: var(--secondary);
+  --color-fd-secondary-foreground: var(--secondary-foreground); */
   --color-fd-background: var(--background);
   --color-fd-foreground: var(--foreground);
   --color-fd-muted: var(--muted);

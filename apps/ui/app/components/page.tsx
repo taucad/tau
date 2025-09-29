@@ -61,7 +61,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                 <Separator orientation="vertical" />
               </span>
             ) : null}
-            <Breadcrumb>
+            <Breadcrumb className="hidden [&:has(>:not(:empty))]:block">
               <BreadcrumbList className={
                 cn(
                   "sm:gap-0",

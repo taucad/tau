@@ -4,7 +4,7 @@ import { Button, buttonVariants } from '#components/ui/button.js';
 import { cn } from '#utils/ui.js';
 import { CopyButton } from '#components/copy-button.js';
 
-export function AppError(): React.JSX.Element {
+export function ErrorPage(): React.JSX.Element {
   const error = useRouteError();
   const navigate = useNavigate();
 
@@ -13,7 +13,6 @@ export function AppError(): React.JSX.Element {
   };
 
   if (isRouteErrorResponse(error)) {
-    console.error('Route error', error);
     return (
       <div className="flex size-full flex-col items-center md:ml-[var(--sidebar-width-current)] justify-center gap-4 p-8">
         <h1 className="text-xl">
@@ -38,7 +37,7 @@ export function AppError(): React.JSX.Element {
 
   if (error instanceof Error) {
     return (
-      <div className="flex min-h-full flex-col items-center justify-center px-4 py-8 md:ml-[var(--sidebar-width-current)]">
+      <div className="flex min-h-full flex-col items-center justify-center px-4 py-8">
         <div className="shadow-lg w-full animate-in rounded-lg border border-destructive/20 bg-destructive/5 p-8 duration-300 fade-in dark:border-destructive/30 dark:bg-destructive/10">
           <div className="mb-6 flex items-center gap-3">
             <div className="flex size-7 items-center justify-center rounded-full bg-destructive/20">

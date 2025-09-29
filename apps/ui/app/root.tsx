@@ -1,7 +1,6 @@
 import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from 'react-router';
-import { Links, Meta, Scripts, ScrollRestoration, useLoaderData } from 'react-router';
-import type { Theme } from 'remix-themes';
-import { PreventFlashOnWrongTheme, ThemeProvider, useTheme } from 'remix-themes';
+import { Links, Meta, Scripts, ScrollRestoration, useRouteLoaderData } from 'react-router';
+import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from 'remix-themes';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
@@ -18,7 +17,7 @@ import { getModels } from '#hooks/use-models.js';
 import { ColorProvider, useColor } from '#hooks/use-color.js';
 import { useFavicon } from '#hooks/use-favicon.js';
 import { TooltipProvider } from '#components/ui/tooltip.js';
-import { AppError } from '#components/error-page.js';
+import { ErrorPage } from '#components/error-page.js';
 import { AuthConfigProvider } from '#providers/auth-provider.js';
 
 export const links: LinksFunction = () => [
@@ -61,11 +60,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
-// Wrap your app with ThemeProvider.
-// `specifiedTheme` is the stored theme in the session storage.
-// `themeAction` is the action name that's used to change the theme in the session storage.
-function AppWithProviders({ error }: { readonly error?: ReactNode }): React.JSX.Element {
-  const data = useLoaderData<typeof loader>();
+export function Layout({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  const data = useRouteLoaderData<typeof loader>("root");
+  const ssrTheme = data?.theme ?? Theme.LIGHT;
   const queryClient = useMemo(
     () =>
       new QueryClient({
@@ -80,10 +77,12 @@ function AppWithProviders({ error }: { readonly error?: ReactNode }): React.JSX.
   return (
     <AuthConfigProvider>
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider specifiedTheme={data.theme} themeAction="/action/set-theme">
+        <ThemeProvider specifiedTheme={ssrTheme} themeAction="/action/set-theme">
           <ColorProvider>
             <TooltipProvider>
-              <App error={error} ssrTheme={data.theme} env={data.env} />
+              <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme}>
+                {children}
+              </LayoutDocument>
             </TooltipProvider>
           </ColorProvider>
         </ThemeProvider>
@@ -92,17 +91,14 @@ function AppWithProviders({ error }: { readonly error?: ReactNode }): React.JSX.
   );
 }
 
-export default AppWithProviders;
-
-export function App({
-  error,
-  ssrTheme,
+function LayoutDocument({ 
+  children, 
   env,
-}: {
-  readonly error?: ReactNode;
-  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- null is used for system theme
-  readonly ssrTheme: Theme | null;
-  readonly env: Record<string, string>;
+  ssrTheme,
+}: { 
+  readonly children: ReactNode; 
+  readonly env: Record<string, string>; 
+  readonly ssrTheme: Theme;
 }): React.JSX.Element {
   const [theme] = useTheme();
   const color = useColor();
@@ -128,7 +124,7 @@ export function App({
             __html: `window.ENV = ${JSON.stringify(env)}`,
           }}
         />
-        <Page error={error} />
+        {children}
         <ScrollRestoration />
         <Scripts />
         <Toaster />
@@ -137,6 +133,10 @@ export function App({
   );
 }
 
+export default function App(): React.JSX.Element {
+  return <Page />;
+}
+
 export function ErrorBoundary(): React.JSX.Element {
-  return <AppWithProviders error={<AppError />} />;
+  return <Page error={<ErrorPage />} />;
 }

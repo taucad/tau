@@ -14,7 +14,7 @@ type ThemeWithSystem = Theme | null;
 export function ThemeToggle(): React.JSX.Element {
   const [, setTheme] = useTheme();
 
-  const [theme, setThemeCookie] = useCookie<ThemeWithSystem>(cookieName.theme, null);
+  const [theme, setThemeCookie] = useCookie<ThemeWithSystem>(cookieName.colorTheme, null);
 
   const cycleTheme = () => {
     let newTheme;

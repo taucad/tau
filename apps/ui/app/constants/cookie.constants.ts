@@ -14,7 +14,7 @@ export const cookieName = {
   // The color hue.
   colorHue: 'color-hue',
   // The theme mode.
-  theme: 'theme',
+  colorTheme: 'color-theme',
 
   /* Layout */
   // Whether the sidebar is open.

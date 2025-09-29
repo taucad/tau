@@ -432,7 +432,7 @@ export const ChatTextarea = memo(function ({
       <div
         data-state={isFocused ? 'active' : 'inactive'}
         className={cn(
-          'flex size-full cursor-text resize-none flex-col overflow-auto rounded-2xl border bg-neutral/10 shadow-md data-[state=active]:border-primary',
+          'flex size-full cursor-text resize-none flex-col overflow-auto rounded-2xl border bg-neutral/5 shadow-md data-[state=active]:border-primary data-[state=active]:ring-ring/50 data-[state=active]:ring-3',
         )}
         onClick={() => {
           focusInput();

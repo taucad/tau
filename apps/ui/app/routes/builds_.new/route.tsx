@@ -234,28 +234,32 @@ export default function BuildsNew(): React.JSX.Element {
                         selectedKernel === option.id && 'border-ring bg-primary/5 ring-3 ring-ring/50',
                       )}
                     >
-                      <AccordionTrigger 
-                        className={cn(
-                          'flex h-auto cursor-pointer items-start justify-between gap-3 rounded-lg border-0 p-4 text-left transition-all hover:no-underline',
-                          'bg-transparent hover:bg-transparent data-[state=open]:bg-transparent',
-                        )}
-                      >
-                        <div className="flex items-start gap-3 flex-1">
-                          <RadioGroupItem value={option.id} id={`mobile-${option.id}`} className="mt-1" />
-                          <SvgIcon id={option.id} className="size-6 shrink-0 mt-0.5" />
-                          <div className="flex flex-col gap-1 min-w-0 w-full">
-                            <div className="flex items-start justify-between gap-2 w-full">
-                              <span className="text-sm font-medium">{option.name}</span>
-                              <span className="text-xs text-muted-foreground/70 font-mono">
-                                {option.backendProvider}
-                              </span>
+                      <div className="flex items-start gap-3 p-4">
+                        <RadioGroupItem value={option.id} id={`mobile-${option.id}`} className="mt-1" />
+                        <div className="flex-1 min-w-0">
+                          <AccordionTrigger 
+                            className={cn(
+                              'flex h-auto cursor-pointer items-start justify-between gap-3 border-0 p-0 text-left transition-all hover:no-underline w-full',
+                              'bg-transparent hover:bg-transparent data-[state=open]:bg-transparent',
+                            )}
+                          >
+                            <div className="flex items-start gap-3 flex-1">
+                              <SvgIcon id={option.id} className="size-6 shrink-0 mt-0.5" />
+                              <div className="flex flex-col gap-1 min-w-0 w-full">
+                                <div className="flex items-start justify-between gap-2 w-full">
+                                  <span className="text-sm font-medium">{option.name}</span>
+                                  <span className="text-xs text-muted-foreground/70 font-mono">
+                                    {option.backendProvider}
+                                  </span>
+                                </div>
+                                <span className="text-xs text-muted-foreground leading-relaxed">
+                                  {option.description}
+                                </span>
+                              </div>
                             </div>
-                            <span className="text-xs text-muted-foreground leading-relaxed">
-                              {option.description}
-                            </span>
-                          </div>
+                          </AccordionTrigger>
                         </div>
-                      </AccordionTrigger>
+                      </div>
                       <AccordionContent className="px-4 pb-4">
                         <KernelDetailsContent kernelId={option.id} />
                       </AccordionContent>
@@ -282,7 +286,7 @@ export default function BuildsNew(): React.JSX.Element {
                       htmlFor={option.id}
                       className={cn(
                         'flex h-auto cursor-pointer items-start justify-start gap-3 rounded-lg border p-4 text-left transition-all hover:border-primary/50 hover:bg-primary/5',
-                        selectedKernel === option.id && 'border-ring bg-primary/5 ring-3 ring-ring/50',
+                        selectedKernel === option.id && 'border-ring hover:border-ring hover:bg-primary/10 bg-primary/5 ring-3 ring-ring/50',
                       )}
                     >
                       <RadioGroupItem value={option.id} id={option.id} className="mt-1" />

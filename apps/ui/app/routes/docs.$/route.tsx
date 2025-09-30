@@ -18,15 +18,33 @@ import { baseOptions } from '#lib/fumadocs/layout.shared.js';
 import { RootProvider } from 'fumadocs-ui/provider/base';
 import { ReactRouterProvider } from 'fumadocs-core/framework/react-router';
 import { CodeBlock, Pre } from '#components/code-block.js';
+import { DocsPageActions } from './docs-page-actions.js';
+import { metaConfig } from '#config.js';
 
 export async function loader({ params }: Route.LoaderArgs) {
   const slugs = params['*'].split('/').filter((v) => v.length > 0);
   const page = source.getPage(slugs);
   if (!page) throw new Response('Not found', { status: 404 });
 
+  // Create GitHub URL (assuming your docs are on GitHub)
+  const githubUrl = `${metaConfig.githubUrl}/edit/main/apps/ui/content/docs/${slugs.join('/')}.mdx`;
+  
   return {
     path: page.path,
     tree: source.pageTree as Record<string, PageTree.Root>,
+    page: {
+      data: {
+        title: page.data.title,
+        description: page.data.description,
+      },
+      file: {
+        path: slugs.join('/'),
+      },
+    },
+    githubUrl,
+    // For now, we'll use a placeholder for page content
+    // In a real implementation, you might need to access the raw markdown
+    rawMarkdownContent: page.data.description ?? 'Page content not available',
   };
 }
 
@@ -62,7 +80,25 @@ const renderer = toClientRenderer(
   docs.doc,
   ({ toc, default: Mdx, frontmatter }) => {
     return (
-      <DocsPage toc={toc} tableOfContent={{ style: 'clerk', single: false }} >
+      <DocsPage 
+        toc={toc} 
+        full={false}
+        tableOfContent={{
+          enabled: true,
+          single: false,
+          style: 'clerk',
+          footer: <DocsPageActions />,
+        }}
+        article={{
+          className: 'max-sm:pb-16 max-w-[770px] !px-0',
+        }}
+        container={{
+          className: '[&>article]:gap-4',
+        }}
+        breadcrumb={{
+          enabled: true,
+        }}
+      >
         {/* @ts-expect-error - frontmatter is not typed correctly. */}
         <title>{frontmatter.title}</title>
         {/* @ts-expect-error - frontmatter is not typed correctly. */}

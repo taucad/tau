@@ -1,6 +1,6 @@
 import type { IChangeEvent } from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
-import { RefreshCcw, ChevronRight, Info, Settings2 } from 'lucide-react';
+import { RefreshCcw, ChevronRight, Info, XIcon, Settings2 } from 'lucide-react';
 import React, { useCallback, useMemo, memo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import Form from '@rjsf/core';
@@ -10,9 +10,10 @@ import { SearchInput } from '#components/search-input.js';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle } from '#components/ui/floating-panel.js';
+import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelTrigger } from '#components/ui/floating-panel.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.js';
+import { formatKeyCombination } from '#utils/keys.js';
 import { cn } from '#utils/ui.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { templates, uiSchema, widgets } from '#routes/builds_.$id/rjsf-theme.js';
@@ -24,6 +25,31 @@ const toggleParametersKeyCombination = {
   key: 'x',
   ctrlKey: true,
 } satisfies KeyCombination;
+
+// Parameters Trigger Component
+export const ChatParametersTrigger = memo(function ({ 
+  isOpen, 
+  onToggle 
+}: { 
+  readonly isOpen: boolean; 
+  readonly onToggle: () => void; 
+}) {
+  return (
+    <FloatingPanelTrigger
+      icon={Settings2}
+      tooltipContent={
+        <div className="flex items-center gap-2">
+          {isOpen ? 'Close' : 'Open'} Parameters
+          <KeyShortcut variant="tooltip">
+            {formatKeyCombination(toggleParametersKeyCombination)}
+          </KeyShortcut>
+        </div>
+      }
+      onClick={onToggle}
+      isOpen={isOpen}
+    />
+  );
+});
 
 export const ChatParameters = memo(function (props: { readonly className?: string }) {
   const { className } = props;
@@ -180,14 +206,14 @@ export const ChatParameters = memo(function (props: { readonly className?: strin
       <FloatingPanelClose
         side="right"
         align="start"
-        icon={Settings2}
+        icon={XIcon}
         tooltipContent={(isOpen) => (
-          <>
-            {isOpen ? 'Close' : 'Open'} Parameters{' '}
-            <KeyShortcut variant="tooltip" className="ml-1">
+          <div className="flex items-center gap-2">
+            {isOpen ? 'Close' : 'Open'} Parameters
+            <KeyShortcut variant="tooltip">
               {formattedParametersKeyCombination}
             </KeyShortcut>
-          </>
+          </div>
         )}
       />
       <FloatingPanelContent className='text-sm'>

@@ -1,12 +1,13 @@
-import { Info } from 'lucide-react';
+import { XIcon, Info } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelContentBody } from '#components/ui/floating-panel.js';
+import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelContentBody, FloatingPanelTrigger } from '#components/ui/floating-panel.js';
 import { Button } from '#components/ui/button.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.js';
+import { formatKeyCombination } from '#utils/keys.js';
 
 const keyCombinationEditor = {
   key: 'i',
@@ -45,6 +46,31 @@ function formatInteger(value: number): string {
   return new Intl.NumberFormat('en-US').format(value);
 }
 
+// Details Trigger Component
+export function ChatEditorDetailsTrigger({ 
+  isOpen, 
+  onToggle 
+}: { 
+  readonly isOpen: boolean; 
+  readonly onToggle: () => void; 
+}): React.JSX.Element {
+  return (
+    <FloatingPanelTrigger
+      icon={Info}
+      tooltipContent={
+        <div className="flex items-center gap-2">
+          {isOpen ? 'Close' : 'Open'} Details
+          <KeyShortcut variant="tooltip">
+            {formatKeyCombination(keyCombinationEditor)}
+          </KeyShortcut>
+        </div>
+      }
+      onClick={onToggle}
+      isOpen={isOpen}
+    />
+  );
+}
+
 export function ChatEditorDetails(): React.JSX.Element {
   const [isOpen, setIsOpen] = useCookie(cookieName.chatOpDetails, false);
   const [geometryDetails, setGeometryDetails] = useState<GeometryDetails>(mockGeometryDetails);
@@ -78,14 +104,14 @@ export function ChatEditorDetails(): React.JSX.Element {
       <FloatingPanelClose
         side="right"
         align="start"
-        icon={Info}
+        icon={XIcon}
         tooltipContent={(isOpen) => (
-          <>
-            {isOpen ? 'Close' : 'Open'} Details{' '}
-            <KeyShortcut variant="tooltip" className="ml-1">
+          <div className="flex items-center gap-2">
+            {isOpen ? 'Close' : 'Open'} Details
+            <KeyShortcut variant="tooltip">
               {formattedEditorKeyCombination}
             </KeyShortcut>
-          </>
+          </div>
         )}
       />
       <FloatingPanelContent>

@@ -2,7 +2,7 @@ import { memo, useCallback, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { useSelector } from '@xstate/react';
-import { MessageCircle } from 'lucide-react';
+import { XIcon, MessageCircle } from 'lucide-react';
 import { ChatMessage } from '#routes/builds_.$id/chat-message.js';
 import { ScrollDownButton } from '#routes/builds_.$id/scroll-down-button.js';
 import { ChatError } from '#routes/builds_.$id/chat-error.js';
@@ -15,10 +15,11 @@ import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provid
 import { ChatSelector } from '#routes/builds_.$id/chat-selector.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader } from '#components/ui/floating-panel.js';
+import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelTrigger } from '#components/ui/floating-panel.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.js';
+import { formatKeyCombination } from '#utils/keys.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '#utils/ui.js';
 
@@ -33,6 +34,32 @@ const MessageItem = memo(function ({ messageId }: { readonly messageId: string }
     <div className="px-4 py-2">
       <ChatMessage messageId={messageId} />
     </div>
+  );
+});
+
+// Chat History Trigger Component
+export const ChatHistoryTrigger = memo(function ({ 
+  isOpen, 
+  onToggle 
+}: { 
+  readonly isOpen: boolean; 
+  readonly onToggle: () => void; 
+}) {
+  return (
+    <FloatingPanelTrigger
+      icon={MessageCircle}
+      tooltipContent={
+        <div className="flex items-center gap-2">
+          {isOpen ? 'Close' : 'Open'} Chat
+          <KeyShortcut variant="tooltip">
+            {formatKeyCombination(toggleChatHistoryKeyCombination)}
+          </KeyShortcut>
+        </div>
+      }
+      onClick={onToggle}
+      isOpen={isOpen}
+      tooltipSide="right"
+    />
   );
 });
 
@@ -100,14 +127,14 @@ export const ChatHistory = memo(function (props: { readonly className?: string }
       <FloatingPanelClose
         side="left"
         align="start"
-        icon={MessageCircle}
+        icon={XIcon}
         tooltipContent={(isOpen) => (
-          <>
-            {isOpen ? 'Close' : 'Open'} Chat{' '}
-            <KeyShortcut variant="tooltip" className="ml-1">
+          <div className="flex items-center gap-2">
+            {isOpen ? 'Close' : 'Open'} Chat
+            <KeyShortcut variant="tooltip">
               {formattedKeyCombination}
             </KeyShortcut>
-          </>
+          </div>
         )}
       />
       <FloatingPanelContent className={cn(!isExpanded && 'hidden')}>

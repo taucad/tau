@@ -12,11 +12,12 @@ import { source } from '#lib/fumadocs/source.js';
 import { type PageTree } from 'fumadocs-core/server';
 import { toClientRenderer } from 'fumadocs-mdx/runtime/vite';
 import defaultMdxComponents from 'fumadocs-ui/mdx';
-import { docs } from '../../lib/fumadocs/source.generated.js';
+import { docs } from '#lib/fumadocs/source.generated.js';
 import type { Route } from './+types/route.js';
 import { baseOptions } from '#lib/fumadocs/layout.shared.js';
 import { RootProvider } from 'fumadocs-ui/provider/base';
 import { ReactRouterProvider } from 'fumadocs-core/framework/react-router';
+import { CodeBlock, Pre } from '#components/code-block.js';
 
 export async function loader({ params }: Route.LoaderArgs) {
   const slugs = params['*'].split('/').filter((v) => v.length > 0);
@@ -54,13 +55,14 @@ export const handle: Handle = {
     
     return breadcrumbs;
   },
+  enableFloatingSidebar: true,
 };
 
 const renderer = toClientRenderer(
   docs.doc,
   ({ toc, default: Mdx, frontmatter }) => {
     return (
-      <DocsPage toc={toc} tableOfContent={{ style: 'clerk' }}>
+      <DocsPage toc={toc} tableOfContent={{ style: 'clerk', single: false }} >
         {/* @ts-expect-error - frontmatter is not typed correctly. */}
         <title>{frontmatter.title}</title>
         {/* @ts-expect-error - frontmatter is not typed correctly. */}
@@ -70,7 +72,22 @@ const renderer = toClientRenderer(
         {/* @ts-expect-error - frontmatter is not typed correctly. */}
         <DocsDescription>{frontmatter.description}</DocsDescription>
         <DocsBody>
-          <Mdx components={{ ...defaultMdxComponents }} />
+          <Mdx components={{ 
+            ...defaultMdxComponents, 
+            pre: (props) => {
+              // Extract language and title from className if available
+              const className = props.className || '';
+              const match = /language-(\w+)/.exec(className);
+              const lang = match ? match[1] : '';
+              const text = String(props.children).replace(/\n$/, '');
+
+              return (
+                <CodeBlock title={lang} text={text} showHeader={false} {...props}>
+                  <Pre {...props} />
+                </CodeBlock>
+              );
+            }
+          }} />
         </DocsBody>
       </DocsPage>
     );
@@ -83,7 +100,7 @@ export default function Page(props: Route.ComponentProps) {
 
   return (
     <ReactRouterProvider>
-      <RootProvider>
+      <RootProvider theme={{enabled: false}}>
         {/* @ts-expect-error - tree is not typed correctly. */}
         <DocsLayout {...baseOptions()} tree={tree as Record<string, PageTree.Root>}>
           {/* @ts-expect-error - Content is not typed */}

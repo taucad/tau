@@ -67,6 +67,10 @@ export const cookieName = {
   consoleLogLevel: 'console-log-level',
   // The last selected display configuration.
   consoleDisplayConfig: 'console-display-config',
+
+  /* Docs */
+  // Whether the docs sidebar is open.
+  docsOpSidebar: 'docs-op-sidebar',
 } as const;
 
 /**

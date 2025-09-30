@@ -1,12 +1,12 @@
 import type { ClassValue } from 'clsx';
-import { ArrowRightToLine, Code2 } from 'lucide-react';
+import { ArrowRightToLine, XIcon, Code2 } from 'lucide-react';
 import { useRef, useCallback } from 'react';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
 import { Button } from '#components/ui/button.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { FloatingPanel, FloatingPanelClose, FloatingPanelContent } from '#components/ui/floating-panel.js';
+import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelTrigger } from '#components/ui/floating-panel.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useKeydown } from '#hooks/use-keydown.js';
@@ -14,6 +14,7 @@ import { ChatEditorFileTree } from '#routes/builds_.$id/chat-editor-file-tree.js
 import { ChatEditor } from '#routes/builds_.$id/chat-editor.js';
 import { ChatConsole } from '#routes/builds_.$id/chat-console.js';
 import type { KeyCombination } from '#utils/keys.js';
+import { formatKeyCombination } from '#utils/keys.js';
 import { cn } from '#utils/ui.js';
 
 const keyCombinationFileExplorer = {
@@ -33,6 +34,31 @@ const toggleConsoleKeyCombination = {
 } satisfies KeyCombination;
 
 export const collapsedConsoleSize = 4;
+
+// Editor Trigger Component
+export function ChatEditorLayoutTrigger({ 
+  isOpen, 
+  onToggle 
+}: { 
+  readonly isOpen: boolean; 
+  readonly onToggle: () => void; 
+}): React.JSX.Element {
+  return (
+    <FloatingPanelTrigger
+      icon={Code2}
+      tooltipContent={
+        <div className="flex items-center gap-2">
+          {isOpen ? 'Close' : 'Open'} Editor
+          <KeyShortcut variant="tooltip">
+            {formatKeyCombination(keyCombinationEditor)}
+          </KeyShortcut>
+        </div>
+      }
+      onClick={onToggle}
+      isOpen={isOpen}
+    />
+  );
+}
 
 export function ChatEditorLayout({ className }: { readonly className?: ClassValue }): React.JSX.Element {
   const [explorerSize, setExplorerSize] = useCookie(cookieName.chatRsFileExplorer, [20, 80]);
@@ -73,14 +99,14 @@ export function ChatEditorLayout({ className }: { readonly className?: ClassValu
       <FloatingPanelClose
         side="right"
         align="start"
-        icon={Code2}
+        icon={XIcon}
         tooltipContent={(isOpen) => (
-          <>
-            {isOpen ? 'Close' : 'Open'} Editor{' '}
-            <KeyShortcut variant="tooltip" className="ml-1">
+          <div className="flex items-center gap-2">
+            {isOpen ? 'Close' : 'Open'} Editor
+            <KeyShortcut variant="tooltip">
               {formattedEditorKeyCombination}
             </KeyShortcut>
-          </>
+          </div>
         )}
       />
       <FloatingPanelContent>

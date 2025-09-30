@@ -1,21 +1,19 @@
 import { memo } from 'react';
-import { ChatHistory } from '#routes/builds_.$id/chat-history.js';
+import { ChatHistory, ChatHistoryTrigger } from '#routes/builds_.$id/chat-history.js';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable.js';
-import { ChatParameters } from '#routes/builds_.$id/chat-parameters.js';
+import { ChatParameters, ChatParametersTrigger } from '#routes/builds_.$id/chat-parameters.js';
 import { useViewContext } from '#routes/builds_.$id/chat-interface-controls.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { ChatViewer } from '#routes/builds_.$id/chat-viewer.js';
-import { ChatEditorLayout } from '#routes/builds_.$id/chat-editor-layout.js';
+import { ChatEditorLayout, ChatEditorLayoutTrigger } from '#routes/builds_.$id/chat-editor-layout.js';
 import { SettingsControl } from '#components/geometry/cad/settings-control.js';
 import { ChatViewerStatus } from '#routes/builds_.$id/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/builds_.$id/chat-viewer-controls.js';
 import { ChatStackTrace } from '#routes/builds_.$id/chat-stack-trace.js';
-import { ChatEditorObjectTree } from '#routes/builds_.$id/chat-editor-object-tree.js';
-import { ChatEditorDetails } from '#routes/builds_.$id/chat-editor-details.js';
+import { ChatEditorObjectTree, ChatEditorObjectTreeTrigger } from '#routes/builds_.$id/chat-editor-object-tree.js';
+import { ChatEditorDetails, ChatEditorDetailsTrigger } from '#routes/builds_.$id/chat-editor-details.js';
 import { cn } from '#utils/ui.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { FloatingPanelTrigger } from '#components/ui/floating-panel.js';
-import { FileBox, MessageCircle, Settings2, Code2, Info } from 'lucide-react';
 
 export const ChatInterface = memo(function () {
   const { isChatOpen, toggleChatOpen, isParametersOpen, toggleParametersOpen, isEditorOpen, toggleEditorOpen, isExplorerOpen, toggleExplorerOpen, isDetailsOpen, toggleDetailsOpen } = useViewContext();
@@ -47,19 +45,13 @@ export const ChatInterface = memo(function () {
         <ResizablePanel order={3} id="spacer" defaultSize={chatResizeLeft[2]} minSize={0} className='relative overflow-visible!'>
           {/* Top-left Content */}
           <div className='absolute top-0 left-0 flex flex-col gap-2 pointer-events-auto'>
-            <FloatingPanelTrigger
-              icon={MessageCircle}
-              tooltipContent={`${isChatOpen ? 'Close' : 'Open'} Chat`}
-              onClick={toggleChatOpen}
+            <ChatHistoryTrigger
               isOpen={isChatOpen}
-              tooltipSide="right"
+              onToggle={toggleChatOpen}
             />
-            <FloatingPanelTrigger
-              icon={FileBox}
-              tooltipContent={`${isExplorerOpen ? 'Close' : 'Open'} Explorer`}
-              onClick={toggleExplorerOpen}
+            <ChatEditorObjectTreeTrigger
               isOpen={isExplorerOpen}
-              tooltipSide="right"
+              onToggle={toggleExplorerOpen}
             />
           </div>
 
@@ -84,23 +76,17 @@ export const ChatInterface = memo(function () {
           {/* Top-right Content */}
           <div className='absolute top-0 right-0 flex flex-col gap-2 pointer-events-auto'>
             <SettingsControl />
-            <FloatingPanelTrigger
-              icon={Settings2}
-              tooltipContent={`${isParametersOpen ? 'Close' : 'Open'} Parameters`}
-              onClick={toggleParametersOpen}
+            <ChatParametersTrigger
               isOpen={isParametersOpen}
+              onToggle={toggleParametersOpen}
             />
-            <FloatingPanelTrigger
-              icon={Code2}
-              tooltipContent={`${isEditorOpen ? 'Close' : 'Open'} Editor`}
-              onClick={toggleEditorOpen}
+            <ChatEditorLayoutTrigger
               isOpen={isEditorOpen}
+              onToggle={toggleEditorOpen}
             />
-            <FloatingPanelTrigger
-              icon={Info}
-              tooltipContent={`${isDetailsOpen ? 'Close' : 'Open'} Details`}
-              onClick={toggleDetailsOpen}
+            <ChatEditorDetailsTrigger
               isOpen={isDetailsOpen}
+              onToggle={toggleDetailsOpen}
             />
           </div>
         </ResizablePanel>

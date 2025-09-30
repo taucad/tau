@@ -1,13 +1,14 @@
-import { FileBox } from 'lucide-react';
+import { XIcon, FileBox } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelContentBody } from '#components/ui/floating-panel.js';
+import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelContentBody, FloatingPanelTrigger } from '#components/ui/floating-panel.js';
 import { Tree, Folder, File } from '#components/magicui/file-tree.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.js';
+import { formatKeyCombination } from '#utils/keys.js';
 import { cn } from '#utils/ui.js';
 
 const keyCombinationEditor = {
@@ -118,6 +119,32 @@ function findCadComponentById(components: readonly CadComponent[], id: string): 
   return undefined;
 }
 
+// Model Explorer Trigger Component
+export function ChatEditorObjectTreeTrigger({ 
+  isOpen, 
+  onToggle 
+}: { 
+  readonly isOpen: boolean; 
+  readonly onToggle: () => void; 
+}): React.JSX.Element {
+  return (
+    <FloatingPanelTrigger
+      icon={FileBox}
+      tooltipContent={
+        <div className="flex items-center gap-2">
+          {isOpen ? 'Close' : 'Open'} Explorer
+          <KeyShortcut variant="tooltip">
+            {formatKeyCombination(keyCombinationEditor)}
+          </KeyShortcut>
+        </div>
+      }
+      onClick={onToggle}
+      isOpen={isOpen}
+      tooltipSide="right"
+    />
+  );
+}
+
 export function ChatEditorObjectTree({ className }: { readonly className?: string }): React.JSX.Element {
   const [isOpen, setIsOpen] = useCookie(cookieName.chatOpModelExplorer, false);
   const [activeComponentId, setActiveComponentId] = useState<string | undefined>(undefined);
@@ -148,14 +175,14 @@ export function ChatEditorObjectTree({ className }: { readonly className?: strin
       <FloatingPanelClose
         side="left"
         align="start"
-        icon={FileBox}
+        icon={XIcon}
         tooltipContent={(isOpen) => (
-          <>
-            {isOpen ? 'Close' : 'Open'} Model Explorer{' '}
-            <KeyShortcut variant="tooltip" className="ml-1">
+          <div className="flex items-center gap-2">
+            {isOpen ? 'Close' : 'Open'} Model Explorer
+            <KeyShortcut variant="tooltip">
               {formattedEditorKeyCombination}
             </KeyShortcut>
-          </>
+          </div>
         )}
       />
       <FloatingPanelContent>

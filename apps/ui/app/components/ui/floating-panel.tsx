@@ -270,6 +270,7 @@ type FloatingPanelTriggerProps = {
   readonly children?: React.ReactNode;
   readonly isOpen?: boolean;
   readonly tooltipSide?: 'left' | 'right' | 'top' | 'bottom';
+  readonly variant?: 'absolute' | 'static';
 };
 
 function FloatingPanelTrigger({
@@ -280,6 +281,7 @@ function FloatingPanelTrigger({
   children,
   isOpen = false,
   tooltipSide,
+  variant = 'static',
 }: FloatingPanelTriggerProps): React.JSX.Element {
   return (
     <FloatingPanelTriggerButton
@@ -287,7 +289,52 @@ function FloatingPanelTrigger({
       tooltipContent={tooltipContent}
       className={className}
       onClick={onClick}
-      variant="static"
+      variant={variant}
+      isOpen={isOpen}
+      tooltipSide={tooltipSide}
+    >
+      {children}
+    </FloatingPanelTriggerButton>
+  );
+}
+
+type FloatingPanelToggleProps = {
+  readonly openIcon: LucideIcon;
+  readonly closeIcon: LucideIcon;
+  readonly openTooltip: React.ReactNode;
+  readonly closeTooltip: React.ReactNode;
+  readonly className?: string;
+  readonly children?: React.ReactNode;
+  readonly side?: Side;
+  readonly align?: Align;
+  readonly tooltipSide?: 'left' | 'right' | 'top' | 'bottom';
+  readonly variant?: 'absolute' | 'static';
+  readonly onClick?: () => void;
+};
+
+function FloatingPanelToggle({
+  openIcon,
+  closeIcon,
+  openTooltip,
+  closeTooltip,
+  className,
+  children,
+  side = 'right',
+  align = 'start',
+  tooltipSide,
+  variant = 'absolute',
+}: FloatingPanelToggleProps): React.JSX.Element {
+  const { isOpen, toggle } = useFloatingPanel();
+  
+  return (
+    <FloatingPanelTriggerButton
+      side={side}
+      align={align}
+      icon={isOpen ? closeIcon : openIcon}
+      tooltipContent={isOpen ? closeTooltip : openTooltip}
+      className={className}
+      onClick={toggle}
+      variant={variant}
       isOpen={isOpen}
       tooltipSide={tooltipSide}
     >
@@ -358,5 +405,5 @@ function FloatingPanelContentBody({
   return <div className={cn('flex-1 overflow-y-auto', className)}>{children}</div>;
 }
 
-export { FloatingPanel, FloatingPanelClose, FloatingPanelTrigger, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelContentBody, useFloatingPanel };
+export { FloatingPanel, FloatingPanelClose, FloatingPanelTrigger, FloatingPanelToggle, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelContentBody, useFloatingPanel };
 export type { Side, Align };

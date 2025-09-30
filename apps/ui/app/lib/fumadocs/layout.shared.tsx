@@ -1,4 +1,4 @@
-import { cn, cni } from '#utils/ui.js';
+import { cn } from '#utils/ui.js';
 import type { DocsLayoutProps } from 'fumadocs-ui/layouts/docs';
 import { DocsSidebar } from '#routes/docs.$/docs-sidebar.js';
 
@@ -38,33 +38,27 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
         'md:[--fd-sidebar-width:var(--sidebar-width)]!',
 
         // Mobile ToC Navigation Styles
-        cni('[&_#nd-tocnav]', [
-          'border',
-          'rounded-md',
-          'bg-sidebar',
-          'mx-2',
-          'mt-(--header-height)!',
-          'ml-4',
-        ]),
-        cni('[&_#nd-tocnav>button]', [
-          'px-2',
-          'h-7.5',
-        ]),
+        '[&_#nd-tocnav]:border',
+        '[&_#nd-tocnav]:rounded-md',
+        '[&_#nd-tocnav]:bg-sidebar',
+        '[&_#nd-tocnav]:mx-2',
+        '[&_#nd-tocnav]:mt-(--header-height)!',
+        '[&_#nd-tocnav]:ml-4',
+        '[&_#nd-tocnav>button]:px-2',
+        '[&_#nd-tocnav>button]:h-7.5',
 
         // Desktop ToC Styles
-        'md:[--fd-toc-width:var(--sidebar-width)]!',
-        'xl:[--fd-banner-height:calc(var(--header-height)-(var(--spacing)*2))]',
-        cni('[&_#nd-toc]', [
-          'border',
-          'rounded-md', 
-          'bg-sidebar',
-          'm-2',
-          'p-2',
-          'w-(--sidebar-width)',
-          'h-fit',
-          'ms-2',
-          'end-0!'
-        ]),
+        // 'md:[--fd-toc-width:var(--sidebar-width)]!',
+        // 'xl:[--fd-banner-height:calc(var(--header-height)-(var(--spacing)*2))]',
+        // '[&_#nd-toc]:border',
+        // '[&_#nd-toc]:rounded-md',
+        // '[&_#nd-toc]:bg-sidebar',
+        // '[&_#nd-toc]:m-2',
+        // '[&_#nd-toc]:p-2',
+        // '[&_#nd-toc]:w-(--sidebar-width)',
+        // '[&_#nd-toc]:h-fit',
+        // '[&_#nd-toc]:ms-2',
+        // '[&_#nd-toc]:end-0!'
       ),
     }
   };

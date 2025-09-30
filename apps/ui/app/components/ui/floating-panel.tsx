@@ -172,15 +172,6 @@ function FloatingPanelTriggerButton({
     return positions[side][align];
   };
 
-  // Calculate icon rotation based on side
-  const getIconRotation = () => {
-    const rotations = {
-      left: isOpen ? '-rotate-90' : 'rotate-0',
-      right: isOpen ? '-rotate-90' : 'rotate-0',
-    };
-    return rotations[side];
-  };
-
   // Default tooltip side based on panel side
   const defaultTooltipSide = () => {
     const defaults = {
@@ -212,7 +203,6 @@ function FloatingPanelTriggerButton({
           <Icon
             className={cn(
               'transition-transform duration-300 ease-in-out',
-              getIconRotation(),
               isOpen ? 'text-primary' : '',
             )}
           />

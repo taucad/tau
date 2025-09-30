@@ -2,6 +2,11 @@ import { defineConfig, defineDocs, frontmatterSchema, metaSchema, type DocsColle
 
 export const docs: DocsCollection<typeof frontmatterSchema, typeof metaSchema> = defineDocs({
   dir: 'content/docs',
+  docs: {
+    postprocess: {
+      includeProcessedMarkdown: true,
+    }
+  }
 });
 
 export default defineConfig() as GlobalConfig;

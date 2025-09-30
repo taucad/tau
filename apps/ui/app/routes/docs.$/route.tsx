@@ -83,7 +83,7 @@ const renderer = toClientRenderer(
           footer: <DocsPageActions />,
         }}
         article={{
-          className: 'max-sm:pb-16 max-w-[770px] !px-0',
+          className: 'max-sm:pb-16 max-w-[770px]',
         }}
         container={{
           className: '[&>article]:gap-4',

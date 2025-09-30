@@ -19,15 +19,14 @@ import { RootProvider } from 'fumadocs-ui/provider/base';
 import { ReactRouterProvider } from 'fumadocs-core/framework/react-router';
 import { CodeBlock, Pre } from '#components/code-block.js';
 import { DocsPageActions } from './docs-page-actions.js';
-import { metaConfig } from '#config.js';
+import { getLLMText } from '#lib/fumadocs/get-llms-text.js';
 
 export async function loader({ params }: Route.LoaderArgs) {
   const slugs = params['*'].split('/').filter((v) => v.length > 0);
   const page = source.getPage(slugs);
   if (!page) throw new Response('Not found', { status: 404 });
 
-  // Create GitHub URL (assuming your docs are on GitHub)
-  const githubUrl = `${metaConfig.githubUrl}/edit/main/apps/ui/content/docs/${slugs.join('/')}.mdx`;
+  const rawMarkdownContent = await getLLMText(page);
   
   return {
     path: page.path,
@@ -41,10 +40,7 @@ export async function loader({ params }: Route.LoaderArgs) {
         path: slugs.join('/'),
       },
     },
-    githubUrl,
-    // For now, we'll use a placeholder for page content
-    // In a real implementation, you might need to access the raw markdown
-    rawMarkdownContent: page.data.description ?? 'Page content not available',
+    rawMarkdownContent,
   };
 }
 

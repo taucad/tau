@@ -84,7 +84,7 @@ export default function SettingsPage(): React.JSX.Element {
 
   return (
     <div className="h-full flex-1">
-      <div className="mx-auto w-full max-w-4xl p-6">
+      <div className="mx-auto w-full max-w-4xl p-4 md:p-6 [&_[data-slot=drawer-trigger]]:hidden">
         <Tabs value={activeTab} className="flex h-full flex-col">
           <TabsList className="mb-6">
             {authTabs.map((tab) => (

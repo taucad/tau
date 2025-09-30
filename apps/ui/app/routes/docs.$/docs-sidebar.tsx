@@ -1,6 +1,6 @@
 'use client';
 import type { PageTree } from 'fumadocs-core/server';
-import { type ReactNode, useMemo, useCallback } from 'react';
+import { type ReactNode, useMemo, useCallback, createContext, useContext } from 'react';
 import { cn } from '#utils/ui.js';
 import { useTreeContext } from 'fumadocs-ui/contexts/tree';
 import { useSearchContext } from 'fumadocs-ui/contexts/search';
@@ -31,6 +31,9 @@ import {
 } from '#components/ui/sidebar.js';
 import { Separator } from '#components/ui/separator.js';
 
+const docsSidebarWidthIcon = 'calc(var(--spacing) * 17)';
+const docsSidebarWidth = 'var(--sidebar-width)';
+
 const linkVariants = cva(
   'flex items-center gap-2 w-full py-1.5 rounded-lg text-fd-foreground/80 [&_svg]:size-4',
   {
@@ -46,6 +49,36 @@ const linkVariants = cva(
 type DocsSidebarProps = {
   readonly className?: string;
 };
+
+const DocsSidebarProviderContext = createContext<{ isDocsSidebarOpen: boolean; toggleDocsSidebar: () => void } | undefined>(undefined);
+
+export const useDocsSidebarProvider = () => {
+  const context = useContext(DocsSidebarProviderContext);
+  if (!context) {
+    throw new Error('useDocsSidebarProvider must be used within a DocsSidebarProvider');
+  }
+  return context;
+};
+
+export function DocsSidebarProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  const [isDocsSidebarOpen, setIsDocsSidebarOpen] = useCookie(cookieName.docsOpSidebar, false);
+  
+  const toggleDocsSidebar = useCallback(() => {
+    setIsDocsSidebarOpen((previous) => !previous);
+  }, [setIsDocsSidebarOpen]);
+
+  return (
+    <DocsSidebarProviderContext.Provider value={{ isDocsSidebarOpen, toggleDocsSidebar }}>
+      <div data-slot="docs-sidebar"
+      style={{
+        '--docs-sidebar-width': docsSidebarWidth,
+        '--docs-sidebar-toggle-width-current': isDocsSidebarOpen ? '0px' : docsSidebarWidthIcon,
+        '--docs-sidebar-width-current': isDocsSidebarOpen ? docsSidebarWidth : '0px',
+      }}
+       className="size-full">{children}</div>
+    </DocsSidebarProviderContext.Provider>
+  );
+}
 
 export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element {
   const [isDocsSidebarOpen, setIsDocsSidebarOpen] = useCookie(cookieName.docsOpSidebar, false);

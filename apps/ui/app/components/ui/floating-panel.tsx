@@ -100,9 +100,10 @@ function FloatingPanel({ children, open, defaultOpen = false, onOpenChange, clas
           'group relative overflow-hidden bg-sidebar border h-full rounded-md',
           'transition-all duration-300 ease-in-out',
           // Size and shape transitions
-          isOpen
-            ? `h-[calc(100dvh-(--spacing(14)))] w-full`
-            : `size-8 hover:bg-sidebar`,
+          'size-8',
+          'data-[state=open]:h-[calc(100dvh-(--spacing(14)))]',
+          'data-[state=open]:w-full',
+          'data-[state=open]:z-50',
           // Position origin
           getOriginClass(),
           className,

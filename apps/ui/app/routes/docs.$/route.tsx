@@ -20,6 +20,7 @@ import { ReactRouterProvider } from 'fumadocs-core/framework/react-router';
 import { CodeBlock, Pre } from '#components/code-block.js';
 import { DocsPageActions } from './docs-page-actions.js';
 import { getLLMText } from '#lib/fumadocs/get-llms-text.js';
+import { DocsSidebarProvider } from '#routes/docs.$/docs-sidebar.js';
 
 export async function loader({ params }: Route.LoaderArgs) {
   const slugs = params['*'].split('/').filter((v) => v.length > 0);
@@ -128,14 +129,16 @@ export default function Page(props: Route.ComponentProps) {
   const Content = renderer[path];
 
   return (
-    <ReactRouterProvider>
-      <RootProvider theme={{enabled: false}}>
-        {/* @ts-expect-error - tree is not typed correctly. */}
-        <DocsLayout {...baseOptions()} tree={tree as Record<string, PageTree.Root>}>
-          {/* @ts-expect-error - Content is not typed */}
-          <Content />
-        </DocsLayout>
-      </RootProvider>
-    </ReactRouterProvider>
+    <DocsSidebarProvider>
+      <ReactRouterProvider>
+        <RootProvider theme={{enabled: false}}>
+          {/* @ts-expect-error - tree is not typed correctly. */}
+          <DocsLayout {...baseOptions()} tree={tree as Record<string, PageTree.Root>}>
+            {/* @ts-expect-error - Content is not typed */}
+            <Content />
+          </DocsLayout>
+        </RootProvider>
+      </ReactRouterProvider>
+    </DocsSidebarProvider>
   );
 }

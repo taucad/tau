@@ -36,9 +36,6 @@ export async function loader({ params }: Route.LoaderArgs) {
         title: page.data.title,
         description: page.data.description,
       },
-      file: {
-        path: slugs.join('/'),
-      },
     },
     rawMarkdownContent,
   };

@@ -7,12 +7,12 @@ import type { loader } from './route.js';
 import { ENV, metaConfig } from '#config.js';
 
 export function DocsPageActions(): React.JSX.Element {
-  const { page, rawMarkdownContent } = useLoaderData<typeof loader>();
+  const { rawMarkdownContent, path } = useLoaderData<typeof loader>();
   
-  const encodedUrl = encodeURIComponent(`https://${ENV.TAU_FRONTEND_URL}/docs/${page.file.path}`);
+  const encodedUrl = encodeURIComponent(`https://${ENV.TAU_FRONTEND_URL}/docs/${path}`);
   const chatGPTUrl = `https://chatgpt.com/?hints=search&q=Read+${encodedUrl}`;
   const claudeUrl = `https://claude.ai/new?q=Read+${encodedUrl}`;
-  const githubUrl = `${metaConfig.githubUrl}/edit/main/apps/ui/content/docs/${page.file.path}.mdx`;
+  const githubUrl = `${metaConfig.githubUrl}/edit/main/${metaConfig.docsDir}/${path}`;
 
   const getMarkdownContent = (): string => rawMarkdownContent;
 

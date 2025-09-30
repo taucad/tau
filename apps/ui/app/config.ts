@@ -48,6 +48,14 @@ export const metaConfig = {
    */
   cookiePrefix: 'tau-',
   /**
+   * The owner of the GitHub repository.
+   */
+  githubOwner: 'taucad',
+  /**
+   * The repository of the GitHub repository.
+   */
+  githubRepo: 'tau',
+  /**
    * The URL to the GitHub repository.
    */
   githubUrl: 'https://github.com/taucad/tau',
@@ -56,4 +64,8 @@ export const metaConfig = {
    */
   description:
     'Your AI-powered workshop companion - a free, open-source CAD platform that works offline. Design anything from 3D prints to woodworking projects with intelligent assistance, right in your browser.',
+  /**
+   * The directory of the docs relative to the root of the repository.
+   */
+  docsDir: 'apps/ui/content/docs',
 } as const;

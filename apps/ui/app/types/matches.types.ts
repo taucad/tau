@@ -7,6 +7,12 @@ export type Handle = {
   actions?: (match: UIMatch) => ReactNode;
   commandPalette?: (match: UIMatch) => ReactNode;
   noPageWrapper?: boolean;
+  /**
+   * Enable floating sidebar. You will become responsible for setting content boundaries using:
+   * - var(--sidebar-width) (for the sidebar width)
+   * - var(--sidebar-width-current) (for the current sidebar width)
+   * - var(--header-height) (for the header height)
+   */
   enableFloatingSidebar?: boolean;
 };
 

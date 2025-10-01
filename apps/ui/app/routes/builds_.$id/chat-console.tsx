@@ -359,8 +359,8 @@ export const ChatConsole = memo(function ({
                 {
                   'bg-destructive/10 text-destructive hover:bg-destructive/20': log.level === logLevels.error,
                   'bg-warning/10 text-warning hover:bg-warning/20': log.level === logLevels.warn,
-                  'hover:bg-neutral/10': log.level === logLevels.info,
-                  'bg-background': log.level === logLevels.info && log.infoIndex % 2 !== 0,
+                  'hover:bg-neutral/20': log.level === logLevels.info,
+                  'bg-neutral/10': log.level === logLevels.info && log.infoIndex % 2 !== 0,
                   'bg-stable/10 text-stable hover:bg-stable/20': log.level === logLevels.debug,
                   'bg-feature/10 text-feature hover:bg-feature/20': log.level === logLevels.trace,
                 },

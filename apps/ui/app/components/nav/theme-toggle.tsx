@@ -52,7 +52,7 @@ export function ThemeToggle(): React.JSX.Element {
           <span className="sr-only">Toggle theme</span>
         </SidebarMenuButton>
       </TooltipTrigger>
-      <TooltipContent side="right" className="flex items-center gap-2 align-baseline">
+      <TooltipContent side="top" className="flex items-center gap-2 align-baseline">
         Toggle theme{' '}
         <KeyShortcut variant="tooltip" className="ml-1">
           {formattedKeyCombination}

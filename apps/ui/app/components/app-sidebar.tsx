@@ -42,7 +42,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
           <NavProjects projects={navRoutes.projects} />
         </div>
       </SidebarContent>
-      <SidebarFooter className="flex flex-col items-end">
+      <SidebarFooter className="border-t flex flex-row justify-end">
         <ColorToggle />
         <ThemeToggle />
       </SidebarFooter>

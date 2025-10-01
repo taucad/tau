@@ -1,6 +1,5 @@
 import * as React from 'react';
 import { Link } from 'react-router';
-import { ColorToggle } from '#components/nav/color-toggle.js';
 import { NavHistory } from '#components/nav/nav-history.js';
 import { NavMain } from '#components/nav/nav-main.js';
 import { NavProjects } from '#components/nav/nav-projects.js';
@@ -14,8 +13,8 @@ import {
 } from '#components/ui/sidebar.js';
 import { Tau } from '#components/icons/tau.js';
 import { NavChat } from '#components/nav/nav-chat.js';
-import { ThemeToggle } from '#components/nav/theme-toggle.js';
 import { navRoutes } from '#constants/route.constants.js';
+import { NavFooter } from '#components/nav/nav-footer.js';
 
 export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>): React.JSX.Element {
   return (
@@ -42,9 +41,8 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
           <NavProjects projects={navRoutes.projects} />
         </div>
       </SidebarContent>
-      <SidebarFooter className="border-t flex flex-row justify-end">
-        <ColorToggle />
-        <ThemeToggle />
+      <SidebarFooter className="border-t flex flex-row items-center justify-between">
+        <NavFooter />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

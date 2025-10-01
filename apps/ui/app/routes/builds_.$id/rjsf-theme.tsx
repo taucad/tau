@@ -39,7 +39,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
 
   if (schema.type === 'object') {
     const isRoot = id === rjsfIdPrefix;
-    return <div className={cn(!isRoot && 'my-2 first:mt-0 last:mb-0')}>{children}</div>;
+    return <div className={cn(!isRoot && 'first:mt-0 last:mb-0')}>{children}</div>;
   }
 
   // Always call hooks at the very top level
@@ -62,7 +62,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   };
 
   return (
-    <div className="@container/parameter flex flex-col rounded-md p-1 transition-colors hover:bg-muted/30">
+    <div className="@container/parameter flex flex-col px-3 py-2 transition-colors hover:bg-muted/50">
       <div className="flex h-auto min-h-6 flex-row justify-between gap-2">
         <span className={cn(fieldHasValue ? 'font-medium' : 'font-normal')} aria-label={`Parameter: ${prettyLabel}`}>
           <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
@@ -136,19 +136,19 @@ function ObjectFieldTemplate(
   return (
     <Collapsible
       open={isOpen}
-      className="w-full overflow-hidden rounded-md border"
+      className="w-full border-b border-border/50"
       onOpenChange={setIsOpen}
     >
-      <CollapsibleTrigger className="group/collapsible flex h-7 w-full items-center justify-between bg-neutral/5 pr-1.5 pl-2 transition-colors hover:bg-neutral/10">
-        <h3 className="flex min-w-0 flex-1 items-center font-medium">
+      <CollapsibleTrigger className="group/collapsible flex h-8 w-full items-center justify-between px-3 py-1.5 transition-colors hover:bg-muted/50">
+        <h3 className="flex min-w-0 flex-1 items-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           <span className="truncate">{prettyTitle}</span>
-          <span className="ml-1 flex-shrink-0 text-muted-foreground/50">({propertiesCount})</span>
+          <span className="ml-1.5 flex-shrink-0 text-muted-foreground/50">({propertiesCount})</span>
         </h3>
-        <ChevronRight className="size-4 text-muted-foreground transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
+        <ChevronRight className="size-3.5 text-muted-foreground transition-transform duration-200 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
       </CollapsibleTrigger>
 
-      <CollapsibleContent className="p-1">
-        {description ? <div className="mb-2 px-1 text-sm text-muted-foreground">{description}</div> : null}
+      <CollapsibleContent className="px-0 py-0">
+        {description ? <div className="px-3 py-2 text-sm text-muted-foreground">{description}</div> : null}
         {properties.map((element) => element.content)}
       </CollapsibleContent>
     </Collapsible>

@@ -165,8 +165,9 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
         <DropdownMenuLabel>Unit</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={unit} onValueChange={handleUnitChange}>
           {gridUnitOptions.map((option) => (
-            <DropdownMenuRadioItem key={option.value} value={option.value} onSelect={preventClose}>
-              {option.label}
+            <DropdownMenuRadioItem key={option.value} className="flex justify-between items-center gap-2" value={option.value} onSelect={preventClose}>
+              <span>{option.label}</span>
+              <span className="bg-neutral/20 rounded-xs w-8 py-0.5 px-1 text-xs font-mono flex items-center justify-center">{option.value}</span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>

@@ -219,7 +219,7 @@ export const ChatConsole = memo(function ({
       )}
       {...properties}
     >
-      <div className="sticky top-0 flex flex-row gap-2 bg-background p-2 text-muted-foreground border-b">
+      <div className="sticky top-0 flex flex-row gap-2 bg-background p-2 text-muted-foreground border-b border-border/50">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

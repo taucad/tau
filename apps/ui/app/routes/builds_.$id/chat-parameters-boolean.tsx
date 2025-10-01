@@ -9,7 +9,7 @@ type ChatParametersBooleanProps = {
 export function ChatParametersBoolean({ value, onChange }: ChatParametersBooleanProps): React.JSX.Element {
   return (
     <Switch
-      size="lg"
+      size="md"
       checked={Boolean(value)}
       onCheckedChange={(checkedValue) => {
         onChange(checkedValue);

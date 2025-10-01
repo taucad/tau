@@ -93,7 +93,7 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
       open={isDocsSidebarOpen}
       onOpenChange={setIsDocsSidebarOpen}
       className={cn( 
-        'w-(--docs-sidebar-width-icon) data-[state=open]:w-full',
+        'w-(--docs-sidebar-width-icon) data-[state=open]:w-full z-10',
         className)}>
       <FloatingPanelToggle
         openIcon={MenuIcon}

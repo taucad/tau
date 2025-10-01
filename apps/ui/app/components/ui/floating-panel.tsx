@@ -103,7 +103,6 @@ function FloatingPanel({ children, open, defaultOpen = false, onOpenChange, clas
           'size-8',
           'data-[state=open]:h-[calc(100dvh-(--spacing(14)))]',
           'data-[state=open]:w-full',
-          'data-[state=open]:z-50',
           // Position origin
           getOriginClass(),
           className,

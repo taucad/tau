@@ -97,7 +97,7 @@ function FloatingPanel({ children, open, defaultOpen = false, onOpenChange, clas
     <FloatingPanelContext.Provider value={contextValue}>
       <div
         className={cn(
-          'group overflow-hidden relative bg-sidebar border h-full rounded-md',
+          'group overflow-hidden relative bg-background border h-full rounded-md',
           'transition-all duration-300 ease-in-out',
           // Size and shape transitions
           'size-8',
@@ -363,7 +363,7 @@ function FloatingPanelContent({
   return (
     <div
       className={cn(
-        'flex size-full flex-col',
+        'flex size-full flex-col bg-sidebar/50',
         isOpen ? 'opacity-100 delay-200' : 'opacity-0 pointer-events-none',
         className,
       )}
@@ -378,7 +378,7 @@ function FloatingPanelContentHeader({
   className,
   side,
 }: FloatingPanelContentHeaderProps): React.JSX.Element {
-  return <div className={cn('flex text-sm text-muted-foreground font-medium h-7.75 items-center justify-between py-0.5 border-b', side === 'right' ? 'pr-8 pl-2' : 'pl-8 pr-0.25', className)}>{children}</div>;
+  return <div className={cn('flex text-sm bg-sidebar text-muted-foreground font-medium h-7.75 items-center justify-between py-0.5 border-b', side === 'right' ? 'pr-8 pl-2' : 'pl-8 pr-0.25', className)}>{children}</div>;
 }
 
 function FloatingPanelContentTitle({

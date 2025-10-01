@@ -136,7 +136,7 @@ function ObjectFieldTemplate(
   return (
     <Collapsible
       open={isOpen}
-      className="w-full overflow-hidden rounded-md border border-border/40"
+      className="w-full overflow-hidden rounded-md border"
       onOpenChange={setIsOpen}
     >
       <CollapsibleTrigger className="group/collapsible flex h-7 w-full items-center justify-between bg-neutral/5 pr-1.5 pl-2 transition-colors hover:bg-neutral/10">

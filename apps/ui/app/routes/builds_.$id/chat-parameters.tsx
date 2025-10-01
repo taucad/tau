@@ -170,9 +170,6 @@ export const ChatParameters = memo(function (props: { readonly className?: strin
     setSearchTerm('');
   }, []);
 
-  const containerXpadding = 'px-2';
-  const containerYpadding = 'py-4 md:py-2';
-
   const formContext = useMemo(
     () => ({
       allExpanded,
@@ -225,9 +222,9 @@ export const ChatParameters = memo(function (props: { readonly className?: strin
         {hasParameters ? (
           <>
             {/* Search and Controls Bar */}
-            <div className={cn('flex w-full flex-row gap-2', containerXpadding, 'py-2')}>
+            <div className="flex w-full flex-row gap-2 border-b border-border/50 px-3 py-2">
               <SearchInput
-                placeholder="Search parameters..."
+                placeholder="Search"
                 value={searchTerm}
                 className="h-8 w-full bg-background"
                 onChange={handleSearchChange}
@@ -268,7 +265,7 @@ export const ChatParameters = memo(function (props: { readonly className?: strin
               </Tooltip>
             </div>
             {!hasSearchResults && searchTerm ? (
-              <div className={cn('py-4 text-center text-muted-foreground', containerXpadding)}>
+              <div className="py-4 text-center text-muted-foreground">
                 No parameters matching &quot;{searchTerm}&quot;
               </div>
             ) : (
@@ -285,7 +282,7 @@ export const ChatParameters = memo(function (props: { readonly className?: strin
                 widgets={widgets}
                 formData={mergedData}
                 formContext={formContext}
-                className={cn('flex size-full flex-col gap-2 overflow-y-auto pb-2', containerXpadding)}
+                className="flex size-full flex-col overflow-y-auto px-0 py-0"
                 onChange={handleChange}
                 onSubmit={handleSubmit}
               />
@@ -295,8 +292,7 @@ export const ChatParameters = memo(function (props: { readonly className?: strin
           <div
             className={cn(
               'm-4 mt-2 flex h-full flex-col items-center justify-center rounded-md border border-dashed p-8 text-center md:m-2',
-              containerXpadding,
-              containerYpadding,
+              'px-2 py-4 md:py-2'
             )}
           >
             <div className="mb-3 rounded-full bg-muted/50 p-2">

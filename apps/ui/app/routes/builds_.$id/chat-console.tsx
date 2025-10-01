@@ -219,7 +219,7 @@ export const ChatConsole = memo(function ({
       )}
       {...properties}
     >
-      <div className="sticky top-0 flex flex-row gap-2 bg-background p-2 text-muted-foreground">
+      <div className="sticky top-0 flex flex-row gap-2 bg-background p-2 text-muted-foreground border-b">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -346,7 +346,7 @@ export const ChatConsole = memo(function ({
           </Tooltip>
         </div>
       </div>
-      <div className="flex min-h-0 flex-grow bg-background flex-col-reverse gap-0.25 overflow-x-hidden overflow-y-auto p-2 pt-0">
+      <div className="flex min-h-0 flex-grow bg-background flex-col-reverse gap-0.25 overflow-x-hidden overflow-y-auto p-2">
         {/* Display console logs */}
         {filteredLogs.length > 0 ? (
           filteredLogs.map((log) => (

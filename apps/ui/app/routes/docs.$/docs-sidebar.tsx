@@ -30,6 +30,8 @@ import {
   SidebarGroupLabel,
 } from '#components/ui/sidebar.js';
 import { Separator } from '#components/ui/separator.js';
+import { Tau } from '#components/icons/tau.js';
+import { metaConfig } from '#config.js';
 
 const docsSidebarWidthIcon = 'calc(var(--spacing) * 17)';
 const docsSidebarWidth = 'calc(var(--spacing) * 72)';
@@ -110,7 +112,7 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
 
       <FloatingPanelContent>
         <FloatingPanelContentHeader side="left">
-          <FloatingPanelContentTitle>Documentation</FloatingPanelContentTitle>
+          <FloatingPanelContentTitle className="flex items-center gap-1"><Tau className="size-6 text-primary" /> {metaConfig.name} Documentation</FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
         
         <FloatingPanelContentBody>

@@ -139,7 +139,7 @@ function ObjectFieldTemplate(
       className="w-full overflow-hidden rounded-md border border-border/40"
       onOpenChange={setIsOpen}
     >
-      <CollapsibleTrigger className="group/collapsible flex h-7 w-full items-center justify-between bg-muted/70 pr-1.5 pl-2 transition-colors hover:bg-muted">
+      <CollapsibleTrigger className="group/collapsible flex h-7 w-full items-center justify-between bg-neutral/5 pr-1.5 pl-2 transition-colors hover:bg-neutral/10">
         <h3 className="flex min-w-0 flex-1 items-center font-medium">
           <span className="truncate">{prettyTitle}</span>
           <span className="ml-1 flex-shrink-0 text-muted-foreground/50">({propertiesCount})</span>

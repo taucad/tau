@@ -97,7 +97,7 @@ function FloatingPanel({ children, open, defaultOpen = false, onOpenChange, clas
     <FloatingPanelContext.Provider value={contextValue}>
       <div
         className={cn(
-          'group relative overflow-hidden bg-sidebar border h-full rounded-md',
+          'group relative bg-sidebar border h-full rounded-md',
           'transition-all duration-300 ease-in-out',
           // Size and shape transitions
           'size-8',

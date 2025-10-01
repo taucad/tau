@@ -10,7 +10,7 @@ import { SettingsControl } from '#components/geometry/cad/settings-control.js';
 import { ChatViewerStatus } from '#routes/builds_.$id/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/builds_.$id/chat-viewer-controls.js';
 import { ChatStackTrace } from '#routes/builds_.$id/chat-stack-trace.js';
-import { ChatEditorObjectTree, ChatEditorObjectTreeTrigger } from '#routes/builds_.$id/chat-editor-object-tree.js';
+import { ChatExplorerTree, ChatExplorerTrigger } from '#routes/builds_.$id/chat-editor-explorer.js';
 import { ChatEditorDetails, ChatEditorDetailsTrigger } from '#routes/builds_.$id/chat-editor-details.js';
 import { cn } from '#utils/ui.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -37,7 +37,7 @@ export const ChatInterface = memo(function () {
         <ResizableHandle variant='floating' className={cn(isChatOpen ? 'hover:after:opacity-100' : 'hidden')} />
 
         <ResizablePanel style={{ ...(!isExplorerOpen ? { display: 'none' } : {}) }} order={2} id="object-tree" minSize={20} maxSize={30} defaultSize={chatResizeLeft[1]} className='pointer-events-auto overflow-visible!'>
-          <ChatEditorObjectTree />
+          <ChatExplorerTree />
         </ResizablePanel>
 
         <ResizableHandle variant='floating' className={cn(isExplorerOpen ? 'hover:after:opacity-100' : 'hidden')} />
@@ -49,7 +49,7 @@ export const ChatInterface = memo(function () {
               isOpen={isChatOpen}
               onToggle={toggleChatOpen}
             />
-            <ChatEditorObjectTreeTrigger
+            <ChatExplorerTrigger
               isOpen={isExplorerOpen}
               onToggle={toggleExplorerOpen}
             />

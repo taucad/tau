@@ -30,13 +30,13 @@ export const ChatInterface = memo(function () {
       {/* Left-side ResizablePanelGroup */}
       <ResizablePanelGroup direction="horizontal" autoSaveId={cookieName.chatRsLeft} className="absolute gap-1 top-(--header-height) left-2 md:left-(--sidebar-width-current) h-[calc(100dvh-(--spacing(14)))]! w-[50%]! md:w-[calc(50%-0.25rem)]! transition-all duration-200 ease-linear overflow-visible! pointer-events-none" onLayout={setChatResizeLeft}
       >
-        <ResizablePanel style={{ ...(!isChatOpen ? { display: 'none' } : {}) }} order={1} id="history" minSize={25} defaultSize={chatResizeLeft[0]} className='pointer-events-auto'>
+        <ResizablePanel style={{ ...(!isChatOpen ? { display: 'none' } : {}) }} order={1} id="history" minSize={25} defaultSize={chatResizeLeft[0]} className='pointer-events-auto overflow-visible!'>
           <ChatHistory />
         </ResizablePanel>
 
         <ResizableHandle variant='floating' className={cn(isChatOpen ? 'hover:after:opacity-100' : 'hidden')} />
 
-        <ResizablePanel style={{ ...(!isExplorerOpen ? { display: 'none' } : {}) }} order={2} id="object-tree" minSize={20} maxSize={30} defaultSize={chatResizeLeft[1]} className='pointer-events-auto'>
+        <ResizablePanel style={{ ...(!isExplorerOpen ? { display: 'none' } : {}) }} order={2} id="object-tree" minSize={20} maxSize={30} defaultSize={chatResizeLeft[1]} className='pointer-events-auto overflow-visible!'>
           <ChatEditorObjectTree />
         </ResizablePanel>
 
@@ -92,17 +92,17 @@ export const ChatInterface = memo(function () {
         </ResizablePanel>
 
         <ResizableHandle variant='floating' className={cn(isParametersOpen ? 'hover:after:opacity-100' : 'hidden')} />
-        <ResizablePanel style={{ ...(!isParametersOpen ? { display: 'none' } : {}) }} order={2} id="parameters" minSize={20} maxSize={40} defaultSize={chatResizeRight[1]} className='pointer-events-auto'>
+        <ResizablePanel style={{ ...(!isParametersOpen ? { display: 'none' } : {}) }} order={2} id="parameters" minSize={20} maxSize={40} defaultSize={chatResizeRight[1]} className='pointer-events-auto overflow-visible!'>
           <ChatParameters />
         </ResizablePanel>
 
         <ResizableHandle variant='floating' className={cn(isEditorOpen ? 'hover:after:opacity-100' : 'hidden')} />
-        <ResizablePanel style={{ ...(!isEditorOpen ? { display: 'none' } : {}) }} order={3} id="editor-layout" minSize={25} maxSize={50} defaultSize={chatResizeRight[2]} className='pointer-events-auto'>
+        <ResizablePanel style={{ ...(!isEditorOpen ? { display: 'none' } : {}) }} order={3} id="editor-layout" minSize={25} maxSize={50} defaultSize={chatResizeRight[2]} className='pointer-events-auto overflow-visible!'>
           <ChatEditorLayout />
         </ResizablePanel>
 
         <ResizableHandle variant='floating' className={cn(isDetailsOpen ? 'hover:after:opacity-100' : 'hidden')} />
-        <ResizablePanel style={{ ...(!isDetailsOpen ? { display: 'none' } : {}) }} order={4} id="details" minSize={20} maxSize={35} defaultSize={chatResizeRight[3]} className='pointer-events-auto'>
+        <ResizablePanel style={{ ...(!isDetailsOpen ? { display: 'none' } : {}) }} order={4} id="details" minSize={20} maxSize={35} defaultSize={chatResizeRight[3]} className='pointer-events-auto overflow-visible!'>
           <ChatEditorDetails />
         </ResizablePanel>
       </ResizablePanelGroup>

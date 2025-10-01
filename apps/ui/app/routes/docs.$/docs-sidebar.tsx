@@ -32,7 +32,7 @@ import {
 import { Separator } from '#components/ui/separator.js';
 
 const docsSidebarWidthIcon = 'calc(var(--spacing) * 17)';
-const docsSidebarWidth = 'var(--sidebar-width)';
+const docsSidebarWidth = 'calc(var(--spacing) * 72)';
 
 const linkVariants = cva(
   'flex items-center gap-2 w-full py-1.5 rounded-lg text-fd-foreground/80 [&_svg]:size-4',
@@ -72,6 +72,7 @@ export function DocsSidebarProvider({ children }: { readonly children: ReactNode
       <div data-slot="docs-sidebar"
       style={{
         '--docs-sidebar-width': docsSidebarWidth,
+        '--docs-sidebar-width-icon': docsSidebarWidthIcon,
         '--docs-sidebar-toggle-width-current': isDocsSidebarOpen ? '0px' : docsSidebarWidthIcon,
         '--docs-sidebar-width-current': isDocsSidebarOpen ? docsSidebarWidth : '0px',
       }}
@@ -92,7 +93,7 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
       open={isDocsSidebarOpen}
       onOpenChange={setIsDocsSidebarOpen}
       className={cn( 
-        'w-17 data-[state=open]:w-full',
+        'w-(--docs-sidebar-width-icon) data-[state=open]:w-full',
         className)}>
       <FloatingPanelToggle
         openIcon={MenuIcon}

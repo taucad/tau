@@ -17,7 +17,7 @@ export function DocsPageActions(): React.JSX.Element {
   const getMarkdownContent = (): string => rawMarkdownContent;
 
   return (
-    <div className="space-y-1 mt-5">
+    <div className="space-y-1 mt-5 -mr-4">
       <CopyButton
         getText={getMarkdownContent}
         variant="ghost"

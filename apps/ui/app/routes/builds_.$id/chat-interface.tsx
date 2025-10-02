@@ -160,7 +160,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
       </ResizablePanelGroup>
 
       {/* Centered Content */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 md:top-[90%] md:left-[50%] md:-translate-x-[50%] md:-translate-y-[90%]">
+      <div className="absolute top-1/2 left-1/2 -translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)] -translate-y-1/2 md:top-[90%] md:-translate-y-[90%] transition-all duration-200 ease-in-out">
         <ChatViewerStatus />
       </div>
     </div>

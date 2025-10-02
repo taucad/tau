@@ -36,7 +36,7 @@ export const ChatParametersTrigger = memo(function ({
 }) {
   return (
     <FloatingPanelTrigger
-      icon={Settings2}
+      icon={<span className='font-medium text-lg'>𝒳</span>}
       tooltipContent={
         <div className="flex items-center gap-2">
           {isOpen ? 'Close' : 'Open'} Parameters

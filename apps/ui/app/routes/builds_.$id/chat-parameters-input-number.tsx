@@ -47,15 +47,10 @@ export function ChatParametersInputNumber({
   ...properties
 }: ChatParametersInputNumberProps): React.ReactNode {
   const descriptor = getDescriptor(name);
-  const inputRef = React.useRef<HTMLInputElement>(null);
 
   const isCount = descriptor === 'count';
   const isAngle = descriptor === 'angle';
   const isUnitless = descriptor === 'unitless';
-
-  const handleIndicatorClick = () => {
-    inputRef.current?.focus();
-  };
 
   return (
     <div
@@ -68,23 +63,21 @@ export function ChatParametersInputNumber({
         <span
           className={cn(
             baseIndicatorClass,
+            'absolute left-0',
             'rounded-l-md border-r-0',
             'group-focus-within/input:border-ring',
-            'cursor-text',
+            'cursor-text pointer-events-none',
           )}
-          onClick={handleIndicatorClick}
         >
           <span className="font-mono text-sm">×</span>
         </span>
       ) : null}
       <Input
-        ref={inputRef}
         autoComplete="off"
         type="number"
         value={value}
         className={cn(
-          isCount ? 'rounded-l-none border-l-0' : '',
-          isCount ? '' : 'rounded-r-none border-r-0',
+          isCount ? 'pl-8' : 'pr-8',
           'focus-visible:ring-0',
           className,
         )}
@@ -92,8 +85,12 @@ export function ChatParametersInputNumber({
       />
       {!isCount && (
         <span
-          className={cn(baseIndicatorClass, 'rounded-r-md border-l-0', 'group-focus-within/input:border-ring', 'cursor-text')}
-          onClick={handleIndicatorClick}
+          className={cn(
+            baseIndicatorClass,
+            'absolute right-0 rounded-r-md border-l-0',
+            'group-focus-within/input:border-ring',
+            'cursor-text pointer-events-none',
+          )}
         >
           {isAngle ? (
             <Angle className="size-4" />

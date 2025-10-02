@@ -121,7 +121,7 @@ type Align = 'start' | 'center' | 'end';
 type FloatingPanelTriggerButtonProps = {
   readonly side?: Side;
   readonly align?: Align;
-  readonly icon: LucideIcon;
+  readonly icon: LucideIcon | React.ReactNode;
   readonly tooltipSide?: 'left' | 'right' | 'top' | 'bottom';
   readonly className?: string;
   readonly children?: React.ReactNode;
@@ -185,6 +185,31 @@ function FloatingPanelTriggerButton({
     ? 'absolute group-data-[state=open]:z-10 rounded-md group-data-[state=open]:rounded-sm size-8 group-data-[state=open]:size-7'
     : '';
 
+  // Render icon based on whether it's a ReactNode or a LucideIcon component
+  const renderIcon = (): React.ReactNode => {
+    if (React.isValidElement(Icon)) {
+      // If it's already a React element, clone it and merge className
+      return React.cloneElement(Icon, {
+        className: cn(
+          'transition-transform duration-300 ease-in-out',
+          isOpen ? 'text-primary' : '',
+          (Icon.props as any).className,
+        ),
+      } as any);
+    }
+    
+    // If it's a LucideIcon component, create an element with className
+    const IconComponent = Icon as LucideIcon;
+    return (
+      <IconComponent
+        className={cn(
+          'transition-transform duration-300 ease-in-out',
+          isOpen ? 'text-primary' : '',
+        )}
+      />
+    );
+  };
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -200,12 +225,7 @@ function FloatingPanelTriggerButton({
           )}
           onClick={onClick}
         >
-          <Icon
-            className={cn(
-              'transition-transform duration-300 ease-in-out',
-              isOpen ? 'text-primary' : '',
-            )}
-          />
+          {renderIcon()}
           {children}
         </Button>
       </TooltipTrigger>
@@ -219,7 +239,7 @@ function FloatingPanelTriggerButton({
 type FloatingPanelCloseProps = {
   readonly side?: Side;
   readonly align?: Align;
-  readonly icon: LucideIcon;
+  readonly icon: LucideIcon | React.ReactNode;
   readonly className?: string;
   readonly children?: React.ReactNode;
   readonly tooltipContent: (isOpen: boolean) => React.ReactNode;
@@ -253,7 +273,7 @@ function FloatingPanelClose({
 }
 
 type FloatingPanelTriggerProps = {
-  readonly icon: LucideIcon;
+  readonly icon: LucideIcon | React.ReactNode;
   readonly tooltipContent: React.ReactNode;
   readonly className?: string;
   readonly onClick: () => void;

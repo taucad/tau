@@ -24,6 +24,7 @@ export const ChatViewer = memo(function () {
       enableSurfaces={enableSurfaces}
       enableLines={enableLines}
       geometries={geometries}
+      gizmoClassName="right-[calc((var(--right-panel-size)+var(--left-panel-size))/2+var(--spacing)*1)]!"
     />
   );
 });

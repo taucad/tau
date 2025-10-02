@@ -16,11 +16,16 @@ import { cn } from '#utils/ui.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useResizeObserver } from '#hooks/use-resize-observer.js';
 
+/**
+ * The spacing/gap between the panels in pixels.
+ */
+const spacing = 8;
+
 export const ChatInterface = memo(function (): React.JSX.Element {
   const { isChatOpen, toggleChatOpen, isParametersOpen, toggleParametersOpen, isEditorOpen, toggleEditorOpen, isExplorerOpen, toggleExplorerOpen, isDetailsOpen, toggleDetailsOpen } = useViewContext();
   const [chatResizeLeft, setChatResizeLeft] = useCookie(cookieName.chatRsLeft, [30, 20, 50]);
   const [chatResizeRight, setChatResizeRight] = useCookie(cookieName.chatRsRight, [50, 30, 20, 0]);
-  
+
   // Refs for each individual panel
   const historyPanelRef = useRef<HTMLDivElement>(null);
   const explorerPanelRef = useRef<HTMLDivElement>(null);
@@ -37,15 +42,15 @@ export const ChatInterface = memo(function (): React.JSX.Element {
 
   // Calculate total widths for each side
   const leftPanelWidth = useMemo(() => {
-    const historyWidth = isChatOpen ? (historySize.width ?? 0) : 0;
-    const explorerWidth = isExplorerOpen ? (explorerSize.width ?? 0) : 0;
+    const historyWidth = isChatOpen ? (historySize.width ?? 0) + spacing : 0;
+    const explorerWidth = isExplorerOpen ? (explorerSize.width ?? 0) + spacing : 0;
     return historyWidth + explorerWidth;
   }, [historySize.width, explorerSize.width, isChatOpen, isExplorerOpen]);
 
   const rightPanelWidth = useMemo(() => {
-    const parametersWidth = isParametersOpen ? (parametersSize.width ?? 0) : 0;
-    const editorWidth = isEditorOpen ? (editorSize.width ?? 0) : 0;
-    const detailsWidth = isDetailsOpen ? (detailsSize.width ?? 0) : 0;
+    const parametersWidth = isParametersOpen ? (parametersSize.width ?? 0) + spacing : 0;
+    const editorWidth = isEditorOpen ? (editorSize.width ?? 0) + spacing : 0;
+    const detailsWidth = isDetailsOpen ? (detailsSize.width ?? 0) + spacing : 0;
     return parametersWidth + editorWidth + detailsWidth;
   }, [parametersSize.width, editorSize.width, detailsSize.width, isParametersOpen, isEditorOpen, isDetailsOpen]);
 
@@ -61,7 +66,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
     >
       {/* Viewer - inset completely to occupy the background fully */}
       {/* The calculation is to center the viewer within the container */}
-      <div className="absolute inset-0 h-full w-[200%] left-1/2 -translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)] transition-all duration-200 ease-in-out">
+      <div className="absolute inset-0 h-full w-full left-1/2 -translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)] transition-all duration-200 ease-in-out">
         <ChatViewer />
       </div>
 

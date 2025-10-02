@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useRef, useMemo } from 'react';
 import { ChatHistory, ChatHistoryTrigger } from '#routes/builds_.$id/chat-history.js';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable.js';
 import { ChatParameters, ChatParametersTrigger } from '#routes/builds_.$id/chat-parameters.js';
@@ -14,30 +14,76 @@ import { ChatExplorerTree, ChatExplorerTrigger } from '#routes/builds_.$id/chat-
 import { ChatEditorDetails, ChatEditorDetailsTrigger } from '#routes/builds_.$id/chat-editor-details.js';
 import { cn } from '#utils/ui.js';
 import { useCookie } from '#hooks/use-cookie.js';
+import { useResizeObserver } from '#hooks/use-resize-observer.js';
 
-export const ChatInterface = memo(function () {
+export const ChatInterface = memo(function (): React.JSX.Element {
   const { isChatOpen, toggleChatOpen, isParametersOpen, toggleParametersOpen, isEditorOpen, toggleEditorOpen, isExplorerOpen, toggleExplorerOpen, isDetailsOpen, toggleDetailsOpen } = useViewContext();
   const [chatResizeLeft, setChatResizeLeft] = useCookie(cookieName.chatRsLeft, [30, 20, 50]);
   const [chatResizeRight, setChatResizeRight] = useCookie(cookieName.chatRsRight, [50, 30, 20, 0]);
+  
+  // Refs for each individual panel
+  const historyPanelRef = useRef<HTMLDivElement>(null);
+  const explorerPanelRef = useRef<HTMLDivElement>(null);
+  const parametersPanelRef = useRef<HTMLDivElement>(null);
+  const editorPanelRef = useRef<HTMLDivElement>(null);
+  const detailsPanelRef = useRef<HTMLDivElement>(null);
+
+  // Track width of each panel
+  const historySize = useResizeObserver({ ref: historyPanelRef as React.RefObject<HTMLElement> });
+  const explorerSize = useResizeObserver({ ref: explorerPanelRef as React.RefObject<HTMLElement> });
+  const parametersSize = useResizeObserver({ ref: parametersPanelRef as React.RefObject<HTMLElement> });
+  const editorSize = useResizeObserver({ ref: editorPanelRef as React.RefObject<HTMLElement> });
+  const detailsSize = useResizeObserver({ ref: detailsPanelRef as React.RefObject<HTMLElement> });
+
+  // Calculate total widths for each side
+  const leftPanelWidth = useMemo(() => {
+    const historyWidth = isChatOpen ? (historySize.width ?? 0) : 0;
+    const explorerWidth = isExplorerOpen ? (explorerSize.width ?? 0) : 0;
+    return historyWidth + explorerWidth;
+  }, [historySize.width, explorerSize.width, isChatOpen, isExplorerOpen]);
+
+  const rightPanelWidth = useMemo(() => {
+    const parametersWidth = isParametersOpen ? (parametersSize.width ?? 0) : 0;
+    const editorWidth = isEditorOpen ? (editorSize.width ?? 0) : 0;
+    const detailsWidth = isDetailsOpen ? (detailsSize.width ?? 0) : 0;
+    return parametersWidth + editorWidth + detailsWidth;
+  }, [parametersSize.width, editorSize.width, detailsSize.width, isParametersOpen, isEditorOpen, isDetailsOpen]);
 
   return (
-    <div className="group/chat-layout relative size-full flex flex-col">
+    <div
+      className="group/chat-layout relative size-full flex flex-col"
+      style={
+        {
+          '--left-panel-size': `${leftPanelWidth}px`,
+          '--right-panel-size': `${rightPanelWidth}px`,
+        } as React.CSSProperties
+      }
+    >
       {/* Viewer - inset completely to occupy the background fully */}
-      <div className="absolute inset-0 size-full">
+      {/* The calculation is to center the viewer within the container */}
+      <div className="absolute inset-0 w-[200%] left-1/2 -translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)] transition-all duration-200 ease-in-out">
         <ChatViewer />
       </div>
 
       {/* Left-side ResizablePanelGroup */}
-      <ResizablePanelGroup direction="horizontal" autoSaveId={cookieName.chatRsLeft} className="absolute gap-1 top-(--header-height) left-2 md:left-(--sidebar-width-current) h-[calc(100dvh-(--spacing(14)))]! w-[50%]! md:w-[calc(50%-0.25rem)]! transition-all duration-200 ease-linear overflow-visible! pointer-events-none" onLayout={setChatResizeLeft}
+      <ResizablePanelGroup
+        direction="horizontal"
+        autoSaveId={cookieName.chatRsLeft}
+        className="absolute gap-1 top-(--header-height) left-2 md:left-(--sidebar-width-current) h-[calc(100dvh-(--spacing(14)))]! w-[50%]! md:w-[calc(50%-0.25rem)]! transition-all duration-200 ease-linear overflow-visible! pointer-events-none"
+        onLayout={setChatResizeLeft}
       >
         <ResizablePanel style={{ ...(!isChatOpen ? { display: 'none' } : {}) }} order={1} id="history" minSize={25} defaultSize={chatResizeLeft[0]} className='pointer-events-auto overflow-visible!'>
-          <ChatHistory />
+          <div ref={historyPanelRef} className="size-full">
+            <ChatHistory />
+          </div>
         </ResizablePanel>
 
         <ResizableHandle variant='floating' className={cn(isChatOpen ? 'hover:after:opacity-100' : 'hidden')} />
 
         <ResizablePanel style={{ ...(!isExplorerOpen ? { display: 'none' } : {}) }} order={2} id="object-tree" minSize={20} maxSize={30} defaultSize={chatResizeLeft[1]} className='pointer-events-auto overflow-visible!'>
-          <ChatExplorerTree />
+          <div ref={explorerPanelRef} className="size-full">
+            <ChatExplorerTree />
+          </div>
         </ResizablePanel>
 
         <ResizableHandle variant='floating' className={cn(isExplorerOpen ? 'hover:after:opacity-100' : 'hidden')} />
@@ -93,17 +139,23 @@ export const ChatInterface = memo(function () {
 
         <ResizableHandle variant='floating' className={cn(isParametersOpen ? 'hover:after:opacity-100' : 'hidden')} />
         <ResizablePanel style={{ ...(!isParametersOpen ? { display: 'none' } : {}) }} order={2} id="parameters" minSize={20} maxSize={40} defaultSize={chatResizeRight[1]} className='pointer-events-auto overflow-visible!'>
-          <ChatParameters />
+          <div ref={parametersPanelRef} className="size-full">
+            <ChatParameters />
+          </div>
         </ResizablePanel>
 
         <ResizableHandle variant='floating' className={cn(isEditorOpen ? 'hover:after:opacity-100' : 'hidden')} />
         <ResizablePanel style={{ ...(!isEditorOpen ? { display: 'none' } : {}) }} order={3} id="editor-layout" minSize={25} maxSize={50} defaultSize={chatResizeRight[2]} className='pointer-events-auto overflow-visible!'>
-          <ChatEditorLayout />
+          <div ref={editorPanelRef} className="size-full">
+            <ChatEditorLayout />
+          </div>
         </ResizablePanel>
 
         <ResizableHandle variant='floating' className={cn(isDetailsOpen ? 'hover:after:opacity-100' : 'hidden')} />
         <ResizablePanel style={{ ...(!isDetailsOpen ? { display: 'none' } : {}) }} order={4} id="details" minSize={20} maxSize={35} defaultSize={chatResizeRight[3]} className='pointer-events-auto overflow-visible!'>
-          <ChatEditorDetails />
+          <div ref={detailsPanelRef} className="size-full">
+            <ChatEditorDetails />
+          </div>
         </ResizablePanel>
       </ResizablePanelGroup>
 

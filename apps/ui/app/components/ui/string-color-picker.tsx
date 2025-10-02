@@ -162,7 +162,7 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
   }, []);
 
   return (
-    <div className={cn('flex w-full flex-row items-center gap-2', className)}>
+    <div className={cn('group/color-picker flex w-full flex-row items-center gap-2', className)}>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
@@ -214,7 +214,7 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
       <div
         className={cn(
           'group relative flex flex-1 flex-row items-center rounded-md',
-          'focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
+          'group-focus-within/color-picker:border-ring group-focus-within/color-picker:ring-3 group-focus-within/color-picker:ring-ring/50',
         )}
       >
         <Input
@@ -231,7 +231,7 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
             className={cn(
               baseIndicatorClass,
               'rounded-r-md border-l-0',
-              'group-focus-within:border-ring',
+              'group-focus-within/color-picker:border-ring',
               'cursor-text',
             )}
             onClick={handleIndicatorClick}

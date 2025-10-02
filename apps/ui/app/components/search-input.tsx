@@ -29,6 +29,10 @@ export function SearchInput({
 }: SearchInputProperties): React.JSX.Element {
   const showClearButton = Boolean(value && onClear);
 
+  const handleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+  };
+
   return (
     <div className={cn('relative w-full', containerClassName)}>
       <Input
@@ -36,10 +40,13 @@ export function SearchInput({
         type="text"
         placeholder={placeholder}
         value={value}
-        className={cn('pr-8 pl-8', className)}
+        className={cn(
+          'pl-8 pr-2 not-placeholder-shown:pr-6',
+          className
+        )}
         {...properties}
       />
-      <Search className="absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Search className="absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
       {showClearButton ? (
         <Button
           variant="ghost"
@@ -48,6 +55,7 @@ export function SearchInput({
           type="button"
           aria-label="Clear search"
           onClick={onClear}
+          onMouseDown={handleMouseDown}
         >
           <X className="size-3.5" />
         </Button>

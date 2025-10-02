@@ -35,7 +35,7 @@ export function ThreeProvider({
   className,
   stageOptions,
   enableCentering = true,
-  zoomSpeed = 1,
+  zoomSpeed = 2,
   ...properties
 }: ThreeContextProperties): React.JSX.Element {
   const dpr = Math.min(globalThis.devicePixelRatio, 2);

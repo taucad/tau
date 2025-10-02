@@ -1,6 +1,6 @@
 import type { IChangeEvent } from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
-import { RefreshCcw, ChevronRight, Info, XIcon, Settings2 } from 'lucide-react';
+import { RefreshCcw, ChevronRight, Info, XIcon } from 'lucide-react';
 import React, { useCallback, useMemo, memo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import Form from '@rjsf/core';

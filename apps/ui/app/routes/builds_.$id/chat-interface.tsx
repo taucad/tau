@@ -61,7 +61,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
     >
       {/* Viewer - inset completely to occupy the background fully */}
       {/* The calculation is to center the viewer within the container */}
-      <div className="absolute inset-0 w-[200%] left-1/2 -translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)] transition-all duration-200 ease-in-out">
+      <div className="absolute inset-0 h-full w-[200%] left-1/2 -translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)] transition-all duration-200 ease-in-out">
         <ChatViewer />
       </div>
 

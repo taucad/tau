@@ -224,7 +224,7 @@ export const ChatParameters = memo(function (props: { readonly className?: strin
             {/* Search and Controls Bar */}
             <div className="flex w-full flex-row gap-2 border-b border-border/50 px-3 py-2">
               <SearchInput
-                placeholder="Search"
+                placeholder="Search parameters..."
                 value={searchTerm}
                 className="h-8 w-full bg-background"
                 onChange={handleSearchChange}

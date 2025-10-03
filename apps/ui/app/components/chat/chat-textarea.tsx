@@ -422,6 +422,10 @@ export const ChatTextarea = memo(function ({
     };
   }, [showContextMenu]);
 
+  const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+  };
+
   return (
     <div
       className={cn(
@@ -442,6 +446,7 @@ export const ChatTextarea = memo(function ({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
+        onMouseDown={handleMouseDown}
       >
 
         {/* Context */}

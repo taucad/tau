@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { RgbColorPicker } from 'react-colorful';
 import type { RgbColor } from 'react-colorful';
 import { parse, converter } from 'culori';

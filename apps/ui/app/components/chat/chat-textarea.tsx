@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
-import { Globe, ArrowUp, Image, X, Square, CircuitBoard, ChevronDown } from 'lucide-react';
+import { ArrowUp, X, Square, CircuitBoard, ChevronDown, Paperclip } from 'lucide-react';
 import type { Attachment } from 'ai';
 import type { ClassValue } from 'clsx';
 import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
@@ -13,12 +13,10 @@ import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { formatKeyCombination } from '#utils/keys.js';
 import type { KeyCombination } from '#utils/keys.js';
 import { toast } from '#components/ui/sonner.js';
-import { useCookie } from '#hooks/use-cookie.js';
 import { cn } from '#utils/ui.js';
 import type { MessagePart } from '#types/chat.types.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { ChatContextActions } from '#components/chat/chat-context-actions.js';
-import { cookieName } from '#constants/cookie.constants.js';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
@@ -33,7 +31,7 @@ export type ChatTextareaProperties = {
     imageUrls?: string[];
   }) => Promise<void>;
   readonly onEscapePressed?: () => void;
-  readonly shouldAutoFocus?: boolean;
+  readonly enableAutoFocus?: boolean;
   readonly initialContent?: MessagePart[];
   readonly initialAttachments?: Attachment[];
   readonly className?: ClassValue;
@@ -53,7 +51,7 @@ const cancelKeyCombination = {
 
 export const ChatTextarea = memo(function ({
   onSubmit,
-  shouldAutoFocus: autoFocus = true,
+  enableAutoFocus = true,
   initialContent = defaultContent,
   initialAttachments = defaultAttachments,
   onEscapePressed,
@@ -81,8 +79,6 @@ export const ChatTextarea = memo(function ({
     return { initialInputText, initialImageUrls };
   }, [initialContent, initialAttachments]);
   const [inputText, setInputText] = useState(initialInputText);
-  const [isSearching, setIsSearching] = useCookie(cookieName.chatWebSearch, false);
-  const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
@@ -108,7 +104,7 @@ export const ChatTextarea = memo(function ({
       content: inputText,
       model: selectedModel?.id ?? '',
       metadata: {
-        toolChoice: isSearching ? 'web_search' : 'auto',
+        toolChoice: 'auto',
       },
       imageUrls: images,
     });
@@ -393,10 +389,10 @@ export const ChatTextarea = memo(function ({
   );
 
   useEffect(() => {
-    if (autoFocus) {
+    if (enableAutoFocus) {
       focusInput();
     }
-  }, [autoFocus, focusInput]);
+  }, [enableAutoFocus, focusInput]);
 
   useEffect(() => {
     // Add paste event listener to the document
@@ -430,13 +426,10 @@ export const ChatTextarea = memo(function ({
     <div className={cn('@container relative h-full rounded-2xl bg-background', className)}>
       {/* Textarea */}
       <div
-        data-state={isFocused ? 'active' : 'inactive'}
         className={cn(
-          'flex size-full cursor-text resize-none flex-col overflow-auto rounded-2xl border bg-neutral/5 shadow-md data-[state=active]:border-primary data-[state=active]:ring-ring/50 data-[state=active]:ring-3',
+          'flex size-full cursor-text resize-none flex-col overflow-auto rounded-2xl border bg-neutral/5 shadow-md focus-within:border-primary focus-within:ring-ring/50 focus-within:ring-3',
         )}
-        onClick={() => {
-          focusInput();
-        }}
+        onClick={focusInput}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -448,14 +441,9 @@ export const ChatTextarea = memo(function ({
             (images.length > 0 || enableContextActions) && 'mt-6 pt-5',
           )}
           rows={3}
+          autoFocus={enableAutoFocus}
           value={inputText}
           placeholder="Ask Tau to build anything..."
-          onFocus={() => {
-            setIsFocused(true);
-          }}
-          onBlur={() => {
-            setIsFocused(false);
-          }}
           onChange={handleTextChange}
           onKeyDown={handleTextareaKeyDown}
         />
@@ -529,7 +517,7 @@ export const ChatTextarea = memo(function ({
       <div className="absolute bottom-2 left-2 flex flex-row items-center gap-1">
         {/* Model selector */}
         <Tooltip>
-          <ChatModelSelector popoverProperties={{ align: 'start' }} onClose={focusInput}>
+          <ChatModelSelector popoverProperties={{ align: 'start' }} onSelect={focusInput} onClose={focusInput}>
             {() => (
               <TooltipTrigger asChild>
                 <Button variant="outline" size="sm" className="rounded-full">
@@ -551,7 +539,7 @@ export const ChatTextarea = memo(function ({
         </Tooltip>
 
         {/* Search button */}
-        <Tooltip>
+        {/* <Tooltip>
           <TooltipTrigger asChild>
             <Button
               data-state={isSearching ? 'active' : 'inactive'}
@@ -573,14 +561,13 @@ export const ChatTextarea = memo(function ({
           <TooltipContent>
             <p>{isSearching ? 'Stop searching' : 'Search the web'}</p>
           </TooltipContent>
-        </Tooltip>
+        </Tooltip> */}
 
         {/* Upload button */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="outline" className="rounded-full" title="Add image" onClick={handleFileSelect}>
-              <span className="hidden text-xs @[22rem]:block">Upload</span>
-              <Image />
+            <Button variant="outline" size="icon" className="rounded-full" title="Add image" onClick={handleFileSelect}>
+              <Paperclip />
             </Button>
           </TooltipTrigger>
           <TooltipContent>

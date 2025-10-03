@@ -1,6 +1,6 @@
 import { AuthUIContext, SignedIn, SignedOut, UserAvatar, UserButton } from '@daveyplate/better-auth-ui';
 import type { UserButtonProps } from '@daveyplate/better-auth-ui';
-import { CreditCard, Sparkles } from 'lucide-react';
+import { CreditCard, LogIn, Sparkles } from 'lucide-react';
 import { useContext } from 'react';
 import { NavLink } from 'react-router';
 import { Button } from '#components/ui/button.js';
@@ -29,18 +29,26 @@ export function NavUser(): React.JSX.Element {
   return (
     <>
       <SignedOut>
-        <NavLink to="/auth/sign-in" tabIndex={-1}>
-          {({ isPending }) => (
-            <Button variant="outline" className="select-none">
-              {isPending ? <LoadingSpinner /> : 'Sign In'}
-            </Button>
-          )}
-        </NavLink>
-      </SignedOut>
-      <SignedOut>
-        <NavLink to="/auth/sign-up" tabIndex={-1}>
-          {({ isPending }) => <Button className="select-none">{isPending ? <LoadingSpinner /> : 'Sign Up'}</Button>}
-        </NavLink>
+        <Button asChild variant="overlay" className="select-none hidden lg:flex">
+          <NavLink to="/auth/sign-in" tabIndex={-1}>
+            {({ isPending }) => (
+              <>{isPending ? <LoadingSpinner /> : 'Sign In'}</>
+            )}
+          </NavLink>
+        </Button>
+        <Button asChild className="select-none hidden">
+          <NavLink to="/auth/sign-up" tabIndex={-1}>
+            {({ isPending }) =>
+              isPending ? <LoadingSpinner /> : 'Sign Up'}
+          </NavLink>
+        </Button>
+        <Button asChild size="icon" variant="overlay" className="select-none lg:hidden text-primary">
+          <NavLink to="/auth/sign-in" tabIndex={-1}>
+            {({ isPending }) => (
+              <>{isPending ? <LoadingSpinner /> : <LogIn />}</>
+            )}
+          </NavLink>
+        </Button>
       </SignedOut>
       <SignedIn>
         <Tooltip>

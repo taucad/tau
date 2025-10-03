@@ -424,13 +424,19 @@ export const ChatTextarea = memo(function ({
 
   return (
     <div
-      className={cn('@container group/chat-textarea relative h-full rounded-2xl bg-background', className)}
+      className={cn(
+        '@container group/chat-textarea',
+        'relative flex size-full flex-col rounded-2xl bg-background border',
+        'cursor-text overflow-auto',
+        'shadow-md',
+        'focus-within:border-primary',
+        className)}
       data-has-context-actions={enableContextActions}
     >
       {/* Textarea */}
       <div
         className={cn(
-          'flex size-full cursor-text resize-none flex-col overflow-auto rounded-2xl border bg-neutral/5 shadow-md focus-within:border-primary focus-within:ring-ring/50 focus-within:ring-3',
+          'flex size-full flex-col overflow-auto',
         )}
         onClick={focusInput}
         onDragOver={handleDragOver}
@@ -529,9 +535,9 @@ export const ChatTextarea = memo(function ({
           <ChatModelSelector popoverProperties={{ align: 'start' }} onSelect={focusInput} onClose={focusInput}>
             {() => (
               <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" className="rounded-full">
+                <Button variant="outline" size="sm" className="rounded-full h-7 text-muted-foreground hover:text-foreground">
                   <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full group-data-[state=open]:text-primary @md:max-w-fit">
-                    <span className="hidden truncate text-xs @[22rem]:block">{selectedModel?.name ?? 'Offline'}</span>
+                    <span className="hidden truncate text-xs @[22rem]:block">{selectedModel?.model ?? 'Offline'}</span>
                     <span className="relative flex size-4 items-center justify-center">
                       <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100" />
                       <CircuitBoard className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0" />
@@ -543,7 +549,7 @@ export const ChatTextarea = memo(function ({
           </ChatModelSelector>
           <TooltipContent>
             <span>Select model{` `}</span>
-            <span>({selectedModel?.name ?? 'Offline'})</span>
+            <span>({selectedModel?.model ?? 'Offline'})</span>
           </TooltipContent>
         </Tooltip>
 
@@ -572,18 +578,6 @@ export const ChatTextarea = memo(function ({
           </TooltipContent>
         </Tooltip> */}
 
-        {/* Upload button */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="outline" size="icon" className="rounded-full" title="Add image" onClick={handleFileSelect}>
-              <Paperclip />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Upload an image</p>
-          </TooltipContent>
-        </Tooltip>
-
         <input
           ref={fileInputReference}
           multiple
@@ -595,6 +589,18 @@ export const ChatTextarea = memo(function ({
       </div>
 
       <div className="absolute right-2 bottom-2 flex flex-row items-center gap-1">
+        {/* Upload button */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="outline" size="icon" className="rounded-full text-muted-foreground hover:text-foreground" title="Add image" onClick={handleFileSelect}>
+              <Paperclip />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Upload an image</p>
+          </TooltipContent>
+        </Tooltip>
+
         {/* Submit button */}
         {status === 'streaming' ? (
           <Tooltip>

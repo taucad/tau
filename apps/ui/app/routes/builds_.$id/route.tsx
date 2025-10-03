@@ -22,15 +22,18 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.
 import { toast } from 'sonner';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { ChatControls } from '#routes/builds_.$id/chat-controls.js';
+import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';
 
 export const handle: Handle = {
   breadcrumb(match) {
     const { id } = match.params as Route.LoaderArgs['params'];
 
     return (
-      <BuildProvider buildId={id}>
+      [<BuildProvider buildId={id}>
         <BuildNameEditor />
-      </BuildProvider>
+      </BuildProvider>,
+      <ChatModeSelector />
+      ]
     );
   },
   actions(match) {
@@ -41,9 +44,6 @@ export const handle: Handle = {
         <BuildProvider buildId={id}>
           <ChatControls />
         </BuildProvider>
-        <Button onClick={() => {
-          toast.info('Publishing coming soon!');
-        }} className="hidden md:flex">Publish <ArrowUpRight /></Button>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button onClick={() => {

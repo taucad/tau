@@ -1,5 +1,5 @@
 import { z } from 'zod/v4';
-import { providerIdSchema } from '#api/providers/provider.schema.js';
+import { modelFamilySchema, providerIdSchema } from '#api/providers/provider.schema.js';
 
 export const modelSupportSchema = z.object({
   tools: z.boolean().describe('Whether the model supports tools').optional(),
@@ -22,7 +22,7 @@ export const modelConfigurationSchema = z.object({
 export const modelDetailsSchema = z.object({
   parentModel: z.string().describe('The parent model of the current model').optional(),
   format: z.string().describe('The format of the model').optional(),
-  family: z.string().describe('The family of the model'),
+  family: modelFamilySchema,
   families: z.array(z.string()).describe('The families of the model'),
   parameterSize: z.string().describe('The parameter size of the model').optional(),
   quantizationLevel: z.string().describe('The quantization level of the model').optional(),

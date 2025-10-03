@@ -18,7 +18,7 @@ type ProviderOptionsMap = {
   ollama: ChatOllamaInput;
   anthropic: ChatAnthropicCallOptions;
   sambanova: ChatOpenAIFields;
-  google: ChatVertexAIInput & { model: string };
+  vertexai: ChatVertexAIInput & { model: string };
 };
 
 // Enhanced type that includes the createClass method
@@ -86,8 +86,8 @@ export class ProviderService {
           }),
       },
 
-      google: {
-        provider: 'google',
+      vertexai: {
+        provider: 'vertexai',
         configuration: {
           apiKey: undefined,
         },

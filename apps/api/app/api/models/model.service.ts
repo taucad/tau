@@ -3,21 +3,21 @@ import type { OnModuleInit } from '@nestjs/common';
 import ollama from 'ollama';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { ChatUsageCost, ChatUsageTokens } from '#api/chat/chat.schema.js';
-import type { ProviderId } from '#api/providers/provider.schema.js';
+import type { ModelFamily, ProviderId } from '#api/providers/provider.schema.js';
 import { ProviderService } from '#api/providers/provider.service.js';
 import type { Model, ModelSupport } from '#api/models/model.schema.js';
 
 type CloudProviderId = Exclude<ProviderId, 'ollama'>;
 
 const modelList: Record<CloudProviderId, Record<string, Model>> = {
-  google: {
+  vertexai: {
     'gemini-2.5-pro': {
       id: 'google-gemini-2.5-pro',
       name: 'Gemini 2.5 Pro',
-      provider: 'google',
+      provider: 'vertexai',
       model: 'gemini-2.5-pro-preview-05-06',
       details: {
-        family: 'Gemini',
+        family: 'gemini',
         families: ['Gemini'],
         contextWindow: 1_048_576,
         maxTokens: 65_536,
@@ -45,7 +45,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
         toolChoice: false,
       },
       details: {
-        family: 'Claude',
+        family: 'claude',
         families: ['Claude'],
         contextWindow: 200_000,
         // Extended thinking mode supports up to 64000 tokens
@@ -79,7 +79,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
         toolChoice: false,
       },
       details: {
-        family: 'Claude',
+        family: 'claude',
         families: ['Claude'],
         contextWindow: 200_000,
         // Extended thinking mode supports up to 64000 tokens
@@ -110,7 +110,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       provider: 'anthropic',
       model: 'claude-sonnet-4-20250514',
       details: {
-        family: 'Claude',
+        family: 'claude',
         families: ['Claude'],
         contextWindow: 200_000,
         maxTokens: 8192,
@@ -134,7 +134,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       provider: 'openai',
       model: 'gpt-4.1',
       details: {
-        family: 'GPT-4.1',
+        family: 'gpt',
         families: ['GPT-4.1'],
         contextWindow: 1_047_576,
         maxTokens: 32_768,
@@ -155,7 +155,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       provider: 'openai',
       model: 'o3-2025-04-16',
       details: {
-        family: 'GPT-O3',
+        family: 'gpt',
         families: ['GPT-O3'],
         contextWindow: 200_000,
         maxTokens: 100_000,
@@ -176,7 +176,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       provider: 'openai',
       model: 'gpt-4o',
       details: {
-        family: 'GPT-4o',
+        family: 'gpt',
         families: ['GPT-4o'],
         contextWindow: 128_000,
         maxTokens: 4096,
@@ -300,7 +300,7 @@ export class ModelService implements OnModuleInit {
             details: {
               parentModel: model.details.parent_model,
               format: model.details.format,
-              family: model.details.family,
+              family: model.details.family as ModelFamily,
               families: model.details.families,
               parameterSize: model.details.parameter_size,
               quantizationLevel: model.details.quantization_level,

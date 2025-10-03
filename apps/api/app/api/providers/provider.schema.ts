@@ -1,8 +1,10 @@
 import { z } from 'zod/v4';
 
 export const providerIdSchema = z
-  .enum(['openai', 'anthropic', 'sambanova', 'ollama', 'google'])
+  .enum(['openai', 'anthropic', 'sambanova', 'ollama', 'vertexai'])
   .describe('The provider of the model');
+
+export const modelFamilySchema = z.enum(['gpt', 'claude', 'gemini']);
 
 export const providerSchema = z.object({
   provider: providerIdSchema,
@@ -18,3 +20,4 @@ export const providerSchema = z.object({
 
 export type ProviderId = z.infer<typeof providerIdSchema>;
 export type Provider = z.infer<typeof providerSchema>;
+export type ModelFamily = z.infer<typeof modelFamilySchema>;

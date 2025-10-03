@@ -61,7 +61,7 @@ export function DocsPageActions(): React.JSX.Element {
         asChild
       >
         <a href={claudeUrl} target="_blank" rel="noopener noreferrer">
-          <SvgIcon id="claude" className="size-4" />
+          <SvgIcon id="claude-mono" className="size-4" />
           <span className="flex items-center gap-1 [&>svg]:text-white">
             Open in Claude
             <span className="text-xs">↗</span>

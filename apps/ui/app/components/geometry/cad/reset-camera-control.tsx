@@ -1,4 +1,4 @@
-import { RotateCcw } from 'lucide-react';
+import { Focus } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
@@ -15,7 +15,7 @@ export function ResetCameraControl(): React.JSX.Element {
     <Tooltip>
       <TooltipTrigger asChild>
         <Button variant="overlay" size="icon" onClick={handleReset}>
-          <RotateCcw className="size-4" />
+          <Focus className="size-4" />
         </Button>
       </TooltipTrigger>
       <TooltipContent>Reset camera zoom</TooltipContent>

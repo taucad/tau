@@ -423,7 +423,10 @@ export const ChatTextarea = memo(function ({
   }, [showContextMenu]);
 
   return (
-    <div className={cn('@container relative h-full rounded-2xl bg-background', className)}>
+    <div
+      className={cn('@container group/chat-textarea relative h-full rounded-2xl bg-background', className)}
+      data-has-context-actions={enableContextActions}
+    >
       {/* Textarea */}
       <div
         className={cn(
@@ -434,11 +437,51 @@ export const ChatTextarea = memo(function ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+
+        {/* Context */}
+        <div className="m-2 flex-wrap gap-1 hidden group-data-[has-context-actions=true]/chat-textarea:flex">
+          {enableContextActions ? <ChatContextActions addImage={handleAddImage} addText={handleAddText} /> : null}
+          {images.map((image, index) => (
+            <div key={image} className="group/image-item relative text-muted-foreground hover:text-foreground">
+              <HoverCard openDelay={100} closeDelay={100}>
+                <HoverCardTrigger asChild>
+                  <div className="flex h-6 cursor-zoom-in items-center justify-center overflow-hidden rounded-xs border bg-background object-cover">
+                    <img src={image} alt="Uploaded" className="size-6 border-r object-cover" />
+                    <span className="px-1 text-xs">Image</span>
+                  </div>
+                </HoverCardTrigger>
+                <HoverCardPortal>
+                  <HoverCardContent side="top" align="start" className="size-auto max-w-screen overflow-hidden p-0">
+                    <img src={image} alt="Uploaded" className="h-48 object-cover md:h-96" />
+                  </HoverCardContent>
+                </HoverCardPortal>
+              </HoverCard>
+              <Button
+                size="icon"
+                className={cn(
+                  "absolute top-1/2 -translate-y-1/2 left-0 z-10 size-6 rounded-none rounded-l-xs border border-r-0",
+                  "hidden group-hover/image-item:flex"
+                )}
+                aria-label="Remove image"
+                type="button"
+                onClick={() => {
+                  removeImage(index);
+                }}
+              >
+                <X className="!size-3 stroke-2" />
+              </Button>
+            </div>
+          ))}
+        </div>
+
+        {/* Input */}
         <Textarea
           ref={textareaReference}
           className={cn(
-            'mt-2 mb-10 size-full max-h-48 min-h-14 resize-none bg-transparent dark:bg-transparent border-none px-4 pt-1 pb-1 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
-            (images.length > 0 || enableContextActions) && 'mt-6 pt-5',
+            'mb-10 size-full max-h-48 min-h-6 resize-none bg-transparent dark:bg-transparent border-none',
+            'px-3 pt-0 pb-3',
+            'group-data-[has-context-actions=false]/chat-textarea:pt-3',
+            'ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
           )}
           rows={3}
           autoFocus={enableAutoFocus}
@@ -451,7 +494,7 @@ export const ChatTextarea = memo(function ({
 
       {/* Context Menu */}
       {showContextMenu ? (
-        <div className="absolute bottom-full left-4 z-50 mb-2 w-60 rounded-md border bg-popover p-0 text-popover-foreground shadow-md">
+        <div className="absolute bottom-full left-2 z-50 mb-2 w-60 rounded-md border bg-popover p-0 text-popover-foreground shadow-md">
           <ChatContextActions
             asPopoverMenu
             addImage={handleContextImageAdd}
@@ -472,40 +515,6 @@ export const ChatTextarea = memo(function ({
         </div>
       ) : null}
 
-      {/* Context */}
-      <div className="absolute top-0 left-0 m-4 flex flex-wrap gap-1">
-        {enableContextActions ? <ChatContextActions addImage={handleAddImage} addText={handleAddText} /> : null}
-        {images.map((image, index) => (
-          <div key={image} className="relative">
-            <HoverCard openDelay={100} closeDelay={100}>
-              <HoverCardTrigger asChild>
-                <div className="flex h-6 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border bg-background object-cover">
-                  <img src={image} alt="Uploaded" className="size-6 border-r object-cover" />
-                  <span className="px-1 text-xs">Image</span>
-                </div>
-              </HoverCardTrigger>
-              <HoverCardPortal>
-                <HoverCardContent side="top" align="start" className="size-auto max-w-screen overflow-hidden p-0">
-                  <img src={image} alt="Uploaded" className="h-48 object-cover md:h-96" />
-                </HoverCardContent>
-              </HoverCardPortal>
-            </HoverCard>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute -top-2 -right-2 z-10 size-4 rounded-full border-[1px] bg-background text-foreground"
-              aria-label="Remove image"
-              type="button"
-              onClick={() => {
-                removeImage(index);
-              }}
-            >
-              <X className="!size-3 stroke-2" />
-            </Button>
-          </div>
-        ))}
-      </div>
-
       {/* Drag and drop feedback */}
       {isDragging ? (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-primary/10 backdrop-blur-xs">
@@ -514,7 +523,7 @@ export const ChatTextarea = memo(function ({
       ) : null}
 
       {/* Main input controls */}
-      <div className="absolute bottom-2 left-2 flex flex-row items-center gap-1">
+      <div className="absolute bottom-2 left-2 flex flex-row items-center gap-1 text-muted-foreground">
         {/* Model selector */}
         <Tooltip>
           <ChatModelSelector popoverProperties={{ align: 'start' }} onSelect={focusInput} onClose={focusInput}>

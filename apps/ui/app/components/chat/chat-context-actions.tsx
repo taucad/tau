@@ -398,7 +398,7 @@ ${kernelError.stack ? `\n\`\`\`\n${kernelError.stack}\n\`\`\`` : ''}
         }}
       >
         <TooltipTrigger asChild>
-          <Button variant="outline" size="icon" className="size-6 bg-background">
+          <Button variant="outline" size="icon" className="size-6 bg-background text-muted-foreground hover:text-foreground">
             <AtSign className="size-3" />
           </Button>
         </TooltipTrigger>

@@ -3,6 +3,7 @@ import { useSelector } from '@xstate/react';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { cn } from '#utils/ui.js';
 
 export const ChatViewer = memo(function () {
   const geometries = useSelector(cadActor, (state) => state.context.geometries);
@@ -24,7 +25,10 @@ export const ChatViewer = memo(function () {
       enableSurfaces={enableSurfaces}
       enableLines={enableLines}
       geometries={geometries}
-      gizmoClassName="right-[calc((var(--sidebar-width-current)+var(--right-panel-size)+var(--left-panel-size))/2)]!"
+      gizmoClassName={cn(
+        "right-[calc((var(--right-panel-size)+var(--left-panel-size))/2)]!",
+        "md:right-[calc((var(--sidebar-width-current)+var(--right-panel-size)+var(--left-panel-size))/2)]!"
+      )}
     />
   );
 });

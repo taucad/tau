@@ -66,7 +66,13 @@ export const ChatInterface = memo(function (): React.JSX.Element {
     >
       {/* Viewer - inset completely to occupy the background fully */}
       {/* The calculation is to center the viewer within the container */}
-      <div className="absolute inset-0 h-full w-full left-1/2 -translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)] transition-all duration-200 ease-in-out">
+      <div className={cn(
+        'absolute inset-0 h-full w-full left-1/2',
+        '-translate-x-[calc((100%+var(--right-panel-size)-var(--left-panel-size))/2)]',
+        'md:-translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)]',
+        'transition-all duration-200 ease-in-out',
+        isChatOpen ? 'hidden' : ''
+      )}>
         <ChatViewer />
       </div>
 
@@ -165,7 +171,14 @@ export const ChatInterface = memo(function (): React.JSX.Element {
       </ResizablePanelGroup>
 
       {/* Centered Content */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)] -translate-y-1/2 md:top-[90%] md:-translate-y-[90%] transition-all duration-200 ease-in-out">
+      <div className={cn(
+        "absolute top-1/2 -translate-y-1/2",
+        "left-1/2",
+        "-translate-x-[calc((100%+var(--right-panel-size)-var(--left-panel-size))/2)]",
+        "md:-translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)]",
+        "md:top-[90%] md:-translate-y-[90%]",
+        "transition-all duration-200 ease-in-out"
+      )}>
         <ChatViewerStatus />
       </div>
     </div>

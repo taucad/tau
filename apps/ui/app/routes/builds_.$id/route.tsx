@@ -16,7 +16,6 @@ import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-f
 import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
 import { CommandPaletteTrigger } from '#routes/builds_.$id/command-palette.js';
 import { Button } from '#components/ui/button.js';
-import { ArrowUpRight } from 'lucide-react';
 import { Github } from '#components/icons/github.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { toast } from 'sonner';

@@ -618,14 +618,13 @@ export function CommandPaletteTrigger(): React.JSX.Element {
     <>
       <Button
         variant="outline"
-        className="relative h-8 w-full max-w-sm justify-start rounded-lg bg-sidebar dark:bg-sidebar text-sm font-normal text-muted-foreground shadow-none max-md:hidden sm:pr-12 md:w-40 lg:w-64"
+        className="relative h-8 w-full max-w-sm justify-start rounded-lg bg-sidebar dark:bg-sidebar text-sm font-normal text-muted-foreground shadow-none max-md:hidden sm:pr-12 md:w-40"
         onClick={() => {
           setOpen(true);
         }}
       >
         <Terminal />
-        <span className="hidden lg:inline-flex">Search commands...</span>
-        <span className="inline-flex lg:hidden">Search...</span>
+        <span className="inline-flex">Search...</span>
         <KeyShortcut className="absolute top-1/2 right-2 -translate-y-1/2">{formattedKeyCombination}</KeyShortcut>
       </Button>
       <CommandPalette isOpen={open} onOpenChange={setOpen} />

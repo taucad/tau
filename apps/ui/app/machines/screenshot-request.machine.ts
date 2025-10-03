@@ -2,6 +2,7 @@ import { setup, assertEvent, enqueueActions, assign, fromCallback } from 'xstate
 import type { ActorRefFrom, AnyActorRef } from 'xstate';
 import type { ScreenshotOptions, CameraAngle } from '#types/graphics.types.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
+import { generateSecureId } from '#utils/crypto.js';
 
 // Context type
 type ScreenshotRequestContext = {
@@ -119,7 +120,7 @@ export const screenshotRequestMachine = setup({
     sendRequest: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'requestScreenshot');
 
-      const requestId = crypto.randomUUID();
+      const requestId = generateSecureId();
 
       // Store request details in context
       enqueue.assign({
@@ -144,7 +145,7 @@ export const screenshotRequestMachine = setup({
     sendCompositeRequest: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'requestCompositeScreenshot');
 
-      const requestId = crypto.randomUUID();
+      const requestId = generateSecureId();
 
       // Store request details in context
       enqueue.assign({

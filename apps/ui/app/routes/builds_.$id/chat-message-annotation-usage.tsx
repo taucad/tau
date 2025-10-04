@@ -1,5 +1,5 @@
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { InfoTooltip } from '#components/info-tooltip.js';
+import { InfoTooltip } from '#components/ui/info-tooltip.js';
 import { Badge } from '#components/ui/badge.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter, Table } from '#components/ui/table.js';

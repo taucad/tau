@@ -6,7 +6,7 @@ import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import globalStylesUrl from '#styles/global.css?url';
 import { getEnvironment, metaConfig } from '#config.js';
-import { Page } from '#components/page.js';
+import { Page } from '#components/layout/page.js';
 import { themeSessionResolver } from '#sessions.server.js';
 import { cn } from '#utils/ui.js';
 import { markdownViewerLinks } from '#components/markdown-viewer.js';

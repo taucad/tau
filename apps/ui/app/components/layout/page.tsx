@@ -1,7 +1,7 @@
 import { Outlet } from 'react-router';
 import { Fragment } from 'react/jsx-runtime';
 import type { ReactNode } from 'react';
-import { AppSidebar } from '#components/app-sidebar.js';
+import { AppSidebar } from '#components/layout/app-sidebar.js';
 import {
   Breadcrumb,
   BreadcrumbItem,

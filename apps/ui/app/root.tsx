@@ -12,7 +12,7 @@ import { cn } from '#utils/ui.js';
 import { markdownViewerLinks } from '#components/markdown-viewer.js';
 import { Toaster } from '#components/ui/sonner.js';
 import { webManifestLinks } from '#routes/manifest[.webmanifest].js';
-import type { Model } from '#hooks/use-models.js';
+import type { Model } from '#types/model.types.js';
 import { getModels } from '#hooks/use-models.js';
 import { ColorProvider, useColor } from '#hooks/use-color.js';
 import { useFavicon } from '#hooks/use-favicon.js';

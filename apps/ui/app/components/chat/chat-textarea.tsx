@@ -548,8 +548,8 @@ export const ChatTextarea = memo(function ({
             {() => (
               <TooltipTrigger asChild>
                 <Button variant="outline" size="sm" className="rounded-full h-7 text-muted-foreground hover:text-foreground">
-                  <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full group-data-[state=open]:text-primary @md:max-w-fit">
-                    <span className="hidden truncate text-xs @[22rem]:block">{selectedModel?.model ?? 'Offline'}</span>
+                  <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full @md:max-w-fit">
+                    <span className="hidden truncate text-xs @[22rem]:block">{selectedModel?.slug ?? 'Offline'}</span>
                     <span className="relative flex size-4 items-center justify-center">
                       <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100" />
                       <CircuitBoard className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0" />
@@ -561,7 +561,7 @@ export const ChatTextarea = memo(function ({
           </ChatModelSelector>
           <TooltipContent>
             <span>Select model{` `}</span>
-            <span>({selectedModel?.model ?? 'Offline'})</span>
+            <span>({selectedModel?.slug ?? 'Offline'})</span>
           </TooltipContent>
         </Tooltip>
 

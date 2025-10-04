@@ -6,18 +6,7 @@ import type { loader } from '#root.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { defaultChatModel } from '#constants/chat.constants.js';
-import type { ModelFamily, ModelProvider } from '#types/model.types.js';
-
-export type Model = {
-  id: string;
-  model: string;
-  name: string;
-  provider: ModelProvider;
-  details: {
-    family: ModelFamily;
-    parameterSize: string;
-  };
-};
+import type { Model } from '#types/model.types.js';
 
 export const getModels = async (): Promise<Model[]> => {
   try {

@@ -39,6 +39,7 @@ export const modelDetailsSchema = z.object({
 export const modelSchema = z.object({
   id: z.string().describe('The unique identifier of the model'),
   name: z.string().describe('The human readable name of the model'),
+  slug: z.string().describe('The slug of the model'),
   model: z.string().describe('The identifier of the model for the provider'),
   modifiedAt: z.string().describe('The modified at of the model').optional(),
   size: z.number().describe('The size of the model in bytes').optional(),

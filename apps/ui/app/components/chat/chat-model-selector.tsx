@@ -4,7 +4,7 @@ import { Check } from 'lucide-react';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Badge } from '#components/ui/badge.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import type { Model } from '#hooks/use-models.js';
+import type { Model } from '#types/model.types.js';
 import type { ModelFamily } from '#types/model.types.js';
 import { useModels } from '#hooks/use-models.js';
 
@@ -48,15 +48,15 @@ export const ChatModelSelector = memo(function ({
   return (
     <ComboBoxResponsive
       popoverContentClassName="w-[300px]"
-      groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({
-        name: provider,
+      groupedItems={[...providerModelsMap.entries()].map(([_provider, models]) => ({
+        name: '',
         items: models,
       }))}
       renderLabel={(item, selectedItem) => (
         <span className="flex w-full items-center justify-between text-xs">
           <div className="flex items-center gap-2">
             <SvgIcon id={item.details.family as ModelFamily} />
-            <span className="font-mono">{item.name}</span>
+            <span className="font-mono">{item.slug}</span>
           </div>
           <div className="flex items-center gap-2">
             {item.details.parameterSize ? (

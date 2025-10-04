@@ -14,6 +14,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
     'gemini-2.5-pro': {
       id: 'google-gemini-2.5-pro',
       name: 'Gemini 2.5 Pro',
+      slug: 'gemini-2.5-pro',
       provider: 'vertexai',
       model: 'gemini-2.5-pro-preview-05-06',
       details: {
@@ -39,6 +40,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
     'claude-4-sonnet-thinking': {
       id: 'anthropic-claude-4-sonnet-thinking',
       name: 'Claude 4 Sonnet (Thinking)',
+      slug: 'claude-4-sonnet-thinking',
       provider: 'anthropic',
       model: 'claude-sonnet-4-20250514',
       support: {
@@ -73,6 +75,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
     'claude-4-opus': {
       id: 'anthropic-claude-4-opus',
       name: 'Claude 4 Opus',
+      slug: 'claude-4-opus',
       provider: 'anthropic',
       model: 'claude-opus-4-20250514',
       support: {
@@ -107,6 +110,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
     'claude-4-sonnet': {
       id: 'anthropic-claude-4-sonnet',
       name: 'Claude 4 Sonnet',
+      slug: 'claude-4-sonnet',
       provider: 'anthropic',
       model: 'claude-sonnet-4-20250514',
       details: {
@@ -131,6 +135,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
     'gpt-4.1': {
       id: 'openai-gpt-4.1',
       name: 'GPT-4.1',
+      slug: 'gpt-4.1',
       provider: 'openai',
       model: 'gpt-4.1',
       details: {
@@ -152,6 +157,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
     'gpt-o3': {
       id: 'openai-gpt-o3',
       name: 'GPT-o3',
+      slug: 'gpt-o3',
       provider: 'openai',
       model: 'o3-2025-04-16',
       details: {
@@ -173,6 +179,7 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
     'gpt-4o': {
       id: 'openai-gpt-4o',
       name: 'GPT-4o',
+      slug: 'gpt-4o',
       provider: 'openai',
       model: 'gpt-4o',
       details: {
@@ -293,6 +300,7 @@ export class ModelService implements OnModuleInit {
           return {
             id: model.name,
             name: model.name,
+            slug: model.name,
             model: model.name,
             modifiedAt: String(model.modified_at),
             size: model.size,

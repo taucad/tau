@@ -18,7 +18,6 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
             // Left
             'left-2',
             'md:left-(--sidebar-width-current)',
-            'bg-muted',
             // Top
             'top-(--header-height)',
 
@@ -35,6 +34,7 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
     },
     containerProps: {
       className: cn(
+        // Transition
         'transition-all duration-200 ease-linear',
         // Positional CSS vars
         '[--fd-tocnav-height:calc(var(--header-height)+var(--spacing)*2)]!',

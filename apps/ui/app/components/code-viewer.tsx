@@ -3,8 +3,7 @@ import type { ClassValue } from 'clsx';
 import { useTheme } from 'remix-themes';
 import { cn } from '#utils/ui.js';
 import { highlighter } from '#lib/shiki.js';
-
-export type CodeLanguage = 'typescript' | 'kcl' | 'javascript' | 'jsx' | 'tsx';
+import type { CodeLanguage } from '#types/code.types.js';
 
 type CodeViewerProps = {
   readonly text: string;

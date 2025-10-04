@@ -7,6 +7,8 @@ export const highlighter = await createHighlighterCore({
     import('@shikijs/langs-precompiled/javascript'),
     import('@shikijs/langs-precompiled/typescript'),
     import('@shikijs/langs-precompiled/jsx'),
+    import('@shikijs/langs-precompiled/tsx'),
+    import('@shikijs/langs-precompiled/bash'),
     // @ts-expect-error -- TODO: migrate the precompiled grammar to the Shiki project.
     import('#lib/openscad-language/openscad-shiki-precompiled.js'),
     // @ts-expect-error -- TODO: migrate the precompiled grammar to the Shiki project.

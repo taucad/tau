@@ -109,12 +109,12 @@ const renderer = toClientRenderer(
               // Extract language and title from className if available
               const className = props.className || '';
               const match = /language-(\w+)/.exec(className);
-              const lang = match ? match[1] : '';
+              const language = match ? match[1] : '';
               const text = String(props.children).replace(/\n$/, '');
 
               return (
-                <DocsCodeBlock title={lang} text={text}>
-                  <Pre {...props} />
+                <DocsCodeBlock title={language} text={text}>
+                  <Pre {...props} language={language} />
                 </DocsCodeBlock>
               );
             },

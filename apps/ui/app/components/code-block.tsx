@@ -1,11 +1,9 @@
 import type { ComponentProps } from 'react';
 import { CodeViewer } from '#components/code-viewer.js';
-import type { CodeLanguage } from '#components/code-viewer.js';
 import { cn } from '#utils/ui.js';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
-
-type PreProps = ComponentProps<'pre'>;
+import type { CodeLanguage } from '#types/code.types.js';
 
 // Root CodeBlock container variants
 const codeBlockVariants = cva(
@@ -187,18 +185,18 @@ export function CodeBlockContent({
   );
 }
 
-export function Pre({ children, className, ...rest }: PreProps): React.JSX.Element {
-  // Extract language from className (e.g., "language-typescript")
-  const match = /language-(\w+)/.exec(className ?? '');
-  const language = (match ? match[1] : 'text') as CodeLanguage;
 
+type PreProps = ComponentProps<'pre'> & {
+  readonly language?: string;
+};
+
+export function Pre({ children, language, className, ...rest }: PreProps): React.JSX.Element {
   // eslint-disable-next-line @typescript-eslint/no-base-to-string -- Convert children to string
   const text = String(children).replace(/\n$/, '');
 
   // Render with syntax highlighting if language is detected
-  if (match) {
-    console.log({ match, className, text, language })
-    return <CodeViewer language={'jsx'} text={text} className={cn("overflow-x-auto py-2 -mx-1", className)} />;
+  if (language) {
+    return <CodeViewer language={language as CodeLanguage} text={text} className={cn("overflow-x-auto py-2 -mx-1", className)} />;
   }
 
   // Fallback to regular pre element

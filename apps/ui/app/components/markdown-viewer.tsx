@@ -54,11 +54,11 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
             const text = String(children).replace(/\n$/, '');
 
             if (match) {
-              const lang = match[1];
+              const language = match[1];
               return (
                 <CodeBlock variant="standard">
                   <CodeBlockHeader variant="standard">
-                    <CodeBlockTitle variant="standard">{lang}</CodeBlockTitle>
+                    <CodeBlockTitle variant="standard">{language}</CodeBlockTitle>
                     <CodeBlockAction variant="standard">
                       <CopyButton
                         size="xs"
@@ -68,7 +68,7 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
                     </CodeBlockAction>
                   </CodeBlockHeader>
                   <CodeBlockContent>
-                    <Pre {...rest} className={cn("text-xs", className)}>{children}</Pre>
+                    <Pre {...rest} language={language} className={cn("text-xs", className)}>{children}</Pre>
                   </CodeBlockContent>
                 </CodeBlock>
               );

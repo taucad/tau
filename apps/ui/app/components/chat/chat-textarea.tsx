@@ -43,11 +43,9 @@ const defaultContent: MessagePart[] = [];
 const defaultAttachments: Attachment[] = [];
 
 // Define the key combination for cancelling the stream
-const cancelKeyCombination = {
-  key: 'Backspace',
-  metaKey: true,
-  shiftKey: true,
-  requireAllModifiers: true,
+export const cancelChatStreamKeyCombination = {
+  key: 'c',
+  ctrlKey: true,
 } satisfies KeyCombination;
 
 export const ChatTextarea = memo(function ({
@@ -117,7 +115,7 @@ export const ChatTextarea = memo(function ({
   };
 
   // Register keyboard shortcut for cancellation
-  const { formattedKeyCombination: formattedCancelKeyCombination } = useKeydown(cancelKeyCombination, () => {
+  const { formattedKeyCombination: formattedCancelKeyCombination } = useKeydown(cancelChatStreamKeyCombination, () => {
     if (status === 'streaming') {
       stop();
     }

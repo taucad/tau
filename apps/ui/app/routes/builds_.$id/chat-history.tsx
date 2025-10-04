@@ -176,7 +176,7 @@ export const ChatHistory = memo(function (props: { readonly className?: string }
         
         {/* Chat input area */}
         <div className="relative mx-2 mb-2 rounded-2xl">
-          <ChatStatus className="absolute inset-x-0 -top-9" />
+          <ChatStatus className="absolute inset-x-0 -top-7" />
           <ChatTextarea onSubmit={onSubmit} className="rounded-sm" />
         </div>
       </FloatingPanelContent>

@@ -18,11 +18,12 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
             // Left
             'left-2',
             'md:left-(--sidebar-width-current)',
+            'data-[state=closed]:bg-muted',
             // Top
             'top-(--header-height)',
 
             // Transition
-            'transition-all duration-200 ease-linear',
+            'transition-[top,left,width] duration-200 ease-linear',
 
             // Max width
             'max-w-[calc(100dvw-var(--spacing)*4)]',
@@ -35,7 +36,7 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
     containerProps: {
       className: cn(
         // Transition
-        'transition-all duration-200 ease-linear',
+        'transition-[padding] duration-200 ease-linear',
         // Positional CSS vars
         '[--fd-tocnav-height:calc(var(--header-height)+var(--spacing)*2)]!',
         // Set the sidebar width to account for both the app sidebar and the docs sidebar.
@@ -52,7 +53,7 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
         '[&_#nd-tocnav]:ml-[calc(var(--docs-sidebar-toggle-width-current)+var(--spacing)*4)]',
         'md:[&_#nd-tocnav]:ml-[calc(var(--docs-sidebar-toggle-width-current)+var(--spacing)*2)]',
         '[&_#nd-tocnav]:mt-(--header-height)!',
-        '[&_#nd-tocnav]:transition-all [&_#nd-tocnav]:duration-200 [&_#nd-tocnav]:ease-linear',
+        '[&_#nd-tocnav]:transition-[top,left,width] [&_#nd-tocnav]:duration-200 [&_#nd-tocnav]:ease-linear',
         '[&_#nd-tocnav]:shadow-sm',
         '[&_#nd-tocnav>button]:px-2',
         '[&_#nd-tocnav>button]:h-7.5',

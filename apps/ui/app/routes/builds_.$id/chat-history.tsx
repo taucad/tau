@@ -31,7 +31,7 @@ const toggleChatHistoryKeyCombination = {
 // Memoized individual message item component to prevent re-renders
 const MessageItem = memo(function ({ messageId }: { readonly messageId: string }) {
   return (
-    <div className="px-4 py-2">
+    <div className="py-2">
       <ChatMessage messageId={messageId} />
     </div>
   );
@@ -40,10 +40,12 @@ const MessageItem = memo(function ({ messageId }: { readonly messageId: string }
 // Chat History Trigger Component
 export const ChatHistoryTrigger = memo(function ({ 
   isOpen, 
-  onToggle 
+  onToggle,
+  className
 }: { 
   readonly isOpen: boolean; 
   readonly onToggle: () => void; 
+  readonly className?: string;
 }) {
   return (
     <FloatingPanelTrigger
@@ -59,6 +61,7 @@ export const ChatHistoryTrigger = memo(function ({
       onClick={onToggle}
       isOpen={isOpen}
       tooltipSide="right"
+      className={className}
     />
   );
 });
@@ -174,7 +177,7 @@ export const ChatHistory = memo(function (props: { readonly className?: string }
         {/* Chat input area */}
         <div className="relative mx-2 mb-2 rounded-2xl">
           <ChatStatus className="absolute inset-x-0 -top-9" />
-          <ChatTextarea onSubmit={onSubmit} />
+          <ChatTextarea onSubmit={onSubmit} className="rounded-sm" />
         </div>
       </FloatingPanelContent>
     </FloatingPanel>

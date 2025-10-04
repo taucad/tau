@@ -54,7 +54,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
         style={{ '--header-height': headerHeight }}
       >
         <header className="absolute top-0 w-full z-20 flex h-[var(--header-height)] shrink-0 items-center justify-between gap-2 pointer-events-none">
-          <div className="flex items-center p-0.25 gap-0.25 md:gap-1 h-8 ml-2 md:ml-[var(--sidebar-width-current)] transition-all duration-200 ease-linear pl-2.75 rounded-lg bg-sidebar border pointer-events-auto">
+          <div className="flex items-center p-0.25 gap-0.25 md:gap-1 h-8 ml-2 md:ml-[var(--sidebar-width-current)] transition-[margin] duration-200 ease-linear pl-2.75 rounded-lg bg-sidebar border pointer-events-auto">
             <SidebarTrigger className="-ml-2.5" />
             {hasBreadcrumbItems ? (
               <span className="h-4">

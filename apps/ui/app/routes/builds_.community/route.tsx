@@ -15,7 +15,7 @@ import { kernelProviders } from '#types/kernel.types.js';
 import { sampleBuilds } from '#constants/build-examples.js';
 import { CommunityBuildGrid } from '#components/project-grid.js';
 import type { Handle } from '#types/matches.types.js';
-import { LoadingSpinner } from '#components/loading-spinner.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 export const handle: Handle = {
   breadcrumb() {

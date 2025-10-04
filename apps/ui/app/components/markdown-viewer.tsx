@@ -13,7 +13,7 @@ import {
   CodeBlockContent,
   InlineCode,
   Pre,
-} from '#components/code-block.js';
+} from '#components/code/code-block.js';
 import { CopyButton } from '#components/copy-button.js';
 import { cn } from '#utils/ui.js';
 

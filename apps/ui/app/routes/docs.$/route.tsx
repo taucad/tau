@@ -17,7 +17,7 @@ import type { Route } from './+types/route.js';
 import { baseOptions } from '#lib/fumadocs/layout.shared.js';
 import { RootProvider } from 'fumadocs-ui/provider/base';
 import { ReactRouterProvider } from 'fumadocs-core/framework/react-router';
-import { InlineCode, Pre } from '#components/code-block.js';
+import { InlineCode, Pre } from '#components/code/code-block.js';
 import { DocsPageActions } from './docs-page-actions.js';
 import { getLLMText } from '#lib/fumadocs/get-llms-text.js';
 import { DocsSidebarProvider } from '#routes/docs.$/docs-sidebar.js';

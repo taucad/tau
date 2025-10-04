@@ -76,7 +76,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.
 import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { LoadingSpinner } from '#components/loading-spinner.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 export const handle: Handle = {
   breadcrumb() {

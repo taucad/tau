@@ -3,7 +3,7 @@ import { useCallback, useState, useEffect } from 'react';
 import { File, LoaderCircle, Play, X, ChevronDown, AlertTriangle, Bug, Camera, Check, RotateCcw } from 'lucide-react';
 import type { ToolResult } from 'ai';
 import { useActor } from '@xstate/react';
-import { CodeViewer } from '#components/code-viewer.js';
+import { CodeViewer } from '#components/code/code-viewer.js';
 import { CopyButton } from '#components/copy-button.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';

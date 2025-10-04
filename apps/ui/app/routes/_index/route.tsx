@@ -20,7 +20,7 @@ import { idPrefix } from '#constants/id.constants.js';
 import type { KernelProvider } from '#types/kernel.types.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { LoadingSpinner } from '#components/loading-spinner.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 export default function ChatStart(): React.JSX.Element {
   const navigate = useNavigate();

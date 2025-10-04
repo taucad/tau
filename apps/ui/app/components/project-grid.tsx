@@ -14,7 +14,7 @@ import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
 import { storage } from '#db/storage.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
-import { LoadingSpinner } from '#components/loading-spinner.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 // Placeholder for language icons
 const kernelIcons: Record<KernelProvider, ComponentType<{ className?: string }>> = {

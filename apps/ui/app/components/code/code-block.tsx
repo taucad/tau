@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import { CodeViewer } from '#components/code-viewer.js';
+import { CodeViewer } from '#components/code/code-viewer.js';
 import { cn } from '#utils/ui.js';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';

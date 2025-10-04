@@ -44,8 +44,10 @@ const defaultAttachments: Attachment[] = [];
 
 // Define the key combination for cancelling the stream
 export const cancelChatStreamKeyCombination = {
-  key: 'c',
-  ctrlKey: true,
+  key: 'Backspace',
+  metaKey: true,
+  shiftKey: true,
+  requireAllModifiers: true,
 } satisfies KeyCombination;
 
 export const ChatTextarea = memo(function ({

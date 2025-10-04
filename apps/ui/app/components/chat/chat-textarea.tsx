@@ -31,6 +31,7 @@ export type ChatTextareaProperties = {
     imageUrls?: string[];
   }) => Promise<void>;
   readonly onEscapePressed?: () => void;
+  readonly onBlur?: () => void;
   readonly enableAutoFocus?: boolean;
   readonly initialContent?: MessagePart[];
   readonly initialAttachments?: Attachment[];
@@ -55,6 +56,7 @@ export const ChatTextarea = memo(function ({
   initialContent = defaultContent,
   initialAttachments = defaultAttachments,
   onEscapePressed,
+  onBlur,
   className,
   enableContextActions = true,
 }: ChatTextareaProperties): React.JSX.Element {
@@ -426,6 +428,10 @@ export const ChatTextarea = memo(function ({
     event.preventDefault();
   };
 
+  const handleTextareaBlur = useCallback(() => {
+    onBlur?.();
+  }, [onBlur]);
+
   return (
     <div
       className={cn(
@@ -500,6 +506,7 @@ export const ChatTextarea = memo(function ({
           placeholder="Ask Tau to build anything..."
           onChange={handleTextChange}
           onKeyDown={handleTextareaKeyDown}
+          onBlur={handleTextareaBlur}
         />
       </div>
 

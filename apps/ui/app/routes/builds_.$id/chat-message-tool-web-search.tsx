@@ -117,7 +117,7 @@ export function ChatMessageToolWebSearch({ part }: { readonly part: ToolInvocati
                       </div>
                     </a>
                   </HoverCardTrigger>
-                  <HoverCardContent className="flex flex-col space-y-2">
+                  <HoverCardContent className="flex flex-col max-h-40 overflow-y-auto space-y-2">
                     <div className="flex flex-row items-center gap-2">
                       <img src={sourceFaviconUrl} alt={sourceDomain} className="size-4 rounded-full" />
                       <p className="text-sm text-foreground/50">{sourceDomain}</p>

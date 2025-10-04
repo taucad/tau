@@ -80,8 +80,8 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                     <Fragment key={match.id}>
                       {breadcrumbArray.map((item, index) => (
                         <Fragment key={`${match.id}-${index}`}>
-                          <BreadcrumbSeparator className="hidden first:hidden md:block" />
-                          <BreadcrumbItem className="hidden last:block md:block hover:text-foreground">
+                          <BreadcrumbSeparator className="hidden first:hidden lg:block" />
+                          <BreadcrumbItem className="hidden last:block lg:block hover:text-foreground">
                             <BreadcrumbLink asChild>{item}</BreadcrumbLink>
                           </BreadcrumbItem>
                         </Fragment>

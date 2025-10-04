@@ -107,6 +107,7 @@ function FloatingPanel({ children, open, defaultOpen = false, onOpenChange, clas
           getOriginClass(),
           className,
         )}
+        data-slot="floating-panel"
         data-state={isOpen ? 'open' : 'closed'}
       >
         {children}
@@ -309,8 +310,8 @@ function FloatingPanelTrigger({
 }
 
 type FloatingPanelToggleProps = {
-  readonly openIcon: LucideIcon;
-  readonly closeIcon: LucideIcon;
+  readonly openIcon: LucideIcon | React.ReactNode;
+  readonly closeIcon: LucideIcon | React.ReactNode;
   readonly openTooltip: React.ReactNode;
   readonly closeTooltip: React.ReactNode;
   readonly className?: string;

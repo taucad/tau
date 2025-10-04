@@ -5,7 +5,16 @@ import rehypeKatex from 'rehype-katex';
 import katexUrl from 'katex/dist/katex.min.css?url';
 import type { LinkDescriptor } from 'react-router';
 import { memo } from 'react';
-import { CodeBlock, InlineCode, Pre } from '#components/code-block.js';
+import { 
+  CodeBlock,
+  CodeBlockHeader,
+  CodeBlockTitle,
+  CodeBlockAction,
+  CodeBlockContent,
+  InlineCode,
+  Pre,
+} from '#components/code-block.js';
+import { CopyButton } from '#components/copy-button.js';
 import { cn } from '#utils/ui.js';
 
 export const markdownViewerLinks: LinkDescriptor[] = [{ rel: 'stylesheet', href: katexUrl }];
@@ -47,8 +56,20 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
             if (match) {
               const lang = match[1];
               return (
-                <CodeBlock title={lang} text={text}>
-                  <Pre {...rest} className={cn("text-xs", className)}>{children}</Pre>
+                <CodeBlock variant="standard">
+                  <CodeBlockHeader variant="standard">
+                    <CodeBlockTitle variant="standard">{lang}</CodeBlockTitle>
+                    <CodeBlockAction variant="standard">
+                      <CopyButton
+                        size="xs"
+                        className="h-6 [&_[data-slot=label]]:hidden @xs/code:[&_[data-slot=label]]:flex"
+                        getText={() => text}
+                      />
+                    </CodeBlockAction>
+                  </CodeBlockHeader>
+                  <CodeBlockContent>
+                    <Pre {...rest} className={cn("text-xs", className)}>{children}</Pre>
+                  </CodeBlockContent>
                 </CodeBlock>
               );
             }

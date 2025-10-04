@@ -64,7 +64,7 @@ export const useDocsSidebarProvider = () => {
 
 export function DocsSidebarProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const [isDocsSidebarOpen, setIsDocsSidebarOpen] = useCookie(cookieName.docsOpSidebar, false);
-  
+
   const toggleDocsSidebar = useCallback(() => {
     setIsDocsSidebarOpen((previous) => !previous);
   }, [setIsDocsSidebarOpen]);
@@ -72,34 +72,41 @@ export function DocsSidebarProvider({ children }: { readonly children: ReactNode
   return (
     <DocsSidebarProviderContext.Provider value={{ isDocsSidebarOpen, toggleDocsSidebar }}>
       <div data-slot="docs-sidebar"
-      style={{
-        '--docs-sidebar-width': docsSidebarWidth,
-        '--docs-sidebar-width-icon': docsSidebarWidthIcon,
-        '--docs-sidebar-toggle-width-current': isDocsSidebarOpen ? '0px' : docsSidebarWidthIcon,
-        '--docs-sidebar-width-current': isDocsSidebarOpen ? docsSidebarWidth : '0px',
-      }}
-       className="size-full">{children}</div>
+        style={{
+          '--docs-sidebar-width': docsSidebarWidth,
+          '--docs-sidebar-width-icon': docsSidebarWidthIcon,
+          '--docs-sidebar-toggle-width-current': isDocsSidebarOpen ? '0px' : docsSidebarWidthIcon,
+          '--docs-sidebar-width-current': isDocsSidebarOpen ? docsSidebarWidth : '0px',
+        }}
+        className="size-full">{children}</div>
     </DocsSidebarProviderContext.Provider>
   );
 }
 
 export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element {
   const [isDocsSidebarOpen, setIsDocsSidebarOpen] = useCookie(cookieName.docsOpSidebar, false);
-  
+
   const toggleDocsSidebar = useCallback(() => {
     setIsDocsSidebarOpen((previous) => !previous);
   }, [setIsDocsSidebarOpen]);
 
   return (
-    <FloatingPanel 
+    <FloatingPanel
       open={isDocsSidebarOpen}
       onOpenChange={setIsDocsSidebarOpen}
-      className={cn( 
+      className={cn(
         'w-(--docs-sidebar-width-icon) data-[state=open]:w-full z-20 shadow-sm',
-        className)}>
+        className
+      )}
+    >
       <FloatingPanelToggle
         openIcon={MenuIcon}
-        closeIcon={XIcon}
+        closeIcon={
+          <>
+            <Tau className="size-6 text-primary group-hover:hidden" />
+            <XIcon className="text-primary group-hover:block hidden" />
+          </>
+        }
         openTooltip="Open Documentation Sidebar"
         closeTooltip="Close Documentation Sidebar"
         variant="absolute"
@@ -107,14 +114,14 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
         align="start"
         onClick={toggleDocsSidebar}
       />
-      <Separator orientation="vertical" className="absolute z-10 h-4! my-2 group-data-[state=open]:hidden left-1/2 -translate-x-1/2"/>
+      <Separator orientation="vertical" className="absolute z-10 h-4! my-2 group-data-[state=open]:hidden left-1/2 -translate-x-1/2" />
       <DocsSidebarSearch />
 
       <FloatingPanelContent>
         <FloatingPanelContentHeader side="left">
-          <FloatingPanelContentTitle className="flex items-center gap-1"><Tau className="size-6 text-primary" /> {metaConfig.name} Documentation</FloatingPanelContentTitle>
+          <FloatingPanelContentTitle className="flex items-center gap-1">{metaConfig.name}</FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
-        
+
         <FloatingPanelContentBody>
           <SidebarContent className="p-1">
             <SidebarGroup>
@@ -131,7 +138,7 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
 
 function DocsSidebarSearch(): React.JSX.Element | null {
   const { enabled, setOpenSearch } = useSearchContext();
-  
+
   if (!enabled) return null;
 
   return (
@@ -154,7 +161,7 @@ function DocsSidebarSearch(): React.JSX.Element | null {
 
 function DocsSidebarItems(): React.JSX.Element {
   const { root } = useTreeContext();
-  
+
   const children = useMemo(() => {
     function renderItems(items: PageTree.Node[]): ReactNode[] {
       return items.map((item) => (

@@ -2,43 +2,186 @@ import type { ComponentProps } from 'react';
 import { CodeViewer } from '#components/code-viewer.js';
 import type { CodeLanguage } from '#components/code-viewer.js';
 import { cn } from '#utils/ui.js';
-import { CopyButton } from '#components/copy-button.js';
-
-type CodeBlockProps = ComponentProps<'div'> & {
-  readonly title?: string;
-  readonly showHeader?: boolean;
-};
+import { cva } from 'class-variance-authority';
+import type { VariantProps } from 'class-variance-authority';
 
 type PreProps = ComponentProps<'pre'>;
 
+// Root CodeBlock container variants
+const codeBlockVariants = cva(
+  "@container/code group/codeblock overflow-hidden rounded-lg border font-sans not-prose text-sm bg-neutral/10",
+  {
+    variants: {
+      variant: {
+        standard: 'relative',
+        floating: 'relative',
+      },
+    },
+    defaultVariants: {
+      variant: 'standard',
+    },
+  }
+);
+
+// Header variants
+const codeBlockHeaderVariants = cva(
+  "flex flex-row items-center justify-between text-foreground/50",
+  {
+    variants: {
+      variant: {
+        standard: 'sticky top-0 border-b p-0.25 pl-3 bg-neutral/5',
+        floating: 'absolute top-0.25 right-0.25 z-10 p-0',
+      },
+    },
+    defaultVariants: {
+      variant: 'standard',
+    },
+  }
+);
+
+// Action container variants
+const codeBlockActionVariants = cva(
+  "flex flex-row gap-1",
+  {
+    variants: {
+      variant: {
+        standard: '',
+        floating: 'p-0.25',
+      },
+      visibility: {
+        inivisibleUntilHover: 'opacity-0 group-hover/codeblock:opacity-100 transition-opacity',
+        alwaysVisible: '',
+      },
+    },
+    defaultVariants: {
+      variant: 'standard',
+      visibility: 'inivisibleUntilHover',
+    },
+  }
+);
+
+// Title variants
+const codeBlockTitleVariants = cva(
+  "text-xs",
+  {
+    variants: {
+      variant: {
+        standard: '',
+        floating: 'hidden',
+      },
+    },
+    defaultVariants: {
+      variant: 'standard',
+    },
+  }
+);
+
+type CodeBlockProps = ComponentProps<'div'> & 
+  VariantProps<typeof codeBlockVariants>;
+
+type CodeBlockHeaderProps = ComponentProps<'div'> & 
+  VariantProps<typeof codeBlockHeaderVariants>;
+
+type CodeBlockActionProps = ComponentProps<'div'> & 
+  VariantProps<typeof codeBlockActionVariants>;
+
+type CodeBlockTitleProps = ComponentProps<'div'> & 
+  VariantProps<typeof codeBlockTitleVariants>;
+
+/**
+ * Root CodeBlock container component
+ */
 export function CodeBlock({
   children,
-  title,
-  showHeader = true,
+  variant = 'standard',
   className,
-  text,
   ...rest
-}: CodeBlockProps & { readonly text: string }): React.JSX.Element {
+}: CodeBlockProps): React.JSX.Element {
   return (
     <div
       {...rest}
-      className={cn(
-        "@container/code overflow-hidden rounded-lg border font-sans not-prose text-sm bg-neutral/10",
-        className
-      )}
+      data-slot="codeblock"
+      className={cn(codeBlockVariants({ variant, className }))}
     >
-      {showHeader && (
-        <div className="sticky top-0 flex flex-row items-center justify-between border-b p-0.25 pl-3 text-foreground/50">
-          <div className="text-xs">{title}</div>
-          <div className="flex flex-row gap-1">
-            <CopyButton
-              size="xs"
-              className="h-7 [&_[data-slot=label]]:hidden @xs/code:[&_[data-slot=label]]:flex"
-              getText={() => text}
-            />
-          </div>
-        </div>
-      )}
+      {children}
+    </div>
+  );
+}
+
+/**
+ * CodeBlock header component - contains title and actions
+ */
+export function CodeBlockHeader({ 
+  variant = 'standard',
+  className,
+  children,
+  ...rest 
+}: CodeBlockHeaderProps): React.JSX.Element {
+  return (
+    <div
+      {...rest}
+      data-slot="codeblock-header"
+      className={cn(codeBlockHeaderVariants({ variant, className }))}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * CodeBlock title component - displays the code block title/filename
+ */
+export function CodeBlockTitle({
+  variant = 'standard',
+  className,
+  children,
+  ...rest
+}: CodeBlockTitleProps): React.JSX.Element {
+  return (
+    <div
+      {...rest}
+      data-slot="codeblock-title"
+      className={cn(codeBlockTitleVariants({ variant, className }))}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * CodeBlock action container - houses action buttons like copy
+ */
+export function CodeBlockAction({
+  variant = 'standard',
+  className,
+  children,
+  ...rest
+}: CodeBlockActionProps): React.JSX.Element {
+  return (
+    <div
+      {...rest}
+      data-slot="codeblock-action"
+      className={cn(codeBlockActionVariants({ variant, className }))}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * CodeBlock content wrapper
+ */
+export function CodeBlockContent({ 
+  children, 
+  className, 
+  ...rest 
+}: ComponentProps<'div'>): React.JSX.Element {
+  return (
+    <div
+      {...rest}
+      data-slot="codeblock-content"
+      className={cn("", className)}
+    >
       {children}
     </div>
   );
@@ -70,9 +213,10 @@ export function InlineCode({ children, className, ...rest }: ComponentProps<'cod
   return (
     <code
       {...rest}
+      data-slot="inline-code"
       className={cn(
         className,
-        'rounded-xs bg-neutral/20 px-1 py-0.5 font-normal text-foreground/80 before:content-none after:content-none',
+        'rounded-sm bg-neutral/20 px-1 py-0.5 font-normal text-foreground/80 before:content-none after:content-none',
       )}
     >
       {children}

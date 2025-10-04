@@ -17,10 +17,11 @@ import type { Route } from './+types/route.js';
 import { baseOptions } from '#lib/fumadocs/layout.shared.js';
 import { RootProvider } from 'fumadocs-ui/provider/base';
 import { ReactRouterProvider } from 'fumadocs-core/framework/react-router';
-import { CodeBlock, Pre } from '#components/code-block.js';
+import { InlineCode, Pre } from '#components/code-block.js';
 import { DocsPageActions } from './docs-page-actions.js';
 import { getLLMText } from '#lib/fumadocs/get-llms-text.js';
 import { DocsSidebarProvider } from '#routes/docs.$/docs-sidebar.js';
+import { DocsCodeBlock } from './docs-codeblock.js';
 
 export async function loader({ params }: Route.LoaderArgs) {
   const slugs = params['*'].split('/').filter((v) => v.length > 0);
@@ -112,11 +113,21 @@ const renderer = toClientRenderer(
               const text = String(props.children).replace(/\n$/, '');
 
               return (
-                <CodeBlock title={lang} text={text} showHeader={false} {...props}>
+                <DocsCodeBlock title={lang} text={text}>
                   <Pre {...props} />
-                </CodeBlock>
+                </DocsCodeBlock>
               );
-            }
+            },
+            code(properties) {
+              const { children, className, ref, node, style, ...rest } = properties;
+              
+              // Only render InlineCode for inline code (strings)
+              if (typeof children === 'string') {
+                return <InlineCode {...rest} className={className}>{children}</InlineCode>;
+              }
+              
+              return <code {...rest} className={className}>{children}</code>;
+            },
           }} />
         </DocsBody>
       </DocsPage>

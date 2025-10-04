@@ -225,6 +225,7 @@ function FloatingPanelTriggerButton({
             className,
           )}
           onClick={onClick}
+          data-slot="floating-panel-trigger"
         >
           {renderIcon()}
           {children}

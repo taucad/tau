@@ -163,7 +163,7 @@ export function ChatSelector(): ReactNode {
               renderLabel={renderChatLabel}
               getValue={getChatValue}
               defaultValue={activeChat}
-              popoverContentClassName="w-[300px]"
+              className="w-[300px]"
               placeholder="Search chats"
               searchPlaceHolder="Search chats..."
               popoverProperties={{

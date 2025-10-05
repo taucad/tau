@@ -484,7 +484,7 @@ export function ChatControls(): React.JSX.Element {
         getValue={getControlItemValue}
         defaultValue={undefined}
         isDisabled={isControlItemDisabled}
-        popoverContentClassName="w-60 z-50"
+        className="w-60 z-50"
         searchPlaceHolder="Search commands..."
         placeholder="Actions"
         onSelect={(itemId) => {

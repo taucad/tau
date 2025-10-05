@@ -12,6 +12,28 @@ type GroupedItems<T> = {
   items: T[];
 };
 
+type ComboBoxResponsiveProperties<T> = Omit<React.HTMLAttributes<HTMLDivElement>, 'defaultValue' | 'onSelect'> & {
+  readonly groupedItems: Array<GroupedItems<T>>;
+  readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
+  readonly children: ReactNode;
+  readonly getValue: (item: T) => string;
+  readonly defaultValue: T | undefined;
+  readonly onSelect?: (value: string) => void;
+  readonly onClose?: () => void;
+  /**
+   * The className for the popover/drawer content.
+   */
+  readonly className?: string;
+  readonly popoverProperties?: React.ComponentProps<typeof PopoverContent>;
+  readonly drawerProperties?: React.ComponentProps<typeof DrawerContent>;
+  readonly placeholder?: string;
+  readonly searchPlaceHolder?: string;
+  readonly asChildLabel?: boolean;
+  readonly labelClassName?: string;
+  readonly isDisabled?: (item: T) => boolean;
+  readonly emptyListMessage?: ReactNode;
+};
+
 export function ComboBoxResponsive<T>({
   groupedItems,
   renderLabel,
@@ -20,29 +42,17 @@ export function ComboBoxResponsive<T>({
   defaultValue,
   onSelect,
   onClose,
-  popoverContentClassName,
-  popoverProperties,
+  className,
+  popoverProperties: { className: popoverClassName, ...popoverProperties } = {},
+  drawerProperties: { className: drawerClassName, ...drawerProperties } = {},
   placeholder = 'Set item',
   searchPlaceHolder = 'Filter items...',
   asChildLabel = false,
   labelClassName,
   isDisabled,
-}: {
-  readonly groupedItems: Array<GroupedItems<T>>;
-  readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
-  readonly children: ReactNode;
-  readonly getValue: (item: T) => string;
-  readonly defaultValue: T | undefined;
-  readonly onSelect?: (value: string) => void;
-  readonly onClose?: () => void;
-  readonly popoverContentClassName?: ClassValue;
-  readonly popoverProperties?: React.ComponentProps<typeof PopoverContent>;
-  readonly placeholder?: string;
-  readonly searchPlaceHolder?: string;
-  readonly asChildLabel?: boolean;
-  readonly labelClassName?: ClassValue;
-  readonly isDisabled?: (item: T) => boolean;
-}): React.JSX.Element {
+  emptyListMessage = 'No results found.',
+  ...properties
+}: ComboBoxResponsiveProperties<T>): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
   const isMobile = useIsMobile();
   const [selectedItem, setSelectedItem] = React.useState<T | undefined>(defaultValue);
@@ -73,7 +83,7 @@ export function ComboBoxResponsive<T>({
     return (
       <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerTrigger asChild>{children}</DrawerTrigger>
-        <DrawerContent aria-describedby="drawer-title">
+        <DrawerContent aria-describedby="drawer-title" className={cn(className, drawerClassName)} {...drawerProperties} {...properties}>
           <DrawerTitle className="sr-only" id="drawer-title">
             {placeholder}
           </DrawerTitle>
@@ -88,6 +98,7 @@ export function ComboBoxResponsive<T>({
               asChildLabel={asChildLabel}
               labelClassName={labelClassName}
               isDisabled={isDisabled}
+              emptyListMessage={emptyListMessage}
             />
           </div>
         </DrawerContent>
@@ -98,7 +109,7 @@ export function ComboBoxResponsive<T>({
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
-      <PopoverContent className={cn('w-[200px] p-0', popoverContentClassName)} {...popoverProperties}>
+      <PopoverContent className={cn('w-[200px] p-0', className, popoverClassName)} {...popoverProperties} {...properties}>
         <ItemList
           groupedItems={groupedItems}
           setSelectedItem={handleSelect}
@@ -109,6 +120,7 @@ export function ComboBoxResponsive<T>({
           asChildLabel={asChildLabel}
           labelClassName={labelClassName}
           isDisabled={isDisabled}
+          emptyListMessage={emptyListMessage}
         />
       </PopoverContent>
     </Popover>
@@ -125,6 +137,7 @@ function ItemList<T>({
   asChildLabel: labelAsChild,
   labelClassName,
   isDisabled,
+  emptyListMessage,
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
   readonly setSelectedItem: (item: T) => void;
@@ -135,12 +148,13 @@ function ItemList<T>({
   readonly asChildLabel?: boolean;
   readonly labelClassName?: ClassValue;
   readonly isDisabled?: (item: T) => boolean;
+  readonly emptyListMessage?: ReactNode;
 }) {
   return (
     <Command>
       <CommandInput placeholder={searchPlaceHolder} />
       <CommandList>
-        <CommandEmpty>No results found.</CommandEmpty>
+        <CommandEmpty>{emptyListMessage}</CommandEmpty>
         {groupedItems.map((group) => (
           <CommandGroup key={group.name} heading={group.name}>
             {group.items.map((item) => {

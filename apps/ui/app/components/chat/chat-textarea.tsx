@@ -18,6 +18,17 @@ import type { MessagePart } from '#types/chat.types.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { ChatContextActions } from '#components/chat/chat-context-actions.js';
 
+/**
+ * IMPORTANT NOTE:
+ * 
+ * When adding a new element to the textarea and that element contains portalled content,
+ * make sure to add the `data-chat-textarea-focustrap` attribute to the element.
+ * 
+ * This is used to determine if the focus has truly left the textarea and its related UI elements.
+ */
+
+const FOCUS_TRAP_ATTRIBUTE = 'data-chat-textarea-focustrap';
+
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
     content,
@@ -227,7 +238,12 @@ export const ChatTextarea = memo(function ({
   }, []);
 
   const focusInput = useCallback(() => {
-    textareaReference.current?.focus();
+    if (textareaReference.current) {
+      textareaReference.current.focus();
+      // Set cursor position to end of text
+      textareaReference.current.selectionStart = textareaReference.current.value.length;
+      textareaReference.current.selectionEnd = textareaReference.current.value.length;
+    }
   }, [textareaReference]);
 
   /**
@@ -428,12 +444,39 @@ export const ChatTextarea = memo(function ({
     event.preventDefault();
   };
 
+  const containerReference = useRef<HTMLDivElement>(null);
+
   const handleTextareaBlur = useCallback(() => {
-    onBlur?.();
+    // Use requestAnimationFrame to check focus after the browser has finished
+    // processing the focus change. This allows portaled elements (popovers, dialogs)
+    // to receive focus before we check if we should trigger onBlur
+    requestAnimationFrame(() => {
+      const activeElement = document.activeElement;
+      const container = containerReference.current;
+
+      if (!container) {
+        return;
+      }
+
+      // Check if focus is within the container itself
+      if (container.contains(activeElement)) {
+        return;
+      }
+
+      // Check if focus moved to a related element (marked with data attribute)
+      // This allows child components to mark their portaled content as related
+      if (activeElement instanceof Element && activeElement.closest(`[${FOCUS_TRAP_ATTRIBUTE}]`)) {
+        return;
+      }
+
+      // Focus has truly left the component and its related UI elements
+      onBlur?.();
+    });
   }, [onBlur]);
 
   return (
     <div
+      ref={containerReference}
       className={cn(
         '@container group/chat-textarea',
         'relative flex size-full flex-col rounded-2xl bg-background border',
@@ -442,6 +485,7 @@ export const ChatTextarea = memo(function ({
         'focus-within:border-primary',
         className)}
       data-has-context-actions={enableContextActions}
+      onBlur={handleTextareaBlur}
     >
       {/* Textarea */}
       <div
@@ -457,7 +501,7 @@ export const ChatTextarea = memo(function ({
 
         {/* Context */}
         <div className="m-2 flex-wrap gap-1 hidden group-data-[has-context-actions=true]/chat-textarea:flex">
-          {enableContextActions ? <ChatContextActions addImage={handleAddImage} addText={handleAddText} /> : null}
+          {enableContextActions ? <ChatContextActions data-chat-textarea-focustrap={true} addImage={handleAddImage} addText={handleAddText} /> : null}
           {images.map((image, index) => (
             <div key={image} className="group/image-item relative text-muted-foreground hover:text-foreground">
               <HoverCard openDelay={100} closeDelay={100}>
@@ -506,7 +550,6 @@ export const ChatTextarea = memo(function ({
           placeholder="Ask Tau to build anything..."
           onChange={handleTextChange}
           onKeyDown={handleTextareaKeyDown}
-          onBlur={handleTextareaBlur}
         />
       </div>
 
@@ -544,7 +587,14 @@ export const ChatTextarea = memo(function ({
       <div className="absolute bottom-2 left-2 flex flex-row items-center gap-1 text-muted-foreground">
         {/* Model selector */}
         <Tooltip>
-          <ChatModelSelector popoverProperties={{ align: 'start' }} onSelect={focusInput} onClose={focusInput}>
+          <ChatModelSelector
+            popoverProperties={{
+              align: 'start',
+            }}
+            onSelect={focusInput}
+            onClose={focusInput}
+            data-chat-textarea-focustrap={true}
+          >
             {() => (
               <TooltipTrigger asChild>
                 <Button variant="outline" size="sm" className="rounded-full h-7 text-muted-foreground hover:text-foreground">

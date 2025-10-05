@@ -8,10 +8,9 @@ import type { Model } from '#types/model.types.js';
 import type { ModelFamily } from '#types/model.types.js';
 import { useModels } from '#hooks/use-models.js';
 
-type ChatModelSelectorProps = {
+type ChatModelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'onSelect' | 'children'> & {
   readonly onSelect?: (modelId: string) => void;
   readonly onClose?: () => void;
-  readonly className?: string;
   readonly children: (props: { selectedModel?: Model }) => ReactNode;
   readonly popoverProperties?: React.ComponentProps<typeof ComboBoxResponsive>['popoverProperties'];
 };
@@ -20,7 +19,7 @@ export const ChatModelSelector = memo(function ({
   onSelect,
   onClose,
   children,
-  ...props
+  ...properties
 }: ChatModelSelectorProps): React.JSX.Element {
   const { selectedModel, setSelectedModelId, data: models = [] } = useModels();
 
@@ -34,8 +33,8 @@ export const ChatModelSelector = memo(function ({
   }
 
   const handleSelectModel = useCallback(
-    (item: string | Model) => {
-      const model = typeof item === 'string' ? models.find((m) => m.id === item) : item;
+    (item: string) => {
+      const model = models.find((m) => m.id === item);
 
       if (model) {
         setSelectedModelId(model.id);
@@ -47,9 +46,12 @@ export const ChatModelSelector = memo(function ({
 
   return (
     <ComboBoxResponsive
-      popoverContentClassName="w-[300px]"
-      groupedItems={[...providerModelsMap.entries()].map(([_provider, models]) => ({
-        name: '',
+      {...properties}
+      className="[&[data-slot='popover-content']]:w-[300px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:text-[0.625rem]"
+      popoverProperties={properties.popoverProperties}
+      emptyListMessage="No models found."
+      groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({
+        name: provider,
         items: models,
       }))}
       renderLabel={(item, selectedItem) => (
@@ -73,7 +75,6 @@ export const ChatModelSelector = memo(function ({
       defaultValue={selectedModel}
       onSelect={handleSelectModel}
       onClose={onClose}
-      {...props}
     >
       {children({ selectedModel })}
     </ComboBoxResponsive>

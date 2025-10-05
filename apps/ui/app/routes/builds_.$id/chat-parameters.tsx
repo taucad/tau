@@ -20,6 +20,7 @@ import { templates, uiSchema, widgets } from '#routes/builds_.$id/rjsf-theme.js'
 import type { RJSFContext } from '#routes/builds_.$id/rjsf-theme.js';
 import { deleteNestedValue, rjsfIdSeparator, resetArrayItem, rjsfIdPrefix } from '#routes/builds_.$id/rjsf-utils.js';
 import { useViewContext } from '#routes/builds_.$id/chat-interface-controls.js';
+import { EmptyItems } from '#components/ui/empty-items.js';
 
 const toggleParametersKeyCombination = {
   key: 'x',
@@ -289,18 +290,13 @@ export const ChatParameters = memo(function (props: { readonly className?: strin
             )}
           </>
         ) : (
-          <div
-            className={cn(
-              'm-4 mt-2 flex h-full flex-col items-center justify-center rounded-md border border-dashed p-8 text-center md:m-2',
-              'px-2 py-4 md:py-2'
-            )}
-          >
+          <EmptyItems>
             <div className="mb-3 rounded-full bg-muted/50 p-2">
               <Info className="size-6 text-muted-foreground" strokeWidth={1.5} />
             </div>
             <h3 className="mb-1 text-base font-medium">No parameters available</h3>
             <p className="text-muted-foreground">Parameters will appear here when they become available for this model</p>
-          </div>
+          </EmptyItems>
         )}
       </FloatingPanelContent>
     </FloatingPanel>

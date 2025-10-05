@@ -28,10 +28,11 @@ export const handle: Handle = {
     const { id } = match.params as Route.LoaderArgs['params'];
 
     return (
-      [<BuildProvider buildId={id}>
-        <BuildNameEditor />
-      </BuildProvider>,
-      <ChatModeSelector />
+      [
+        <BuildProvider buildId={id}>
+          <BuildNameEditor />
+        </BuildProvider>,
+        <ChatModeSelector />
       ]
     );
   },

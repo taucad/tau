@@ -139,7 +139,7 @@ export function ChatEditorLayout({ className }: { readonly className?: ClassValu
                   <Button
                     variant="overlay"
                     size="icon"
-                    className={cn('absolute size-7 bottom-2 left-2 z-10', 'transition-transform', isExplorerOpen && 'rotate-y-180')}
+                    className={cn('absolute size-7 bottom-2 left-2 z-10', 'transition-transform', isExplorerOpen && 'rotate-180')}
                     onClick={toggleExplorer}
                   >
                     <ArrowRightToLine />

@@ -198,7 +198,7 @@ function FloatingPanelTriggerButton({
         ),
       } as any);
     }
-    
+
     // If it's a LucideIcon component, create an element with className
     const IconComponent = Icon as LucideIcon;
     return (
@@ -337,7 +337,7 @@ function FloatingPanelToggle({
   variant = 'absolute',
 }: FloatingPanelToggleProps): React.JSX.Element {
   const { isOpen, toggle } = useFloatingPanel();
-  
+
   return (
     <FloatingPanelTriggerButton
       side={side}
@@ -389,6 +389,7 @@ function FloatingPanelContent({
         isOpen ? 'opacity-100 delay-200' : 'opacity-0 pointer-events-none',
         className,
       )}
+      data-slot="floating-panel-content"
     >
       {children}
     </div>
@@ -400,21 +401,30 @@ function FloatingPanelContentHeader({
   className,
   side,
 }: FloatingPanelContentHeaderProps): React.JSX.Element {
-  return <div className={cn('flex text-sm bg-sidebar text-muted-foreground font-medium h-7.75 items-center justify-between py-0.5 border-b', side === 'right' ? 'pr-8 pl-2' : 'pl-8 pr-0.25', className)}>{children}</div>;
+  return <div
+    className={cn('flex text-sm bg-sidebar text-muted-foreground font-medium h-7.75 items-center justify-between py-0.5 border-b', side === 'right' ? 'pr-8 pl-2' : 'pl-8 pr-0.25', className)}
+    data-slot="floating-panel-content-header"
+  >{children}</div>;
 }
 
 function FloatingPanelContentTitle({
   children,
   className,
 }: FloatingPanelContentTitleProps): React.JSX.Element {
-  return <h2 className={cn('text-sm font-medium text-nowrap', className)}>{children}</h2>;
+  return <h2
+    className={cn('text-sm font-medium text-nowrap', className)}
+    data-slot="floating-panel-content-title"
+  >{children}</h2>;
 }
 
 function FloatingPanelContentBody({
   children,
   className,
 }: FloatingPanelContentBodyProps): React.JSX.Element {
-  return <div className={cn('flex-1 overflow-y-auto', className)}>{children}</div>;
+  return <div
+    className={cn('flex-1 overflow-y-auto', className)}
+    data-slot="floating-panel-content-body"
+  >{children}</div>;
 }
 
 export { FloatingPanel, FloatingPanelClose, FloatingPanelTrigger, FloatingPanelToggle, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelContentBody, useFloatingPanel };

@@ -212,7 +212,7 @@ function TabsContents({
       className={className}
       {...props}
     >
-      <div ref={containerRef}>{children}</div>
+      <div className='size-full' ref={containerRef}>{children}</div>
     </motion.div>
   );
 }

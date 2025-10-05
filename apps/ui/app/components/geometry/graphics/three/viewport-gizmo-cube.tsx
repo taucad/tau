@@ -12,10 +12,11 @@ import { createViewportGizmoCubeAxes } from '#components/geometry/graphics/three
 
 type ViewportGizmoCubeProps = {
   readonly size?: number;
-  readonly className?: string;
 };
 
-export function ViewportGizmoCube({ size = 128, className = '' }: ViewportGizmoCubeProps): ReactNode {
+const className = 'viewport-gizmo-cube';
+
+export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): ReactNode {
   const { camera, gl, controls, scene, invalidate } = useThree((state) => ({
     camera: state.camera as THREE.PerspectiveCamera,
     gl: state.gl,

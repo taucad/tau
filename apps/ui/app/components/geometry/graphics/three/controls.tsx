@@ -23,10 +23,6 @@ type ControlsProperties = {
    * @description The speed of the camera zoom.
    */
   readonly zoomSpeed: number;
-  /**
-   * @description The className for the gizmo.
-   */
-  readonly gizmoClassName: string;
 };
 
 export const Controls = React.memo(function ({
@@ -35,7 +31,6 @@ export const Controls = React.memo(function ({
   enableZoom,
   enablePan,
   zoomSpeed,
-  gizmoClassName,
 }: ControlsProperties) {
   return (
     <>
@@ -46,7 +41,7 @@ export const Controls = React.memo(function ({
         enableDamping={enableDamping}
         enableZoom={enableZoom}
       />
-      {enableGizmo ? <ViewportGizmoCube className={gizmoClassName} /> : null}
+      {enableGizmo ? <ViewportGizmoCube /> : null}
     </>
   );
 });

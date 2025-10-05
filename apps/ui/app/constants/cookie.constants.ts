@@ -39,6 +39,12 @@ export const cookieName = {
   chatRsLeft: 'chat-rs-left',
   // The last selected chat right panel size.
   chatRsRight: 'chat-rs-right',
+  // The last selected chat interface tab.
+  chatInterfaceTab: 'chat-interface-tab',
+  // Whether the chat interface is full height.
+  chatInterfaceFullHeight: 'chat-interface-full-height',
+  // Whether the chat interface is transparent.
+  chatInterfaceTransparent: 'chat-interface-transparent',
 
   /* CAD */
   // The last selected kernel.

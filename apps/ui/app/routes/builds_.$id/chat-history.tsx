@@ -22,6 +22,7 @@ import type { KeyCombination } from '#utils/keys.js';
 import { formatKeyCombination } from '#utils/keys.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '#utils/ui.js';
+import { ChatHistoryEmpty } from '#routes/builds_.$id/chat-history-empty.js';
 
 const toggleChatHistoryKeyCombination = {
   key: 'c',
@@ -158,11 +159,9 @@ export const ChatHistory = memo(function (props: { readonly className?: string }
             style={{ height: '100%', paddingBottom: '2.5rem' }}
             atBottomStateChange={handleAtBottomStateChange}
             components={{
-              Header: () => <div className="pt-2" />,
+              Header: () => null,
               EmptyPlaceholder: () => (
-                <div className="flex h-full items-center justify-center text-muted-foreground">
-                  <p>Start a conversation...</p>
-                </div>
+                <ChatHistoryEmpty className="h-full -mb-7 justify-end" />
               ),
               Footer: () => (
                 <div className="px-4 pb-12">

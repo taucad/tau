@@ -244,7 +244,7 @@ export const ChatConsole = memo(function ({
         <Input
           autoComplete="off"
           className="h-7 w-full bg-background"
-          placeholder="Filter..."
+          placeholder="Filter logs..."
           value={filter}
           onChange={handleFilterChange}
         />

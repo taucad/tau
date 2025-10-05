@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Tree, Folder } from '#components/magicui/file-tree.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
-import { ChatEditorExplorerNoItems } from '#routes/builds_.$id/chat-editor-explorer-no-items.js';
 import { ExplorerFile } from '#routes/builds_.$id/chat-editor-explorer-file.js';
 import { Box } from 'lucide-react';
+import { EmptyItems } from '#components/ui/empty-items.js';
 
 export type CadComponent = {
   readonly id: string;
@@ -130,7 +130,7 @@ export function ChatEditorExplorerObjects({
   const treeElements = convertCadComponentToTreeElement(components);
 
   if (treeElements.length === 0) {
-    return <ChatEditorExplorerNoItems message="No objects available" />;
+    return <EmptyItems>No objects available</EmptyItems>;
   }
 
   return (

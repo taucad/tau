@@ -23,6 +23,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { logActor } from '#machines/logs.machine.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { stringToColor } from '#utils/color.utils.js';
+import { EmptyItems } from '#components/ui/empty-items.js';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   readonly onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -379,9 +380,9 @@ export const ChatConsole = memo(function ({
             </pre>
           ))
         ) : (
-          <div className="flex flex-1 items-center justify-center text-muted-foreground border-dashed border rounded-md">
-            <p className="text-sm">No logs to display</p>
-          </div>
+          <EmptyItems className="m-0">
+            No logs to display
+          </EmptyItems>
         )}
       </div>
     </div>

@@ -2,7 +2,7 @@ import { Film } from 'lucide-react';
 import { useState } from 'react';
 import { Tree } from '#components/magicui/file-tree.js';
 import { ExplorerFile } from '#routes/builds_.$id/chat-editor-explorer-file.js';
-import { ChatEditorExplorerNoItems } from '#routes/builds_.$id/chat-editor-explorer-no-items.js';
+import { EmptyItems } from '#components/ui/empty-items.js';
 
 export type AnimationItem = {
   readonly id: string;
@@ -36,7 +36,7 @@ export function ChatEditorExplorerAnimations({
   };
 
   if (animations.length === 0) {
-    return <ChatEditorExplorerNoItems message="No animations available" />;
+    return <EmptyItems>No animations available</EmptyItems>;
   }
 
   const treeElements = animations.map((animation) => ({

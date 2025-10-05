@@ -2,7 +2,7 @@ import { Box } from 'lucide-react';
 import { useState } from 'react';
 import { Tree } from '#components/magicui/file-tree.js';
 import { ExplorerFile } from '#routes/builds_.$id/chat-editor-explorer-file.js';
-import { ChatEditorExplorerNoItems } from '#routes/builds_.$id/chat-editor-explorer-no-items.js';
+import { EmptyItems } from '#components/ui/empty-items.js';
 
 // Generate a consistent color from a string
 function stringToColor(string_: string): string {
@@ -53,7 +53,7 @@ export function ChatEditorExplorerMeshes({
   };
 
   if (meshes.length === 0) {
-    return <ChatEditorExplorerNoItems message="No meshes available" />;
+    return <EmptyItems>No meshes available</EmptyItems>;
   }
 
   const treeElements = meshes.map((mesh) => ({

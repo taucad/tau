@@ -2,7 +2,7 @@ import { FileIcon } from 'lucide-react';
 import { useState } from 'react';
 import { Tree } from '#components/magicui/file-tree.js';
 import { ExplorerFile } from '#routes/builds_.$id/chat-editor-explorer-file.js';
-import { ChatEditorExplorerNoItems } from '#routes/builds_.$id/chat-editor-explorer-no-items.js';
+import { EmptyItems } from '#components/ui/empty-items.js';
 
 export type FileItem = {
   readonly id: string;
@@ -33,7 +33,7 @@ export function ChatEditorExplorerFiles({
   };
 
   if (files.length === 0) {
-    return <ChatEditorExplorerNoItems message="No files available" />;
+    return <EmptyItems>No files available</EmptyItems>;
   }
 
   const treeElements = files.map((file) => ({

@@ -71,7 +71,7 @@ function CommandList({
 }
 
 function CommandEmpty({ ...properties }: React.ComponentProps<typeof CommandPrimitive.Empty>): React.JSX.Element {
-  return <CommandPrimitive.Empty data-slot="command-empty" className="py-6 text-center text-sm" {...properties} />;
+  return <CommandPrimitive.Empty data-slot="command-empty" className="m-2 border border-dashed rounded-xs py-4 text-center text-sm" {...properties} />;
 }
 
 function CommandGroup({

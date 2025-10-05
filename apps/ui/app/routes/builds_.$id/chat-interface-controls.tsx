@@ -1,18 +1,18 @@
-import { createContext, useCallback, useContext, useMemo } from 'react';
+import { createContext, useContext, useMemo } from 'react';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 
 type ViewContextType = {
   isChatOpen: boolean;
-  toggleChatOpen: () => void;
+  setIsChatOpen: (value: boolean | ((current: boolean) => boolean)) => void;
   isParametersOpen: boolean;
-  toggleParametersOpen: () => void;
+  setIsParametersOpen: (value: boolean | ((current: boolean) => boolean)) => void;
   isEditorOpen: boolean;
-  toggleEditorOpen: () => void;
+  setIsEditorOpen: (value: boolean | ((current: boolean) => boolean)) => void;
   isExplorerOpen: boolean;
-  toggleExplorerOpen: () => void;
+  setIsExplorerOpen: (value: boolean | ((current: boolean) => boolean)) => void;
   isDetailsOpen: boolean;
-  toggleDetailsOpen: () => void;
+  setIsDetailsOpen: (value: boolean | ((current: boolean) => boolean)) => void;
 };
 
 const ViewContext = createContext<ViewContextType | undefined>(undefined);
@@ -30,31 +30,23 @@ export function ViewContextProvider({ children }: { readonly children: React.Rea
   const [isChatOpen, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
   const [isParametersOpen, setIsParametersOpen] = useCookie(cookieName.chatOpParameters, true);
   const [isEditorOpen, setIsEditorOpen] = useCookie(cookieName.chatOpEditor, true);
-  const [isExplorerOpen, setIsObjectTreeOpen] = useCookie(cookieName.chatOpModelExplorer, true);
+  const [isExplorerOpen, setIsExplorerOpen] = useCookie(cookieName.chatOpModelExplorer, true);
   const [isDetailsOpen, setIsDetailsOpen] = useCookie(cookieName.chatOpDetails, true);
-  const toggleChatOpen = useCallback(() => {
-    setIsChatOpen((previous) => !previous);
-  }, [setIsChatOpen]);
-
-  const toggleParametersOpen = useCallback(() => {
-    setIsParametersOpen((previous) => !previous);
-  }, [setIsParametersOpen]);
-
-  const toggleEditorOpen = useCallback(() => {
-    setIsEditorOpen((previous) => !previous);
-  }, [setIsEditorOpen]);
-
-  const toggleExplorerOpen = useCallback(() => {
-    setIsObjectTreeOpen((previous) => !previous);
-  }, [setIsObjectTreeOpen]);
-
-  const toggleDetailsOpen = useCallback(() => {
-    setIsDetailsOpen((previous) => !previous);
-  }, [setIsDetailsOpen]);
 
   const value = useMemo(
-    () => ({ isChatOpen, isParametersOpen, toggleChatOpen, toggleParametersOpen, isEditorOpen, toggleEditorOpen, isExplorerOpen, toggleExplorerOpen, isDetailsOpen, toggleDetailsOpen }),
-    [isChatOpen, isParametersOpen, toggleChatOpen, toggleParametersOpen, isEditorOpen, toggleEditorOpen, isExplorerOpen, toggleExplorerOpen, isDetailsOpen, toggleDetailsOpen],
+    () => ({ 
+      isChatOpen, 
+      setIsChatOpen, 
+      isParametersOpen, 
+      setIsParametersOpen, 
+      isEditorOpen, 
+      setIsEditorOpen, 
+      isExplorerOpen, 
+      setIsExplorerOpen, 
+      isDetailsOpen, 
+      setIsDetailsOpen 
+    }),
+    [isChatOpen, setIsChatOpen, isParametersOpen, setIsParametersOpen, isEditorOpen, setIsEditorOpen, isExplorerOpen, setIsExplorerOpen, isDetailsOpen, setIsDetailsOpen],
   );
 
   return <ViewContext.Provider value={value}>{children}</ViewContext.Provider>;

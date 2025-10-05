@@ -16,11 +16,9 @@ import { ChatSelector } from '#routes/builds_.$id/chat-selector.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelTrigger } from '#components/ui/floating-panel.js';
-import { useCookie } from '#hooks/use-cookie.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.js';
 import { formatKeyCombination } from '#utils/keys.js';
-import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '#utils/ui.js';
 import { ChatHistoryEmpty } from '#routes/builds_.$id/chat-history-empty.js';
 
@@ -67,15 +65,16 @@ export const ChatHistoryTrigger = memo(function ({
   );
 });
 
-export const ChatHistory = memo(function (props: { readonly className?: string }) {
-  const { className } = props;
+export const ChatHistory = memo(function (props: { 
+  readonly className?: string;
+  readonly isExpanded: boolean;
+  readonly setIsExpanded: (value: boolean | ((current: boolean) => boolean)) => void;
+}) {
+  const { className, isExpanded, setIsExpanded } = props;
   const kernel = useSelector(cadActor, (state) => state.context.kernelTypeSelected);
   const messageIds = useChatSelector((state) => state.context.messageOrder);
   const { append } = useChatActions();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
-  
-  // Chat history collapsible state
-  const [isExpanded, setIsExpanded] = useCookie(cookieName.chatOpHistory, true);
   
   const toggleChatHistory = useCallback(() => {
     setIsExpanded((current) => !current);

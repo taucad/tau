@@ -60,11 +60,18 @@ export function ChatEditorLayoutTrigger({
   );
 }
 
-export function ChatEditorLayout({ className }: { readonly className?: ClassValue }): React.JSX.Element {
+export function ChatEditorLayout({ 
+  className,
+  isExpanded,
+  setIsExpanded,
+}: { 
+  readonly className?: ClassValue;
+  readonly isExpanded: boolean;
+  readonly setIsExpanded: (value: boolean | ((current: boolean) => boolean)) => void;
+}): React.JSX.Element {
   const [explorerSize, setExplorerSize] = useCookie(cookieName.chatRsFileExplorer, [20, 80]);
   const [consoleSize, setConsoleSize] = useCookie(cookieName.chatRsEditor, [85, 15]);
   const [isExplorerOpen, setIsExplorerOpen] = useCookie(cookieName.chatOpFileExplorer, false);
-  const [isEditorOpen, setIsEditorOpen] = useCookie(cookieName.chatOpEditor, false);
 
   const consolePanelReference = useRef<ImperativePanelHandle>(null);
 
@@ -73,7 +80,7 @@ export function ChatEditorLayout({ className }: { readonly className?: ClassValu
   };
 
   const toggleEditor = () => {
-    setIsEditorOpen(!isEditorOpen);
+    setIsExpanded((current) => !current);
   };
 
   const toggleConsolePanel = useCallback(() => {
@@ -95,7 +102,7 @@ export function ChatEditorLayout({ className }: { readonly className?: ClassValu
   );
 
   return (
-    <FloatingPanel open={isEditorOpen} onOpenChange={setIsEditorOpen}>
+    <FloatingPanel open={isExpanded} onOpenChange={setIsExpanded}>
       <FloatingPanelClose
         side="right"
         align="start"

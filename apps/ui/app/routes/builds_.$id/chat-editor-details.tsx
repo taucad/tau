@@ -3,8 +3,6 @@ import { useCallback, useState } from 'react';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelContentBody, FloatingPanelTrigger } from '#components/ui/floating-panel.js';
 import { Button } from '#components/ui/button.js';
-import { cookieName } from '#constants/cookie.constants.js';
-import { useCookie } from '#hooks/use-cookie.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.js';
 import { formatKeyCombination } from '#utils/keys.js';
@@ -71,14 +69,19 @@ export function ChatEditorDetailsTrigger({
   );
 }
 
-export function ChatEditorDetails(): React.JSX.Element {
-  const [isOpen, setIsOpen] = useCookie(cookieName.chatOpDetails, false);
+export function ChatEditorDetails({
+  isExpanded,
+  setIsExpanded,
+}: {
+  readonly isExpanded: boolean;
+  readonly setIsExpanded: (value: boolean | ((current: boolean) => boolean)) => void;
+}): React.JSX.Element {
   const [geometryDetails, setGeometryDetails] = useState<GeometryDetails>(mockGeometryDetails);
   const [isCalculatingVolume, setIsCalculatingVolume] = useState(false);
   const [isCalculatingSurface, setIsCalculatingSurface] = useState(false);
 
   const toggleEditor = () => {
-    setIsOpen(!isOpen);
+    setIsExpanded((current) => !current);
   };
 
   const handleCalculateVolume = useCallback(async () => {
@@ -100,7 +103,7 @@ export function ChatEditorDetails(): React.JSX.Element {
   const { formattedKeyCombination: formattedEditorKeyCombination } = useKeydown(keyCombinationEditor, toggleEditor);
 
   return (
-    <FloatingPanel open={isOpen} onOpenChange={setIsOpen}>
+    <FloatingPanel open={isExpanded} onOpenChange={setIsExpanded}>
       <FloatingPanelClose
         side="right"
         align="start"

@@ -3,8 +3,6 @@ import { useState } from 'react';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelContentBody, FloatingPanelTrigger } from '#components/ui/floating-panel.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
-import { cookieName } from '#constants/cookie.constants.js';
-import { useCookie } from '#hooks/use-cookie.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.js';
 import { formatKeyCombination } from '#utils/keys.js';
@@ -45,9 +43,15 @@ export function ChatExplorerTrigger({
   );
 }
 
-export function ChatExplorerTree({ className }: { readonly className?: string }): React.JSX.Element {
-  const [isOpen, setIsOpen] = useCookie(cookieName.chatOpModelExplorer, false);
-  
+export function ChatExplorerTree({ 
+  className,
+  isExpanded,
+  setIsExpanded,
+}: { 
+  readonly className?: string;
+  readonly isExpanded: boolean;
+  readonly setIsExpanded: (value: boolean | ((current: boolean) => boolean)) => void;
+}): React.JSX.Element {
   // Section collapse states
   const [isFilesOpen, setIsFilesOpen] = useState(true);
   const [isMaterialsOpen, setIsMaterialsOpen] = useState(true);
@@ -56,14 +60,14 @@ export function ChatExplorerTree({ className }: { readonly className?: string })
   const [isObjectsOpen, setIsObjectsOpen] = useState(false);
 
   const toggleEditor = () => {
-    setIsOpen(!isOpen);
+    setIsExpanded((current) => !current);
   };
 
   const { formattedKeyCombination: formattedEditorKeyCombination } = useKeydown(keyCombinationEditor, toggleEditor);
 
 
   return (
-    <FloatingPanel open={isOpen} onOpenChange={setIsOpen} className={className}>
+    <FloatingPanel open={isExpanded} onOpenChange={setIsExpanded} className={className}>
       <FloatingPanelClose
         side="left"
         align="start"

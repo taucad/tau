@@ -19,7 +19,6 @@ import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { templates, uiSchema, widgets } from '#routes/builds_.$id/rjsf-theme.js';
 import type { RJSFContext } from '#routes/builds_.$id/rjsf-theme.js';
 import { deleteNestedValue, rjsfIdSeparator, resetArrayItem, rjsfIdPrefix } from '#routes/builds_.$id/rjsf-utils.js';
-import { useViewContext } from '#routes/builds_.$id/chat-interface-controls.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 
 const toggleParametersKeyCombination = {
@@ -52,14 +51,21 @@ export const ChatParametersTrigger = memo(function ({
   );
 });
 
-export const ChatParameters = memo(function (props: { readonly className?: string }) {
-  const { className } = props;
-  const { toggleParametersOpen, isParametersOpen } = useViewContext();
+export const ChatParameters = memo(function (props: { 
+  readonly className?: string;
+  readonly isExpanded: boolean;
+  readonly setIsExpanded: (value: boolean | ((current: boolean) => boolean)) => void;
+}) {
+  const { className, isExpanded, setIsExpanded } = props;
   const parameters = useSelector(cadActor, (state) => state.context.parameters);
   const defaultParameters = useSelector(cadActor, (state) => state.context.defaultParameters);
   const jsonSchema = useSelector(cadActor, (state) => state.context.jsonSchema);
   const [allExpanded, setAllExpanded] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+
+  const toggleParametersOpen = useCallback(() => {
+    setIsExpanded((current) => !current);
+  }, [setIsExpanded]);
 
   const { formattedKeyCombination: formattedParametersKeyCombination } = useKeydown(
     toggleParametersKeyCombination,
@@ -200,7 +206,7 @@ export const ChatParameters = memo(function (props: { readonly className?: strin
   };
 
   return (
-    <FloatingPanel open={isParametersOpen} onOpenChange={toggleParametersOpen} className={className}>
+    <FloatingPanel open={isExpanded} onOpenChange={setIsExpanded} className={className}>
       <FloatingPanelClose
         side="right"
         align="start"

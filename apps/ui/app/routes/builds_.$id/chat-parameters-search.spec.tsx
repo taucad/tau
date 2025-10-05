@@ -110,7 +110,7 @@ describe('ChatParameters Search Component', () => {
   it('shows "Is Hidden" parameter when searching for "hi"', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <ChatParameters isExpanded={true} setIsExpanded={() => {}} />
       </TestWrapper>,
     );
 
@@ -130,7 +130,7 @@ describe('ChatParameters Search Component', () => {
   it('shows "Site Url" parameter when searching for "URL"', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <ChatParameters isExpanded={true} setIsExpanded={() => {}} />
       </TestWrapper>,
     );
 
@@ -150,7 +150,7 @@ describe('ChatParameters Search Component', () => {
   it('shows groups when group title matches search', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <ChatParameters isExpanded={true} setIsExpanded={() => {}} />
       </TestWrapper>,
     );
 
@@ -168,7 +168,7 @@ describe('ChatParameters Search Component', () => {
   it('shows groups when child parameters match search', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <ChatParameters isExpanded={true} setIsExpanded={() => {}} />
       </TestWrapper>,
     );
 
@@ -185,7 +185,7 @@ describe('ChatParameters Search Component', () => {
   it('is case insensitive', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <ChatParameters isExpanded={true} setIsExpanded={() => {}} />
       </TestWrapper>,
     );
 
@@ -207,7 +207,7 @@ describe('ChatParameters Search Component', () => {
   it('preserves case in search input while searching case-insensitively', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <ChatParameters isExpanded={true} setIsExpanded={() => {}} />
       </TestWrapper>,
     );
 
@@ -226,7 +226,7 @@ describe('ChatParameters Search Component', () => {
   it('shows "No parameters matching" when no results found', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <ChatParameters isExpanded={true} setIsExpanded={() => {}} />
       </TestWrapper>,
     );
 
@@ -246,7 +246,7 @@ describe('ChatParameters Search Component', () => {
   it('shows all parameters when search is cleared', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <ChatParameters isExpanded={true} setIsExpanded={() => {}} />
       </TestWrapper>,
     );
 
@@ -272,7 +272,7 @@ describe('ChatParameters Search Component', () => {
   it('hides empty groups when no children match search', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <ChatParameters isExpanded={true} setIsExpanded={() => {}} />
       </TestWrapper>,
     );
 

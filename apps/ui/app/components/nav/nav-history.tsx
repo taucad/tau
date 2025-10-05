@@ -136,7 +136,7 @@ export function NavHistory(): ReactNode {
         <SearchInput
           placeholder="Search builds..."
           value={searchQuery}
-          className="text-xs bg-background h-7 focus-visible:ring-2"
+          className="bg-background dark:bg-background h-7"
           onChange={handleSearchChange}
           onKeyDown={handleSearchKeyDown}
           onClear={handleSearchClear}

@@ -7,6 +7,7 @@ import { defaultBuildName } from '#constants/build-names.js';
 import { useBuild } from '#hooks/use-build.js';
 import { useChatConstants } from '#utils/chat.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 export function BuildNameEditor(): React.JSX.Element {
   const { build, updateName, isLoading } = useBuild();
@@ -130,14 +131,14 @@ export function BuildNameEditor(): React.JSX.Element {
       <TooltipTrigger asChild>
         <Button 
           variant="ghost" 
-          className="cursor-text" 
+          className="cursor-text justify-start" 
           onClick={handleEdit}
         >
           <span
             data-animate={isNameGenerating}
             className="truncate data-[animate=true]:animate-typewriter-20"
           >
-            {displayName}
+            {displayName === '' ? <LoadingSpinner /> : displayName}
           </span>
         </Button>
       </TooltipTrigger>

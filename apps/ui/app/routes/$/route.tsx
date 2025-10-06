@@ -10,7 +10,6 @@ export default function NotFoundPage(): React.JSX.Element {
     void navigate(-1);
   };
 
-
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-4 py-8">
       <div className="w-full max-w-md animate-in duration-300 fade-in">

@@ -1,6 +1,6 @@
 import type { IChangeEvent } from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
-import { RefreshCcw, ChevronRight, Info, XIcon } from 'lucide-react';
+import { RefreshCcw, ChevronRight, Info, XIcon, SlidersHorizontal } from 'lucide-react';
 import React, { useCallback, useMemo, memo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import Form from '@rjsf/core';
@@ -36,7 +36,7 @@ export const ChatParametersTrigger = memo(function ({
 }) {
   return (
     <FloatingPanelTrigger
-      icon={<span className='font-medium text-lg'>𝒳</span>}
+      icon={SlidersHorizontal}
       tooltipContent={
         <div className="flex items-center gap-2">
           {isOpen ? 'Close' : 'Open'} Parameters

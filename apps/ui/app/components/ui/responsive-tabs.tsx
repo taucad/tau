@@ -62,19 +62,21 @@ export function ResponsiveTabs({
           ))}
         </TabsList>
 
-        <TabsContents
-          className={cn(
-            'flex-1 h-full! overflow-y-auto w-full',
-          )}
-        >
-          <h2 className='text-2xl font-bold hidden md:block mb-6'>{activeTab}</h2>
-          {children}
-        </TabsContents>
+        <div className='flex flex-col flex-1 gap-6'>
+          <h2 className='text-2xl font-bold hidden md:block'>{activeTab}</h2>
+          <TabsContents
+            className={cn(
+              'flex-1 h-full! overflow-y-auto w-full',
+            )}
+          >
+            {children}
+          </TabsContents>
+        </div>
       </>
     )
   }
 
-  const tabsList = useMemo(() => renderTabs(), [tabs]);
+  const tabsList = useMemo(() => renderTabs(), [tabs, activeTab]);
 
   return (
     <>

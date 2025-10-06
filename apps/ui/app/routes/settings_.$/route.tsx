@@ -1,20 +1,18 @@
 import type { SettingsView } from '@daveyplate/better-auth-ui';
 import { SettingsCards, useAuthenticate } from '@daveyplate/better-auth-ui';
 import { Link, useLocation } from 'react-router';
-import { Tabs, TabsList, TabsTrigger, TabsContent, TabsContents } from '#components/ui/tabs.js';
+import { TabsContent } from '#components/ui/tabs.js';
 import type { Handle } from '#types/matches.types.js';
 import { Button } from '#components/ui/button.js';
-import { CreditCard, Key, Lock, Palette, User, type LucideIcon } from 'lucide-react';
+import { CreditCard, Key, Lock, Palette, User } from 'lucide-react';
 import { cn } from '#utils/ui.js';
+import { ResponsiveTabs, type ResponsiveTabItem } from '#components/ui/responsive-tabs.js';
 
-type SettingsTab = {
-  tabView: SettingsView;
-  label: string;
-  href: string;
-  icon: LucideIcon;
+type SettingsTab = ResponsiveTabItem & {
+  tabView?: SettingsView;
 };
 
-const authTabs: SettingsTab[] = [
+const authTabs: readonly SettingsTab[] = [
   {
     tabView: 'SETTINGS',
     label: 'Account',
@@ -47,7 +45,7 @@ const authTabs: SettingsTab[] = [
   // },
 ] as const;
 
-const nonAuthTabs: Array<Omit<SettingsTab, 'tabView'>> = [
+const nonAuthTabs: readonly SettingsTab[] = [
   {
     label: 'Billing',
     href: '/settings/billing',
@@ -58,9 +56,9 @@ const nonAuthTabs: Array<Omit<SettingsTab, 'tabView'>> = [
     href: '/settings/appearance',
     icon: Palette,
   }
-];
+] as const;
 
-const allTabs = [...authTabs, ...nonAuthTabs];
+const allTabs: readonly SettingsTab[] = [...authTabs, ...nonAuthTabs];
 
 const defaultTab = authTabs[0]!.label;
 const defaultLabel = authTabs[0]!.label;
@@ -85,7 +83,7 @@ export default function SettingsPage(): React.JSX.Element {
   const location = useLocation();
 
   // Map pathname to cardView
-  const getActiveTab = () => {
+  const getActiveTab = (): string => {
     const currentTab = allTabs.find((tab) => tab.href === location.pathname);
     return currentTab?.label ?? defaultTab;
   };
@@ -95,41 +93,25 @@ export default function SettingsPage(): React.JSX.Element {
   return (
     <div className="h-full flex-1">
       <div className={cn(
-        "mx-auto w-full max-w-4xl p-4 md:p-6",
+        "mx-auto size-full max-w-4xl p-4 md:p-6 mb-6",
         "[&_[data-slot=drawer-trigger]]:hidden"
       )}>
-        <Tabs orientation='vertical' value={activeTab} className={cn(
-          "flex h-full flex-row gap-6",
-          "[&_[data-slot=tabs-trigger]]:flex-row",
-          "[&_[data-slot=tabs-trigger]]:gap-2",
-          "[&_[data-slot=tabs-trigger]]:justify-start",
-          "[&_[data-slot=tabs-trigger]]:[&_svg]:text-muted-foreground"
-        )}>
-          <TabsList className="mb-6">
-            {allTabs.map((tab) => (
-              <TabsTrigger key={tab.label} asChild value={tab.label}>
-                <Link to={tab.href}>
-                  <tab.icon />
-                  {tab.label}
-                </Link>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          <TabsContents className="flex-1 overflow-y-auto">
-            {authTabs.map((tab) => (
-              <TabsContent key={tab.label} value={tab.label} className="[&>*]:md:gap-0">
-                <SettingsCards classNames={{ sidebar: { base: 'hidden' } }} view={tab.tabView} />
-              </TabsContent>
-            ))}
-            <TabsContent value="Billing">
-              <div>Billing - TODO</div>
+        <ResponsiveTabs tabs={allTabs} activeTab={activeTab}>
+          {authTabs.map((tab) => (
+            <TabsContent key={tab.label} value={tab.label} className="[&>*]:md:gap-0">
+              <SettingsCards 
+                classNames={{ cards: 'h-full', sidebar: { base: 'hidden' }, base: 'h-full' }} 
+                view={tab.tabView!} 
+              />
             </TabsContent>
-            <TabsContent value="Appearance">
-              <div>Appearance - TODO</div>
-            </TabsContent>
-          </TabsContents>
-        </Tabs>
+          ))}
+          <TabsContent value="Billing">
+            <div>Billing - TODO</div>
+          </TabsContent>
+          <TabsContent value="Appearance">
+            <div>Appearance - TODO</div>
+          </TabsContent>
+        </ResponsiveTabs>
       </div>
     </div>
   );

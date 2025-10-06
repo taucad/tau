@@ -54,8 +54,8 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
         style={{ '--header-height': headerHeight }}
       >
         <header className="absolute top-0 w-full z-20 flex h-[var(--header-height)] shrink-0 items-center justify-between gap-2 pointer-events-none">
-          <div className="flex items-center p-0.25 gap-0.25 md:gap-1 h-8 ml-2 md:ml-[var(--sidebar-width-current)] transition-[margin] duration-200 ease-linear pl-2.75 rounded-lg bg-sidebar border pointer-events-auto">
-            <SidebarTrigger className="-ml-2.5" />
+          <div className="flex items-center p-0.25 gap-0.25 md:gap-1 h-8 ml-2 md:ml-[var(--sidebar-width-current)] transition-[margin] duration-200 ease-linear pl-2.75 rounded-md bg-sidebar border pointer-events-auto">
+            <SidebarTrigger className="-ml-2.5 rounded-sm" />
             {hasBreadcrumbItems ? (
               <span className="h-4">
                 <Separator orientation="vertical" />
@@ -65,10 +65,10 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
               <BreadcrumbList className={
                 cn(
                   "sm:gap-0",
-                  "[&_[data-slot=button]]:h-7 [&_[data-slot=button]]:p-2 [&_[data-slot=button]]:rounded-md",
-                  "[&_[data-slot='tooltip-trigger']]:h-7 [&_[data-slot='tooltip-trigger']]:p-2 [&_[data-slot='tooltip-trigger']]:rounded-md",
-                  "[&_[data-slot='breadcrumb-link']]:h-7 [&_[data-slot='breadcrumb-link']]:p-2 [&_[data-slot='breadcrumb-link']]:rounded-md",
-                  "[&_[data-slot=input]]:h-7 [&_[data-slot=input]]:rounded-md"
+                  "[&_[data-slot=button]]:h-7 [&_[data-slot=button]]:p-2 [&_[data-slot=button]]:rounded-sm",
+                  "[&_[data-slot='tooltip-trigger']]:h-7 [&_[data-slot='tooltip-trigger']]:p-2 [&_[data-slot='tooltip-trigger']]:rounded-sm",
+                  "[&_[data-slot='breadcrumb-link']]:h-7 [&_[data-slot='breadcrumb-link']]:p-2 [&_[data-slot='breadcrumb-link']]:rounded-sm",
+                  "[&_[data-slot=input]]:h-7 [&_[data-slot=input]]:rounded-sm",
                 )}
               >
                 {breadcrumbItems.map((match) => {

@@ -14,7 +14,6 @@ function Tabs({ className, ...props }: TabsProps): React.JSX.Element {
 type TabsListProps = React.ComponentProps<typeof TabsPrimitive.List> & {
   readonly activeClassName?: string;
   readonly transition?: Transition;
-  readonly orientation?: 'horizontal' | 'vertical';
 };
 
 const defaultTabsListTransition = {

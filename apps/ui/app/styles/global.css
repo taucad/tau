@@ -155,8 +155,8 @@
 /* Squircle shape for rounding - https://developer.mozilla.org/en-US/docs/Web/CSS/superellipse */
 @utility rounded-* {
   @supports (corner-shape: superellipse(1)) {
-    border-radius: calc(--value(--radius-*, [length]) * 1.1);
-    corner-shape: superellipse(1.1);
+    border-radius: calc(--value(--radius-*, [length]) * 1.15);
+    corner-shape: superellipse(1.15);
   }
 }
 

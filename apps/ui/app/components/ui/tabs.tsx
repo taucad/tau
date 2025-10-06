@@ -80,7 +80,8 @@ function TabsList({
         className={cn(
           'w-fit items-center justify-center rounded-md bg-muted p-0.75 text-muted-foreground',
           'data-[orientation=vertical]:h-fit',
-          'data-[orientation=horizontal]:h-8',
+          'data-[orientation=horizontal]:min-h-8',
+          'data-[orientation=horizontal]:min-w-fit',
           'data-[orientation=horizontal]:inline-flex',
           className,
         )}

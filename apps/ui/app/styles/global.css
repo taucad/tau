@@ -152,6 +152,14 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Squircle shape for rounding - https://developer.mozilla.org/en-US/docs/Web/CSS/superellipse */
+@utility rounded-* {
+  @supports (corner-shape: superellipse(1)) {
+    border-radius: calc(--value(--radius-*, [length]) * 1.1);
+    corner-shape: superellipse(1.1);
+  }
+}
+
 @theme inline {
   --shadow-*: initial;
   --shadow-xs: 0px 1px 2px 0px rgba(10, 13, 20, 0.03);

@@ -17,9 +17,8 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import { ChatInterfaceNav, chatTabs } from '#routes/builds_.$id/chat-interface-nav.js';
 import { Tabs, TabsContents, TabsContent } from '#components/ui/tabs.js';
-import { useIsMobile } from '#hooks/use-mobile.js';
 import { Button } from '#components/ui/button.js';
-import { ArrowUpToLine, Eye, EyeClosed } from 'lucide-react';
+import { Eye, EyeClosed } from 'lucide-react';
 
 /**
  * The spacing/gap between the panels in pixels.
@@ -31,7 +30,6 @@ export const ChatInterface = memo(function (): React.JSX.Element {
   const [chatResizeLeft, setChatResizeLeft] = useCookie(cookieName.chatRsLeft, [30, 20, 50]);
   const [chatResizeRight, setChatResizeRight] = useCookie(cookieName.chatRsRight, [50, 30, 20, 0]);
   const [activeTab, setActiveTab] = useCookie<typeof chatTabs[number]['id']>(cookieName.chatInterfaceTab, 'chat');
-  const isMobile = useIsMobile();
 
   // Refs for each individual panel
   const historyPanelRef = useRef<HTMLDivElement>(null);
@@ -66,32 +64,37 @@ export const ChatInterface = memo(function (): React.JSX.Element {
   };
 
   const [isFullHeightPanel, setIsFullHeightPanel] = useCookie(cookieName.chatInterfaceFullHeight, false);
-  const [isTransparentPanel, setIsTransparentPanel] = useCookie(cookieName.chatInterfaceTransparent, false);
   const toggleFullHeightPanel = () => {
     setIsFullHeightPanel((previous) => !previous);
   };
-  const toggleTransparentPanel = () => {
-    setIsTransparentPanel((previous) => !previous);
-  };
 
-  if (isMobile) {
+  // Memoize the chat viewer to prevent re-rendering during responsive width changes.
+  const chatViewer = useMemo(() => {
     return (
+      <ChatViewer />
+    );
+  }, []);
+
+  return (
+    <>
+      {/* Mobile */}
       <Tabs className={cn(
         'group/chat-tabs size-full absolute inset-0 gap-0',
         '[--nav-height:calc(var(--spacing)*10)]',
+        'md:hidden',
+        '[--full-panel-collapsed:30dvh]',
       )}
         value={activeTab}
         onValueChange={handleTabChange}
         data-active-tab={activeTab}
         data-full-height-panel={isFullHeightPanel}
-        data-transparent-panel={isTransparentPanel}
       >
         <div
           // Position the model tab content absolutely to the top of the header height.
           className={cn(
             'relative size-full',
             'pb-0',
-            'group-data-[full-height-panel=true]/chat-tabs:pb-[50dvh]',
+            'group-data-[full-height-panel=true]/chat-tabs:pb-[calc(100dvh-var(--full-panel-collapsed))]',
             'group-data-[active-tab=model]/chat-tabs:pb-0!',
 
             'group-data-[active-tab=model]/chat-tabs:[&_.viewport-gizmo-cube]:bottom-(--nav-height)!',
@@ -99,7 +102,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           )}
         >
           {/* Main viewer */}
-          <ChatViewer />
+          {chatViewer}
 
           {/* Top-left Content */}
           <div className='absolute top-(--header-height) left-2 group-data-[active-tab=model]/chat-tabs:block group-data-[full-height-panel=true]/chat-tabs:block hidden'>
@@ -123,42 +126,36 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           </div>
 
           {/* Bottom-left Content */}
-          <div className='absolute bottom-13 left-0 px-2 flex flex-row justify-between w-full gap-2 pointer-events-auto z-10'>
+          <div className={cn(
+            'absolute bottom-13 left-0 px-2 flex flex-row justify-between w-full gap-2 pointer-events-auto z-10',
+            'group-data-[full-height-panel=false]/chat-tabs:hidden',
+          )}>
             <ChatViewerControls />
-            <div className='flex flex-row gap-2 group-data-[active-tab=model]/chat-tabs:hidden'>
-              <Button
-                size='icon'
-                variant='overlay'
-                onClick={toggleTransparentPanel}
-              >
-                <EyeClosed className='group-data-[transparent-panel=true]/chat-tabs:hidden' />
-                <Eye className='group-data-[transparent-panel=false]/chat-tabs:hidden' />
-              </Button>
-              <Button
-                size='icon'
-                variant='overlay'
-                onClick={toggleFullHeightPanel}
-              >
-                <ArrowUpToLine className='group-data-[full-height-panel=false]/chat-tabs:rotate-180' />
-              </Button>
-            </div>
           </div>
         </div>
-        <div className='absolute z-20 bottom-0 left-0 right-0 p-1 pt-0'>
+        <div className='absolute z-20 bottom-0 left-0 right-0 p-1 pt-0 flex flex-row justify-between items-center w-full gap-1'>
           <ChatInterfaceNav className='h-(--nav-height) shadow-sm' />
+          <Button
+            size='icon'
+            variant='overlay'
+            onClick={toggleFullHeightPanel}
+            className="size-10 [&_svg]:size-5! [&_svg]:text-muted-foreground [&_svg]:stroke-[1.5] rounded-xl bg-muted shadow-sm"
+          >
+            <EyeClosed className='group-data-[full-height-panel=true]/chat-tabs:hidden' />
+            <Eye className='group-data-[full-height-panel=false]/chat-tabs:hidden' />
+          </Button>
         </div>
         <TabsContents className={cn(
           'absolute inset-0',
           'size-full!',
 
-          // Full height panel effect.
-          'pt-(--header-height)',
-          'group-data-[full-height-panel=true]/chat-tabs:pt-[50dvh]',
+          // Disable pointer events for the tabs contents so the user can interact with the viewer when height is half.
           'pointer-events-none',
+
+          // Full height panel effect - toggle between half and full height.
+          'pt-(--header-height)',
+          'group-data-[full-height-panel=true]/chat-tabs:pt-(--full-panel-collapsed)',
           'transition-[padding-top] duration-200 ease-in-out',
-          
-          // Transparent panel effect.
-          "group-data-[transparent-panel=true]/chat-tabs:[&_[data-slot=floating-panel]]:opacity-70",
 
           // Make only the top of the floating panel rounded.
           "[&_[data-slot=floating-panel]]:rounded-none",
@@ -167,7 +164,9 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           "[&_[data-slot=floating-panel]]:pointer-events-auto",
 
           // Make sure the content is padded to the bottom of the floating panel.
+          '[&_[data-slot=floating-panel-content]]:transition-none',
           "[&_[data-slot=floating-panel-content]]:pb-21",
+          'group-data-[full-height-panel=false]/chat-tabs:[&_[data-slot=floating-panel-content]]:pb-[calc(var(--nav-height)+0.25rem)]',
 
           // Hide the floating panel trigger.
           "[&_[data-slot=floating-panel-trigger]]:hidden",
@@ -199,164 +198,157 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           </TabsContent>
         </TabsContents>
       </Tabs>
-    );
-  }
 
-  // @ts-ignore
-  return (
-    <div
-      className={cn("group/chat-layout relative size-full flex flex-col")}
-      style={
-        {
-          '--left-panel-size': `${leftPanelWidth}px`,
-          '--right-panel-size': `${rightPanelWidth}px`,
-        } as React.CSSProperties
-      }
-      data-chat-open={isChatOpen}
-      data-explorer-open={isExplorerOpen}
-      data-parameters-open={isParametersOpen}
-      data-editor-open={isEditorOpen}
-      data-details-open={isDetailsOpen}
-    >
-      {/* Viewer - inset completely to occupy the background fully */}
-      {/* The calculation is to center the viewer within the container */}
-      <div className={cn(
-        'absolute inset-0 h-full w-[200dvw] left-1/2',
-
-        // Center the viewer based on the size of the left and right panels.
-        '-translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)]',
-        'transition-all duration-200 ease-in-out',
-
-        // Position the gizmo cube.
-        '[&_.viewport-gizmo-cube]:right-[calc((var(--sidebar-width-current)+var(--right-panel-size)+var(--left-panel-size)+100dvw)/2)]!',
-      )}>
-        <ChatViewer />
-      </div>
-
-      {/* Left-side ResizablePanelGroup */}
-      <ResizablePanelGroup
-        direction="horizontal"
-        autoSaveId={cookieName.chatRsLeft}
-        className={cn(
-          "absolute",
-          "top-(--header-height)",
-          "left-(--sidebar-width-current)",
-          "h-[calc(100dvh-(--spacing(14)))]!",
-          "w-[calc(50dvw-0.25rem)]!",
-          "transition-all duration-200 ease-linear",
-          "overflow-visible! pointer-events-none"
-        )}
-        onLayout={setChatResizeLeft}
+      {/* Desktop */}
+      <div
+        className={cn("group/chat-layout relative size-full flex-col hidden md:flex")}
+        style={
+          {
+            '--left-panel-size': `${leftPanelWidth}px`,
+            '--right-panel-size': `${rightPanelWidth}px`,
+          } as React.CSSProperties
+        }
+        data-chat-open={isChatOpen}
+        data-explorer-open={isExplorerOpen}
+        data-parameters-open={isParametersOpen}
+        data-editor-open={isEditorOpen}
+        data-details-open={isDetailsOpen}
       >
-        <ResizablePanel order={1} id="history" minSize={25} defaultSize={chatResizeLeft[0]} className='pointer-events-auto overflow-visible! group-data-[chat-open=false]/chat-layout:hidden'>
-          <div ref={historyPanelRef} className="size-full">
-            <ChatHistory isExpanded={isChatOpen} setIsExpanded={setIsChatOpen} />
-          </div>
-        </ResizablePanel>
+        {/* Viewer - inset completely to occupy the background fully */}
+        {/* The calculation is to center the viewer within the container */}
+        <div className={cn(
+          'absolute inset-0 h-full w-[200dvw] left-1/2',
 
-        <ResizableHandle variant='floating' className='hover:after:opacity-100 group-data-[chat-open=false]/chat-layout:hidden' />
+          // Center the viewer based on the size of the left and right panels.
+          '-translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)]',
+          'transition-all duration-200 ease-in-out',
 
-        <ResizablePanel order={2} id="object-tree" minSize={20} maxSize={30} defaultSize={chatResizeLeft[1]} className='pointer-events-auto overflow-visible! group-data-[explorer-open=false]/chat-layout:hidden'>
-          <div ref={explorerPanelRef} className="size-full">
-            <ChatExplorerTree isExpanded={isExplorerOpen} setIsExpanded={setIsExplorerOpen} />
-          </div>
-        </ResizablePanel>
+          // Position the gizmo cube.
+          '[&_.viewport-gizmo-cube]:right-[calc((var(--sidebar-width-current)+var(--right-panel-size)+var(--left-panel-size)+100dvw)/2)]!',
+        )}>
+          {chatViewer}
+        </div>
 
-        <ResizableHandle variant='floating' className='hover:after:opacity-100 group-data-[explorer-open=false]/chat-layout:hidden' />
+        {/* Left-side ResizablePanelGroup */}
+        <ResizablePanelGroup
+          direction="horizontal"
+          autoSaveId={cookieName.chatRsLeft}
+          className={cn(
+            "absolute gap-1",
+            "top-(--header-height)",
+            "left-(--sidebar-width-current)",
+            "h-[calc(100dvh-(--spacing(14)))]!",
+            "w-[calc(50dvw-0.25rem)]!",
+            "transition-all duration-200 ease-linear",
+            "overflow-visible! pointer-events-none"
+          )}
+          onLayout={setChatResizeLeft}
+        >
+          <ResizablePanel order={1} id="history" minSize={25} defaultSize={chatResizeLeft[0]} className='pointer-events-auto overflow-visible! group-data-[chat-open=false]/chat-layout:hidden'>
+            <div ref={historyPanelRef} className="size-full">
+              <ChatHistory isExpanded={isChatOpen} setIsExpanded={setIsChatOpen} />
+            </div>
+          </ResizablePanel>
 
-        <ResizablePanel order={3} id="spacer" defaultSize={chatResizeLeft[2]} minSize={0} className='relative overflow-visible!'>
-          {/* Top-left Content */}
-          <div className='absolute top-0 left-0 flex flex-col gap-2 pointer-events-auto'>
-            <ChatHistoryTrigger
-              isOpen={isChatOpen}
-              onToggle={() => setIsChatOpen((previous) => !previous)}
-            />
-            <ChatExplorerTrigger
-              isOpen={isExplorerOpen}
-              onToggle={() => setIsExplorerOpen((previous) => !previous)}
-            />
-          </div>
+          <ResizableHandle variant='floating' className='hover:after:opacity-100 group-data-[chat-open=false]/chat-layout:hidden' />
 
-          {/* Bottom-left Content */}
-          <div className='absolute bottom-0 left-0 flex flex-col gap-2 pointer-events-auto'>
-            <ChatStackTrace />
-            <ChatViewerControls />
-          </div>
+          <ResizablePanel order={2} id="object-tree" minSize={20} maxSize={30} defaultSize={chatResizeLeft[1]} className='pointer-events-auto overflow-visible! group-data-[explorer-open=false]/chat-layout:hidden'>
+            <div ref={explorerPanelRef} className="size-full">
+              <ChatExplorerTree isExpanded={isExplorerOpen} setIsExpanded={setIsExplorerOpen} />
+            </div>
+          </ResizablePanel>
 
-        </ResizablePanel>
-      </ResizablePanelGroup>
+          <ResizableHandle variant='floating' className='hover:after:opacity-100 group-data-[explorer-open=false]/chat-layout:hidden' />
 
-      {/* Right-side ResizablePanelGroup */}
-      <ResizablePanelGroup
-        direction="horizontal"
-        autoSaveId={cookieName.chatRsRight}
-        className={cn(
-          "absolute gap-1",
-          "top-(--header-height)",
-          "right-2",
-          "h-[calc(100dvh-(--spacing(14)))]!",
-          "w-[calc(50dvw-0.25rem)]!",
-          "transition-all duration-200 ease-linear",
-          "overflow-visible! pointer-events-none"
-        )}
-        onLayout={setChatResizeRight}
-      >
-        {/* Spacer panel for open buttons */}
-        <ResizablePanel order={1} id="spacer-right" defaultSize={chatResizeRight[0]} minSize={0} className='relative overflow-visible!'>
-          {/* Top-right Content */}
-          <div className='absolute top-0 right-0 flex flex-col gap-2 pointer-events-auto'>
-            <SettingsControl />
-            <ChatParametersTrigger
-              isOpen={isParametersOpen}
-              onToggle={() => setIsParametersOpen((previous) => !previous)}
-            />
-            <ChatEditorLayoutTrigger
-              isOpen={isEditorOpen}
-              onToggle={() => setIsEditorOpen((previous) => !previous)}
-            />
-            <ChatEditorDetailsTrigger
-              isOpen={isDetailsOpen}
-              onToggle={() => setIsDetailsOpen((previous) => !previous)}
-            />
-          </div>
-        </ResizablePanel>
+          <ResizablePanel order={3} id="spacer" defaultSize={chatResizeLeft[2]} minSize={0} className='relative overflow-visible!'>
+            {/* Top-left Content */}
+            <div className='absolute top-0 left-0 flex flex-col gap-2 pointer-events-auto'>
+              <ChatHistoryTrigger
+                isOpen={isChatOpen}
+                onToggle={() => setIsChatOpen((previous) => !previous)}
+              />
+              <ChatExplorerTrigger
+                isOpen={isExplorerOpen}
+                onToggle={() => setIsExplorerOpen((previous) => !previous)}
+              />
+            </div>
 
-        <ResizableHandle variant='floating' className='hover:after:opacity-100 group-data-[parameters-open=false]/chat-layout:hidden' />
-        <ResizablePanel order={2} id="parameters" minSize={20} maxSize={40} defaultSize={chatResizeRight[1]} className='pointer-events-auto overflow-visible! group-data-[parameters-open=false]/chat-layout:hidden'>
-          <div ref={parametersPanelRef} className="size-full">
-            <ChatParameters isExpanded={isParametersOpen} setIsExpanded={setIsParametersOpen} />
-          </div>
-        </ResizablePanel>
+            {/* Bottom-left Content */}
+            <div className='absolute bottom-0 left-0 flex flex-col gap-2 pointer-events-auto'>
+              <ChatStackTrace />
+              <ChatViewerControls />
+            </div>
 
-        <ResizableHandle variant='floating' className='hover:after:opacity-100 group-data-[editor-open=false]/chat-layout:hidden' />
-        <ResizablePanel order={3} id="editor-layout" minSize={25} maxSize={50} defaultSize={chatResizeRight[2]} className='pointer-events-auto overflow-visible! group-data-[editor-open=false]/chat-layout:hidden'>
-          <div ref={editorPanelRef} className="size-full">
-            <ChatEditorLayout isExpanded={isEditorOpen} setIsExpanded={setIsEditorOpen} />
-          </div>
-        </ResizablePanel>
+          </ResizablePanel>
+        </ResizablePanelGroup>
 
-        <ResizableHandle variant='floating' className='hover:after:opacity-100 group-data-[details-open=false]/chat-layout:hidden' />
-        <ResizablePanel order={4} id="details" minSize={20} maxSize={35} defaultSize={chatResizeRight[3]} className='pointer-events-auto overflow-visible! group-data-[details-open=false]/chat-layout:hidden'>
-          <div ref={detailsPanelRef} className="size-full">
-            <ChatEditorDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+        {/* Right-side ResizablePanelGroup */}
+        <ResizablePanelGroup
+          direction="horizontal"
+          autoSaveId={cookieName.chatRsRight}
+          className={cn(
+            "absolute gap-1",
+            "top-(--header-height)",
+            "right-2",
+            "h-[calc(100dvh-(--spacing(14)))]!",
+            "w-[calc(50dvw-0.25rem)]!",
+            "transition-all duration-200 ease-linear",
+            "overflow-visible! pointer-events-none"
+          )}
+          onLayout={setChatResizeRight}
+        >
+          {/* Spacer panel for open buttons */}
+          <ResizablePanel order={1} id="spacer-right" defaultSize={chatResizeRight[0]} minSize={0} className='relative overflow-visible!'>
+            {/* Top-right Content */}
+            <div className='absolute top-0 right-0 flex flex-col gap-2 pointer-events-auto'>
+              <SettingsControl />
+              <ChatParametersTrigger
+                isOpen={isParametersOpen}
+                onToggle={() => setIsParametersOpen((previous) => !previous)}
+              />
+              <ChatEditorLayoutTrigger
+                isOpen={isEditorOpen}
+                onToggle={() => setIsEditorOpen((previous) => !previous)}
+              />
+              <ChatEditorDetailsTrigger
+                isOpen={isDetailsOpen}
+                onToggle={() => setIsDetailsOpen((previous) => !previous)}
+              />
+            </div>
+          </ResizablePanel>
 
-      {/* Centered Content */}
-      <div className={cn(
-        "absolute top-1/2 -translate-y-1/2",
-        "left-1/2",
-        "-translate-x-1/2",
-        "sm:-translate-x-[calc((100%+var(--right-panel-size)-var(--left-panel-size))/2)]",
-        "md:-translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)]",
-        "md:top-[90%] md:-translate-y-[90%]",
-        // Use matching transition settings
-        "transition-transform duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
-        "will-change-transform"
-      )}>
-        <ChatViewerStatus />
+          <ResizableHandle variant='floating' className='hover:after:opacity-100 group-data-[parameters-open=false]/chat-layout:hidden' />
+          <ResizablePanel order={2} id="parameters" minSize={20} maxSize={40} defaultSize={chatResizeRight[1]} className='pointer-events-auto overflow-visible! group-data-[parameters-open=false]/chat-layout:hidden'>
+            <div ref={parametersPanelRef} className="size-full">
+              <ChatParameters isExpanded={isParametersOpen} setIsExpanded={setIsParametersOpen} />
+            </div>
+          </ResizablePanel>
+
+          <ResizableHandle variant='floating' className='hover:after:opacity-100 group-data-[editor-open=false]/chat-layout:hidden' />
+          <ResizablePanel order={3} id="editor-layout" minSize={25} maxSize={50} defaultSize={chatResizeRight[2]} className='pointer-events-auto overflow-visible! group-data-[editor-open=false]/chat-layout:hidden'>
+            <div ref={editorPanelRef} className="size-full">
+              <ChatEditorLayout isExpanded={isEditorOpen} setIsExpanded={setIsEditorOpen} />
+            </div>
+          </ResizablePanel>
+
+          <ResizableHandle variant='floating' className='hover:after:opacity-100 group-data-[details-open=false]/chat-layout:hidden' />
+          <ResizablePanel order={4} id="details" minSize={20} maxSize={35} defaultSize={chatResizeRight[3]} className='pointer-events-auto overflow-visible! group-data-[details-open=false]/chat-layout:hidden'>
+            <div ref={detailsPanelRef} className="size-full">
+              <ChatEditorDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+
+        {/* Centered Content */}
+        <div className={cn(
+          "absolute top-1/2 -translate-y-1/2",
+          "left-1/2",
+          "-translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)]",
+          "top-[90%] -translate-y-[90%]",
+        )}>
+          <ChatViewerStatus />
+        </div>
       </div>
-    </div>
+    </>
   );
 });

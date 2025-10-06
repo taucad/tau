@@ -9,11 +9,15 @@ import tailwindcss from '@tailwindcss/vite';
 import { visualizer } from 'rollup-plugin-visualizer';
 import mdx from 'fumadocs-mdx/vite';
 import * as MdxConfig from './app/lib/fumadocs/source.config';
-// Import viteSvgSpriteWrapper from 'vite-svg-sprite-wrapper';
+import svgSpriteWrapper from 'vite-svg-sprite-wrapper';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Sprite generation can slow down the build time, so we disable it by default.
+// Enable it when adding a new icon to regenerate the sprite.
+const enableSpriteGeneration = false;
 
 /**
  * A simple plugin to load files as base64 strings.
@@ -42,27 +46,43 @@ export default defineConfig(({ mode }) => {
     root: __dirname,
     cacheDir: '../../node_modules/.vite/apps/ui',
     plugins: [
+      // Base64 Loader
       base64Loader,
+
+      // React + Web
       // Only include React Router plugin for non-test modes
       ...(isTest ? [] : [reactRouter()]),
+      tailwindcss(),
+      // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
+
+      // Paths
       nxViteTsPaths(),
       tsconfigPaths(),
-      // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
-      mdx(MdxConfig, {'configPath': path.resolve(__dirname, './app/lib/fumadocs/source.config.ts')}), // Fumadocs
-      tailwindcss(),
+
+      // Fumadocs
+      mdx(MdxConfig, { 'configPath': path.resolve(__dirname, './app/lib/fumadocs/source.config.ts') }), // Fumadocs
+
+
+      // Browser DevTools JSON plugin.
       devtoolsJson(),
+
+      // This plugin visualizes the bundle size of the build.
       visualizer({
         exclude: [{ file: '**/*?raw' }], // ignore raw files that are used for editor typings
       }),
-      // TODO: add back after fixing the recrusive reload issue.
-      // ViteSvgSpriteWrapper({
-      //   icons: path.resolve(__dirname, './app/components/icons/raw/**/*.svg'),
-      //   outputDir: path.resolve(__dirname, './app/components/icons/generated'),
-      //   generateType: true,
-      //   typeOutputDir: path.resolve(__dirname, './app/components/icons/generated'),
-      //   // Ensure the sprite retains the original svg attributes
-      //   sprite: { shape: {} },
-      // }),
+
+      // This plugin generates an SVG sprite to reduce the number of requests to the server.
+      // An SVG sprite is a single SVG file that contains all the SVG icons,
+      // inlined as <use> elements.
+      // This provides better caching performance.
+      ...(enableSpriteGeneration ? [svgSpriteWrapper({
+        icons: path.resolve(__dirname, './app/components/icons/raw/**/*.svg'),
+        outputDir: path.resolve(__dirname, './app/components/icons/generated'),
+        generateType: true,
+        typeOutputDir: path.resolve(__dirname, './app/components/icons/generated'),
+        // Ensure the sprite retains the original svg attributes
+        sprite: { shape: {} },
+      })] : []),
     ],
     worker: {
       // Workers need their own plugins.
@@ -103,7 +123,7 @@ export default defineConfig(({ mode }) => {
         exclude: ['app/**/*.{test,spec}.{ts,tsx}', 'app/**/index.ts'],
       },
     },
-        
+
     resolve: {
       alias: {
         // Fumadocs dependencies - for some reason, these CommonJS files are not transpiled by Vite, resulting in errors like:

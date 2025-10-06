@@ -16,12 +16,12 @@ import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-f
 import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
 import { CommandPaletteTrigger } from '#routes/builds_.$id/command-palette.js';
 import { Button } from '#components/ui/button.js';
-import { Github } from '#components/icons/github.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { toast } from 'sonner';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { ChatControls } from '#routes/builds_.$id/chat-controls.js';
 import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';
+import { SvgIcon } from '#components/icons/svg-icon.js';
 
 export const handle: Handle = {
   breadcrumb(match) {
@@ -49,7 +49,7 @@ export const handle: Handle = {
             <Button onClick={() => {
               toast.info('Github connection coming soon!');
             }} variant='outline' size="icon" className="hidden md:flex">
-              <Github />
+              <SvgIcon id="github" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Connect to Github</TooltipContent>

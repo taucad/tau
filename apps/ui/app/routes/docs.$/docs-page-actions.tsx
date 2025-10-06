@@ -1,20 +1,47 @@
 import { Button } from '#components/ui/button.js';
 import { CopyButton } from '#components/copy-button.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { Github } from '#components/icons/github.js';
 import { useLoaderData } from 'react-router';
 import type { loader } from './route.js';
 import { ENV, metaConfig } from '#config.js';
+import type { SvgIcons } from '#components/icons/generated/svg-icons.js';
+
+type ActionLink = {
+  url: string;
+  label: string;
+  iconId: SvgIcons;
+};
 
 export function DocsPageActions(): React.JSX.Element {
   const { rawMarkdownContent, path } = useLoaderData<typeof loader>();
-  
+
   const encodedUrl = encodeURIComponent(`https://${ENV.TAU_FRONTEND_URL}/docs/${path}`);
-  const chatGPTUrl = `https://chatgpt.com/?hints=search&q=Read+${encodedUrl}`;
-  const claudeUrl = `https://claude.ai/new?q=Read+${encodedUrl}`;
   const githubUrl = `${metaConfig.githubUrl}/edit/main/${metaConfig.docsDir}/${path}`;
 
   const getMarkdownContent = (): string => rawMarkdownContent;
+
+  const actionLinks: ActionLink[] = [
+    {
+      url: githubUrl,
+      label: 'Edit page on GitHub',
+      iconId: 'github',
+    },
+    {
+      url: `https://chatgpt.com/?hints=search&q=Read+${encodedUrl}`,
+      label: 'Open in ChatGPT',
+      iconId: 'openai',
+    },
+    {
+      url: `https://claude.ai/new?q=Read+${encodedUrl}`,
+      label: 'Open in Claude',
+      iconId: 'claude-mono',
+    },
+    {
+      url: `https://cursor.com/link/prompt?text=Read+${encodedUrl}`,
+      label: 'Open in Cursor',
+      iconId: 'cursor',
+    },
+  ];
 
   return (
     <div className="space-y-1 mt-5 -mr-4">
@@ -27,47 +54,23 @@ export function DocsPageActions(): React.JSX.Element {
         className="flex flex-row-reverse items-center justify-end gap-2 w-full text-left px-3 py-1 text-sm text-muted-foreground hover:text-foreground rounded-md transition-colors h-auto"
       />
 
-      {githubUrl && (
-        <Button asChild variant="ghost" size="sm" className="flex items-center justify-start gap-2 w-full text-left px-3 py-1 text-sm text-muted-foreground hover:text-foreground rounded-md transition-colors h-auto">
-          <a href={githubUrl} target="_blank" rel="noopener noreferrer">
-            <Github className="size-4" />
+      {actionLinks.map((link) => (
+        <Button
+          key={link.label}
+          asChild
+          variant="ghost"
+          size="sm"
+          className={'flex items-center justify-start gap-2 w-full text-left px-3 py-1 text-sm text-muted-foreground hover:text-foreground rounded-md transition-colors'}
+        >
+          <a href={link.url} target="_blank" rel="noopener noreferrer">
+            <SvgIcon id={link.iconId!} className="size-4" />
             <span className="flex items-center gap-1">
-              Edit page on GitHub
+              {link.label}
               <span className="text-xs">↗</span>
             </span>
           </a>
         </Button>
-      )}
-
-      <Button
-        variant="ghost"
-        size="sm"
-        className="flex items-center justify-start gap-2 w-full text-left px-3 py-1 text-sm text-muted-foreground hover:text-foreground rounded-md transition-colors h-auto"
-        asChild
-      >
-        <a href={chatGPTUrl} target="_blank" rel="noopener noreferrer">
-          <SvgIcon id="openai" className="size-4" />
-          <span className="flex items-center gap-1">
-            Open in ChatGPT
-            <span className="text-xs">↗</span>
-          </span>
-        </a>
-      </Button>
-
-      <Button
-        variant="ghost"
-        size="sm"
-        className="flex items-center justify-start gap-2 w-full text-left px-3 py-1 text-sm text-muted-foreground hover:text-foreground rounded-md transition-colors h-auto"
-        asChild
-      >
-        <a href={claudeUrl} target="_blank" rel="noopener noreferrer">
-          <SvgIcon id="claude-mono" className="size-4" />
-          <span className="flex items-center gap-1 [&>svg]:text-white">
-            Open in Claude
-            <span className="text-xs">↗</span>
-          </span>
-        </a>
-      </Button>
+      ))}
     </div>
   );
 }

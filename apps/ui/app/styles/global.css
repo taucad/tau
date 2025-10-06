@@ -22,7 +22,7 @@
   --radius-lg: calc(var(--radius-md) + 0.125rem);
   --radius-md: calc(var(--radius-sm) + 0.125rem);
   --radius-sm: calc(var(--radius-xs) + 0.125rem);
-  --radius-xs: 0.5rem;
+  --radius-xs: 0.4375rem;
 
   /* Base color hues */
   --hue-primary: 266deg;

@@ -39,7 +39,27 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
 
   if (schema.type === 'object') {
     const isRoot = id === rjsfIdPrefix;
-    return <div className={cn(!isRoot && 'first:mt-0 last:mb-0')}>{children}</div>;
+
+    // Narrow down to check if root is an object with only object children
+    const isRootWithOnlyObjectChildren = isRoot && schema.type === 'object' && Object.values(schema.properties ?? {}).every((property) => property !== false && property !== true && property.type === 'object');
+
+    return <div
+      data-slot='field-group'
+      className={cn(
+        'field-group',
+
+        // We can save some space by hiding the left border if the root is an object with only object children
+        isRootWithOnlyObjectChildren && '-ml-3.5 ',
+
+        // Non root object fields.
+        // These have a left border and a top/bottom border.
+        !isRoot && cn(
+          "border-t border-b",
+          "ml-2 border-l-6",
+          "[.field-group:last-of-type]:border-b-0",
+          "[.field-group+&]:border-t-0",
+        )
+      )}>{children}</div>;
   }
 
   // Always call hooks at the very top level
@@ -136,7 +156,7 @@ function ObjectFieldTemplate(
   return (
     <Collapsible
       open={isOpen}
-      className="w-full border-t border-border"
+      className="w-full"
       onOpenChange={setIsOpen}
     >
       <CollapsibleTrigger className="group/collapsible flex h-8 w-full items-center justify-between px-3 py-1.5 transition-colors hover:bg-muted/70">

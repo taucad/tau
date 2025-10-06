@@ -229,7 +229,7 @@ export const ChatParameters = memo(function (props: {
         {hasParameters ? (
           <>
             {/* Search and Controls Bar */}
-            <div className="flex w-full flex-row gap-2 border-b border-border/50 px-3 py-2">
+            <div className="flex w-full flex-row gap-2 px-3 py-2">
               <SearchInput
                 placeholder="Search parameters..."
                 value={searchTerm}

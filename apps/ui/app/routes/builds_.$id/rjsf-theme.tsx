@@ -56,7 +56,9 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
         !isRoot && cn(
           "border-t border-b",
           "ml-2 border-l-6",
+          // The last field group in the object should not have a bottom border
           "[.field-group:last-of-type]:border-b-0",
+          // The first field group in the object should not have a top border
           "[.field-group+&]:border-t-0",
         )
       )}>{children}</div>;

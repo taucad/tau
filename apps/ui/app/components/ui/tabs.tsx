@@ -14,6 +14,7 @@ function Tabs({ className, ...props }: TabsProps): React.JSX.Element {
 type TabsListProps = React.ComponentProps<typeof TabsPrimitive.List> & {
   readonly activeClassName?: string;
   readonly transition?: Transition;
+  readonly orientation?: 'horizontal' | 'vertical';
 };
 
 const defaultTabsListTransition = {
@@ -78,7 +79,10 @@ function TabsList({
         ref={localRef}
         data-slot="tabs-list"
         className={cn(
-          'inline-flex h-8 w-fit items-center justify-center rounded-md bg-muted p-0.75 text-muted-foreground',
+          'w-fit items-center justify-center rounded-md bg-muted p-0.75 text-muted-foreground',
+          'data-[orientation=vertical]:h-fit',
+          'data-[orientation=horizontal]:h-8',
+          'data-[orientation=horizontal]:inline-flex',
           className,
         )}
         {...props}

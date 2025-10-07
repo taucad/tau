@@ -41,7 +41,7 @@ export function SearchInput({
         placeholder={placeholder}
         value={value}
         className={cn(
-          'pl-8 pr-2 not-placeholder-shown:pr-6',
+          'pl-8 pr-2 not-placeholder-shown:pr-6 placeholder:text-sm',
           className
         )}
         {...properties}

@@ -60,7 +60,7 @@
 
   --l-primary: 0.5719;
   --c-primary: 0.1898;
-  
+
   --l-secondary: 0.9;
   --c-secondary: 0.12;
 
@@ -140,7 +140,6 @@
   --l-high: 0.78;
   --l-intense: 0.88;
   --l-deepest: 0.95;
-  
   --l-secondary: 0.8;
 
   --primary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
@@ -152,11 +151,17 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Squircle shape for rounding - https://developer.mozilla.org/en-US/docs/Web/CSS/superellipse */
 @utility rounded-* {
+  /* 
+   * Extend rounded utility to apply the squircle shape for rounding.
+   * Squircle shape for rounding - https://developer.mozilla.org/en-US/docs/Web/CSS/superellipse
+   */
   @supports (corner-shape: superellipse(1)) {
-    border-radius: calc(--value(--radius-*, [length]) * 1.15);
-    corner-shape: superellipse(1.15);
+    /* Full rounded corners preserve perfect circles. */
+    &:not(.rounded-full) {
+      /* 1.15 applies a subtle squircle shape to the rounded corners without being overwhelming.*/
+      corner-shape: superellipse(1.15);
+    }
   }
 }
 

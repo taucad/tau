@@ -2,7 +2,6 @@ import * as React from 'react';
 import { Link } from 'react-router';
 import { NavHistory } from '#components/nav/nav-history.js';
 import { NavMain } from '#components/nav/nav-main.js';
-import { NavProjects } from '#components/nav/nav-projects.js';
 import {
   Sidebar,
   SidebarContent,
@@ -38,7 +37,6 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
         <div className="flex-1 overflow-y-auto">
           <NavHistory />
           <NavMain items={navRoutes.navMain} />
-          <NavProjects projects={navRoutes.projects} />
         </div>
       </SidebarContent>
       <SidebarFooter className="border-t flex flex-row items-center justify-between">

@@ -86,7 +86,7 @@ function addDefaultValues(
 export async function jsonSchemaFromJson(json: Record<string, unknown>): Promise<JsonSchema> {
   const jsonInput = jsonInputForTargetLanguage('json-schema');
   await jsonInput.addSource({
-    name: '',
+    name: 'root',
     samples: [JSON.stringify(json)],
   });
 
@@ -96,6 +96,12 @@ export async function jsonSchemaFromJson(json: Record<string, unknown>): Promise
   const serializedData = await quicktype({
     inputData,
     lang: targetLanguage,
+
+    // This flag should prevent quicktype from combining objects with the same type into a
+    // single ref, but currently it doesn't work. This failure results in schemas that
+    // share types but have different property names to share the same title.
+    // See: https://github.com/glideapps/quicktype/issues/1678
+    combineClasses: false,
   });
 
   const joinedSchema = serializedData.lines.join('');

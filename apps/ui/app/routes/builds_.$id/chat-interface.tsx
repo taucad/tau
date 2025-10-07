@@ -105,7 +105,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           {chatViewer}
 
           {/* Top-left Content */}
-          <div className='absolute top-(--header-height) left-2 group-data-[active-tab=model]/chat-tabs:block group-data-[full-height-panel=true]/chat-tabs:block hidden'>
+          <div className='absolute top-(--header-height) left-2 right-12 group-data-[active-tab=model]/chat-tabs:block group-data-[full-height-panel=true]/chat-tabs:block hidden'>
             <ChatStackTrace />
           </div>
 
@@ -274,7 +274,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
             </div>
 
             {/* Bottom-left Content */}
-            <div className='absolute bottom-0 left-0 flex flex-col gap-2 pointer-events-auto'>
+            <div className='absolute bottom-0 left-0 right-8 flex flex-col gap-2 pointer-events-auto'>
               <ChatStackTrace />
               <ChatViewerControls />
             </div>

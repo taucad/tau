@@ -7,7 +7,7 @@ function StackFrame({ frame, index }: { readonly frame: KernelStackFrame; readon
   const fileName = frame.fileName ?? '<unknown>';
 
   return (
-    <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
+    <div className="flex min-w-0 items-center gap-2 font-mono text-[0.625rem]">
       <span className="w-3 flex-shrink-0 text-right text-muted-foreground">{index + 1}</span>
       <span className="flex-shrink-0 text-muted-foreground">|</span>
       <span className="flex-shrink-0 text-foreground">{frame.functionName ?? '<anonymous>'}</span>

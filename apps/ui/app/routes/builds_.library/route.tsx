@@ -71,7 +71,7 @@ import { createBuildMutations } from '#hooks/build-mutations.js';
 import { Checkbox } from '#components/ui/checkbox.js';
 import { formatRelativeTime } from '#utils/date.js';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '#components/ui/table.js';
-import { toSentenceCase } from '#utils/string.js';
+import { toTitleCase } from '#utils/string.js';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
@@ -533,7 +533,7 @@ function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReact
     .filter((column) => column.getCanSort())
     .map((column) => ({
       id: column.id,
-      label: toSentenceCase(column.id),
+      label: toTitleCase(column.id),
     }));
 
   const toggleSorting = (id: string) => {
@@ -610,7 +610,7 @@ function ViewOptionsDropdown({ table }: { readonly table: ReturnType<typeof useR
                   event.preventDefault();
                 }}
               >
-                {toSentenceCase(column.id)}
+                {toTitleCase(column.id)}
               </DropdownMenuCheckboxItem>
             );
           })}

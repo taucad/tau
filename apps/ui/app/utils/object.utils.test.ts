@@ -5,7 +5,7 @@ describe("getValueAtPath", () => {
   describe("Basic functionality", () => {
     it("should get top-level value", () => {
       const object = { name: "John" };
-      expect(getValueAtPath(object, ["name"])).toBe("John");
+      expect(getValueAtPath(object, ["name"] as const)).toBe("John");
     });
 
     it("should get nested value", () => {
@@ -16,7 +16,7 @@ describe("getValueAtPath", () => {
           },
         },
       };
-      expect(getValueAtPath(object, ["user", "profile", "email"])).toBe("john@example.com");
+      expect(getValueAtPath(object, ["user", "profile", "email"] as const)).toBe("john@example.com");
     });
 
     it("should get deeply nested value", () => {
@@ -31,7 +31,7 @@ describe("getValueAtPath", () => {
           },
         },
       };
-      expect(getValueAtPath(object, ["level1", "level2", "level3", "level4", "value"])).toBe(42);
+      expect(getValueAtPath(object, ["level1", "level2", "level3", "level4", "value"] as const)).toBe(42);
     });
 
     it("should return object itself with empty path", () => {
@@ -53,19 +53,19 @@ describe("getValueAtPath", () => {
   describe("Different value types", () => {
     it("should get string values", () => {
       const object = { text: "hello" };
-      expect(getValueAtPath(object, ["text"])).toBe("hello");
+      expect(getValueAtPath(object, ["text"] as const)).toBe("hello");
     });
 
     it("should get number values", () => {
       const object = { count: 42, price: 19.99 };
-      expect(getValueAtPath(object, ["count"])).toBe(42);
-      expect(getValueAtPath(object, ["price"])).toBe(19.99);
+      expect(getValueAtPath(object, ["count"] as const)).toBe(42);
+      expect(getValueAtPath(object, ["price"] as const)).toBe(19.99);
     });
 
     it("should get boolean values", () => {
       const object = { isActive: true, isDeleted: false };
-      expect(getValueAtPath(object, ["isActive"])).toBe(true);
-      expect(getValueAtPath(object, ["isDeleted"])).toBe(false);
+      expect(getValueAtPath(object, ["isActive"] as const)).toBe(true);
+      expect(getValueAtPath(object, ["isDeleted"] as const)).toBe(false);
     });
 
     it("should get null values", () => {
@@ -90,12 +90,12 @@ describe("getValueAtPath", () => {
 
     it("should get zero values", () => {
       const object = { count: 0 };
-      expect(getValueAtPath(object, ["count"])).toBe(0);
+      expect(getValueAtPath(object, ["count"] as const)).toBe(0);
     });
 
     it("should get empty string values", () => {
       const object = { text: "" };
-      expect(getValueAtPath(object, ["text"])).toBe("");
+      expect(getValueAtPath(object, ["text"] as const)).toBe("");
     });
 
     it("should get empty array values", () => {
@@ -112,9 +112,9 @@ describe("getValueAtPath", () => {
   describe("Array handling", () => {
     it("should access array elements by index", () => {
       const object = { items: ["a", "b", "c"] };
-      expect(getValueAtPath(object, ["items", "0"])).toBe("a");
-      expect(getValueAtPath(object, ["items", "1"])).toBe("b");
-      expect(getValueAtPath(object, ["items", "2"])).toBe("c");
+      expect(getValueAtPath(object, ["items", "0"] as const)).toBe("a");
+      expect(getValueAtPath(object, ["items", "1"] as const)).toBe("b");
+      expect(getValueAtPath(object, ["items", "2"] as const)).toBe("c");
     });
 
     it("should access nested objects in arrays", () => {
@@ -124,8 +124,8 @@ describe("getValueAtPath", () => {
           { name: "Jane", age: 25 },
         ],
       };
-      expect(getValueAtPath(object, ["users", "0", "name"])).toBe("John");
-      expect(getValueAtPath(object, ["users", "1", "age"])).toBe(25);
+      expect(getValueAtPath(object, ["users", "0", "name"] as const)).toBe("John");
+      expect(getValueAtPath(object, ["users", "1", "age"] as const)).toBe(25);
     });
 
     it("should access deeply nested arrays", () => {
@@ -137,8 +137,8 @@ describe("getValueAtPath", () => {
           ],
         },
       };
-      expect(getValueAtPath(object, ["data", "items", "0", "values", "1"])).toBe(2);
-      expect(getValueAtPath(object, ["data", "items", "1", "values", "2"])).toBe(6);
+      expect(getValueAtPath(object, ["data", "items", "0", "values", "1"] as const)).toBe(2);
+      expect(getValueAtPath(object, ["data", "items", "1", "values", "2"] as const)).toBe(6);
     });
 
     it("should return undefined for out-of-bounds array index", () => {
@@ -181,7 +181,7 @@ describe("getValueAtPath", () => {
 
     it("should handle paths with empty string keys", () => {
       const object = { "": "empty key" };
-      expect(getValueAtPath(object, [""])).toBe("empty key");
+      expect(getValueAtPath(object, [""] as const)).toBe("empty key");
     });
 
     it("should handle paths with special characters", () => {
@@ -190,9 +190,9 @@ describe("getValueAtPath", () => {
         "field.name": "value2",
         "field@name": "value3",
       };
-      expect(getValueAtPath(object, ["field-name"])).toBe("value1");
-      expect(getValueAtPath(object, ["field.name"])).toBe("value2");
-      expect(getValueAtPath(object, ["field@name"])).toBe("value3");
+      expect(getValueAtPath(object, ["field-name"] as const)).toBe("value1");
+      expect(getValueAtPath(object, ["field.name"] as const)).toBe("value2");
+      expect(getValueAtPath(object, ["field@name"] as const)).toBe("value3");
     });
 
     it("should handle paths with unicode characters", () => {
@@ -200,8 +200,8 @@ describe("getValueAtPath", () => {
         名前: "name",
         поле: "field",
       };
-      expect(getValueAtPath(object, ["名前"])).toBe("name");
-      expect(getValueAtPath(object, ["поле"])).toBe("field");
+      expect(getValueAtPath(object, ["名前"] as const)).toBe("name");
+      expect(getValueAtPath(object, ["поле"] as const)).toBe("field");
     });
 
     it("should handle paths with numeric string keys", () => {
@@ -209,8 +209,8 @@ describe("getValueAtPath", () => {
         "123": "numeric key",
         "0": "zero key",
       };
-      expect(getValueAtPath(object, ["123"])).toBe("numeric key");
-      expect(getValueAtPath(object, ["0"])).toBe("zero key");
+      expect(getValueAtPath(object, ["123"] as const)).toBe("numeric key");
+      expect(getValueAtPath(object, ["0"] as const)).toBe("zero key");
     });
 
     it("should handle very long paths", () => {

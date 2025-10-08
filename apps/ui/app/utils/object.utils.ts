@@ -1,4 +1,4 @@
-import type { MergeDeep, OmitDeep } from "type-fest";
+import type { MergeDeep, OmitDeep, Get } from "type-fest";
 
 /**
  * Checks if a string is a numeric string (e.g., "0", "1", "42")
@@ -86,14 +86,15 @@ export function setValueAtPath<
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return -- Generic type constraint requires cast
   return result as any;
-}/**
+}
+
+/**
  * Gets a value from a nested object using a path array
  * @param object - The object to traverse
  * @param path - Array of property keys to follow
  * @returns The value at the specified path, or undefined if not found
  */
-
-export function getValueAtPath(object: Record<string, unknown>, path: string[]): unknown {
+export function getValueAtPath<T extends Record<string, unknown>, Path extends readonly string[]>(object: T, path: Path): Get<T, Path> | undefined {
   let current: unknown = object;
 
   for (const key of path) {
@@ -104,7 +105,7 @@ export function getValueAtPath(object: Record<string, unknown>, path: string[]):
     }
   }
 
-  return current;
+  return current as Get<T, Path>;
 }
 
 /**

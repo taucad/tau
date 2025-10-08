@@ -2,9 +2,10 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import type { InspectReport } from '@gltf-transform/functions';
 import type { InputFormat } from '#types.js';
 import { importFiles, supportedImportFormats } from '#import.js';
-import { createInspectTestUtils, loadTestData, createGeometryVariant, validateGlbData } from '#test.utils.js';
+import { createInspectTestUtils, loadTestData, createGeometryVariant } from '#test.utils.js';
 import type { LoaderTestCase, GeometryExpectation } from '#test.utils.js';
-import { getInspectReport, type GltfSceneStructure } from '#gltf.utils.js';
+import { getInspectReport, validateGlbData } from '#gltf.utils.js';
+import type { GltfSceneStructure } from '#gltf.utils.js';
 
 // ============================================================================
 // Test Case Templates & Factories
@@ -33,16 +34,20 @@ const OPTIMIZED_CUBE_GEOMETRY: GeometryExpectation = {
 const GLTF_SCENE_PATTERNS = {
   // Container node with mesh child (most common pattern)
   containerWithMeshChild: {
-    rootNodes: [{
-      type: 'ContainerNode',
-      children: [{ type: 'MeshNode' }]
-    }]
+    rootNodes: [
+      {
+        type: 'ContainerNode',
+        children: [{ type: 'MeshNode' }],
+      },
+    ],
   },
   // Direct mesh (simple formats)
   directMesh: {
-    rootNodes: [{
-      type: 'MeshNode'
-    }]
+    rootNodes: [
+      {
+        type: 'MeshNode',
+      },
+    ],
   },
 } as const;
 
@@ -59,7 +64,7 @@ const createCubeTestCase = (
     dataSource?: () => Promise<Uint8Array>;
   } = {},
 ): LoaderTestCase => ({
-  format: format,
+  format,
   variant: options.variant,
   fixtureName: options.fixtureName ?? `cube${options.variant ? `-${options.variant}` : ''}.${format}`,
   dataSource: options.dataSource,
@@ -85,13 +90,13 @@ const loaderTestCases: LoaderTestCase[] = [
   // GLTF/GLB Family - direct mesh at root level
   createCubeTestCase('gltf', { structure: 'directMesh' }),
   createCubeTestCase('glb', { structure: 'directMesh' }),
-  createCubeTestCase('glb', { variant: 'draco', structure: 'directMesh', geometry: OPTIMIZED_CUBE_GEOMETRY  }),
+  createCubeTestCase('glb', { variant: 'draco', structure: 'directMesh', geometry: OPTIMIZED_CUBE_GEOMETRY }),
   createCubeTestCase('glb', {
     variant: 'materials',
     structure: 'directMesh',
     geometry: createGeometryVariant(OPTIMIZED_CUBE_GEOMETRY, {
       boundingBox: {
-        size: [2201.25752, 2000, 2201.25752],
+        size: [2201.257_52, 2000, 2201.257_52],
         center: [0, 1, 0],
       },
     }),
@@ -101,7 +106,7 @@ const loaderTestCases: LoaderTestCase[] = [
     structure: 'directMesh',
     geometry: createGeometryVariant(OPTIMIZED_CUBE_GEOMETRY, {
       boundingBox: {
-        size: [2201.25752, 2000, 2201.25752],
+        size: [2201.257_52, 2000, 2201.257_52],
         center: [0, 1, 0],
       },
     }),
@@ -117,6 +122,25 @@ const loaderTestCases: LoaderTestCase[] = [
     }),
   }),
   createCubeTestCase('gltf', { variant: 'draco', structure: 'directMesh', geometry: OPTIMIZED_CUBE_GEOMETRY }),
+  {
+    format: 'gltf',
+    files: ['cube-bin.gltf', 'cube-bin.bin'],
+    description: 'GLTF with external binary file',
+    geometry: createGeometryVariant(OPTIMIZED_CUBE_GEOMETRY, {
+      boundingBox: {
+        size: [2000, 2000, 2000],
+        center: [0, 1, 0],
+      },
+    }),
+    structure: {
+      rootNodes: [
+        {
+          type: 'MeshNode',
+          name: 'Cube',
+        },
+      ],
+    },
+  },
 
   createCubeTestCase('stl', { variant: 'binary', structure: 'containerWithMeshChild' }),
   createCubeTestCase('stl', { variant: 'ascii', structure: 'containerWithMeshChild' }),
@@ -128,10 +152,12 @@ const loaderTestCases: LoaderTestCase[] = [
     description: 'OBJ with MTL material file',
     geometry: STANDARD_CUBE_GEOMETRY,
     structure: {
-      rootNodes: [{
-        type: 'ContainerNode',
-        children: [{ type: 'MeshNode' }]
-      }]
+      rootNodes: [
+        {
+          type: 'ContainerNode',
+          children: [{ type: 'MeshNode' }],
+        },
+      ],
     },
   },
 
@@ -185,7 +211,7 @@ const loaderTestCases: LoaderTestCase[] = [
     skipReason: 'GLTF texture loading does not work in Node.js yet.',
   }),
 
-  // 3DS creates complex multi-mesh structures - skip structure validation  
+  // 3DS creates complex multi-mesh structures - skip structure validation
   createCubeTestCase('3ds', {}),
 
   createCubeTestCase('amf', { structure: 'containerWithMeshChild' }),
@@ -193,13 +219,17 @@ const loaderTestCases: LoaderTestCase[] = [
 
   createCubeTestCase('x3d', {
     structure: {
-      rootNodes: [{
-        type: 'ContainerNode',
-        children: [{
+      rootNodes: [
+        {
           type: 'ContainerNode',
-          children: [{ type: 'MeshNode' }]
-        }]
-      }]
+          children: [
+            {
+              type: 'ContainerNode',
+              children: [{ type: 'MeshNode' }],
+            },
+          ],
+        },
+      ],
     },
   }),
   createSkippedTestCase('x3db', 'X3DB (binary) loader is not implemented yet.'),
@@ -209,46 +239,64 @@ const loaderTestCases: LoaderTestCase[] = [
   createCubeTestCase('ifc', {
     variant: 'freecad',
     structure: {
-      rootNodes: [{
-        type: 'ContainerNode',
-        children: [{
+      rootNodes: [
+        {
           type: 'ContainerNode',
-          children: [{
-            type: 'ContainerNode',
-            children: [{ type: 'MeshNode' }]
-          }]
-        }]
-      }]
+          children: [
+            {
+              type: 'ContainerNode',
+              children: [
+                {
+                  type: 'ContainerNode',
+                  children: [{ type: 'MeshNode' }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
     },
   }),
   createCubeTestCase('ifc', {
     variant: 'blender',
     structure: {
-      rootNodes: [{
-        type: 'ContainerNode',
-        children: [{
+      rootNodes: [
+        {
           type: 'ContainerNode',
-          children: [{
-            type: 'ContainerNode',
-            children: [{
+          children: [
+            {
               type: 'ContainerNode',
-              children: [{ type: 'MeshNode' }]
-            }]
-          }]
-        }]
-      }]
+              children: [
+                {
+                  type: 'ContainerNode',
+                  children: [
+                    {
+                      type: 'ContainerNode',
+                      children: [{ type: 'MeshNode' }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
     },
   }),
 
   createCubeTestCase('ase', {
     structure: {
-      rootNodes: [{
-        type: 'ContainerNode',
-        children: [{
+      rootNodes: [
+        {
           type: 'ContainerNode',
-          children: [{ type: 'MeshNode' }]
-        }]
-      }]
+          children: [
+            {
+              type: 'ContainerNode',
+              children: [{ type: 'MeshNode' }],
+            },
+          ],
+        },
+      ],
     },
   }),
 
@@ -258,10 +306,12 @@ const loaderTestCases: LoaderTestCase[] = [
 
   createCubeTestCase('smd', {
     structure: {
-      rootNodes: [{
-        type: 'ContainerNode',
-        children: [{ type: 'ContainerNode' }]
-      }]
+      rootNodes: [
+        {
+          type: 'ContainerNode',
+          children: [{ type: 'ContainerNode' }],
+        },
+      ],
     },
     skip: true,
     skipReason: 'SMD loader depends on GLTF image loading, which is not supported in Node.js.',
@@ -281,8 +331,8 @@ const loaderTestCases: LoaderTestCase[] = [
 
   createCubeTestCase('drc', {
     geometry: OPTIMIZED_CUBE_GEOMETRY,
-    structure: { 
-      rootNodes: [{ type: 'MeshNode' }]
+    structure: {
+      rootNodes: [{ type: 'MeshNode' }],
     },
   }),
 
@@ -300,7 +350,6 @@ const loaderTestCases: LoaderTestCase[] = [
     }),
     structure: 'containerWithMeshChild',
   }),
-
 
   createCubeTestCase('3dm', {
     variant: 'mesh',
@@ -337,7 +386,7 @@ const loaderTestCases: LoaderTestCase[] = [
         { type: 'MeshNode', name: 'TestCube' },
         { type: 'MeshNode', name: 'TestCube' },
         { type: 'MeshNode', name: 'TestCube' },
-      ]
+      ],
     },
   },
 
@@ -346,39 +395,57 @@ const loaderTestCases: LoaderTestCase[] = [
       vertexCount: 120,
       faceCount: 40,
       boundingBox: {
-        size: [2.48284, 2.4, 2.4],
-        center: [-0.04142, 0, 2],
+        size: [2.482_84, 2.4, 2.4],
+        center: [-0.041_42, 0, 2],
       },
     }),
     structure: {
-      rootNodes: [{
-        type: 'SkinNode',
-        children: [{
-          type: 'ContainerNode',
-          children: [{
-            type: 'ContainerNode',
-            children: [{
+      rootNodes: [
+        {
+          type: 'SkinNode',
+          children: [
+            {
               type: 'ContainerNode',
-              children: [{
-                type: 'ContainerNode',
-                children: [{
+              children: [
+                {
                   type: 'ContainerNode',
-                  children: [{
-                    type: 'ContainerNode',
-                    children: [{
+                  children: [
+                    {
                       type: 'ContainerNode',
-                      children: [{
-                        type: 'ContainerNode',
-                        children: [{ type: 'ContainerNode' }] // BVH creates 10-level deep skeletal hierarchy
-                      }]
-                    }]
-                  }]
-                }]
-              }]
-            }]
-          }]
-        }]
-      }]
+                      children: [
+                        {
+                          type: 'ContainerNode',
+                          children: [
+                            {
+                              type: 'ContainerNode',
+                              children: [
+                                {
+                                  type: 'ContainerNode',
+                                  children: [
+                                    {
+                                      type: 'ContainerNode',
+                                      children: [
+                                        {
+                                          type: 'ContainerNode',
+                                          children: [{ type: 'ContainerNode' }], // BVH creates 10-level deep skeletal hierarchy
+                                        },
+                                      ],
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
     },
   }),
 
@@ -409,7 +476,7 @@ const loaderTestCases: LoaderTestCase[] = [
   createCubeTestCase('igs', {
     variant: 'brep',
     geometry: { ...OPTIMIZED_CUBE_GEOMETRY, meshCount: 6, facePoints: 4 },
-    // Skip structure validation for complex BREP - has complex multi-mesh structure  
+    // Skip structure validation for complex BREP - has complex multi-mesh structure
     skip: false,
   }),
   createCubeTestCase('brep', { geometry: OPTIMIZED_CUBE_GEOMETRY, structure: 'directMesh' }),

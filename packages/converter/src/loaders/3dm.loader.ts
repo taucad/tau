@@ -1,9 +1,5 @@
 import { Document } from '@gltf-transform/core';
 import type { Buffer as GltfBuffer, Material, Mesh, Node, Scene } from '@gltf-transform/core';
-import { BaseLoader, type BaseLoaderOptions } from '#loaders/base.loader.js';
-import type { File } from '#types.js';
-import { createNodeIO } from '#gltf.utils.js';
-import { createCoordinateTransform, createScalingTransform } from '#gltf.transforms.js';
 import type {
   RhinoModule,
   File3dm,
@@ -26,6 +22,11 @@ import type {
   File3dmObject,
 } from 'rhino3dm';
 import rhino3dm from 'rhino3dm';
+import { BaseLoader } from '#loaders/base.loader.js';
+import type { BaseLoaderOptions } from '#loaders/base.loader.js';
+import type { File } from '#types.js';
+import { createNodeIO } from '#gltf.utils.js';
+import { createCoordinateTransform, createScalingTransform } from '#gltf.transforms.js';
 
 // Type for rhino3dm geometry JSON structure
 type RhinoGeometryJSON = {
@@ -174,7 +175,7 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
       const result = this.createObject(geometry, attributes, doc, document, buffer);
       if (result) {
         const { node } = result;
-        
+
         // Apply accumulated transformations from the transformation stack
         if (transformationStack.length > 0) {
           // Compose all transformations into a single matrix
@@ -272,50 +273,37 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
     buffer: GltfBuffer,
   ): { mesh: Mesh; node: Node } {
     const threeGeometry = geometry.toThreejsJSON() as RhinoGeometryJSON;
-    
+
     // Extract vertex data
     const positions = new Float32Array(threeGeometry.data.attributes.position.array);
-    const normals = threeGeometry.data.attributes.normal 
-      ? new Float32Array(threeGeometry.data.attributes.normal.array) 
+    const normals = threeGeometry.data.attributes.normal
+      ? new Float32Array(threeGeometry.data.attributes.normal.array)
       : undefined;
     const colors = threeGeometry.data.attributes.color
       ? new Float32Array(threeGeometry.data.attributes.color.array)
       : undefined;
-    const indices = threeGeometry.data.index
-      ? new Uint32Array(threeGeometry.data.index.array)
-      : undefined;
+    const indices = threeGeometry.data.index ? new Uint32Array(threeGeometry.data.index.array) : undefined;
 
     // Create accessors
-    const positionAccessor = document.createAccessor()
-      .setArray(positions)
-      .setType('VEC3')
-      .setBuffer(buffer);
+    const positionAccessor = document.createAccessor().setArray(positions).setType('VEC3').setBuffer(buffer);
 
-    const primitive = document.createPrimitive()
+    const primitive = document
+      .createPrimitive()
       .setMode(4) // TRIANGLES
       .setAttribute('POSITION', positionAccessor);
 
     if (indices) {
-      const indexAccessor = document.createAccessor()
-        .setArray(indices)
-        .setType('SCALAR')
-        .setBuffer(buffer);
+      const indexAccessor = document.createAccessor().setArray(indices).setType('SCALAR').setBuffer(buffer);
       primitive.setIndices(indexAccessor);
     }
 
     if (normals) {
-      const normalAccessor = document.createAccessor()
-        .setArray(normals)
-        .setType('VEC3')
-        .setBuffer(buffer);
+      const normalAccessor = document.createAccessor().setArray(normals).setType('VEC3').setBuffer(buffer);
       primitive.setAttribute('NORMAL', normalAccessor);
     }
 
     if (colors) {
-      const colorAccessor = document.createAccessor()
-        .setArray(colors)
-        .setType('VEC3')
-        .setBuffer(buffer);
+      const colorAccessor = document.createAccessor().setArray(colors).setType('VEC3').setBuffer(buffer);
       primitive.setAttribute('COLOR_0', colorAccessor);
     }
 
@@ -433,24 +421,18 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
     const colors = new Float32Array([drawColor.r / 255, drawColor.g / 255, drawColor.b / 255]);
 
     // Create accessors
-    const positionAccessor = document.createAccessor()
-      .setArray(positions)
-      .setType('VEC3')
-      .setBuffer(buffer);
+    const positionAccessor = document.createAccessor().setArray(positions).setType('VEC3').setBuffer(buffer);
 
-    const colorAccessor = document.createAccessor()
-      .setArray(colors)
-      .setType('VEC3')
-      .setBuffer(buffer);
+    const colorAccessor = document.createAccessor().setArray(colors).setType('VEC3').setBuffer(buffer);
 
-    const primitive = document.createPrimitive()
+    const primitive = document
+      .createPrimitive()
       .setMode(0) // POINTS
       .setAttribute('POSITION', positionAccessor)
       .setAttribute('COLOR_0', colorAccessor);
 
     // Create basic material for points
-    const material = document.createMaterial()
-      .setBaseColorFactor([1, 1, 1, 1]);
+    const material = document.createMaterial().setBaseColorFactor([1, 1, 1, 1]);
     primitive.setMaterial(material);
 
     // Create mesh and node
@@ -480,36 +462,29 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
     buffer: GltfBuffer,
   ): { mesh: Mesh; node: Node } {
     const threeGeometry = geometry.toThreejsJSON() as RhinoGeometryJSON;
-    
+
     const positions = new Float32Array(threeGeometry.data.attributes.position.array);
     const colors = threeGeometry.data.attributes.color
       ? new Float32Array(threeGeometry.data.attributes.color.array)
       : undefined;
 
     // Create accessors
-    const positionAccessor = document.createAccessor()
-      .setArray(positions)
-      .setType('VEC3')
-      .setBuffer(buffer);
+    const positionAccessor = document.createAccessor().setArray(positions).setType('VEC3').setBuffer(buffer);
 
-    const primitive = document.createPrimitive()
+    const primitive = document
+      .createPrimitive()
       .setMode(0) // POINTS
       .setAttribute('POSITION', positionAccessor);
 
     let material: Material;
     if (colors) {
-      const colorAccessor = document.createAccessor()
-        .setArray(colors)
-        .setType('VEC3')
-        .setBuffer(buffer);
+      const colorAccessor = document.createAccessor().setArray(colors).setType('VEC3').setBuffer(buffer);
       primitive.setAttribute('COLOR_0', colorAccessor);
-      
-      material = document.createMaterial()
-        .setBaseColorFactor([1, 1, 1, 1]);
+
+      material = document.createMaterial().setBaseColorFactor([1, 1, 1, 1]);
     } else {
       const color = this.extractColor(attributes, doc);
-      material = document.createMaterial()
-        .setBaseColorFactor([color.r, color.g, color.b, 1]);
+      material = document.createMaterial().setBaseColorFactor([color.r, color.g, color.b, 1]);
     }
 
     primitive.setMaterial(material);
@@ -543,27 +518,24 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
     const pts = this.curveToPoints(geometry, 100);
     const positions = new Float32Array(pts.length * 3);
 
-    for (let i = 0; i < pts.length; i++) {
-      const pt = pts[i]!;
+    for (const [i, pt_] of pts.entries()) {
+      const pt = pt_;
       positions[i * 3] = pt[0]!;
       positions[i * 3 + 1] = pt[1]!;
       positions[i * 3 + 2] = pt[2]!;
     }
 
     // Create accessors
-    const positionAccessor = document.createAccessor()
-      .setArray(positions)
-      .setType('VEC3')
-      .setBuffer(buffer);
+    const positionAccessor = document.createAccessor().setArray(positions).setType('VEC3').setBuffer(buffer);
 
-    const primitive = document.createPrimitive()
+    const primitive = document
+      .createPrimitive()
       .setMode(3) // LINE_STRIP
       .setAttribute('POSITION', positionAccessor);
 
     // Create material with color
     const color = this.extractColor(attributes, doc);
-    const material = document.createMaterial()
-      .setBaseColorFactor([color.r, color.g, color.b, 1]);
+    const material = document.createMaterial().setBaseColorFactor([color.r, color.g, color.b, 1]);
     primitive.setMaterial(material);
 
     // Create mesh and node
@@ -596,19 +568,16 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
     const positions = new Float32Array([point[0]!, point[1]!, point[2]!]);
 
     // Create accessors
-    const positionAccessor = document.createAccessor()
-      .setArray(positions)
-      .setType('VEC3')
-      .setBuffer(buffer);
+    const positionAccessor = document.createAccessor().setArray(positions).setType('VEC3').setBuffer(buffer);
 
-    const primitive = document.createPrimitive()
+    const primitive = document
+      .createPrimitive()
       .setMode(0) // POINTS
       .setAttribute('POSITION', positionAccessor);
 
     // Create material with color
     const color = this.extractColor(attributes, doc);
-    const material = document.createMaterial()
-      .setBaseColorFactor([color.r, color.g, color.b, 1]);
+    const material = document.createMaterial().setBaseColorFactor([color.r, color.g, color.b, 1]);
     primitive.setMaterial(material);
 
     // Create mesh and node
@@ -643,18 +612,17 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
     const positions = new Float32Array([location[0]!, location[1]!, location[2]!]);
 
     // Create accessors
-    const positionAccessor = document.createAccessor()
-      .setArray(positions)
-      .setType('VEC3')
-      .setBuffer(buffer);
+    const positionAccessor = document.createAccessor().setArray(positions).setType('VEC3').setBuffer(buffer);
 
-    const primitive = document.createPrimitive()
+    const primitive = document
+      .createPrimitive()
       .setMode(0) // POINTS
       .setAttribute('POSITION', positionAccessor);
 
     // Create material with light color
     const lightColor = geometry.diffuse as { r: number; g: number; b: number };
-    const material = document.createMaterial()
+    const material = document
+      .createMaterial()
       .setBaseColorFactor([lightColor.r / 255, lightColor.g / 255, lightColor.b / 255, 1]);
     primitive.setMaterial(material);
 
@@ -668,21 +636,21 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
     metadata['lightStyle'] = lightStyle.name;
     metadata['intensity'] = geometry.intensity;
     metadata['diffuse'] = lightColor;
-    
+
     // Add direction for directional/spot lights
     if (lightStyle.name.includes('Directional') || lightStyle.name.includes('Spot')) {
       metadata['direction'] = geometry.direction;
     }
-    
+
     if (lightStyle.name.includes('Spot')) {
       metadata['spotAngleRadians'] = geometry.spotAngleRadians;
     }
-    
+
     if (lightStyle.name.includes('Rectangular')) {
       metadata['width'] = geometry.width;
       metadata['length'] = geometry.length;
     }
-    
+
     node.setExtras(metadata);
 
     if (attributes.name) {
@@ -697,15 +665,27 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
    * Compose transformation stack by multiplying matrices in order
    */
   private composeTransformationStack(
-    transformationStack: number[][]
-  ): [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number] {
+    transformationStack: number[][],
+  ): [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ] {
     // Start with identity matrix
-    let result = [
-      1, 0, 0, 0,
-      0, 1, 0, 0,
-      0, 0, 1, 0,
-      0, 0, 0, 1
-    ];
+    let result = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
     // Multiply matrices from the stack in reverse order (parent to child)
     for (let i = transformationStack.length - 1; i >= 0; i--) {
@@ -713,14 +693,31 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
       result = this.multiplyMatrices(result, matrix);
     }
 
-    return result as [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number];
+    return result as [
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+    ];
   }
 
   /**
    * Multiply two 4x4 matrices (column-major order)
    */
   private multiplyMatrices(a: number[], b: number[]): number[] {
-    const result = new Array(16).fill(0);
+    const result = Array.from({ length: 16 }).fill(0);
 
     for (let row = 0; row < 4; row++) {
       for (let col = 0; col < 4; col++) {
@@ -758,11 +755,7 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
   /**
    * Create gltf-transform material from Rhino attributes and document
    */
-  private createGltfMaterial(
-    attributes: ObjectAttributes,
-    doc: File3dm,
-    document: Document,
-  ): Material {
+  private createGltfMaterial(attributes: ObjectAttributes, doc: File3dm, document: Document): Material {
     // Try to get material from document
     const materials = doc.materials();
     let rhinoMaterial: RhinoMaterial | undefined;
@@ -777,7 +770,8 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
 
     // Fallback to object draw color
     const color = this.extractColor(attributes, doc);
-    return document.createMaterial()
+    return document
+      .createMaterial()
       .setBaseColorFactor([color.r, color.g, color.b, 1])
       .setMetallicFactor(0.1)
       .setRoughnessFactor(0.8);
@@ -786,10 +780,7 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
   /**
    * Create gltf-transform material from Rhino Material
    */
-  private createMaterialFromRhinoMaterial(
-    rhinoMaterial: RhinoMaterial,
-    document: Document,
-  ): Material {
+  private createMaterialFromRhinoMaterial(rhinoMaterial: RhinoMaterial, document: Document): Material {
     // Check if it's a PBR material
     const pbrMaterial = rhinoMaterial as unknown as PhysicallyBasedMaterial;
 
@@ -801,7 +792,8 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
     const diffuseColor = rhinoMaterial.diffuseColor as unknown as { r: number; g: number; b: number };
     const specularColor = rhinoMaterial.specularColor as unknown as { r: number; g: number; b: number };
 
-    const material = document.createMaterial()
+    const material = document
+      .createMaterial()
       .setBaseColorFactor([diffuseColor.r / 255, diffuseColor.g / 255, diffuseColor.b / 255, 1])
       .setMetallicFactor(0.1)
       .setRoughnessFactor(1 - rhinoMaterial.shine / 255); // Convert shine to roughness
@@ -825,7 +817,8 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
   private createPbrMaterial(pbrMaterial: PhysicallyBasedMaterial, document: Document): Material {
     const baseColor = pbrMaterial.baseColor as unknown as { r: number; g: number; b: number };
 
-    const material = document.createMaterial()
+    const material = document
+      .createMaterial()
       .setBaseColorFactor([baseColor.r / 255, baseColor.g / 255, baseColor.b / 255, pbrMaterial.opacity])
       .setMetallicFactor(pbrMaterial.metallic)
       .setRoughnessFactor(pbrMaterial.roughness);

@@ -19,11 +19,13 @@ import { ChatParametersBoolean } from '#routes/builds_.$id/chat-parameters-boole
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { cn } from '#utils/ui.js';
-import { toSentenceCase } from '#utils/string.js';
+import { toTitleCase } from '#utils/string.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { HighlightText } from '#components/highlight-text.js';
 import { ChatParameterWidget } from '#routes/builds_.$id/chat-parameter-widget.js';
-import { rjsfIdToJsonPath, hasCustomValue, rjsfIdPrefix } from '#routes/builds_.$id/rjsf-utils.js';
+import { rjsfIdToJsonPath, rjsfIdPrefix, rjsfIdSeparator, isSchemaMatchingSearch } from '#routes/builds_.$id/rjsf-utils.js';
+import { hasCustomValue } from "#utils/object.utils.js";
+import { EmptyItems } from '#components/ui/empty-items.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for formContext
 export type RJSFContext = {
@@ -37,19 +39,25 @@ export type RJSFContext = {
 function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSchema, RJSFContext>): React.ReactNode {
   const { label, help, required, description, errors, children, schema, formData, id, registry } = props;
 
-  if (schema.type === 'object') {
+  if (schema.type === 'object' || schema.type === 'array') {
     const isRoot = id === rjsfIdPrefix;
+    const { formContext } = registry;
 
-    // Narrow down to check if root is an object with only object children
-    const isRootWithOnlyObjectChildren = isRoot && schema.type === 'object' && Object.values(schema.properties ?? {}).every((property) => property !== false && property !== true && property.type === 'object');
+    // If we're searching and this object/array has no matching nested properties, don't render it
+    if (!isRoot && formContext.searchTerm && !isSchemaMatchingSearch(schema, formContext.searchTerm, label)) {
+      return null;
+    }
+
+    // Narrow down to check if root is an object with only nested children
+    const isRootNestedOnlyChildren = isRoot && schema.type === 'object' && Object.values(schema.properties ?? {}).every((property) => property !== false && property !== true && (property.type === 'object' || property.type === 'array'));
 
     return <div
       data-slot='field-group'
       className={cn(
-        'field-group',
+        'field-group group/field-group',
 
-        // We can save some space by hiding the left border if the root is an object with only object children
-        isRootWithOnlyObjectChildren && '-ml-3.5 ',
+        // We can save some space by hiding the left border if the root is an object with only nested (object or array) children
+        'data-[is-root-nested-only=true]:-ml-3.5',
 
         // Non root object fields.
         // These have a left border and a top/bottom border.
@@ -61,15 +69,46 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
           // The first field group in the object should not have a top border
           "[.field-group+&]:border-t-0",
         )
-      )}>{children}</div>;
+      )}
+      data-is-root-nested-only={isRootNestedOnlyChildren}
+    >{children}</div>;
   }
 
   // Always call hooks at the very top level
   const { formContext } = registry;
-  const prettyLabel = toSentenceCase(label);
+  const prettyLabel = toTitleCase(label);
+  const descriptionText = typeof schema.description === 'string' ? schema.description : '';
 
-  if (!formContext.shouldShowField(prettyLabel)) {
-    return null; // Hide field if it doesn't match search
+  // Check if we need to filter this field
+  if (formContext.searchTerm) {
+    // Check if this field matches the search
+    const labelMatches = formContext.shouldShowField(prettyLabel);
+    const descriptionMatches = descriptionText && formContext.shouldShowField(descriptionText);
+
+    // If field doesn't match, check if it's inside a matching parent group
+    // by checking the parent group names in the ID path
+    let isInMatchingGroup = false;
+    if (!labelMatches && !descriptionMatches) {
+      // Parse the ID to extract parent group names (e.g., ///root///handrails///colors///post)
+      const idParts = id.split(rjsfIdSeparator).filter(Boolean);
+      // Skip 'root' and check if any parent segment matches
+      for (let i = 1; i < idParts.length - 1; i++) {
+        const parentSegment = idParts[i];
+        if (parentSegment) {
+          const parentName = toTitleCase(parentSegment);
+          if (formContext.shouldShowField(parentName)) {
+            isInMatchingGroup = true;
+            break;
+          }
+        }
+      }
+    }
+
+    const shouldShow = labelMatches || descriptionMatches || isInMatchingGroup;
+
+    if (!shouldShow) {
+      return null;
+    }
   }
 
   // Convert RJSF ID to JSON path using schema-aware parsing
@@ -84,7 +123,9 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   };
 
   return (
-    <div className="@container/parameter flex flex-col px-3 py-2 transition-colors hover:bg-muted/70">
+    <div className={cn(
+      "@container/parameter flex flex-col px-3 py-2 transition-colors",
+    )}>
       <div className="flex h-auto min-h-6 flex-row justify-between gap-2">
         <span className={cn(fieldHasValue ? 'font-medium' : 'font-normal')} aria-label={`Parameter: ${prettyLabel}`}>
           <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
@@ -106,7 +147,11 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
           </Tooltip>
         ) : null}
       </div>
-      {description}
+      {descriptionText ? (
+        <div className="text-sm text-muted-foreground">
+          <HighlightText text={descriptionText} searchTerm={formContext.searchTerm} />
+        </div>
+      ) : description}
       <div className="mt-auto flex w-full flex-row items-center gap-2">{children}</div>
       {help}
       {errors}
@@ -118,7 +163,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
 function ObjectFieldTemplate(
   props: ObjectFieldTemplateProps<Record<string, unknown>, RJSFSchema, RJSFContext>,
 ): React.ReactNode {
-  const { title, description, properties, idSchema, registry } = props;
+  const { title, description, properties, idSchema, registry, schema } = props;
 
   const { formContext } = registry;
 
@@ -129,31 +174,64 @@ function ObjectFieldTemplate(
     setIsOpen(formContext.allExpanded);
   }, [formContext.allExpanded]);
 
-  if (isRoot) {
-    return <div>{properties.map((element) => element.content)}</div>;
-  }
-
-  // FIXED: Check if the group should be visible by checking BOTH:
-  // 1. If the group title itself matches the search term, OR
-  // 2. If any child properties match the search term
-  const prettyTitle = toSentenceCase(title);
+  // Check if the group should be visible by checking:
+  // 1. If the group title itself matches the search term, OR  
+  // 2. If any child properties (or their nested children) match
+  const prettyTitle = toTitleCase(title);
   const groupTitleMatches = formContext.shouldShowField(prettyTitle);
 
-  const hasVisibleChildProperties = properties.some((property) => {
-    const propertyName = property.name;
-    const prettyLabel = toSentenceCase(propertyName);
-    return formContext.shouldShowField(prettyLabel);
-  });
+  // Use the schema to check if any nested properties match
+  const hasMatchingNestedProperties = isSchemaMatchingSearch(schema, formContext.searchTerm);
 
-  // Show the group if either the title matches OR any children match
-  const shouldShowGroup = groupTitleMatches || hasVisibleChildProperties;
+  // Show the group if either the title matches OR any nested properties match
+  const shouldShowGroup = groupTitleMatches || hasMatchingNestedProperties;
+
+  // Force group open when there's an active search and this group has matches
+  useEffect(() => {
+    const hasActiveSearch = formContext.searchTerm.trim().length > 0;
+    if (hasActiveSearch && shouldShowGroup) {
+      setIsOpen(true);
+    }
+  }, [formContext.searchTerm, shouldShowGroup]);
+
+  if (isRoot) {
+    return (
+      <div className="[&:has(.properties:not(:empty))_.no-params]:hidden">
+        <EmptyItems className="no-params break-all group-data-[is-root-nested-only=true]/field-group:ml-5.5">
+          No parameters matching &quot;{formContext.searchTerm}&quot;
+        </EmptyItems>
+        <div className="properties">{properties.map((element) => element.content)}</div>
+      </div>
+    );
+  }
 
   // Don't render the group if neither title nor children would be visible
   if (!shouldShowGroup) {
     return null;
   }
 
-  const propertiesCount = properties.length;
+  const totalPropertiesCount = properties.length;
+
+  // Calculate filtered count when searching
+  const isFiltering = formContext.searchTerm.trim().length > 0;
+  const filteredPropertiesCount = isFiltering
+    ? properties.filter((property) => {
+      const propertyName = property.name;
+      // Get the schema for this child property from the parent schema
+      const childSchema = schema.properties?.[propertyName];
+      if (!childSchema || typeof childSchema !== 'object' || Array.isArray(childSchema)) {
+        return false;
+      }
+      // Check if this direct child property matches
+      return isSchemaMatchingSearch(childSchema as RJSFSchema, formContext.searchTerm, propertyName);
+    }).length
+    : totalPropertiesCount;
+
+  // Show filtered/total format when filtering and counts differ
+  const isCountFiltered = isFiltering && filteredPropertiesCount !== totalPropertiesCount;
+  const countDisplay = isCountFiltered
+    ? `(${filteredPropertiesCount}/${totalPropertiesCount})`
+    : `(${totalPropertiesCount})`;
 
   return (
     <Collapsible
@@ -161,10 +239,17 @@ function ObjectFieldTemplate(
       className="w-full"
       onOpenChange={setIsOpen}
     >
-      <CollapsibleTrigger className="group/collapsible flex h-8 w-full items-center justify-between px-3 py-1.5 transition-colors hover:bg-muted/70">
+      <CollapsibleTrigger 
+        className="group/collapsible flex h-8 w-full items-center justify-between px-3 py-1.5 transition-colors hover:bg-muted/70"
+        aria-label={`Group: ${prettyTitle}`}
+      >
         <h3 className="flex min-w-0 flex-1 items-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          <span className="truncate">{prettyTitle}</span>
-          <span className="ml-1.5 flex-shrink-0 text-muted-foreground/50">({propertiesCount})</span>
+          <span className="truncate">
+            <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
+          </span>
+          <span className={cn("ml-1.5 flex-shrink-0 text-muted-foreground/50", isCountFiltered && "italic")}>
+            {countDisplay}
+          </span>
         </h3>
         <ChevronRight className="size-3.5 text-muted-foreground transition-transform duration-200 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
       </CollapsibleTrigger>
@@ -172,6 +257,73 @@ function ObjectFieldTemplate(
       <CollapsibleContent className="px-0 py-0">
         {description ? <div className="px-3 py-2 text-sm text-muted-foreground">{description}</div> : null}
         {properties.map((element) => element.content)}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function ArrayFieldTemplate(props: ArrayFieldTemplateProps): React.ReactNode {
+  const { title, items, canAdd, onAddClick, registry, schema } = props;
+  const { formContext } = registry;
+
+  const [isOpen, setIsOpen] = useState<boolean | undefined>(true);
+
+  useEffect(() => {
+    setIsOpen(formContext.allExpanded);
+  }, [formContext.allExpanded]);
+
+  // Check if the array should be visible by checking:
+  // 1. If the array title itself matches the search term, OR
+  // 2. If the array items schema matches (indicating children would match)
+  const prettyTitle = toTitleCase(title);
+  
+  // Check if the schema or its title matches the search
+  const shouldShowArray = isSchemaMatchingSearch(schema, formContext.searchTerm, title);
+
+  // Force array open when there's an active search and this array has matches
+  useEffect(() => {
+    const hasActiveSearch = formContext.searchTerm.trim().length > 0;
+    if (hasActiveSearch && shouldShowArray) {
+      setIsOpen(true);
+    }
+  }, [formContext.searchTerm, shouldShowArray]);
+
+  // Don't render the array if it wouldn't be visible
+  if (!shouldShowArray) {
+    return null;
+  }
+
+  const itemCount = items.length;
+  const countDisplay = `(${itemCount})`;
+
+  return (
+    <Collapsible
+      open={isOpen}
+      className="w-full"
+      onOpenChange={setIsOpen}
+    >
+      <CollapsibleTrigger 
+        className="group/collapsible flex h-8 w-full items-center justify-between px-3 py-1.5 transition-colors hover:bg-muted/70"
+        aria-label={`Group: ${prettyTitle}`}
+      >
+        <h3 className="flex min-w-0 flex-1 items-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="truncate">
+            <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
+          </span>
+          <span className="ml-1.5 flex-shrink-0 text-muted-foreground/50">
+            {countDisplay}
+          </span>
+        </h3>
+        <ChevronRight className="size-3.5 text-muted-foreground transition-transform duration-200 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
+      </CollapsibleTrigger>
+
+      <CollapsibleContent className="px-0 py-0">
+        {items.map((item) => item.children)}
+        {canAdd ? (
+          <Button type="button" variant="outline" size="sm" className="mx-2 my-2" onClick={onAddClick}>
+            Add item ({prettyTitle})
+          </Button>
+        ) : null}
       </CollapsibleContent>
     </Collapsible>
   );
@@ -287,16 +439,7 @@ export const templates: TemplatesType = {
   },
   FieldTemplate,
   ObjectFieldTemplate,
-  ArrayFieldTemplate: (props: ArrayFieldTemplateProps) => (
-    <div className="w-full space-y-2">
-      {props.items.map((item) => item.children)}
-      {props.canAdd ? (
-        <Button type="button" variant="outline" size="sm" onClick={props.onAddClick}>
-          Add Item
-        </Button>
-      ) : null}
-    </div>
-  ),
+  ArrayFieldTemplate,
   ArrayFieldDescriptionTemplate: ({ description }) =>
     description ? <div className="mb-2 text-sm text-muted-foreground">{description}</div> : null,
   ArrayFieldItemTemplate: ({ children, hasRemove, onDropIndexClick, index }) => (
@@ -324,7 +467,7 @@ export const templates: TemplatesType = {
   DescriptionFieldTemplate: ({ description }) =>
     description ? <div className="mb-2 text-sm text-muted-foreground">{description}</div> : null,
   ErrorListTemplate: ({ errors }: ErrorListProps) => (
-    <div className="space-y-1">
+    <div className="space-y-1 px-3">
       {errors.map((error) => (
         <div key={error.property} className="text-sm text-destructive">
           {error.stack}
@@ -345,8 +488,9 @@ export const uiSchema: UiSchema = {
   // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for ui:globalOptions
   'ui:globalOptions': {
     addable: true,
-    copyable: false,
+    copyable: true,
     orderable: true,
+    removable: true,
     label: true,
   },
   // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for ui:options

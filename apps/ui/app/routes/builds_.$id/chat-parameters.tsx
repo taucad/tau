@@ -5,7 +5,6 @@ import React, { useCallback, useMemo, memo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import Form from '@rjsf/core';
 import type { RJSFSchema } from '@rjsf/utils';
-import { toSentenceCase } from '#utils/string.js';
 import { SearchInput } from '#components/search-input.js';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
@@ -18,7 +17,8 @@ import { cn } from '#utils/ui.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { templates, uiSchema, widgets } from '#routes/builds_.$id/rjsf-theme.js';
 import type { RJSFContext } from '#routes/builds_.$id/rjsf-theme.js';
-import { deleteNestedValue, rjsfIdSeparator, resetArrayItem, rjsfIdPrefix } from '#routes/builds_.$id/rjsf-utils.js';
+import { rjsfIdPrefix, rjsfIdSeparator } from '#routes/builds_.$id/rjsf-utils.js';
+import { deleteValueAtPath } from "#utils/object.utils.js";
 import { EmptyItems } from '#components/ui/empty-items.js';
 
 const toggleParametersKeyCombination = {
@@ -27,12 +27,12 @@ const toggleParametersKeyCombination = {
 } satisfies KeyCombination;
 
 // Parameters Trigger Component
-export const ChatParametersTrigger = memo(function ({ 
-  isOpen, 
-  onToggle 
-}: { 
-  readonly isOpen: boolean; 
-  readonly onToggle: () => void; 
+export const ChatParametersTrigger = memo(function ({
+  isOpen,
+  onToggle
+}: {
+  readonly isOpen: boolean;
+  readonly onToggle: () => void;
 }) {
   return (
     <FloatingPanelTrigger
@@ -51,7 +51,7 @@ export const ChatParametersTrigger = memo(function ({
   );
 });
 
-export const ChatParameters = memo(function (props: { 
+export const ChatParameters = memo(function (props: {
   readonly className?: string;
   readonly isExpanded: boolean;
   readonly setIsExpanded: (value: boolean | ((current: boolean) => boolean)) => void;
@@ -87,78 +87,12 @@ export const ChatParameters = memo(function (props: {
         return;
       }
 
-      // Check if this might be an array item by looking for numeric indices
-      const hasNumericIndex = fieldPath.some((segment) => /^\d+$/.test(segment));
-
-      let updatedParameters: Record<string, unknown>;
-
-      // eslint-disable-next-line unicorn/prefer-ternary -- better readability
-      if (hasNumericIndex) {
-        // Handle array item reset
-        updatedParameters = resetArrayItem(currentParameters, fieldPath);
-      } else {
-        // Handle regular property reset
-        updatedParameters = deleteNestedValue(currentParameters, fieldPath);
-      }
+      const updatedParameters = deleteValueAtPath(currentParameters, fieldPath);
 
       setParameters(updatedParameters);
     },
     [parameters, setParameters],
   );
-
-  const hasSearchResults = useMemo(() => {
-    if (!searchTerm) {
-      return true;
-    }
-
-    // Helper function that matches our template logic
-    const matchesSearch = (text: string): boolean => {
-      const prettyText = toSentenceCase(text);
-      return prettyText.toLowerCase().includes(searchTerm.toLowerCase());
-    };
-
-    // Check flat parameters in defaultParameters
-    const parameterEntries = Object.entries(defaultParameters);
-    const hasMatchingParameters = parameterEntries.some(([key]) => matchesSearch(key));
-
-    // Check group titles from jsonSchema if it exists
-    let hasMatchingGroups = false;
-    let hasMatchingNestedParameters = false;
-
-    if (jsonSchema && typeof jsonSchema === 'object' && 'properties' in jsonSchema) {
-      const schemaProperties = jsonSchema.properties as Record<string, unknown>;
-
-      // Check if any group titles match
-      const groupNames = Object.keys(schemaProperties);
-      hasMatchingGroups = groupNames.some((groupName) => matchesSearch(groupName));
-
-      // Check if any nested parameters within groups match
-      for (const [_groupName, groupSchema] of Object.entries(schemaProperties)) {
-        if (
-          groupSchema &&
-          typeof groupSchema === 'object' &&
-          'properties' in groupSchema &&
-          groupSchema.properties &&
-          typeof groupSchema.properties === 'object'
-        ) {
-          const nestedProperties = groupSchema.properties as Record<string, unknown>;
-          const nestedParameterNames = Object.keys(nestedProperties);
-
-          const hasMatchingNestedInThisGroup = nestedParameterNames.some((parameterName) =>
-            matchesSearch(parameterName),
-          );
-
-          if (hasMatchingNestedInThisGroup) {
-            hasMatchingNestedParameters = true;
-            break;
-          }
-        }
-      }
-    }
-
-    // Return true if any parameters, groups, or nested parameters match
-    return hasMatchingParameters || hasMatchingGroups || hasMatchingNestedParameters;
-  }, [searchTerm, defaultParameters, jsonSchema]);
 
   const resetAllParameters = useCallback(() => {
     setParameters({});
@@ -180,15 +114,13 @@ export const ChatParameters = memo(function (props: {
   const formContext = useMemo(
     () => ({
       allExpanded,
-      searchTerm: searchTerm.toLowerCase(),
+      searchTerm,
       resetSingleParameter,
-      shouldShowField(prettyLabel: string) {
+      shouldShowField(text: string) {
         if (!searchTerm) {
           return true;
         }
-
-        const searchableLabel = prettyLabel.toLowerCase();
-        return searchableLabel.includes(searchTerm.toLowerCase());
+        return text.toLowerCase().includes(searchTerm.toLowerCase());
       },
     }),
     [allExpanded, searchTerm, resetSingleParameter],
@@ -229,7 +161,7 @@ export const ChatParameters = memo(function (props: {
         {hasParameters ? (
           <>
             {/* Search and Controls Bar */}
-            <div className="flex w-full flex-row gap-2 px-3 py-2">
+            <div className="flex w-full flex-row gap-2 p-2">
               <SearchInput
                 placeholder="Search parameters..."
                 value={searchTerm}
@@ -271,29 +203,23 @@ export const ChatParameters = memo(function (props: {
                 <TooltipContent side='bottom'>{allExpanded ? 'Collapse all' : 'Expand all'}</TooltipContent>
               </Tooltip>
             </div>
-            {!hasSearchResults && searchTerm ? (
-              <div className="py-4 text-center text-muted-foreground">
-                No parameters matching &quot;{searchTerm}&quot;
-              </div>
-            ) : (
-              <Form<Record<string, unknown>, RJSFSchema, RJSFContext>
-                // @ts-expect-error -- TODO: fix this
-                validator={validator}
-                // @ts-expect-error -- TODO: fix this
-                templates={templates}
-                schema={jsonSchema}
-                // @ts-expect-error -- TODO: fix this
-                uiSchema={uiSchema}
-                idPrefix={rjsfIdPrefix}
-                idSeparator={rjsfIdSeparator}
-                widgets={widgets}
-                formData={mergedData}
-                formContext={formContext}
-                className="flex size-full flex-col overflow-y-auto px-0 py-0"
-                onChange={handleChange}
-                onSubmit={handleSubmit}
-              />
-            )}
+            <Form<Record<string, unknown>, RJSFSchema, RJSFContext>
+              // @ts-expect-error -- TODO: fix this
+              validator={validator}
+              // @ts-expect-error -- TODO: fix this
+              templates={templates}
+              schema={jsonSchema}
+              // @ts-expect-error -- TODO: fix this
+              uiSchema={uiSchema}
+              idPrefix={rjsfIdPrefix}
+              idSeparator={rjsfIdSeparator}
+              widgets={widgets}
+              formData={mergedData}
+              formContext={formContext}
+              className="flex size-full flex-col overflow-y-auto px-0 py-0"
+              onChange={handleChange}
+              onSubmit={handleSubmit}
+            />
           </>
         ) : (
           <EmptyItems>

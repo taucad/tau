@@ -160,9 +160,9 @@ describe('ChatParameters Search Component', () => {
     await user.type(searchInput, 'type');
 
     // Should show groups with "type" in their title
-    expect(screen.getByText('Wifi Type')).toBeTruthy();
-    expect(screen.getByText('Phone Call Type')).toBeTruthy();
-    expect(screen.getByText('V Card Type')).toBeTruthy();
+    expect(screen.getByLabelText('Group: Wifi Type')).toBeTruthy();
+    expect(screen.getByLabelText('Group: Phone Call Type')).toBeTruthy();
+    expect(screen.getByLabelText('Group: V Card Type')).toBeTruthy();
   });
 
   it('shows groups when child parameters match search', async () => {
@@ -178,7 +178,7 @@ describe('ChatParameters Search Component', () => {
     await user.type(searchInput, 'phone');
 
     // Should show the group containing the matching child parameter
-    expect(screen.getByText('Phone Call Type')).toBeTruthy();
+    expect(screen.getByLabelText('Group: Phone Call Type')).toBeTruthy();
     expect(screen.getByLabelText('Parameter: Phone Number')).toBeTruthy();
   });
 
@@ -201,7 +201,7 @@ describe('ChatParameters Search Component', () => {
 
     await user.clear(searchInput);
     await user.type(searchInput, 'WiFi');
-    expect(screen.getByText('Wifi Type')).toBeTruthy();
+    expect(screen.getByLabelText('Group: Wifi Type')).toBeTruthy();
   });
 
   it('preserves case in search input while searching case-insensitively', async () => {
@@ -240,7 +240,7 @@ describe('ChatParameters Search Component', () => {
 
     // Should not show any parameters or groups
     expect(screen.queryByLabelText('Parameter: Is Hidden')).toBeNull();
-    expect(screen.queryByText('Wifi Type')).toBeNull();
+    expect(screen.queryByLabelText('Group: Wifi Type')).toBeNull();
   });
 
   it('shows all parameters when search is cleared', async () => {
@@ -261,9 +261,9 @@ describe('ChatParameters Search Component', () => {
     await user.clear(searchInput);
 
     // All groups and parameters should be visible again
-    expect(screen.getByText('Wifi Type')).toBeTruthy();
-    expect(screen.getByText('Phone Call Type')).toBeTruthy();
-    expect(screen.getByText('V Card Type')).toBeTruthy();
+    expect(screen.getByLabelText('Group: Wifi Type')).toBeTruthy();
+    expect(screen.getByLabelText('Group: Phone Call Type')).toBeTruthy();
+    expect(screen.getByLabelText('Group: V Card Type')).toBeTruthy();
     expect(screen.getByLabelText('Parameter: Is Hidden')).toBeTruthy();
     expect(screen.getByLabelText('Parameter: Site Url')).toBeTruthy();
     expect(screen.getByLabelText('Parameter: Phone Number')).toBeTruthy();
@@ -282,11 +282,11 @@ describe('ChatParameters Search Component', () => {
     await user.type(searchInput, 'hidden');
 
     // Should only show the group with matching content
-    expect(screen.getByText('Wifi Type')).toBeTruthy(); // Contains "isHidden"
+    expect(screen.getByLabelText('Group: Wifi Type')).toBeTruthy(); // Contains "isHidden"
     expect(screen.getByLabelText('Parameter: Is Hidden')).toBeTruthy();
 
     // Should NOT show groups without matching content
-    expect(screen.queryByText('Phone Call Type')).toBeNull();
-    expect(screen.queryByText('V Card Type')).toBeNull();
+    expect(screen.queryByLabelText('Group: Phone Call Type')).toBeNull();
+    expect(screen.queryByLabelText('Group: V Card Type')).toBeNull();
   });
 });

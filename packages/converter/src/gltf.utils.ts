@@ -12,9 +12,11 @@ import { allExtensions } from '#gltf.extensions.js';
 /**
  * Create a NodeIO instance for gltf-transform operations
  */
-export const createNodeIO = async (): Promise<NodeIO> => {
+export const createNodeIo = async (): Promise<NodeIO> => {
   return new NodeIO().registerExtensions(allExtensions).registerDependencies({
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- draco3d uses this format
     'draco3d.decoder': await draco3d.createDecoderModule(),
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- draco3d uses this format
     'draco3d.encoder': await draco3d.createEncoderModule(),
   });
 };
@@ -23,7 +25,7 @@ export const createNodeIO = async (): Promise<NodeIO> => {
  * Convert GLB data to gltf-transform Document
  */
 export const glbToDocument = async (glbData: Uint8Array): Promise<Document> => {
-  const io = await createNodeIO();
+  const io = await createNodeIo();
   return io.readBinary(glbData);
 };
 
@@ -39,7 +41,7 @@ export const getInspectReport = async (glbData: Uint8Array): Promise<InspectRepo
  * Validate that GLB data is properly formatted.
  */
 export const validateGlbData = (glb: Uint8Array): void => {
-  if (!glb || glb.length === 0) {
+  if (glb.length === 0) {
     throw new Error('GLB data cannot be empty');
   }
 
@@ -90,7 +92,7 @@ export const getBoundingBoxFromInspect = (
 
   const scene = report.scenes.properties[0]!;
 
-  if (!scene.bboxMax || !scene.bboxMin || scene.bboxMax.length < 3 || scene.bboxMin.length < 3) {
+  if (scene.bboxMax.length < 3 || scene.bboxMin.length < 3) {
     return undefined;
   }
 
@@ -214,7 +216,7 @@ function convertNodeToInfo(node: GltfNode): GltfNodeInfo {
   }
 
   const nodeInfo: GltfNodeInfo = {
-    name: node.getName ? node.getName() : undefined,
+    name: node.getName(),
     type: nodeType,
   };
 
@@ -261,7 +263,7 @@ function convertSimpleToGltf(simple: SimpleHierarchy): GltfNodeInfo {
   return {
     type: simple.type as GltfNodeInfo['type'],
     ...(simple.name && { name: simple.name }),
-    ...(simple.children.length > 0 && { children: simple.children.map(convertSimpleToGltf) }),
+    ...(simple.children.length > 0 && { children: simple.children.map((child) => convertSimpleToGltf(child)) }),
   };
 }
 

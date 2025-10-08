@@ -19,7 +19,7 @@ import { loadFixture } from '#test.utils.js';
  * Representative format matrix for comprehensive testing.
  * We test key format families rather than every possible combination.
  */
-const TEST_FORMAT_COMBINATIONS = [
+const testFormatCombinations = [
   // GLB pass-through optimization
   { input: 'glb' as InputFormat, output: 'glb' as OutputFormat },
 
@@ -45,9 +45,12 @@ const TEST_FORMAT_COMBINATIONS = [
  * Format-specific test fixtures.
  * Maps each format to a known working test file.
  */
-const TEST_FIXTURES: Record<InputFormat, string> = {
+const testFixtures: Record<InputFormat, string> = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- valid file extension
   '3dm': 'cube-mesh.3dm',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- valid file extension
   '3ds': 'cube.3ds',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- valid file extension
   '3mf': 'cube.3mf',
   ac: 'cube.ac',
   ase: 'cube.ase',
@@ -67,6 +70,7 @@ const TEST_FIXTURES: Record<InputFormat, string> = {
   lwo: 'cube.lwo',
   md2: 'cube.md2', // Note: May be skipped
   md5mesh: 'cube.md5mesh',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- valid file extension
   'mesh.xml': 'cube.mesh.xml',
   nff: 'cube.nff',
   obj: 'cube.obj',
@@ -96,7 +100,7 @@ const TEST_FIXTURES: Record<InputFormat, string> = {
  * Load test file for a given format.
  */
 const loadTestFile = (format: InputFormat) => {
-  const filename = TEST_FIXTURES[format];
+  const filename = testFixtures[format];
   return [
     {
       name: filename,
@@ -184,7 +188,7 @@ describe('File Conversion Integration', () => {
 
   describe('end-to-end conversion', () => {
     // Test each format combination
-    for (const { input, output } of TEST_FORMAT_COMBINATIONS) {
+    for (const { input, output } of testFormatCombinations) {
       it(`should convert ${input} → ${output}`, async () => {
         try {
           const inputFiles = loadTestFile(input);
@@ -250,8 +254,9 @@ describe('File Conversion Integration', () => {
 
     const testFormats: OutputFormat[] = ['glb', 'obj', 'stl', 'dae'];
 
-    for (const format of testFormats) {
-      it(`should export GLB to ${format}`, async () => {
+    it.each(testFormats)(
+      'should export GLB to %s',
+      async (format) => {
         try {
           const outputFiles = await exportFromGlb(testGlb, format);
           validateOutputFiles(outputFiles, format);
@@ -262,8 +267,9 @@ describe('File Conversion Integration', () => {
             throw error;
           }
         }
-      }, 15_000);
-    }
+      },
+      15_000,
+    );
 
     it('should handle GLB pass-through optimization', async () => {
       const outputFiles = await exportFromGlb(testGlb, 'glb');

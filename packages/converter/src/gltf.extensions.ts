@@ -3,13 +3,14 @@ import { KHRONOS_EXTENSIONS } from '@gltf-transform/extensions';
 
 // NOTE: Stub implementation to suppress gltf-transform warnings.
 class FbNgonEncodingExtension extends Extension {
-  static override EXTENSION_NAME = 'FB_ngon_encoding';
-  override extensionName = 'FB_ngon_encoding';
-  override write() {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- valid property
+  public static override EXTENSION_NAME = 'FB_ngon_encoding';
+  public override extensionName = 'FB_ngon_encoding';
+  public override write(): this {
     return this;
   }
 
-  override read() {
+  public override read(): this {
     return this;
   }
 }

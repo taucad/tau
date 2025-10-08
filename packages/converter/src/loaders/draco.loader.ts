@@ -2,7 +2,7 @@ import type { Document } from '@gltf-transform/core';
 import { BaseLoader } from '#loaders/base.loader.js';
 import type { File } from '#types.js';
 import { GltfDracoDecoder } from '#loaders/draco/gltf-draco-decoder.js';
-import { createNodeIO } from '#gltf.utils.js';
+import { createNodeIo } from '#gltf.utils.js';
 
 export class DracoLoader extends BaseLoader<Document> {
   private readonly decoder = new GltfDracoDecoder();
@@ -28,7 +28,7 @@ export class DracoLoader extends BaseLoader<Document> {
   }
 
   protected async mapToGlb(document: Document): Promise<Uint8Array> {
-    const io = await createNodeIO();
+    const io = await createNodeIo();
 
     // Export to GLB
     const glb = await io.writeBinary(document);

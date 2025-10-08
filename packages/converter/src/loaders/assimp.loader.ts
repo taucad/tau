@@ -64,11 +64,11 @@ export class AssimpLoader extends BaseLoader<Uint8Array, AssimpOptions> {
     return glbData;
   }
 
-  private getTransformYtoZup(format: InputFormat): boolean {
-    return AssimpLoader.transformYtoZupRequired[format] ?? false;
-  }
-
   protected mapToGlb(parseResult: Uint8Array): Uint8Array {
     return parseResult;
+  }
+
+  private getTransformYtoZup(format: InputFormat): boolean {
+    return AssimpLoader.transformYtoZupRequired[format] ?? false;
   }
 }

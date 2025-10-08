@@ -4,7 +4,7 @@ import { BaseExporter } from '#exporters/base.exporter.js';
 import type { File } from '#types.js';
 import { allExtensions } from '#gltf.extensions.js';
 
-type GLTFExporterOptions = {
+type GltfExporterOptions = {
   binary?: boolean;
 };
 
@@ -12,7 +12,7 @@ type GLTFExporterOptions = {
  * GLTF exporter implementation using gltf-transform.
  * Supports both binary (GLB) and text (GLTF) formats.
  */
-export class GltfExporter extends BaseExporter<GLTFExporterOptions> {
+export class GltfExporter extends BaseExporter<GltfExporterOptions> {
   private readonly io: NodeIO;
 
   public constructor() {
@@ -20,7 +20,7 @@ export class GltfExporter extends BaseExporter<GLTFExporterOptions> {
     this.io = new NodeIO().registerExtensions(allExtensions);
   }
 
-  public async parseAsync(glbData: Uint8Array, options?: Partial<GLTFExporterOptions>): Promise<File[]> {
+  public async parseAsync(glbData: Uint8Array, options?: Partial<GltfExporterOptions>): Promise<File[]> {
     if (glbData.length === 0) {
       throw new Error('GLB data cannot be empty');
     }

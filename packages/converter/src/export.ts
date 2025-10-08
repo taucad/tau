@@ -8,6 +8,7 @@ type ExportConfig = {
 };
 
 const exportConfigs = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- valid file format
   '3ds': { exporter: new AssimpExporter().initialize({ format: '3ds' }) },
   dae: { exporter: new AssimpExporter().initialize({ format: 'dae' }) },
   fbx: { exporter: new AssimpExporter().initialize({ format: 'fbx' }) },

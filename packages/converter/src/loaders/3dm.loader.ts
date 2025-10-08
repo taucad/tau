@@ -25,11 +25,11 @@ import rhino3dm from 'rhino3dm';
 import { BaseLoader } from '#loaders/base.loader.js';
 import type { BaseLoaderOptions } from '#loaders/base.loader.js';
 import type { File } from '#types.js';
-import { createNodeIO } from '#gltf.utils.js';
+import { createNodeIo } from '#gltf.utils.js';
 import { createCoordinateTransform, createScalingTransform } from '#gltf.transforms.js';
 
 // Type for rhino3dm geometry JSON structure
-type RhinoGeometryJSON = {
+type RhinoGeometryJson = {
   data: {
     attributes: {
       position: { array: number[] };
@@ -80,7 +80,7 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
   }
 
   protected async mapToGlb(document: Document, options: ThreeDmLoaderOptions): Promise<Uint8Array> {
-    const io = await createNodeIO();
+    const io = await createNodeIo();
 
     // Apply transformations
     await document.transform(
@@ -189,7 +189,7 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
           if (attributes.layerIndex >= 0 && attributes.layerIndex < layers.count) {
             const layer = layers.get(attributes.layerIndex);
             // Store visibility in extras since gltf-transform nodes don't have direct visibility
-            const extras = node.getExtras() || {};
+            const extras = node.getExtras();
             extras['visible'] = layer.visible;
             node.setExtras(extras);
           }
@@ -247,7 +247,7 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
       }
 
       case this.rhino.ObjectType.SubD: {
-        return this.createSubDAsMesh(geometry as SubD, attributes, doc, document, buffer);
+        return this.createSubdAsMesh(geometry as SubD, attributes, doc, document, buffer);
       }
 
       case this.rhino.ObjectType.InstanceReference: {
@@ -272,7 +272,7 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
     document: Document,
     buffer: GltfBuffer,
   ): { mesh: Mesh; node: Node } {
-    const threeGeometry = geometry.toThreejsJSON() as RhinoGeometryJSON;
+    const threeGeometry = geometry.toThreejsJSON() as RhinoGeometryJson;
 
     // Extract vertex data
     const positions = new Float32Array(threeGeometry.data.attributes.position.array);
@@ -384,7 +384,8 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
   /**
    * Create gltf-transform mesh from Rhino SubD
    */
-  private createSubDAsMesh(
+  // eslint-disable-next-line max-params -- following method signature pattern in file.
+  private createSubdAsMesh(
     geometry: SubD,
     attributes: ObjectAttributes,
     doc: File3dm,
@@ -461,7 +462,7 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
     document: Document,
     buffer: GltfBuffer,
   ): { mesh: Mesh; node: Node } {
-    const threeGeometry = geometry.toThreejsJSON() as RhinoGeometryJSON;
+    const threeGeometry = geometry.toThreejsJSON() as RhinoGeometryJson;
 
     const positions = new Float32Array(threeGeometry.data.attributes.position.array);
     const colors = threeGeometry.data.attributes.color

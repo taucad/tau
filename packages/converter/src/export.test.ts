@@ -284,7 +284,7 @@ const assertTextureCount = (comparison: InspectComparison, expectedCount: number
 // Test Case Templates & Factories
 // ============================================================================
 
-const STANDARD_GEOMETRY_EXPECTATIONS = {
+const standardGeometryExpectations = {
   vertexCountTolerance: 0,
   meshCountTolerance: 0,
   boundingBoxTolerance: 0.001,
@@ -294,12 +294,12 @@ const STANDARD_GEOMETRY_EXPECTATIONS = {
   additionalAttributeCount: 0, // Most standard formats don't add extra attributes
 } as const;
 
-const STANDARD_MATERIAL_EXPECTATIONS = {
+const standardMaterialExpectations = {
   expectedMaterialCount: 1, // Standard cube fixture has 1 material
   expectedTextureCount: 0, // Standard cube fixture has no textures
 } as const;
 
-const MULTI_MATERIAL_EXPECTATIONS = {
+const multiMaterialExpectations = {
   expectedMaterialCount: 2, // Some formats create multiple default materials
   expectedTextureCount: 0, // These formats don't preserve textures
 } as const;
@@ -351,8 +351,8 @@ const createExportTestCase = (
       expectedNames: options.expectedFiles?.expectedNames ?? getDefaultFileNames(format),
     },
     expectations: {
-      geometry: createExpectationVariant(STANDARD_GEOMETRY_EXPECTATIONS, options.expectations?.geometry ?? {}),
-      materials: createExpectationVariant(STANDARD_MATERIAL_EXPECTATIONS, options.expectations?.materials ?? {}),
+      geometry: createExpectationVariant(standardGeometryExpectations, options.expectations?.geometry ?? {}),
+      materials: createExpectationVariant(standardMaterialExpectations, options.expectations?.materials ?? {}),
     },
   };
 };
@@ -382,12 +382,12 @@ const exportTestCases: ExportTestCase[] = [
   // Formats that add default materials
   createExportTestCase('dae', {
     expectations: {
-      materials: MULTI_MATERIAL_EXPECTATIONS,
+      materials: multiMaterialExpectations,
     },
   }),
   createExportTestCase('3ds', {
     expectations: {
-      materials: MULTI_MATERIAL_EXPECTATIONS,
+      materials: multiMaterialExpectations,
     },
   }),
   createExportTestCase('obj', {
@@ -395,7 +395,7 @@ const exportTestCases: ExportTestCase[] = [
       expectedNames: ['result.obj', 'result.mtl'],
     },
     expectations: {
-      materials: MULTI_MATERIAL_EXPECTATIONS,
+      materials: multiMaterialExpectations,
     },
   }),
 
@@ -403,7 +403,7 @@ const exportTestCases: ExportTestCase[] = [
   createExportTestCase('stp', {
     expectations: {
       geometry: {
-        ...STANDARD_GEOMETRY_EXPECTATIONS,
+        ...standardGeometryExpectations,
         meshCountTolerance: 15, // CAD formats often subdivide geometry into multiple meshes
       },
       materials: {

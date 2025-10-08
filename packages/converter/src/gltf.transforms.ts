@@ -11,29 +11,29 @@ import { allExtensions } from '#gltf.extensions.js';
  * gltf-transform matrix for Y-up to Z-up coordinate transformation
  * Matrix layout: column-major format (gltf-transform standard)
  */
-export const GLTF_COORDINATE_TRANSFORM_MATRIX: mat4 = [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1];
+export const gltfCoordinateTransformMatrix: mat4 = [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1];
 
 /**
  * Gltf-transform matrix for meters to millimeters scaling
  */
-export const GLTF_SCALING_MATRIX: mat4 = [1000, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1];
+export const gltfScalingMatrix: mat4 = [1000, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1];
 
 /**
  * Gltf-transform matrix for Z-up to Y-up coordinate transformation (reverse of Y-up to Z-up)
  * Matrix layout: column-major format (gltf-transform standard)
  */
-export const GLTF_REVERSE_COORDINATE_TRANSFORM_MATRIX: mat4 = [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];
+export const gltfReverseCoordinateTransformMatrix: mat4 = [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];
 
 /**
  * Gltf-transform matrix for millimeters to meters scaling (reverse of meters to millimeters)
  */
-export const GLTF_REVERSE_SCALING_MATRIX: mat4 = [0.001, 0, 0, 0, 0, 0.001, 0, 0, 0, 0, 0.001, 0, 0, 0, 0, 1];
+export const gltfReverseScalingMatrix: mat4 = [0.001, 0, 0, 0, 0, 0.001, 0, 0, 0, 0, 0.001, 0, 0, 0, 0, 1];
 
 /**
  * Creates a custom transform for Y-up to Z-up coordinate system conversion
  */
 export function createCoordinateTransform(shouldTransform = true): (document: Document) => void {
-  const matrix = GLTF_COORDINATE_TRANSFORM_MATRIX;
+  const matrix = gltfCoordinateTransformMatrix;
 
   return (document: Document): void => {
     if (!shouldTransform) {
@@ -51,7 +51,7 @@ export function createCoordinateTransform(shouldTransform = true): (document: Do
  * Creates a custom transform for meters to millimeters scaling
  */
 export function createScalingTransform(shouldTransform = true): (document: Document) => void {
-  const matrix = GLTF_SCALING_MATRIX;
+  const matrix = gltfScalingMatrix;
 
   return (document: Document): void => {
     if (!shouldTransform) {
@@ -69,7 +69,7 @@ export function createScalingTransform(shouldTransform = true): (document: Docum
  * Creates a custom transform for Z-up to Y-up coordinate system conversion (reverse transform)
  */
 export function createReverseCoordinateTransform(shouldTransform = true): (document: Document) => void {
-  const matrix = GLTF_REVERSE_COORDINATE_TRANSFORM_MATRIX;
+  const matrix = gltfReverseCoordinateTransformMatrix;
 
   return (document: Document): void => {
     if (!shouldTransform) {
@@ -87,7 +87,7 @@ export function createReverseCoordinateTransform(shouldTransform = true): (docum
  * Creates a custom transform for millimeters to meters scaling (reverse transform)
  */
 export function createReverseScalingTransform(shouldTransform = true): (document: Document) => void {
-  const matrix = GLTF_REVERSE_SCALING_MATRIX;
+  const matrix = gltfReverseScalingMatrix;
 
   return (document: Document): void => {
     if (!shouldTransform) {

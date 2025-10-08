@@ -325,7 +325,7 @@ function FloatingPanelTriggerButton({
   // Render icon based on whether it's a ReactNode or a LucideIcon component
   const renderIcon = (): React.ReactNode => {
     if (React.isValidElement(Icon)) {
-      return <span className={floatingPanelIconVariants()}>{Icon}</span>;
+      return Icon;
     }
 
     // If it's a LucideIcon component, create an element
@@ -343,7 +343,7 @@ function FloatingPanelTriggerButton({
           data-slot="floating-panel-trigger"
           onClick={onClick}
         >
-          {renderIcon()}
+          <span className={floatingPanelIconVariants()}>{renderIcon()}</span>
           {children}
         </Button>
       </TooltipTrigger>

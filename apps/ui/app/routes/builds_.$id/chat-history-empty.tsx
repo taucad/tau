@@ -13,7 +13,7 @@ export function ChatHistoryEmpty({ className }: { className?: string }): React.J
       <div className="mt-4 w-full space-y-3 pt-4 text-left">
         <div className="flex items-start gap-2">
           <Lightbulb className="mt-0.5 size-4 flex-shrink-0 text-muted-foreground" strokeWidth={1.5} />
-          <div className="flex-1 space-y-1">
+          <div className="flex-1 space-y-1 mr-4">
             <p className="text-xs font-medium text-foreground">Tips for best results:</p>
             <ul className="space-y-1.5 text-xs text-muted-foreground">
               <li className="flex items-start gap-1.5">

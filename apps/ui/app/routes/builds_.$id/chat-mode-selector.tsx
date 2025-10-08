@@ -66,7 +66,7 @@ export const ChatModeSelector = memo(function ({
         </Button>
         <TooltipContent side="bottom">Select mode</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="start" className="w-[2z0px]">
+      <DropdownMenuContent align="start">
         <DropdownMenuLabel>Mode</DropdownMenuLabel>
         <DropdownMenuRadioGroup className="flex flex-col gap-1" value={selectedMode} onValueChange={handleModeChange}>
           {chatModes.map((mode) => {

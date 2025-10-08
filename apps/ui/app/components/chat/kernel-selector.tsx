@@ -67,17 +67,6 @@ export function KernelSelector({
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <h4 className="text-sm font-medium">Key Features:</h4>
-                  <ul className="space-y-1 text-sm text-muted-foreground">
-                    {option.features.map((feature) => (
-                      <li key={feature} className="flex items-center gap-2">
-                        <div className="size-1.5 shrink-0 rounded-full bg-primary/60" />
-                        <span>{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
               </div>
             </div>
           </HoverCardContent>

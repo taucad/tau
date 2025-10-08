@@ -260,7 +260,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
 
           <ResizableHandle variant='floating' className='hover:after:opacity-100 group-data-[explorer-open=false]/chat-layout:hidden' />
 
-          <ResizablePanel order={3} id="spacer" defaultSize={chatResizeLeft[2]} minSize={0} className='relative overflow-visible!'>
+          <ResizablePanel order={3} id="spacer" defaultSize={chatResizeLeft[2]} minSize={0} className='relative overflow-visible! mr-2'>
             {/* Top-left Content */}
             <div className='absolute top-0 left-0 flex flex-col gap-2 pointer-events-auto'>
               <ChatHistoryTrigger
@@ -274,7 +274,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
             </div>
 
             {/* Bottom-left Content */}
-            <div className='absolute bottom-0 left-0 right-8 flex flex-col gap-2 pointer-events-auto'>
+            <div className='absolute bottom-0 left-0 right-8 w-full flex flex-col gap-2 pointer-events-auto'>
               <ChatStackTrace />
               <ChatViewerControls />
             </div>
@@ -298,7 +298,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           onLayout={setChatResizeRight}
         >
           {/* Spacer panel for open buttons */}
-          <ResizablePanel order={1} id="spacer-right" defaultSize={chatResizeRight[0]} minSize={0} className='relative overflow-visible!'>
+          <ResizablePanel order={1} id="spacer-right" defaultSize={chatResizeRight[0]} minSize={0} className='relative overflow-visible! ml-2'>
             {/* Top-right Content */}
             <div className='absolute top-0 right-0 flex flex-col gap-2 pointer-events-auto'>
               <SettingsControl />

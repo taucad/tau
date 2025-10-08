@@ -1,7 +1,7 @@
-import type { Model } from "#api/models/model.schema.js";
-import type { CloudProviderId } from "#api/models/model.service.js";
+import type { Model } from '#api/models/model.schema.js';
+import type { CloudProviderId } from '#api/models/model.service.js';
 
-export const modelList = {
+export const modelList: Record<CloudProviderId, Record<string, Model>> = {
   vertexai: {
     'gemini-2.5-pro': {
       id: 'google-gemini-2.5-pro',
@@ -15,8 +15,8 @@ export const modelList = {
       details: {
         family: 'gemini',
         families: ['Gemini'],
-        contextWindow: 1048576,
-        maxTokens: 65536,
+        contextWindow: 1_048_576,
+        maxTokens: 65_536,
         cost: {
           inputTokens: 1.25,
           outputTokens: 10,
@@ -44,7 +44,7 @@ export const modelList = {
       details: {
         family: 'claude',
         families: ['Claude'],
-        contextWindow: 200000,
+        contextWindow: 200_000,
         // Sonnet 4.5 supports standard output up to 8192 tokens
         maxTokens: 8192,
         cost: {
@@ -74,9 +74,9 @@ export const modelList = {
       details: {
         family: 'claude',
         families: ['Claude'],
-        contextWindow: 200000,
+        contextWindow: 200_000,
         // Extended thinking mode supports up to 64000 tokens
-        maxTokens: 64000,
+        maxTokens: 64_000,
         cost: {
           inputTokens: 3,
           outputTokens: 15,
@@ -86,14 +86,14 @@ export const modelList = {
       },
       configuration: {
         streaming: true,
-        maxTokens: 20000,
+        maxTokens: 20_000,
         // @ts-expect-error: FIXME - some models use camelCase
         // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
-        max_tokens: 20000,
+        max_tokens: 20_000,
         thinking: {
           type: 'enabled',
           // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
-          budget_tokens: 10000,
+          budget_tokens: 10_000,
         },
       },
     },
@@ -112,9 +112,9 @@ export const modelList = {
       details: {
         family: 'claude',
         families: ['Claude'],
-        contextWindow: 200000,
+        contextWindow: 200_000,
         // Extended thinking mode supports up to 64000 tokens
-        maxTokens: 64000,
+        maxTokens: 64_000,
         cost: {
           inputTokens: 15,
           outputTokens: 75,
@@ -124,10 +124,10 @@ export const modelList = {
       },
       configuration: {
         streaming: true,
-        maxTokens: 20000,
+        maxTokens: 20_000,
         // @ts-expect-error: FIXME - some models use camelCase
         // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
-        max_tokens: 20000,
+        max_tokens: 20_000,
         thinking: {
           type: 'enabled',
           // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
@@ -147,7 +147,7 @@ export const modelList = {
       details: {
         family: 'claude',
         families: ['Claude'],
-        contextWindow: 200000,
+        contextWindow: 200_000,
         maxTokens: 8192,
         cost: {
           inputTokens: 3,
@@ -175,8 +175,8 @@ export const modelList = {
       details: {
         family: 'gpt',
         families: ['GPT-4.1'],
-        contextWindow: 1047576,
-        maxTokens: 32768,
+        contextWindow: 1_047_576,
+        maxTokens: 32_768,
         cost: {
           inputTokens: 2,
           outputTokens: 8,
@@ -200,8 +200,8 @@ export const modelList = {
       details: {
         family: 'gpt',
         families: ['GPT-O3'],
-        contextWindow: 200000,
-        maxTokens: 100000,
+        contextWindow: 200_000,
+        maxTokens: 100_000,
         cost: {
           inputTokens: 2,
           outputTokens: 8,
@@ -225,7 +225,7 @@ export const modelList = {
       details: {
         family: 'gpt',
         families: ['GPT-4o'],
-        contextWindow: 128000,
+        contextWindow: 128_000,
         maxTokens: 4096,
         cost: {
           inputTokens: 2.5,
@@ -253,8 +253,8 @@ export const modelList = {
       details: {
         family: 'gpt',
         families: ['GPT-OSS'],
-        contextWindow: 64000,
-        maxTokens: 64000,
+        contextWindow: 64_000,
+        maxTokens: 64_000,
         cost: {
           inputTokens: 0.25,
           outputTokens: 0.69,
@@ -268,4 +268,4 @@ export const modelList = {
       },
     },
   },
-} as const satisfies Record<CloudProviderId, Record<string, Model>>;
+} as const;

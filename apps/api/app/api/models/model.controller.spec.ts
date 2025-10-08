@@ -14,6 +14,7 @@ const mockModels: Model[] = [
       id: 'anthropic',
       name: 'Anthropic',
     },
+    slug: 'claude-4-sonnet',
     model: 'claude-sonnet-4',
     details: {
       family: 'claude',
@@ -40,6 +41,7 @@ const mockModels: Model[] = [
       id: 'openai',
       name: 'OpenAI',
     },
+    slug: 'gpt-4o',
     model: 'gpt-4o',
     details: {
       family: 'gpt',

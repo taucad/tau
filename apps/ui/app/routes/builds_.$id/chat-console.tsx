@@ -3,7 +3,6 @@ import { useState, useCallback, memo } from 'react';
 import { useSelector } from '@xstate/react';
 import { collapsedConsoleSize } from '#routes/builds_.$id/chat-editor-layout.js';
 import { Button } from '#components/ui/button.js';
-import { Input } from '#components/ui/input.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { cn } from '#utils/ui.js';
@@ -24,6 +23,8 @@ import { logActor } from '#machines/logs.machine.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { stringToColor } from '#utils/color.utils.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
+import { SearchInput } from '#components/search-input.js';
+import { HighlightText } from '#components/highlight-text.js';
 
 type ChatConsoleProperties = React.HTMLAttributes<HTMLDivElement> & {
   readonly onButtonClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -186,6 +187,10 @@ export const ChatConsole = memo(function ({
     log.clear();
   }, [log]);
 
+  const handleClearFilter = useCallback(() => {
+    setFilter('');
+  }, [setFilter]);
+
   // Toggle log level filter
   const toggleLevel = useCallback(
     (level: LogLevel, value: boolean) => {
@@ -241,12 +246,13 @@ export const ChatConsole = memo(function ({
             ) : null}
           </TooltipContent>
         </Tooltip>
-        <Input
+        <SearchInput
           autoComplete="off"
           className="h-7 w-full bg-background"
           placeholder="Filter logs..."
           value={filter}
           onChange={handleFilterChange}
+          onClear={handleClearFilter}
         />
 
         <div className="flex flex-row gap-2">
@@ -372,7 +378,9 @@ export const ChatConsole = memo(function ({
                   <span className="shrink-0 opacity-60">[{formatTimestamp(log.timestamp)}]</span>
                 ) : null}
                 {displayConfig.showComponent ? <ComponentBadge origin={log.origin} /> : null}
-                <span className="mr-auto">{log.message}</span>
+                <span className="mr-auto">
+                  <HighlightText text={log.message} searchTerm={filter} />
+                </span>
               </div>
               {log.data !== undefined && displayConfig.showData ? (
                 <div>{JSON.stringify(log.data, undefined, 2)}</div>

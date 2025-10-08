@@ -303,6 +303,124 @@ describe("isSchemaMatchingSearch", () => {
     });
   });
 
+  describe("Array schema matching", () => {
+    it("should match array by property name", () => {
+      const schema: RJSFSchema = {
+        type: "array",
+        items: {
+          type: "number",
+        },
+      };
+      expect(isSchemaMatchingSearch(schema, "foo", "foo")).toBe(true);
+      expect(isSchemaMatchingSearch(schema, "FOO", "foo")).toBe(true);
+    });
+
+    it("should match array by title", () => {
+      const schema: RJSFSchema = {
+        type: "array",
+        title: "Foo Items",
+        items: {
+          type: "number",
+        },
+      };
+      expect(isSchemaMatchingSearch(schema, "foo")).toBe(true);
+      expect(isSchemaMatchingSearch(schema, "FOO")).toBe(true);
+    });
+
+    it("should match array when item schema has matching properties", () => {
+      const schema: RJSFSchema = {
+        type: "array",
+        title: "Items",
+        items: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              title: "Foo Name",
+            },
+          },
+        },
+      };
+      expect(isSchemaMatchingSearch(schema, "foo")).toBe(true);
+    });
+
+    it("should match array when item schema property name matches", () => {
+      const schema: RJSFSchema = {
+        type: "array",
+        title: "Items",
+        items: {
+          type: "object",
+          properties: {
+            fooField: {
+              type: "string",
+            },
+          },
+        },
+      };
+      expect(isSchemaMatchingSearch(schema, "foo")).toBe(true);
+    });
+
+    it("should not match array when nothing matches", () => {
+      const schema: RJSFSchema = {
+        type: "array",
+        title: "Items",
+        items: {
+          type: "number",
+        },
+      };
+      expect(isSchemaMatchingSearch(schema, "foo")).toBe(false);
+    });
+
+    it("should handle array with primitive items", () => {
+      const schema: RJSFSchema = {
+        type: "array",
+        title: "Numbers",
+        items: {
+          type: "number",
+        },
+      };
+      expect(isSchemaMatchingSearch(schema, "numbers")).toBe(true);
+      expect(isSchemaMatchingSearch(schema, "foo")).toBe(false);
+    });
+
+    it("should handle array with nested object items", () => {
+      const schema: RJSFSchema = {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            nested: {
+              type: "object",
+              properties: {
+                value: {
+                  type: "string",
+                  title: "Foo Value",
+                },
+              },
+            },
+          },
+        },
+      };
+      expect(isSchemaMatchingSearch(schema, "foo")).toBe(true);
+    });
+
+    it("should handle array with invalid items schema", () => {
+      const schema = {
+        type: "array",
+        items: "invalid",
+      } as unknown as RJSFSchema;
+      expect(isSchemaMatchingSearch(schema, "foo")).toBe(false);
+    });
+
+    it("should handle array with array items", () => {
+      const schema = {
+        type: "array",
+        items: ["item1", "item2"],
+      } as unknown as RJSFSchema;
+      expect(isSchemaMatchingSearch(schema, "foo")).toBe(false);
+    });
+  });
+
   describe("Edge cases", () => {
     it("should handle schema with no title or description", () => {
       const schema: RJSFSchema = {

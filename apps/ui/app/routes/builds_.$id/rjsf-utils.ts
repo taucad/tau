@@ -93,5 +93,12 @@ export function isSchemaMatchingSearch(schema: RJSFSchema, searchTerm: string, p
     }
   }
 
+  // If this schema is an array, check its items schema recursively
+  if (schema.type === 'array' && schema.items && typeof schema.items === 'object' && !Array.isArray(schema.items)) {
+    if (isSchemaMatchingSearch(schema.items as RJSFSchema, searchTerm)) {
+      return true;
+    }
+  }
+
   return false;
 }

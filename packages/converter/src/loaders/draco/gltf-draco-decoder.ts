@@ -1,3 +1,4 @@
+/* eslint-disable complexity -- draco3d uses c++ style */
 // Copyright 2016 The Draco Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,7 +33,7 @@ type AttributeTypeConstructor =
   | Int8ArrayConstructor
   | Int32ArrayConstructor;
 
-// gltf-transform doesn't support Int32Array
+// Gltf-transform doesn't support Int32Array
 type TypedArray = Float32Array | Uint32Array | Uint16Array | Uint8Array | Int16Array | Int8Array;
 
 type AccessorType = 'SCALAR' | 'VEC2' | 'VEC3' | 'VEC4' | 'MAT2' | 'MAT3' | 'MAT4';
@@ -76,14 +77,118 @@ export class GltfDracoDecoder {
     return this;
   }
 
+  public async createGltfDocument(decodedData: DecodedDracoData): Promise<Document> {
+    const document = new Document();
+    const root = document.getRoot();
+
+    // Create buffer to hold all geometry data
+    const buffer = document.createBuffer();
+
+    // Calculate total buffer size
+    let totalBufferSize = 0;
+    for (const [, attributeData] of decodedData.attributes) {
+      totalBufferSize += attributeData.array.byteLength;
+    }
+
+    if (decodedData.indices) {
+      totalBufferSize += decodedData.indices.byteLength;
+    }
+
+    // Create buffer views and accessors for attributes
+    const accessors = new Map<string, Accessor>();
+    let bufferOffset = 0;
+
+    // Position is required and should be first
+    const positionData = decodedData.attributes.get('position');
+    if (!positionData) {
+      throw new Error('Position attribute is required');
+    }
+
+    // Create accessors for each attribute
+    for (const [attributeName, attributeData] of decodedData.attributes) {
+      const accessor = this.createAccessorForAttribute(document, buffer, attributeName, attributeData, bufferOffset);
+      accessors.set(attributeName, accessor);
+      bufferOffset += attributeData.array.byteLength;
+    }
+
+    // Create index accessor if needed
+    let indexAccessor: Accessor | undefined;
+    if (!decodedData.isPointCloud && decodedData.indices) {
+      indexAccessor = this.createIndexAccessor(document, buffer, decodedData.indices, bufferOffset);
+    }
+
+    // Create mesh and primitive
+    const mesh = document.createMesh();
+    const primitive = document.createPrimitive();
+
+    // Set primitive mode based on geometry type
+    if (decodedData.isPointCloud) {
+      primitive.setMode(0); // POINTS
+    } else {
+      primitive.setMode(4); // TRIANGLES
+    }
+
+    // Set attributes using GLTF attribute names
+    const positionAccessor = accessors.get('position');
+    if (positionAccessor) {
+      primitive.setAttribute('POSITION', positionAccessor);
+    }
+
+    const normalAccessor = accessors.get('normal');
+    if (normalAccessor) {
+      primitive.setAttribute('NORMAL', normalAccessor);
+    }
+
+    const colorAccessor = accessors.get('color');
+    if (colorAccessor) {
+      primitive.setAttribute('COLOR_0', colorAccessor);
+    }
+
+    const uvAccessor = accessors.get('uv');
+    if (uvAccessor) {
+      primitive.setAttribute('TEXCOORD_0', uvAccessor);
+    }
+
+    // Set indices if not point cloud
+    if (indexAccessor) {
+      primitive.setIndices(indexAccessor);
+    }
+
+    // Create basic material appropriate for the geometry type
+    const material = document.createMaterial();
+    if (decodedData.isPointCloud) {
+      // Point cloud material
+      material.setBaseColorFactor([1, 1, 1, 1]);
+      if (colorAccessor) {
+        // Enable vertex colors for point clouds
+        material.setBaseColorFactor([1, 1, 1, 1]);
+      }
+    } else {
+      // Mesh material
+      material.setBaseColorFactor([0.8, 0.8, 0.8, 1]);
+      material.setMetallicFactor(0.1);
+      material.setRoughnessFactor(0.9);
+    }
+
+    primitive.setMaterial(material);
+    mesh.addPrimitive(primitive);
+
+    // Create scene hierarchy - direct mesh node at root as expected by tests
+    const scene = document.createScene();
+    const node = document.createNode();
+    node.setMesh(mesh);
+    scene.addChild(node);
+    root.setDefaultScene(scene);
+
+    return document;
+  }
+
   public async decodeDracoFile(
     rawBuffer: ArrayBuffer,
     attributeUniqueIdMap?: Record<string, number>,
     attributeTypeMap?: Record<string, AttributeTypeConstructor>,
   ): Promise<DecodedDracoData> {
-    if (!this.decoderModule) {
-      await this.initialize();
-    }
+    await this.initialize();
 
     const buffer = new this.decoderModule.DecoderBuffer();
     buffer.Init(new Int8Array(rawBuffer), rawBuffer.byteLength);
@@ -322,6 +427,7 @@ export class GltfDracoDecoder {
         for (let i = 0; i < numberValues; i++) {
           int32Array[i] = attributeData.GetValue(i);
         }
+
         typedArray = new Uint32Array(int32Array.buffer);
         // Skip the regular copy loop below for Int32Array since we already copied the data
         this.decoderModule.destroy(attributeData);
@@ -377,112 +483,6 @@ export class GltfDracoDecoder {
     };
   }
 
-  public async createGltfDocument(decodedData: DecodedDracoData): Promise<Document> {
-    const document = new Document();
-    const root = document.getRoot();
-
-    // Create buffer to hold all geometry data
-    const buffer = document.createBuffer();
-
-    // Calculate total buffer size
-    let totalBufferSize = 0;
-    for (const [, attributeData] of decodedData.attributes) {
-      totalBufferSize += attributeData.array.byteLength;
-    }
-
-    if (decodedData.indices) {
-      totalBufferSize += decodedData.indices.byteLength;
-    }
-
-    // Create buffer views and accessors for attributes
-    const accessors = new Map<string, Accessor>();
-    let bufferOffset = 0;
-
-    // Position is required and should be first
-    const positionData = decodedData.attributes.get('position');
-    if (!positionData) {
-      throw new Error('Position attribute is required');
-    }
-
-    // Create accessors for each attribute
-    for (const [attributeName, attributeData] of decodedData.attributes) {
-      const accessor = this.createAccessorForAttribute(document, buffer, attributeName, attributeData, bufferOffset);
-      accessors.set(attributeName, accessor);
-      bufferOffset += attributeData.array.byteLength;
-    }
-
-    // Create index accessor if needed
-    let indexAccessor: Accessor | undefined;
-    if (!decodedData.isPointCloud && decodedData.indices) {
-      indexAccessor = this.createIndexAccessor(document, buffer, decodedData.indices, bufferOffset);
-    }
-
-    // Create mesh and primitive
-    const mesh = document.createMesh();
-    const primitive = document.createPrimitive();
-
-    // Set primitive mode based on geometry type
-    if (decodedData.isPointCloud) {
-      primitive.setMode(0); // POINTS
-    } else {
-      primitive.setMode(4); // TRIANGLES
-    }
-
-    // Set attributes using GLTF attribute names
-    const positionAccessor = accessors.get('position');
-    if (positionAccessor) {
-      primitive.setAttribute('POSITION', positionAccessor);
-    }
-
-    const normalAccessor = accessors.get('normal');
-    if (normalAccessor) {
-      primitive.setAttribute('NORMAL', normalAccessor);
-    }
-
-    const colorAccessor = accessors.get('color');
-    if (colorAccessor) {
-      primitive.setAttribute('COLOR_0', colorAccessor);
-    }
-
-    const uvAccessor = accessors.get('uv');
-    if (uvAccessor) {
-      primitive.setAttribute('TEXCOORD_0', uvAccessor);
-    }
-
-    // Set indices if not point cloud
-    if (indexAccessor) {
-      primitive.setIndices(indexAccessor);
-    }
-
-    // Create basic material appropriate for the geometry type
-    const material = document.createMaterial();
-    if (decodedData.isPointCloud) {
-      // Point cloud material
-      material.setBaseColorFactor([1, 1, 1, 1]);
-      if (colorAccessor) {
-        // Enable vertex colors for point clouds
-        material.setBaseColorFactor([1, 1, 1, 1]);
-      }
-    } else {
-      // Mesh material
-      material.setBaseColorFactor([0.8, 0.8, 0.8, 1]);
-      material.setMetallicFactor(0.1);
-      material.setRoughnessFactor(0.9);
-    }
-
-    primitive.setMaterial(material);
-    mesh.addPrimitive(primitive);
-
-    // Create scene hierarchy - direct mesh node at root as expected by tests
-    const scene = document.createScene();
-    const node = document.createNode();
-    node.setMesh(mesh);
-    scene.addChild(node);
-    root.setDefaultScene(scene);
-
-    return document;
-  }
-
   private createAccessorForAttribute(
     document: Document,
     buffer: GltfBuffer,
@@ -513,11 +513,7 @@ export class GltfDracoDecoder {
     const useShort = indices.every((index) => index < 65_536);
     const typedIndices = useShort ? new Uint16Array(indices) : indices;
 
-    const accessor = document
-      .createAccessor()
-      .setBuffer(buffer)
-      .setArray(typedIndices)
-      .setType('SCALAR');
+    const accessor = document.createAccessor().setBuffer(buffer).setArray(typedIndices).setType('SCALAR');
 
     return accessor;
   }

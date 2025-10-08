@@ -47,7 +47,7 @@ export const ChatModelSelector = memo(function ({
   return (
     <ComboBoxResponsive
       {...properties}
-      className="[&[data-slot='popover-content']]:w-[300px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:text-[0.625rem]"
+      className="[&[data-slot='popover-content']]:w-[300px]"
       popoverProperties={properties.popoverProperties}
       emptyListMessage="No models found."
       groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({

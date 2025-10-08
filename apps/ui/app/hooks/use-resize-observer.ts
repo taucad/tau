@@ -11,7 +11,7 @@ type Size = {
 };
 
 type UseResizeObserverOptions<T extends HTMLElement = HTMLElement> = {
-  ref: RefObject<T>;
+  ref: RefObject<T | undefined>;
   onResize?: (size: Size) => void;
   box?: 'border-box' | 'content-box' | 'device-pixel-content-box';
 };
@@ -59,6 +59,9 @@ export function useResizeObserver<T extends HTMLElement = HTMLElement>(options: 
         }
       }
     });
+    if (!ref.current) {
+      return;
+    }
 
     observer.observe(ref.current, { box });
 

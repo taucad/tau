@@ -384,7 +384,6 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
   /**
    * Create gltf-transform mesh from Rhino SubD
    */
-  // eslint-disable-next-line max-params -- following method signature pattern in file.
   private createSubdAsMesh(
     geometry: SubD,
     attributes: ObjectAttributes,

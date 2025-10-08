@@ -46,11 +46,9 @@ const MessageItem = memo(function ({ messageId }: { readonly messageId: string }
 export const ChatHistoryTrigger = memo(function ({
   isOpen,
   onToggle,
-  className,
 }: {
   readonly isOpen: boolean;
   readonly onToggle: () => void;
-  readonly className?: string;
 }) {
   return (
     <FloatingPanelTrigger
@@ -61,9 +59,8 @@ export const ChatHistoryTrigger = memo(function ({
           <KeyShortcut variant="tooltip">{formatKeyCombination(toggleChatHistoryKeyCombination)}</KeyShortcut>
         </div>
       }
-      isOpen={isOpen}
       tooltipSide="right"
-      className={className}
+      className={isOpen ? 'text-primary' : undefined}
       onClick={onToggle}
     />
   );
@@ -130,10 +127,8 @@ export const ChatHistory = memo(function (props: {
   }, [messageIds.length]);
 
   return (
-    <FloatingPanel isOpen={isExpanded} className={className} onOpenChange={setIsExpanded}>
+    <FloatingPanel isOpen={isExpanded} side="left" className={className} onOpenChange={setIsExpanded}>
       <FloatingPanelClose
-        side="left"
-        align="start"
         icon={XIcon}
         tooltipContent={(isOpen) => (
           <div className="flex items-center gap-2">

@@ -57,7 +57,7 @@ export function ChatEditorLayoutTrigger({
           <KeyShortcut variant="tooltip">{formatKeyCombination(keyCombinationEditor)}</KeyShortcut>
         </div>
       }
-      isOpen={isOpen}
+      className={isOpen ? 'text-primary' : undefined}
       onClick={onToggle}
     />
   );
@@ -108,10 +108,8 @@ export function ChatEditorLayout({
   );
 
   return (
-    <FloatingPanel isOpen={isExpanded} onOpenChange={setIsExpanded}>
+    <FloatingPanel isOpen={isExpanded} side="right" onOpenChange={setIsExpanded}>
       <FloatingPanelClose
-        side="right"
-        align="start"
         icon={XIcon}
         tooltipContent={(isOpen) => (
           <div className="flex items-center gap-2">

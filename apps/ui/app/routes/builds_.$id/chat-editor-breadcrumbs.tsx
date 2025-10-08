@@ -37,7 +37,7 @@ export function ChatEditorBreadcrumbs(): ReactNode {
   };
 
   return (
-    <FloatingPanelContentHeader side="right">
+    <FloatingPanelContentHeader>
       <FloatingPanelContentTitle className="flex flex-row items-center gap-0.5">
         {displayPath ? (
           parts.map((part, index) => (

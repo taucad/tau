@@ -98,6 +98,7 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
   return (
     <FloatingPanel
       isOpen={isDocsSidebarOpen}
+      side="left"
       className={cn('z-20 w-(--docs-sidebar-width-icon) shadow-sm data-[state=open]:w-full', className)}
       onOpenChange={setIsDocsSidebarOpen}
     >
@@ -112,8 +113,6 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
         openTooltip="Open Documentation Sidebar"
         closeTooltip="Close Documentation Sidebar"
         variant="absolute"
-        side="left"
-        align="start"
       />
       <Separator
         orientation="vertical"
@@ -122,7 +121,7 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
       <DocsSidebarSearch />
 
       <FloatingPanelContent>
-        <FloatingPanelContentHeader side="left">
+        <FloatingPanelContentHeader>
           <FloatingPanelContentTitle className="flex items-center gap-1">{metaConfig.name}</FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
 
@@ -157,7 +156,7 @@ function DocsSidebarSearch(): React.JSX.Element | undefined {
         </div>
       }
       tooltipSide="right"
-      variant="absolute"
+      variant="action"
       onClick={() => {
         setOpenSearch(true);
       }}

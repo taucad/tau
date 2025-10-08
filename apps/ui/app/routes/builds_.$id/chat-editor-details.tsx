@@ -69,7 +69,7 @@ export function ChatEditorDetailsTrigger({
           <KeyShortcut variant="tooltip">{formatKeyCombination(keyCombinationEditor)}</KeyShortcut>
         </div>
       }
-      isOpen={isOpen}
+      className={isOpen ? 'text-primary' : undefined}
       onClick={onToggle}
     />
   );
@@ -113,10 +113,8 @@ export function ChatEditorDetails({
   const { formattedKeyCombination: formattedEditorKeyCombination } = useKeydown(keyCombinationEditor, toggleEditor);
 
   return (
-    <FloatingPanel isOpen={isExpanded} onOpenChange={setIsExpanded}>
+    <FloatingPanel isOpen={isExpanded} side="right" onOpenChange={setIsExpanded}>
       <FloatingPanelClose
-        side="right"
-        align="start"
         icon={XIcon}
         tooltipContent={(isOpen) => (
           <div className="flex items-center gap-2">
@@ -126,7 +124,7 @@ export function ChatEditorDetails({
         )}
       />
       <FloatingPanelContent>
-        <FloatingPanelContentHeader side="right">
+        <FloatingPanelContentHeader>
           <FloatingPanelContentTitle>Details</FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
         <FloatingPanelContentBody className="p-2">

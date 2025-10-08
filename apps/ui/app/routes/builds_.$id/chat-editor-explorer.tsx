@@ -42,7 +42,7 @@ export function ChatExplorerTrigger({
           <KeyShortcut variant="tooltip">{formatKeyCombination(keyCombinationEditor)}</KeyShortcut>
         </div>
       }
-      isOpen={isOpen}
+      className={isOpen ? 'text-primary' : undefined}
       tooltipSide="right"
       onClick={onToggle}
     />
@@ -72,10 +72,8 @@ export function ChatExplorerTree({
   const { formattedKeyCombination: formattedEditorKeyCombination } = useKeydown(keyCombinationEditor, toggleEditor);
 
   return (
-    <FloatingPanel isOpen={isExpanded} className={className} onOpenChange={setIsExpanded}>
+    <FloatingPanel isOpen={isExpanded} side="left" className={className} onOpenChange={setIsExpanded}>
       <FloatingPanelClose
-        side="left"
-        align="start"
         icon={XIcon}
         tooltipContent={(isOpen) => (
           <div className="flex items-center gap-2">
@@ -85,7 +83,7 @@ export function ChatExplorerTree({
         )}
       />
       <FloatingPanelContent className="text-sm">
-        <FloatingPanelContentHeader side="left">
+        <FloatingPanelContentHeader>
           <FloatingPanelContentTitle>Explorer</FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
         <FloatingPanelContentBody className="flex flex-col px-0 py-0">

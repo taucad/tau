@@ -50,7 +50,7 @@ export const ChatParametersTrigger = memo(function ({
           <KeyShortcut variant="tooltip">{formatKeyCombination(toggleParametersKeyCombination)}</KeyShortcut>
         </div>
       }
-      isOpen={isOpen}
+      className={isOpen ? 'text-primary' : undefined}
       onClick={onToggle}
     />
   );
@@ -144,10 +144,8 @@ export const ChatParameters = memo(function (props: {
   };
 
   return (
-    <FloatingPanel isOpen={isExpanded} className={className} onOpenChange={setIsExpanded}>
+    <FloatingPanel isOpen={isExpanded} side="right" className={className} onOpenChange={setIsExpanded}>
       <FloatingPanelClose
-        side="right"
-        align="start"
         icon={XIcon}
         tooltipContent={(isOpen) => (
           <div className="flex items-center gap-2">
@@ -158,7 +156,7 @@ export const ChatParameters = memo(function (props: {
       />
       <FloatingPanelContent className="text-sm">
         {/* Header */}
-        <FloatingPanelContentHeader side="right">
+        <FloatingPanelContentHeader>
           <FloatingPanelContentTitle>Parameters</FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
 

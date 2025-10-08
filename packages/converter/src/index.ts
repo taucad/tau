@@ -1,3 +1,4 @@
+/* eslint-disable no-barrel-files/no-barrel-files -- barrel file */
 // Main conversion functions
 export { convertFile, importToGlb, exportFromGlb } from '#conversion.js';
 

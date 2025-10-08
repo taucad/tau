@@ -29,17 +29,19 @@ export class GltfLoader extends BaseLoader<Uint8Array, GltfLoaderOptions> {
       // For GLTF files, convert to text and use readJSON
       const jsonText = new TextDecoder().decode(data);
       const json = JSON.parse(jsonText);
-      
-      // Build resources map from additional files (e.g., .bin files)
+
+      // Extract URIs referenced in the GLTF file
+      const referencedUris = this.extractReferencedUris(json);
+
+      // Build resources map by matching referenced URIs to provided files
       const resources: Record<string, Uint8Array> = {};
-      files.forEach((file) => {
-        if (file.name !== name) {
-          // Add other files as resources using their filename as the URI
-          // gltf-transform expects Uint8Array, not ArrayBuffer
-          resources[file.name] = file.data;
+      for (const uri of referencedUris) {
+        const matchedFile = this.findFileByUri(uri, files, name);
+        if (matchedFile) {
+          resources[uri] = matchedFile.data;
         }
-      });
-      
+      }
+
       document = await io.readJSON({ json, resources });
     } else {
       // For GLB files, use readBinary
@@ -60,5 +62,87 @@ export class GltfLoader extends BaseLoader<Uint8Array, GltfLoaderOptions> {
 
   protected mapToGlb(parseResult: Uint8Array): Uint8Array {
     return parseResult;
+  }
+
+  /**
+   * Extract all URIs referenced in a GLTF JSON file
+   * Looks for URIs in buffers and images
+   */
+  private extractReferencedUris(json: unknown): string[] {
+    const uris: string[] = [];
+
+    if (typeof json !== 'object' || json === null) {
+      return uris;
+    }
+
+    const gltfJson = json as Record<string, unknown>;
+
+    // Extract buffer URIs
+    if (Array.isArray(gltfJson['buffers'])) {
+      for (const buffer of gltfJson['buffers']) {
+        if (
+          typeof buffer === 'object' &&
+          buffer !== null &&
+          'uri' in buffer &&
+          typeof buffer.uri === 'string' &&
+          !buffer.uri.startsWith('data:') // Skip data URIs
+        ) {
+          uris.push(buffer.uri);
+        }
+      }
+    }
+
+    // Extract image URIs
+    if (Array.isArray(gltfJson['images'])) {
+      for (const image of gltfJson['images']) {
+        if (
+          typeof image === 'object' &&
+          image !== null &&
+          'uri' in image &&
+          typeof image.uri === 'string' &&
+          !image.uri.startsWith('data:') // Skip data URIs
+        ) {
+          uris.push(image.uri);
+        }
+      }
+    }
+
+    return uris;
+  }
+
+  /**
+   * Find a file that matches the given URI
+   * Tries exact match first, then basename match
+   */
+  private findFileByUri(uri: string, files: File[], primaryFileName: string): File | undefined {
+    // Normalize URI by removing leading ./
+    const normalizedUri = uri.replace(/^\.\//, '');
+
+    // Get basename from URI (everything after last slash)
+    const uriBasename = normalizedUri.split('/').pop() ?? normalizedUri;
+
+    for (const file of files) {
+      // Skip the primary GLTF file
+      if (file.name === primaryFileName) {
+        continue;
+      }
+
+      // Try exact match first
+      if (file.name === normalizedUri) {
+        return file;
+      }
+
+      // Try basename match (case-sensitive)
+      if (file.name === uriBasename) {
+        return file;
+      }
+
+      // Try case-insensitive basename match as fallback
+      if (file.name.toLowerCase() === uriBasename.toLowerCase()) {
+        return file;
+      }
+    }
+
+    return undefined;
   }
 }

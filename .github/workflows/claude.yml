@@ -1,0 +1,97 @@
+name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+      actions: read # Required for Claude to read CI results on PRs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # This is an optional setting that allows Claude to read CI results on PRs
+          additional_permissions: |
+            actions: read
+
+          # Custom instructions tailored to Tau project
+          custom_instructions: |
+            You are working on Tau, an AI-powered CAD platform built as an Nx monorepo.
+            Please read CLAUDE.md for full project context and coding standards.
+
+            ## 1. Code Style & Linting (CRITICAL)
+            This project uses extremely strict linting via XO + ESLint. Follow these rules:
+            - ✓ Use `import type` for type-only imports
+            - ✓ All exported functions have explicit return types (including React components)
+            - ✓ `type` instead of `interface`
+            - ✓ `undefined` instead of `null`
+            - ✓ No `any` type - use `unknown` instead
+            - ✓ `.js` extensions for local imports with `#` prefix
+            - ✓ Curly braces for all control flow statements
+            - ✓ Explicit class member accessibility (`public`, `private`)
+            - ✓ Absolute imports with `#` prefix (e.g., `#utils/helper.js`)
+            - ✓ Descriptive variable names (`properties` not `props`, `event` not `e`)
+            - ✓ Functional programming patterns preferred
+
+            ## 2. Architecture & Best Practices
+            - Verify changes align with monorepo structure (apps/ui, apps/api, libs/)
+            - Check proper usage of React 19, React Router v7, NestJS patterns
+            - Validate database changes use Drizzle ORM correctly
+            - Ensure AI integration follows LangGraph patterns
+
+            ## 3. Testing
+            - Verify adequate test coverage (Vitest)
+            - Check tests use correct environment (jsdom for UI, node for API)
+            - Ensure test files follow naming conventions (`*.test.ts`)
+
+            ## 4. Security
+            - Review authentication/authorization logic (Better Auth)
+            - Check for SQL injection risks (Drizzle ORM usage)
+            - Validate input sanitization
+            - Review API endpoint security
+
+            ## 5. Performance
+            - Check for unnecessary re-renders in React components
+            - Review database query efficiency
+            - Validate proper use of React hooks and memoization
+            - Check for memory leaks
+
+            ## 6. Type Safety
+            - Ensure strict TypeScript compliance
+            - Check for proper error handling
+            - Validate API contracts between frontend/backend
+
+            ## 7. Dependencies & Build
+            - Verify changes work with pnpm workspace structure
+            - Check Nx cache and build configurations aren't broken
+            - Ensure changes don't introduce circular dependencies
+
+          # Allow Claude to run common development commands
+          allowed_tools: "Bash(pnpm *),Bash(nx *),Bash(npm *),Bash(git *),Bash(gh *)"
+

@@ -332,57 +332,7 @@
   white-space: nowrap;
 }
 
-/* Collapsible Animation */
 @layer utilities {
-  [data-slot='collapsible-content'] {
-    overflow: hidden;
-    transition:
-      max-height 300ms cubic-bezier(0.4, 0, 0.2, 1),
-      opacity 200ms ease-out;
-  }
-
-  [data-slot='collapsible-content'][data-state='open'],
-  [data-slot='collapsible-content'][data-state='closed'] {
-    transform: translateZ(0);
-    backface-visibility: hidden;
-  }
-
-  [data-slot='collapsible-content'][data-state='open'] {
-    animation: smoothDown 300ms ease-out forwards;
-  }
-
-  [data-slot='collapsible-content'][data-state='closed'] {
-    animation: smoothUp 250ms ease-in forwards;
-  }
-
-  @keyframes smoothDown {
-    from {
-      max-height: 0;
-      opacity: 0;
-      transform: translateY(-4px);
-    }
-
-    to {
-      max-height: var(--radix-collapsible-content-height);
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  @keyframes smoothUp {
-    from {
-      max-height: var(--radix-collapsible-content-height);
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    to {
-      max-height: 0;
-      opacity: 0;
-      transform: translateY(-4px);
-    }
-  }
-
   @keyframes hammer-animated-effect {
     0% { transform: rotate(0deg) translateY(0px); }
     15% { transform: rotate(35deg) translateY(-2.5px); } /* Hit overshoot */

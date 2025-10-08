@@ -11,6 +11,7 @@ const baseConfig: Options = {
   minifyIdentifiers: true,
   minifySyntax: true,
   publicDir: 'src/assets',
+  tsconfig: 'tsconfig.build.json',
 };
 
 export const cjsConfig: Options = {

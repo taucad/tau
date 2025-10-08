@@ -39,7 +39,7 @@
     "@gltf-transform/extensions": "^4.2.0",
     "@hookform/resolvers": "^5.1.1",
     "@kittycad/lib": "^2.0.42",
-    "@langchain/anthropic": "^0.3.23",
+    "@langchain/anthropic": "^0.3.30",
     "@langchain/cerebras": "^0.0.2",
     "@langchain/community": "^0.3.47",
     "@langchain/core": "^0.3.66",

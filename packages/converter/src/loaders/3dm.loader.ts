@@ -717,12 +717,12 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
    * Multiply two 4x4 matrices (column-major order)
    */
   private multiplyMatrices(a: number[], b: number[]): number[] {
-    const result = Array.from({ length: 16 }).fill(0);
+    const result = Array.from({ length: 16 }).fill(0) as number[];
 
     for (let row = 0; row < 4; row++) {
       for (let col = 0; col < 4; col++) {
         for (let k = 0; k < 4; k++) {
-          result[col * 4 + row] += a[k * 4 + row]! * b[col * 4 + k]!;
+          result[col * 4 + row] = (result[col * 4 + row] ?? 0) + (a[k * 4 + row] ?? 0) * (b[col * 4 + k] ?? 0);
         }
       }
     }

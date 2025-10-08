@@ -42,7 +42,6 @@ type ExportTestCase = {
       expectedMaterialCount: number; // Exact number of materials expected
       expectedTextureCount: number; // Exact number of textures expected
     };
-
   };
 };
 
@@ -144,40 +143,40 @@ const assertVertexCount = (comparison: InspectComparison, tolerance: number): vo
  */
 const assertBoundingBoxSize = (comparison: InspectComparison, tolerance: number): void => {
   const { original, roundTrip } = comparison;
-  
+
   // Ensure both have scenes - if not, this is a test failure
   expect(original.scenes.properties.length).toBeGreaterThan(0);
   expect(roundTrip.scenes.properties.length).toBeGreaterThan(0);
-  
+
   const originalScene = original.scenes.properties[0]!;
   const roundTripScene = roundTrip.scenes.properties[0]!;
-  
+
   // Ensure bounding boxes exist - if not, this is a test failure
   expect(originalScene.bboxMax).toBeDefined();
   expect(originalScene.bboxMin).toBeDefined();
   expect(roundTripScene.bboxMax).toBeDefined();
   expect(roundTripScene.bboxMin).toBeDefined();
-  expect(originalScene.bboxMax!.length).toBeGreaterThanOrEqual(3);
-  expect(originalScene.bboxMin!.length).toBeGreaterThanOrEqual(3);
-  expect(roundTripScene.bboxMax!.length).toBeGreaterThanOrEqual(3);
-  expect(roundTripScene.bboxMin!.length).toBeGreaterThanOrEqual(3);
-  
+  expect(originalScene.bboxMax.length).toBeGreaterThanOrEqual(3);
+  expect(originalScene.bboxMin.length).toBeGreaterThanOrEqual(3);
+  expect(roundTripScene.bboxMax.length).toBeGreaterThanOrEqual(3);
+  expect(roundTripScene.bboxMin.length).toBeGreaterThanOrEqual(3);
+
   // Calculate bounding box size differences
   const originalSize = [
-    originalScene.bboxMax![0]! - originalScene.bboxMin![0]!,
-    originalScene.bboxMax![1]! - originalScene.bboxMin![1]!,
-    originalScene.bboxMax![2]! - originalScene.bboxMin![2]!,
+    originalScene.bboxMax[0]! - originalScene.bboxMin[0]!,
+    originalScene.bboxMax[1]! - originalScene.bboxMin[1]!,
+    originalScene.bboxMax[2]! - originalScene.bboxMin[2]!,
   ];
   const roundTripSize = [
-    roundTripScene.bboxMax![0]! - roundTripScene.bboxMin![0]!,
-    roundTripScene.bboxMax![1]! - roundTripScene.bboxMin![1]!,
-    roundTripScene.bboxMax![2]! - roundTripScene.bboxMin![2]!,
+    roundTripScene.bboxMax[0]! - roundTripScene.bboxMin[0]!,
+    roundTripScene.bboxMax[1]! - roundTripScene.bboxMin[1]!,
+    roundTripScene.bboxMax[2]! - roundTripScene.bboxMin[2]!,
   ];
 
-  const sizeDiff = Math.sqrt(
-    Math.pow(originalSize[0]! - roundTripSize[0]!, 2) +
-      Math.pow(originalSize[1]! - roundTripSize[1]!, 2) +
-      Math.pow(originalSize[2]! - roundTripSize[2]!, 2),
+  const sizeDiff = Math.hypot(
+    originalSize[0]! - roundTripSize[0]!,
+    originalSize[1]! - roundTripSize[1]!,
+    originalSize[2]! - roundTripSize[2]!,
   );
   expect(sizeDiff).toBeLessThanOrEqual(tolerance);
 };
@@ -187,13 +186,13 @@ const assertBoundingBoxSize = (comparison: InspectComparison, tolerance: number)
  */
 const assertPositionAttribute = (comparison: InspectComparison, shouldHave: boolean): void => {
   const { roundTrip } = comparison;
-  
+
   // Ensure we have meshes to test
   expect(roundTrip.meshes.properties.length).toBeGreaterThan(0);
-  
+
   const mesh = roundTrip.meshes.properties[0]!;
-  const hasPosition = mesh.attributes.some(attr => attr.toLowerCase().includes('position'));
-  
+  const hasPosition = mesh.attributes.some((attr) => attr.toLowerCase().includes('position'));
+
   if (shouldHave) {
     expect(hasPosition).toBe(true);
   } else {
@@ -206,13 +205,13 @@ const assertPositionAttribute = (comparison: InspectComparison, shouldHave: bool
  */
 const assertNormalAttribute = (comparison: InspectComparison, shouldHave: boolean): void => {
   const { roundTrip } = comparison;
-  
+
   // Ensure we have meshes to test
   expect(roundTrip.meshes.properties.length).toBeGreaterThan(0);
-  
+
   const mesh = roundTrip.meshes.properties[0]!;
-  const hasNormal = mesh.attributes.some(attr => attr.toLowerCase().includes('normal'));
-  
+  const hasNormal = mesh.attributes.some((attr) => attr.toLowerCase().includes('normal'));
+
   if (shouldHave) {
     expect(hasNormal).toBe(true);
   } else {
@@ -225,16 +224,15 @@ const assertNormalAttribute = (comparison: InspectComparison, shouldHave: boolea
  */
 const assertUvAttribute = (comparison: InspectComparison, shouldHave: boolean): void => {
   const { roundTrip } = comparison;
-  
+
   // Ensure we have meshes to test
   expect(roundTrip.meshes.properties.length).toBeGreaterThan(0);
-  
+
   const mesh = roundTrip.meshes.properties[0]!;
-  const hasUv = mesh.attributes.some(attr => 
-    attr.toLowerCase().includes('texcoord') || 
-    attr.toLowerCase().includes('uv')
+  const hasUv = mesh.attributes.some(
+    (attr) => attr.toLowerCase().includes('texcoord') || attr.toLowerCase().includes('uv'),
   );
-  
+
   if (shouldHave) {
     expect(hasUv).toBe(true);
   } else {
@@ -247,19 +245,21 @@ const assertUvAttribute = (comparison: InspectComparison, shouldHave: boolean): 
  */
 const assertAdditionalAttributeCount = (comparison: InspectComparison, expectedCount: number): void => {
   const { roundTrip } = comparison;
-  
+
   // Ensure we have meshes to test
   expect(roundTrip.meshes.properties.length).toBeGreaterThan(0);
-  
+
   const mesh = roundTrip.meshes.properties[0]!;
-  const standardAttributes = mesh.attributes.filter(attr => {
+  const standardAttributes = mesh.attributes.filter((attr) => {
     const attrLower = attr.toLowerCase();
-    return attrLower.includes('position') || 
-           attrLower.includes('normal') || 
-           attrLower.includes('texcoord') || 
-           attrLower.includes('uv');
+    return (
+      attrLower.includes('position') ||
+      attrLower.includes('normal') ||
+      attrLower.includes('texcoord') ||
+      attrLower.includes('uv')
+    );
   });
-  
+
   const additionalCount = mesh.attributes.length - standardAttributes.length;
   expect(additionalCount).toBe(expectedCount);
 };
@@ -378,7 +378,7 @@ const exportTestCases: ExportTestCase[] = [
       expectedNames: ['model.glb'],
     },
   }),
-  
+
   // Formats that add default materials
   createExportTestCase('dae', {
     expectations: {
@@ -522,8 +522,6 @@ describe('exportFiles', () => {
       it('should handle texture count correctly', () => {
         assertTextureCount(comparison, testCase.expectations.materials.expectedTextureCount);
       });
-
-
     });
   }
 

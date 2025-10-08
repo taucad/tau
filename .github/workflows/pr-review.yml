@@ -1,0 +1,91 @@
+name: PR Review with Claude Code
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: PR Review with Progress Tracking
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+          # Enable progress tracking
+          track_progress: true
+
+          # Custom review instructions tailored to Tau project
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            You are reviewing a PR for Tau, an AI-powered CAD platform built as an Nx monorepo.
+            Please read CLAUDE.md for full project context and coding standards.
+
+            Perform a comprehensive code review focusing on:
+
+            ## 1. Code Style & Linting (CRITICAL)
+            This project uses extremely strict linting via XO + ESLint. Verify:
+            - ✓ Use `import type` for type-only imports
+            - ✓ All exported functions have explicit return types (including React components)
+            - ✓ `type` instead of `interface`
+            - ✓ `undefined` instead of `null`
+            - ✓ No `any` type - use `unknown` instead
+            - ✓ `.js` extensions for local imports with `#` prefix
+            - ✓ Curly braces for all control flow statements
+            - ✓ Explicit class member accessibility (`public`, `private`)
+            - ✓ Absolute imports with `#` prefix (e.g., `#utils/helper.js`)
+            - ✓ Descriptive variable names (`properties` not `props`, `event` not `e`)
+            - ✓ Functional programming patterns preferred
+
+            ## 2. Architecture & Best Practices
+            - Verify changes align with monorepo structure (apps/ui, apps/api, libs/)
+            - Check proper usage of React 19, React Router v7, NestJS patterns
+            - Validate database changes use Drizzle ORM correctly
+            - Ensure AI integration follows LangGraph patterns
+
+            ## 3. Testing
+            - Verify adequate test coverage (Vitest)
+            - Check tests use correct environment (jsdom for UI, node for API)
+            - Ensure test files follow naming conventions (`*.test.ts`)
+
+            ## 4. Security
+            - Review authentication/authorization logic (Better Auth)
+            - Check for SQL injection risks (Drizzle ORM usage)
+            - Validate input sanitization
+            - Review API endpoint security
+
+            ## 5. Performance
+            - Check for unnecessary re-renders in React components
+            - Review database query efficiency
+            - Validate proper use of React hooks and memoization
+            - Check for memory leaks
+
+            ## 6. Type Safety
+            - Ensure strict TypeScript compliance
+            - Check for proper error handling
+            - Validate API contracts between frontend/backend
+
+            ## 7. Dependencies & Build
+            - Verify changes work with pnpm workspace structure
+            - Check Nx cache and build configurations aren't broken
+            - Ensure changes don't introduce circular dependencies
+
+            Provide detailed feedback using inline comments for specific issues.
+            Use top-level comments for general observations, architectural concerns, or praise.
+            Be constructive and reference specific line numbers when possible.
+
+          # Tools for comprehensive PR review
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"

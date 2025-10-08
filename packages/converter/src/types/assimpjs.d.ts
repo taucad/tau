@@ -1,3 +1,4 @@
+/* eslint-disable no-barrel-files/no-barrel-files -- allowed for this type declaration file */
 /* eslint-disable @typescript-eslint/naming-convention -- External library uses PascalCase method names */
 
 // Base module with all type definitions

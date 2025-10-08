@@ -1,6 +1,7 @@
 /**
  * Utility functions for React JSON Schema Form (RJSF) operations
  */
+import type { RJSFSchema } from "@rjsf/utils";
 
 /**
  * The prefix used in RJSF IDs.
@@ -225,4 +226,53 @@ export function resetArrayItem(object: Record<string, unknown>, path: string[]):
 
   // Fallback to normal deletion
   return deleteNestedValue(object, path);
+}
+
+/**
+ * Helper to recursively check if a schema or its nested properties match the search term
+ * @param schema - The schema to check
+ * @param searchTerm - The search term to check
+ * @param propertyName - The name of the property to check
+ * @returns true if the schema or its nested properties match the search term
+ */
+export function isSchemaMatchingSearch(schema: RJSFSchema, searchTerm: string, propertyName?: string): boolean {
+  if (!searchTerm) {
+    return true;
+  }
+
+  const lowerSearch = searchTerm.toLowerCase();
+
+  // Check if the property name matches
+  if (propertyName) {
+    if (propertyName.toLowerCase().includes(lowerSearch)) {
+      return true;
+    }
+  }
+
+  // Check if the title matches
+  if (schema.title && typeof schema.title === 'string') {
+    if (schema.title.toLowerCase().includes(lowerSearch)) {
+      return true;
+    }
+  }
+
+  // Check if the description matches
+  if (schema.description && typeof schema.description === 'string') {
+    if (schema.description.toLowerCase().includes(lowerSearch)) {
+      return true;
+    }
+  }
+
+  // If this schema has nested properties (is a group), check them recursively
+  if (schema.properties && typeof schema.properties === 'object') {
+    for (const [nestedName, nestedSchema] of Object.entries(schema.properties)) {
+      if (nestedSchema && typeof nestedSchema === 'object' && !Array.isArray(nestedSchema)) {
+        if (isSchemaMatchingSearch(nestedSchema as RJSFSchema, searchTerm, nestedName)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
 }

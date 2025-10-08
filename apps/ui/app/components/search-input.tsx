@@ -39,7 +39,7 @@ export function SearchInput({
         placeholder={placeholder}
         value={value}
         className={cn(
-          'peer pl-8 pr-2 not-placeholder-shown:pr-6 placeholder:text-sm',
+          'peer pl-8 pr-2 not-placeholder-shown:pr-6 placeholder:text-sm placeholder-shown:truncate focus:placeholder:opacity-0',
           className
         )}
         {...properties}

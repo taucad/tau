@@ -1,9 +1,9 @@
-import { allExtensions } from '#gltf.extensions.js';
 import type { Document, Node as GltfNode } from '@gltf-transform/core';
 import { NodeIO } from '@gltf-transform/core';
 import { inspect } from '@gltf-transform/functions';
 import type { InspectReport } from '@gltf-transform/functions';
 import draco3d from 'draco3dgltf';
+import { allExtensions } from '#gltf.extensions.js';
 
 // ============================================================================
 // gltf-transform Utility Functions
@@ -24,7 +24,7 @@ export const createNodeIO = async (): Promise<NodeIO> => {
  */
 export const glbToDocument = async (glbData: Uint8Array): Promise<Document> => {
   const io = await createNodeIO();
-  return await io.readBinary(glbData);
+  return io.readBinary(glbData);
 };
 
 /**
@@ -59,7 +59,9 @@ export const validateGlbData = (glb: Uint8Array): void => {
 /**
  * Extract geometry statistics from an InspectReport
  */
-export const getGeometryStatsFromInspect = (report: InspectReport): {
+export const getGeometryStatsFromInspect = (
+  report: InspectReport,
+): {
   vertexCount: number;
   faceCount: number;
   meshCount: number;
@@ -67,47 +69,52 @@ export const getGeometryStatsFromInspect = (report: InspectReport): {
   const totalVertices = report.meshes.properties.reduce((sum, mesh) => sum + mesh.vertices, 0);
   const totalFaces = Math.round(totalVertices / 3); // Assuming triangulation
   const meshCount = report.meshes.properties.length;
-  
+
   return { vertexCount: totalVertices, faceCount: totalFaces, meshCount };
 };
 
 /**
  * Extract bounding box information from an InspectReport
  */
-export const getBoundingBoxFromInspect = (report: InspectReport): {
-  size: [number, number, number];
-  center: [number, number, number];
-} | undefined => {
+export const getBoundingBoxFromInspect = (
+  report: InspectReport,
+):
+  | {
+      size: [number, number, number];
+      center: [number, number, number];
+    }
+  | undefined => {
   if (report.scenes.properties.length === 0) {
     return undefined;
   }
-  
+
   const scene = report.scenes.properties[0]!;
-  
-  if (!scene.bboxMax || !scene.bboxMin || 
-      scene.bboxMax.length < 3 || scene.bboxMin.length < 3) {
+
+  if (!scene.bboxMax || !scene.bboxMin || scene.bboxMax.length < 3 || scene.bboxMin.length < 3) {
     return undefined;
   }
-  
+
   const size: [number, number, number] = [
     scene.bboxMax[0]! - scene.bboxMin[0]!,
     scene.bboxMax[1]! - scene.bboxMin[1]!,
     scene.bboxMax[2]! - scene.bboxMin[2]!,
   ];
-  
+
   const center: [number, number, number] = [
     (scene.bboxMax[0]! + scene.bboxMin[0]!) / 2,
     (scene.bboxMax[1]! + scene.bboxMin[1]!) / 2,
     (scene.bboxMax[2]! + scene.bboxMin[2]!) / 2,
   ];
-  
+
   return { size, center };
 };
 
 /**
  * Create a geometry signature from an InspectReport for comparison purposes
  */
-export const createInspectSignature = (report: InspectReport): {
+export const createInspectSignature = (
+  report: InspectReport,
+): {
   vertexCount: number;
   faceCount: number;
   meshCount: number;
@@ -118,7 +125,7 @@ export const createInspectSignature = (report: InspectReport): {
 } => {
   const stats = getGeometryStatsFromInspect(report);
   const boundingBox = getBoundingBoxFromInspect(report);
-  
+
   return {
     vertexCount: stats.vertexCount,
     faceCount: stats.faceCount,
@@ -131,7 +138,7 @@ export const createInspectSignature = (report: InspectReport): {
  * Check if a mesh has a specific attribute type
  */
 export const hasAttribute = (mesh: InspectReport['meshes']['properties'][0], attributeType: string): boolean => {
-  return mesh.attributes.some(attr => attr.toLowerCase().includes(attributeType.toLowerCase()));
+  return mesh.attributes.some((attr) => attr.toLowerCase().includes(attributeType.toLowerCase()));
 };
 
 /**
@@ -175,18 +182,16 @@ export const getDocumentStructure = async (glbData: Uint8Array): Promise<GltfSce
   const document = await glbToDocument(glbData);
   const root = document.getRoot();
   const scene = root.listScenes()[0];
-  
+
   if (!scene) {
     throw new Error('No scene found in GLB document');
   }
-  
+
   // Build root nodes hierarchy
-  const rootNodes = scene.listChildren().map(child => 
-    convertNodeToInfo(child)
-  );
-  
+  const rootNodes = scene.listChildren().map((child) => convertNodeToInfo(child));
+
   return {
-    rootNodes: rootNodes,
+    rootNodes,
   };
 };
 
@@ -197,29 +202,27 @@ function convertNodeToInfo(node: GltfNode): GltfNodeInfo {
   const mesh = node.getMesh();
   const skin = node.getSkin();
   const children = node.listChildren();
-  
+
   // Determine node type based on content
   let nodeType: 'MeshNode' | 'SkinNode' | 'ContainerNode';
   if (skin !== null) {
     nodeType = 'SkinNode';
-  } else if (mesh !== null) {
-    nodeType = 'MeshNode';
-  } else {
+  } else if (mesh === null) {
     nodeType = 'ContainerNode';
+  } else {
+    nodeType = 'MeshNode';
   }
-  
+
   const nodeInfo: GltfNodeInfo = {
     name: node.getName ? node.getName() : undefined,
     type: nodeType,
   };
-  
+
   // Process children recursively
   if (children.length > 0) {
-    nodeInfo.children = children.map((child: any) => 
-      convertNodeToInfo(child)
-    );
+    nodeInfo.children = children.map((child: unknown) => convertNodeToInfo(child));
   }
-  
+
   return nodeInfo;
 }
 
@@ -240,7 +243,7 @@ function nodeToSimpleHierarchy(node: GltfNodeInfo, includeNames = true): SimpleH
   return {
     type: node.type,
     ...(includeNames && node.name && { name: node.name }),
-    children: node.children?.map(child => nodeToSimpleHierarchy(child, includeNames)) ?? [],
+    children: node.children?.map((child) => nodeToSimpleHierarchy(child, includeNames)) ?? [],
   };
 }
 
@@ -248,7 +251,7 @@ function nodeToSimpleHierarchy(node: GltfNodeInfo, includeNames = true): SimpleH
  * Convert GLTF scene structure to simple hierarchy for comparison
  */
 function sceneToSimpleHierarchy(scene: GltfSceneStructure): SimpleHierarchy[] {
-  return scene.rootNodes.map(node => nodeToSimpleHierarchy(node));
+  return scene.rootNodes.map((node) => nodeToSimpleHierarchy(node));
 }
 
 /**
@@ -266,14 +269,14 @@ function convertSimpleToGltf(simple: SimpleHierarchy): GltfNodeInfo {
  * Format hierarchy for readable error messages
  */
 function formatHierarchy(hierarchy: SimpleHierarchy[], indent = 0): string {
-  return hierarchy.map(node => {
-    const padding = '  '.repeat(indent);
-    const name = node.name ? ` (${node.name})` : '';
-    const childrenStr = node.children.length > 0 
-      ? '\n' + formatHierarchy(node.children, indent + 1)
-      : '';
-    return `${padding}${node.type}${name}${childrenStr}`;
-  }).join('\n');
+  return hierarchy
+    .map((node) => {
+      const padding = '  '.repeat(indent);
+      const name = node.name ? ` (${node.name})` : '';
+      const childrenString = node.children.length > 0 ? '\n' + formatHierarchy(node.children, indent + 1) : '';
+      return `${padding}${node.type}${name}${childrenString}`;
+    })
+    .join('\n');
 }
 
 /**
@@ -283,26 +286,28 @@ export const validateGltfScene = (actual: GltfSceneStructure, expected: GltfScen
   // Compare structures without names (names are optional and added by loaders)
   const actualHierarchy = sceneToSimpleHierarchy(actual);
   const expectedHierarchy = sceneToSimpleHierarchy(expected);
-  
+
   // Create comparison versions without names for structural equality
-  const actualForComparison = actualHierarchy.map(node => nodeToSimpleHierarchy(convertSimpleToGltf(node), false));
-  const expectedForComparison = expectedHierarchy.map(node => nodeToSimpleHierarchy(convertSimpleToGltf(node), false));
-  
+  const actualForComparison = actualHierarchy.map((node) => nodeToSimpleHierarchy(convertSimpleToGltf(node), false));
+  const expectedForComparison = expectedHierarchy.map((node) =>
+    nodeToSimpleHierarchy(convertSimpleToGltf(node), false),
+  );
+
   // Use JSON comparison for deep equality check (without names)
   const actualJson = JSON.stringify(actualForComparison, null, 2);
   const expectedJson = JSON.stringify(expectedForComparison, null, 2);
-  
+
   if (actualJson !== expectedJson) {
     const actualFormatted = formatHierarchy(actualHierarchy);
     const expectedFormatted = formatHierarchy(expectedHierarchy);
-    
+
     throw new Error(
       `GLTF structure mismatch:\n\n` +
-      `Expected:\n${expectedFormatted}\n\n` +
-      `Actual:\n${actualFormatted}\n\n` +
-      `Structures compared without names for equality.\n\n` +
-      `Expected JSON:\n${expectedJson}\n\n` +
-      `Actual JSON:\n${actualJson}`
+        `Expected:\n${expectedFormatted}\n\n` +
+        `Actual:\n${actualFormatted}\n\n` +
+        `Structures compared without names for equality.\n\n` +
+        `Expected JSON:\n${expectedJson}\n\n` +
+        `Actual JSON:\n${actualJson}`,
     );
   }
 };

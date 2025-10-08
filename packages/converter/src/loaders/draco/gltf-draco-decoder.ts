@@ -18,21 +18,10 @@
 /* eslint-disable max-params -- draco3d uses c++ style */
 /* eslint-disable new-cap -- draco3d uses c++ style */
 
-import type { 
-  Attribute, 
-  Decoder, 
-  DecoderBuffer, 
-  DecoderModule, 
-  DracoArray, 
-  Mesh, 
-  PointCloud 
-} from 'draco3dgltf';
+import type { Attribute, Decoder, DecoderBuffer, DecoderModule, DracoArray, Mesh, PointCloud } from 'draco3dgltf';
 import draco3d from 'draco3dgltf';
-import {
-  Document,
-  Accessor,
-  Buffer as GltfBuffer,
-} from '@gltf-transform/core';
+import type { Accessor, Buffer as GltfBuffer } from '@gltf-transform/core';
+import { Document } from '@gltf-transform/core';
 
 type AttributeTypeConstructor =
   | Float32ArrayConstructor
@@ -43,14 +32,7 @@ type AttributeTypeConstructor =
   | Int8ArrayConstructor
   | Int32ArrayConstructor;
 
-type TypedArray =
-  | Float32Array
-  | Uint32Array
-  | Uint16Array
-  | Uint8Array
-  | Int16Array
-  | Int8Array
-  | Int32Array;
+type TypedArray = Float32Array | Uint32Array | Uint16Array | Uint8Array | Int16Array | Int8Array | Int32Array;
 
 type AttributeData = {
   array: TypedArray;
@@ -106,7 +88,7 @@ export class GltfDracoDecoder {
 
     const geometryType = decoder.GetEncodedGeometryType(buffer);
     const isPointCloud = geometryType === this.decoderModule.POINT_CLOUD;
-    
+
     if (geometryType === this.decoderModule.TRIANGULAR_MESH) {
       if (this.verbosity > 0) {
         console.info('Loaded a mesh.');
@@ -141,7 +123,7 @@ export class GltfDracoDecoder {
   ): Omit<DecodedDracoData, 'isPointCloud'> {
     let dracoGeometry;
     let decodingStatus;
-    
+
     if (geometryType === this.decoderModule.TRIANGULAR_MESH) {
       dracoGeometry = new this.decoderModule.Mesh();
       decodingStatus = decoder.DecodeBufferToMesh(buffer, dracoGeometry);
@@ -227,18 +209,22 @@ export class GltfDracoDecoder {
             dracoConstant = this.decoderModule.POSITION;
             break;
           }
+
           case 'NORMAL': {
             dracoConstant = this.decoderModule.NORMAL;
             break;
           }
+
           case 'COLOR': {
             dracoConstant = this.decoderModule.COLOR;
             break;
           }
+
           case 'TEX_COORD': {
             dracoConstant = this.decoderModule.TEX_COORD;
             break;
           }
+
           default: {
             continue;
           }
@@ -263,7 +249,7 @@ export class GltfDracoDecoder {
         attributeTypeConstructor,
         attributeName,
       );
-      
+
       attributes.set(attributeName, attributeData);
     }
 
@@ -272,7 +258,7 @@ export class GltfDracoDecoder {
       const numberIndices = numberFaces * 3;
       indices = new Uint32Array(numberIndices);
       const ia = new this.decoderModule.DracoInt32Array();
-      
+
       for (let i = 0; i < numberFaces; ++i) {
         decoder.GetFaceFromMesh(dracoGeometry as Mesh, i, ia);
         const index = i * 3;
@@ -310,42 +296,49 @@ export class GltfDracoDecoder {
         typedArray = new Float32Array(numberValues);
         break;
       }
+
       case Int8Array: {
         attributeData = new this.decoderModule.DracoInt8Array();
         decoder.GetAttributeInt8ForAllPoints(dracoGeometry, attribute, attributeData);
         typedArray = new Int8Array(numberValues);
         break;
       }
+
       case Int16Array: {
         attributeData = new this.decoderModule.DracoInt16Array();
         decoder.GetAttributeInt16ForAllPoints(dracoGeometry, attribute, attributeData);
         typedArray = new Int16Array(numberValues);
         break;
       }
+
       case Int32Array: {
         attributeData = new this.decoderModule.DracoInt32Array();
         decoder.GetAttributeInt32ForAllPoints(dracoGeometry, attribute, attributeData);
         typedArray = new Int32Array(numberValues);
         break;
       }
+
       case Uint8Array: {
         attributeData = new this.decoderModule.DracoUInt8Array();
         decoder.GetAttributeUInt8ForAllPoints(dracoGeometry, attribute, attributeData);
         typedArray = new Uint8Array(numberValues);
         break;
       }
+
       case Uint16Array: {
         attributeData = new this.decoderModule.DracoUInt16Array();
         decoder.GetAttributeUInt16ForAllPoints(dracoGeometry, attribute, attributeData);
         typedArray = new Uint16Array(numberValues);
         break;
       }
+
       case Uint32Array: {
         attributeData = new this.decoderModule.DracoUInt32Array();
         decoder.GetAttributeUInt32ForAllPoints(dracoGeometry, attribute, attributeData);
         typedArray = new Uint32Array(numberValues);
         break;
       }
+
       default: {
         const errorMessage = `DRACOLoader: Unexpected attribute type: ${String(attributeTypeConstructor)}`;
         console.error(errorMessage);
@@ -376,12 +369,13 @@ export class GltfDracoDecoder {
 
     // Create buffer to hold all geometry data
     const buffer = document.createBuffer();
-    
+
     // Calculate total buffer size
     let totalBufferSize = 0;
     for (const [, attributeData] of decodedData.attributes) {
       totalBufferSize += attributeData.array.byteLength;
     }
+
     if (decodedData.indices) {
       totalBufferSize += decodedData.indices.byteLength;
     }
@@ -398,13 +392,7 @@ export class GltfDracoDecoder {
 
     // Create accessors for each attribute
     for (const [attributeName, attributeData] of decodedData.attributes) {
-      const accessor = this.createAccessorForAttribute(
-        document,
-        buffer,
-        attributeName,
-        attributeData,
-        bufferOffset,
-      );
+      const accessor = this.createAccessorForAttribute(document, buffer, attributeName, attributeData, bufferOffset);
       accessors.set(attributeName, accessor);
       bufferOffset += attributeData.array.byteLength;
     }
@@ -488,10 +476,11 @@ export class GltfDracoDecoder {
     data: AttributeData,
     _bufferOffset: number,
   ): Accessor {
-    const accessor = document.createAccessor()
+    const accessor = document
+      .createAccessor()
       .setBuffer(buffer)
-      .setArray(data.array as any)
-      .setType(this.getAccessorType(data.itemSize) as any);
+      .setArray(data.array as unknown)
+      .setType(this.getAccessorType(data.itemSize) as unknown);
 
     if (data.normalized) {
       accessor.setNormalized(true);
@@ -507,25 +496,39 @@ export class GltfDracoDecoder {
     _bufferOffset: number,
   ): Accessor {
     // Use the most appropriate index type - Uint32 for large meshes, Uint16 for smaller ones
-    const useShort = indices.every(index => index < 65536);
+    const useShort = indices.every((index) => index < 65_536);
     const typedIndices = useShort ? new Uint16Array(indices) : indices;
 
-    const accessor = document.createAccessor()
+    const accessor = document
+      .createAccessor()
       .setBuffer(buffer)
-      .setArray(typedIndices as any)
-      .setType('SCALAR' as any);
+      .setArray(typedIndices as unknown)
+      .setType('SCALAR' as unknown);
 
     return accessor;
   }
 
   private getAccessorType(itemSize: number): string {
     switch (itemSize) {
-      case 1: return 'SCALAR';
-      case 2: return 'VEC2';
-      case 3: return 'VEC3';
-      case 4: return 'VEC4';
-      default: 
+      case 1: {
+        return 'SCALAR';
+      }
+
+      case 2: {
+        return 'VEC2';
+      }
+
+      case 3: {
+        return 'VEC3';
+      }
+
+      case 4: {
+        return 'VEC4';
+      }
+
+      default: {
         throw new Error(`Unsupported item size: ${itemSize}`);
+      }
     }
   }
 }

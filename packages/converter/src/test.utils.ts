@@ -7,7 +7,6 @@ import type { InspectReport } from '@gltf-transform/functions';
 import type { SupportedImportFormat } from '#import.js';
 import type { File } from '#types.js';
 import {
-  validateGlbData,
   getInspectReport,
   getGeometryStatsFromInspect,
   getBoundingBoxFromInspect,
@@ -16,6 +15,7 @@ import {
   validateGltfScene,
 } from '#gltf.utils.js';
 import type { GltfSceneStructure } from '#gltf.utils.js';
+
 // ============================================================================
 // Test Framework Types & Utilities
 // ============================================================================
@@ -124,10 +124,6 @@ export const loadTestData = async (testCase: LoaderTestCase): Promise<File[]> =>
   throw new Error('Test case must specify files, fixtureName, or dataSource');
 };
 
-// validateGlbData is now imported from gltf.utils.js
-
-// getBoundingBox functionality is now handled by getBoundingBoxFromInspect in gltf.utils.js
-
 // GLTF test utilities factory using gltf-transform inspect reports
 export const createInspectTestUtils = (): {
   getInspectReport: (glbData: Uint8Array) => Promise<InspectReport>;
@@ -137,7 +133,11 @@ export const createInspectTestUtils = (): {
     expectFaceCount: (report: InspectReport, expectedCount: number) => void;
     expectMeshCount: (report: InspectReport, expectedCount: number) => void;
     expectBoundingBoxSize: (report: InspectReport, expectedSize: [number, number, number], tolerance?: number) => void;
-    expectBoundingBoxCenter: (report: InspectReport, expectedCenter: [number, number, number], tolerance?: number) => void;
+    expectBoundingBoxCenter: (
+      report: InspectReport,
+      expectedCenter: [number, number, number],
+      tolerance?: number,
+    ) => void;
   };
   createStructureTestHelpers: () => {
     expectMeshCount: (report: InspectReport, expectedCount: number) => void;
@@ -152,7 +152,12 @@ export const createInspectTestUtils = (): {
 } => {
   const epsilon = 1e-6;
 
-  const expectVector3ToBeCloseTo = (actual: [number, number, number], expected: [number, number, number], subject: string, precision = epsilon): void => {
+  const expectVector3ToBeCloseTo = (
+    actual: [number, number, number],
+    expected: [number, number, number],
+    subject: string,
+    precision = epsilon,
+  ): void => {
     expect(
       Math.abs(actual[0] - expected[0]),
       `${subject}: Expected [X: ${expected[0]}]. Actual [X: ${actual[0]}]\n`,
@@ -178,16 +183,20 @@ export const createInspectTestUtils = (): {
       faceCount: stats.faceCount,
       meshCount: stats.meshCount,
       boundingBox: {
-        size: boundingBox ? [
-          Math.round(boundingBox.size[0] * 1000) / 1000,
-          Math.round(boundingBox.size[1] * 1000) / 1000,
-          Math.round(boundingBox.size[2] * 1000) / 1000,
-        ] : [0, 0, 0],
-        center: boundingBox ? [
-          Math.round(boundingBox.center[0] * 1000) / 1000,
-          Math.round(boundingBox.center[1] * 1000) / 1000,
-          Math.round(boundingBox.center[2] * 1000) / 1000,
-        ] : [0, 0, 0],
+        size: boundingBox
+          ? [
+              Math.round(boundingBox.size[0] * 1000) / 1000,
+              Math.round(boundingBox.size[1] * 1000) / 1000,
+              Math.round(boundingBox.size[2] * 1000) / 1000,
+            ]
+          : [0, 0, 0],
+        center: boundingBox
+          ? [
+              Math.round(boundingBox.center[0] * 1000) / 1000,
+              Math.round(boundingBox.center[1] * 1000) / 1000,
+              Math.round(boundingBox.center[2] * 1000) / 1000,
+            ]
+          : [0, 0, 0],
       },
     };
   };
@@ -214,27 +223,17 @@ export const createInspectTestUtils = (): {
     expectBoundingBoxSize(report: InspectReport, expectedSize: [number, number, number], tolerance?: number): void {
       const boundingBox = getBoundingBoxFromInspect(report);
       expect(boundingBox).toBeDefined();
-      
+
       const actualTolerance = tolerance ?? epsilon;
-      expectVector3ToBeCloseTo(
-        boundingBox!.size,
-        expectedSize,
-        'bounding box size',
-        actualTolerance,
-      );
+      expectVector3ToBeCloseTo(boundingBox!.size, expectedSize, 'bounding box size', actualTolerance);
     },
 
     expectBoundingBoxCenter(report: InspectReport, expectedCenter: [number, number, number], tolerance?: number): void {
       const boundingBox = getBoundingBoxFromInspect(report);
       expect(boundingBox).toBeDefined();
-      
+
       const actualTolerance = tolerance ?? epsilon;
-      expectVector3ToBeCloseTo(
-        boundingBox!.center,
-        expectedCenter,
-        'bounding box center',
-        actualTolerance,
-      );
+      expectVector3ToBeCloseTo(boundingBox!.center, expectedCenter, 'bounding box center', actualTolerance);
     },
   });
 
@@ -283,6 +282,3 @@ export const createInspectTestUtils = (): {
     epsilon,
   };
 };
-
-// Export validateGlbData for backward compatibility
-export { validateGlbData };

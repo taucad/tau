@@ -19,7 +19,7 @@ export const GLTF_COORDINATE_TRANSFORM_MATRIX: mat4 = [1, 0, 0, 0, 0, 0, 1, 0, 0
 export const GLTF_SCALING_MATRIX: mat4 = [1000, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1];
 
 /**
- * gltf-transform matrix for Z-up to Y-up coordinate transformation (reverse of Y-up to Z-up)
+ * Gltf-transform matrix for Z-up to Y-up coordinate transformation (reverse of Y-up to Z-up)
  * Matrix layout: column-major format (gltf-transform standard)
  */
 export const GLTF_REVERSE_COORDINATE_TRANSFORM_MATRIX: mat4 = [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];

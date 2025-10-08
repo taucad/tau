@@ -29,24 +29,19 @@ export function NavUser(): React.JSX.Element {
   return (
     <>
       <SignedOut>
-        <Button asChild variant="overlay" className="select-none hidden lg:flex">
+        <Button asChild variant="overlay" className="hidden select-none lg:flex">
           <NavLink to="/auth/sign-in" tabIndex={-1}>
-            {({ isPending }) => (
-              <>{isPending ? <LoadingSpinner /> : 'Sign In'}</>
-            )}
+            {({ isPending }) => (isPending ? <LoadingSpinner /> : 'Sign In')}
           </NavLink>
         </Button>
-        <Button asChild className="select-none hidden">
+        <Button asChild className="hidden select-none">
           <NavLink to="/auth/sign-up" tabIndex={-1}>
-            {({ isPending }) =>
-              isPending ? <LoadingSpinner /> : 'Sign Up'}
+            {({ isPending }) => (isPending ? <LoadingSpinner /> : 'Sign Up')}
           </NavLink>
         </Button>
-        <Button asChild size="icon" variant="overlay" className="select-none lg:hidden text-primary">
+        <Button asChild size="icon" variant="overlay" className="text-primary select-none lg:hidden">
           <NavLink to="/auth/sign-in" tabIndex={-1}>
-            {({ isPending }) => (
-              <>{isPending ? <LoadingSpinner /> : <LogIn />}</>
-            )}
+            {({ isPending }) => (isPending ? <LoadingSpinner /> : <LogIn />)}
           </NavLink>
         </Button>
       </SignedOut>

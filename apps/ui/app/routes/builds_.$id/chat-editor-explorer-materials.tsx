@@ -47,18 +47,13 @@ export function ChatEditorExplorerMaterials({
     <Tree elements={treeElements} className="px-1">
       {materials.map((material) => {
         const isSelected = selectedMaterialId === material.id;
-        
+
         return (
           <ExplorerFile
             key={material.id}
             id={material.id}
             name={material.name}
-            icon={
-              <Palette
-                className="size-4"
-                style={{ color: material.color ?? '#888' }}
-              />
-            }
+            icon={<Palette className="size-4" style={{ color: material.color ?? '#888' }} />}
             isSelected={isSelected}
             onClick={() => {
               handleMaterialClick(material.id);
@@ -69,4 +64,3 @@ export function ChatEditorExplorerMaterials({
     </Tree>
   );
 }
-

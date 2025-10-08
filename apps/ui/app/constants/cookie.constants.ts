@@ -4,7 +4,7 @@ import type { ConstantRecord } from '#types/constant.types.js';
  * Cookie names.
  *
  * These must be short, hyphen separated, and lowercase.
- * 
+ *
  * The following conventions are in place to reduce cookie name length:
  * - resize cookies use <namespace>-rs-<subject> (e.g. chat-resize-file-explorer)
  * - open cookies use <namespace>-op-<subject> (e.g. chat-file-explorer-open)

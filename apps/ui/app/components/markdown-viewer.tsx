@@ -5,7 +5,7 @@ import rehypeKatex from 'rehype-katex';
 import katexUrl from 'katex/dist/katex.min.css?url';
 import type { LinkDescriptor } from 'react-router';
 import { memo } from 'react';
-import { 
+import {
   CodeBlock,
   CodeBlockHeader,
   CodeBlockTitle,
@@ -51,6 +51,7 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
             const { children, className, ref, node, style, ...rest } = properties;
             // Check if this is a code block (has language class) or inline code
             const match = /language-(\w+)/.exec(className ?? '');
+            // eslint-disable-next-line @typescript-eslint/no-base-to-string -- children is stringifiable.
             const text = String(children).replace(/\n$/, '');
 
             if (match) {
@@ -68,18 +69,17 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
                     </CodeBlockAction>
                   </CodeBlockHeader>
                   <CodeBlockContent>
-                    <Pre {...rest} language={language} className={cn("text-xs", className)}>{children}</Pre>
+                    <Pre {...rest} language={language} className={cn('text-xs', className)}>
+                      {children}
+                    </Pre>
                   </CodeBlockContent>
                 </CodeBlock>
               );
             }
-            
+
             // Render as inline code
             return (
-              <InlineCode
-                {...rest}
-                className={className}
-              >
+              <InlineCode {...rest} className={className}>
                 {children}
               </InlineCode>
             );

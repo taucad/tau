@@ -23,8 +23,13 @@ import { toTitleCase } from '#utils/string.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { HighlightText } from '#components/highlight-text.js';
 import { ChatParameterWidget } from '#routes/builds_.$id/chat-parameter-widget.js';
-import { rjsfIdToJsonPath, rjsfIdPrefix, rjsfIdSeparator, isSchemaMatchingSearch } from '#routes/builds_.$id/rjsf-utils.js';
-import { hasCustomValue } from "#utils/object.utils.js";
+import {
+  rjsfIdToJsonPath,
+  rjsfIdPrefix,
+  rjsfIdSeparator,
+  isSchemaMatchingSearch,
+} from '#routes/builds_.$id/rjsf-utils.js';
+import { hasCustomValue } from '#utils/object.utils.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for formContext
@@ -36,6 +41,7 @@ export type RJSFContext = {
 };
 
 // Custom Field Template with Reset Button and Search Filtering
+// eslint-disable-next-line complexity -- consider refactoring.
 function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSchema, RJSFContext>): React.ReactNode {
   const { label, help, required, description, errors, children, schema, formData, id, registry } = props;
 
@@ -49,29 +55,40 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     }
 
     // Narrow down to check if root is an object with only nested children
-    const isRootNestedOnlyChildren = isRoot && schema.type === 'object' && Object.values(schema.properties ?? {}).every((property) => property !== false && property !== true && (property.type === 'object' || property.type === 'array'));
+    const isRootNestedOnlyChildren =
+      isRoot &&
+      schema.type === 'object' &&
+      Object.values(schema.properties ?? {}).every(
+        (property) =>
+          property !== false && property !== true && (property.type === 'object' || property.type === 'array'),
+      );
 
-    return <div
-      data-slot='field-group'
-      className={cn(
-        'field-group group/field-group',
+    return (
+      <div
+        data-slot="field-group"
+        className={cn(
+          'field-group group/field-group',
 
-        // We can save some space by hiding the left border if the root is an object with only nested (object or array) children
-        'data-[is-root-nested-only=true]:-ml-3.5',
+          // We can save some space by hiding the left border if the root is an object with only nested (object or array) children
+          'data-[is-root-nested-only=true]:-ml-3.5',
 
-        // Non root object fields.
-        // These have a left border and a top/bottom border.
-        !isRoot && cn(
-          "border-t border-b",
-          "ml-2 border-l-6",
-          // The last field group in the object should not have a bottom border
-          "[.field-group:last-of-type]:border-b-0",
-          // The first field group in the object should not have a top border
-          "[.field-group+&]:border-t-0",
-        )
-      )}
-      data-is-root-nested-only={isRootNestedOnlyChildren}
-    >{children}</div>;
+          // Non root object fields.
+          // These have a left border and a top/bottom border.
+          !isRoot &&
+            cn(
+              'border-t border-b',
+              'ml-2 border-l-6',
+              // The last field group in the object should not have a bottom border
+              '[.field-group:last-of-type]:border-b-0',
+              // The first field group in the object should not have a top border
+              '[.field-group+&]:border-t-0',
+            ),
+        )}
+        data-is-root-nested-only={isRootNestedOnlyChildren}
+      >
+        {children}
+      </div>
+    );
   }
 
   // Always call hooks at the very top level
@@ -96,6 +113,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
         const parentSegment = idParts[i];
         if (parentSegment) {
           const parentName = toTitleCase(parentSegment);
+          // eslint-disable-next-line max-depth -- consider refactoring.
           if (formContext.shouldShowField(parentName)) {
             isInMatchingGroup = true;
             break;
@@ -123,9 +141,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   };
 
   return (
-    <div className={cn(
-      "@container/parameter flex flex-col px-3 py-2 transition-colors",
-    )}>
+    <div className={cn('@container/parameter flex flex-col px-3 py-2 transition-colors')}>
       <div className="flex h-auto min-h-6 flex-row justify-between gap-2">
         <span className={cn(fieldHasValue ? 'font-medium' : 'font-normal')} aria-label={`Parameter: ${prettyLabel}`}>
           <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
@@ -134,12 +150,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
         {fieldHasValue ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="xs"
-                className="text-muted-foreground"
-                onClick={handleReset}
-              >
+              <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={handleReset}>
                 <RefreshCcwDot className="size-3.5" />
               </Button>
             </TooltipTrigger>
@@ -151,7 +162,9 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
         <div className="text-sm text-muted-foreground">
           <HighlightText text={descriptionText} searchTerm={formContext.searchTerm} />
         </div>
-      ) : description}
+      ) : (
+        description
+      )}
       <div className="mt-auto flex w-full flex-row items-center gap-2">{children}</div>
       {help}
       {errors}
@@ -175,7 +188,7 @@ function ObjectFieldTemplate(
   }, [formContext.allExpanded]);
 
   // Check if the group should be visible by checking:
-  // 1. If the group title itself matches the search term, OR  
+  // 1. If the group title itself matches the search term, OR
   // 2. If any child properties (or their nested children) match
   const prettyTitle = toTitleCase(title);
   const groupTitleMatches = formContext.shouldShowField(prettyTitle);
@@ -216,15 +229,16 @@ function ObjectFieldTemplate(
   const isFiltering = formContext.searchTerm.trim().length > 0;
   const filteredPropertiesCount = isFiltering
     ? properties.filter((property) => {
-      const propertyName = property.name;
-      // Get the schema for this child property from the parent schema
-      const childSchema = schema.properties?.[propertyName];
-      if (!childSchema || typeof childSchema !== 'object' || Array.isArray(childSchema)) {
-        return false;
-      }
-      // Check if this direct child property matches
-      return isSchemaMatchingSearch(childSchema as RJSFSchema, formContext.searchTerm, propertyName);
-    }).length
+        const propertyName = property.name;
+        // Get the schema for this child property from the parent schema
+        const childSchema = schema.properties?.[propertyName];
+        if (!childSchema || typeof childSchema !== 'object' || Array.isArray(childSchema)) {
+          return false;
+        }
+
+        // Check if this direct child property matches
+        return isSchemaMatchingSearch(childSchema as RJSFSchema, formContext.searchTerm, propertyName);
+      }).length
     : totalPropertiesCount;
 
   // Show filtered/total format when filtering and counts differ
@@ -234,20 +248,16 @@ function ObjectFieldTemplate(
     : `(${totalPropertiesCount})`;
 
   return (
-    <Collapsible
-      open={isOpen}
-      className="w-full"
-      onOpenChange={setIsOpen}
-    >
-      <CollapsibleTrigger 
+    <Collapsible open={isOpen} className="w-full" onOpenChange={setIsOpen}>
+      <CollapsibleTrigger
         className="group/collapsible flex h-8 w-full items-center justify-between px-3 py-1.5 transition-colors hover:bg-muted/70"
         aria-label={`Group: ${prettyTitle}`}
       >
-        <h3 className="flex min-w-0 flex-1 items-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <h3 className="flex min-w-0 flex-1 items-center text-xs font-semibold tracking-wide text-muted-foreground uppercase">
           <span className="truncate">
             <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
           </span>
-          <span className={cn("ml-1.5 flex-shrink-0 text-muted-foreground/50", isCountFiltered && "italic")}>
+          <span className={cn('ml-1.5 flex-shrink-0 text-muted-foreground/50', isCountFiltered && 'italic')}>
             {countDisplay}
           </span>
         </h3>
@@ -262,7 +272,9 @@ function ObjectFieldTemplate(
   );
 }
 
-function ArrayFieldTemplate(props: ArrayFieldTemplateProps): React.ReactNode {
+function ArrayFieldTemplate(
+  props: ArrayFieldTemplateProps<Record<string, unknown>, RJSFSchema, RJSFContext>,
+): React.ReactNode {
   const { title, items, canAdd, onAddClick, registry, schema } = props;
   const { formContext } = registry;
 
@@ -276,7 +288,7 @@ function ArrayFieldTemplate(props: ArrayFieldTemplateProps): React.ReactNode {
   // 1. If the array title itself matches the search term, OR
   // 2. If the array items schema matches (indicating children would match)
   const prettyTitle = toTitleCase(title);
-  
+
   // Check if the schema or its title matches the search
   const shouldShowArray = isSchemaMatchingSearch(schema, formContext.searchTerm, title);
 
@@ -297,22 +309,16 @@ function ArrayFieldTemplate(props: ArrayFieldTemplateProps): React.ReactNode {
   const countDisplay = `(${itemCount})`;
 
   return (
-    <Collapsible
-      open={isOpen}
-      className="w-full"
-      onOpenChange={setIsOpen}
-    >
-      <CollapsibleTrigger 
+    <Collapsible open={isOpen} className="w-full" onOpenChange={setIsOpen}>
+      <CollapsibleTrigger
         className="group/collapsible flex h-8 w-full items-center justify-between px-3 py-1.5 transition-colors hover:bg-muted/70"
         aria-label={`Group: ${prettyTitle}`}
       >
-        <h3 className="flex min-w-0 flex-1 items-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <h3 className="flex min-w-0 flex-1 items-center text-xs font-semibold tracking-wide text-muted-foreground uppercase">
           <span className="truncate">
             <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
           </span>
-          <span className="ml-1.5 flex-shrink-0 text-muted-foreground/50">
-            {countDisplay}
-          </span>
+          <span className="ml-1.5 flex-shrink-0 text-muted-foreground/50">{countDisplay}</span>
         </h3>
         <ChevronRight className="size-3.5 text-muted-foreground transition-transform duration-200 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
       </CollapsibleTrigger>

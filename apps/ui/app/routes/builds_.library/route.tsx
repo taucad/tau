@@ -716,7 +716,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
         <div className="flex items-start justify-between">
           <Popover open={isEditing} onOpenChange={setIsEditing}>
             <PopoverTrigger asChild>
-              <Button variant="ghost" className="cursor-text justify-start -mx-2 px-2 text-xl font-semibold">
+              <Button variant="ghost" className="-mx-2 cursor-text justify-start px-2 text-xl font-semibold">
                 {build.name}
               </Button>
             </PopoverTrigger>

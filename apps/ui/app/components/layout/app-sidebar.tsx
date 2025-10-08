@@ -17,7 +17,7 @@ import { NavFooter } from '#components/nav/nav-footer.js';
 
 export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>): React.JSX.Element {
   return (
-    <Sidebar variant='floating' collapsible='offcanvas' {...properties}>
+    <Sidebar variant="floating" collapsible="offcanvas" {...properties}>
       <SidebarHeader>
         <SidebarMenuButton
           asChild
@@ -39,7 +39,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
           <NavMain items={navRoutes.navMain} />
         </div>
       </SidebarContent>
-      <SidebarFooter className="border-t flex flex-row items-center justify-between">
+      <SidebarFooter className="flex flex-row items-center justify-between border-t">
         <NavFooter />
       </SidebarFooter>
       <SidebarRail />

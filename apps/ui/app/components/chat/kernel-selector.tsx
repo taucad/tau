@@ -27,7 +27,8 @@ export function KernelSelector({
               size="sm"
               className={cn(
                 'flex h-auto min-h-9 flex-col items-center justify-center gap-2 rounded-lg border-border p-2 transition-all hover:border-ring/50 hover:bg-primary/5',
-                selectedKernel === option.id && 'border-ring hover:border-ring hover:bg-primary/10 bg-primary/5 text-primary',
+                selectedKernel === option.id &&
+                  'border-ring bg-primary/5 text-primary hover:border-ring hover:bg-primary/10',
               )}
               onClick={() => {
                 onKernelChange(option.id);
@@ -66,7 +67,6 @@ export function KernelSelector({
                     ))}
                   </div>
                 </div>
-
               </div>
             </div>
           </HoverCardContent>

@@ -12,9 +12,7 @@ export type FileItem = {
 };
 
 // Mock file data
-const mockFiles: readonly FileItem[] = [
-  { id: 'file-1', name: 'MultipleMeshes.bim', type: 'bim', size: 2048 },
-];
+const mockFiles: readonly FileItem[] = [{ id: 'file-1', name: 'MultipleMeshes.bim', type: 'bim', size: 2048 }];
 
 type ChatEditorExplorerFilesProps = {
   readonly files?: readonly FileItem[];
@@ -46,7 +44,7 @@ export function ChatEditorExplorerFiles({
     <Tree elements={treeElements} className="px-1">
       {files.map((file) => {
         const isSelected = selectedFileId === file.id;
-        
+
         return (
           <ExplorerFile
             key={file.id}

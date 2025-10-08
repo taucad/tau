@@ -1,7 +1,8 @@
 import { useParams } from 'react-router';
 import { useCallback, useEffect } from 'react';
 import { createActor } from 'xstate';
-// eslint-disable-next-line no-restricted-imports -- allowed for router types
+import { toast } from 'sonner';
+// eslint-disable-next-line no-restricted-imports -- allowed for route types
 import type { Route } from './+types/route.js';
 import { ChatInterface } from '#routes/builds_.$id/chat-interface.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
@@ -17,7 +18,6 @@ import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls
 import { CommandPaletteTrigger } from '#routes/builds_.$id/command-palette.js';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { toast } from 'sonner';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { ChatControls } from '#routes/builds_.$id/chat-controls.js';
 import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';
@@ -27,14 +27,12 @@ export const handle: Handle = {
   breadcrumb(match) {
     const { id } = match.params as Route.LoaderArgs['params'];
 
-    return (
-      [
-        <BuildProvider buildId={id}>
-          <BuildNameEditor />
-        </BuildProvider>,
-        <ChatModeSelector />
-      ]
-    );
+    return [
+      <BuildProvider key={`${id}-build-name-editor`} buildId={id}>
+        <BuildNameEditor />
+      </BuildProvider>,
+      <ChatModeSelector key={`${id}-chat-mode-selector`} />,
+    ];
   },
   actions(match) {
     const { id } = match.params as Route.LoaderArgs['params'];
@@ -46,9 +44,14 @@ export const handle: Handle = {
         </BuildProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button onClick={() => {
-              toast.info('Github connection coming soon!');
-            }} variant='outline' size="icon" className="hidden md:flex">
+            <Button
+              variant="outline"
+              size="icon"
+              className="hidden md:flex"
+              onClick={() => {
+                toast.info('Github connection coming soon!');
+              }}
+            >
               <SvgIcon id="github" />
             </Button>
           </TooltipTrigger>
@@ -233,14 +236,14 @@ function ChatWithProvider() {
 
   // Use chat ID when available, fallback to build ID
   // Backend can distinguish: chat IDs start with "chat_", build IDs start with "bld_"
-  const threadId = activeChatId || buildId!;
+  const threadId = activeChatId ?? buildId!;
 
   return (
     <AiChatProvider value={{ ...useChatConstants, id: threadId, onToolCall }}>
       <ViewContextProvider>
         <FileExplorerContext.Provider>
-          {build?.name && <title>{build.name}</title>}
-          {build?.description && <meta name="description" content={build.description} />}
+          {build?.name ? <title>{build.name}</title> : null}
+          {build?.description ? <meta name="description" content={build.description} /> : null}
           <Chat />
         </FileExplorerContext.Provider>
       </ViewContextProvider>

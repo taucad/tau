@@ -25,7 +25,8 @@ export const handle: Handle = {
     return (
       <Button asChild variant="ghost">
         <Link to="/builds/new">New</Link>
-      </Button>)
+      </Button>
+    );
   },
 };
 
@@ -215,44 +216,44 @@ export default function BuildsNew(): React.JSX.Element {
                   setSelectedKernel(value as KernelProvider);
                 }}
               >
-                <Accordion 
-                  type="single" 
-                  value={selectedKernel} 
+                <Accordion
+                  type="single"
+                  value={selectedKernel}
+                  className="space-y-2"
                   onValueChange={(value) => {
                     if (value) {
                       setSelectedKernel(value as KernelProvider);
                     }
                   }}
-                  className="space-y-2"
                 >
                   {kernelOptions.map((option) => (
-                    <AccordionItem 
-                      key={option.id} 
-                      value={option.id} 
+                    <AccordionItem
+                      key={option.id}
+                      value={option.id}
                       className={cn(
-                        'border rounded-lg transition-all',
+                        'rounded-lg border transition-all',
                         selectedKernel === option.id && 'border-ring bg-primary/5 ring-3 ring-ring/50',
                       )}
                     >
                       <div className="flex items-start gap-3 p-4">
                         <RadioGroupItem value={option.id} id={`mobile-${option.id}`} className="mt-1" />
-                        <div className="flex-1 min-w-0">
-                          <AccordionTrigger 
+                        <div className="min-w-0 flex-1">
+                          <AccordionTrigger
                             className={cn(
-                              'flex h-auto cursor-pointer items-start justify-between gap-3 border-0 p-0 text-left transition-all hover:no-underline w-full',
+                              'flex h-auto w-full cursor-pointer items-start justify-between gap-3 border-0 p-0 text-left transition-all hover:no-underline',
                               'bg-transparent hover:bg-transparent data-[state=open]:bg-transparent',
                             )}
                           >
-                            <div className="flex items-start gap-3 flex-1">
-                              <SvgIcon id={option.id} className="size-6 shrink-0 mt-0.5" />
-                              <div className="flex flex-col gap-1 min-w-0 w-full">
-                                <div className="flex items-start justify-between gap-2 w-full">
+                            <div className="flex flex-1 items-start gap-3">
+                              <SvgIcon id={option.id} className="mt-0.5 size-6 shrink-0" />
+                              <div className="flex w-full min-w-0 flex-col gap-1">
+                                <div className="flex w-full items-start justify-between gap-2">
                                   <span className="text-sm font-medium">{option.name}</span>
-                                  <span className="text-xs text-muted-foreground/70 font-mono">
+                                  <span className="font-mono text-xs text-muted-foreground/70">
                                     {option.backendProvider}
                                   </span>
                                 </div>
-                                <span className="text-xs text-muted-foreground leading-relaxed">
+                                <span className="text-xs leading-relaxed text-muted-foreground">
                                   {option.description}
                                 </span>
                               </div>
@@ -286,21 +287,18 @@ export default function BuildsNew(): React.JSX.Element {
                       htmlFor={option.id}
                       className={cn(
                         'flex h-auto cursor-pointer items-start justify-start gap-3 rounded-lg border p-4 text-left transition-all hover:border-primary/50 hover:bg-primary/5',
-                        selectedKernel === option.id && 'border-ring hover:border-ring hover:bg-primary/10 bg-primary/5 ring-3 ring-ring/50',
+                        selectedKernel === option.id &&
+                          'border-ring bg-primary/5 ring-3 ring-ring/50 hover:border-ring hover:bg-primary/10',
                       )}
                     >
                       <RadioGroupItem value={option.id} id={option.id} className="mt-1" />
-                      <SvgIcon id={option.id} className="size-6 shrink-0 mt-0.5" />
-                      <div className="flex flex-col gap-1 min-w-0 w-full">
-                        <div className="flex items-start justify-between gap-2 w-full">
+                      <SvgIcon id={option.id} className="mt-0.5 size-6 shrink-0" />
+                      <div className="flex w-full min-w-0 flex-col gap-1">
+                        <div className="flex w-full items-start justify-between gap-2">
                           <span className="text-sm font-medium">{option.name}</span>
-                          <span className="text-xs text-muted-foreground/70 font-mono">
-                            {option.backendProvider}
-                          </span>
+                          <span className="font-mono text-xs text-muted-foreground/70">{option.backendProvider}</span>
                         </div>
-                        <span className="text-xs text-muted-foreground leading-relaxed">
-                          {option.description}
-                        </span>
+                        <span className="text-xs leading-relaxed text-muted-foreground">{option.description}</span>
                       </div>
                     </Label>
                   ))}

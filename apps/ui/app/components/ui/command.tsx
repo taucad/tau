@@ -75,13 +75,13 @@ function CommandEmpty({
   className,
   ...properties
 }: React.ComponentProps<typeof CommandPrimitive.Empty>): React.JSX.Element {
-  return <CommandPrimitive.Empty
-    data-slot="command-empty"
-    className={cn(
-      emptyItemVariants({ variant: "default" }),
-      className
-    )}
-    {...properties} />;
+  return (
+    <CommandPrimitive.Empty
+      data-slot="command-empty"
+      className={cn(emptyItemVariants({ variant: 'default' }), className)}
+      {...properties}
+    />
+  );
 }
 
 function CommandGroup({

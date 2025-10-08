@@ -39,16 +39,16 @@ export function SearchInput({
         placeholder={placeholder}
         value={value}
         className={cn(
-          'peer pl-8 pr-2 not-placeholder-shown:pr-6 placeholder:text-sm placeholder-shown:truncate focus:placeholder:opacity-0',
-          className
+          'peer pr-2 pl-8 not-placeholder-shown:pr-6 placeholder:text-sm placeholder-shown:truncate focus:placeholder:opacity-0',
+          className,
         )}
         {...properties}
       />
-      <Search className="absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+      <Search className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
       <Button
         variant="ghost"
         size="icon"
-        className="absolute top-1/2 right-1.5 size-5 -translate-y-1/2 p-0 text-muted-foreground hover:text-foreground peer-placeholder-shown:invisible"
+        className="absolute top-1/2 right-1.5 size-5 -translate-y-1/2 p-0 text-muted-foreground peer-placeholder-shown:invisible hover:text-foreground"
         type="button"
         aria-label="Clear search"
         onClick={onClear}

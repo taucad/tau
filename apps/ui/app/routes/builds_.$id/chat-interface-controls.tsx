@@ -34,19 +34,30 @@ export function ViewContextProvider({ children }: { readonly children: React.Rea
   const [isDetailsOpen, setIsDetailsOpen] = useCookie(cookieName.chatOpDetails, true);
 
   const value = useMemo(
-    () => ({ 
-      isChatOpen, 
-      setIsChatOpen, 
-      isParametersOpen, 
-      setIsParametersOpen, 
-      isEditorOpen, 
-      setIsEditorOpen, 
-      isExplorerOpen, 
-      setIsExplorerOpen, 
-      isDetailsOpen, 
-      setIsDetailsOpen 
+    () => ({
+      isChatOpen,
+      setIsChatOpen,
+      isParametersOpen,
+      setIsParametersOpen,
+      isEditorOpen,
+      setIsEditorOpen,
+      isExplorerOpen,
+      setIsExplorerOpen,
+      isDetailsOpen,
+      setIsDetailsOpen,
     }),
-    [isChatOpen, setIsChatOpen, isParametersOpen, setIsParametersOpen, isEditorOpen, setIsEditorOpen, isExplorerOpen, setIsExplorerOpen, isDetailsOpen, setIsDetailsOpen],
+    [
+      isChatOpen,
+      setIsChatOpen,
+      isParametersOpen,
+      setIsParametersOpen,
+      isEditorOpen,
+      setIsEditorOpen,
+      isExplorerOpen,
+      setIsExplorerOpen,
+      isDetailsOpen,
+      setIsDetailsOpen,
+    ],
   );
 
   return <ViewContext.Provider value={value}>{children}</ViewContext.Provider>;

@@ -113,7 +113,11 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button variant="overlay" size="icon" className={cn('text-muted-foreground hover:text-foreground', className)}>
+            <Button
+              variant="overlay"
+              size="icon"
+              className={cn('text-muted-foreground hover:text-foreground', className)}
+            >
               <Settings />
             </Button>
           </DropdownMenuTrigger>

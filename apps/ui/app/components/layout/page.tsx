@@ -50,11 +50,9 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset
-        style={{ '--header-height': headerHeight }}
-      >
-        <header className="absolute top-0 w-full z-20 flex h-[var(--header-height)] shrink-0 items-center justify-between gap-2 pointer-events-none">
-          <div className="flex items-center p-0.25 gap-0.25 md:gap-1 h-8 ml-2 md:ml-[var(--sidebar-width-current)] transition-[margin] duration-200 ease-linear pl-2.75 rounded-md bg-sidebar border pointer-events-auto">
+      <SidebarInset style={{ '--header-height': headerHeight }}>
+        <header className="pointer-events-none absolute top-0 z-20 flex h-[var(--header-height)] w-full shrink-0 items-center justify-between gap-2">
+          <div className="pointer-events-auto ml-2 flex h-8 items-center gap-0.25 rounded-md border bg-sidebar p-0.25 pl-2.75 transition-[margin] duration-200 ease-linear md:ml-[var(--sidebar-width-current)] md:gap-1">
             <SidebarTrigger className="-ml-2.5 rounded-sm" />
             {hasBreadcrumbItems ? (
               <span className="h-4">
@@ -62,26 +60,27 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
               </span>
             ) : null}
             <Breadcrumb className="hidden [&:has(>:not(:empty))]:block">
-              <BreadcrumbList className={
-                cn(
-                  "sm:gap-0",
-                  "[&_[data-slot=button]]:h-7 [&_[data-slot=button]]:p-2 [&_[data-slot=button]]:rounded-sm",
-                  "[&_[data-slot='tooltip-trigger']]:h-7 [&_[data-slot='tooltip-trigger']]:p-2 [&_[data-slot='tooltip-trigger']]:rounded-sm",
-                  "[&_[data-slot='breadcrumb-link']]:h-7 [&_[data-slot='breadcrumb-link']]:p-2 [&_[data-slot='breadcrumb-link']]:rounded-sm",
-                  "[&_[data-slot=input]]:h-7 [&_[data-slot=input]]:rounded-sm",
+              <BreadcrumbList
+                className={cn(
+                  'sm:gap-0',
+                  '[&_[data-slot=button]]:h-7 [&_[data-slot=button]]:rounded-sm [&_[data-slot=button]]:p-2',
+                  "[&_[data-slot='tooltip-trigger']]:h-7 [&_[data-slot='tooltip-trigger']]:rounded-sm [&_[data-slot='tooltip-trigger']]:p-2",
+                  "[&_[data-slot='breadcrumb-link']]:h-7 [&_[data-slot='breadcrumb-link']]:rounded-sm [&_[data-slot='breadcrumb-link']]:p-2",
+                  '[&_[data-slot=input]]:h-7 [&_[data-slot=input]]:rounded-sm',
                 )}
               >
                 {breadcrumbItems.map((match) => {
                   const breadcrumb = match.handle.breadcrumb?.(match);
                   // Normalize to always be an array
                   const breadcrumbArray = Array.isArray(breadcrumb) ? breadcrumb : [breadcrumb];
-                  
+
                   return (
                     <Fragment key={match.id}>
                       {breadcrumbArray.map((item, index) => (
+                        // eslint-disable-next-line react/no-array-index-key -- these are stable.
                         <Fragment key={`${match.id}-${index}`}>
                           <BreadcrumbSeparator className="hidden first:hidden lg:block" />
-                          <BreadcrumbItem className="hidden last:block lg:block hover:text-foreground">
+                          <BreadcrumbItem className="hidden last:block hover:text-foreground lg:block">
                             <BreadcrumbLink asChild>{item}</BreadcrumbLink>
                           </BreadcrumbItem>
                         </Fragment>
@@ -94,7 +93,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
           </div>
 
           {/* Centered Command Palette */}
-          <div className="absolute top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 pointer-events-auto">
+          <div className="pointer-events-auto absolute top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2">
             {hasCommandPaletteItems ? (
               <div className="flex items-center gap-2">
                 {commandPaletteItems.map((match) => (
@@ -104,7 +103,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
             ) : null}
           </div>
 
-          <div className="flex items-center gap-2 px-2 pointer-events-auto">
+          <div className="pointer-events-auto flex items-center gap-2 px-2">
             {!isOnline && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -126,7 +125,13 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
             <NavUser />
           </div>
         </header>
-        <section className={cn("h-dvh overflow-y-auto", !enableFloatingSidebar && 'md:ml-(--sidebar-width-current) h-[calc(100dvh-var(--header-height)-1px)] mt-[var(--header-height)]')}>
+        <section
+          className={cn(
+            'h-dvh overflow-y-auto',
+            !enableFloatingSidebar &&
+              'mt-[var(--header-height)] h-[calc(100dvh-var(--header-height)-1px)] md:ml-(--sidebar-width-current)',
+          )}
+        >
           {error === undefined ? <Outlet /> : error}
         </section>
       </SidebarInset>

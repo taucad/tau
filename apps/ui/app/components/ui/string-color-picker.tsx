@@ -190,7 +190,7 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
                 className="h-7 pr-8 pl-10 font-mono"
                 onChange={handlePopoverInputChange}
               />
-              <div className="absolute top-0 right-2 bottom-0 rounded-r pointer-events-none">
+              <div className="pointer-events-none absolute top-0 right-2 bottom-0 rounded-r">
                 {isValidColor(temporaryColor) ? (
                   <div className="flex h-full w-full items-center justify-center rounded-r text-success">
                     <Check className="size-4" />
@@ -224,10 +224,10 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
           <span
             className={cn(
               baseIndicatorClass,
-              'absolute right-0 top-1/2 -translate-y-1/2',
+              'absolute top-1/2 right-0 -translate-y-1/2',
               'rounded-r-md border-l-0',
               'group-focus-within/color-picker:border-ring',
-              'cursor-text pointer-events-none',
+              'pointer-events-none cursor-text',
             )}
           >
             <span className="font-mono text-[0.5rem] leading-none uppercase">{colorFormat}</span>

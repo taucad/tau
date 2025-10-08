@@ -27,6 +27,7 @@ const config = [
       '**/out-tsc',
       '**/generated',
       '**/assets',
+      '**/source.generated.ts',
     ],
   },
   // First, apply XO's base configuration

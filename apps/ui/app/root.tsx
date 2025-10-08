@@ -61,7 +61,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export function Layout({ children }: { readonly children: ReactNode }): React.JSX.Element {
-  const data = useRouteLoaderData<typeof loader>("root");
+  const data = useRouteLoaderData<typeof loader>('root');
   const ssrTheme = data?.theme ?? Theme.LIGHT;
   const queryClient = useMemo(
     () =>
@@ -91,13 +91,13 @@ export function Layout({ children }: { readonly children: ReactNode }): React.JS
   );
 }
 
-function LayoutDocument({ 
-  children, 
+function LayoutDocument({
+  children,
   env,
   ssrTheme,
-}: { 
-  readonly children: ReactNode; 
-  readonly env: Record<string, string>; 
+}: {
+  readonly children: ReactNode;
+  readonly env: Record<string, string>;
   readonly ssrTheme: Theme;
 }): React.JSX.Element {
   const [theme] = useTheme();

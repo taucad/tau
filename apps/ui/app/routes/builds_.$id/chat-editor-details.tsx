@@ -1,7 +1,15 @@
 import { XIcon, Info } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelContentBody, FloatingPanelTrigger } from '#components/ui/floating-panel.js';
+import {
+  FloatingPanel,
+  FloatingPanelClose,
+  FloatingPanelContent,
+  FloatingPanelContentHeader,
+  FloatingPanelContentTitle,
+  FloatingPanelContentBody,
+  FloatingPanelTrigger,
+} from '#components/ui/floating-panel.js';
 import { Button } from '#components/ui/button.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.js';
@@ -24,9 +32,9 @@ type GeometryDetails = {
 
 // Mock geometry details data
 const mockGeometryDetails: GeometryDetails = {
-  vertices: 17731,
-  triangles: 32044,
-  sizeX: 35.20,
+  vertices: 17_731,
+  triangles: 32_044,
+  sizeX: 35.2,
   sizeY: 5.38,
   sizeZ: 26.34,
   volume: undefined, // Will be calculated
@@ -45,12 +53,12 @@ function formatInteger(value: number): string {
 }
 
 // Details Trigger Component
-export function ChatEditorDetailsTrigger({ 
-  isOpen, 
-  onToggle 
-}: { 
-  readonly isOpen: boolean; 
-  readonly onToggle: () => void; 
+export function ChatEditorDetailsTrigger({
+  isOpen,
+  onToggle,
+}: {
+  readonly isOpen: boolean;
+  readonly onToggle: () => void;
 }): React.JSX.Element {
   return (
     <FloatingPanelTrigger
@@ -58,52 +66,54 @@ export function ChatEditorDetailsTrigger({
       tooltipContent={
         <div className="flex items-center gap-2">
           {isOpen ? 'Close' : 'Open'} Details
-          <KeyShortcut variant="tooltip">
-            {formatKeyCombination(keyCombinationEditor)}
-          </KeyShortcut>
+          <KeyShortcut variant="tooltip">{formatKeyCombination(keyCombinationEditor)}</KeyShortcut>
         </div>
       }
-      onClick={onToggle}
       isOpen={isOpen}
+      onClick={onToggle}
     />
   );
 }
 
 export function ChatEditorDetails({
-  isExpanded,
+  isExpanded = true,
   setIsExpanded,
 }: {
-  readonly isExpanded: boolean;
-  readonly setIsExpanded: (value: boolean | ((current: boolean) => boolean)) => void;
+  readonly isExpanded?: boolean;
+  readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }): React.JSX.Element {
   const [geometryDetails, setGeometryDetails] = useState<GeometryDetails>(mockGeometryDetails);
   const [isCalculatingVolume, setIsCalculatingVolume] = useState(false);
   const [isCalculatingSurface, setIsCalculatingSurface] = useState(false);
 
   const toggleEditor = () => {
-    setIsExpanded((current) => !current);
+    setIsExpanded?.((current) => !current);
   };
 
   const handleCalculateVolume = useCallback(async () => {
     setIsCalculatingVolume(true);
     // Simulate calculation delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    setGeometryDetails(prev => ({ ...prev, volume: 2847.63 }));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 1500);
+    });
+    setGeometryDetails((previous) => ({ ...previous, volume: 2847.63 }));
     setIsCalculatingVolume(false);
   }, []);
 
   const handleCalculateSurface = useCallback(async () => {
     setIsCalculatingSurface(true);
     // Simulate calculation delay
-    await new Promise(resolve => setTimeout(resolve, 1200));
-    setGeometryDetails(prev => ({ ...prev, surface: 1523.45 }));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 1200);
+    });
+    setGeometryDetails((previous) => ({ ...previous, surface: 1523.45 }));
     setIsCalculatingSurface(false);
   }, []);
 
   const { formattedKeyCombination: formattedEditorKeyCombination } = useKeydown(keyCombinationEditor, toggleEditor);
 
   return (
-    <FloatingPanel open={isExpanded} onOpenChange={setIsExpanded}>
+    <FloatingPanel isOpen={isExpanded} onOpenChange={setIsExpanded}>
       <FloatingPanelClose
         side="right"
         align="start"
@@ -111,9 +121,7 @@ export function ChatEditorDetails({
         tooltipContent={(isOpen) => (
           <div className="flex items-center gap-2">
             {isOpen ? 'Close' : 'Open'} Details
-            <KeyShortcut variant="tooltip">
-              {formattedEditorKeyCombination}
-            </KeyShortcut>
+            <KeyShortcut variant="tooltip">{formattedEditorKeyCombination}</KeyShortcut>
           </div>
         )}
       />
@@ -121,87 +129,81 @@ export function ChatEditorDetails({
         <FloatingPanelContentHeader side="right">
           <FloatingPanelContentTitle>Details</FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
-        <FloatingPanelContentBody className='p-2'>
+        <FloatingPanelContentBody className="p-2">
           <div className="space-y-4">
             {/* Mesh Information */}
             <div className="space-y-3">
-              <div className="flex justify-between items-center">
+              <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-foreground">Vertices:</span>
-                <span className="text-sm text-muted-foreground font-mono">
+                <span className="font-mono text-sm text-muted-foreground">
                   {formatInteger(geometryDetails.vertices)}
                 </span>
               </div>
-              
-              <div className="flex justify-between items-center">
+
+              <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-foreground">Triangles:</span>
-                <span className="text-sm text-muted-foreground font-mono">
+                <span className="font-mono text-sm text-muted-foreground">
                   {formatInteger(geometryDetails.triangles)}
                 </span>
               </div>
             </div>
 
-            <div className="border-t pt-3 space-y-3">
+            <div className="space-y-3 border-t pt-3">
               {/* Dimensions */}
-              <div className="flex justify-between items-center">
+              <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-foreground">Size X:</span>
-                <span className="text-sm text-muted-foreground font-mono">
-                  {formatNumber(geometryDetails.sizeX)}
-                </span>
+                <span className="font-mono text-sm text-muted-foreground">{formatNumber(geometryDetails.sizeX)}</span>
               </div>
-              
-              <div className="flex justify-between items-center">
+
+              <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-foreground">Size Y:</span>
-                <span className="text-sm text-muted-foreground font-mono">
-                  {formatNumber(geometryDetails.sizeY)}
-                </span>
+                <span className="font-mono text-sm text-muted-foreground">{formatNumber(geometryDetails.sizeY)}</span>
               </div>
-              
-              <div className="flex justify-between items-center">
+
+              <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-foreground">Size Z:</span>
-                <span className="text-sm text-muted-foreground font-mono">
-                  {formatNumber(geometryDetails.sizeZ)}
-                </span>
+                <span className="font-mono text-sm text-muted-foreground">{formatNumber(geometryDetails.sizeZ)}</span>
               </div>
             </div>
 
-            <div className="border-t pt-3 space-y-3">
+            <div className="space-y-3 border-t pt-3">
               {/* Volume */}
-              <div className="flex justify-between items-center">
+              <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-foreground">Volume:</span>
-                {geometryDetails.volume !== undefined ? (
-                  <span className="text-sm text-muted-foreground font-mono">
-                    {formatNumber(geometryDetails.volume)}
-                  </span>
-                ) : (
+                {geometryDetails.volume === undefined ? (
                   <Button
                     variant="link"
                     size="sm"
-                    className="h-auto p-0 text-sm text-blue-500 hover:text-blue-600"
-                    onClick={handleCalculateVolume}
+                    className="text-blue-500 hover:text-blue-600 h-auto p-0 text-sm"
                     disabled={isCalculatingVolume}
+                    onClick={handleCalculateVolume}
                   >
                     {isCalculatingVolume ? 'Calculating...' : 'Calculate...'}
                   </Button>
+                ) : (
+                  <span className="font-mono text-sm text-muted-foreground">
+                    {formatNumber(geometryDetails.volume)}
+                  </span>
                 )}
               </div>
-              
+
               {/* Surface */}
-              <div className="flex justify-between items-center">
+              <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-foreground">Surface:</span>
-                {geometryDetails.surface !== undefined ? (
-                  <span className="text-sm text-muted-foreground font-mono">
-                    {formatNumber(geometryDetails.surface)}
-                  </span>
-                ) : (
+                {geometryDetails.surface === undefined ? (
                   <Button
                     variant="link"
                     size="sm"
-                    className="h-auto p-0 text-sm text-blue-500 hover:text-blue-600"
-                    onClick={handleCalculateSurface}
+                    className="text-blue-500 hover:text-blue-600 h-auto p-0 text-sm"
                     disabled={isCalculatingSurface}
+                    onClick={handleCalculateSurface}
                   >
                     {isCalculatingSurface ? 'Calculating...' : 'Calculate...'}
                   </Button>
+                ) : (
+                  <span className="font-mono text-sm text-muted-foreground">
+                    {formatNumber(geometryDetails.surface)}
+                  </span>
                 )}
               </div>
             </div>

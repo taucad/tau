@@ -177,7 +177,7 @@ export function ChatSelector(): ReactNode {
                 <Button
                   variant="ghost"
                   className={cn(
-                    'w-full justify-between gap-2 h-7 rounded-sm truncate overflow-hidden text-left',
+                    'h-7 w-full justify-between gap-2 truncate overflow-hidden rounded-sm text-left',
                     isGeneratingName && 'animate-pulse',
                   )}
                 >

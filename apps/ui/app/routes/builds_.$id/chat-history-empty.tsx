@@ -1,7 +1,7 @@
-import { MessageSquare, Lightbulb } from "lucide-react";
-import { EmptyItems } from "#components/ui/empty-items.js";
+import { MessageSquare, Lightbulb } from 'lucide-react';
+import { EmptyItems } from '#components/ui/empty-items.js';
 
-export function ChatHistoryEmpty({ className }: { className?: string }): React.JSX.Element {
+export function ChatHistoryEmpty({ className }: { readonly className?: string }): React.JSX.Element {
   return (
     <EmptyItems className={className}>
       <div className="mb-3 rounded-full bg-muted/50 p-2">
@@ -13,24 +13,36 @@ export function ChatHistoryEmpty({ className }: { className?: string }): React.J
       <div className="mt-4 w-full space-y-3 pt-4 text-left">
         <div className="flex items-start gap-2">
           <Lightbulb className="mt-0.5 size-4 flex-shrink-0 text-muted-foreground" strokeWidth={1.5} />
-          <div className="flex-1 space-y-1 mr-4">
+          <div className="mr-4 flex-1 space-y-1">
             <p className="text-xs font-medium text-foreground">Tips for best results:</p>
             <ul className="space-y-1.5 text-xs text-muted-foreground">
               <li className="flex items-start gap-1.5">
                 <span className="text-primary">•</span>
-                <span><strong className="font-medium text-foreground">Be specific</strong> - Include dimensions, materials, and intended use (e.g., "3D printable", "engineering part")</span>
+                <span>
+                  <strong className="font-medium text-foreground">Be specific</strong> - Include dimensions, materials,
+                  and intended use (e.g., &quot;3D printable&quot;, &quot;engineering part&quot;)
+                </span>
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="text-primary">•</span>
-                <span><strong className="font-medium text-foreground">Use parameters</strong> - Request parametric designs with descriptive variable names for easy customization</span>
+                <span>
+                  <strong className="font-medium text-foreground">Use parameters</strong> - Request parametric designs
+                  with descriptive variable names for easy customization
+                </span>
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="text-primary">•</span>
-                <span><strong className="font-medium text-foreground">Break it down</strong> - For complex models, describe components and how they connect</span>
+                <span>
+                  <strong className="font-medium text-foreground">Break it down</strong> - For complex models, describe
+                  components and how they connect
+                </span>
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="text-primary">•</span>
-                <span><strong className="font-medium text-foreground">Specify constraints</strong> - Mention tolerances, clearances, or manufacturing requirements</span>
+                <span>
+                  <strong className="font-medium text-foreground">Specify constraints</strong> - Mention tolerances,
+                  clearances, or manufacturing requirements
+                </span>
               </li>
             </ul>
           </div>

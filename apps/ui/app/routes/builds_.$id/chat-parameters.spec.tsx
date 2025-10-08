@@ -84,7 +84,7 @@ describe('ChatParameters - Core Search Functionality', () => {
   it('should render without crashing', () => {
     render(
       <TestWrapper>
-        <ChatParameters isExpanded={true} setIsExpanded={() => {}} />
+        <ChatParameters isExpanded />
       </TestWrapper>,
     );
 
@@ -95,7 +95,7 @@ describe('ChatParameters - Core Search Functionality', () => {
   it('should render search input', () => {
     render(
       <TestWrapper>
-        <ChatParameters isExpanded={true} setIsExpanded={() => {}} />
+        <ChatParameters isExpanded />
       </TestWrapper>,
     );
 

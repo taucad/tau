@@ -8,10 +8,11 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 import tailwindcss from '@tailwindcss/vite';
 import { visualizer } from 'rollup-plugin-visualizer';
 import mdx from 'fumadocs-mdx/vite';
-import * as MdxConfig from './app/lib/fumadocs/source.config';
 import svgSpriteWrapper from 'vite-svg-sprite-wrapper';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
+// eslint-disable-next-line no-restricted-imports -- allowed for Fumadocs.
+import * as MdxConfig from './app/lib/fumadocs/source.config';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -60,8 +61,7 @@ export default defineConfig(({ mode }) => {
       tsconfigPaths(),
 
       // Fumadocs
-      mdx(MdxConfig, { 'configPath': path.resolve(__dirname, './app/lib/fumadocs/source.config.ts') }), // Fumadocs
-
+      mdx(MdxConfig, { configPath: path.resolve(__dirname, './app/lib/fumadocs/source.config.ts') }), // Fumadocs
 
       // Browser DevTools JSON plugin.
       devtoolsJson(),
@@ -75,14 +75,19 @@ export default defineConfig(({ mode }) => {
       // An SVG sprite is a single SVG file that contains all the SVG icons,
       // inlined as <use> elements.
       // This provides better caching performance.
-      ...(enableSpriteGeneration ? [svgSpriteWrapper({
-        icons: path.resolve(__dirname, './app/components/icons/raw/**/*.svg'),
-        outputDir: path.resolve(__dirname, './app/components/icons/generated'),
-        generateType: true,
-        typeOutputDir: path.resolve(__dirname, './app/components/icons/generated'),
-        // Ensure the sprite retains the original svg attributes
-        sprite: { shape: {} },
-      })] : []),
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- allowed for quick switching of sprite generation.
+      ...(enableSpriteGeneration
+        ? [
+            svgSpriteWrapper({
+              icons: path.resolve(__dirname, './app/components/icons/raw/**/*.svg'),
+              outputDir: path.resolve(__dirname, './app/components/icons/generated'),
+              generateType: true,
+              typeOutputDir: path.resolve(__dirname, './app/components/icons/generated'),
+              // Ensure the sprite retains the original svg attributes
+              sprite: { shape: {} },
+            }),
+          ]
+        : []),
     ],
     worker: {
       // Workers need their own plugins.
@@ -129,8 +134,8 @@ export default defineConfig(({ mode }) => {
         // Error: 'default' is not exported by extend.
         //
         // Therefore, we resolve them directly.
-        'extend': path.resolve(__dirname, '../../node_modules/.pnpm/extend@3.0.2/node_modules/extend/index.js'),
-        'micromark': path.resolve(__dirname, '../../node_modules/.pnpm/micromark@4.0.1/node_modules/micromark/index.js'),
+        extend: path.resolve(__dirname, '../../node_modules/.pnpm/extend@3.0.2/node_modules/extend/index.js'),
+        micromark: path.resolve(__dirname, '../../node_modules/.pnpm/micromark@4.0.1/node_modules/micromark/index.js'),
       },
     },
   };

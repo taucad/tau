@@ -1,8 +1,8 @@
+import { useLoaderData } from 'react-router';
+import type { loader } from '#routes/docs.$/route.js';
 import { Button } from '#components/ui/button.js';
 import { CopyButton } from '#components/copy-button.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { useLoaderData } from 'react-router';
-import type { loader } from './route.js';
 import { ENV, metaConfig } from '#config.js';
 import type { SvgIcons } from '#components/icons/generated/svg-icons.js';
 
@@ -44,14 +44,14 @@ export function DocsPageActions(): React.JSX.Element {
   ];
 
   return (
-    <div className="space-y-1 mt-5 -mr-4">
+    <div className="mt-5 -mr-4 space-y-1">
       <CopyButton
         getText={getMarkdownContent}
         variant="ghost"
         size="sm"
         tooltip="Copy page as markdown"
         readyToCopyText="Copy page as markdown"
-        className="flex flex-row-reverse items-center justify-end gap-2 w-full text-left px-3 py-1 text-sm text-muted-foreground hover:text-foreground rounded-md transition-colors h-auto"
+        className="flex h-auto w-full flex-row-reverse items-center justify-end gap-2 rounded-md px-3 py-1 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
       />
 
       {actionLinks.map((link) => (
@@ -60,10 +60,10 @@ export function DocsPageActions(): React.JSX.Element {
           asChild
           variant="ghost"
           size="sm"
-          className={'flex items-center justify-start gap-2 w-full text-left px-3 py-1 text-sm text-muted-foreground hover:text-foreground rounded-md transition-colors'}
+          className="flex w-full items-center justify-start gap-2 rounded-md px-3 py-1 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <a href={link.url} target="_blank" rel="noopener noreferrer">
-            <SvgIcon id={link.iconId!} className="size-4" />
+            <SvgIcon id={link.iconId} className="size-4" />
             <span className="flex items-center gap-1">
               {link.label}
               <span className="text-xs">↗</span>

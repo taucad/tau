@@ -389,7 +389,7 @@ ${kernelError.stack ? `\n\`\`\`\n${kernelError.stack}\n\`\`\`` : ''}
         popoverProperties={{
           align: 'start',
           side: 'top',
-          className: "w-60"
+          className: 'w-60',
         }}
         searchPlaceHolder="Search context..."
         placeholder="Add context"
@@ -400,7 +400,11 @@ ${kernelError.stack ? `\n\`\`\`\n${kernelError.stack}\n\`\`\`` : ''}
         {...properties}
       >
         <TooltipTrigger asChild>
-          <Button variant="outline" size="icon" className="size-6 bg-background text-muted-foreground hover:text-foreground">
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-6 bg-background text-muted-foreground hover:text-foreground"
+          >
             <AtSign className="size-3" />
           </Button>
         </TooltipTrigger>

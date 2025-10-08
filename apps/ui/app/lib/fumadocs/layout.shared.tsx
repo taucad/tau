@@ -1,5 +1,5 @@
-import { cn } from '#utils/ui.js';
 import type { DocsLayoutProps } from 'fumadocs-ui/layouts/docs';
+import { cn } from '#utils/ui.js';
 import { DocsSidebar } from '#routes/docs.$/docs-sidebar.js';
 
 export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
@@ -57,7 +57,7 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
         '[&_#nd-tocnav]:shadow-sm',
         '[&_#nd-tocnav>button]:px-2',
         '[&_#nd-tocnav>button]:h-7.5',
-        
+
         // Desktop ToC Styles
         'xl:[--fd-toc-width:var(--docs-sidebar-width)]!',
         'xl:[--fd-banner-height:calc(var(--header-height)-(var(--spacing)*2))]',
@@ -69,8 +69,8 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
         '[&_#nd-toc]:w-(--docs-sidebar-width)',
         '[&_#nd-toc]:h-fit',
         '[&_#nd-toc]:ms-2',
-        '[&_#nd-toc]:end-0!'
+        '[&_#nd-toc]:end-0!',
       ),
-    }
+    },
   };
 }

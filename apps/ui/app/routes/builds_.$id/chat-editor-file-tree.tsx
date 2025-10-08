@@ -4,7 +4,11 @@ import { Tree, Folder, File } from '#components/magicui/file-tree.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
 import type { FileItem } from '#machines/file-explorer.machine.js';
 import { cn } from '#utils/ui.js';
-import { FloatingPanelContentBody, FloatingPanelContentHeader, FloatingPanelContentTitle } from '#components/ui/floating-panel.js';
+import {
+  FloatingPanelContentBody,
+  FloatingPanelContentHeader,
+  FloatingPanelContentTitle,
+} from '#components/ui/floating-panel.js';
 
 function convertFileItemToTreeElement(items: FileItem[]): TreeViewElement[] {
   return items.map((item) => ({

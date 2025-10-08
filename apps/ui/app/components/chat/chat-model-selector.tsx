@@ -5,10 +5,9 @@ import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Badge } from '#components/ui/badge.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import type { Model } from '#types/model.types.js';
-import type { ModelFamily } from '#types/model.types.js';
 import { useModels } from '#hooks/use-models.js';
 
-type ChatModelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'onSelect' | 'children'> & {
+type ChatModelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'onSelect'> & {
   readonly onSelect?: (modelId: string) => void;
   readonly onClose?: () => void;
   readonly children: (props: { selectedModel?: Model }) => ReactNode;
@@ -57,7 +56,7 @@ export const ChatModelSelector = memo(function ({
       renderLabel={(item, selectedItem) => (
         <span className="flex w-full items-center justify-between text-xs">
           <div className="flex items-center gap-2">
-            <SvgIcon id={item.details.family as ModelFamily} />
+            <SvgIcon id={item.details.family} />
             <span className="font-mono">{item.slug}</span>
           </div>
           <div className="flex items-center gap-2">

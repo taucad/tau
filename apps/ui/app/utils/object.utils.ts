@@ -1,4 +1,4 @@
-import type { MergeDeep, OmitDeep, Get } from "type-fest";
+import type { MergeDeep, OmitDeep, Get } from 'type-fest';
 
 /**
  * Checks if a string is a numeric string (e.g., "0", "1", "42")
@@ -10,30 +10,49 @@ type IsNumericString<S extends string> = S extends `${number}` ? true : false;
  * @example BuildNested<['a', 'b', 'c'], number> = { a: { b: { c: number } } }
  * @example BuildNested<['users', '0', 'name'], string> = { users: Array<{ name: string }> }
  */
-type BuildNested<Path extends readonly string[], Value> = Path extends readonly [infer First extends string, ...infer Rest extends string[]] ? Rest extends [] ? IsNumericString<First> extends true ? Array<Value> : Record<First, Value> : IsNumericString<First> extends true ? Array<BuildNested<Rest, Value>> : Record<First, BuildNested<Rest, Value>> : Record<string, never>;
+type BuildNested<Path extends readonly string[], Value> = Path extends readonly [
+  infer First extends string,
+  ...infer Rest extends string[],
+]
+  ? // eslint-disable-next-line @typescript-eslint/no-restricted-types -- we only want to match an empty array here.
+    Rest extends []
+    ? IsNumericString<First> extends true
+      ? Value[]
+      : Record<First, Value>
+    : IsNumericString<First> extends true
+      ? Array<BuildNested<Rest, Value>>
+      : Record<First, BuildNested<Rest, Value>>
+  : Record<string, never>;
 /**
  * Deep merges a nested value into an object type at the specified path
  * @example SetNestedValue<{ x: string }, ['a', 'b'], number> = { x: string; a: { b: number } }
  */
 
-type SetNestedValue<
-  T extends Record<string, unknown>,
-  Path extends readonly string[],
-  Value
-> = MergeDeep<T, BuildNested<Path, Value>>;
+type SetNestedValue<T extends Record<string, unknown>, Path extends readonly string[], Value> = MergeDeep<
+  T,
+  BuildNested<Path, Value>
+>;
 /**
  * Converts a path array to a dot-notation string
  * @example PathArrayToString<['a', 'b', 'c']> = 'a.b.c'
  */
-type PathArrayToString<Path extends readonly string[]> = Path extends readonly [infer First extends string, ...infer Rest extends string[]] ? Rest extends [] ? First : `${First}.${PathArrayToString<Rest>}` : '';
+type PathArrayToString<Path extends readonly string[]> = Path extends readonly [
+  infer First extends string,
+  ...infer Rest extends string[],
+]
+  ? // eslint-disable-next-line @typescript-eslint/no-restricted-types -- we only want to match an empty array here.
+    Rest extends []
+    ? First
+    : `${First}.${PathArrayToString<Rest>}`
+  : '';
 /**
  * Removes a nested property from an object type using a path array
  * @example DeleteNestedValue<{ x: string; a: { b: { c: number } } }, ['a', 'b', 'c']> = { x: string; a: { b: {} } }
  */
-type DeleteNestedValue<
-  T extends Record<string, unknown>,
-  Path extends readonly string[]
-> = OmitDeep<T, PathArrayToString<Path>>;
+type DeleteNestedValue<T extends Record<string, unknown>, Path extends readonly string[]> = OmitDeep<
+  T,
+  PathArrayToString<Path>
+>;
 
 /**
  * Sets a value in a nested object using a path array
@@ -42,14 +61,10 @@ type DeleteNestedValue<
  * @param value - The value to set
  * @returns A new object with the value set at the specified path
  */
-export function setValueAtPath<
-  T extends Record<string, unknown>,
-  const Path extends readonly string[],
-  Value
->(
+export function setValueAtPath<T extends Record<string, unknown>, const Path extends readonly string[], Value>(
   object: T,
   path: Path,
-  value: Value
+  value: Value,
 ): SetNestedValue<T, Path, Value> {
   if (path.length === 0) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return -- Generic type constraint requires cast
@@ -57,7 +72,7 @@ export function setValueAtPath<
   }
 
   // Work with mutable version for internal mutations
-  const result = { ...object } as Record<string, unknown>;
+  const result: Record<string, unknown> = { ...object };
   let current: Record<string, unknown> = result;
 
   // Navigate to parent of target, creating objects as needed
@@ -94,7 +109,10 @@ export function setValueAtPath<
  * @param path - Array of property keys to follow
  * @returns The value at the specified path, or undefined if not found
  */
-export function getValueAtPath<T extends Record<string, unknown>, Path extends readonly string[]>(object: T, path: Path): Get<T, Path> | undefined {
+export function getValueAtPath<T extends Record<string, unknown>, Path extends readonly string[]>(
+  object: T,
+  path: Path,
+): Get<T, Path> | undefined {
   let current: unknown = object;
 
   for (const key of path) {
@@ -114,17 +132,17 @@ export function getValueAtPath<T extends Record<string, unknown>, Path extends r
  * @param path - Array of property keys to follow
  * @returns A new object with the value deleted at the specified path
  */
-export function deleteValueAtPath<
-  T extends Record<string, unknown>,
-  const Path extends readonly string[]
->(object: T, path: Path): DeleteNestedValue<T, Path> {
+export function deleteValueAtPath<T extends Record<string, unknown>, const Path extends readonly string[]>(
+  object: T,
+  path: Path,
+): DeleteNestedValue<T, Path> {
   if (path.length === 0) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return -- Generic type constraint requires cast
     return object as any;
   }
 
   // Work with mutable version for internal mutations
-  const result = { ...object } as Record<string, unknown>;
+  const result: Record<string, unknown> = { ...object };
 
   // If it's a top-level property, delete directly
   if (path.length === 1) {
@@ -147,11 +165,9 @@ export function deleteValueAtPath<
     const key = path[i]!;
     if (current[key] && typeof current[key] === 'object') {
       // Preserve arrays when creating shallow copies
-      if (Array.isArray(current[key])) {
-        current[key] = [...(current[key] as unknown[])];
-      } else {
-        current[key] = { ...(current[key] as Record<string, unknown>) };
-      }
+      current[key] = Array.isArray(current[key])
+        ? [...(current[key] as unknown[])]
+        : { ...(current[key] as Record<string, unknown>) };
       current = current[key] as Record<string, unknown>;
     } else {
       // Path doesn't exist, nothing to delete
@@ -208,4 +224,3 @@ export function hasCustomValue(formData: unknown, defaultValue: unknown): boolea
 
   return formData !== defaultValue;
 }
-

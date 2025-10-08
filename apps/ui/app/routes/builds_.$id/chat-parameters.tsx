@@ -9,7 +9,14 @@ import { SearchInput } from '#components/search-input.js';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelTrigger } from '#components/ui/floating-panel.js';
+import {
+  FloatingPanel,
+  FloatingPanelClose,
+  FloatingPanelContent,
+  FloatingPanelContentHeader,
+  FloatingPanelContentTitle,
+  FloatingPanelTrigger,
+} from '#components/ui/floating-panel.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.js';
 import { formatKeyCombination } from '#utils/keys.js';
@@ -18,7 +25,7 @@ import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { templates, uiSchema, widgets } from '#routes/builds_.$id/rjsf-theme.js';
 import type { RJSFContext } from '#routes/builds_.$id/rjsf-theme.js';
 import { rjsfIdPrefix, rjsfIdSeparator } from '#routes/builds_.$id/rjsf-utils.js';
-import { deleteValueAtPath } from "#utils/object.utils.js";
+import { deleteValueAtPath } from '#utils/object.utils.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 
 const toggleParametersKeyCombination = {
@@ -29,7 +36,7 @@ const toggleParametersKeyCombination = {
 // Parameters Trigger Component
 export const ChatParametersTrigger = memo(function ({
   isOpen,
-  onToggle
+  onToggle,
 }: {
   readonly isOpen: boolean;
   readonly onToggle: () => void;
@@ -40,23 +47,21 @@ export const ChatParametersTrigger = memo(function ({
       tooltipContent={
         <div className="flex items-center gap-2">
           {isOpen ? 'Close' : 'Open'} Parameters
-          <KeyShortcut variant="tooltip">
-            {formatKeyCombination(toggleParametersKeyCombination)}
-          </KeyShortcut>
+          <KeyShortcut variant="tooltip">{formatKeyCombination(toggleParametersKeyCombination)}</KeyShortcut>
         </div>
       }
-      onClick={onToggle}
       isOpen={isOpen}
+      onClick={onToggle}
     />
   );
 });
 
 export const ChatParameters = memo(function (props: {
   readonly className?: string;
-  readonly isExpanded: boolean;
-  readonly setIsExpanded: (value: boolean | ((current: boolean) => boolean)) => void;
+  readonly isExpanded?: boolean;
+  readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }) {
-  const { className, isExpanded, setIsExpanded } = props;
+  const { className, isExpanded = true, setIsExpanded } = props;
   const parameters = useSelector(cadActor, (state) => state.context.parameters);
   const defaultParameters = useSelector(cadActor, (state) => state.context.defaultParameters);
   const jsonSchema = useSelector(cadActor, (state) => state.context.jsonSchema);
@@ -64,7 +69,7 @@ export const ChatParameters = memo(function (props: {
   const [searchTerm, setSearchTerm] = useState('');
 
   const toggleParametersOpen = useCallback(() => {
-    setIsExpanded((current) => !current);
+    setIsExpanded?.((current) => !current);
   }, [setIsExpanded]);
 
   const { formattedKeyCombination: formattedParametersKeyCombination } = useKeydown(
@@ -120,6 +125,7 @@ export const ChatParameters = memo(function (props: {
         if (!searchTerm) {
           return true;
         }
+
         return text.toLowerCase().includes(searchTerm.toLowerCase());
       },
     }),
@@ -138,7 +144,7 @@ export const ChatParameters = memo(function (props: {
   };
 
   return (
-    <FloatingPanel open={isExpanded} onOpenChange={setIsExpanded} className={className}>
+    <FloatingPanel isOpen={isExpanded} className={className} onOpenChange={setIsExpanded}>
       <FloatingPanelClose
         side="right"
         align="start"
@@ -146,13 +152,11 @@ export const ChatParameters = memo(function (props: {
         tooltipContent={(isOpen) => (
           <div className="flex items-center gap-2">
             {isOpen ? 'Close' : 'Open'} Parameters
-            <KeyShortcut variant="tooltip">
-              {formattedParametersKeyCombination}
-            </KeyShortcut>
+            <KeyShortcut variant="tooltip">{formattedParametersKeyCombination}</KeyShortcut>
           </div>
         )}
       />
-      <FloatingPanelContent className='text-sm'>
+      <FloatingPanelContent className="text-sm">
         {/* Header */}
         <FloatingPanelContentHeader side="right">
           <FloatingPanelContentTitle>Parameters</FloatingPanelContentTitle>
@@ -182,7 +186,7 @@ export const ChatParameters = memo(function (props: {
                       <RefreshCcw />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side='bottom'>Reset all parameters</TooltipContent>
+                  <TooltipContent side="bottom">Reset all parameters</TooltipContent>
                 </Tooltip>
               )}
 
@@ -200,7 +204,7 @@ export const ChatParameters = memo(function (props: {
                     />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side='bottom'>{allExpanded ? 'Collapse all' : 'Expand all'}</TooltipContent>
+                <TooltipContent side="bottom">{allExpanded ? 'Collapse all' : 'Expand all'}</TooltipContent>
               </Tooltip>
             </div>
             <Form<Record<string, unknown>, RJSFSchema, RJSFContext>
@@ -227,7 +231,9 @@ export const ChatParameters = memo(function (props: {
               <Info className="size-6 text-muted-foreground" strokeWidth={1.5} />
             </div>
             <h3 className="mb-1 text-base font-medium">No parameters available</h3>
-            <p className="text-muted-foreground">Parameters will appear here when they become available for this model</p>
+            <p className="text-muted-foreground">
+              Parameters will appear here when they become available for this model
+            </p>
           </EmptyItems>
         )}
       </FloatingPanelContent>

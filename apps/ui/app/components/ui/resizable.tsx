@@ -1,8 +1,8 @@
 import { GripVertical } from 'lucide-react';
 import * as ResizablePrimitive from 'react-resizable-panels';
 import type { SetRequired } from 'type-fest';
-import { cn } from '#utils/ui.js';
 import { cva } from 'class-variance-authority';
+import { cn } from '#utils/ui.js';
 
 function ResizablePanelGroup({
   className,
@@ -44,9 +44,9 @@ const resizableHandleVariants = cva(
       defaultVariants: {
         variant: 'default',
       },
-    }
-  }
-)
+    },
+  },
+);
 
 function ResizableHandle({
   hasHandle,

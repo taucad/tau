@@ -225,7 +225,7 @@ export const ChatConsole = memo(function ({
       )}
       {...properties}
     >
-      <div className="sticky top-0 flex flex-row gap-2 bg-sidebar p-2 text-muted-foreground border-b">
+      <div className="sticky top-0 flex flex-row gap-2 border-b bg-sidebar p-2 text-muted-foreground">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -234,7 +234,9 @@ export const ChatConsole = memo(function ({
               onClick={(event) => onButtonClick?.(event)}
             >
               <span className="hidden font-normal @xs/console:block">Console</span>
-              <ChevronsDown className={`transition-transform duration-200 ease-in-out group-data-[panel-size="${collapsedConsoleSize}.0"]/console-resizable:rotate-180`} />
+              <ChevronsDown
+                className={`transition-transform duration-200 ease-in-out group-data-[panel-size="${collapsedConsoleSize}.0"]/console-resizable:rotate-180`}
+              />
             </Button>
           </TooltipTrigger>
           <TooltipContent>
@@ -261,13 +263,7 @@ export const ChatConsole = memo(function ({
             <Tooltip>
               <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className={cn(
-                      'gap-2 size-7 [&>svg]:size-3',
-                    )}
-                  >
+                  <Button variant="outline" size="icon" className={cn('size-7 gap-2 [&>svg]:size-3')}>
                     <Filter />
                   </Button>
                 </DropdownMenuTrigger>
@@ -301,13 +297,7 @@ export const ChatConsole = memo(function ({
             <Tooltip>
               <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className={cn(
-                      'gap-2 size-7 [&>svg]:size-3',
-                    )}
-                  >
+                  <Button variant="outline" size="icon" className={cn('size-7 gap-2 [&>svg]:size-3')}>
                     <Settings />
                   </Button>
                 </DropdownMenuTrigger>
@@ -341,9 +331,7 @@ export const ChatConsole = memo(function ({
               <Button
                 variant="outline"
                 size="icon"
-                className={cn(
-                  'gap-2 size-7 [&>svg]:size-3',
-                )}
+                className={cn('size-7 gap-2 [&>svg]:size-3')}
                 onClick={handleClearLogs}
               >
                 <Trash />
@@ -353,25 +341,20 @@ export const ChatConsole = memo(function ({
           </Tooltip>
         </div>
       </div>
-      <div className="flex min-h-0 flex-grow bg-background flex-col-reverse gap-0.25 overflow-x-hidden overflow-y-auto p-2">
+      <div className="flex min-h-0 flex-grow flex-col-reverse gap-0.25 overflow-x-hidden overflow-y-auto bg-background p-2">
         {/* Display console logs */}
         {filteredLogs.length > 0 ? (
           filteredLogs.map((log) => (
             <pre
               key={log.id}
-              className={cn(
-                'rounded p-1 font-mono text-xs',
-                'group/log cursor-default',
-                'flex-shrink-0 text-wrap',
-                {
-                  'bg-destructive/10 text-destructive hover:bg-destructive/20': log.level === logLevels.error,
-                  'bg-warning/10 text-warning hover:bg-warning/20': log.level === logLevels.warn,
-                  'hover:bg-neutral/20': log.level === logLevels.info,
-                  'bg-neutral/10': log.level === logLevels.info && log.infoIndex % 2 !== 0,
-                  'bg-stable/10 text-stable hover:bg-stable/20': log.level === logLevels.debug,
-                  'bg-feature/10 text-feature hover:bg-feature/20': log.level === logLevels.trace,
-                },
-              )}
+              className={cn('rounded p-1 font-mono text-xs', 'group/log cursor-default', 'flex-shrink-0 text-wrap', {
+                'bg-destructive/10 text-destructive hover:bg-destructive/20': log.level === logLevels.error,
+                'bg-warning/10 text-warning hover:bg-warning/20': log.level === logLevels.warn,
+                'hover:bg-neutral/20': log.level === logLevels.info,
+                'bg-neutral/10': log.level === logLevels.info && log.infoIndex % 2 !== 0,
+                'bg-stable/10 text-stable hover:bg-stable/20': log.level === logLevels.debug,
+                'bg-feature/10 text-feature hover:bg-feature/20': log.level === logLevels.trace,
+              })}
             >
               <div className="flex flex-wrap items-baseline gap-2">
                 {displayConfig.showTimestamp ? (
@@ -388,9 +371,7 @@ export const ChatConsole = memo(function ({
             </pre>
           ))
         ) : (
-          <EmptyItems className="m-0">
-            No logs to display
-          </EmptyItems>
+          <EmptyItems className="m-0">No logs to display</EmptyItems>
         )}
       </div>
     </div>

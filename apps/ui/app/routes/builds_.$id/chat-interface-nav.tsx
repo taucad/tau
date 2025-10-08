@@ -1,6 +1,6 @@
-import { TabsList, TabsTrigger } from "#components/ui/tabs.js";
-import { cn } from "#utils/ui.js";
-import { Box, Code2, Info, MessageCircleIcon, SlidersHorizontal } from "lucide-react";
+import { Box, Code2, Info, MessageCircleIcon, SlidersHorizontal } from 'lucide-react';
+import { TabsList, TabsTrigger } from '#components/ui/tabs.js';
+import { cn } from '#utils/ui.js';
 
 export const chatTabs = [
   {
@@ -30,21 +30,25 @@ export const chatTabs = [
   },
 ] as const;
 
-export function ChatInterfaceNav({ className }: { className?: string }) {
+export function ChatInterfaceNav({ className }: { readonly className?: string }): React.ReactNode {
   return (
     <TabsList
       activeClassName="rounded-lg"
       className={cn(
-        "shadow-none rounded-none w-full",
-        "[&_svg]:size-4! [&_svg]:text-muted-foreground text-muted-foreground! border rounded-xl",
+        'w-full rounded-none shadow-none',
+        'rounded-xl border text-muted-foreground! [&_svg]:size-4! [&_svg]:text-muted-foreground',
         className,
-      )}>
+      )}
+    >
       {chatTabs.map((tab) => (
-        <TabsTrigger key={tab.id} value={tab.id} className={cn(
-          'flex flex-col gap-0.5 items-center justify-center',
-          "data-[state=active]:text-primary!",
-          "data-[state=active]:[&_svg]:text-primary",
-        )}
+        <TabsTrigger
+          key={tab.id}
+          value={tab.id}
+          className={cn(
+            'flex flex-col items-center justify-center gap-0.5',
+            'data-[state=active]:text-primary!',
+            'data-[state=active]:[&_svg]:text-primary',
+          )}
         >
           {tab.icon}
           <span className="text-[0.625rem] text-muted-foreground">{tab.label}</span>

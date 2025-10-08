@@ -1,12 +1,13 @@
-import { defineConfig, defineDocs, frontmatterSchema, metaSchema, type DocsCollection, type GlobalConfig } from 'fumadocs-mdx/config';
+import type { frontmatterSchema, metaSchema, DocsCollection, GlobalConfig } from 'fumadocs-mdx/config';
+import { defineConfig, defineDocs } from 'fumadocs-mdx/config';
 
 export const docs: DocsCollection<typeof frontmatterSchema, typeof metaSchema> = defineDocs({
   dir: 'content/docs',
   docs: {
     postprocess: {
       includeProcessedMarkdown: true,
-    }
-  }
+    },
+  },
 });
 
-export default defineConfig() as GlobalConfig;
+export default defineConfig();

@@ -1,8 +1,8 @@
 import { useState } from 'react';
+import { Box } from 'lucide-react';
 import { Tree, Folder } from '#components/magicui/file-tree.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
 import { ExplorerFile } from '#routes/builds_.$id/chat-editor-explorer-file.js';
-import { Box } from 'lucide-react';
 import { EmptyItems } from '#components/ui/empty-items.js';
 
 export type CadComponent = {
@@ -136,7 +136,12 @@ export function ChatEditorExplorerObjects({
   return (
     <Tree elements={treeElements} initialExpandedItems={treeElements.map((element) => element.id)} className="px-1">
       {treeElements.map((element) => (
-        <CadTreeItem key={element.id} element={element} activeComponentId={activeComponentId} onSelect={handleComponentSelect} />
+        <CadTreeItem
+          key={element.id}
+          element={element}
+          activeComponentId={activeComponentId}
+          onSelect={handleComponentSelect}
+        />
       ))}
     </Tree>
   );
@@ -151,11 +156,7 @@ type CadTreeItemProps = {
 function CadTreeItem({ element, onSelect, activeComponentId }: CadTreeItemProps): React.JSX.Element {
   if (element.children && element.children.length > 0) {
     return (
-      <Folder
-        value={element.id}
-        element={element.name}
-        className="px-2 py-1 text-sm text-sidebar-foreground"
-      >
+      <Folder value={element.id} element={element.name} className="px-2 py-1 text-sm text-sidebar-foreground">
         {element.children.map((child) => (
           <CadTreeItem key={child.id} element={child} activeComponentId={activeComponentId} onSelect={onSelect} />
         ))}
@@ -177,4 +178,3 @@ function CadTreeItem({ element, onSelect, activeComponentId }: CadTreeItemProps)
     />
   );
 }
-

@@ -13,7 +13,8 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Skeleton } from '#components/ui/skeleton.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { formatKeyCombination, type KeyCombination } from '#utils/keys.js';
+import { formatKeyCombination } from '#utils/keys.js';
+import type { KeyCombination } from '#utils/keys.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 
@@ -236,7 +237,9 @@ function SidebarTrigger({ className, onClick, ...properties }: React.ComponentPr
       </TooltipTrigger>
       <TooltipContent>
         {open ? 'Close Sidebar' : 'Open Sidebar'}{' '}
-        <KeyShortcut className="ml-1" variant="tooltip">{formatKeyCombination(sidebarToggleKeyCombo)}</KeyShortcut>
+        <KeyShortcut className="ml-1" variant="tooltip">
+          {formatKeyCombination(sidebarToggleKeyCombo)}
+        </KeyShortcut>
       </TooltipContent>
     </Tooltip>
   );
@@ -254,7 +257,7 @@ function SidebarRail({ className, ...properties }: React.ComponentProps<'button'
       tabIndex={-1}
       title="Toggle Sidebar"
       className={cn(
-        'absolute inset-y-0 my-5 z-20 opacity-0 hover:opacity-100 hidden w-4 -translate-x-1/2 transition-[width] ease-linear group-data-[side=left]:-right-3 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-neutral/50 after:transition-[width] after:duration-200 after:ease-in-out hover:after:w-[3px] hover:after:transition-all active:after:w-[3px] active:after:bg-neutral/50 sm:flex after:rounded-full',
+        'absolute inset-y-0 z-20 my-5 hidden w-4 -translate-x-1/2 opacity-0 transition-[width] ease-linear group-data-[side=left]:-right-3 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:rounded-full after:bg-neutral/50 after:transition-[width] after:duration-200 after:ease-in-out hover:opacity-100 hover:after:w-[3px] hover:after:transition-all active:after:w-[3px] active:after:bg-neutral/50 sm:flex',
         'in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize',
         '[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize',
         'group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full hover:group-data-[collapsible=offcanvas]:bg-transparent',
@@ -346,7 +349,7 @@ function SidebarGroup({ className, ...properties }: React.ComponentProps<'div'>)
     <div
       data-slot="sidebar-group"
       data-sidebar="group"
-      className={cn('relative flex w-full min-w-0 flex-col py-2 px-1', className)}
+      className={cn('relative flex w-full min-w-0 flex-col px-1 py-2', className)}
       {...properties}
     />
   );
@@ -533,7 +536,7 @@ function SidebarMenuAction({
         'after:absolute after:-inset-2 md:after:hidden',
         'group-data-[collapsible=icon]:hidden',
         shouldShowOnHover &&
-        'group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 peer-data-[active=true]/menu-button:text-sidebar-accent-foreground data-[state=open]:opacity-100 md:opacity-0',
+          'group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 peer-data-[active=true]/menu-button:text-sidebar-accent-foreground data-[state=open]:opacity-100 md:opacity-0',
         className,
       )}
       {...properties}

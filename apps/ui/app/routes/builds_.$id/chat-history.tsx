@@ -15,7 +15,13 @@ import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provid
 import { ChatSelector } from '#routes/builds_.$id/chat-selector.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelTrigger } from '#components/ui/floating-panel.js';
+import {
+  FloatingPanel,
+  FloatingPanelClose,
+  FloatingPanelContent,
+  FloatingPanelContentHeader,
+  FloatingPanelTrigger,
+} from '#components/ui/floating-panel.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.js';
 import { formatKeyCombination } from '#utils/keys.js';
@@ -37,13 +43,13 @@ const MessageItem = memo(function ({ messageId }: { readonly messageId: string }
 });
 
 // Chat History Trigger Component
-export const ChatHistoryTrigger = memo(function ({ 
-  isOpen, 
+export const ChatHistoryTrigger = memo(function ({
+  isOpen,
   onToggle,
-  className
-}: { 
-  readonly isOpen: boolean; 
-  readonly onToggle: () => void; 
+  className,
+}: {
+  readonly isOpen: boolean;
+  readonly onToggle: () => void;
   readonly className?: string;
 }) {
   return (
@@ -52,32 +58,30 @@ export const ChatHistoryTrigger = memo(function ({
       tooltipContent={
         <div className="flex items-center gap-2">
           {isOpen ? 'Close' : 'Open'} Chat
-          <KeyShortcut variant="tooltip">
-            {formatKeyCombination(toggleChatHistoryKeyCombination)}
-          </KeyShortcut>
+          <KeyShortcut variant="tooltip">{formatKeyCombination(toggleChatHistoryKeyCombination)}</KeyShortcut>
         </div>
       }
-      onClick={onToggle}
       isOpen={isOpen}
       tooltipSide="right"
       className={className}
+      onClick={onToggle}
     />
   );
 });
 
-export const ChatHistory = memo(function (props: { 
+export const ChatHistory = memo(function (props: {
   readonly className?: string;
-  readonly isExpanded: boolean;
-  readonly setIsExpanded: (value: boolean | ((current: boolean) => boolean)) => void;
+  readonly isExpanded?: boolean;
+  readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }) {
-  const { className, isExpanded, setIsExpanded } = props;
+  const { className, isExpanded = true, setIsExpanded } = props;
   const kernel = useSelector(cadActor, (state) => state.context.kernelTypeSelected);
   const messageIds = useChatSelector((state) => state.context.messageOrder);
   const { append } = useChatActions();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
-  
+
   const toggleChatHistory = useCallback(() => {
-    setIsExpanded((current) => !current);
+    setIsExpanded?.((current) => !current);
   }, [setIsExpanded]);
 
   const { formattedKeyCombination } = useKeydown(toggleChatHistoryKeyCombination, toggleChatHistory);
@@ -126,7 +130,7 @@ export const ChatHistory = memo(function (props: {
   }, [messageIds.length]);
 
   return (
-    <FloatingPanel open={isExpanded} onOpenChange={setIsExpanded} className={className} >
+    <FloatingPanel isOpen={isExpanded} className={className} onOpenChange={setIsExpanded}>
       <FloatingPanelClose
         side="left"
         align="start"
@@ -134,9 +138,7 @@ export const ChatHistory = memo(function (props: {
         tooltipContent={(isOpen) => (
           <div className="flex items-center gap-2">
             {isOpen ? 'Close' : 'Open'} Chat
-            <KeyShortcut variant="tooltip">
-              {formattedKeyCombination}
-            </KeyShortcut>
+            <KeyShortcut variant="tooltip">{formattedKeyCombination}</KeyShortcut>
           </div>
         )}
       />
@@ -159,9 +161,7 @@ export const ChatHistory = memo(function (props: {
             atBottomStateChange={handleAtBottomStateChange}
             components={{
               Header: () => null,
-              EmptyPlaceholder: () => (
-                <ChatHistoryEmpty className="h-full -mb-7 justify-end" />
-              ),
+              EmptyPlaceholder: () => <ChatHistoryEmpty className="-mb-7 h-full justify-end" />,
               Footer: () => (
                 <div className="px-4 pb-12">
                   <ChatError />
@@ -169,13 +169,17 @@ export const ChatHistory = memo(function (props: {
               ),
             }}
           />
-          <ScrollDownButton hasContent={messageIds.length > 0} isVisible={!atBottom} onScrollToBottom={scrollToBottom} />
+          <ScrollDownButton
+            hasContent={messageIds.length > 0}
+            isVisible={!atBottom}
+            onScrollToBottom={scrollToBottom}
+          />
         </div>
-        
+
         {/* Chat input area */}
         <div className="relative mx-2 mb-2 rounded-2xl">
           <ChatStatus className="absolute inset-x-0 -top-7" />
-          <ChatTextarea onSubmit={onSubmit} className="rounded-sm" />
+          <ChatTextarea className="rounded-sm" onSubmit={onSubmit} />
         </div>
       </FloatingPanelContent>
     </FloatingPanel>

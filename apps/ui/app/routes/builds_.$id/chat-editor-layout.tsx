@@ -6,7 +6,12 @@ import { Button } from '#components/ui/button.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelTrigger } from '#components/ui/floating-panel.js';
+import {
+  FloatingPanel,
+  FloatingPanelClose,
+  FloatingPanelContent,
+  FloatingPanelTrigger,
+} from '#components/ui/floating-panel.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useKeydown } from '#hooks/use-keydown.js';
@@ -36,12 +41,12 @@ const toggleConsoleKeyCombination = {
 export const collapsedConsoleSize = 4;
 
 // Editor Trigger Component
-export function ChatEditorLayoutTrigger({ 
-  isOpen, 
-  onToggle 
-}: { 
-  readonly isOpen: boolean; 
-  readonly onToggle: () => void; 
+export function ChatEditorLayoutTrigger({
+  isOpen,
+  onToggle,
+}: {
+  readonly isOpen: boolean;
+  readonly onToggle: () => void;
 }): React.JSX.Element {
   return (
     <FloatingPanelTrigger
@@ -49,25 +54,23 @@ export function ChatEditorLayoutTrigger({
       tooltipContent={
         <div className="flex items-center gap-2">
           {isOpen ? 'Close' : 'Open'} Editor
-          <KeyShortcut variant="tooltip">
-            {formatKeyCombination(keyCombinationEditor)}
-          </KeyShortcut>
+          <KeyShortcut variant="tooltip">{formatKeyCombination(keyCombinationEditor)}</KeyShortcut>
         </div>
       }
-      onClick={onToggle}
       isOpen={isOpen}
+      onClick={onToggle}
     />
   );
 }
 
-export function ChatEditorLayout({ 
+export function ChatEditorLayout({
   className,
-  isExpanded,
+  isExpanded = true,
   setIsExpanded,
-}: { 
+}: {
   readonly className?: ClassValue;
-  readonly isExpanded: boolean;
-  readonly setIsExpanded: (value: boolean | ((current: boolean) => boolean)) => void;
+  readonly isExpanded?: boolean;
+  readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }): React.JSX.Element {
   const [explorerSize, setExplorerSize] = useCookie(cookieName.chatRsFileExplorer, [20, 80]);
   const [consoleSize, setConsoleSize] = useCookie(cookieName.chatRsEditor, [85, 15]);
@@ -80,7 +83,7 @@ export function ChatEditorLayout({
   };
 
   const toggleEditor = () => {
-    setIsExpanded((current) => !current);
+    setIsExpanded?.((current) => !current);
   };
 
   const toggleConsolePanel = useCallback(() => {
@@ -94,7 +97,10 @@ export function ChatEditorLayout({
     }
   }, [consolePanelReference]);
 
-  const { formattedKeyCombination: formattedExplorerKeyCombination } = useKeydown(keyCombinationFileExplorer, toggleExplorer);
+  const { formattedKeyCombination: formattedExplorerKeyCombination } = useKeydown(
+    keyCombinationFileExplorer,
+    toggleExplorer,
+  );
   const { formattedKeyCombination: formattedEditorKeyCombination } = useKeydown(keyCombinationEditor, toggleEditor);
   const { formattedKeyCombination: formattedToggleConsoleKeyCombination } = useKeydown(
     toggleConsoleKeyCombination,
@@ -102,7 +108,7 @@ export function ChatEditorLayout({
   );
 
   return (
-    <FloatingPanel open={isExpanded} onOpenChange={setIsExpanded}>
+    <FloatingPanel isOpen={isExpanded} onOpenChange={setIsExpanded}>
       <FloatingPanelClose
         side="right"
         align="start"
@@ -110,14 +116,17 @@ export function ChatEditorLayout({
         tooltipContent={(isOpen) => (
           <div className="flex items-center gap-2">
             {isOpen ? 'Close' : 'Open'} Editor
-            <KeyShortcut variant="tooltip">
-              {formattedEditorKeyCombination}
-            </KeyShortcut>
+            <KeyShortcut variant="tooltip">{formattedEditorKeyCombination}</KeyShortcut>
           </div>
         )}
       />
       <FloatingPanelContent>
-        <ResizablePanelGroup direction="vertical" autoSaveId={cookieName.chatRsEditor} onLayout={setConsoleSize} className={cn('h-full', className)}>
+        <ResizablePanelGroup
+          direction="vertical"
+          autoSaveId={cookieName.chatRsEditor}
+          className={cn('h-full', className)}
+          onLayout={setConsoleSize}
+        >
           {/* Editor and File Explorer Panel */}
           <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-editor" className="size-full">
             <ResizablePanelGroup
@@ -136,7 +145,12 @@ export function ChatEditorLayout({
                 </>
               ) : null}
 
-              <ResizablePanel order={2} defaultSize={isExplorerOpen ? explorerSize[1] : 100} minSize={15} id="file-editor">
+              <ResizablePanel
+                order={2}
+                defaultSize={isExplorerOpen ? explorerSize[1] : 100}
+                minSize={15}
+                id="file-editor"
+              >
                 <ChatEditor />
               </ResizablePanel>
 
@@ -146,7 +160,11 @@ export function ChatEditorLayout({
                   <Button
                     variant="overlay"
                     size="icon"
-                    className={cn('absolute size-7 bottom-2 left-2 z-10', 'transition-transform', isExplorerOpen && 'rotate-180')}
+                    className={cn(
+                      'absolute bottom-2 left-2 z-10 size-7',
+                      'transition-transform',
+                      isExplorerOpen && 'rotate-180',
+                    )}
                     onClick={toggleExplorer}
                   >
                     <ArrowRightToLine />

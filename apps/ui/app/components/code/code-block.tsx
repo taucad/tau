@@ -1,13 +1,13 @@
 import type { ComponentProps } from 'react';
-import { CodeViewer } from '#components/code/code-viewer.js';
-import { cn } from '#utils/ui.js';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
+import { CodeViewer } from '#components/code/code-viewer.js';
+import { cn } from '#utils/ui.js';
 import type { CodeLanguage } from '#types/code.types.js';
 
 // Root CodeBlock container variants
 const codeBlockVariants = cva(
-  "@container/code group/codeblock overflow-hidden rounded-lg border font-sans not-prose text-sm bg-neutral/10",
+  '@container/code group/codeblock overflow-hidden rounded-lg border font-sans not-prose text-sm bg-neutral/10',
   {
     variants: {
       variant: {
@@ -18,89 +18,67 @@ const codeBlockVariants = cva(
     defaultVariants: {
       variant: 'standard',
     },
-  }
+  },
 );
 
 // Header variants
-const codeBlockHeaderVariants = cva(
-  "flex flex-row items-center justify-between text-foreground/50",
-  {
-    variants: {
-      variant: {
-        standard: 'sticky top-0 border-b p-0.25 pl-3 bg-neutral/5',
-        floating: 'absolute top-0.25 right-0.25 z-10 p-0',
-      },
+const codeBlockHeaderVariants = cva('flex flex-row items-center justify-between text-foreground/50', {
+  variants: {
+    variant: {
+      standard: 'sticky top-0 border-b p-0.25 pl-3 bg-neutral/5',
+      floating: 'absolute top-0.25 right-0.25 z-10 p-0',
     },
-    defaultVariants: {
-      variant: 'standard',
-    },
-  }
-);
+  },
+  defaultVariants: {
+    variant: 'standard',
+  },
+});
 
 // Action container variants
-const codeBlockActionVariants = cva(
-  "flex flex-row gap-1",
-  {
-    variants: {
-      variant: {
-        standard: '',
-        floating: 'p-0.25',
-      },
-      visibility: {
-        inivisibleUntilHover: 'opacity-0 group-hover/codeblock:opacity-100 transition-opacity',
-        alwaysVisible: '',
-      },
+const codeBlockActionVariants = cva('flex flex-row gap-1', {
+  variants: {
+    variant: {
+      standard: '',
+      floating: 'p-0.25',
     },
-    defaultVariants: {
-      variant: 'standard',
-      visibility: 'inivisibleUntilHover',
+    visibility: {
+      inivisibleUntilHover: 'opacity-0 group-hover/codeblock:opacity-100 transition-opacity',
+      alwaysVisible: '',
     },
-  }
-);
+  },
+  defaultVariants: {
+    variant: 'standard',
+    visibility: 'inivisibleUntilHover',
+  },
+});
 
 // Title variants
-const codeBlockTitleVariants = cva(
-  "text-xs",
-  {
-    variants: {
-      variant: {
-        standard: '',
-        floating: 'hidden',
-      },
+const codeBlockTitleVariants = cva('text-xs', {
+  variants: {
+    variant: {
+      standard: '',
+      floating: 'hidden',
     },
-    defaultVariants: {
-      variant: 'standard',
-    },
-  }
-);
+  },
+  defaultVariants: {
+    variant: 'standard',
+  },
+});
 
-type CodeBlockProps = ComponentProps<'div'> & 
-  VariantProps<typeof codeBlockVariants>;
+type CodeBlockProps = ComponentProps<'div'> & VariantProps<typeof codeBlockVariants>;
 
-type CodeBlockHeaderProps = ComponentProps<'div'> & 
-  VariantProps<typeof codeBlockHeaderVariants>;
+type CodeBlockHeaderProps = ComponentProps<'div'> & VariantProps<typeof codeBlockHeaderVariants>;
 
-type CodeBlockActionProps = ComponentProps<'div'> & 
-  VariantProps<typeof codeBlockActionVariants>;
+type CodeBlockActionProps = ComponentProps<'div'> & VariantProps<typeof codeBlockActionVariants>;
 
-type CodeBlockTitleProps = ComponentProps<'div'> & 
-  VariantProps<typeof codeBlockTitleVariants>;
+type CodeBlockTitleProps = ComponentProps<'div'> & VariantProps<typeof codeBlockTitleVariants>;
 
 /**
  * Root CodeBlock container component
  */
-export function CodeBlock({
-  children,
-  variant = 'standard',
-  className,
-  ...rest
-}: CodeBlockProps): React.JSX.Element {
+export function CodeBlock({ children, variant = 'standard', className, ...rest }: CodeBlockProps): React.JSX.Element {
   return (
-    <div
-      {...rest}
-      data-slot="codeblock"
-      className={cn(codeBlockVariants({ variant, className }))}
-    >
+    <div {...rest} data-slot="codeblock" className={cn(codeBlockVariants({ variant, className }))}>
       {children}
     </div>
   );
@@ -109,18 +87,14 @@ export function CodeBlock({
 /**
  * CodeBlock header component - contains title and actions
  */
-export function CodeBlockHeader({ 
+export function CodeBlockHeader({
   variant = 'standard',
   className,
   children,
-  ...rest 
+  ...rest
 }: CodeBlockHeaderProps): React.JSX.Element {
   return (
-    <div
-      {...rest}
-      data-slot="codeblock-header"
-      className={cn(codeBlockHeaderVariants({ variant, className }))}
-    >
+    <div {...rest} data-slot="codeblock-header" className={cn(codeBlockHeaderVariants({ variant, className }))}>
       {children}
     </div>
   );
@@ -136,11 +110,7 @@ export function CodeBlockTitle({
   ...rest
 }: CodeBlockTitleProps): React.JSX.Element {
   return (
-    <div
-      {...rest}
-      data-slot="codeblock-title"
-      className={cn(codeBlockTitleVariants({ variant, className }))}
-    >
+    <div {...rest} data-slot="codeblock-title" className={cn(codeBlockTitleVariants({ variant, className }))}>
       {children}
     </div>
   );
@@ -156,11 +126,7 @@ export function CodeBlockAction({
   ...rest
 }: CodeBlockActionProps): React.JSX.Element {
   return (
-    <div
-      {...rest}
-      data-slot="codeblock-action"
-      className={cn(codeBlockActionVariants({ variant, className }))}
-    >
+    <div {...rest} data-slot="codeblock-action" className={cn(codeBlockActionVariants({ variant, className }))}>
       {children}
     </div>
   );
@@ -169,22 +135,13 @@ export function CodeBlockAction({
 /**
  * CodeBlock content wrapper
  */
-export function CodeBlockContent({ 
-  children, 
-  className, 
-  ...rest 
-}: ComponentProps<'div'>): React.JSX.Element {
+export function CodeBlockContent({ children, className, ...rest }: ComponentProps<'div'>): React.JSX.Element {
   return (
-    <div
-      {...rest}
-      data-slot="codeblock-content"
-      className={cn("", className)}
-    >
+    <div {...rest} data-slot="codeblock-content" className={cn('', className)}>
       {children}
     </div>
   );
 }
-
 
 type PreProps = ComponentProps<'pre'> & {
   readonly language?: string;
@@ -196,12 +153,18 @@ export function Pre({ children, language, className, ...rest }: PreProps): React
 
   // Render with syntax highlighting if language is detected
   if (language) {
-    return <CodeViewer language={language as CodeLanguage} text={text} className={cn("overflow-x-auto py-2 -mx-1", className)} />;
+    return (
+      <CodeViewer
+        language={language as CodeLanguage}
+        text={text}
+        className={cn('-mx-1 overflow-x-auto py-2', className)}
+      />
+    );
   }
 
   // Fallback to regular pre element
   return (
-    <pre {...rest} className={cn("overflow-x-auto py-2", className)}>
+    <pre {...rest} className={cn('overflow-x-auto py-2', className)}>
       {children}
     </pre>
   );

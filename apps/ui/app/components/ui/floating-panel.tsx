@@ -18,28 +18,36 @@ function useFloatingPanel(): FloatingPanelContextValue {
   if (!context) {
     throw new Error('useFloatingPanel must be used within a FloatingPanel');
   }
+
   return context;
 }
 
 type FloatingPanelProps = {
   readonly children: React.ReactNode;
-  readonly open?: boolean;
-  readonly defaultOpen?: boolean;
+  readonly isOpen?: boolean;
+  readonly isDefaultOpen?: boolean;
   readonly onOpenChange?: (open: boolean) => void;
   readonly className?: string;
 };
 
-function FloatingPanel({ children, open, defaultOpen = false, onOpenChange, className }: FloatingPanelProps): React.JSX.Element {
-  const [internalOpen, setInternalOpen] = React.useState(defaultOpen);
+function FloatingPanel({
+  children,
+  isOpen: isOpenExternal,
+  isDefaultOpen = false,
+  onOpenChange,
+  className,
+}: FloatingPanelProps): React.JSX.Element {
+  const [isInternalOpen, setIsInternalOpen] = React.useState(isDefaultOpen);
 
-  const isControlled = open !== undefined;
-  const isOpen = isControlled ? open : internalOpen;
+  const isControlled = isOpenExternal !== undefined;
+  const isOpen = isControlled ? isOpenExternal : isInternalOpen;
 
   const handleOpenChange = React.useCallback(
     (newOpen: boolean) => {
       if (!isControlled) {
-        setInternalOpen(newOpen);
+        setIsInternalOpen(newOpen);
       }
+
       onOpenChange?.(newOpen);
     },
     [isControlled, onOpenChange],
@@ -70,11 +78,11 @@ function FloatingPanel({ children, open, defaultOpen = false, onOpenChange, clas
   // Extract side, align, and sizing props from children
   const triggerChild = React.Children.toArray(children).find(
     (child): child is React.ReactElement<FloatingPanelTriggerButtonProps> =>
-      React.isValidElement(child) && (child as any).type === FloatingPanelClose
+      React.isValidElement(child) && (child as unknown as { type: React.ElementType }).type === FloatingPanelClose,
   );
 
-  const side = triggerChild?.props.side || 'right';
-  const align = triggerChild?.props.align || 'start';
+  const side = triggerChild?.props.side ?? 'right';
+  const align = triggerChild?.props.align ?? 'start';
 
   // Calculate origin classes based on side and align
   const getOriginClass = (): string => {
@@ -90,14 +98,14 @@ function FloatingPanel({ children, open, defaultOpen = false, onOpenChange, clas
         end: 'origin-bottom-right',
       },
     };
-    return origins[side as Side][align as Align];
+    return origins[side][align];
   };
 
   return (
     <FloatingPanelContext.Provider value={contextValue}>
       <div
         className={cn(
-          'group overflow-hidden relative bg-background border h-full rounded-md',
+          'group relative h-full overflow-hidden rounded-md border bg-background',
           'transition-all duration-300 ease-in-out',
           // Size and shape transitions
           'size-8',
@@ -146,7 +154,9 @@ function FloatingPanelTriggerButton({
 }: FloatingPanelTriggerButtonProps): React.JSX.Element {
   // Calculate positioning classes based on side and align (only for absolute variant)
   const getPositionClasses = () => {
-    if (variant === 'static') return '';
+    if (variant === 'static') {
+      return '';
+    }
 
     const positions = {
       left: {
@@ -179,35 +189,33 @@ function FloatingPanelTriggerButton({
       left: 'right' as const,
       right: 'left' as const,
     };
-    return tooltipSide || defaults[side];
+    return tooltipSide ?? defaults[side];
   };
 
-  const buttonBaseClasses = variant === 'absolute'
-    ? 'absolute group-data-[state=open]:z-10 rounded-md group-data-[state=open]:rounded-sm size-8 group-data-[state=open]:size-7'
-    : '';
+  const buttonBaseClasses =
+    variant === 'absolute'
+      ? 'absolute group-data-[state=open]:z-10 rounded-md group-data-[state=open]:rounded-sm size-8 group-data-[state=open]:size-7'
+      : '';
 
   // Render icon based on whether it's a ReactNode or a LucideIcon component
   const renderIcon = (): React.ReactNode => {
     if (React.isValidElement(Icon)) {
       // If it's already a React element, clone it and merge className
       return React.cloneElement(Icon, {
+        // @ts-expect-error -- Icon.props is not typed correctly
         className: cn(
           'transition-transform duration-300 ease-in-out',
           isOpen ? 'text-primary' : '',
-          (Icon.props as any).className,
+          // @ts-expect-error -- Icon.props is not typed correctly
+          Icon.props.className as string,
         ),
-      } as any);
+      });
     }
 
     // If it's a LucideIcon component, create an element with className
     const IconComponent = Icon as LucideIcon;
     return (
-      <IconComponent
-        className={cn(
-          'transition-transform duration-300 ease-in-out',
-          isOpen ? 'text-primary' : '',
-        )}
-      />
+      <IconComponent className={cn('transition-transform duration-300 ease-in-out', isOpen ? 'text-primary' : '')} />
     );
   };
 
@@ -224,16 +232,14 @@ function FloatingPanelTriggerButton({
             getPositionClasses(),
             className,
           )}
-          onClick={onClick}
           data-slot="floating-panel-trigger"
+          onClick={onClick}
         >
           {renderIcon()}
           {children}
         </Button>
       </TooltipTrigger>
-      <TooltipContent side={defaultTooltipSide()}>
-        {tooltipContent}
-      </TooltipContent>
+      <TooltipContent side={defaultTooltipSide()}>{tooltipContent}</TooltipContent>
     </Tooltip>
   );
 }
@@ -262,12 +268,12 @@ function FloatingPanelClose({
       side={side}
       align={align}
       icon={icon}
-      tooltipSide='top'
+      tooltipSide="top"
       className={className}
       tooltipContent={tooltipContent(isOpen)}
-      onClick={close}
       isOpen={isOpen}
       variant="absolute"
+      onClick={close}
     >
       {children}
     </FloatingPanelTriggerButton>
@@ -300,10 +306,10 @@ function FloatingPanelTrigger({
       icon={icon}
       tooltipContent={tooltipContent}
       className={className}
-      onClick={onClick}
       variant={variant}
       isOpen={isOpen}
       tooltipSide={tooltipSide}
+      onClick={onClick}
     >
       {children}
     </FloatingPanelTriggerButton>
@@ -321,7 +327,6 @@ type FloatingPanelToggleProps = {
   readonly align?: Align;
   readonly tooltipSide?: 'left' | 'right' | 'top' | 'bottom';
   readonly variant?: 'absolute' | 'static';
-  readonly onClick?: () => void;
 };
 
 function FloatingPanelToggle({
@@ -345,10 +350,10 @@ function FloatingPanelToggle({
       icon={isOpen ? closeIcon : openIcon}
       tooltipContent={isOpen ? closeTooltip : openTooltip}
       className={className}
-      onClick={toggle}
       variant={variant}
       isOpen={isOpen}
       tooltipSide={tooltipSide}
+      onClick={toggle}
     >
       {children}
     </FloatingPanelTriggerButton>
@@ -376,17 +381,14 @@ type FloatingPanelContentBodyProps = {
   readonly className?: string;
 };
 
-function FloatingPanelContent({
-  children,
-  className,
-}: FloatingPanelContentProps): React.JSX.Element {
+function FloatingPanelContent({ children, className }: FloatingPanelContentProps): React.JSX.Element {
   const { isOpen } = useFloatingPanel();
 
   return (
     <div
       className={cn(
         'flex size-full flex-col bg-sidebar/50',
-        isOpen ? 'opacity-100 delay-200' : 'opacity-0 pointer-events-none',
+        isOpen ? 'opacity-100 delay-200' : 'pointer-events-none opacity-0',
         className,
       )}
       data-slot="floating-panel-content"
@@ -396,36 +398,46 @@ function FloatingPanelContent({
   );
 }
 
-function FloatingPanelContentHeader({
-  children,
-  className,
-  side,
-}: FloatingPanelContentHeaderProps): React.JSX.Element {
-  return <div
-    className={cn('flex text-sm bg-sidebar text-muted-foreground font-medium h-7.75 items-center justify-between py-0.5 border-b', side === 'right' ? 'pr-8 pl-2' : 'pl-8 pr-0.25', className)}
-    data-slot="floating-panel-content-header"
-  >{children}</div>;
+function FloatingPanelContentHeader({ children, className, side }: FloatingPanelContentHeaderProps): React.JSX.Element {
+  return (
+    <div
+      className={cn(
+        'flex h-7.75 items-center justify-between border-b bg-sidebar py-0.5 text-sm font-medium text-muted-foreground',
+        side === 'right' ? 'pr-8 pl-2' : 'pr-0.25 pl-8',
+        className,
+      )}
+      data-slot="floating-panel-content-header"
+    >
+      {children}
+    </div>
+  );
 }
 
-function FloatingPanelContentTitle({
-  children,
-  className,
-}: FloatingPanelContentTitleProps): React.JSX.Element {
-  return <h2
-    className={cn('text-sm font-medium text-nowrap', className)}
-    data-slot="floating-panel-content-title"
-  >{children}</h2>;
+function FloatingPanelContentTitle({ children, className }: FloatingPanelContentTitleProps): React.JSX.Element {
+  return (
+    <h2 className={cn('text-sm font-medium text-nowrap', className)} data-slot="floating-panel-content-title">
+      {children}
+    </h2>
+  );
 }
 
-function FloatingPanelContentBody({
-  children,
-  className,
-}: FloatingPanelContentBodyProps): React.JSX.Element {
-  return <div
-    className={cn('flex-1 overflow-y-auto', className)}
-    data-slot="floating-panel-content-body"
-  >{children}</div>;
+function FloatingPanelContentBody({ children, className }: FloatingPanelContentBodyProps): React.JSX.Element {
+  return (
+    <div className={cn('flex-1 overflow-y-auto', className)} data-slot="floating-panel-content-body">
+      {children}
+    </div>
+  );
 }
 
-export { FloatingPanel, FloatingPanelClose, FloatingPanelTrigger, FloatingPanelToggle, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelContentBody, useFloatingPanel };
+export {
+  FloatingPanel,
+  FloatingPanelClose,
+  FloatingPanelTrigger,
+  FloatingPanelToggle,
+  FloatingPanelContent,
+  FloatingPanelContentHeader,
+  FloatingPanelContentTitle,
+  FloatingPanelContentBody,
+  useFloatingPanel,
+};
 export type { Side, Align };

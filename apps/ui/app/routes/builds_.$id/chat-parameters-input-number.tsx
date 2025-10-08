@@ -66,7 +66,7 @@ export function ChatParametersInputNumber({
             'absolute left-0',
             'rounded-l-md border-r-0',
             'group-focus-within/input:border-ring',
-            'cursor-text pointer-events-none',
+            'pointer-events-none cursor-text',
           )}
         >
           <span className="font-mono text-sm">×</span>
@@ -76,11 +76,7 @@ export function ChatParametersInputNumber({
         autoComplete="off"
         type="number"
         value={value}
-        className={cn(
-          isCount ? 'pl-8' : 'pr-8',
-          'focus-visible:ring-0',
-          className,
-        )}
+        className={cn(isCount ? 'pl-8' : 'pr-8', 'focus-visible:ring-0', className)}
         {...properties}
       />
       {!isCount && (
@@ -89,7 +85,7 @@ export function ChatParametersInputNumber({
             baseIndicatorClass,
             'absolute right-0 rounded-r-md border-l-0',
             'group-focus-within/input:border-ring',
-            'cursor-text pointer-events-none',
+            'pointer-events-none cursor-text',
           )}
         >
           {isAngle ? (

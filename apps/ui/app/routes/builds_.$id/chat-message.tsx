@@ -55,15 +55,13 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
     if (!isUser) {
       return;
     }
+
     setIsEditing((previous) => !previous);
   };
 
   return (
     <article
-      className={cn(
-        'group/chat-message flex w-full flex-row items-start',
-        isUser && 'items-end gap-2 space-x-reverse',
-      )}
+      className={cn('group/chat-message flex w-full flex-row items-start', isUser && 'items-end gap-2 space-x-reverse')}
     >
       <div
         className={cn(
@@ -77,6 +75,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
           <ChatTextarea
             initialContent={message.parts}
             initialAttachments={message.experimental_attachments}
+            className="rounded-sm"
             onSubmit={async (event) => {
               editMessage(messageId, event.content, event.model, event.metadata, event.imageUrls);
               setIsEditing(false);
@@ -87,11 +86,16 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
             onBlur={() => {
               setIsEditing(false);
             }}
-            className="rounded-sm"
           />
         </When>
         <When shouldRender={!isEditing}>
-          <div className={cn('flex flex-col gap-2', isUser && 'rounded-sm bg-background p-2 border hover:border-primary cursor-pointer')} onClick={handleEditClick}>
+          <div
+            className={cn(
+              'flex flex-col gap-2',
+              isUser && 'cursor-pointer rounded-sm border bg-background p-2 hover:border-primary',
+            )}
+            onClick={handleEditClick}
+          >
             {message.parts?.map((part, index) => {
               switch (part.type) {
                 case 'text': {

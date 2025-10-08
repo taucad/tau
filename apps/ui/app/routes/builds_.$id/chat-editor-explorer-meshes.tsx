@@ -3,17 +3,7 @@ import { useState } from 'react';
 import { Tree } from '#components/magicui/file-tree.js';
 import { ExplorerFile } from '#routes/builds_.$id/chat-editor-explorer-file.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
-
-// Generate a consistent color from a string
-function stringToColor(string_: string): string {
-  let hash = 0;
-  for (let index = 0; index < string_.length; index++) {
-    hash = string_.codePointAt(index)! + ((hash << 5) - hash);
-  }
-  
-  const hue = hash % 360;
-  return `hsl(${hue}, 70%, 50%)`;
-}
+import { stringToColor } from '#utils/color.utils.js';
 
 export type MeshItem = {
   readonly id: string;
@@ -67,7 +57,7 @@ export function ChatEditorExplorerMeshes({
       {meshes.map((mesh) => {
         const isSelected = selectedMeshId === mesh.id;
         const meshColor = stringToColor(mesh.name);
-        
+
         return (
           <ExplorerFile
             key={mesh.id}
@@ -84,4 +74,3 @@ export function ChatEditorExplorerMeshes({
     </Tree>
   );
 }
-

@@ -14,8 +14,8 @@ export type AnimationItem = {
 
 // Mock animation data
 const mockAnimations: readonly AnimationItem[] = [
-  { id: 'anim-1', name: 'Camera Pan', duration: 5.0, frameCount: 150, type: 'keyframe' },
-  { id: 'anim-2', name: 'Bridge Assembly', duration: 10.0, frameCount: 300, type: 'skeletal' },
+  { id: 'anim-1', name: 'Camera Pan', duration: 5, frameCount: 150, type: 'keyframe' },
+  { id: 'anim-2', name: 'Bridge Assembly', duration: 10, frameCount: 300, type: 'skeletal' },
   { id: 'anim-3', name: 'Material Fade', duration: 2.5, frameCount: 75, type: 'keyframe' },
 ];
 
@@ -49,7 +49,7 @@ export function ChatEditorExplorerAnimations({
     <Tree elements={treeElements} className="px-1">
       {animations.map((animation) => {
         const isSelected = selectedAnimationId === animation.id;
-        
+
         return (
           <ExplorerFile
             key={animation.id}
@@ -66,4 +66,3 @@ export function ChatEditorExplorerAnimations({
     </Tree>
   );
 }
-

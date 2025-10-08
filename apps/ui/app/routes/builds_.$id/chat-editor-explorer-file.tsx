@@ -26,4 +26,3 @@ export function ExplorerFile({ id, name, icon, isSelected, onClick }: ExplorerFi
     </File>
   );
 }
-

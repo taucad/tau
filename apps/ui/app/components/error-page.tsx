@@ -14,7 +14,7 @@ export function ErrorPage(): React.JSX.Element {
 
   if (isRouteErrorResponse(error)) {
     return (
-      <div className="flex size-full flex-col items-center md:ml-[var(--sidebar-width-current)] justify-center gap-4 p-8">
+      <div className="flex size-full flex-col items-center justify-center gap-4 p-8 md:ml-[var(--sidebar-width-current)]">
         <h1 className="text-xl">
           {error.status} {error.statusText}
         </h1>

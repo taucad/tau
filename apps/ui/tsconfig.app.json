@@ -38,7 +38,8 @@
     "app/**/*.test.js",
     "app/**/*.spec.js",
     "app/**/*.test.jsx",
-    "app/**/*.spec.jsx"
+    "app/**/*.spec.jsx",
+    "source.generated.ts"
   ],
   "references": [
     {

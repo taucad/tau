@@ -43,8 +43,8 @@ export function ComboBoxResponsive<T>({
   onSelect,
   onClose,
   className,
-  popoverProperties: { className: popoverClassName, ...popoverProperties } = {},
-  drawerProperties: { className: drawerClassName, ...drawerProperties } = {},
+  popoverProperties,
+  drawerProperties,
   placeholder = 'Set item',
   searchPlaceHolder = 'Filter items...',
   asChildLabel = false,
@@ -83,7 +83,12 @@ export function ComboBoxResponsive<T>({
     return (
       <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerTrigger asChild>{children}</DrawerTrigger>
-        <DrawerContent aria-describedby="drawer-title" className={cn(className, drawerClassName)} {...drawerProperties} {...properties}>
+        <DrawerContent
+          aria-describedby="drawer-title"
+          {...properties}
+          {...drawerProperties}
+          className={cn(className, drawerProperties?.className)}
+        >
           <DrawerTitle className="sr-only" id="drawer-title">
             {placeholder}
           </DrawerTitle>
@@ -109,7 +114,11 @@ export function ComboBoxResponsive<T>({
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
-      <PopoverContent className={cn('w-[200px] p-0', className, popoverClassName)} {...popoverProperties} {...properties}>
+      <PopoverContent
+        {...properties}
+        {...popoverProperties}
+        className={cn('w-[200px] p-0', className, popoverProperties?.className)}
+      >
         <ItemList
           groupedItems={groupedItems}
           setSelectedItem={handleSelect}

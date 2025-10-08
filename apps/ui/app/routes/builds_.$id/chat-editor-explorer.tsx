@@ -1,7 +1,15 @@
 import { XIcon, FileBox, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { FloatingPanel, FloatingPanelClose, FloatingPanelContent, FloatingPanelContentHeader, FloatingPanelContentTitle, FloatingPanelContentBody, FloatingPanelTrigger } from '#components/ui/floating-panel.js';
+import {
+  FloatingPanel,
+  FloatingPanelClose,
+  FloatingPanelContent,
+  FloatingPanelContentHeader,
+  FloatingPanelContentTitle,
+  FloatingPanelContentBody,
+  FloatingPanelTrigger,
+} from '#components/ui/floating-panel.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.js';
@@ -18,12 +26,12 @@ const keyCombinationEditor = {
 } as const satisfies KeyCombination;
 
 // Items Trigger Component
-export function ChatExplorerTrigger({ 
-  isOpen, 
-  onToggle 
-}: { 
-  readonly isOpen: boolean; 
-  readonly onToggle: () => void; 
+export function ChatExplorerTrigger({
+  isOpen,
+  onToggle,
+}: {
+  readonly isOpen: boolean;
+  readonly onToggle: () => void;
 }): React.JSX.Element {
   return (
     <FloatingPanelTrigger
@@ -31,26 +39,24 @@ export function ChatExplorerTrigger({
       tooltipContent={
         <div className="flex items-center gap-2">
           {isOpen ? 'Close' : 'Open'} Explorer
-          <KeyShortcut variant="tooltip">
-            {formatKeyCombination(keyCombinationEditor)}
-          </KeyShortcut>
+          <KeyShortcut variant="tooltip">{formatKeyCombination(keyCombinationEditor)}</KeyShortcut>
         </div>
       }
-      onClick={onToggle}
       isOpen={isOpen}
       tooltipSide="right"
+      onClick={onToggle}
     />
   );
 }
 
-export function ChatExplorerTree({ 
+export function ChatExplorerTree({
   className,
-  isExpanded,
+  isExpanded = true,
   setIsExpanded,
-}: { 
+}: {
   readonly className?: string;
   readonly isExpanded: boolean;
-  readonly setIsExpanded: (value: boolean | ((current: boolean) => boolean)) => void;
+  readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }): React.JSX.Element {
   // Section collapse states
   const [isFilesOpen, setIsFilesOpen] = useState(true);
@@ -60,14 +66,13 @@ export function ChatExplorerTree({
   const [isObjectsOpen, setIsObjectsOpen] = useState(false);
 
   const toggleEditor = () => {
-    setIsExpanded((current) => !current);
+    setIsExpanded?.((current) => !current);
   };
 
   const { formattedKeyCombination: formattedEditorKeyCombination } = useKeydown(keyCombinationEditor, toggleEditor);
 
-
   return (
-    <FloatingPanel open={isExpanded} onOpenChange={setIsExpanded} className={className}>
+    <FloatingPanel isOpen={isExpanded} className={className} onOpenChange={setIsExpanded}>
       <FloatingPanelClose
         side="left"
         align="start"
@@ -75,9 +80,7 @@ export function ChatExplorerTree({
         tooltipContent={(isOpen) => (
           <div className="flex items-center gap-2">
             {isOpen ? 'Close' : 'Open'} Explorer
-            <KeyShortcut variant="tooltip">
-              {formattedEditorKeyCombination}
-            </KeyShortcut>
+            <KeyShortcut variant="tooltip">{formattedEditorKeyCombination}</KeyShortcut>
           </div>
         )}
       />
@@ -87,12 +90,7 @@ export function ChatExplorerTree({
         </FloatingPanelContentHeader>
         <FloatingPanelContentBody className="flex flex-col px-0 py-0">
           {/* Files Section */}
-          <ExplorerCollapsibleSection
-            title="Files"
-            count={1}
-            isOpen={isFilesOpen}
-            onOpenChange={setIsFilesOpen}
-          >
+          <ExplorerCollapsibleSection title="Files" count={1} isOpen={isFilesOpen} onOpenChange={setIsFilesOpen}>
             <ChatEditorExplorerFiles />
           </ExplorerCollapsibleSection>
 
@@ -107,12 +105,7 @@ export function ChatExplorerTree({
           </ExplorerCollapsibleSection>
 
           {/* Meshes Section */}
-          <ExplorerCollapsibleSection
-            title="Meshes"
-            count={9}
-            isOpen={isMeshesOpen}
-            onOpenChange={setIsMeshesOpen}
-          >
+          <ExplorerCollapsibleSection title="Meshes" count={9} isOpen={isMeshesOpen} onOpenChange={setIsMeshesOpen}>
             <ChatEditorExplorerMeshes />
           </ExplorerCollapsibleSection>
 
@@ -127,12 +120,7 @@ export function ChatExplorerTree({
           </ExplorerCollapsibleSection>
 
           {/* Objects Section */}
-          <ExplorerCollapsibleSection
-            title="Objects"
-            count={10}
-            isOpen={isObjectsOpen}
-            onOpenChange={setIsObjectsOpen}
-          >
+          <ExplorerCollapsibleSection title="Objects" count={10} isOpen={isObjectsOpen} onOpenChange={setIsObjectsOpen}>
             <ChatEditorExplorerObjects />
           </ExplorerCollapsibleSection>
         </FloatingPanelContentBody>
@@ -157,22 +145,16 @@ function ExplorerCollapsibleSection({
   children,
 }: ExplorerCollapsibleSectionProps): React.JSX.Element {
   return (
-    <Collapsible
-      open={isOpen}
-      className="w-full border-b border-border/50 last:border-b-0"
-      onOpenChange={onOpenChange}
-    >
+    <Collapsible open={isOpen} className="w-full border-b border-border/50 last:border-b-0" onOpenChange={onOpenChange}>
       <CollapsibleTrigger className="group/collapsible flex h-8 w-full items-center justify-between px-3 py-1.5 transition-colors hover:bg-muted/50">
-        <h3 className="flex min-w-0 flex-1 items-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <h3 className="flex min-w-0 flex-1 items-center text-xs font-semibold tracking-wide text-muted-foreground uppercase">
           <span className="truncate">{title}</span>
           <span className="ml-1.5 flex-shrink-0 text-muted-foreground/50">({count})</span>
         </h3>
         <ChevronRight className="size-3.5 text-muted-foreground transition-transform duration-200 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
       </CollapsibleTrigger>
 
-      <CollapsibleContent className="px-0 py-1">
-        {children}
-      </CollapsibleContent>
+      <CollapsibleContent className="px-0 py-1">{children}</CollapsibleContent>
     </Collapsible>
   );
 }

@@ -50,7 +50,7 @@ const calculateTierBoundary = (value: number): number => {
 /**
  * Calculate the range boundary magnitude using tier-based scaling logic.
  * This shared logic determines whether to expand the range based on the 2x test.
- * 
+ *
  * @param defaultValue - The default value of the parameter
  * @returns The calculated range boundary (always positive)
  */
@@ -58,15 +58,15 @@ const calculateRangeBoundary = (defaultValue: number): number => {
   const absoluteValue = Math.abs(defaultValue);
   const tierBoundary = calculateTierBoundary(absoluteValue);
   const nextTier = tierBoundary * 10;
-  
+
   // Test if doubled value exceeds the next tier boundary
   const testValue = absoluteValue * RangeTestMultiplier;
-  
+
   // If test value meets or exceeds the next tier, expand the range
   if (testValue >= nextTier) {
     return nextTier * TierExpansionMultiplier;
   }
-  
+
   return nextTier;
 };
 

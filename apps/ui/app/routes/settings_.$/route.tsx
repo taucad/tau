@@ -1,12 +1,13 @@
 import type { SettingsView } from '@daveyplate/better-auth-ui';
 import { SettingsCards, useAuthenticate } from '@daveyplate/better-auth-ui';
 import { Link, useLocation } from 'react-router';
+import { CreditCard, Key, Lock, Palette, User } from 'lucide-react';
 import { TabsContent } from '#components/ui/tabs.js';
 import type { Handle } from '#types/matches.types.js';
 import { Button } from '#components/ui/button.js';
-import { CreditCard, Key, Lock, Palette, User } from 'lucide-react';
 import { cn } from '#utils/ui.js';
-import { ResponsiveTabs, type ResponsiveTabItem } from '#components/ui/responsive-tabs.js';
+import { ResponsiveTabs } from '#components/ui/responsive-tabs.js';
+import type { ResponsiveTabItem } from '#components/ui/responsive-tabs.js';
 
 type SettingsTab = ResponsiveTabItem & {
   tabView?: SettingsView;
@@ -55,7 +56,7 @@ const nonAuthTabs: readonly SettingsTab[] = [
     label: 'Appearance',
     href: '/settings/appearance',
     icon: Palette,
-  }
+  },
 ] as const;
 
 const allTabs: readonly SettingsTab[] = [...authTabs, ...nonAuthTabs];
@@ -92,16 +93,13 @@ export default function SettingsPage(): React.JSX.Element {
 
   return (
     <div className="h-full flex-1">
-      <div className={cn(
-        "mx-auto size-full max-w-4xl p-4 md:p-6 mb-6",
-        "[&_[data-slot=drawer-trigger]]:hidden"
-      )}>
+      <div className={cn('mx-auto mb-6 size-full max-w-4xl p-4 md:p-6', '[&_[data-slot=drawer-trigger]]:hidden')}>
         <ResponsiveTabs tabs={allTabs} activeTab={activeTab}>
           {authTabs.map((tab) => (
             <TabsContent key={tab.label} value={tab.label} className="[&>*]:md:gap-0">
-              <SettingsCards 
-                classNames={{ cards: 'h-full', sidebar: { base: 'hidden' }, base: 'h-full' }} 
-                view={tab.tabView!} 
+              <SettingsCards
+                classNames={{ cards: 'h-full', sidebar: { base: 'hidden' }, base: 'h-full' }}
+                view={tab.tabView}
               />
             </TabsContent>
           ))}

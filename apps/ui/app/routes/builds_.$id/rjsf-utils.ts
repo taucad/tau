@@ -1,7 +1,7 @@
 /**
  * Utility functions for React JSON Schema Form (RJSF) operations
  */
-import type { RJSFSchema } from "@rjsf/utils";
+import type { RJSFSchema } from '@rjsf/utils';
 
 /**
  * The prefix used in RJSF IDs.
@@ -62,42 +62,47 @@ export function isSchemaMatchingSearch(schema: RJSFSchema, searchTerm: string, p
   const lowerSearch = searchTerm.toLowerCase();
 
   // Check if the property name matches
-  if (propertyName) {
-    if (propertyName.toLowerCase().includes(lowerSearch)) {
-      return true;
-    }
+  if (propertyName?.toLowerCase().includes(lowerSearch)) {
+    return true;
   }
 
   // Check if the title matches
-  if (schema.title && typeof schema.title === 'string') {
-    if (schema.title.toLowerCase().includes(lowerSearch)) {
-      return true;
-    }
+  if (schema.title && typeof schema.title === 'string' && schema.title.toLowerCase().includes(lowerSearch)) {
+    return true;
   }
 
   // Check if the description matches
-  if (schema.description && typeof schema.description === 'string') {
-    if (schema.description.toLowerCase().includes(lowerSearch)) {
-      return true;
-    }
+  if (
+    schema.description &&
+    typeof schema.description === 'string' &&
+    schema.description.toLowerCase().includes(lowerSearch)
+  ) {
+    return true;
   }
 
   // If this schema has nested properties (is a group), check them recursively
   if (schema.properties && typeof schema.properties === 'object') {
     for (const [nestedName, nestedSchema] of Object.entries(schema.properties)) {
-      if (nestedSchema && typeof nestedSchema === 'object' && !Array.isArray(nestedSchema)) {
-        if (isSchemaMatchingSearch(nestedSchema as RJSFSchema, searchTerm, nestedName)) {
-          return true;
-        }
+      if (
+        nestedSchema &&
+        typeof nestedSchema === 'object' &&
+        !Array.isArray(nestedSchema) &&
+        isSchemaMatchingSearch(nestedSchema as RJSFSchema, searchTerm, nestedName)
+      ) {
+        return true;
       }
     }
   }
 
   // If this schema is an array, check its items schema recursively
-  if (schema.type === 'array' && schema.items && typeof schema.items === 'object' && !Array.isArray(schema.items)) {
-    if (isSchemaMatchingSearch(schema.items as RJSFSchema, searchTerm)) {
-      return true;
-    }
+  if (
+    schema.type === 'array' &&
+    schema.items &&
+    typeof schema.items === 'object' &&
+    !Array.isArray(schema.items) &&
+    isSchemaMatchingSearch(schema.items as RJSFSchema, searchTerm)
+  ) {
+    return true;
   }
 
   return false;

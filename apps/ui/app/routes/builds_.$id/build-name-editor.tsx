@@ -63,10 +63,11 @@ export function BuildNameEditor(): React.JSX.Element {
 
   const handleSave = async () => {
     if (editValue.trim()) {
-      await updateName(editValue.trim());
+      updateName(editValue.trim());
       setDisplayName(editValue.trim());
       // Don't trigger animation for manual edits
     }
+
     setIsEditing(false);
   };
 
@@ -110,7 +111,7 @@ export function BuildNameEditor(): React.JSX.Element {
           autoComplete="off"
           type="text"
           value={editValue}
-          className="focus-visible:ring-0 px-2 bg-background"
+          className="bg-background px-2 focus-visible:ring-0"
           onChange={(event) => {
             setEditValue(event.target.value);
           }}
@@ -129,15 +130,8 @@ export function BuildNameEditor(): React.JSX.Element {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button 
-          variant="ghost" 
-          className="cursor-text justify-start" 
-          onClick={handleEdit}
-        >
-          <span
-            data-animate={isNameGenerating}
-            className="truncate data-[animate=true]:animate-typewriter-20"
-          >
+        <Button variant="ghost" className="cursor-text justify-start" onClick={handleEdit}>
+          <span data-animate={isNameGenerating} className="truncate data-[animate=true]:animate-typewriter-20">
             {displayName === '' ? <LoadingSpinner /> : displayName}
           </span>
         </Button>

@@ -1,0 +1,42 @@
+---
+title: OpenSCAD Kernel
+description: WebAssembly build of OpenSCAD that accepts standard .scad syntax.
+---
+
+## Usage
+
+1. Load/create a file ending with `.scad` **or** set the build asset language to `openscad`.
+2. The CAD machine will automatically choose the OpenSCAD kernel and spin up the `openscad.worker`.
+3. All Replicad viewer features work (mesh display, export).
+
+## Example
+
+```ts
+send({
+  type: 'initializeModel',
+  code: `cube(10);`,
+  parameters: {},
+  kernelType: 'openscad',
+});
+// cad.machine detects `.scad` → initializes OpenSCAD kernel
+```
+
+## OpenSCAD Syntax
+
+Standard OpenSCAD syntax is supported:
+
+```c
+// Basic shapes
+cube([10, 20, 30]);
+sphere(r=5);
+cylinder(h=10, r=3);
+
+// Boolean operations
+difference() {
+    cube(10);
+    sphere(r=6);
+}
+
+// Transformations
+translate([5, 0, 0]) rotate([0, 0, 45]) cube(5);
+```

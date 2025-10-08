@@ -50,7 +50,7 @@ export function ChatEditorTabs(): React.JSX.Element {
     <div className="border-b bg-muted/20">
       <div
         ref={scrollContainerRef}
-        className="h-11 overflow-x-auto overflow-y-hidden overscroll-x-none [scrollbar-width:none]"
+        className="h-7.75 overflow-x-auto overflow-y-hidden overscroll-x-none [scrollbar-width:none]"
       >
         <div className="flex h-full w-max">
           {openFiles.map((file) => (

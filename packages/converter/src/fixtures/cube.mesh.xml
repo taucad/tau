@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mesh>
+    <sharedgeometry vertexcount="8">
+        <vertexbuffer texture_coords="1" positions="true" colours_diffuse="false" normals="true">
+            <!-- Bottom face vertices (z=0) -->
+            <vertex>
+                <position x="-1.0" y="-1.0" z="0.0"/>
+                <normal x="0.0" y="0.0" z="-1.0"/>
+                <texcoord u="0.0" v="0.0"/>
+            </vertex>
+            <vertex>
+                <position x="1.0" y="-1.0" z="0.0"/>
+                <normal x="0.0" y="0.0" z="-1.0"/>
+                <texcoord u="1.0" v="0.0"/>
+            </vertex>
+            <vertex>
+                <position x="1.0" y="1.0" z="0.0"/>
+                <normal x="0.0" y="0.0" z="-1.0"/>
+                <texcoord u="1.0" v="1.0"/>
+            </vertex>
+            <vertex>
+                <position x="-1.0" y="1.0" z="0.0"/>
+                <normal x="0.0" y="0.0" z="-1.0"/>
+                <texcoord u="0.0" v="1.0"/>
+            </vertex>
+            <!-- Top face vertices (z=2) -->
+            <vertex>
+                <position x="-1.0" y="-1.0" z="2.0"/>
+                <normal x="0.0" y="0.0" z="1.0"/>
+                <texcoord u="0.0" v="0.0"/>
+            </vertex>
+            <vertex>
+                <position x="1.0" y="-1.0" z="2.0"/>
+                <normal x="0.0" y="0.0" z="1.0"/>
+                <texcoord u="1.0" v="0.0"/>
+            </vertex>
+            <vertex>
+                <position x="1.0" y="1.0" z="2.0"/>
+                <normal x="0.0" y="0.0" z="1.0"/>
+                <texcoord u="1.0" v="1.0"/>
+            </vertex>
+            <vertex>
+                <position x="-1.0" y="1.0" z="2.0"/>
+                <normal x="0.0" y="0.0" z="1.0"/>
+                <texcoord u="0.0" v="1.0"/>
+            </vertex>
+        </vertexbuffer>
+    </sharedgeometry>
+    <submeshes>
+        <submesh usesharedvertices="true" material="BlockMat" use32bitindexes="false">
+            <faces count="12">
+                <!-- Bottom face (z=0) -->
+                <face v1="0" v2="2" v3="1"/>
+                <face v1="0" v2="3" v3="2"/>
+                <!-- Top face (z=2) -->
+                <face v1="4" v2="5" v3="6"/>
+                <face v1="4" v2="6" v3="7"/>
+                <!-- Front face (y=-1) -->
+                <face v1="0" v2="1" v3="5"/>
+                <face v1="0" v2="5" v3="4"/>
+                <!-- Right face (x=1) -->
+                <face v1="1" v2="2" v3="6"/>
+                <face v1="1" v2="6" v3="5"/>
+                <!-- Back face (y=1) -->
+                <face v1="2" v2="3" v3="7"/>
+                <face v1="2" v2="7" v3="6"/>
+                <!-- Left face (x=-1) -->
+                <face v1="3" v2="0" v3="4"/>
+                <face v1="3" v2="4" v3="7"/>
+            </faces>
+        </submesh>
+    </submeshes>
+</mesh>

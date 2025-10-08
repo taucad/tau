@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
-import { Globe, ArrowUp, Image, X, Square, CircuitBoard, ChevronDown } from 'lucide-react';
+import { ArrowUp, X, Square, CircuitBoard, ChevronDown, Paperclip } from 'lucide-react';
 import type { Attachment } from 'ai';
 import type { ClassValue } from 'clsx';
 import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
@@ -13,12 +13,20 @@ import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { formatKeyCombination } from '#utils/keys.js';
 import type { KeyCombination } from '#utils/keys.js';
 import { toast } from '#components/ui/sonner.js';
-import { useCookie } from '#hooks/use-cookie.js';
 import { cn } from '#utils/ui.js';
 import type { MessagePart } from '#types/chat.types.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { ChatContextActions } from '#components/chat/chat-context-actions.js';
-import { cookieName } from '#constants/cookie.constants.js';
+
+/**
+ * IMPORTANT NOTE:
+ *
+ * When adding a new element to the textarea and that element contains portalled content,
+ * make sure to add the `data-chat-textarea-focustrap` attribute to the element.
+ *
+ * This is used to determine if the focus has truly left the textarea and its related UI elements.
+ */
+const focusTrapAttribute = 'data-chat-textarea-focustrap';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
@@ -33,7 +41,8 @@ export type ChatTextareaProperties = {
     imageUrls?: string[];
   }) => Promise<void>;
   readonly onEscapePressed?: () => void;
-  readonly shouldAutoFocus?: boolean;
+  readonly onBlur?: () => void;
+  readonly enableAutoFocus?: boolean;
   readonly initialContent?: MessagePart[];
   readonly initialAttachments?: Attachment[];
   readonly className?: ClassValue;
@@ -44,7 +53,7 @@ const defaultContent: MessagePart[] = [];
 const defaultAttachments: Attachment[] = [];
 
 // Define the key combination for cancelling the stream
-const cancelKeyCombination = {
+export const cancelChatStreamKeyCombination = {
   key: 'Backspace',
   metaKey: true,
   shiftKey: true,
@@ -53,10 +62,11 @@ const cancelKeyCombination = {
 
 export const ChatTextarea = memo(function ({
   onSubmit,
-  shouldAutoFocus: autoFocus = true,
+  enableAutoFocus = true,
   initialContent = defaultContent,
   initialAttachments = defaultAttachments,
   onEscapePressed,
+  onBlur,
   className,
   enableContextActions = true,
 }: ChatTextareaProperties): React.JSX.Element {
@@ -81,8 +91,6 @@ export const ChatTextarea = memo(function ({
     return { initialInputText, initialImageUrls };
   }, [initialContent, initialAttachments]);
   const [inputText, setInputText] = useState(initialInputText);
-  const [isSearching, setIsSearching] = useCookie(cookieName.chatWebSearch, false);
-  const [isFocused, setIsFocused] = useState(false);
   const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
@@ -108,7 +116,7 @@ export const ChatTextarea = memo(function ({
       content: inputText,
       model: selectedModel?.id ?? '',
       metadata: {
-        toolChoice: isSearching ? 'web_search' : 'auto',
+        toolChoice: 'auto',
       },
       imageUrls: images,
     });
@@ -119,7 +127,7 @@ export const ChatTextarea = memo(function ({
   };
 
   // Register keyboard shortcut for cancellation
-  const { formattedKeyCombination: formattedCancelKeyCombination } = useKeydown(cancelKeyCombination, () => {
+  const { formattedKeyCombination: formattedCancelKeyCombination } = useKeydown(cancelChatStreamKeyCombination, () => {
     if (status === 'streaming') {
       stop();
     }
@@ -229,7 +237,12 @@ export const ChatTextarea = memo(function ({
   }, []);
 
   const focusInput = useCallback(() => {
-    textareaReference.current?.focus();
+    if (textareaReference.current) {
+      textareaReference.current.focus();
+      // Set cursor position to end of text
+      textareaReference.current.selectionStart = textareaReference.current.value.length;
+      textareaReference.current.selectionEnd = textareaReference.current.value.length;
+    }
   }, [textareaReference]);
 
   /**
@@ -393,10 +406,10 @@ export const ChatTextarea = memo(function ({
   );
 
   useEffect(() => {
-    if (autoFocus) {
+    if (enableAutoFocus) {
       focusInput();
     }
-  }, [autoFocus, focusInput]);
+  }, [enableAutoFocus, focusInput]);
 
   useEffect(() => {
     // Add paste event listener to the document
@@ -426,36 +439,114 @@ export const ChatTextarea = memo(function ({
     };
   }, [showContextMenu]);
 
+  const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+  };
+
+  const containerReference = useRef<HTMLDivElement>(null);
+
+  const handleTextareaBlur = useCallback(() => {
+    // Use requestAnimationFrame to check focus after the browser has finished
+    // processing the focus change. This allows portaled elements (popovers, dialogs)
+    // to receive focus before we check if we should trigger onBlur
+    requestAnimationFrame(() => {
+      const { activeElement } = document;
+      const container = containerReference.current;
+
+      if (!container) {
+        return;
+      }
+
+      // Check if focus is within the container itself
+      if (container.contains(activeElement)) {
+        return;
+      }
+
+      // Check if focus moved to a related element (marked with data attribute)
+      // This allows child components to mark their portaled content as related
+      if (activeElement instanceof Element && activeElement.closest(`[${focusTrapAttribute}]`)) {
+        return;
+      }
+
+      // Focus has truly left the component and its related UI elements
+      onBlur?.();
+    });
+  }, [onBlur]);
+
   return (
-    <div className={cn('@container relative h-full rounded-2xl bg-background', className)}>
+    <div
+      ref={containerReference}
+      className={cn(
+        'group/chat-textarea @container',
+        'relative flex size-full flex-col rounded-2xl border bg-background',
+        'cursor-text overflow-auto',
+        'shadow-md',
+        'focus-within:border-primary',
+        className,
+      )}
+      data-has-context-actions={enableContextActions}
+      onBlur={handleTextareaBlur}
+    >
       {/* Textarea */}
       <div
-        data-state={isFocused ? 'active' : 'inactive'}
-        className={cn(
-          'flex size-full cursor-text resize-none flex-col overflow-auto rounded-2xl border bg-neutral/10 shadow-md data-[state=active]:border-primary',
-        )}
-        onClick={() => {
-          focusInput();
-        }}
+        className={cn('flex size-full flex-col overflow-auto')}
+        onClick={focusInput}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
+        onMouseDown={handleMouseDown}
       >
+        {/* Context */}
+        <div className="m-2 hidden flex-wrap gap-1 group-data-[has-context-actions=true]/chat-textarea:flex">
+          {enableContextActions ? (
+            <ChatContextActions data-chat-textarea-focustrap addImage={handleAddImage} addText={handleAddText} />
+          ) : null}
+          {images.map((image, index) => (
+            <div key={image} className="group/image-item relative text-muted-foreground hover:text-foreground">
+              <HoverCard openDelay={100} closeDelay={100}>
+                <HoverCardTrigger asChild>
+                  <div className="flex h-6 cursor-zoom-in items-center justify-center overflow-hidden rounded-xs border bg-background object-cover">
+                    <img src={image} alt="Uploaded" className="size-6 border-r object-cover" />
+                    <span className="px-1 text-xs">Image</span>
+                  </div>
+                </HoverCardTrigger>
+                <HoverCardPortal>
+                  <HoverCardContent side="top" align="start" className="size-auto max-w-screen overflow-hidden p-0">
+                    <img src={image} alt="Uploaded" className="h-48 object-cover md:h-96" />
+                  </HoverCardContent>
+                </HoverCardPortal>
+              </HoverCard>
+              <Button
+                size="icon"
+                className={cn(
+                  'absolute top-1/2 left-0 z-10 size-6 -translate-y-1/2 rounded-none rounded-l-xs border border-r-0',
+                  'hidden group-hover/image-item:flex',
+                )}
+                aria-label="Remove image"
+                type="button"
+                onClick={() => {
+                  removeImage(index);
+                }}
+              >
+                <X className="!size-3 stroke-2" />
+              </Button>
+            </div>
+          ))}
+        </div>
+
+        {/* Input */}
         <Textarea
           ref={textareaReference}
           className={cn(
-            'mt-2 mb-10 size-full max-h-48 min-h-14 resize-none border-none px-4 pt-1 pb-1 ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
-            (images.length > 0 || enableContextActions) && 'mt-6 pt-5',
+            'mb-10 size-full max-h-48 min-h-6 resize-none border-none bg-transparent dark:bg-transparent',
+            'px-3 pt-0 pb-3',
+            'group-data-[has-context-actions=false]/chat-textarea:pt-3',
+            'ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
           )}
           rows={3}
+          autoFocus={enableAutoFocus}
           value={inputText}
           placeholder="Ask Tau to build anything..."
-          onFocus={() => {
-            setIsFocused(true);
-          }}
-          onBlur={() => {
-            setIsFocused(false);
-          }}
           onChange={handleTextChange}
           onKeyDown={handleTextareaKeyDown}
         />
@@ -463,7 +554,7 @@ export const ChatTextarea = memo(function ({
 
       {/* Context Menu */}
       {showContextMenu ? (
-        <div className="absolute bottom-full left-4 z-50 mb-2 w-60 rounded-md border bg-popover p-0 text-popover-foreground shadow-md">
+        <div className="absolute bottom-full left-2 z-50 mb-2 w-60 rounded-md border bg-popover p-0 text-popover-foreground shadow-md">
           <ChatContextActions
             asPopoverMenu
             addImage={handleContextImageAdd}
@@ -484,40 +575,6 @@ export const ChatTextarea = memo(function ({
         </div>
       ) : null}
 
-      {/* Context */}
-      <div className="absolute top-0 left-0 m-4 flex flex-wrap gap-1">
-        {enableContextActions ? <ChatContextActions addImage={handleAddImage} addText={handleAddText} /> : null}
-        {images.map((image, index) => (
-          <div key={image} className="relative">
-            <HoverCard openDelay={100} closeDelay={100}>
-              <HoverCardTrigger asChild>
-                <div className="flex h-6 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border bg-background object-cover">
-                  <img src={image} alt="Uploaded" className="size-6 border-r object-cover" />
-                  <span className="px-1 text-xs">Image</span>
-                </div>
-              </HoverCardTrigger>
-              <HoverCardPortal>
-                <HoverCardContent side="top" align="start" className="size-auto max-w-screen overflow-hidden p-0">
-                  <img src={image} alt="Uploaded" className="h-48 object-cover md:h-96" />
-                </HoverCardContent>
-              </HoverCardPortal>
-            </HoverCard>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute -top-2 -right-2 z-10 size-4 rounded-full border-[1px] bg-background text-foreground"
-              aria-label="Remove image"
-              type="button"
-              onClick={() => {
-                removeImage(index);
-              }}
-            >
-              <X className="!size-3 stroke-2" />
-            </Button>
-          </div>
-        ))}
-      </div>
-
       {/* Drag and drop feedback */}
       {isDragging ? (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-primary/10 backdrop-blur-xs">
@@ -526,15 +583,26 @@ export const ChatTextarea = memo(function ({
       ) : null}
 
       {/* Main input controls */}
-      <div className="absolute bottom-2 left-2 flex flex-row items-center gap-1">
+      <div className="absolute bottom-2 left-2 flex flex-row items-center gap-1 text-muted-foreground">
         {/* Model selector */}
         <Tooltip>
-          <ChatModelSelector popoverProperties={{ align: 'start' }} onClose={focusInput}>
+          <ChatModelSelector
+            data-chat-textarea-focustrap
+            popoverProperties={{
+              align: 'start',
+            }}
+            onSelect={focusInput}
+            onClose={focusInput}
+          >
             {() => (
               <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" className="rounded-full">
-                  <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full group-data-[state=open]:text-primary @md:max-w-fit">
-                    <span className="hidden truncate text-xs @[22rem]:block">{selectedModel?.name ?? 'Offline'}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 rounded-full text-muted-foreground hover:text-foreground"
+                >
+                  <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full @xs:max-w-fit">
+                    <span className="hidden truncate text-xs @[22rem]:block">{selectedModel?.slug ?? 'Offline'}</span>
                     <span className="relative flex size-4 items-center justify-center">
                       <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100" />
                       <CircuitBoard className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0" />
@@ -546,12 +614,12 @@ export const ChatTextarea = memo(function ({
           </ChatModelSelector>
           <TooltipContent>
             <span>Select model{` `}</span>
-            <span>({selectedModel?.name ?? 'Offline'})</span>
+            <span>({selectedModel?.slug ?? 'Offline'})</span>
           </TooltipContent>
         </Tooltip>
 
         {/* Search button */}
-        <Tooltip>
+        {/* <Tooltip>
           <TooltipTrigger asChild>
             <Button
               data-state={isSearching ? 'active' : 'inactive'}
@@ -573,20 +641,7 @@ export const ChatTextarea = memo(function ({
           <TooltipContent>
             <p>{isSearching ? 'Stop searching' : 'Search the web'}</p>
           </TooltipContent>
-        </Tooltip>
-
-        {/* Upload button */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="outline" className="rounded-full" title="Add image" onClick={handleFileSelect}>
-              <span className="hidden text-xs @[22rem]:block">Upload</span>
-              <Image />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Upload an image</p>
-          </TooltipContent>
-        </Tooltip>
+        </Tooltip> */}
 
         <input
           ref={fileInputReference}
@@ -599,6 +654,24 @@ export const ChatTextarea = memo(function ({
       </div>
 
       <div className="absolute right-2 bottom-2 flex flex-row items-center gap-1">
+        {/* Upload button */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              className="rounded-full text-muted-foreground hover:text-foreground"
+              title="Add image"
+              onClick={handleFileSelect}
+            >
+              <Paperclip />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Upload an image</p>
+          </TooltipContent>
+        </Tooltip>
+
         {/* Submit button */}
         {status === 'streaming' ? (
           <Tooltip>

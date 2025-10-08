@@ -7,6 +7,7 @@ import { useChatActions } from '#components/chat/ai-chat-provider.js';
 import { useModels } from '#hooks/use-models.js';
 import { createMessage } from '#utils/chat.js';
 import { messageRole, messageStatus } from '#types/chat.types.js';
+import { EmptyItems } from '#components/ui/empty-items.js';
 
 export const ChatExamples = memo(function () {
   // Use lazy initialization to ensure consistent examples across renders
@@ -30,7 +31,7 @@ export const ChatExamples = memo(function () {
   };
 
   return (
-    <div className="mx-2 mb-2 rounded-xl border border-dashed border-muted-foreground/50 p-4">
+    <EmptyItems>
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-sm font-medium">Get started with 3D model examples</h3>
         <Button variant="ghost" size="icon" className="size-7" onClick={handleRefreshExamples}>
@@ -51,6 +52,6 @@ export const ChatExamples = memo(function () {
           </Button>
         ))}
       </div>
-    </div>
+    </EmptyItems>
   );
 });

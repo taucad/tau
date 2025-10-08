@@ -3,245 +3,12 @@ import type { OnModuleInit } from '@nestjs/common';
 import ollama from 'ollama';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { ChatUsageCost, ChatUsageTokens } from '#api/chat/chat.schema.js';
-import type { ProviderId } from '#api/providers/provider.schema.js';
+import type { ModelFamily, ProviderId } from '#api/providers/provider.schema.js';
 import { ProviderService } from '#api/providers/provider.service.js';
 import type { Model, ModelSupport } from '#api/models/model.schema.js';
+import { modelList } from '#api/models/model.constants.js';
 
-type CloudProviderId = Exclude<ProviderId, 'ollama'>;
-
-const modelList: Record<CloudProviderId, Record<string, Model>> = {
-  google: {
-    'gemini-2.5-pro': {
-      id: 'google-gemini-2.5-pro',
-      name: 'Gemini 2.5 Pro',
-      provider: {
-        id: 'google',
-        name: 'Google',
-      },
-      model: 'gemini-2.5-pro-preview-05-06',
-      details: {
-        family: 'Gemini',
-        families: ['Gemini'],
-        contextWindow: 1_048_576,
-        maxTokens: 65_536,
-        cost: {
-          inputTokens: 1.25,
-          outputTokens: 10,
-          cachedReadTokens: 0,
-          cachedWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-    },
-  },
-
-  anthropic: {
-    'claude-4-sonnet-thinking': {
-      id: 'anthropic-claude-4-sonnet-thinking',
-      name: 'Claude 4 Sonnet (Thinking)',
-      provider: {
-        id: 'anthropic',
-        name: 'Anthropic',
-      },
-      model: 'claude-sonnet-4-20250514',
-      support: {
-        toolChoice: false,
-      },
-      details: {
-        family: 'Claude',
-        families: ['Claude'],
-        contextWindow: 200_000,
-        // Extended thinking mode supports up to 64000 tokens
-        maxTokens: 64_000,
-        cost: {
-          inputTokens: 3,
-          outputTokens: 15,
-          cachedReadTokens: 3.75,
-          cachedWriteTokens: 0.3,
-        },
-      },
-      configuration: {
-        streaming: true,
-        maxTokens: 20_000,
-        // @ts-expect-error: FIXME - some models use camelCase
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
-        max_tokens: 20_000,
-        thinking: {
-          type: 'enabled',
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
-          budget_tokens: 5000,
-        },
-      },
-    },
-    'claude-4-opus': {
-      id: 'anthropic-claude-4-opus',
-      name: 'Claude 4 Opus',
-      provider: {
-        id: 'anthropic',
-        name: 'Anthropic',
-      },
-      model: 'claude-opus-4-20250514',
-      support: {
-        toolChoice: false,
-      },
-      details: {
-        family: 'Claude',
-        families: ['Claude'],
-        contextWindow: 200_000,
-        // Extended thinking mode supports up to 64000 tokens
-        maxTokens: 64_000,
-        cost: {
-          inputTokens: 15,
-          outputTokens: 75,
-          cachedReadTokens: 1.5,
-          cachedWriteTokens: 18.75,
-        },
-      },
-      configuration: {
-        streaming: true,
-        maxTokens: 20_000,
-        // @ts-expect-error: FIXME - some models use camelCase
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
-        max_tokens: 20_000,
-        thinking: {
-          type: 'enabled',
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
-          budget_tokens: 5000,
-        },
-      },
-    },
-    'claude-4-sonnet': {
-      id: 'anthropic-claude-4-sonnet',
-      name: 'Claude 4 Sonnet',
-      provider: {
-        id: 'anthropic',
-        name: 'Anthropic',
-      },
-      model: 'claude-sonnet-4-20250514',
-      details: {
-        family: 'Claude',
-        families: ['Claude'],
-        contextWindow: 200_000,
-        maxTokens: 8192,
-        cost: {
-          inputTokens: 3,
-          outputTokens: 15,
-          cachedReadTokens: 3.75,
-          cachedWriteTokens: 0.3,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-    },
-  },
-  openai: {
-    'gpt-4.1': {
-      id: 'openai-gpt-4.1',
-      name: 'GPT-4.1',
-      provider: {
-        id: 'openai',
-        name: 'OpenAI',
-      },
-      model: 'gpt-4.1',
-      details: {
-        family: 'GPT-4.1',
-        families: ['GPT-4.1'],
-        contextWindow: 1_047_576,
-        maxTokens: 32_768,
-        cost: {
-          inputTokens: 2,
-          outputTokens: 8,
-          cachedReadTokens: 0.5,
-          cachedWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-      },
-    },
-    'gpt-o3': {
-      id: 'openai-gpt-o3',
-      name: 'GPT-o3',
-      provider: {
-        id: 'openai',
-        name: 'OpenAI',
-      },
-      model: 'o3-2025-04-16',
-      details: {
-        family: 'GPT-O3',
-        families: ['GPT-O3'],
-        contextWindow: 200_000,
-        maxTokens: 100_000,
-        cost: {
-          inputTokens: 2,
-          outputTokens: 8,
-          cachedReadTokens: 0.5,
-          cachedWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-      },
-    },
-    'gpt-4o': {
-      id: 'openai-gpt-4o',
-      name: 'GPT-4o',
-      provider: {
-        id: 'openai',
-        name: 'OpenAI',
-      },
-      model: 'gpt-4o',
-      details: {
-        family: 'GPT-4o',
-        families: ['GPT-4o'],
-        contextWindow: 128_000,
-        maxTokens: 4096,
-        cost: {
-          inputTokens: 2.5,
-          outputTokens: 10,
-          cachedReadTokens: 1.25,
-          cachedWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-    },
-  },
-  cerebras: {
-    'gpt-oss-120b': {
-      id: 'cerebras-gpt-oss-120b',
-      name: 'GPT-OSS-120B',
-      provider: {
-        id: 'cerebras',
-        name: 'Cerebras',
-      },
-      model: 'gpt-oss-120b',
-      details: {
-        family: 'GPT-OSS',
-        families: ['GPT-OSS'],
-        contextWindow: 64_000,
-        maxTokens: 64_000,
-        cost: {
-          inputTokens: 0.25,
-          outputTokens: 0.69,
-          cachedReadTokens: 0,
-          cachedWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 0,
-      },
-    },
-  },
-} as const;
+export type CloudProviderId = Exclude<ProviderId, 'ollama'>;
 
 @Injectable()
 export class ModelService implements OnModuleInit {
@@ -341,6 +108,7 @@ export class ModelService implements OnModuleInit {
           return {
             id: model.name,
             name: model.name,
+            slug: model.name,
             model: model.name,
             modifiedAt: String(model.modified_at),
             size: model.size,
@@ -348,7 +116,7 @@ export class ModelService implements OnModuleInit {
             details: {
               parentModel: model.details.parent_model,
               format: model.details.format,
-              family: model.details.family,
+              family: model.details.family as ModelFamily,
               families: model.details.families,
               parameterSize: model.details.parameter_size,
               quantizationLevel: model.details.quantization_level,

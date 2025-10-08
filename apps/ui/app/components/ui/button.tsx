@@ -5,7 +5,7 @@ import type { VariantProps } from 'class-variance-authority';
 import { cn } from '#utils/ui.js';
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-[box-shadow] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-[box-shadow] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
   {
     variants: {
       variant: {
@@ -15,18 +15,18 @@ const buttonVariants = cva(
         outline:
           'border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/60',
         // A variant of the outline, used when overlaying onto a canvas
-        overlay: 'border bg-muted shadow-xs hover:bg-accent hover:text-accent-foreground',
+        overlay: 'border bg-sidebar shadow-xs hover:bg-accent hover:text-accent-foreground',
         secondary: 'bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80',
         neutral: 'bg-accent/70 text-foreground shadow-xs hover:bg-accent',
         ghost: 'hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50',
         link: 'underline-offset-4 hover:underline',
       },
       size: {
-        default: 'h-7 px-4 py-2 has-[>svg]:px-3',
+        default: 'h-8 px-4 py-2 has-[>svg]:px-3',
         xs: 'h-6 rounded-md gap-1.5 px-2 has-[>svg]:px-2 text-xs',
-        sm: 'h-7 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5 text-xs',
+        sm: 'h-8 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5 text-xs',
         lg: 'h-10 rounded-md px-8 has-[>svg]:px-4',
-        icon: 'size-7',
+        icon: 'size-8',
       },
     },
     defaultVariants: {

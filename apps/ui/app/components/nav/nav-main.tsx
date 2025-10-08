@@ -16,7 +16,7 @@ import {
 import type { KeyCombination } from '#utils/keys.js';
 import { formatKeyCombination } from '#utils/keys.js';
 import { useKeydown } from '#hooks/use-keydown.js';
-import { LoadingSpinner } from '#components/loading-spinner.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 export function NavMain({
   items,

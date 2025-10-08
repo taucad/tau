@@ -3,7 +3,7 @@ import { useCallback, useState, useEffect } from 'react';
 import { File, LoaderCircle, Play, X, ChevronDown, AlertTriangle, Bug, Camera, Check, RotateCcw } from 'lucide-react';
 import type { ToolResult } from 'ai';
 import { useActor } from '@xstate/react';
-import { CodeViewer } from '#components/code-viewer.js';
+import { CodeViewer } from '#components/code/code-viewer.js';
 import { CopyButton } from '#components/copy-button.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
@@ -178,7 +178,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
         targetFile?: string;
       };
       return (
-        <div className="@container/code flex h-7 w-full flex-row items-center gap-1 overflow-hidden rounded-md border bg-neutral/10 pr-1 pl-3 text-xs text-muted-foreground">
+        <div className="@container/code flex h-7 w-full flex-row items-center gap-1 overflow-hidden rounded-md border bg-neutral/10 pr-1 pl-2 text-xs text-muted-foreground">
           <StatusIcon chatStatus={status} toolStatus={part.toolInvocation.state} />
           <Filename targetFile={targetFile} chatStatus={status} toolStatus={part.toolInvocation.state} />
         </div>

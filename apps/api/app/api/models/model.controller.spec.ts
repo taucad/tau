@@ -14,9 +14,10 @@ const mockModels: Model[] = [
       id: 'anthropic',
       name: 'Anthropic',
     },
+    slug: 'claude-4-sonnet',
     model: 'claude-sonnet-4',
     details: {
-      family: 'Claude',
+      family: 'claude',
       families: ['Claude'],
       contextWindow: 200_000,
       maxTokens: 64_000,
@@ -40,9 +41,10 @@ const mockModels: Model[] = [
       id: 'openai',
       name: 'OpenAI',
     },
+    slug: 'gpt-4o',
     model: 'gpt-4o',
     details: {
-      family: 'GPT-4o',
+      family: 'gpt',
       families: ['GPT-4o'],
       contextWindow: 128_000,
       maxTokens: 4096,

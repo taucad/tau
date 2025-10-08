@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { RgbColorPicker } from 'react-colorful';
 import type { RgbColor } from 'react-colorful';
 import { parse, converter } from 'culori';
@@ -113,7 +113,6 @@ const baseIndicatorClass = 'flex h-7 w-7 items-center justify-center border bg-m
 export function StringColorPicker({ value, onChange, className }: StringColorPickerProperties): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [temporaryColor, setTemporaryColor] = useState(value);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // Sync internal state with external value changes (e.g., when parameter is reset)
   useEffect(() => {
@@ -157,12 +156,8 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
     [onChange, open],
   );
 
-  const handleIndicatorClick = useCallback(() => {
-    inputRef.current?.focus();
-  }, []);
-
   return (
-    <div className={cn('flex w-full flex-row items-center gap-2', className)}>
+    <div className={cn('group/color-picker flex w-full flex-row items-center gap-2', className)}>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
@@ -195,7 +190,7 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
                 className="h-7 pr-8 pl-10 font-mono"
                 onChange={handlePopoverInputChange}
               />
-              <div className="absolute top-0 right-2 bottom-0 rounded-r">
+              <div className="pointer-events-none absolute top-0 right-2 bottom-0 rounded-r">
                 {isValidColor(temporaryColor) ? (
                   <div className="flex h-full w-full items-center justify-center rounded-r text-success">
                     <Check className="size-4" />
@@ -214,15 +209,14 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
       <div
         className={cn(
           'group relative flex flex-1 flex-row items-center rounded-md',
-          'focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50',
+          'group-focus-within/color-picker:border-ring group-focus-within/color-picker:ring-3 group-focus-within/color-picker:ring-ring/50',
         )}
       >
         <Input
-          ref={inputRef}
           autoComplete="off"
           type="text"
           value={value}
-          className="h-7 flex-1 rounded-r-none border-r-0 bg-background px-3 font-mono text-sm focus-visible:ring-0"
+          className="h-7 flex-1 bg-background px-3 font-mono text-sm focus-visible:ring-0"
           placeholder="Color value"
           onChange={handleMainInputChange}
         />
@@ -230,13 +224,13 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
           <span
             className={cn(
               baseIndicatorClass,
+              'absolute top-1/2 right-0 -translate-y-1/2',
               'rounded-r-md border-l-0',
-              'group-focus-within:border-ring',
-              'cursor-text',
+              'group-focus-within/color-picker:border-ring',
+              'pointer-events-none cursor-text',
             )}
-            onClick={handleIndicatorClick}
           >
-            <span className="font-mono text-[0.5rem] uppercase">{colorFormat}</span>
+            <span className="font-mono text-[0.5rem] leading-none uppercase">{colorFormat}</span>
           </span>
         ) : null}
       </div>

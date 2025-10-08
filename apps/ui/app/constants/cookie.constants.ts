@@ -4,35 +4,47 @@ import type { ConstantRecord } from '#types/constant.types.js';
  * Cookie names.
  *
  * These must be short, hyphen separated, and lowercase.
+ *
+ * The following conventions are in place to reduce cookie name length:
+ * - resize cookies use <namespace>-rs-<subject> (e.g. chat-resize-file-explorer)
+ * - open cookies use <namespace>-op-<subject> (e.g. chat-file-explorer-open)
  */
 export const cookieName = {
   /* Theme */
   // The color hue.
   colorHue: 'color-hue',
   // The theme mode.
-  themeMode: 'theme-mode',
+  colorTheme: 'color-theme',
 
   /* Layout */
   // Whether the sidebar is open.
-  sidebarOpen: 'sidebar-open',
-  // The last selected chat explorer size.
-  chatResizeExplorer: 'chat-resize-explorer',
+  sidebarOp: 'sidebar-op',
   // Whether the chat explorer is open.
-  chatExplorerOpen: 'chat-explorer-open',
-  // The last selected chat view mode.
-  chatViewMode: 'chat-view-mode',
+  chatOpFileExplorer: 'chat-op-file-explorer',
   // Whether the chat is open.
-  chatHistoryOpen: 'chat-history-open',
+  chatOpHistory: 'chat-op-history',
   // Whether the chat parameters are open.
-  chatParametersOpen: 'chat-parameters-open',
+  chatOpParameters: 'chat-op-parameters',
+  // Whether the chat editor is open.
+  chatOpEditor: 'chat-op-editor',
+  // Whether the chat model explorer is open.
+  chatOpModelExplorer: 'chat-op-model-explorer',
+  // Whether the chat editor details are open.
+  chatOpDetails: 'chat-op-details',
+  // The last selected chat explorer size.
+  chatRsFileExplorer: 'chat-rs-file-explorer',
   // The last selected chat console size.
-  chatResizeEditor: 'chat-resize-editor',
-  // The last selected chat viewer size.
-  chatResizeViewer: 'chat-resize-viewer',
-  // The last selected chat main size.
-  chatResizeMain: 'chat-resize-main',
-  // The last selected chat tab.
-  chatTab: 'chat-tab',
+  chatRsEditor: 'chat-rs-editor',
+  // The last selected chat console size.
+  chatRsLeft: 'chat-rs-left',
+  // The last selected chat right panel size.
+  chatRsRight: 'chat-rs-right',
+  // The last selected chat interface tab.
+  chatInterfaceTab: 'chat-interface-tab',
+  // Whether the chat interface is full height.
+  chatInterfaceFullHeight: 'chat-interface-full-height',
+  // Whether the chat interface is transparent.
+  chatInterfaceTransparent: 'chat-interface-transparent',
 
   /* CAD */
   // The last selected kernel.
@@ -61,6 +73,10 @@ export const cookieName = {
   consoleLogLevel: 'console-log-level',
   // The last selected display configuration.
   consoleDisplayConfig: 'console-display-config',
+
+  /* Docs */
+  // Whether the docs sidebar is open.
+  docsOpSidebar: 'docs-op-sidebar',
 } as const;
 
 /**

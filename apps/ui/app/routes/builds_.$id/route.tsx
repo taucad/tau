@@ -1,54 +1,63 @@
-import { NavLink, useParams } from 'react-router';
+import { useParams } from 'react-router';
 import { useCallback, useEffect } from 'react';
 import { createActor } from 'xstate';
-import { PackagePlus } from 'lucide-react';
-// eslint-disable-next-line no-restricted-imports -- allowed for router types
+import { toast } from 'sonner';
+// eslint-disable-next-line no-restricted-imports -- allowed for route types
 import type { Route } from './+types/route.js';
 import { ChatInterface } from '#routes/builds_.$id/chat-interface.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
-import { Button } from '#components/ui/button.js';
 import type { Handle } from '#types/matches.types.js';
 import { useChatConstants } from '#utils/chat.js';
 import { AiChatProvider, useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { BuildNameEditor } from '#routes/builds_.$id/build-name-editor.js';
 import { FileExplorerContext } from '#routes/builds_.$id/graphics-actor.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
-import { ChatInterfaceControls, ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
+import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
 import { CommandPaletteTrigger } from '#routes/builds_.$id/command-palette.js';
-import { LoadingSpinner } from '#components/loading-spinner.js';
+import { Button } from '#components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { useKeydown } from '#hooks/use-keydown.js';
+import { ChatControls } from '#routes/builds_.$id/chat-controls.js';
+import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';
+import { SvgIcon } from '#components/icons/svg-icon.js';
 
 export const handle: Handle = {
   breadcrumb(match) {
     const { id } = match.params as Route.LoaderArgs['params'];
 
-    return (
-      <BuildProvider buildId={id}>
+    return [
+      <BuildProvider key={`${id}-build-name-editor`} buildId={id}>
         <BuildNameEditor />
-      </BuildProvider>
-    );
+      </BuildProvider>,
+      <ChatModeSelector key={`${id}-chat-mode-selector`} />,
+    ];
   },
   actions(match) {
     const { id } = match.params as Route.LoaderArgs['params'];
 
     return (
-      <BuildProvider buildId={id}>
-        <ViewContextProvider>
-          <ChatInterfaceControls />
-        </ViewContextProvider>
+      <>
+        <BuildProvider buildId={id}>
+          <ChatControls />
+        </BuildProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button asChild variant="outline" className="md:hidden" size="icon">
-              <NavLink to="/builds/new">
-                {({ isPending }) => (isPending ? <LoadingSpinner /> : <PackagePlus className="size-4" />)}
-              </NavLink>
+            <Button
+              variant="outline"
+              size="icon"
+              className="hidden md:flex"
+              onClick={() => {
+                toast.info('Github connection coming soon!');
+              }}
+            >
+              <SvgIcon id="github" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>New Build</TooltipContent>
+          <TooltipContent>Connect to Github</TooltipContent>
         </Tooltip>
-      </BuildProvider>
+      </>
     );
   },
   commandPalette(match) {
@@ -60,6 +69,7 @@ export const handle: Handle = {
       </BuildProvider>
     );
   },
+  enableFloatingSidebar: true,
 };
 
 function Chat() {
@@ -69,6 +79,16 @@ function Chat() {
   const messages = useChatSelector((state) => state.context.messages);
   const status = useChatSelector((state) => state.context.status);
   const { setMessages, reload } = useChatActions();
+
+  useKeydown(
+    {
+      key: 's',
+      metaKey: true,
+    },
+    () => {
+      toast.success('Your work is saved automatically');
+    },
+  );
 
   // Subscribe the build to persist code & parameters changes
   useEffect(() => {
@@ -148,12 +168,10 @@ function Chat() {
   return <ChatInterface />;
 }
 
-export default function ChatRoute(): React.JSX.Element {
-  const { id } = useParams();
-
-  if (!id) {
-    throw new Error('No build id provided');
-  }
+// Wrapper component that has access to build context and can configure AiChatProvider
+function ChatWithProvider() {
+  const { activeChatId, build } = useBuild();
+  const { id: buildId } = useParams();
 
   // Tool call handler that integrates with the new architecture
   const onToolCall = useCallback(async ({ toolCall }: { toolCall: { toolName: string; args: unknown } }) => {
@@ -216,15 +234,33 @@ export default function ChatRoute(): React.JSX.Element {
     return undefined;
   }, []);
 
+  // Use chat ID when available, fallback to build ID
+  // Backend can distinguish: chat IDs start with "chat_", build IDs start with "bld_"
+  const threadId = activeChatId ?? buildId!;
+
+  return (
+    <AiChatProvider value={{ ...useChatConstants, id: threadId, onToolCall }}>
+      <ViewContextProvider>
+        <FileExplorerContext.Provider>
+          {build?.name ? <title>{build.name}</title> : null}
+          {build?.description ? <meta name="description" content={build.description} /> : null}
+          <Chat />
+        </FileExplorerContext.Provider>
+      </ViewContextProvider>
+    </AiChatProvider>
+  );
+}
+
+export default function ChatRoute(): React.JSX.Element {
+  const { id } = useParams();
+
+  if (!id) {
+    throw new Error('No build id provided');
+  }
+
   return (
     <BuildProvider buildId={id}>
-      <AiChatProvider value={{ ...useChatConstants, id, onToolCall }}>
-        <ViewContextProvider>
-          <FileExplorerContext.Provider>
-            <Chat />
-          </FileExplorerContext.Provider>
-        </ViewContextProvider>
-      </AiChatProvider>
+      <ChatWithProvider />
     </BuildProvider>
   );
 }

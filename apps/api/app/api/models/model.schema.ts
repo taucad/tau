@@ -1,5 +1,5 @@
 import { z } from 'zod/v4';
-import { providerIdSchema } from '#api/providers/provider.schema.js';
+import { modelFamilySchema, providerIdSchema } from '#api/providers/provider.schema.js';
 
 export const modelSupportSchema = z.object({
   tools: z.boolean().describe('Whether the model supports tools').optional(),
@@ -10,6 +10,7 @@ export const modelConfigurationSchema = z.object({
   streaming: z.boolean().describe('Whether the model is streaming'),
   temperature: z.number().describe('The temperature of the model').optional(),
   maxTokens: z.number().describe('The maximum number of tokens to generate').optional(),
+  topP: z.number().describe('The top P of the model').optional(),
   thinking: z
     .object({
       type: z.enum(['enabled']).describe('A toggle to enable thinking'),
@@ -22,7 +23,7 @@ export const modelConfigurationSchema = z.object({
 export const modelDetailsSchema = z.object({
   parentModel: z.string().describe('The parent model of the current model').optional(),
   format: z.string().describe('The format of the model').optional(),
-  family: z.string().describe('The family of the model'),
+  family: modelFamilySchema,
   families: z.array(z.string()).describe('The families of the model'),
   parameterSize: z.string().describe('The parameter size of the model').optional(),
   quantizationLevel: z.string().describe('The quantization level of the model').optional(),
@@ -44,6 +45,7 @@ const modelProviderSchema = z.object({
 export const modelSchema = z.object({
   id: z.string().describe('The unique identifier of the model'),
   name: z.string().describe('The human readable name of the model'),
+  slug: z.string().describe('The slug of the model'),
   model: z.string().describe('The identifier of the model for the provider'),
   modifiedAt: z.string().describe('The modified at of the model').optional(),
   size: z.number().describe('The size of the model in bytes').optional(),

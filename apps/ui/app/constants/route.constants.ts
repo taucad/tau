@@ -1,4 +1,4 @@
-import { BookOpen, Bot, Frame, Hammer, Map, PieChart, UsersRound, Workflow } from 'lucide-react';
+import { BookOpen, Bot, FileAxis3D, Frame, Hammer, Map, PieChart, UsersRound, Workflow } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { KeyCombination } from '#utils/keys.js';
 
@@ -49,6 +49,15 @@ export const navRoutes: {
       icon: UsersRound,
       keyCombination: {
         key: 'g',
+        ctrlKey: true,
+      },
+    },
+    {
+      title: 'Converter',
+      url: '/converter',
+      icon: FileAxis3D,
+      keyCombination: {
+        key: 'o',
         ctrlKey: true,
       },
     },

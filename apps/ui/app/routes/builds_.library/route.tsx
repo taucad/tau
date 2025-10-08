@@ -71,17 +71,17 @@ import { createBuildMutations } from '#hooks/build-mutations.js';
 import { Checkbox } from '#components/ui/checkbox.js';
 import { formatRelativeTime } from '#utils/date.js';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '#components/ui/table.js';
-import { toSentenceCase } from '#utils/string.js';
+import { toTitleCase } from '#utils/string.js';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { LoadingSpinner } from '#components/loading-spinner.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 export const handle: Handle = {
   breadcrumb() {
     return (
-      <Button asChild variant="ghost" className="p-2">
+      <Button asChild variant="ghost">
         <Link to="/builds/library">Library</Link>
       </Button>
     );
@@ -366,7 +366,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
       <div className="flex items-center justify-between gap-2">
         <SearchInput
           autoComplete="off"
-          className="h-7"
+          className="h-8"
           placeholder="Search builds..."
           value={globalFilter}
           containerClassName="flex-grow"
@@ -533,7 +533,7 @@ function SortingDropdown({ table }: { readonly table: ReturnType<typeof useReact
     .filter((column) => column.getCanSort())
     .map((column) => ({
       id: column.id,
-      label: toSentenceCase(column.id),
+      label: toTitleCase(column.id),
     }));
 
   const toggleSorting = (id: string) => {
@@ -610,7 +610,7 @@ function ViewOptionsDropdown({ table }: { readonly table: ReturnType<typeof useR
                   event.preventDefault();
                 }}
               >
-                {toSentenceCase(column.id)}
+                {toTitleCase(column.id)}
               </DropdownMenuCheckboxItem>
             );
           })}
@@ -662,7 +662,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
   }, [code, parameters, mechanicalAsset.language, showPreview, send]);
 
   return (
-    <Card className={cn('group relative flex flex-col overflow-hidden pt-0', isSelected && 'ring-2 ring-primary')}>
+    <Card className={cn('group relative flex flex-col overflow-hidden pt-0', isSelected && 'ring-3 ring-primary')}>
       <div className="absolute top-2 left-2 z-10">
         <Checkbox size="large" checked={isSelected} onCheckedChange={() => onSelect?.()} />
       </div>
@@ -716,7 +716,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
         <div className="flex items-start justify-between">
           <Popover open={isEditing} onOpenChange={setIsEditing}>
             <PopoverTrigger asChild>
-              <Button variant="ghost" className="cursor-text justify-start p-0 text-xl font-semibold">
+              <Button variant="ghost" className="-mx-2 cursor-text justify-start px-2 text-xl font-semibold">
                 {build.name}
               </Button>
             </PopoverTrigger>
@@ -822,7 +822,7 @@ function BulkActions({ table, deleteBuild }: BulkActionsProps) {
         <Button
           variant="outline"
           size="sm"
-          className="h-7 gap-1 border-destructive text-destructive hover:bg-destructive/10"
+          className="gap-1 border-destructive text-destructive hover:bg-destructive/10"
           onClick={() => {
             setShowDeleteDialog(true);
           }}

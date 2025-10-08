@@ -3,29 +3,72 @@ import { ChatParametersInputNumber } from '#routes/builds_.$id/chat-parameters-i
 import { cn } from '#utils/ui.js';
 
 // Slider calculation constants
-/*
- * The multiplier for the slider range.
- * This is the factor by which the default range is multiplied to get the maximum value.
- */
-const SliderRangeMultiplier = 4;
 
 /*
  * The default range for zero values.
- * This is the range that is used for zero values.
+ * When the default value is 0, we provide a symmetric range from negative to positive.
  */
 const DefaultRangeForZero = 100;
 
 /*
+ * The multiplier used to test if a default value should get an expanded range.
+ * We multiply the default value by this factor and check if it exceeds the tier boundary.
+ */
+const RangeTestMultiplier = 2;
+
+/*
+ * The multiplier applied to tier boundaries when creating expanded ranges.
+ * When a default value's doubled value exceeds its tier, the range is expanded by this factor.
+ */
+const TierExpansionMultiplier = 2;
+
+/*
  * The minimum step value for the slider.
- * This is the minimum step value that is used for the slider.
+ * This prevents the step from becoming too small and causing precision issues.
  */
 const MinStepValue = 0.000_001;
 
 /*
  * The default step value for zero values.
- * This is the step value that is used for zero values.
+ * Used when the default value is 0 and we need a reasonable step size.
  */
 const DefaultStepForZero = 0.01;
+
+/**
+ * Calculate the tier boundary for a given value using log10.
+ * The tier boundary is the power of 10 that defines the current tier.
+ * For example: 60 → tier boundary is 10, 400 → tier boundary is 100
+ *
+ * @param value - The value to find the tier boundary for
+ * @returns The tier boundary (power of 10)
+ */
+const calculateTierBoundary = (value: number): number => {
+  const absoluteValue = Math.abs(value);
+  return 10 ** Math.floor(Math.log10(absoluteValue));
+};
+
+/**
+ * Calculate the range boundary magnitude using tier-based scaling logic.
+ * This shared logic determines whether to expand the range based on the 2x test.
+ *
+ * @param defaultValue - The default value of the parameter
+ * @returns The calculated range boundary (always positive)
+ */
+const calculateRangeBoundary = (defaultValue: number): number => {
+  const absoluteValue = Math.abs(defaultValue);
+  const tierBoundary = calculateTierBoundary(absoluteValue);
+  const nextTier = tierBoundary * 10;
+
+  // Test if doubled value exceeds the next tier boundary
+  const testValue = absoluteValue * RangeTestMultiplier;
+
+  // If test value meets or exceeds the next tier, expand the range
+  if (testValue >= nextTier) {
+    return nextTier * TierExpansionMultiplier;
+  }
+
+  return nextTier;
+};
 
 /**
  * Calculate appropriate step value for slider based on the default parameter value
@@ -51,7 +94,7 @@ const calculateSliderStep = (defaultValue: number): number => {
 
 /**
  * Calculate appropriate maximum value for slider based on the default parameter value
- * Handles the case when defaultValue is 0 by providing a reasonable default range
+ * Uses tier-based scaling: if default*2 exceeds its tier boundary, expand the range
  *
  * @param defaultValue - The default value of the parameter
  * @returns The calculated maximum value
@@ -61,16 +104,18 @@ const calculateSliderMax = (defaultValue: number): number => {
     return DefaultRangeForZero;
   }
 
-  const absoluteValue = Math.abs(defaultValue);
+  // For negative values, max should be 0
+  if (defaultValue < 0) {
+    return 0;
+  }
 
-  // For positive values, multiply by 4 to give a good range
-  // For negative values, we want the positive range to be 4 times the absolute value
-  return absoluteValue * SliderRangeMultiplier;
+  // Use shared logic to calculate the positive range boundary
+  return calculateRangeBoundary(defaultValue);
 };
 
 /**
  * Calculate appropriate minimum value for slider based on the default parameter value
- * For positive values, minimum is 0. For negative values, minimum mirrors the maximum calculation
+ * Uses tier-based scaling: if default*2 exceeds its tier boundary, expand the range
  *
  * @param defaultValue - The default value of the parameter
  * @returns The calculated minimum value
@@ -85,9 +130,8 @@ const calculateSliderMin = (defaultValue: number): number => {
     return 0;
   }
 
-  // For negative values, set minimum to negative equivalent of maximum calculation
-  const absoluteValue = Math.abs(defaultValue);
-  return -absoluteValue * SliderRangeMultiplier;
+  // Use shared logic to calculate the range boundary, then make it negative
+  return -calculateRangeBoundary(defaultValue);
 };
 
 type ChatParametersNumberProps = {
@@ -134,7 +178,7 @@ export function ChatParametersNumber({
         <ChatParametersInputNumber
           value={value}
           name={name}
-          className="h-7 w-12 bg-background px-2"
+          className="h-7 w-24 bg-background"
           onChange={(event) => {
             onChange(Number.parseFloat(event.target.value));
           }}

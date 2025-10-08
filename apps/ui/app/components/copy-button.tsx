@@ -13,12 +13,16 @@ export type CopyButtonProperties = {
    */
   readonly tooltip?: string;
   readonly tooltipContentProperties?: React.ComponentProps<typeof TooltipContent>;
+  readonly readyToCopyText?: string;
+  readonly copiedText?: string;
 } & React.ComponentProps<typeof Button>;
 
 export function CopyButton({
   getText,
   size,
   tooltip = 'Copy',
+  readyToCopyText = 'Copy',
+  copiedText = 'Copied',
   tooltipContentProperties,
   ...properties
 }: CopyButtonProperties): React.JSX.Element {
@@ -54,8 +58,8 @@ export function CopyButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <Button size={size} variant="ghost" onClick={handleCopy} {...properties}>
-          {size !== 'icon' && <span data-slot="label">{copied ? 'Copied' : 'Copy'}</span>}
-          {copied ? <Check /> : <Copy />}
+          {size !== 'icon' && <span data-slot="label">{copied ? copiedText : readyToCopyText}</span>}
+          {copied ? <Check className="text-success" /> : <Copy />}
         </Button>
       </TooltipTrigger>
       <TooltipContent {...tooltipContentProperties}>{tooltip}</TooltipContent>

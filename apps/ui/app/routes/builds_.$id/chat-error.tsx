@@ -3,6 +3,7 @@ import { ChevronRight, RefreshCcw } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
+import { CodeViewer } from '#components/code/code-viewer.js';
 
 export const ChatError = memo(() => {
   const error = useChatSelector((state) => state.context.error);
@@ -13,6 +14,7 @@ export const ChatError = memo(() => {
   }
 
   let errorMessage: string;
+  console.log(error);
 
   try {
     errorMessage = JSON.stringify(JSON.parse(error.message), null, 2);
@@ -41,9 +43,7 @@ export const ChatError = memo(() => {
         </div>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <pre className="overflow-x-scroll border-t border-destructive/20 p-2 text-xs whitespace-pre-wrap">
-          {errorMessage}
-        </pre>
+        <CodeViewer text={errorMessage} language="json" className="overflow-x-scroll text-xs whitespace-pre-wrap" />
       </CollapsibleContent>
     </Collapsible>
   );

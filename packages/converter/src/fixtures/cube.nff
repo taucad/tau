@@ -1,0 +1,22 @@
+nff
+version 2.0
+
+Cube2x2x2
+8 // Eight vertices for 2x2x2 cube
+
+-1.0 -1.0  0.0  uv 0.0 0.0 // #0 Bottom face vertices  
+ 1.0 -1.0  0.0  uv 1.0 0.0 // #1
+ 1.0  1.0  0.0  uv 1.0 1.0 // #2
+-1.0  1.0  0.0  uv 0.0 1.0 // #3
+-1.0 -1.0  2.0  uv 0.0 0.0 // #4 Top face vertices
+ 1.0 -1.0  2.0  uv 1.0 0.0 // #5  
+ 1.0  1.0  2.0  uv 1.0 1.0 // #6
+-1.0  1.0  2.0  uv 0.0 1.0 // #7
+
+6 // Six quad faces
+4  0  1  2  3  0xfff // Bottom face (z=0) - vertices in clockwise order for outward normal
+4  4  7  6  5  0xfff // Top face (z=2) - vertices in clockwise order for outward normal  
+4  0  4  5  1  0xfff // Front face (y=-1)
+4  2  6  7  3  0xfff // Back face (y=1)
+4  0  3  7  4  0xfff // Left face (x=-1) 
+4  1  5  6  2  0xfff // Right face (x=1)

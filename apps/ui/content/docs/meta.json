@@ -1,0 +1,18 @@
+{
+  "title": "Tau",
+  "pages": [
+    "---Getting Started---",
+    "index",
+
+    "---CAD Kernels---",
+    "kernels/index",
+    "kernels/replicad",
+    "kernels/openscad",
+    "kernels/zoo",
+
+    "---Architecture---",
+    "architecture/index",
+    "architecture/rag",
+    "architecture/evaluation"
+  ]
+}

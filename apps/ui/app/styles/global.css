@@ -1,10 +1,29 @@
+@import 'fumadocs-ui/style.css';
 @import 'tailwindcss';
+
+/*
+  These imports are recommended by Fumadocs, but fail.
+  @see https://github.com/fuma-nama/fumadocs/issues/1828
+*/
+/* @import 'fumadocs-ui/css/shadcn.css'; */
+/* @import 'fumadocs-ui/css/preset.css'; */
 @import 'tw-animate-css';
 @source "../../../../node_modules/@daveyplate/better-auth-ui";
 
-@plugin '@tailwindcss/typography';
+/* Disabled due to conflict with Fumadocs - https://fumadocs.dev/docs/ui/theme#typography */
+/* @plugin '@tailwindcss/typography'; */
 
 :root {
+  /* Radius */
+  --radius-4xl: calc(var(--radius-3xl) + 0.5rem);
+  --radius-3xl: calc(var(--radius-2xl) + 0.5rem);
+  --radius-2xl: calc(var(--radius-xl) + 0.25rem);
+  --radius-xl: calc(var(--radius-lg) + 0.25rem);
+  --radius-lg: calc(var(--radius-md) + 0.125rem);
+  --radius-md: calc(var(--radius-sm) + 0.125rem);
+  --radius-sm: calc(var(--radius-xs) + 0.125rem);
+  --radius-xs: 0.4375rem;
+
   /* Base color hues */
   --hue-primary: 266deg;
   --hue-secondary: calc(var(--hue-primary) - 86deg); /* Results in ~180deg - true teal */
@@ -41,7 +60,7 @@
 
   --l-primary: 0.5719;
   --c-primary: 0.1898;
-  
+
   --l-secondary: 0.9;
   --c-secondary: 0.12;
 
@@ -79,7 +98,7 @@
   --verified: oklch(var(--l-medium) 0.25 var(--hue-verified));
 
   --input: oklch(var(--l-subtle) 0.01 var(--hue-neutral));
-  --ring: oklch(0.55 0.2 var(--hue-primary));
+  --ring: oklch(var(--l-medium) 0.2 var(--hue-primary));
 
   /* Component specific */
   --popover: oklch(var(--l-base) 0 var(--hue-neutral));
@@ -89,14 +108,14 @@
   --card-foreground: oklch(var(--l-deepest) 0.02 var(--hue-neutral));
 
   /* Sidebar specific */
-  --sidebar-background: oklch(var(--l-base) 0.005 var(--hue-neutral));
+  --sidebar-background: oklch(var(--l-surface) 0.005 var(--hue-neutral));
   --sidebar-foreground: oklch(var(--l-high) 0.02 var(--hue-neutral));
   --sidebar-primary: oklch(var(--l-deepest) 0.02 var(--hue-neutral));
   --sidebar-primary-foreground: oklch(var(--l-surface) 0.01 var(--hue-neutral));
   --sidebar-accent: oklch(var(--l-subtle) 0.02 var(--hue-neutral));
   --sidebar-accent-foreground: oklch(var(--l-deepest) 0.02 var(--hue-neutral));
   --sidebar-border: oklch(var(--l-subtle) 0.02 var(--hue-neutral));
-  --sidebar-ring: oklch(0.55 0.2 var(--hue-primary));
+  --sidebar-ring: oklch(var(--l-medium) 0.2 var(--hue-primary));
 
   /* Scrollbar specific */
   --scrollbar-thumb: var(--border);
@@ -121,7 +140,6 @@
   --l-high: 0.78;
   --l-intense: 0.88;
   --l-deepest: 0.95;
-  
   --l-secondary: 0.8;
 
   --primary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
@@ -132,6 +150,20 @@
 }
 
 @custom-variant dark (&:is(.dark *));
+
+@utility rounded-* {
+  /* 
+   * Extend rounded utility to apply the squircle shape for rounding.
+   * Squircle shape for rounding - https://developer.mozilla.org/en-US/docs/Web/CSS/superellipse
+   */
+  @supports (corner-shape: superellipse(1)) {
+    /* Full rounded corners preserve perfect circles. */
+    &:not(.rounded-full) {
+      /* 1.15 applies a subtle squircle shape to the rounded corners without being overwhelming.*/
+      corner-shape: superellipse(1.15);
+    }
+  }
+}
 
 @theme inline {
   --shadow-*: initial;
@@ -204,6 +236,25 @@
   --animate-gradient: gradient 5s ease infinite;
   --animate-bounce-subtle: gentle-bounce 2s infinite;
   --animate-shiny-text: shiny-text 1.2s linear infinite;
+
+  /* Fumadocs Docs */
+  --color-fd-primary: var(--primary);
+  --color-fd-primary-foreground: var(--primary-foreground);
+  /* We use the default secondary color from Fumadocs */
+  /* --color-fd-secondary: var(--secondary);
+  --color-fd-secondary-foreground: var(--secondary-foreground); */
+  --color-fd-background: var(--background);
+  --color-fd-foreground: var(--foreground);
+  --color-fd-muted: var(--muted);
+  --color-fd-muted-foreground: var(--muted-foreground);
+  --color-fd-border: var(--border);
+  --color-fd-card: var(--card);
+  --color-fd-card-foreground: var(--card-foreground);
+  --color-fd-accent: var(--accent);
+  --color-fd-accent-foreground: var(--accent-foreground);
+  --color-fd-ring: var(--ring);
+  --color-fd-popover: var(--popover);
+  --color-fd-popover-foreground: var(--popover-foreground);
 
   @keyframes gradient {
 
@@ -281,57 +332,7 @@
   white-space: nowrap;
 }
 
-/* Collapsible Animation */
 @layer utilities {
-  [data-slot='collapsible-content'] {
-    overflow: hidden;
-    transition:
-      max-height 300ms cubic-bezier(0.4, 0, 0.2, 1),
-      opacity 200ms ease-out;
-  }
-
-  [data-slot='collapsible-content'][data-state='open'],
-  [data-slot='collapsible-content'][data-state='closed'] {
-    transform: translateZ(0);
-    backface-visibility: hidden;
-  }
-
-  [data-slot='collapsible-content'][data-state='open'] {
-    animation: smoothDown 300ms ease-out forwards;
-  }
-
-  [data-slot='collapsible-content'][data-state='closed'] {
-    animation: smoothUp 250ms ease-in forwards;
-  }
-
-  @keyframes smoothDown {
-    from {
-      max-height: 0;
-      opacity: 0;
-      transform: translateY(-4px);
-    }
-
-    to {
-      max-height: var(--radix-collapsible-content-height);
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  @keyframes smoothUp {
-    from {
-      max-height: var(--radix-collapsible-content-height);
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    to {
-      max-height: 0;
-      opacity: 0;
-      transform: translateY(-4px);
-    }
-  }
-
   @keyframes hammer-animated-effect {
     0% { transform: rotate(0deg) translateY(0px); }
     15% { transform: rotate(35deg) translateY(-2.5px); } /* Hit overshoot */

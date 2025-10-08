@@ -4,7 +4,7 @@ import { Button, buttonVariants } from '#components/ui/button.js';
 import { cn } from '#utils/ui.js';
 import { CopyButton } from '#components/copy-button.js';
 
-export function AppError(): React.JSX.Element {
+export function ErrorPage(): React.JSX.Element {
   const error = useRouteError();
   const navigate = useNavigate();
 
@@ -13,9 +13,8 @@ export function AppError(): React.JSX.Element {
   };
 
   if (isRouteErrorResponse(error)) {
-    console.error('Route error', error);
     return (
-      <div className="flex size-full flex-col items-center justify-center gap-4 p-8">
+      <div className="flex size-full flex-col items-center justify-center gap-4 p-8 md:ml-[var(--sidebar-width-current)]">
         <h1 className="text-xl">
           {error.status} {error.statusText}
         </h1>

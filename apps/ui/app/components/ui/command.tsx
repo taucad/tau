@@ -3,6 +3,7 @@ import { Command as CommandPrimitive } from 'cmdk';
 import { SearchIcon } from 'lucide-react';
 import { cn } from '#utils/ui.js';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '#components/ui/dialog.js';
+import { emptyItemVariants } from '#components/ui/empty-items.js';
 
 function Command({ className, ...properties }: React.ComponentProps<typeof CommandPrimitive>): React.JSX.Element {
   return (
@@ -70,8 +71,17 @@ function CommandList({
   );
 }
 
-function CommandEmpty({ ...properties }: React.ComponentProps<typeof CommandPrimitive.Empty>): React.JSX.Element {
-  return <CommandPrimitive.Empty data-slot="command-empty" className="py-6 text-center text-sm" {...properties} />;
+function CommandEmpty({
+  className,
+  ...properties
+}: React.ComponentProps<typeof CommandPrimitive.Empty>): React.JSX.Element {
+  return (
+    <CommandPrimitive.Empty
+      data-slot="command-empty"
+      className={cn(emptyItemVariants({ variant: 'default' }), className)}
+      {...properties}
+    />
+  );
 }
 
 function CommandGroup({

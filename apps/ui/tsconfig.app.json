@@ -31,7 +31,6 @@
     "tests/**/*.test.js",
     "tests/**/*.spec.jsx",
     "tests/**/*.test.jsx",
-    "vite.config.ts",
     "app/**/*.test.ts",
     "app/**/*.spec.ts",
     "app/**/*.test.tsx",
@@ -39,7 +38,8 @@
     "app/**/*.test.js",
     "app/**/*.spec.js",
     "app/**/*.test.jsx",
-    "app/**/*.spec.jsx"
+    "app/**/*.spec.jsx",
+    "source.generated.ts"
   ],
   "references": [
     {

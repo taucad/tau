@@ -1,11 +1,11 @@
 import { AuthUIContext, SignedIn, SignedOut, UserAvatar, UserButton } from '@daveyplate/better-auth-ui';
 import type { UserButtonProps } from '@daveyplate/better-auth-ui';
-import { CreditCard, Sparkles } from 'lucide-react';
+import { CreditCard, LogIn, Sparkles } from 'lucide-react';
 import { useContext } from 'react';
 import { NavLink } from 'react-router';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { LoadingSpinner } from '#components/loading-spinner.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 const additionalUserButtonLinks: UserButtonProps['additionalLinks'] = [
   {
@@ -29,18 +29,21 @@ export function NavUser(): React.JSX.Element {
   return (
     <>
       <SignedOut>
-        <NavLink to="/auth/sign-in" tabIndex={-1}>
-          {({ isPending }) => (
-            <Button variant="outline" className="select-none">
-              {isPending ? <LoadingSpinner /> : 'Sign In'}
-            </Button>
-          )}
-        </NavLink>
-      </SignedOut>
-      <SignedOut>
-        <NavLink to="/auth/sign-up" tabIndex={-1}>
-          {({ isPending }) => <Button className="select-none">{isPending ? <LoadingSpinner /> : 'Sign Up'}</Button>}
-        </NavLink>
+        <Button asChild variant="overlay" className="hidden select-none lg:flex">
+          <NavLink to="/auth/sign-in" tabIndex={-1}>
+            {({ isPending }) => (isPending ? <LoadingSpinner /> : 'Sign In')}
+          </NavLink>
+        </Button>
+        <Button asChild className="hidden select-none">
+          <NavLink to="/auth/sign-up" tabIndex={-1}>
+            {({ isPending }) => (isPending ? <LoadingSpinner /> : 'Sign Up')}
+          </NavLink>
+        </Button>
+        <Button asChild size="icon" variant="overlay" className="text-primary select-none lg:hidden">
+          <NavLink to="/auth/sign-in" tabIndex={-1}>
+            {({ isPending }) => (isPending ? <LoadingSpinner /> : <LogIn />)}
+          </NavLink>
+        </Button>
       </SignedOut>
       <SignedIn>
         <Tooltip>
@@ -48,7 +51,7 @@ export function NavUser(): React.JSX.Element {
             trigger={
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="select-none">
-                  <UserAvatar className="size-7" user={session?.user} />
+                  <UserAvatar className="size-8 rounded-md" user={session?.user} />
                 </Button>
               </TooltipTrigger>
             }

@@ -67,14 +67,14 @@ function ColorPicker({
             />
           </TooltipTrigger>
         </PopoverTrigger>
-        <TooltipContent side="right">
+        <TooltipContent side="top">
           Choose color{' '}
           <KeyShortcut variant="tooltip" className="ml-1">
             {formattedKeyCombination}
           </KeyShortcut>
         </TooltipContent>
       </Tooltip>
-      <PopoverContent side="right" className="flex w-48 flex-col gap-2 p-2">
+      <PopoverContent side="top" className="flex w-48 flex-col gap-2 p-2">
         <span className="w-full items-center text-sm text-muted-foreground">Select hue ({value.h}°)</span>
         <div className="flex w-full flex-row gap-2">
           <Slider

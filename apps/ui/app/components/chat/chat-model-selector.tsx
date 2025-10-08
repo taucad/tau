@@ -4,14 +4,12 @@ import { Check } from 'lucide-react';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Badge } from '#components/ui/badge.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { useModels } from '#hooks/use-models.js';
-import { toSentenceCase } from '#utils/string.js';
 import type { Model } from '#types/model.types.js';
+import { useModels } from '#hooks/use-models.js';
 
-type ChatModelSelectorProps = {
+type ChatModelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'onSelect'> & {
   readonly onSelect?: (modelId: string) => void;
   readonly onClose?: () => void;
-  readonly className?: string;
   readonly children: (props: { selectedModel?: Model }) => ReactNode;
   readonly popoverProperties?: React.ComponentProps<typeof ComboBoxResponsive>['popoverProperties'];
 };
@@ -20,22 +18,22 @@ export const ChatModelSelector = memo(function ({
   onSelect,
   onClose,
   children,
-  ...props
+  ...properties
 }: ChatModelSelectorProps): React.JSX.Element {
   const { selectedModel, setSelectedModelId, data: models = [] } = useModels();
 
   const providerModelsMap = new Map<string, Model[]>();
   for (const model of models) {
-    if (!providerModelsMap.has(model.provider.id)) {
-      providerModelsMap.set(model.provider.id, []);
+    if (!providerModelsMap.has(model.provider.name)) {
+      providerModelsMap.set(model.provider.name, []);
     }
 
-    providerModelsMap.get(model.provider.id)?.push(model);
+    providerModelsMap.get(model.provider.name)?.push(model);
   }
 
   const handleSelectModel = useCallback(
-    (item: string | Model) => {
-      const model = typeof item === 'string' ? models.find((m) => m.id === item) : item;
+    (item: string) => {
+      const model = models.find((m) => m.id === item);
 
       if (model) {
         setSelectedModelId(model.id);
@@ -47,16 +45,19 @@ export const ChatModelSelector = memo(function ({
 
   return (
     <ComboBoxResponsive
-      popoverContentClassName="w-[300px]"
+      {...properties}
+      className="[&[data-slot='popover-content']]:w-[300px]"
+      popoverProperties={properties.popoverProperties}
+      emptyListMessage="No models found."
       groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({
-        name: toSentenceCase(provider),
+        name: provider,
         items: models,
       }))}
       renderLabel={(item, selectedItem) => (
         <span className="flex w-full items-center justify-between text-xs">
           <div className="flex items-center gap-2">
-            <SvgIcon id={item.provider.id} />
-            <span className="font-mono">{item.name}</span>
+            <SvgIcon id={item.details.family} />
+            <span className="font-mono">{item.slug}</span>
           </div>
           <div className="flex items-center gap-2">
             {item.details.parameterSize ? (
@@ -73,7 +74,6 @@ export const ChatModelSelector = memo(function ({
       defaultValue={selectedModel}
       onSelect={handleSelectModel}
       onClose={onClose}
-      {...props}
     >
       {children({ selectedModel })}
     </ComboBoxResponsive>

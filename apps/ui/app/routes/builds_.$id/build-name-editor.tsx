@@ -1,19 +1,22 @@
 import { useChat } from '@ai-sdk/react';
 import type { Message } from 'ai';
 import { useState, useEffect } from 'react';
-import { Popover, PopoverTrigger, PopoverContent } from '#components/ui/popover.js';
 import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
 import { defaultBuildName } from '#constants/build-names.js';
 import { useBuild } from '#hooks/use-build.js';
 import { useChatConstants } from '#utils/chat.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
+
+const animationDuration = 2000;
 
 export function BuildNameEditor(): React.JSX.Element {
   const { build, updateName, isLoading } = useBuild();
   const [isEditing, setIsEditing] = useState(false);
-  const [name, setName] = useState<string>();
+  const [editValue, setEditValue] = useState<string>('');
   const [displayName, setDisplayName] = useState<string>(build?.name ?? '');
+  const [isNameAnimating, setIsNameAnimating] = useState(false);
   const { append } = useChat({
     ...useChatConstants,
     credentials: 'include',
@@ -22,6 +25,11 @@ export function BuildNameEditor(): React.JSX.Element {
       if (textPart) {
         updateName(textPart.text);
         setDisplayName(textPart.text);
+        setIsNameAnimating(true);
+        // Reset the animation flag after animation completes
+        setTimeout(() => {
+          setIsNameAnimating(false);
+        }, animationDuration); // Adjust timing based on your animation duration
       }
     },
   });
@@ -45,57 +53,92 @@ export function BuildNameEditor(): React.JSX.Element {
       } as const satisfies Message;
       void append(message);
     } else {
-      setName(build.name);
       setDisplayName(build.name);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only run after loading completes
   }, [build?.name, isLoading]);
 
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (name) {
-      updateName(name);
-      setDisplayName(name);
-      setIsEditing(false);
+  const handleEdit = () => {
+    setEditValue(displayName);
+    setIsEditing(true);
+  };
+
+  const handleSave = async () => {
+    if (editValue.trim()) {
+      updateName(editValue.trim());
+      setDisplayName(editValue.trim());
+      // Don't trigger animation for manual edits
+    }
+
+    setIsEditing(false);
+  };
+
+  const handleCancel = () => {
+    setEditValue(displayName);
+    setIsEditing(false);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      void handleSave();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      handleCancel();
     }
   };
 
+  const handleBlur = () => {
+    void handleSave();
+  };
+
+  const handleInputClick = (event: React.MouseEvent) => {
+    event.stopPropagation();
+  };
+
+  const handleInputFocus = (event: React.FocusEvent<HTMLInputElement>) => {
+    event.target.select();
+  };
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    void handleSave();
+  };
+
+  if (isEditing) {
+    return (
+      <form className="flex items-center gap-1" onSubmit={handleSubmit}>
+        <Input
+          autoFocus
+          autoComplete="off"
+          type="text"
+          value={editValue}
+          className="bg-background px-2 focus-visible:ring-0"
+          onChange={(event) => {
+            setEditValue(event.target.value);
+          }}
+          onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
+          onFocus={handleInputFocus}
+          onClick={handleInputClick}
+        />
+        <Button type="submit" size="sm">
+          Save
+        </Button>
+      </form>
+    );
+  }
+
   return (
-    <Popover open={isEditing} onOpenChange={setIsEditing}>
-      <Tooltip>
-        <PopoverTrigger asChild>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" className="cursor-text justify-start p-2">
-              <span
-                data-animate={displayName.length > 0 && !(!name || name === build?.name || isEditing)}
-                className="data-[animate=true]:animate-typewriter-20"
-              >
-                {displayName}
-              </span>
-            </Button>
-          </TooltipTrigger>
-        </PopoverTrigger>
-        <TooltipContent>Edit name</TooltipContent>
-      </Tooltip>
-      <PopoverContent align="start" className="w-64 -translate-x-2 p-1">
-        <form className="flex items-center gap-2 align-middle" onSubmit={handleSubmit}>
-          <Input
-            autoFocus
-            autoComplete="off"
-            value={name}
-            className="h-7"
-            onChange={(event) => {
-              setName(event.target.value);
-            }}
-            onFocus={(event) => {
-              event.target.select();
-            }}
-          />
-          <Button type="submit" size="sm">
-            Save
-          </Button>
-        </form>
-      </PopoverContent>
-    </Popover>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" className="cursor-text justify-start" onClick={handleEdit}>
+          <span data-animate={isNameAnimating} className="truncate data-[animate=true]:animate-typewriter-20">
+            {displayName === '' ? <LoadingSpinner /> : displayName}
+          </span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Edit name</TooltipContent>
+    </Tooltip>
   );
 }

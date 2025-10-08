@@ -19,15 +19,15 @@ export const ChatStatus = memo(function ({ className }: ChatStatusProperties) {
       <AnimatePresence>
         {isVisible ? (
           <motion.div
-            className="absolute inset-x-0 mx-3.5 flex items-center justify-start overflow-clip rounded-2xl border bg-background text-sm text-muted-foreground"
+            className="absolute inset-x-0 mx-3.5 flex items-center justify-between overflow-clip rounded-t-md border bg-background py-1 pr-1 pl-2 text-sm text-muted-foreground select-none"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
             transition={{ duration: 0.3 }}
           >
-            <div className="flex w-full items-center gap-1.5 bg-neutral/10 px-3 pt-2 pb-5">
+            <div className="flex w-full items-center gap-2">
               <HammerAnimation className="size-5" />
-              <AnimatedShinyText>Generating...</AnimatedShinyText>
+              <AnimatedShinyText className="italic">Building...</AnimatedShinyText>
             </div>
           </motion.div>
         ) : null}

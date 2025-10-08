@@ -20,6 +20,7 @@ export function useTypedMatches<Selected>(
       actions: [],
       commandPalette: [],
       noPageWrapper: [],
+      enableFloatingSidebar: [],
     };
 
     // Get all possible handle properties from all matches

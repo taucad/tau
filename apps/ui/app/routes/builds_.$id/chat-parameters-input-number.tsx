@@ -47,53 +47,46 @@ export function ChatParametersInputNumber({
   ...properties
 }: ChatParametersInputNumberProps): React.ReactNode {
   const descriptor = getDescriptor(name);
-  const inputRef = React.useRef<HTMLInputElement>(null);
 
   const isCount = descriptor === 'count';
   const isAngle = descriptor === 'angle';
   const isUnitless = descriptor === 'unitless';
 
-  const handleIndicatorClick = () => {
-    inputRef.current?.focus();
-  };
-
   return (
     <div
       className={cn(
-        'group relative flex flex-row items-center rounded-md',
-        'focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50',
+        'group/input relative flex flex-row items-center rounded-md',
+        'focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
       )}
     >
       {isCount ? (
         <span
           className={cn(
             baseIndicatorClass,
+            'absolute left-0',
             'rounded-l-md border-r-0',
-            'transition-[color,box-shadow] group-focus-within:z-10 group-focus-within:border-ring',
-            'cursor-text',
+            'group-focus-within/input:border-ring',
+            'pointer-events-none cursor-text',
           )}
-          onClick={handleIndicatorClick}
         >
           <span className="font-mono text-sm">×</span>
         </span>
       ) : null}
       <Input
-        ref={inputRef}
         autoComplete="off"
         type="number"
         value={value}
-        className={cn(
-          isCount ? 'rounded-l-none border-l-0' : '',
-          isCount ? '' : 'rounded-r-none border-r-0',
-          'focus-visible:ring-0',
-          className,
-        )}
+        className={cn(isCount ? 'pl-8' : 'pr-8', 'focus-visible:ring-0', className)}
         {...properties}
       />
       {!isCount && (
         <span
-          className={cn(baseIndicatorClass, 'rounded-r-md border-l-0', 'group-focus-within:border-ring', 'cursor-text')}
-          onClick={handleIndicatorClick}
+          className={cn(
+            baseIndicatorClass,
+            'absolute right-0 rounded-r-md border-l-0',
+            'group-focus-within/input:border-ring',
+            'pointer-events-none cursor-text',
+          )}
         >
           {isAngle ? (
             <Angle className="size-4" />

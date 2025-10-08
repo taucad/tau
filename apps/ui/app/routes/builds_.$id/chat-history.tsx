@@ -2,6 +2,7 @@ import { memo, useCallback, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { useSelector } from '@xstate/react';
+import { XIcon, MessageCircle } from 'lucide-react';
 import { ChatMessage } from '#routes/builds_.$id/chat-message.js';
 import { ScrollDownButton } from '#routes/builds_.$id/scroll-down-button.js';
 import { ChatError } from '#routes/builds_.$id/chat-error.js';
@@ -11,24 +12,76 @@ import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { createMessage } from '#utils/chat.js';
 import { messageRole, messageStatus } from '#types/chat.types.js';
 import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
-import { cn } from '#utils/ui.js';
 import { ChatSelector } from '#routes/builds_.$id/chat-selector.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import {
+  FloatingPanel,
+  FloatingPanelClose,
+  FloatingPanelContent,
+  FloatingPanelContentHeader,
+  FloatingPanelTrigger,
+} from '#components/ui/floating-panel.js';
+import { useKeydown } from '#hooks/use-keydown.js';
+import type { KeyCombination } from '#utils/keys.js';
+import { formatKeyCombination } from '#utils/keys.js';
+import { cn } from '#utils/ui.js';
+import { ChatHistoryEmpty } from '#routes/builds_.$id/chat-history-empty.js';
+
+const toggleChatHistoryKeyCombination = {
+  key: 'c',
+  ctrlKey: true,
+} satisfies KeyCombination;
 
 // Memoized individual message item component to prevent re-renders
 const MessageItem = memo(function ({ messageId }: { readonly messageId: string }) {
   return (
-    <div className="px-4 py-2">
+    <div className="py-2">
       <ChatMessage messageId={messageId} />
     </div>
   );
 });
 
-export const ChatHistory = memo(function () {
+// Chat History Trigger Component
+export const ChatHistoryTrigger = memo(function ({
+  isOpen,
+  onToggle,
+}: {
+  readonly isOpen: boolean;
+  readonly onToggle: () => void;
+}) {
+  return (
+    <FloatingPanelTrigger
+      icon={MessageCircle}
+      tooltipContent={
+        <div className="flex items-center gap-2">
+          {isOpen ? 'Close' : 'Open'} Chat
+          <KeyShortcut variant="tooltip">{formatKeyCombination(toggleChatHistoryKeyCombination)}</KeyShortcut>
+        </div>
+      }
+      tooltipSide="right"
+      className={isOpen ? 'text-primary' : undefined}
+      onClick={onToggle}
+    />
+  );
+});
+
+export const ChatHistory = memo(function (props: {
+  readonly className?: string;
+  readonly isExpanded?: boolean;
+  readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
+}) {
+  const { className, isExpanded = true, setIsExpanded } = props;
   const kernel = useSelector(cadActor, (state) => state.context.kernelTypeSelected);
   const messageIds = useChatSelector((state) => state.context.messageOrder);
   const { append } = useChatActions();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  const toggleChatHistory = useCallback(() => {
+    setIsExpanded?.((current) => !current);
+  }, [setIsExpanded]);
+
+  const { formattedKeyCombination } = useKeydown(toggleChatHistoryKeyCombination, toggleChatHistory);
 
   // Memoize the onSubmit callback to prevent unnecessary re-renders
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
@@ -74,40 +127,56 @@ export const ChatHistory = memo(function () {
   }, [messageIds.length]);
 
   return (
-    <div className="relative flex h-full flex-col">
-      <div className="flex items-center justify-between border-b p-2">
-        <ChatSelector />
-      </div>
-      <div className="-mb-3 flex-1 overflow-hidden">
-        <Virtuoso
-          ref={virtuosoRef}
-          alignToBottom
-          totalCount={messageIds.length}
-          itemContent={renderItem}
-          followOutput="smooth"
-          className="h-full"
-          style={{ height: '100%', paddingBottom: '2.5rem' }}
-          atBottomStateChange={handleAtBottomStateChange}
-          components={{
-            Header: () => <div className="pt-2" />,
-            EmptyPlaceholder: () => (
-              <div className="flex h-full items-center justify-center text-muted-foreground">
-                <p>Start a conversation...</p>
-              </div>
-            ),
-            Footer: () => (
-              <div className="px-4 pb-12">
-                <ChatError />
-              </div>
-            ),
-          }}
-        />
-        <ScrollDownButton hasContent={messageIds.length > 0} isVisible={!atBottom} onScrollToBottom={scrollToBottom} />
-      </div>
-      <div className={cn('relative mx-2 mb-2 rounded-2xl')}>
-        <ChatStatus className="absolute inset-x-0 -top-9" />
-        <ChatTextarea onSubmit={onSubmit} />
-      </div>
-    </div>
+    <FloatingPanel isOpen={isExpanded} side="left" className={className} onOpenChange={setIsExpanded}>
+      <FloatingPanelClose
+        icon={XIcon}
+        tooltipContent={(isOpen) => (
+          <div className="flex items-center gap-2">
+            {isOpen ? 'Close' : 'Open'} Chat
+            <KeyShortcut variant="tooltip">{formattedKeyCombination}</KeyShortcut>
+          </div>
+        )}
+      />
+      <FloatingPanelContent className={cn(!isExpanded && 'hidden')}>
+        {/* Header with search */}
+        <FloatingPanelContentHeader>
+          <ChatSelector />
+        </FloatingPanelContentHeader>
+
+        {/* Main chat content area */}
+        <div className="-mb-3 flex-1 overflow-hidden">
+          <Virtuoso
+            ref={virtuosoRef}
+            alignToBottom
+            totalCount={messageIds.length}
+            itemContent={renderItem}
+            followOutput="smooth"
+            className="h-full"
+            style={{ height: '100%', paddingBottom: '2.5rem' }}
+            atBottomStateChange={handleAtBottomStateChange}
+            components={{
+              Header: () => null,
+              EmptyPlaceholder: () => <ChatHistoryEmpty className="-mb-7 h-full justify-end" />,
+              Footer: () => (
+                <div className="px-4 pb-12">
+                  <ChatError />
+                </div>
+              ),
+            }}
+          />
+          <ScrollDownButton
+            hasContent={messageIds.length > 0}
+            isVisible={!atBottom}
+            onScrollToBottom={scrollToBottom}
+          />
+        </div>
+
+        {/* Chat input area */}
+        <div className="relative mx-2 mb-2 rounded-2xl">
+          <ChatStatus className="absolute inset-x-0 -top-7" />
+          <ChatTextarea className="rounded-sm" onSubmit={onSubmit} />
+        </div>
+      </FloatingPanelContent>
+    </FloatingPanel>
   );
 });

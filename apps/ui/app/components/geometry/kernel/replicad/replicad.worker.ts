@@ -187,7 +187,7 @@ try {
         const runCodeStartTime = performance.now();
         shapes = ((await this.runCode(code, parameters)) ?? []) as MainResultShapes;
         const runCodeEndTime = performance.now();
-        this.log(`Code execution took ${runCodeEndTime - runCodeStartTime}ms`, { operation: 'computeGeometry' });
+        this.log(`Kernel computation took ${runCodeEndTime - runCodeStartTime}ms`, { operation: 'computeGeometry' });
 
         const defaultNameResult = await this.extractDefaultNameFromCode(code);
         defaultName = isKernelError(defaultNameResult) ? undefined : defaultNameResult.data;
@@ -213,7 +213,7 @@ try {
         defaultName,
       );
       const renderEndTime = performance.now();
-      this.log(`Render output took ${renderEndTime - renderStartTime}ms`, { operation: 'computeGeometry' });
+      this.log(`Tessellation took ${renderEndTime - renderStartTime}ms`, { operation: 'computeGeometry' });
 
       const gltfStartTime = performance.now();
       const shapes3d = renderedShapes.filter((shape): shape is GeometryReplicad => shape.type === '3d');

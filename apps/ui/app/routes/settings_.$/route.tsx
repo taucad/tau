@@ -1,51 +1,65 @@
 import type { SettingsView } from '@daveyplate/better-auth-ui';
 import { SettingsCards, useAuthenticate } from '@daveyplate/better-auth-ui';
 import { Link, useLocation } from 'react-router';
-import { Tabs, TabsList, TabsTrigger, TabsContent, TabsContents } from '#components/ui/tabs.js';
+import { CreditCard, Key, Lock, Palette, User } from 'lucide-react';
+import { TabsContent } from '#components/ui/tabs.js';
 import type { Handle } from '#types/matches.types.js';
+import { Button } from '#components/ui/button.js';
+import { cn } from '#utils/ui.js';
+import { ResponsiveTabs } from '#components/ui/responsive-tabs.js';
+import type { ResponsiveTabItem } from '#components/ui/responsive-tabs.js';
 
-type SettingsTab = {
-  tabView: SettingsView;
-  label: string;
-  href: string;
+type SettingsTab = ResponsiveTabItem & {
+  tabView?: SettingsView;
 };
 
-const authTabs: SettingsTab[] = [
+const authTabs: readonly SettingsTab[] = [
   {
     tabView: 'SETTINGS',
     label: 'Account',
     href: '/settings/account',
+    icon: User,
   },
   {
     tabView: 'SECURITY',
     label: 'Security',
     href: '/settings/security',
+    icon: Lock,
   },
   {
     tabView: 'API_KEYS',
     label: 'API Keys',
     href: '/settings/api-keys',
+    icon: Key,
   },
   // {
   //   tabView: 'ORGANIZATION',
   //   label: 'Organization',
   //   href: '/settings/organization',
+  //   icon: Building,
   // },
   // {
   //   tabView: 'MEMBERS',
   //   label: 'Team',
   //   href: '/settings/team',
+  //   icon: Users,
   // },
 ] as const;
 
-const nonAuthTabs: Array<Omit<SettingsTab, 'tabView'>> = [
+const nonAuthTabs: readonly SettingsTab[] = [
   {
     label: 'Billing',
     href: '/settings/billing',
+    icon: CreditCard,
   },
-];
+  {
+    label: 'Appearance',
+    href: '/settings/appearance',
+    icon: Palette,
+  },
+] as const;
 
-const allTabs = [...authTabs, ...nonAuthTabs];
+const allTabs: readonly SettingsTab[] = [...authTabs, ...nonAuthTabs];
 
 const defaultTab = authTabs[0]!.label;
 const defaultLabel = authTabs[0]!.label;
@@ -57,7 +71,11 @@ export const handle: Handle = {
     const currentTab = allTabs.find((tab) => tab.href === location.pathname);
     const label = currentTab?.label ?? defaultLabel;
 
-    return <span className="p-2 text-sm font-medium">{label}</span>;
+    return (
+      <Button asChild variant="ghost">
+        <Link to={location.pathname}>{label}</Link>
+      </Button>
+    );
   },
 };
 
@@ -66,7 +84,7 @@ export default function SettingsPage(): React.JSX.Element {
   const location = useLocation();
 
   // Map pathname to cardView
-  const getActiveTab = () => {
+  const getActiveTab = (): string => {
     const currentTab = allTabs.find((tab) => tab.href === location.pathname);
     return currentTab?.label ?? defaultTab;
   };
@@ -75,32 +93,23 @@ export default function SettingsPage(): React.JSX.Element {
 
   return (
     <div className="h-full flex-1">
-      <div className="mx-auto w-full max-w-4xl p-6">
-        <Tabs value={activeTab} className="flex h-full flex-col">
-          <TabsList className="mb-6">
-            {authTabs.map((tab) => (
-              <TabsTrigger key={tab.label} asChild value={tab.label}>
-                <Link to={tab.href}>{tab.label}</Link>
-              </TabsTrigger>
-            ))}
-            {nonAuthTabs.map((tab) => (
-              <TabsTrigger key={tab.label} asChild value={tab.label}>
-                <Link to={tab.href}>{tab.label}</Link>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          <TabsContents className="flex-1 overflow-y-auto pb-10">
-            {authTabs.map((tab) => (
-              <TabsContent key={tab.label} value={tab.label} className="[&>*]:md:gap-0">
-                <SettingsCards classNames={{ sidebar: { base: 'hidden' } }} view={tab.tabView} />
-              </TabsContent>
-            ))}
-            <TabsContent value="Billing">
-              <div>Billing - TODO</div>
+      <div className={cn('mx-auto mb-6 size-full max-w-4xl p-4 md:p-6', '[&_[data-slot=drawer-trigger]]:hidden')}>
+        <ResponsiveTabs tabs={allTabs} activeTab={activeTab}>
+          {authTabs.map((tab) => (
+            <TabsContent key={tab.label} value={tab.label} className="[&>*]:md:gap-0">
+              <SettingsCards
+                classNames={{ cards: 'h-full', sidebar: { base: 'hidden' }, base: 'h-full' }}
+                view={tab.tabView}
+              />
             </TabsContent>
-          </TabsContents>
-        </Tabs>
+          ))}
+          <TabsContent value="Billing">
+            <div>Billing - TODO</div>
+          </TabsContent>
+          <TabsContent value="Appearance">
+            <div>Appearance - TODO</div>
+          </TabsContent>
+        </ResponsiveTabs>
       </div>
     </div>
   );

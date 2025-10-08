@@ -4,6 +4,11 @@ import { Tree, Folder, File } from '#components/magicui/file-tree.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
 import type { FileItem } from '#machines/file-explorer.machine.js';
 import { cn } from '#utils/ui.js';
+import {
+  FloatingPanelContentBody,
+  FloatingPanelContentHeader,
+  FloatingPanelContentTitle,
+} from '#components/ui/floating-panel.js';
 
 function convertFileItemToTreeElement(items: FileItem[]): TreeViewElement[] {
   return items.map((item) => ({
@@ -50,11 +55,11 @@ export function ChatEditorFileTree(): React.JSX.Element {
   const treeElements = fileTree.length > 0 ? convertFileItemToTreeElement(fileTree) : [];
 
   return (
-    <div className={cn('flex h-full flex-col overflow-y-auto bg-sidebar select-none')}>
-      <div className="border-b px-4 text-base font-medium text-muted-foreground">
-        <h3 className="flex h-11 items-center">Files</h3>
-      </div>
-      <div className="my-2">
+    <>
+      <FloatingPanelContentHeader>
+        <FloatingPanelContentTitle>Files</FloatingPanelContentTitle>
+      </FloatingPanelContentHeader>
+      <FloatingPanelContentBody className="py-2">
         {treeElements.length > 0 ? (
           <Tree elements={treeElements} initialExpandedItems={treeElements.map((element) => element.id)}>
             {treeElements.map((element) => (
@@ -64,8 +69,8 @@ export function ChatEditorFileTree(): React.JSX.Element {
         ) : (
           <div className="px-4 py-2 text-sm text-muted-foreground">No files available</div>
         )}
-      </div>
-    </div>
+      </FloatingPanelContentBody>
+    </>
   );
 }
 

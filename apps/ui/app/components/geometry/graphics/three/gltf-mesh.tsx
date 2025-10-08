@@ -3,7 +3,7 @@ import { useThree } from '@react-three/fiber';
 import { useState, useRef, useLayoutEffect } from 'react';
 import type { Mesh, Material, Object3D, LineSegments, BufferGeometry } from 'three';
 import { LineBasicMaterial, EdgesGeometry, Matrix4 } from 'three';
-import { GLTFLoader } from 'three-stdlib';
+import { GLTFLoader } from 'three/addons';
 import { MatcapMaterial } from '#components/geometry/graphics/three/matcap-material.js';
 import type { GeometryGltf } from '#types/cad.types.js';
 

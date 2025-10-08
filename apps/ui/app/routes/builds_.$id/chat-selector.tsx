@@ -14,6 +14,15 @@ import { formatRelativeTime } from '#utils/date.js';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '#components/ui/dialog.js';
 import { Input } from '#components/ui/input.js';
 import { groupItemsByTimeHorizon } from '#utils/temporal.js';
+import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { useKeydown } from '#hooks/use-keydown.js';
+import type { KeyCombination } from '#utils/keys.js';
+
+const newChatKeyCombination = {
+  key: 'c',
+  ctrlKey: true,
+  shiftKey: true,
+} satisfies KeyCombination;
 
 export function ChatSelector(): ReactNode {
   const { build, isLoading, activeChat, activeChatId, addChat, setActiveChat, updateChatName, deleteChat } = useBuild();
@@ -22,6 +31,12 @@ export function ChatSelector(): ReactNode {
   const [chatToRename, setChatToRename] = useState<string | undefined>(undefined);
   const [newChatName, setNewChatName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleAddChat = async () => {
+    await addChat();
+  };
+
+  const { formattedKeyCombination } = useKeydown(newChatKeyCombination, handleAddChat);
 
   const { append } = useChat({
     ...useChatConstants,
@@ -59,12 +74,7 @@ export function ChatSelector(): ReactNode {
       } as const satisfies Message;
       void append(message);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on init
-  }, [activeChatId, isLoading, updateChatName]);
-
-  const handleAddChat = async () => {
-    await addChat();
-  };
+  }, [activeChatId, activeChat, isLoading]);
 
   const handleRenameChat = (chatId: string, currentName: string) => {
     setChatToRename(chatId);
@@ -146,14 +156,14 @@ export function ChatSelector(): ReactNode {
   return (
     <>
       <div className="flex h-7 w-full items-center justify-between">
-        <div className="group min-w-0 flex-1 opacity-70 hover:opacity-100">
+        <div className="group min-w-0 flex-1">
           <Tooltip>
             <ComboBoxResponsive
               groupedItems={groupedChats}
               renderLabel={renderChatLabel}
               getValue={getChatValue}
               defaultValue={activeChat}
-              popoverContentClassName="w-[300px]"
+              className="w-[300px]"
               placeholder="Search chats"
               searchPlaceHolder="Search chats..."
               popoverProperties={{
@@ -167,7 +177,7 @@ export function ChatSelector(): ReactNode {
                 <Button
                   variant="ghost"
                   className={cn(
-                    'w-full justify-between gap-2 truncate overflow-hidden text-left',
+                    'h-7 w-full justify-between gap-2 truncate overflow-hidden rounded-sm text-left',
                     isGeneratingName && 'animate-pulse',
                   )}
                 >
@@ -182,18 +192,23 @@ export function ChatSelector(): ReactNode {
                 </Button>
               </TooltipTrigger>
             </ComboBoxResponsive>
-            <TooltipContent>Search chats</TooltipContent>
+            <TooltipContent side="top">Search chats</TooltipContent>
           </Tooltip>
         </div>
 
-        <div className="flex-shrink-0 opacity-70 hover:opacity-100">
+        <div className="flex-shrink-0">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" onClick={handleAddChat}>
+              <Button variant="ghost" size="icon" className="size-7 rounded-sm" onClick={handleAddChat}>
                 <Plus className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>New chat</TooltipContent>
+            <TooltipContent side="top">
+              New chat{' '}
+              <KeyShortcut variant="tooltip" className="ml-1">
+                {formattedKeyCombination}
+              </KeyShortcut>
+            </TooltipContent>
           </Tooltip>
         </div>
       </div>

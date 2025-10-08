@@ -142,12 +142,12 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
               <span
                 className={cn(
                   getTextSizeClass(localizedSmallGridSize),
-                  'absolute top-[calc(var(--spacing)*2)] left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center',
+                  'absolute top-[calc(var(--spacing)*3)] left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center',
                 )}
               >
                 <span>{localizedSmallGridSize}</span>
               </span>
-              <span className="absolute bottom-[calc(var(--spacing)*0.25)] left-1/2 flex -translate-x-1/2 items-center gap-0.5 text-[calc(var(--spacing)*3)]">
+              <span className="absolute bottom-[calc(var(--spacing)*1)] left-1/2 flex -translate-x-1/2 items-center gap-0.5 text-[calc(var(--spacing)*2)]">
                 {unit}
                 {isGridSizeLocked ? <LockIcon className="size-2" /> : null}
               </span>
@@ -165,8 +165,16 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
         <DropdownMenuLabel>Unit</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={unit} onValueChange={handleUnitChange}>
           {gridUnitOptions.map((option) => (
-            <DropdownMenuRadioItem key={option.value} value={option.value} onSelect={preventClose}>
-              {option.label}
+            <DropdownMenuRadioItem
+              key={option.value}
+              className="flex items-center justify-between gap-2"
+              value={option.value}
+              onSelect={preventClose}
+            >
+              <span>{option.label}</span>
+              <span className="flex w-8 items-center justify-center rounded-xs bg-neutral/20 px-1 py-0.5 font-mono text-xs">
+                {option.value}
+              </span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>

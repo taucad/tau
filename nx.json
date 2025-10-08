@@ -6,6 +6,9 @@
       "plugin": "./tools/tsup.plugin.ts"
     },
     {
+      "plugin": "./tools/copy-files-from-to.plugin.ts"
+    },
+    {
       "plugin": "@nx/react/router-plugin",
       "options": {
         "buildTargetName": "build",
@@ -83,6 +86,9 @@
   "nxCloudId": "687b39d7852b9a43a8bba201",
   "sync": {
     "applyChanges": true
+  },
+  "tui": {
+    "enabled": false
   },
   "namedInputs": {
     "sharedGlobals": ["{workspaceRoot}/.github/workflows/ci.yml"],

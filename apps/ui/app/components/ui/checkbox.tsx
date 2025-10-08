@@ -31,8 +31,8 @@ function Checkbox({ className, onCheckedChange, size = 'default', ...props }: Ch
       <motion.button
         data-slot="checkbox"
         className={cn(
-          'peer flex shrink-0 items-center justify-center bg-input transition-colors duration-500 outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:aria-invalid:ring-destructive/40',
-          size === 'default' ? 'size-4' : 'size-7',
+          'peer flex shrink-0 items-center justify-center bg-input transition-colors duration-500 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:aria-invalid:ring-destructive/40',
+          size === 'default' ? 'size-4' : 'size-8',
           size === 'default' ? 'rounded-sm' : 'rounded-md',
           className,
         )}

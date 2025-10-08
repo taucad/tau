@@ -17,7 +17,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from '#components/ui/sidebar.js';
-import { LoadingSpinner } from '#components/loading-spinner.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 export function NavProjects({
   projects,

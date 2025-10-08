@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Edit, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
@@ -12,7 +12,6 @@ import { Button } from '#components/ui/button.js';
 import { messageRole } from '#types/chat.types.js';
 import type { MessageAnnotation } from '#types/chat.types.js';
 import { cn } from '#utils/ui.js';
-import { HoverCard, HoverCardTrigger, HoverCardContent } from '#components/ui/hover-card.js';
 import { When } from '#components/ui/utils/when.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import {
@@ -52,26 +51,31 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
 
   const isUser = message.role === messageRole.user;
 
+  const handleEditClick = () => {
+    if (!isUser) {
+      return;
+    }
+
+    setIsEditing((previous) => !previous);
+  };
+
   return (
     <article
-      className={cn(
-        'group/message flex w-full flex-row items-start',
-        isUser && 'flex-row-reverse gap-2 space-x-reverse',
-      )}
+      className={cn('group/chat-message flex w-full flex-row items-start', isUser && 'items-end gap-2 space-x-reverse')}
     >
       <div
         className={cn(
           'flex flex-col space-y-2 overflow-y-auto',
-          // Only make the text area full when editing.
-          isEditing && 'w-full',
-          // Only the assistant messages should take up the full width.
-          !isUser && 'w-full',
+          'w-full',
+          // Vary width for user and assistant messages to achieve visual differentiation
+          isUser ? 'mx-2' : 'mx-6',
         )}
       >
         <When shouldRender={isUser ? isEditing : false}>
           <ChatTextarea
             initialContent={message.parts}
             initialAttachments={message.experimental_attachments}
+            className="rounded-sm"
             onSubmit={async (event) => {
               editMessage(messageId, event.content, event.model, event.metadata, event.imageUrls);
               setIsEditing(false);
@@ -79,31 +83,19 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
             onEscapePressed={() => {
               setIsEditing(false);
             }}
+            onBlur={() => {
+              setIsEditing(false);
+            }}
           />
         </When>
         <When shouldRender={!isEditing}>
-          <div className={cn('flex flex-col gap-2', isUser && 'rounded-xl bg-neutral/20 p-2')}>
-            {message.experimental_attachments?.map((attachment, index) => {
-              return (
-                <HoverCard
-                  // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                  key={`${message.id}-attachment-${index}`}
-                  openDelay={100}
-                  closeDelay={100}
-                >
-                  <HoverCardTrigger asChild>
-                    <img
-                      src={attachment.url}
-                      alt="Chat message"
-                      className="ml-auto h-7 w-auto cursor-zoom-in rounded-md border bg-muted object-cover"
-                    />
-                  </HoverCardTrigger>
-                  <HoverCardContent className="size-auto max-w-screen overflow-hidden p-0">
-                    <img src={attachment.url} alt="Chat message zoomed" className="h-48 md:h-96" />
-                  </HoverCardContent>
-                </HoverCard>
-              );
-            })}
+          <div
+            className={cn(
+              'flex flex-col gap-2',
+              isUser && 'cursor-pointer rounded-sm border bg-background p-2 hover:border-primary',
+            )}
+            onClick={handleEditClick}
+          >
             {message.parts?.map((part, index) => {
               switch (part.type) {
                 case 'text': {
@@ -216,35 +208,6 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                 <ChatMessageAnnotations annotations={message.annotations as MessageAnnotation[]} />
               ) : null}
             </div>
-          </div>
-        </When>
-        <When shouldRender={isUser}>
-          <div className="mt-1 flex flex-row items-center justify-end text-muted-foreground">
-            <CopyButton
-              tooltipContentProperties={{ side: 'bottom' }}
-              size="icon"
-              getText={() => getMessageContent(message)}
-              tooltip="Copy message"
-              className="size-7"
-            />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  className="size-7"
-                  onClick={() => {
-                    setIsEditing((previous) => !previous);
-                  }}
-                >
-                  <Edit className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{isEditing ? 'Stop editing' : 'Edit message'}</TooltipContent>
-            </Tooltip>
-            {message.annotations && message.annotations.length > 0 ? (
-              <ChatMessageAnnotations annotations={message.annotations as MessageAnnotation[]} />
-            ) : null}
           </div>
         </When>
       </div>

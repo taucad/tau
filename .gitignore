@@ -29,3 +29,7 @@ vitest.config.*.timestamp*
 
 # Docker pnpm deploy target directory
 pruned
+
+# Fumadocs - unable to customise source.generated.ts output path.
+source.generated.ts
+!apps/ui/app/lib/fumadocs/source.generated.ts

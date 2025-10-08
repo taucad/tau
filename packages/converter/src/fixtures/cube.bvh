@@ -1,0 +1,54 @@
+HIERARCHY
+ROOT CubeCenter
+{
+	OFFSET 0.00000 0.00000 1.00000
+	CHANNELS 6 Xposition Yposition Zposition Zrotation Yrotation Xrotation
+	JOINT BottomFrontLeft
+	{
+		OFFSET -1.00000 -1.00000 -1.00000
+		CHANNELS 3 Zrotation Yrotation Xrotation
+		JOINT BottomFrontRight
+		{
+			OFFSET 2.00000 0.00000 0.00000
+			CHANNELS 3 Zrotation Yrotation Xrotation
+			JOINT BottomBackRight
+			{
+				OFFSET 0.00000 2.00000 0.00000
+				CHANNELS 3 Zrotation Yrotation Xrotation
+				JOINT BottomBackLeft
+				{
+					OFFSET -2.00000 0.00000 0.00000
+					CHANNELS 3 Zrotation Yrotation Xrotation
+					JOINT TopFrontLeft
+					{
+						OFFSET 0.00000 -2.00000 2.00000
+						CHANNELS 3 Zrotation Yrotation Xrotation
+						JOINT TopFrontRight
+						{
+							OFFSET 2.00000 0.00000 0.00000
+							CHANNELS 3 Zrotation Yrotation Xrotation
+							JOINT TopBackRight
+							{
+								OFFSET 0.00000 2.00000 0.00000
+								CHANNELS 3 Zrotation Yrotation Xrotation
+								JOINT TopBackLeft
+								{
+									OFFSET -2.00000 0.00000 0.00000
+									CHANNELS 3 Zrotation Yrotation Xrotation
+									End Site
+									{
+										OFFSET 0.00000 0.00000 0.00000
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+MOTION
+Frames: 1
+Frame Time: 0.0333333
+0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0

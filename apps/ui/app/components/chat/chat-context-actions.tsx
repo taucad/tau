@@ -38,6 +38,7 @@ export function ChatContextActions({
   selectedIndex,
   onSelectedIndexChange,
   onSelectItem,
+  ...properties
 }: ChatContextActionsProperties): React.JSX.Element {
   const kernelError = useSelector(cadActor, (state) => state.context.kernelError);
   const codeErrors = useSelector(cadActor, (state) => state.context.codeErrors);
@@ -388,17 +389,22 @@ ${kernelError.stack ? `\n\`\`\`\n${kernelError.stack}\n\`\`\`` : ''}
         popoverProperties={{
           align: 'start',
           side: 'top',
+          className: 'w-60',
         }}
-        popoverContentClassName="w-60 z-50"
         searchPlaceHolder="Search context..."
         placeholder="Add context"
         onSelect={(itemId) => {
           const selectedItem = contextItems.find((item) => item.id === itemId);
           selectedItem?.action();
         }}
+        {...properties}
       >
         <TooltipTrigger asChild>
-          <Button variant="outline" size="icon" className="size-6 bg-background">
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-6 bg-background text-muted-foreground hover:text-foreground"
+          >
             <AtSign className="size-3" />
           </Button>
         </TooltipTrigger>

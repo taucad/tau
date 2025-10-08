@@ -16,7 +16,7 @@ export type SearchInputProperties = {
   /**
    * Callback function called when the clear button is clicked
    */
-  readonly onClear?: () => void;
+  readonly onClear: () => void;
 } & Omit<React.ComponentProps<typeof Input>, 'type'>;
 
 export function SearchInput({
@@ -27,7 +27,9 @@ export function SearchInput({
   onClear,
   ...properties
 }: SearchInputProperties): React.JSX.Element {
-  const showClearButton = Boolean(value && onClear);
+  const handleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+  };
 
   return (
     <div className={cn('relative w-full', containerClassName)}>
@@ -36,22 +38,24 @@ export function SearchInput({
         type="text"
         placeholder={placeholder}
         value={value}
-        className={cn('pr-8 pl-8', className)}
+        className={cn(
+          'peer pr-2 pl-8 not-placeholder-shown:pr-6 placeholder:text-sm placeholder-shown:truncate focus:placeholder:opacity-0',
+          className,
+        )}
         {...properties}
       />
-      <Search className="absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
-      {showClearButton ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="absolute top-1/2 right-1 size-5 -translate-y-1/2 p-0 text-muted-foreground hover:text-foreground"
-          type="button"
-          aria-label="Clear search"
-          onClick={onClear}
-        >
-          <X className="size-3.5" />
-        </Button>
-      ) : null}
+      <Search className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute top-1/2 right-1.5 size-5 -translate-y-1/2 p-0 text-muted-foreground peer-placeholder-shown:invisible hover:text-foreground"
+        type="button"
+        aria-label="Clear search"
+        onClick={onClear}
+        onMouseDown={handleMouseDown}
+      >
+        <X className="size-3.5" />
+      </Button>
     </div>
   );
 }

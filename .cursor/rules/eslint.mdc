@@ -34,6 +34,11 @@ alwaysApply: false
 + const data: undefined = response;
 ```
 
+**Type preferred over interface**: Use `type` instead of `interface`:
+```diff
+- interface User {
++ type User = {
+
 **Curly Braces**: Always use curly braces for control flow:
 ```diff
 - if (condition) return;

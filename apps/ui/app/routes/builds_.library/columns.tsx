@@ -14,7 +14,7 @@ import type { BuildActions } from '#routes/builds_.library/route.js';
 import { BuildActionDropdown } from '#routes/builds_.library/build-action-dropdown.js';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
 import { Input } from '#components/ui/input.js';
-import { LoadingSpinner } from '#components/loading-spinner.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 // Rename component for table cells
 function BuildNameCell({ build, actions }: { readonly build: Build; readonly actions: BuildActions }) {

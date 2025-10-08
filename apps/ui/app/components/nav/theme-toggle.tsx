@@ -14,7 +14,7 @@ type ThemeWithSystem = Theme | null;
 export function ThemeToggle(): React.JSX.Element {
   const [, setTheme] = useTheme();
 
-  const [theme, setThemeCookie] = useCookie<ThemeWithSystem>(cookieName.themeMode, null);
+  const [theme, setThemeCookie] = useCookie<ThemeWithSystem>(cookieName.colorTheme, null);
 
   const cycleTheme = () => {
     let newTheme;
@@ -52,7 +52,7 @@ export function ThemeToggle(): React.JSX.Element {
           <span className="sr-only">Toggle theme</span>
         </SidebarMenuButton>
       </TooltipTrigger>
-      <TooltipContent side="right" className="flex items-center gap-2 align-baseline">
+      <TooltipContent side="top" className="flex items-center gap-2 align-baseline">
         Toggle theme{' '}
         <KeyShortcut variant="tooltip" className="ml-1">
           {formattedKeyCombination}

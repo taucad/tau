@@ -4,7 +4,7 @@ import type { GizmoAxisOptions, GizmoOptions } from 'three-viewport-gizmo';
 import { ViewportGizmo } from 'three-viewport-gizmo';
 import { useEffect, useCallback } from 'react';
 import * as THREE from 'three';
-import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import type { OrbitControls } from 'three/addons';
 import type { ReactNode } from 'react';
 import { Theme, useTheme } from 'remix-themes';
 import { useColor } from '#hooks/use-color.js';
@@ -13,6 +13,8 @@ import { createViewportGizmoCubeAxes } from '#components/geometry/graphics/three
 type ViewportGizmoCubeProps = {
   readonly size?: number;
 };
+
+const className = 'viewport-gizmo-cube';
 
 export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): ReactNode {
   const { camera, gl, controls, scene, invalidate } = useThree((state) => ({
@@ -45,6 +47,7 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
 
     // Create a separate canvas for the gizmo
     const canvas = document.createElement('canvas');
+    canvas.className = className;
     canvas.style.position = 'absolute';
     canvas.style.bottom = '0';
     canvas.style.right = '0';
@@ -107,6 +110,7 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
         bottom: 0,
         right: 0,
       },
+      className,
       resolution: 256,
       container,
       corners: cornerConfig,

@@ -23,7 +23,7 @@ import { useBuilds } from '#hooks/use-builds.js';
 import { toast } from '#components/ui/sonner.js';
 import { groupItemsByTimeHorizon } from '#utils/temporal.js';
 import { SearchInput } from '#components/search-input.js';
-import { LoadingSpinner } from '#components/loading-spinner.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 const buildsPerPage = 5;
 
@@ -136,7 +136,7 @@ export function NavHistory(): ReactNode {
         <SearchInput
           placeholder="Search builds..."
           value={searchQuery}
-          className="h-7 text-xs"
+          className="h-7 bg-background dark:bg-background"
           onChange={handleSearchChange}
           onKeyDown={handleSearchKeyDown}
           onClear={handleSearchClear}

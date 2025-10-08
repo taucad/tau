@@ -12,7 +12,7 @@
     "erasableSyntaxOnly": false // Incompatible with NestJS dependency injection.
   },
   "include": ["app/**/*.ts"],
-  "exclude": ["app/**/*.spec.ts", "app/**/*.test.ts", "vite.config.ts"],
+  "exclude": ["app/**/*.spec.ts", "app/**/*.test.ts"],
   "references": [
     {
       "path": "../../libs/api-extractor/tsconfig.lib.json"

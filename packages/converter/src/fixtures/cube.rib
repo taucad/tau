@@ -1,0 +1,43 @@
+##RenderMan RIB-Structure 1.1
+##Scene /Users/rifont/git/tau/packages/converter/src/fixtures/cube.rib
+##Creator Rhinoceros Jul  7 2025
+##Frames 1
+##CapabilitiesNeeded TrimCurves
+
+FrameBegin 1
+  Display "c" "file" "rgba"
+  ScreenWindow -1.49277 1.49277 -1.1 1.1
+  Clipping 0.00475003 3.15527
+  Format 1258 927 1
+  Projection "orthographic"
+  Transform [ 1 0 0 0.0 -0 1 0 0.0 0 0 -1 0.0 -0 1 2.50502 1.0 ]
+  Option "searchpath" "texture" "&:/Applications/Rhino 8.app/Contents/PlugIns/"
+  Option "searchpath" "shader" "&:/Applications/Rhino 8.app/Contents/PlugIns/"
+  Option "searchpath" "archive" "&:/Applications/Rhino 8.app/Contents/PlugIns/"
+  Declare "bgcolor" "color"
+  Imager "rh_background" "bgcolor" [ 1 1 1 ]
+
+  WorldBegin
+    Declare "intensity" "float"
+    Declare "lightcolor" "color"
+    Declare "from" "point"
+    Declare "to" "point"
+    Declare "intensity" "float"
+    Declare "lightcolor" "color"
+    Declare "from" "point"
+    Declare "to" "point"
+    LightSource "distantlight" 1 "intensity" [ 1 ] "lightcolor" [ 1 1 1 ] "from" [ 0 -1 2.50502 ] "to" [ 0 -1 -97.495 ]
+
+    AttributeBegin
+      Attribute "identifier" "name" ["node"]
+      Color [ 1 1 1 ]
+      Opacity [ 1 1 1 ]
+      ReadArchive "DefaultMaterial"
+      AttributeBegin
+        PointsPolygons [ 3 3 3 3 3 3 3 3 3 3 3 3 ] [ 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 ] "P" [ 1 1 2 -1 1 2 -1 -1 2 1 1 2 -1 -1 2 1 -1 2 1 1 0 1 1 2 1 -1 2 1 1 0 1 -1 2 1 -1 0 -1 1 0 1 1 0 1 -1 0 -1 1 0 1 -1 0 -1 -1 0 -1 1 2 -1 1 0 -1 -1 0 -1 1 2 -1 -1 0 -1 -1 2 -1 1 2 1 1 2 1 1 0 -1 1 2 1 1 0 -1 1 0 -1 -1 2 1 -1 0 1 -1 2 -1 -1 2 -1 -1 0 1 -1 0 ] "N" [ 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 0 0 -1 0 0 -1 0 0 -1 0 0 -1 0 0 -1 0 0 -1 -1 0 0 -1 0 0 -1 0 0 -1 0 0 -1 0 0 -1 0 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 1 0 0 -1 0 0 -1 0 0 -1 0 0 -1 0 0 -1 0 0 -1 0 ] 
+      AttributeEnd
+    AttributeEnd
+
+  WorldEnd
+
+FrameEnd

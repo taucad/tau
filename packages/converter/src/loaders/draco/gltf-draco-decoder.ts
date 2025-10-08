@@ -32,7 +32,10 @@ type AttributeTypeConstructor =
   | Int8ArrayConstructor
   | Int32ArrayConstructor;
 
-type TypedArray = Float32Array | Uint32Array | Uint16Array | Uint8Array | Int16Array | Int8Array | Int32Array;
+// gltf-transform doesn't support Int32Array
+type TypedArray = Float32Array | Uint32Array | Uint16Array | Uint8Array | Int16Array | Int8Array;
+
+type AccessorType = 'SCALAR' | 'VEC2' | 'VEC3' | 'VEC4' | 'MAT2' | 'MAT3' | 'MAT4';
 
 type AttributeData = {
   array: TypedArray;
@@ -314,8 +317,19 @@ export class GltfDracoDecoder {
       case Int32Array: {
         attributeData = new this.decoderModule.DracoInt32Array();
         decoder.GetAttributeInt32ForAllPoints(dracoGeometry, attribute, attributeData);
-        typedArray = new Int32Array(numberValues);
-        break;
+        // Convert Int32Array to Uint32Array as gltf-transform doesn't support Int32Array
+        const int32Array = new Int32Array(numberValues);
+        for (let i = 0; i < numberValues; i++) {
+          int32Array[i] = attributeData.GetValue(i);
+        }
+        typedArray = new Uint32Array(int32Array.buffer);
+        // Skip the regular copy loop below for Int32Array since we already copied the data
+        this.decoderModule.destroy(attributeData);
+        return {
+          array: typedArray,
+          itemSize: numberComponents,
+          normalized: attributeName === 'color' && !(typedArray instanceof Float32Array),
+        };
       }
 
       case Uint8Array: {
@@ -479,8 +493,8 @@ export class GltfDracoDecoder {
     const accessor = document
       .createAccessor()
       .setBuffer(buffer)
-      .setArray(data.array as unknown)
-      .setType(this.getAccessorType(data.itemSize) as unknown);
+      .setArray(data.array)
+      .setType(this.getAccessorType(data.itemSize));
 
     if (data.normalized) {
       accessor.setNormalized(true);
@@ -502,13 +516,13 @@ export class GltfDracoDecoder {
     const accessor = document
       .createAccessor()
       .setBuffer(buffer)
-      .setArray(typedIndices as unknown)
-      .setType('SCALAR' as unknown);
+      .setArray(typedIndices)
+      .setType('SCALAR');
 
     return accessor;
   }
 
-  private getAccessorType(itemSize: number): string {
+  private getAccessorType(itemSize: number): AccessorType {
     switch (itemSize) {
       case 1: {
         return 'SCALAR';

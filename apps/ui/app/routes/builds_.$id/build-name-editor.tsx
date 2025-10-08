@@ -9,12 +9,14 @@ import { useChatConstants } from '#utils/chat.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
+const animationDuration = 2000;
+
 export function BuildNameEditor(): React.JSX.Element {
   const { build, updateName, isLoading } = useBuild();
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState<string>('');
   const [displayName, setDisplayName] = useState<string>(build?.name ?? '');
-  const [isNameGenerating, setIsNameGenerating] = useState(false);
+  const [isNameAnimating, setIsNameAnimating] = useState(false);
   const { append } = useChat({
     ...useChatConstants,
     credentials: 'include',
@@ -23,11 +25,11 @@ export function BuildNameEditor(): React.JSX.Element {
       if (textPart) {
         updateName(textPart.text);
         setDisplayName(textPart.text);
-        setIsNameGenerating(true);
+        setIsNameAnimating(true);
         // Reset the animation flag after animation completes
         setTimeout(() => {
-          setIsNameGenerating(false);
-        }, 2000); // Adjust timing based on your animation duration
+          setIsNameAnimating(false);
+        }, animationDuration); // Adjust timing based on your animation duration
       }
     },
   });
@@ -131,7 +133,7 @@ export function BuildNameEditor(): React.JSX.Element {
     <Tooltip>
       <TooltipTrigger asChild>
         <Button variant="ghost" className="cursor-text justify-start" onClick={handleEdit}>
-          <span data-animate={isNameGenerating} className="truncate data-[animate=true]:animate-typewriter-20">
+          <span data-animate={isNameAnimating} className="truncate data-[animate=true]:animate-typewriter-20">
             {displayName === '' ? <LoadingSpinner /> : displayName}
           </span>
         </Button>

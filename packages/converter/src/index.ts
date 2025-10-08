@@ -10,7 +10,7 @@ export {
 } from '#conversion.js';
 
 // Direct access to import and export pipelines
-export { importFiles, supportedImportFomats } from '#import.js';
+export { importFiles, supportedImportFormats } from '#import.js';
 export { exportFiles, supportedExportFormats } from '#export.js';
 
 // Types

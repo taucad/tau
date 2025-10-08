@@ -1,5 +1,5 @@
 import type { File, InputFormat, OutputFormat } from '#types.js';
-import { importFiles, supportedImportFomats } from '#import.js';
+import { importFiles, supportedImportFormats } from '#import.js';
 import { exportFiles, supportedExportFormats } from '#export.js';
 
 /**
@@ -16,7 +16,7 @@ export const convertFile = async (
   outputFormat: OutputFormat,
 ): Promise<File[]> => {
   // Validate input format
-  if (!supportedImportFomats.includes(inputFormat)) {
+  if (!supportedImportFormats.includes(inputFormat)) {
     throw new Error(`Unsupported input format: ${inputFormat}`);
   }
 
@@ -47,7 +47,7 @@ export const convertFile = async (
  */
 export const importToGlb = async (inputFiles: File[], inputFormat: InputFormat): Promise<Uint8Array> => {
   // Validate input format
-  if (!supportedImportFomats.includes(inputFormat)) {
+  if (!supportedImportFormats.includes(inputFormat)) {
     throw new Error(`Unsupported input format: ${inputFormat}`);
   }
 
@@ -99,7 +99,7 @@ export const exportFromGlb = async (glbData: Uint8Array, outputFormat: OutputFor
  * @returns Array of supported input format strings.
  */
 export const getSupportedInputFormats = (): readonly InputFormat[] => {
-  return supportedImportFomats;
+  return supportedImportFormats;
 };
 
 /**
@@ -118,7 +118,7 @@ export const getSupportedOutputFormats = (): readonly OutputFormat[] => {
  * @returns True if the format is supported.
  */
 export const isInputFormatSupported = (format: string): format is InputFormat => {
-  return supportedImportFomats.includes(format as InputFormat);
+  return supportedImportFormats.includes(format as InputFormat);
 };
 
 /**

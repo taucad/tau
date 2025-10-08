@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import type { InspectReport } from '@gltf-transform/functions';
 import type { InputFormat } from '#types.js';
-import { importFiles, supportedImportFomats } from '#import.js';
+import { importFiles, supportedImportFormats } from '#import.js';
 import { createInspectTestUtils, loadTestData, createGeometryVariant, validateGlbData } from '#test.utils.js';
 import type { LoaderTestCase, GeometryExpectation } from '#test.utils.js';
 import { getInspectReport, type GltfSceneStructure } from '#gltf.utils.js';
@@ -569,7 +569,7 @@ describe('importFiles', () => {
 
   it('should test all declared formats', () => {
     const enabledFormats = loaderTestCases.map((tc) => tc.format);
-    const declaredFormats = supportedImportFomats;
+    const declaredFormats = supportedImportFormats;
 
     expect([...new Set(enabledFormats)].sort()).toEqual([...new Set(declaredFormats)].sort());
   });

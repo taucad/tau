@@ -25,11 +25,11 @@ export const ChatModelSelector = memo(function ({
 
   const providerModelsMap = new Map<string, Model[]>();
   for (const model of models) {
-    if (!providerModelsMap.has(model.provider)) {
-      providerModelsMap.set(model.provider, []);
+    if (!providerModelsMap.has(model.provider.name)) {
+      providerModelsMap.set(model.provider.name, []);
     }
 
-    providerModelsMap.get(model.provider)?.push(model);
+    providerModelsMap.get(model.provider.name)?.push(model);
   }
 
   const handleSelectModel = useCallback(

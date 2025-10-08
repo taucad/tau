@@ -15,7 +15,10 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       id: 'google-gemini-2.5-pro',
       name: 'Gemini 2.5 Pro',
       slug: 'gemini-2.5-pro',
-      provider: 'vertexai',
+      provider: {
+        id: 'vertexai',
+        name: 'Google',
+      },
       model: 'gemini-2.5-pro-preview-05-06',
       details: {
         family: 'gemini',
@@ -41,7 +44,10 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       id: 'anthropic-claude-4-sonnet-thinking',
       name: 'Claude 4 Sonnet (Thinking)',
       slug: 'claude-4-sonnet-thinking',
-      provider: 'anthropic',
+      provider: {
+        id: 'anthropic',
+        name: 'Anthropic',
+      },
       model: 'claude-sonnet-4-20250514',
       support: {
         toolChoice: false,
@@ -76,7 +82,10 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       id: 'anthropic-claude-4-opus',
       name: 'Claude 4 Opus',
       slug: 'claude-4-opus',
-      provider: 'anthropic',
+      provider: {
+        id: 'anthropic',
+        name: 'Anthropic',
+      },
       model: 'claude-opus-4-20250514',
       support: {
         toolChoice: false,
@@ -111,7 +120,10 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       id: 'anthropic-claude-4-sonnet',
       name: 'Claude 4 Sonnet',
       slug: 'claude-4-sonnet',
-      provider: 'anthropic',
+      provider: {
+        id: 'anthropic',
+        name: 'Anthropic',
+      },
       model: 'claude-sonnet-4-20250514',
       details: {
         family: 'claude',
@@ -136,7 +148,10 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       id: 'openai-gpt-4.1',
       name: 'GPT-4.1',
       slug: 'gpt-4.1',
-      provider: 'openai',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
       model: 'gpt-4.1',
       details: {
         family: 'gpt',
@@ -158,7 +173,10 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       id: 'openai-gpt-o3',
       name: 'GPT-o3',
       slug: 'gpt-o3',
-      provider: 'openai',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
       model: 'o3-2025-04-16',
       details: {
         family: 'gpt',
@@ -180,7 +198,10 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
       id: 'openai-gpt-4o',
       name: 'GPT-4o',
       slug: 'gpt-4o',
-      provider: 'openai',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
       model: 'gpt-4o',
       details: {
         family: 'gpt',
@@ -191,6 +212,34 @@ const modelList: Record<CloudProviderId, Record<string, Model>> = {
           inputTokens: 2.5,
           outputTokens: 10,
           cachedReadTokens: 1.25,
+          cachedWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        temperature: 0,
+      },
+    },
+  },
+  cerebras: {
+    'gpt-oss-120b': {
+      id: 'cerebras-gpt-oss-120b',
+      name: 'GPT-OSS-120B',
+      slug: 'gpt-oss-120b',
+      provider: {
+        id: 'cerebras',
+        name: 'Cerebras',
+      },
+      model: 'gpt-oss-120b',
+      details: {
+        family: 'gpt',
+        families: ['GPT-OSS'],
+        contextWindow: 64_000,
+        maxTokens: 64_000,
+        cost: {
+          inputTokens: 0.25,
+          outputTokens: 0.69,
+          cachedReadTokens: 0,
           cachedWriteTokens: 0,
         },
       },
@@ -229,9 +278,9 @@ export class ModelService implements OnModuleInit {
       throw new Error(`Could not find model ${modelId}`);
     }
 
-    const provider = this.providerService.getProvider(modelConfig.provider);
+    const provider = this.providerService.getProvider(modelConfig.provider.id);
 
-    const modelClass = this.providerService.createModelClass(modelConfig.provider, {
+    const modelClass = this.providerService.createModelClass(modelConfig.provider.id, {
       model: modelConfig.model,
       ...modelConfig.configuration,
       configuration: provider.configuration,
@@ -249,7 +298,7 @@ export class ModelService implements OnModuleInit {
       throw new Error(`Could not find model ${modelId}`);
     }
 
-    const provider = this.providerService.getProvider(modelConfig.provider);
+    const provider = this.providerService.getProvider(modelConfig.provider.id);
 
     return {
       // Some providers include cached read tokens in the input tokens,
@@ -330,7 +379,10 @@ export class ModelService implements OnModuleInit {
               tools: fullModel.template.includes('.Tools'),
               toolChoice: false,
             },
-            provider: 'ollama',
+            provider: {
+              id: 'ollama',
+              name: 'Ollama',
+            },
           };
         }),
       );

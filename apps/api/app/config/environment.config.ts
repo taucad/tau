@@ -33,6 +33,7 @@ const environmentSchema = z.object({
         universe_domain: z.string(),
       }),
     ),
+  CEREBRAS_API_KEY: z.string().optional(),
   LANGSMITH_TRACING: z.string().optional(),
   LANGSMITH_ENDPOINT: z.string().optional(),
   LANGSMITH_PROJECT: z.string().optional(),

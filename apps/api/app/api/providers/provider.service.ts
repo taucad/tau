@@ -9,6 +9,8 @@ import type { ChatOllamaInput } from '@langchain/ollama';
 import { ChatAnthropic } from '@langchain/anthropic';
 import type { ChatAnthropicCallOptions } from '@langchain/anthropic';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { ChatCerebras } from '@langchain/cerebras';
+import type { ChatCerebrasInput } from '@langchain/cerebras';
 import type { Environment } from '#config/environment.config.ts';
 import type { ProviderId, Provider } from '#api/providers/provider.schema.js';
 
@@ -19,6 +21,7 @@ type ProviderOptionsMap = {
   anthropic: ChatAnthropicCallOptions;
   sambanova: ChatOpenAIFields;
   vertexai: ChatVertexAIInput & { model: string };
+  cerebras: ChatCerebrasInput;
 };
 
 // Enhanced type that includes the createClass method
@@ -102,6 +105,14 @@ export class ProviderService {
             },
           });
         },
+      },
+      cerebras: {
+        provider: 'cerebras',
+        configuration: {
+          apiKey: configService.get('CEREBRAS_API_KEY', { infer: true }),
+        },
+        inputTokensIncludesCachedReadTokens: false,
+        createClass: (options) => new ChatCerebras(options),
       },
     };
   }

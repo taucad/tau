@@ -1,4 +1,4 @@
-import type { Document } from '@gltf-transform/core';
+import type { Document, GLTF } from '@gltf-transform/core';
 import { NodeIO } from '@gltf-transform/core';
 import { unpartition } from '@gltf-transform/functions';
 import draco3d from 'draco3dgltf';
@@ -16,7 +16,9 @@ type GltfLoaderOptions = {
 export class GltfLoader extends BaseLoader<Uint8Array, GltfLoaderOptions> {
   protected async parseAsync(files: File[]): Promise<Uint8Array> {
     const io = new NodeIO().registerExtensions(allExtensions).registerDependencies({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- External library property names
       'draco3d.decoder': await draco3d.createDecoderModule(),
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- External library property names
       'draco3d.encoder': await draco3d.createEncoderModule(),
     });
     const { data, name } = this.findPrimaryFile(files);
@@ -28,7 +30,7 @@ export class GltfLoader extends BaseLoader<Uint8Array, GltfLoaderOptions> {
     if (isGltf) {
       // For GLTF files, convert to text and use readJSON
       const jsonText = new TextDecoder().decode(data);
-      const json = JSON.parse(jsonText);
+      const json = JSON.parse(jsonText) as GLTF.IGLTF;
 
       // Extract URIs referenced in the GLTF file
       const referencedUris = this.extractReferencedUris(json);
@@ -80,14 +82,12 @@ export class GltfLoader extends BaseLoader<Uint8Array, GltfLoaderOptions> {
     // Extract buffer URIs
     if (Array.isArray(gltfJson['buffers'])) {
       for (const buffer of gltfJson['buffers']) {
-        if (
-          typeof buffer === 'object' &&
-          buffer !== null &&
-          'uri' in buffer &&
-          typeof buffer.uri === 'string' &&
-          !buffer.uri.startsWith('data:') // Skip data URIs
-        ) {
-          uris.push(buffer.uri);
+        if (typeof buffer === 'object' && buffer !== null && 'uri' in buffer && typeof buffer.uri === 'string') {
+          const uri = buffer.uri as string;
+          if (!uri.startsWith('data:')) {
+            // Skip data URIs
+            uris.push(uri);
+          }
         }
       }
     }
@@ -95,14 +95,12 @@ export class GltfLoader extends BaseLoader<Uint8Array, GltfLoaderOptions> {
     // Extract image URIs
     if (Array.isArray(gltfJson['images'])) {
       for (const image of gltfJson['images']) {
-        if (
-          typeof image === 'object' &&
-          image !== null &&
-          'uri' in image &&
-          typeof image.uri === 'string' &&
-          !image.uri.startsWith('data:') // Skip data URIs
-        ) {
-          uris.push(image.uri);
+        if (typeof image === 'object' && image !== null && 'uri' in image && typeof image.uri === 'string') {
+          const uri = image.uri as string;
+          if (!uri.startsWith('data:')) {
+            // Skip data URIs
+            uris.push(uri);
+          }
         }
       }
     }

@@ -177,18 +177,9 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
         
         // Apply accumulated transformations from the transformation stack
         if (transformationStack.length > 0) {
-          // Apply transformations to the node
-          for (let i = transformationStack.length - 1; i >= 0; i--) {
-            const matrix = transformationStack[i]!;
-            // Convert from Rhino's column-major 4x4 matrix to gltf-transform format
-            const gltfMatrix = [
-              matrix[0]!, matrix[1]!, matrix[2]!, matrix[3]!,
-              matrix[4]!, matrix[5]!, matrix[6]!, matrix[7]!,
-              matrix[8]!, matrix[9]!, matrix[10]!, matrix[11]!,
-              matrix[12]!, matrix[13]!, matrix[14]!, matrix[15]!
-            ] as [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number];
-            node.setMatrix(gltfMatrix);
-          }
+          // Compose all transformations into a single matrix
+          const composedMatrix = this.composeTransformationStack(transformationStack);
+          node.setMatrix(composedMatrix);
         }
 
         // Set layer visibility (only for objects not in transformation stack)
@@ -700,6 +691,46 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
     }
 
     return { mesh, node };
+  }
+
+  /**
+   * Compose transformation stack by multiplying matrices in order
+   */
+  private composeTransformationStack(
+    transformationStack: number[][]
+  ): [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number] {
+    // Start with identity matrix
+    let result = [
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      0, 0, 0, 1
+    ];
+
+    // Multiply matrices from the stack in reverse order (parent to child)
+    for (let i = transformationStack.length - 1; i >= 0; i--) {
+      const matrix = transformationStack[i]!;
+      result = this.multiplyMatrices(result, matrix);
+    }
+
+    return result as [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number];
+  }
+
+  /**
+   * Multiply two 4x4 matrices (column-major order)
+   */
+  private multiplyMatrices(a: number[], b: number[]): number[] {
+    const result = new Array(16).fill(0);
+
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col < 4; col++) {
+        for (let k = 0; k < 4; k++) {
+          result[col * 4 + row] += a[k * 4 + row]! * b[col * 4 + k]!;
+        }
+      }
+    }
+
+    return result;
   }
 
   /**

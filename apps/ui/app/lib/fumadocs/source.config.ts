@@ -1,4 +1,4 @@
-import type { frontmatterSchema, metaSchema, DocsCollection, GlobalConfig } from 'fumadocs-mdx/config';
+import type { frontmatterSchema, metaSchema, DocsCollection } from 'fumadocs-mdx/config';
 import { defineConfig, defineDocs } from 'fumadocs-mdx/config';
 
 export const docs: DocsCollection<typeof frontmatterSchema, typeof metaSchema> = defineDocs({

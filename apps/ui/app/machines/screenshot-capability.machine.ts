@@ -306,6 +306,7 @@ async function captureScreenshots(
     canvas: screenshotCanvas,
     alpha: true,
     antialias: true,
+    logarithmicDepthBuffer: true,
   });
 
   try {

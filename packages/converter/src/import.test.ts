@@ -11,7 +11,7 @@ import type { GltfSceneStructure } from '#gltf.utils.js';
 // Test Case Templates & Factories
 // ============================================================================
 
-const STANDARD_CUBE_GEOMETRY: GeometryExpectation = {
+const standardCubeGeometry: GeometryExpectation = {
   vertexCount: 36,
   faceCount: 12,
   meshCount: 1,
@@ -21,7 +21,7 @@ const STANDARD_CUBE_GEOMETRY: GeometryExpectation = {
   },
 };
 
-const OPTIMIZED_CUBE_GEOMETRY: GeometryExpectation = {
+const optimizedCubeGeometry: GeometryExpectation = {
   vertexCount: 24,
   faceCount: 8,
   meshCount: 1,
@@ -31,7 +31,7 @@ const OPTIMIZED_CUBE_GEOMETRY: GeometryExpectation = {
   },
 };
 
-const GLTF_SCENE_PATTERNS = {
+const gltfScenePatterns = {
   // Container node with mesh child (most common pattern)
   containerWithMeshChild: {
     rootNodes: [
@@ -57,7 +57,7 @@ const createCubeTestCase = (
   options: {
     variant?: LoaderTestCase['variant'];
     geometry?: GeometryExpectation;
-    structure?: keyof typeof GLTF_SCENE_PATTERNS | GltfSceneStructure;
+    structure?: keyof typeof gltfScenePatterns | GltfSceneStructure;
     skip?: boolean;
     skipReason?: string;
     fixtureName?: string;
@@ -69,10 +69,10 @@ const createCubeTestCase = (
   fixtureName: options.fixtureName ?? `cube${options.variant ? `-${options.variant}` : ''}.${format}`,
   dataSource: options.dataSource,
   description: `Simple cube from ${format.toUpperCase()} format${options.variant ? ` (${options.variant})` : ''}`,
-  geometry: options.geometry ?? STANDARD_CUBE_GEOMETRY,
+  geometry: options.geometry ?? standardCubeGeometry,
   structure: options.structure
     ? typeof options.structure === 'string'
-      ? (GLTF_SCENE_PATTERNS[options.structure] as unknown as GltfSceneStructure)
+      ? (gltfScenePatterns[options.structure] as unknown as GltfSceneStructure)
       : options.structure
     : undefined,
   skip: options.skip,
@@ -90,11 +90,11 @@ const loaderTestCases: LoaderTestCase[] = [
   // GLTF/GLB Family - direct mesh at root level
   createCubeTestCase('gltf', { structure: 'directMesh' }),
   createCubeTestCase('glb', { structure: 'directMesh' }),
-  createCubeTestCase('glb', { variant: 'draco', structure: 'directMesh', geometry: OPTIMIZED_CUBE_GEOMETRY }),
+  createCubeTestCase('glb', { variant: 'draco', structure: 'directMesh', geometry: optimizedCubeGeometry }),
   createCubeTestCase('glb', {
     variant: 'materials',
     structure: 'directMesh',
-    geometry: createGeometryVariant(OPTIMIZED_CUBE_GEOMETRY, {
+    geometry: createGeometryVariant(optimizedCubeGeometry, {
       boundingBox: {
         size: [2201.257_52, 2000, 2201.257_52],
         center: [0, 1, 0],
@@ -104,7 +104,7 @@ const loaderTestCases: LoaderTestCase[] = [
   createCubeTestCase('glb', {
     variant: 'animations',
     structure: 'directMesh',
-    geometry: createGeometryVariant(OPTIMIZED_CUBE_GEOMETRY, {
+    geometry: createGeometryVariant(optimizedCubeGeometry, {
       boundingBox: {
         size: [2201.257_52, 2000, 2201.257_52],
         center: [0, 1, 0],
@@ -114,19 +114,19 @@ const loaderTestCases: LoaderTestCase[] = [
   createCubeTestCase('glb', {
     variant: 'textures',
     structure: 'directMesh',
-    geometry: createGeometryVariant(OPTIMIZED_CUBE_GEOMETRY, {
+    geometry: createGeometryVariant(optimizedCubeGeometry, {
       boundingBox: {
         size: [2000, 2000, 2000],
         center: [0, 1, 0],
       },
     }),
   }),
-  createCubeTestCase('gltf', { variant: 'draco', structure: 'directMesh', geometry: OPTIMIZED_CUBE_GEOMETRY }),
+  createCubeTestCase('gltf', { variant: 'draco', structure: 'directMesh', geometry: optimizedCubeGeometry }),
   {
     format: 'gltf',
     files: ['cube-bin.gltf', 'cube-bin.bin'],
     description: 'GLTF with external binary file',
-    geometry: createGeometryVariant(OPTIMIZED_CUBE_GEOMETRY, {
+    geometry: createGeometryVariant(optimizedCubeGeometry, {
       boundingBox: {
         size: [2000, 2000, 2000],
         center: [0, 1, 0],
@@ -150,7 +150,7 @@ const loaderTestCases: LoaderTestCase[] = [
     format: 'obj',
     files: ['cube-materials.obj', 'cube-materials.mtl'],
     description: 'OBJ with MTL material file',
-    geometry: STANDARD_CUBE_GEOMETRY,
+    geometry: standardCubeGeometry,
     structure: {
       rootNodes: [
         {
@@ -170,7 +170,7 @@ const loaderTestCases: LoaderTestCase[] = [
   createCubeTestCase('fbx', {
     variant: 'animations',
     structure: 'containerWithMeshChild',
-    geometry: createGeometryVariant(STANDARD_CUBE_GEOMETRY, {
+    geometry: createGeometryVariant(standardCubeGeometry, {
       boundingBox: {
         center: [0, 1, 0],
       },
@@ -190,7 +190,7 @@ const loaderTestCases: LoaderTestCase[] = [
   createCubeTestCase('dae', {}),
   createCubeTestCase('dae', {
     variant: 'millimeters',
-    geometry: createGeometryVariant(STANDARD_CUBE_GEOMETRY, {
+    geometry: createGeometryVariant(standardCubeGeometry, {
       // This is incorrect - the Assimp DAE loader should be accounting for the unit scaling.
       // TODO: fix this in the Assimp DAE loader.
       boundingBox: {
@@ -330,14 +330,14 @@ const loaderTestCases: LoaderTestCase[] = [
   createCubeTestCase('cob', { structure: 'containerWithMeshChild' }),
 
   createCubeTestCase('drc', {
-    geometry: OPTIMIZED_CUBE_GEOMETRY,
+    geometry: optimizedCubeGeometry,
     structure: {
       rootNodes: [{ type: 'MeshNode' }],
     },
   }),
 
   createCubeTestCase('dxf', {
-    geometry: createGeometryVariant(STANDARD_CUBE_GEOMETRY, {
+    geometry: createGeometryVariant(standardCubeGeometry, {
       vertexCount: 72,
       faceCount: 24,
     }),
@@ -345,7 +345,7 @@ const loaderTestCases: LoaderTestCase[] = [
   }),
 
   createCubeTestCase('3mf', {
-    geometry: createGeometryVariant(STANDARD_CUBE_GEOMETRY, {
+    geometry: createGeometryVariant(standardCubeGeometry, {
       boundingBox: { center: [0, -1, 0] },
     }),
     structure: 'containerWithMeshChild',
@@ -391,7 +391,7 @@ const loaderTestCases: LoaderTestCase[] = [
   },
 
   createCubeTestCase('bvh', {
-    geometry: createGeometryVariant(STANDARD_CUBE_GEOMETRY, {
+    geometry: createGeometryVariant(standardCubeGeometry, {
       vertexCount: 120,
       faceCount: 40,
       boundingBox: {
@@ -450,36 +450,36 @@ const loaderTestCases: LoaderTestCase[] = [
   }),
 
   createCubeTestCase('step', {
-    geometry: OPTIMIZED_CUBE_GEOMETRY,
+    geometry: optimizedCubeGeometry,
     structure: 'directMesh',
   }),
   createCubeTestCase('stp', {
-    geometry: OPTIMIZED_CUBE_GEOMETRY,
+    geometry: optimizedCubeGeometry,
     structure: 'directMesh',
   }),
   createCubeTestCase('iges', {
     variant: 'mesh',
-    geometry: OPTIMIZED_CUBE_GEOMETRY,
+    geometry: optimizedCubeGeometry,
     structure: 'directMesh',
   }),
   createCubeTestCase('igs', {
     variant: 'mesh',
-    geometry: OPTIMIZED_CUBE_GEOMETRY,
+    geometry: optimizedCubeGeometry,
     structure: 'directMesh',
   }),
   createCubeTestCase('iges', {
     variant: 'brep',
-    geometry: { ...OPTIMIZED_CUBE_GEOMETRY, meshCount: 6, facePoints: 4 },
+    geometry: { ...optimizedCubeGeometry, meshCount: 6, facePoints: 4 },
     // Skip structure validation for complex BREP - has 6 separate mesh root nodes
     skip: false,
   }),
   createCubeTestCase('igs', {
     variant: 'brep',
-    geometry: { ...OPTIMIZED_CUBE_GEOMETRY, meshCount: 6, facePoints: 4 },
+    geometry: { ...optimizedCubeGeometry, meshCount: 6, facePoints: 4 },
     // Skip structure validation for complex BREP - has complex multi-mesh structure
     skip: false,
   }),
-  createCubeTestCase('brep', { geometry: OPTIMIZED_CUBE_GEOMETRY, structure: 'directMesh' }),
+  createCubeTestCase('brep', { geometry: optimizedCubeGeometry, structure: 'directMesh' }),
 
   // ========================================================================
   // UNSUPPORTED FORMATS
@@ -614,10 +614,8 @@ describe('importFiles', () => {
         // Validate finite values through bounding box presence
         if (inspectReport.scenes.properties.length > 0) {
           const scene = inspectReport.scenes.properties[0]!;
-          if (scene.bboxMax && scene.bboxMin) {
-            for (const value of [...scene.bboxMax, ...scene.bboxMin]) {
-              expect(Number.isFinite(value)).toBe(true);
-            }
+          for (const value of [...scene.bboxMax, ...scene.bboxMin]) {
+            expect(Number.isFinite(value)).toBe(true);
           }
         }
       });

@@ -20,14 +20,13 @@ import { ChatContextActions } from '#components/chat/chat-context-actions.js';
 
 /**
  * IMPORTANT NOTE:
- * 
+ *
  * When adding a new element to the textarea and that element contains portalled content,
  * make sure to add the `data-chat-textarea-focustrap` attribute to the element.
- * 
+ *
  * This is used to determine if the focus has truly left the textarea and its related UI elements.
  */
-
-const FOCUS_TRAP_ATTRIBUTE = 'data-chat-textarea-focustrap';
+const focusTrapAttribute = 'data-chat-textarea-focustrap';
 
 export type ChatTextareaProperties = {
   readonly onSubmit: ({
@@ -451,7 +450,7 @@ export const ChatTextarea = memo(function ({
     // processing the focus change. This allows portaled elements (popovers, dialogs)
     // to receive focus before we check if we should trigger onBlur
     requestAnimationFrame(() => {
-      const activeElement = document.activeElement;
+      const { activeElement } = document;
       const container = containerReference.current;
 
       if (!container) {
@@ -465,7 +464,7 @@ export const ChatTextarea = memo(function ({
 
       // Check if focus moved to a related element (marked with data attribute)
       // This allows child components to mark their portaled content as related
-      if (activeElement instanceof Element && activeElement.closest(`[${FOCUS_TRAP_ATTRIBUTE}]`)) {
+      if (activeElement instanceof Element && activeElement.closest(`[${focusTrapAttribute}]`)) {
         return;
       }
 
@@ -478,30 +477,30 @@ export const ChatTextarea = memo(function ({
     <div
       ref={containerReference}
       className={cn(
-        '@container group/chat-textarea',
-        'relative flex size-full flex-col rounded-2xl bg-background border',
+        'group/chat-textarea @container',
+        'relative flex size-full flex-col rounded-2xl border bg-background',
         'cursor-text overflow-auto',
         'shadow-md',
         'focus-within:border-primary',
-        className)}
+        className,
+      )}
       data-has-context-actions={enableContextActions}
       onBlur={handleTextareaBlur}
     >
       {/* Textarea */}
       <div
-        className={cn(
-          'flex size-full flex-col overflow-auto',
-        )}
+        className={cn('flex size-full flex-col overflow-auto')}
         onClick={focusInput}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onMouseDown={handleMouseDown}
       >
-
         {/* Context */}
-        <div className="m-2 flex-wrap gap-1 hidden group-data-[has-context-actions=true]/chat-textarea:flex">
-          {enableContextActions ? <ChatContextActions data-chat-textarea-focustrap={true} addImage={handleAddImage} addText={handleAddText} /> : null}
+        <div className="m-2 hidden flex-wrap gap-1 group-data-[has-context-actions=true]/chat-textarea:flex">
+          {enableContextActions ? (
+            <ChatContextActions data-chat-textarea-focustrap addImage={handleAddImage} addText={handleAddText} />
+          ) : null}
           {images.map((image, index) => (
             <div key={image} className="group/image-item relative text-muted-foreground hover:text-foreground">
               <HoverCard openDelay={100} closeDelay={100}>
@@ -520,8 +519,8 @@ export const ChatTextarea = memo(function ({
               <Button
                 size="icon"
                 className={cn(
-                  "absolute top-1/2 -translate-y-1/2 left-0 z-10 size-6 rounded-none rounded-l-xs border border-r-0",
-                  "hidden group-hover/image-item:flex"
+                  'absolute top-1/2 left-0 z-10 size-6 -translate-y-1/2 rounded-none rounded-l-xs border border-r-0',
+                  'hidden group-hover/image-item:flex',
                 )}
                 aria-label="Remove image"
                 type="button"
@@ -539,7 +538,7 @@ export const ChatTextarea = memo(function ({
         <Textarea
           ref={textareaReference}
           className={cn(
-            'mb-10 size-full max-h-48 min-h-6 resize-none bg-transparent dark:bg-transparent border-none',
+            'mb-10 size-full max-h-48 min-h-6 resize-none border-none bg-transparent dark:bg-transparent',
             'px-3 pt-0 pb-3',
             'group-data-[has-context-actions=false]/chat-textarea:pt-3',
             'ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
@@ -588,17 +587,21 @@ export const ChatTextarea = memo(function ({
         {/* Model selector */}
         <Tooltip>
           <ChatModelSelector
+            data-chat-textarea-focustrap
             popoverProperties={{
               align: 'start',
             }}
             onSelect={focusInput}
             onClose={focusInput}
-            data-chat-textarea-focustrap={true}
           >
             {() => (
               <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" className="rounded-full h-7 text-muted-foreground hover:text-foreground">
-                  <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full @md:max-w-fit">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 rounded-full text-muted-foreground hover:text-foreground"
+                >
+                  <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full @xs:max-w-fit">
                     <span className="hidden truncate text-xs @[22rem]:block">{selectedModel?.slug ?? 'Offline'}</span>
                     <span className="relative flex size-4 items-center justify-center">
                       <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100" />
@@ -654,7 +657,13 @@ export const ChatTextarea = memo(function ({
         {/* Upload button */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="outline" size="icon" className="rounded-full text-muted-foreground hover:text-foreground" title="Add image" onClick={handleFileSelect}>
+            <Button
+              variant="outline"
+              size="icon"
+              className="rounded-full text-muted-foreground hover:text-foreground"
+              title="Add image"
+              onClick={handleFileSelect}
+            >
               <Paperclip />
             </Button>
           </TooltipTrigger>

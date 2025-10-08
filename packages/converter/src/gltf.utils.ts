@@ -220,7 +220,7 @@ function convertNodeToInfo(node: GltfNode): GltfNodeInfo {
 
   // Process children recursively
   if (children.length > 0) {
-    nodeInfo.children = children.map((child: unknown) => convertNodeToInfo(child));
+    nodeInfo.children = children.map((child) => convertNodeToInfo(child));
   }
 
   return nodeInfo;

@@ -33,9 +33,9 @@ export const chatTabs = [
 export function ChatInterfaceNav({ className }: { readonly className?: string }): React.ReactNode {
   return (
     <TabsList
-      activeClassName="rounded-lg"
+      enableAnimation={false}
       className={cn(
-        'w-full rounded-none shadow-none',
+        'w-full',
         'rounded-xl border text-muted-foreground! [&_svg]:size-4! [&_svg]:text-muted-foreground',
         className,
       )}
@@ -43,15 +43,17 @@ export function ChatInterfaceNav({ className }: { readonly className?: string })
       {chatTabs.map((tab) => (
         <TabsTrigger
           key={tab.id}
+          enableAnimation={false}
           value={tab.id}
           className={cn(
-            'flex flex-col items-center justify-center gap-0.5',
+            '-mx-1 flex flex-col items-center justify-center gap-0 first:ml-0 last:mr-0',
             'data-[state=active]:text-primary!',
+            'data-[state=active]:bg-primary/20',
+            'data-[state=active]:rounded-lg',
             'data-[state=active]:[&_svg]:text-primary',
           )}
         >
           {tab.icon}
-          <span className="text-[0.625rem] text-muted-foreground">{tab.label}</span>
         </TabsTrigger>
       ))}
     </TabsList>

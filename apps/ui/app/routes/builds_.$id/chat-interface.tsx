@@ -91,9 +91,9 @@ export const ChatInterface = memo(function (): React.JSX.Element {
       <Tabs
         className={cn(
           'group/chat-tabs absolute inset-0 size-full gap-0',
-          '[--nav-height:calc(var(--spacing)*10)]',
+          '[--nav-height:calc(var(--spacing)*9)]',
           'md:hidden',
-          '[--full-panel-collapsed:30dvh]',
+          '[--full-panel-collapsed:40dvh]',
         )}
         value={activeTab}
         data-active-tab={activeTab}
@@ -141,19 +141,20 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           {/* Bottom-left Content */}
           <div
             className={cn(
-              'pointer-events-auto absolute bottom-13 left-0 z-10 flex w-full flex-row justify-between gap-2 px-2',
+              'pointer-events-auto absolute bottom-11 left-0 z-10 flex w-full flex-row justify-between gap-2 px-2',
+              'hidden group-data-[active-tab=model]/chat-tabs:flex',
               'group-data-[full-height-panel=false]/chat-tabs:hidden',
             )}
           >
             <ChatViewerControls />
           </div>
         </div>
-        <div className="absolute right-0 bottom-0 left-0 z-20 flex w-full flex-row items-center justify-between gap-1 p-1 pt-0">
-          <ChatInterfaceNav className="h-(--nav-height) shadow-sm" />
+        <div className="absolute right-0 bottom-0 left-0 z-20 flex w-full flex-row items-center justify-between gap-2 px-2 pt-0">
+          <ChatInterfaceNav className="h-(--nav-height)" />
           <Button
             size="icon"
             variant="overlay"
-            className="size-10 rounded-xl bg-muted shadow-sm [&_svg]:size-5! [&_svg]:stroke-[1.5] [&_svg]:text-muted-foreground"
+            className="size-9 rounded-full bg-muted shadow-none [&_svg]:size-5! [&_svg]:stroke-[1.5] [&_svg]:text-muted-foreground"
             onClick={toggleFullHeightPanel}
           >
             <EyeClosed className="group-data-[full-height-panel=true]/chat-tabs:hidden" />
@@ -176,13 +177,13 @@ export const ChatInterface = memo(function (): React.JSX.Element {
             // Make only the top of the floating panel rounded.
             '[&_[data-slot=floating-panel]]:rounded-none',
             '[&_[data-slot=floating-panel]]:rounded-t-lg',
+            '[&_[data-slot=floating-panel]]:border-b-0',
             '[&_[data-slot=floating-panel]]:h-full',
             '[&_[data-slot=floating-panel]]:pointer-events-auto',
 
             // Make sure the content is padded to the bottom of the floating panel.
             '[&_[data-slot=floating-panel-content]]:transition-none',
-            '[&_[data-slot=floating-panel-content]]:pb-21',
-            'group-data-[full-height-panel=false]/chat-tabs:[&_[data-slot=floating-panel-content]]:pb-[calc(var(--nav-height)+0.25rem)]',
+            '[&_[data-slot=floating-panel-content]]:pb-9',
 
             // Hide the floating panel trigger.
             '[&_[data-slot=floating-panel-trigger]]:hidden',

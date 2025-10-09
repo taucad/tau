@@ -14,6 +14,7 @@ function Tabs({ className, ...props }: TabsProps): React.JSX.Element {
 type TabsListProps = React.ComponentProps<typeof TabsPrimitive.List> & {
   readonly activeClassName?: string;
   readonly transition?: Transition;
+  readonly enableAnimation?: boolean;
 };
 
 const defaultTabsListTransition = {
@@ -28,6 +29,7 @@ function TabsList({
   className,
   activeClassName,
   transition = defaultTabsListTransition,
+  enableAnimation = true,
   ...props
 }: TabsListProps): React.JSX.Element {
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- radix requires `null` ref
@@ -50,6 +52,10 @@ function TabsList({
   }, []);
 
   React.useEffect(() => {
+    if (!enableAnimation) {
+      return;
+    }
+
     getActiveValue();
 
     const observer = new MutationObserver(getActiveValue);
@@ -65,7 +71,27 @@ function TabsList({
     return () => {
       observer.disconnect();
     };
-  }, [getActiveValue]);
+  }, [getActiveValue, enableAnimation]);
+
+  if (!enableAnimation) {
+    return (
+      <TabsPrimitive.List
+        ref={localRef}
+        data-slot="tabs-list"
+        className={cn(
+          'w-fit items-center justify-center rounded-md bg-muted p-0.75 text-muted-foreground',
+          'data-[orientation=vertical]:h-fit',
+          'data-[orientation=horizontal]:min-h-8',
+          'data-[orientation=horizontal]:min-w-fit',
+          'data-[orientation=horizontal]:inline-flex',
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </TabsPrimitive.List>
+    );
+  }
 
   return (
     <MotionHighlight
@@ -93,9 +119,25 @@ function TabsList({
   );
 }
 
-type TabsTriggerProps = React.ComponentProps<typeof TabsPrimitive.Trigger>;
+type TabsTriggerProps = React.ComponentProps<typeof TabsPrimitive.Trigger> & {
+  readonly enableAnimation?: boolean;
+};
 
-function TabsTrigger({ className, value, ...props }: TabsTriggerProps): React.JSX.Element {
+function TabsTrigger({ className, value, enableAnimation = true, ...props }: TabsTriggerProps): React.JSX.Element {
+  if (!enableAnimation) {
+    return (
+      <TabsPrimitive.Trigger
+        data-slot="tabs-trigger"
+        className={cn(
+          "z-10 flex size-full cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium whitespace-nowrap text-foreground transition-[box-shadow] select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 dark:text-muted-foreground dark:data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+          className,
+        )}
+        value={value}
+        {...props}
+      />
+    );
+  }
+
   return (
     <MotionHighlightItem value={value} className="size-full">
       <TabsPrimitive.Trigger

@@ -6,6 +6,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { useKeydown } from '#hooks/use-keydown.js';
+import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { formatKeyCombination } from '#utils/keys.js';
 
 type CameraControlProps = {
   /**
@@ -32,6 +35,18 @@ type CameraControlProps = {
 export function FovControl({ defaultAngle, className }: Omit<CameraControlProps, 'onChange'>): React.JSX.Element {
   const [fovAngle, setFovAngle] = useCookie<number>(cookieName.fovAngle, defaultAngle);
 
+  // Track Shift key state for changing slider step
+  const { isKeyPressed: isShiftHeld } = useKeydown(
+    { key: 'Shift' },
+    () => {
+      // No-op callback, we just use the returned isKeyPressed state
+    },
+    {
+      preventDefault: false,
+      stopPropagation: false,
+    },
+  );
+
   // Synchronize fov angle to the Graphics context when angle changes
   useEffect(() => {
     graphicsActor.send({ type: 'setFovAngle', payload: fovAngle });
@@ -45,40 +60,67 @@ export function FovControl({ defaultAngle, className }: Omit<CameraControlProps,
             buttonVariants({
               variant: 'overlay',
               size: 'sm',
+              className: cn(
+                'group relative gap-0 overflow-hidden p-0 transition-[box-shadow] duration-300 max-md:w-30 md:w-50',
+                'flex items-center',
+                'hover:cursor-pointer',
+                '[&:focus-within]:border-primary',
+                '[&:focus-within]:ring-ring/50',
+                '[&:focus-within]:ring-3',
+                className,
+              ),
             }),
-            className,
-            'group relative w-fit gap-0 overflow-hidden p-0 px-1.5 hover:overflow-visible max-md:overflow-visible',
-            'flex items-center',
-            'hover:cursor-pointer',
           )}
         >
-          {/* Text labels that will move up on hover */}
-          <div className="flex w-full justify-between gap-2 px-1 text-xs leading-none transition-transform duration-300 group-hover:-translate-y-1.75 max-md:-translate-y-1.75">
-            <span className="hidden md:block">Orthographic</span>
-            <span className="md:hidden">Orth.</span>
-            <div className="w-[3ch] text-center font-bold text-primary">{fovAngle}°</div>
-            <span className="hidden md:block">Perspective</span>
-            <span className="md:hidden">Persp.</span>
-          </div>
-
           {/* Slider container that slides up from bottom */}
           <Slider
             min={0}
             max={90}
-            step={1}
+            step={isShiftHeld ? 5 : 1}
             value={[fovAngle]}
+            variant="inset"
             // Inset-0 is used to make the entire button slideable for better UX
-            className="absolute inset-0 h-full px-1 pt-8 opacity-0 duration-300 group-hover:pt-4 group-hover:opacity-100 max-md:pt-4 max-md:opacity-100 [&_[data-slot='slider-track']]:bg-neutral/20"
+            className={cn(
+              'size-full transition-[opacity] duration-300',
+              // Mobile gets a visual clue that this is a slider
+              'opacity-15 md:opacity-0',
+              // Brighten the slider when hovering or focusing,
+              // keeping it dim for mobile to ensure the text is legible
+              'group-hover:opacity-30 focus-within:opacity-30',
+              '[&_[data-slot=slider-track]]:h-full',
+              '[&_[data-slot=slider-track]]:rounded-none',
+              '[&_[data-slot=slider-track]]:border-none',
+              '[&_[data-slot=slider-track]]:bg-transparent',
+              '[&_[data-slot=slider-track]]:ring-0',
+            )}
             onValueChange={(value) => {
               setFovAngle(value[0]!);
             }}
           />
+          {/* Text labels that will move up on hover */}
+          <div
+            className={cn(
+              'pointer-events-none absolute inset-0 flex h-full w-full items-center justify-between gap-1 px-2',
+              'text-xs leading-none text-foreground transition-all duration-300 select-none',
+            )}
+          >
+            <span className="hidden md:block">Orthographic</span>
+            <span className="md:hidden">Orth.</span>
+            <div className="w-[3ch] text-center font-bold">{fovAngle}°</div>
+            <span className="hidden md:block">Perspective</span>
+            <span className="md:hidden">Persp.</span>
+          </div>
         </div>
       </TooltipTrigger>
-      <TooltipContent>
+      <TooltipContent forceMount>
         <span>Adjust field of view angle</span>
         <br />
         <span className="text-neutral-foreground/60 dark:text-foreground/50">Tip: Set to 0° for orthographic view</span>
+        {/* Desktop only - shift key is usually not available on mobile */}
+        <br className="max-md:hidden" />
+        <span className="text-neutral-foreground/60 max-md:hidden dark:text-foreground/50">
+          Tip: Hold <KeyShortcut variant="tooltip">{formatKeyCombination({ key: 'Shift' })}</KeyShortcut> for 5° steps
+        </span>
       </TooltipContent>
     </Tooltip>
   );

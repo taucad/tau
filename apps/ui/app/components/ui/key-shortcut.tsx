@@ -4,13 +4,13 @@ import { cn } from '#utils/ui.js';
 
 const keyboardShortcutVariants = cva(
   // Font
-  'font-normal text-sm tracking-[0.2em] flex items-center rounded-md h-5 p-0 pl-1 pr-0.5 hidden md:inline-flex',
+  'font-normal text-xs tracking-[0.2em] flex items-center rounded-xs p-0 pl-1 pr-0.5 hidden md:inline-flex',
   {
     variants: {
       variant: {
         tooltip: 'bg-white/30 dark:bg-white/20 text-white dark:text-white',
         ghost: 'bg-transparent text-muted-foreground',
-        default: 'bg-muted text-muted-foreground',
+        default: 'bg-neutral/10 text-muted-foreground',
       },
     },
     defaultVariants: {

@@ -6,24 +6,28 @@ export type KeyCombination = Pick<KeyboardEvent, 'key'> &
     requireAllModifiers?: boolean;
   };
 
+/* eslint-disable @typescript-eslint/naming-convention -- these are the key codes from the KeyboardEvent interface */
+const specialKeys: Record<string, string> = {
+  ArrowUp: '↑',
+  ArrowDown: '↓',
+  ArrowLeft: '←',
+  ArrowRight: '→',
+  Enter: '⏎',
+  Escape: 'Esc',
+  Backspace: '⌫',
+  Delete: 'Del',
+  ' ': 'Space',
+  Shift: '⇧',
+  Control: '⌃',
+  Alt: '⌥',
+  Meta: '⌘',
+};
+/* eslint-enable @typescript-eslint/naming-convention -- these are the key codes from the KeyboardEvent interface */
+
 /**
  * Formats special keys into symbols or readable names
  */
 const formatKey = (key: KeyCombination['key']): string => {
-  /* eslint-disable @typescript-eslint/naming-convention -- these are the key codes from the KeyboardEvent interface */
-  const specialKeys: Record<string, string> = {
-    ArrowUp: '↑',
-    ArrowDown: '↓',
-    ArrowLeft: '←',
-    ArrowRight: '→',
-    Enter: '⏎',
-    Escape: 'Esc',
-    Backspace: '⌫',
-    Delete: 'Del',
-    ' ': 'Space',
-  };
-  /* eslint-enable @typescript-eslint/naming-convention -- these are the key codes from the KeyboardEvent interface */
-
   const specialKey = specialKeys[key];
 
   if (specialKey) {

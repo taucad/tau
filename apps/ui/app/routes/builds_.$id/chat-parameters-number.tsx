@@ -1,6 +1,7 @@
 import { Slider } from '#components/ui/slider.js';
 import { ChatParametersInputNumber } from '#routes/builds_.$id/chat-parameters-input-number.js';
 import { cn } from '#utils/ui.js';
+import { useKeydown } from '#hooks/use-keydown.js';
 
 // Slider calculation constants
 
@@ -33,6 +34,44 @@ const MinStepValue = 0.000_001;
  * Used when the default value is 0 and we need a reasonable step size.
  */
 const DefaultStepForZero = 0.01;
+
+/*
+ * The target percentage of the default value that the shift multiplier should represent.
+ * This helps select an appropriate multiplier from the sequence.
+ */
+const TargetShiftPercentage = 0.1; // 10% of the value
+
+/**
+ * Calculate the shift step multiplier based on the magnitude of the default value.
+ * Returns a value from the sequence: [..., 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, ...]
+ * The multiplier scales with the default value to provide consistent UX across different magnitudes.
+ *
+ * @param defaultValue - The default value of the parameter
+ * @returns The calculated shift step multiplier from the 5/10 sequence
+ */
+const calculateShiftStepMultiplier = (defaultValue: number): number => {
+  if (defaultValue === 0) {
+    return 5;
+  }
+
+  const absoluteValue = Math.abs(defaultValue);
+
+  // Calculate the target multiplier as a percentage of the value
+  const targetMultiplier = absoluteValue * TargetShiftPercentage;
+
+  // Find the magnitude (power of 10) we're working with
+  const magnitude = Math.floor(Math.log10(targetMultiplier));
+
+  // Generate two candidate multipliers: 10^n and 5 * 10^n
+  const lowerCandidate = 10 ** magnitude;
+  const upperCandidate = 5 * 10 ** magnitude;
+
+  // Pick the one closest to our target
+  const lowerDiff = Math.abs(targetMultiplier - lowerCandidate);
+  const upperDiff = Math.abs(targetMultiplier - upperCandidate);
+
+  return lowerDiff < upperDiff ? lowerCandidate : upperCandidate;
+};
 
 /**
  * Calculate the tier boundary for a given value using log10.
@@ -153,37 +192,43 @@ export function ChatParametersNumber({
   max,
   step,
 }: ChatParametersNumberProps): React.JSX.Element {
+  // Track Shift key state for adjusting slider step
+  const { isKeyPressed: isShiftHeld } = useKeydown(
+    { key: 'Shift' },
+    () => {
+      // No-op callback, we just use the returned isKeyPressed state
+    },
+    {
+      preventDefault: false,
+      stopPropagation: false,
+    },
+  );
+
+  const baseStep = step ?? calculateSliderStep(defaultValue);
+  const shiftMultiplier = calculateShiftStepMultiplier(defaultValue);
+  const effectiveStep = isShiftHeld ? baseStep * shiftMultiplier : baseStep;
+
   return (
     <div className="flex w-full flex-row items-center gap-2">
       <Slider
+        variant="inset"
         value={[value]}
         min={min ?? calculateSliderMin(defaultValue)}
         max={max ?? calculateSliderMax(defaultValue)}
-        step={step ?? calculateSliderStep(defaultValue)}
-        className={cn(
-          'flex-1',
-          '[&_[data-slot="slider-track"]]:h-4',
-          '[&_[data-slot="slider-track"]]:rounded-md',
-          '[&_[data-slot="slider-thumb"]]:size-5.5',
-          '[&_[data-slot="slider-thumb"]]:border-1',
-          '[&_[data-slot="slider-thumb"]]:transition-transform',
-          '[&_[data-slot="slider-thumb"]]:hover:scale-110',
-          '[&_[data-slot="slider-track"]]:bg-muted',
-        )}
+        step={effectiveStep}
+        className={cn('[&_[data-slot=slider-track]]:h-7', 'md:[&_[data-slot=slider-track]]:h-4.5')}
         onValueChange={([newValue]) => {
           onChange(Number(newValue));
         }}
       />
-      <div className="flex flex-row items-center">
-        <ChatParametersInputNumber
-          value={value}
-          name={name}
-          className="h-7 w-24 bg-background"
-          onChange={(event) => {
-            onChange(Number.parseFloat(event.target.value));
-          }}
-        />
-      </div>
+      <ChatParametersInputNumber
+        value={value}
+        name={name}
+        className="h-7 w-24 bg-background"
+        onChange={(event) => {
+          onChange(Number.parseFloat(event.target.value));
+        }}
+      />
     </div>
   );
 }

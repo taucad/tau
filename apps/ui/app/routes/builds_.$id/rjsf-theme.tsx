@@ -141,16 +141,19 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   };
 
   return (
-    <div className={cn('@container/parameter flex flex-col px-3 py-2 transition-colors')}>
-      <div className="flex h-auto min-h-6 flex-row justify-between gap-2">
-        <span className={cn(fieldHasValue ? 'font-medium' : 'font-normal')} aria-label={`Parameter: ${prettyLabel}`}>
+    <div className={cn('@container/parameter my-3 flex flex-col px-3 transition-colors')}>
+      <div className="flex h-auto min-h-5 flex-row justify-between gap-2">
+        <span
+          className={cn('pb-0.25', fieldHasValue ? 'font-medium' : 'font-normal')}
+          aria-label={`Parameter: ${prettyLabel}`}
+        >
           <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
           {required ? <span className="text-destructive">*</span> : null}
         </span>
         {fieldHasValue ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={handleReset}>
+              <Button variant="ghost" size="xs" className="h-5 text-muted-foreground" onClick={handleReset}>
                 <RefreshCcwDot className="size-3.5" />
               </Button>
             </TooltipTrigger>

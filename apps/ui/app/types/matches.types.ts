@@ -14,6 +14,10 @@ export type Handle = {
    * - var(--header-height) (for the header height)
    */
   enableFloatingSidebar?: boolean;
+  /**
+   * Enable overflow-y on the page. Use this when you have scrollable content in the page.
+   */
+  enableOverflowY?: boolean;
 };
 
 export type TypedUiMatch = UIMatch & {

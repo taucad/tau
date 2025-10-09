@@ -21,6 +21,11 @@ import type { KernelProvider } from '#types/kernel.types.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
+import type { Handle } from '#types/matches.types.js';
+
+export const handle: Handle = {
+  enableOverflowY: true,
+};
 
 export default function ChatStart(): React.JSX.Element {
   const navigate = useNavigate();

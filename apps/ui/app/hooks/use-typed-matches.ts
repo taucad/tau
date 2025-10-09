@@ -21,6 +21,7 @@ export function useTypedMatches<Selected>(
       commandPalette: [],
       noPageWrapper: [],
       enableFloatingSidebar: [],
+      enableOverflowY: [],
     };
 
     // Get all possible handle properties from all matches

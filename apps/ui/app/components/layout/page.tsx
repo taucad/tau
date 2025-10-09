@@ -30,6 +30,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     hasCommandPaletteItems,
     noPageWrapper,
     enableFloatingSidebar,
+    enableOverflowY,
   } = useTypedMatches((handles) => ({
     breadcrumbItems: handles.breadcrumb,
     hasBreadcrumbItems: handles.breadcrumb.length > 0,
@@ -39,6 +40,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     hasCommandPaletteItems: handles.commandPalette.length > 0,
     noPageWrapper: handles.noPageWrapper.some((match) => match.handle.noPageWrapper === true),
     enableFloatingSidebar: handles.enableFloatingSidebar.some((match) => match.handle.enableFloatingSidebar === true),
+    enableOverflowY: handles.enableOverflowY.some((match) => match.handle.enableOverflowY === true),
   }));
 
   const isOnline = useNetworkConnectivity();
@@ -127,7 +129,8 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
         </header>
         <section
           className={cn(
-            'h-dvh overflow-y-auto',
+            'h-dvh',
+            enableOverflowY && 'overflow-y-auto',
             !enableFloatingSidebar &&
               'mt-[var(--header-height)] h-[calc(100dvh-var(--header-height)-1px)] md:ml-(--sidebar-width-current)',
           )}

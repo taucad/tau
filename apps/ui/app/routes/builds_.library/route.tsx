@@ -86,6 +86,7 @@ export const handle: Handle = {
       </Button>
     );
   },
+  enableOverflowY: true,
 };
 
 export type BuildActions = {

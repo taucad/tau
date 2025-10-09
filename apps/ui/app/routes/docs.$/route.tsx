@@ -70,6 +70,7 @@ export const handle: Handle = {
     return breadcrumbs;
   },
   enableFloatingSidebar: true,
+  enableOverflowY: true,
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- docs.doc is not typed correctly.

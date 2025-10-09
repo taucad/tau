@@ -154,7 +154,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           <Button
             size="icon"
             variant="overlay"
-            className="size-9 rounded-full bg-muted shadow-none [&_svg]:size-5! [&_svg]:stroke-[1.5] [&_svg]:text-muted-foreground"
+            className="size-9 rounded-full bg-sidebar shadow-none [&_svg]:size-5! [&_svg]:stroke-[1.5] [&_svg]:text-muted-foreground"
             onClick={toggleFullHeightPanel}
           >
             <EyeClosed className="group-data-[full-height-panel=true]/chat-tabs:hidden" />

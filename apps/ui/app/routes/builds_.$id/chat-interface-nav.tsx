@@ -35,8 +35,8 @@ export function ChatInterfaceNav({ className }: { readonly className?: string })
     <TabsList
       enableAnimation={false}
       className={cn(
-        'w-full',
-        'rounded-xl border text-muted-foreground! [&_svg]:size-4! [&_svg]:text-muted-foreground',
+        'w-full border bg-sidebar',
+        'rounded-xl p-0 text-muted-foreground! [&_svg]:size-4! [&_svg]:text-muted-foreground',
         className,
       )}
     >
@@ -47,9 +47,9 @@ export function ChatInterfaceNav({ className }: { readonly className?: string })
           value={tab.id}
           className={cn(
             '-mx-1 flex flex-col items-center justify-center gap-0 first:ml-0 last:mr-0',
-            'data-[state=active]:text-primary!',
+            'data-[state=active]:text-primary',
             'data-[state=active]:bg-primary/20',
-            'data-[state=active]:rounded-lg',
+            'data-[state=active]:rounded-xl',
             'data-[state=active]:[&_svg]:text-primary',
           )}
         >

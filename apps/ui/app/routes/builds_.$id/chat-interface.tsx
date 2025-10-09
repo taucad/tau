@@ -126,7 +126,15 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           </div>
 
           {/* Centered Content */}
-          <div className={cn('absolute', 'left-1/2', '-translate-x-1/2', 'top-6', 'z-50')}>
+          <div
+            className={cn(
+              'absolute',
+              'left-1/2',
+              '-translate-x-1/2',
+              'top-[calc(var(--header-height)+var(--spacing)*4)]',
+              'z-50',
+            )}
+          >
             <ChatViewerStatus />
           </div>
 

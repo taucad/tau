@@ -3,7 +3,7 @@ import { cva } from 'class-variance-authority';
 import { cn } from '#utils/ui.js';
 
 const keyboardShortcutVariants = cva(
-  'font-normal text-xs tracking-[0.1em] flex items-center rounded-xs p-0 pl-1 pr-0.5 hidden md:inline-flex',
+  'font-normal select-none text-xs tracking-[0.1em] flex items-center rounded-xs p-0 pl-1 pr-0.5 hidden md:inline-flex',
   {
     variants: {
       variant: {

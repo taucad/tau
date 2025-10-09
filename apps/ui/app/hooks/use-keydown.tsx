@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useMemo } from 'react';
+import { useEffect, useCallback, useMemo, useState } from 'react';
 import { formatKeyCombination } from '#utils/keys.js';
 import type { KeyCombination } from '#utils/keys.js';
 
@@ -11,7 +11,7 @@ type KeydownOptions = {
 /**
  * Hook to handle keyboard shortcuts
  */
-export const useKeydown = (
+export function useKeydown(
   combo: KeyCombination,
   callback: (event: KeyboardEvent) => void,
   options: KeydownOptions = {},
@@ -24,8 +24,13 @@ export const useKeydown = (
    * The key combination, formatted by navigator platform
    */
   formattedKeyCombination: string;
-} => {
+  /**
+   * Whether the key is currently pressed
+   */
+  isKeyPressed: boolean;
+} {
   const { preventDefault = true, stopPropagation = true, repeat = false } = options;
+  const [isKeyPressed, setIsKeyPressed] = useState(false);
 
   const handler = useCallback(
     (event: KeyboardEvent) => {
@@ -33,14 +38,25 @@ export const useKeydown = (
         return;
       }
 
-      const matches =
-        event.key.toLowerCase() === combo.key.toLowerCase() &&
-        Boolean(event.metaKey) === Boolean(combo.metaKey) &&
-        Boolean(event.ctrlKey) === Boolean(combo.ctrlKey) &&
-        Boolean(event.altKey) === Boolean(combo.altKey) &&
-        Boolean(event.shiftKey) === Boolean(combo.shiftKey);
+      // Check if the main key matches
+      const keyMatches = event.key.toLowerCase() === combo.key.toLowerCase();
 
-      if (matches) {
+      if (!keyMatches) {
+        return;
+      }
+
+      // For modifier keys (Shift, Control, Alt, Meta), we don't check their own modifier state
+      const isModifierKey = ['shift', 'control', 'alt', 'meta'].includes(combo.key.toLowerCase());
+
+      // Check modifier keys only if the target key is not itself a modifier
+      const modifiersMatch =
+        isModifierKey ||
+        (Boolean(event.metaKey) === Boolean(combo.metaKey) &&
+          Boolean(event.ctrlKey) === Boolean(combo.ctrlKey) &&
+          Boolean(event.altKey) === Boolean(combo.altKey) &&
+          Boolean(event.shiftKey) === Boolean(combo.shiftKey));
+
+      if (modifiersMatch) {
         if (preventDefault) {
           event.preventDefault();
         }
@@ -48,6 +64,9 @@ export const useKeydown = (
         if (stopPropagation) {
           event.stopPropagation();
         }
+
+        const isPressed = event.type === 'keydown';
+        setIsKeyPressed(isPressed);
 
         callback(event);
       }
@@ -57,8 +76,11 @@ export const useKeydown = (
 
   useEffect(() => {
     globalThis.addEventListener('keydown', handler);
+    globalThis.addEventListener('keyup', handler);
+
     return () => {
       globalThis.removeEventListener('keydown', handler);
+      globalThis.removeEventListener('keyup', handler);
     };
   }, [handler]);
 
@@ -67,5 +89,6 @@ export const useKeydown = (
   return {
     originalKeyCombination: combo,
     formattedKeyCombination,
+    isKeyPressed,
   };
-};
+}

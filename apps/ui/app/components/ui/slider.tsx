@@ -1,15 +1,49 @@
 import * as React from 'react';
 import * as SliderPrimitive from '@radix-ui/react-slider';
+import { cva } from 'class-variance-authority';
+import type { VariantProps } from 'class-variance-authority';
 import { cn } from '#utils/ui.js';
+
+const sliderVariants = cva(
+  'relative flex w-full touch-none items-center select-none data-[disabled]:opacity-50 data-[orientation=vertical]:h-full data-[orientation=vertical]:min-h-44 data-[orientation=vertical]:w-auto data-[orientation=vertical]:flex-col',
+  {
+    variants: {
+      variant: {
+        default: '',
+        inset: [
+          // The slider thumb is hidden via opacity, but still active for accessibility.
+          '[&_[data-slot=slider-thumb]]:opacity-0',
+
+          // Then, apply the focus styles to the slider track instead
+          '[&_[data-slot=slider-track]]:transition-[box-shadow]',
+          '[&:focus-within_[data-slot=slider-track]]:border-primary',
+          '[&:focus-within_[data-slot=slider-track]]:ring-ring/50',
+          '[&:focus-within_[data-slot=slider-track]]:ring-3',
+
+          // Make the slider track appear clickable
+          '[&_[data-slot=slider-track]]:cursor-pointer',
+
+          // Default styles
+          '[&_[data-slot=slider-track]]:h-4.5',
+          '[&_[data-slot=slider-track]]:bg-background',
+        ],
+      },
+    },
+    defaultVariants: {
+      variant: 'default',
+    },
+  },
+);
 
 function Slider({
   className,
+  variant,
   defaultValue,
   value,
   min = 0,
   max = 100,
   ...properties
-}: React.ComponentProps<typeof SliderPrimitive.Root>): React.JSX.Element {
+}: React.ComponentProps<typeof SliderPrimitive.Root> & VariantProps<typeof sliderVariants>): React.JSX.Element {
   const _values = React.useMemo(
     () => (Array.isArray(value) ? value : Array.isArray(defaultValue) ? defaultValue : [min, max]),
     [value, defaultValue, min, max],
@@ -22,10 +56,7 @@ function Slider({
       value={value}
       min={min}
       max={max}
-      className={cn(
-        'relative flex w-full touch-none items-center select-none data-[disabled]:opacity-50 data-[orientation=vertical]:h-full data-[orientation=vertical]:min-h-44 data-[orientation=vertical]:w-auto data-[orientation=vertical]:flex-col',
-        className,
-      )}
+      className={cn(sliderVariants({ variant, className }))}
       {...properties}
     >
       <SliderPrimitive.Track
@@ -50,4 +81,4 @@ function Slider({
   );
 }
 
-export { Slider };
+export { Slider, sliderVariants };

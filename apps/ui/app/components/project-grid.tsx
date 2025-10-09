@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { Star, GitFork, Eye } from 'lucide-react';
+import { Star, Eye, ArrowRight } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useActor, useSelector } from '@xstate/react';
@@ -143,7 +143,7 @@ function ProjectCard({
     try {
       // Create a new build with forked data
       const newBuild: Omit<Build, 'id'> = {
-        name: `${name} (Fork)`,
+        name: `${name} (Remixed)`,
         description,
         thumbnail,
         stars: 0,
@@ -161,7 +161,7 @@ function ProjectCard({
       // Navigate to the new build
       await navigate(`/builds/${createdBuild.id}`);
     } catch (error) {
-      console.error('Failed to fork project:', error);
+      console.error('Failed to remix project:', error);
       // TODO: Show error toast/notification to user
       setIsForking(false);
     }
@@ -245,8 +245,8 @@ function ProjectCard({
                 className="group flex items-center gap-1 text-sm text-muted-foreground hover:text-yellow"
                 onClick={handleStar}
               >
-                <Star />
                 {stars}
+                <Star />
               </Button>
             </TooltipTrigger>
             <TooltipContent>Star this project</TooltipContent>
@@ -260,11 +260,11 @@ function ProjectCard({
                 disabled={isForking}
                 onClick={handleFork}
               >
-                {isForking ? <LoadingSpinner /> : <GitFork />}
-                {forks}
+                <span className="text-sm">Remix</span>
+                {isForking ? <LoadingSpinner /> : <ArrowRight />}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{isForking ? 'Forking project...' : 'Fork this project'}</TooltipContent>
+            <TooltipContent>{isForking ? 'Remixing project...' : 'Remix this project'}</TooltipContent>
           </Tooltip>
         </div>
       </CardFooter>

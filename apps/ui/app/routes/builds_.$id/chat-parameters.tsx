@@ -33,6 +33,12 @@ const toggleParametersKeyCombination = {
   ctrlKey: true,
 } satisfies KeyCombination;
 
+const focusSearchKeyCombination = {
+  key: 'x',
+  ctrlKey: true,
+  shiftKey: true,
+} satisfies KeyCombination;
+
 // Parameters Trigger Component
 export const ChatParametersTrigger = memo(function ({
   isOpen,
@@ -67,6 +73,7 @@ export const ChatParameters = memo(function (props: {
   const jsonSchema = useSelector(cadActor, (state) => state.context.jsonSchema);
   const [allExpanded, setAllExpanded] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const searchInputReference = React.useRef<HTMLInputElement>(null);
 
   const toggleParametersOpen = useCallback(() => {
     setIsExpanded?.((current) => !current);
@@ -75,6 +82,24 @@ export const ChatParameters = memo(function (props: {
   const { formattedKeyCombination: formattedParametersKeyCombination } = useKeydown(
     toggleParametersKeyCombination,
     toggleParametersOpen,
+  );
+
+  const focusSearchInput = useCallback(() => {
+    // Open parameters panel if it's not already open
+    if (!isExpanded) {
+      setIsExpanded?.(true);
+    }
+
+    // Focus the search input
+    // Use RAF to ensure DOM is updated AND painted before focusing the input
+    requestAnimationFrame(() => {
+      searchInputReference.current?.focus();
+    });
+  }, [isExpanded, setIsExpanded]);
+
+  const { formattedKeyCombination: formattedSearchKeyCombination } = useKeydown(
+    focusSearchKeyCombination,
+    focusSearchInput,
   );
 
   const setParameters = useCallback((newParameters: Record<string, unknown>) => {
@@ -165,9 +190,11 @@ export const ChatParameters = memo(function (props: {
             {/* Search and Controls Bar */}
             <div className="flex w-full flex-row gap-2 p-2">
               <SearchInput
+                ref={searchInputReference}
                 placeholder="Search parameters..."
                 value={searchTerm}
                 className="h-8 w-full bg-background"
+                keyboardShortcut={formattedSearchKeyCombination}
                 onChange={handleSearchChange}
                 onClear={clearSearch}
               />

@@ -6,6 +6,8 @@ type KeydownOptions = {
   preventDefault?: boolean;
   stopPropagation?: boolean;
   repeat?: boolean;
+  enableKeydownCallback?: boolean;
+  enableKeyupCallback?: boolean;
 };
 
 /**
@@ -29,7 +31,13 @@ export function useKeydown(
    */
   isKeyPressed: boolean;
 } {
-  const { preventDefault = true, stopPropagation = true, repeat = false } = options;
+  const {
+    preventDefault = true,
+    stopPropagation = true,
+    repeat = false,
+    enableKeydownCallback = true,
+    enableKeyupCallback = false,
+  } = options;
   const [isKeyPressed, setIsKeyPressed] = useState(false);
 
   const handler = useCallback(
@@ -68,10 +76,15 @@ export function useKeydown(
         const isPressed = event.type === 'keydown';
         setIsKeyPressed(isPressed);
 
-        callback(event);
+        // Call callback based on event type and options
+        const shouldCallCallback = (isPressed && enableKeydownCallback) || (!isPressed && enableKeyupCallback);
+
+        if (shouldCallCallback) {
+          callback(event);
+        }
       }
     },
-    [callback, combo, preventDefault, stopPropagation, repeat],
+    [callback, combo, preventDefault, stopPropagation, repeat, enableKeydownCallback, enableKeyupCallback],
   );
 
   useEffect(() => {

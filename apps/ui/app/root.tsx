@@ -112,7 +112,7 @@ function LayoutDocument({
     <html lang="en" className={cn(theme, '[--spacing:0.275rem] md:[--spacing:0.25rem]')} style={color.rootStyles}>
       <head>
         <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="viewport" content="width=device-width, initial-scale=1 viewport-fit=cover" />
         <Meta />
         <PreventFlashOnWrongTheme ssrTheme={Boolean(ssrTheme)} />
         <Links />

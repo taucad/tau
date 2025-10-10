@@ -1,7 +1,6 @@
 import { ChevronsDown, Filter, Settings, Trash } from 'lucide-react';
 import { useState, useCallback, memo } from 'react';
 import { useSelector } from '@xstate/react';
-import { collapsedConsoleSize } from '#routes/builds_.$id/chat-editor-layout.js';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -40,6 +39,8 @@ const defaultLogLevels: Record<LogLevel, boolean> = {
   debug: false,
   trace: false,
 };
+
+export const collapsedConsoleSize = 4;
 
 // Default values for display configuration
 const defaultDisplayConfig = {

@@ -17,7 +17,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { ChatEditorFileTree } from '#routes/builds_.$id/chat-editor-file-tree.js';
 import { ChatEditor } from '#routes/builds_.$id/chat-editor.js';
-import { ChatConsole } from '#routes/builds_.$id/chat-console.js';
+import { ChatConsole, collapsedConsoleSize } from '#routes/builds_.$id/chat-console.js';
 import type { KeyCombination } from '#utils/keys.js';
 import { formatKeyCombination } from '#utils/keys.js';
 import { cn } from '#utils/ui.js';
@@ -37,8 +37,6 @@ const toggleConsoleKeyCombination = {
   ctrlKey: true,
   requireAllModifiers: true,
 } satisfies KeyCombination;
-
-export const collapsedConsoleSize = 4;
 
 // Editor Trigger Component
 export function ChatEditorLayoutTrigger({
@@ -146,12 +144,7 @@ export function ChatEditorLayout({
                 </>
               ) : null}
 
-              <ResizablePanel
-                order={2}
-                defaultSize={isExplorerOpen ? explorerSize[1] : 100}
-                minSize={15}
-                id="file-editor"
-              >
+              <ResizablePanel order={2} defaultSize={explorerSize[1]} minSize={15} id="file-editor">
                 <ChatEditor />
               </ResizablePanel>
 
@@ -189,7 +182,7 @@ export function ChatEditorLayout({
             collapsible
             order={2}
             defaultSize={consoleSize[1]}
-            minSize={collapsedConsoleSize}
+            minSize={15}
             collapsedSize={collapsedConsoleSize}
             id="chat-console"
             className="group/console-resizable min-h-11"

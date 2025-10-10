@@ -236,7 +236,8 @@ export const ChatConsole = memo(function ({
             >
               <span className="hidden font-normal @xs/console:block">Console</span>
               <ChevronsDown
-                className={`transition-transform duration-200 ease-in-out group-data-[panel-size="${collapsedConsoleSize}.0"]/console-resizable:rotate-180`}
+                // IMPORTANT: Update this when collapsedConsoleSize changes
+                className={`transition-transform duration-200 ease-in-out group-data-[panel-size="4.0"]/console-resizable:rotate-180`}
               />
             </Button>
           </TooltipTrigger>

@@ -54,7 +54,6 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
         'md:[&_#nd-tocnav]:ml-[calc(var(--docs-sidebar-toggle-width-current)+var(--spacing)*2)]',
         '[&_#nd-tocnav]:mt-(--header-height)!',
         '[&_#nd-tocnav]:transition-[top,left,width] [&_#nd-tocnav]:duration-200 [&_#nd-tocnav]:ease-linear',
-        '[&_#nd-tocnav]:shadow-sm',
         '[&_#nd-tocnav>button]:px-2',
         '[&_#nd-tocnav>button]:h-7.5',
 

@@ -4,27 +4,27 @@ import { cn } from '#utils/ui.js';
 
 export const chatTabs = [
   {
-    id: 'chat' as const,
+    id: 'chat',
     label: 'Chat',
     icon: <MessageCircleIcon />,
   },
   {
-    id: 'parameters' as const,
+    id: 'parameters',
     label: 'Params',
     icon: <SlidersHorizontal />,
   },
   {
-    id: 'model' as const,
+    id: 'model',
     label: 'Model',
     icon: <Box />,
   },
   {
-    id: 'editor' as const,
+    id: 'editor',
     label: 'Editor',
     icon: <Code2 />,
   },
   {
-    id: 'details' as const,
+    id: 'details',
     label: 'Details',
     icon: <Info />,
   },

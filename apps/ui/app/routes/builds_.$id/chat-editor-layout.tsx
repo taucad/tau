@@ -127,7 +127,7 @@ export function ChatEditorLayout({
           onLayout={setConsoleSize}
         >
           {/* Editor and File Explorer Panel */}
-          <ResizablePanel order={1} defaultSize={consoleSize[0]} id="chat-editor" className="size-full">
+          <ResizablePanel order={1} defaultSize={consoleSize[0]} minSize={5} id="chat-editor" className="size-full">
             <ResizablePanelGroup
               direction="horizontal"
               autoSaveId={cookieName.chatRsFileExplorer}

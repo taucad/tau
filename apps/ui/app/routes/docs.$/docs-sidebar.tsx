@@ -66,7 +66,7 @@ export const useDocsSidebarProvider = (): DocsSidebarProviderContextType => {
 };
 
 export function DocsSidebarProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
-  const [isDocsSidebarOpen, setIsDocsSidebarOpen] = useCookie(cookieName.docsOpSidebar, false);
+  const [isDocsSidebarOpen, setIsDocsSidebarOpen] = useCookie(cookieName.docsOpSidebar, true);
 
   const toggleDocsSidebar = useCallback(() => {
     setIsDocsSidebarOpen((previous) => !previous);
@@ -99,15 +99,15 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
     <FloatingPanel
       isOpen={isDocsSidebarOpen}
       side="left"
-      className={cn('z-20 w-(--docs-sidebar-width-icon) shadow-sm data-[state=open]:w-full', className)}
+      className={cn('z-20 w-(--docs-sidebar-width-icon) data-[state=open]:w-full', className)}
       onOpenChange={setIsDocsSidebarOpen}
     >
       <FloatingPanelToggle
         openIcon={MenuIcon}
         closeIcon={
           <span>
-            <Tau className="size-6 text-primary group-hover:hidden" />
-            <XIcon className="hidden text-primary group-hover:block" />
+            <Tau className="hidden size-6 text-primary md:block md:group-hover:hidden" />
+            <XIcon className="text-primary md:hidden md:group-hover:block" />
           </span>
         }
         openTooltip="Open Documentation Sidebar"

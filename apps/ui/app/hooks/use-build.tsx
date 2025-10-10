@@ -28,6 +28,8 @@ type BuildContextType = {
   setChatMessages: (chatId: string, messages: Message[]) => void;
   setCodeParameters: (files: Record<string, { content: string }>, parameters: Record<string, unknown>) => void;
   updateName: (name: string) => void;
+  updateDescription: (description: string) => void;
+  updateTags: (tags: string[]) => void;
   updateThumbnail: (thumbnail: string) => void;
   // Chat related functions
   addChat: (initialMessages?: Message[]) => Promise<Chat>;
@@ -74,6 +76,8 @@ export function BuildProvider({
       setCodeParameters: async (files: Record<string, { content: string }>, parameters: Record<string, unknown>) =>
         mutations.updateCodeParameters(buildId, files, parameters),
       updateName: async (name: string) => mutations.updateName(buildId, name),
+      updateDescription: async (description: string) => mutations.updateDescription(buildId, description),
+      updateTags: async (tags: string[]) => mutations.updateTags(buildId, tags),
       updateThumbnail: async (thumbnail: string) => mutations.updateThumbnail(buildId, thumbnail),
       // Chat related functions
       async addChat(initialMessages?: Message[]) {

@@ -147,7 +147,7 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
               >
                 <span>{localizedSmallGridSize}</span>
               </span>
-              <span className="absolute bottom-[calc(var(--spacing)*1)] left-1/2 flex -translate-x-1/2 items-center gap-0.5 text-[calc(var(--spacing)*2)]">
+              <span className="absolute bottom-1 left-1/2 flex -translate-x-1/2 items-center gap-0.5 text-[calc(var(--spacing)*2)]">
                 {unit}
                 {isGridSizeLocked ? <LockIcon className="size-2" /> : null}
               </span>

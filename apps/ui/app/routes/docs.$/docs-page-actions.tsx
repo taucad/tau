@@ -15,7 +15,7 @@ type ActionLink = {
 export function DocsPageActions(): React.JSX.Element {
   const { rawMarkdownContent, path } = useLoaderData<typeof loader>();
 
-  const encodedUrl = encodeURIComponent(`https://${ENV.TAU_FRONTEND_URL}/docs/${path}`);
+  const encodedUrl = encodeURIComponent(`${ENV.TAU_FRONTEND_URL}/docs/${path}`);
   const githubUrl = `${metaConfig.githubUrl}/edit/main/${metaConfig.docsDir}/${path}`;
 
   const getMarkdownContent = (): string => rawMarkdownContent;

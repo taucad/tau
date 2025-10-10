@@ -64,7 +64,8 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): React.
       )}
       theme={theme === Theme.DARK ? 'github-dark' : 'github-light'}
       options={{
-        fontSize: isMobile ? 16 : 12,
+        fontSize: isMobile ? 16 : 14,
+        fontFamily: 'var(--font-mono)',
         tabSize: 2,
         minimap: { enabled: false },
         // Explicitly configure line numbers

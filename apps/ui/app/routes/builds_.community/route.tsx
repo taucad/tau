@@ -25,6 +25,7 @@ export const handle: Handle = {
       </Button>
     );
   },
+  enableOverflowY: true,
 };
 
 const itemsPerPage = 9;

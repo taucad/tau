@@ -11,7 +11,11 @@ import {
   FloatingPanelTrigger,
 } from '#components/ui/floating-panel.js';
 import { Button } from '#components/ui/button.js';
+import { Input } from '#components/ui/input.js';
+import { Textarea } from '#components/ui/textarea.js';
+import { Tags, TagsTrigger } from '#components/ui/input-tags.js';
 import { useKeydown } from '#hooks/use-keydown.js';
+import { useBuild } from '#hooks/use-build.js';
 import type { KeyCombination } from '#utils/keys.js';
 import { formatKeyCombination } from '#utils/keys.js';
 
@@ -82,13 +86,23 @@ export function ChatEditorDetails({
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }): React.JSX.Element {
+  const { build, updateName, updateDescription, updateTags } = useBuild();
   const [geometryDetails, setGeometryDetails] = useState<GeometryDetails>(mockGeometryDetails);
   const [isCalculatingVolume, setIsCalculatingVolume] = useState(false);
   const [isCalculatingSurface, setIsCalculatingSurface] = useState(false);
 
-  const toggleEditor = () => {
+  const toggleEditor = (): void => {
     setIsExpanded?.((current) => !current);
   };
+
+  const handleTagsChange = useCallback(
+    (newTags: string[]) => {
+      // Deduplicate tags to prevent duplicates from accumulating
+      const uniqueTags = [...new Set(newTags)];
+      updateTags(uniqueTags);
+    },
+    [updateTags],
+  );
 
   const handleCalculateVolume = useCallback(async () => {
     setIsCalculatingVolume(true);
@@ -129,8 +143,47 @@ export function ChatEditorDetails({
         </FloatingPanelContentHeader>
         <FloatingPanelContentBody className="p-2">
           <div className="space-y-4">
-            {/* Mesh Information */}
+            {/* Project Information */}
             <div className="space-y-3">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground" htmlFor="project-name">
+                  Name:
+                </label>
+                <Input
+                  id="project-name"
+                  value={build?.name ?? ''}
+                  placeholder="Enter your build name..."
+                  onChange={(event) => {
+                    updateName(event.target.value);
+                  }}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground" htmlFor="project-description">
+                  Description:
+                </label>
+                <Textarea
+                  id="project-description"
+                  value={build?.description ?? ''}
+                  placeholder="Describe what you're building..."
+                  className="min-h-20"
+                  onChange={(event) => {
+                    updateDescription(event.target.value);
+                  }}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Tags:</label>
+                <Tags tags={build?.tags ?? []} onTagsChange={handleTagsChange}>
+                  <TagsTrigger placeholder="Add tags..." />
+                </Tags>
+              </div>
+            </div>
+
+            {/* Mesh Information */}
+            <div className="space-y-3 border-t pt-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-foreground">Vertices:</span>
                 <span className="font-mono text-sm text-muted-foreground">
@@ -146,8 +199,8 @@ export function ChatEditorDetails({
               </div>
             </div>
 
+            {/* Dimensions */}
             <div className="space-y-3 border-t pt-3">
-              {/* Dimensions */}
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-foreground">Size X:</span>
                 <span className="font-mono text-sm text-muted-foreground">{formatNumber(geometryDetails.sizeX)}</span>
@@ -164,8 +217,8 @@ export function ChatEditorDetails({
               </div>
             </div>
 
+            {/* Volume & Surface */}
             <div className="space-y-3 border-t pt-3">
-              {/* Volume */}
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-foreground">Volume:</span>
                 {geometryDetails.volume === undefined ? (

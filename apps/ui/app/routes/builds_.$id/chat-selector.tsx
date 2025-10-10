@@ -120,11 +120,11 @@ export function ChatSelector(): ReactNode {
               {formatRelativeTime(chat.updatedAt)}
             </div>
           </div>
-          <div className="flex opacity-0 group-hover:opacity-100">
+          <div className="flex gap-1 md:opacity-0 md:group-hover:opacity-100">
             <Button
               variant="ghost"
               size="icon"
-              className="size-6 hover:bg-neutral/10"
+              className="hover:bg-neutral/10 max-md:bg-neutral/10 md:size-6"
               onClick={(event) => {
                 event.stopPropagation();
                 handleRenameChat(chat.id, chatName);
@@ -135,7 +135,7 @@ export function ChatSelector(): ReactNode {
             <Button
               variant="ghost"
               size="icon"
-              className="size-6 hover:bg-destructive/10"
+              className="hover:bg-destructive/10 max-md:bg-destructive/10 md:size-6"
               onClick={(event) => {
                 event.stopPropagation();
                 void handleDeleteChat(chat.id);
@@ -163,11 +163,11 @@ export function ChatSelector(): ReactNode {
               renderLabel={renderChatLabel}
               getValue={getChatValue}
               defaultValue={activeChat}
-              className="w-[300px]"
               placeholder="Search chats"
               searchPlaceHolder="Search chats..."
               popoverProperties={{
                 align: 'start',
+                className: 'w-[300px]',
               }}
               onSelect={(chatId) => {
                 setActiveChat(chatId);
@@ -188,7 +188,7 @@ export function ChatSelector(): ReactNode {
                         ? 'Initial design'
                         : (activeChat?.name ?? 'Select a chat')}
                   </span>
-                  <Search className="size-4 shrink-0 opacity-0 group-hover:opacity-100" />
+                  <Search className="size-4 shrink-0 md:opacity-0 md:group-hover:opacity-100" />
                 </Button>
               </TooltipTrigger>
             </ComboBoxResponsive>

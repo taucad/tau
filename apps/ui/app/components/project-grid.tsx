@@ -57,7 +57,6 @@ function ProjectCard({
   description,
   thumbnail,
   stars,
-  forks,
   chats,
   author,
   tags,

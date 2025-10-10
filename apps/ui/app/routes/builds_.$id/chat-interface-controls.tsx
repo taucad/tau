@@ -29,9 +29,9 @@ export const useViewContext = (): ViewContextType => {
 export function ViewContextProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const [isChatOpen, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
   const [isParametersOpen, setIsParametersOpen] = useCookie(cookieName.chatOpParameters, true);
-  const [isEditorOpen, setIsEditorOpen] = useCookie(cookieName.chatOpEditor, true);
-  const [isExplorerOpen, setIsExplorerOpen] = useCookie(cookieName.chatOpModelExplorer, true);
-  const [isDetailsOpen, setIsDetailsOpen] = useCookie(cookieName.chatOpDetails, true);
+  const [isEditorOpen, setIsEditorOpen] = useCookie(cookieName.chatOpEditor, false);
+  const [isExplorerOpen, setIsExplorerOpen] = useCookie(cookieName.chatOpModelExplorer, false);
+  const [isDetailsOpen, setIsDetailsOpen] = useCookie(cookieName.chatOpDetails, false);
 
   const value = useMemo(
     () => ({

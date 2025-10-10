@@ -156,7 +156,7 @@
    * Extend rounded utility to apply the squircle shape for rounding.
    * Squircle shape for rounding - https://developer.mozilla.org/en-US/docs/Web/CSS/superellipse
    */
-  @supports (corner-shape: superellipse(1)) {
+  @supports (corner-shape: superellipse(1.15)) {
     /* Full rounded corners preserve perfect circles. */
     &:not(.rounded-full) {
       /* 1.15 applies a subtle squircle shape to the rounded corners without being overwhelming.*/

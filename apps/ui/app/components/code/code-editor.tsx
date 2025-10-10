@@ -7,6 +7,7 @@ import type { CompletionRegistration, Monaco, StandaloneCodeEditor } from 'monac
 import { cn } from '#utils/ui.js';
 import { highlighter } from '#lib/shiki.js';
 import { configureMonaco, registerCompletions } from '#lib/monaco.js';
+import { useIsMobile } from '#hooks/use-mobile.js';
 
 type CodeEditorProperties = EditorProps & {
   readonly onChange: (value: string) => void;
@@ -17,6 +18,7 @@ await configureMonaco();
 export function CodeEditor({ className, ...rest }: CodeEditorProperties): React.JSX.Element {
   const [theme] = useTheme();
   const completionRef = useRef<CompletionRegistration | undefined>(null);
+  const isMobile = useIsMobile();
 
   const handleMount = useCallback((editor: StandaloneCodeEditor, monaco: Monaco) => {
     completionRef.current = registerCompletions(editor, monaco);
@@ -62,12 +64,12 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): React.
       )}
       theme={theme === Theme.DARK ? 'github-dark' : 'github-light'}
       options={{
-        fontSize: 12,
+        fontSize: isMobile ? 16 : 12,
         tabSize: 2,
         minimap: { enabled: false },
         // Explicitly configure line numbers
         lineNumbers: 'on',
-        lineNumbersMinChars: 5,
+        lineNumbersMinChars: isMobile ? 3 : 5,
         renderLineHighlight: 'line',
         renderLineHighlightOnlyWhenFocus: false,
         // Disable horizontal scroll beyond last line

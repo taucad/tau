@@ -166,12 +166,18 @@
 }
 
 @theme inline {
+  /* Shadows */
   --shadow-*: initial;
   --shadow-xs: 0px 1px 2px 0px rgba(10, 13, 20, 0.03);
   --shadow-sm: 0px 1px 2px 0px #1018280f, 0px 1px 3px 0px #1018281a;
   --shadow-md: 0px 16px 32px -12px rgba(14, 18, 27, 0.1);
   --shadow: 0px 16px 32px -12px #0e121b1a;
 
+  /* Fonts */
+  --font-sans: 'Geist Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+
+  /* Colors */
   --color-*: initial;
   --color-black: black;
   --color-white: white;
@@ -384,6 +390,27 @@
     overflow: hidden;
   }
 }
+
+/* FONTS */
+
+/* Self-hosted Geist Fonts */
+@font-face {
+  font-family: 'Geist Sans';
+  src: url('/fonts/Geist-Variable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/fonts/GeistMono-Variable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* END FONTS */
 
 /* START SCROLLBAR STYLES */
 @plugin 'tailwind-scrollbar' {

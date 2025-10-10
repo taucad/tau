@@ -6,6 +6,7 @@
   "tags": ["scope:ui", "type:app"],
   "targets": {
     "build": {
+      "dependsOn": ["copy-assets"],
       "outputs": ["{projectRoot}/build"],
       "options": {
         "env": {

@@ -15,6 +15,8 @@ import { storage } from '#db/storage.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
+import { idPrefix } from '#constants/id.constants.js';
+import { generatePrefixedId } from '#utils/id.js';
 
 // Placeholder for language icons
 const kernelIcons: Record<KernelProvider, ComponentType<{ className?: string }>> = {
@@ -139,6 +141,7 @@ function ProjectCard({
 
     setIsForking(true);
 
+    const chatId = generatePrefixedId(idPrefix.chat);
     try {
       // Create a new build with forked data
       const newBuild: Omit<Build, 'id'> = {
@@ -153,7 +156,16 @@ function ProjectCard({
         createdAt: Date.now(),
         updatedAt: Date.now(),
         forkedFrom: id,
-        chats,
+        chats: [
+          {
+            id: chatId,
+            name: 'Initial design',
+            messages: [],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ],
+        lastChatId: chatId,
       };
 
       const createdBuild = await storage.createBuild(newBuild);

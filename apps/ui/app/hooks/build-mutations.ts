@@ -13,6 +13,8 @@ export function createBuildMutations(queryClient: QueryClient): {
   restoreBuild: (buildId: string) => Promise<void>;
   duplicateBuild: (buildId: string) => Promise<Build>;
   updateName: (buildId: string, name: string) => Promise<void>;
+  updateDescription: (buildId: string, description: string) => Promise<void>;
+  updateTags: (buildId: string, tags: string[]) => Promise<void>;
   updateThumbnail: (buildId: string, thumbnail: string) => Promise<void>;
   updateCodeParameters: (
     buildId: string,
@@ -81,6 +83,24 @@ export function createBuildMutations(queryClient: QueryClient): {
      */
     async updateName(buildId: string, name: string) {
       await storage.updateBuild(buildId, { name });
+      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
+      void queryClient.invalidateQueries({ queryKey: ['builds'] });
+    },
+
+    /**
+     * Update a build's description
+     */
+    async updateDescription(buildId: string, description: string) {
+      await storage.updateBuild(buildId, { description });
+      void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
+      void queryClient.invalidateQueries({ queryKey: ['builds'] });
+    },
+
+    /**
+     * Update a build's tags
+     */
+    async updateTags(buildId: string, tags: string[]) {
+      await storage.updateBuild(buildId, { tags }, { ignoreKeys: ['tags'] });
       void queryClient.invalidateQueries({ queryKey: ['build', buildId] });
       void queryClient.invalidateQueries({ queryKey: ['builds'] });
     },

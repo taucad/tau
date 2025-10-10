@@ -73,7 +73,10 @@ export function ChatEditorLayout({
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }): React.JSX.Element {
   const [explorerSize, setExplorerSize] = useCookie(cookieName.chatRsFileExplorer, [20, 80]);
-  const [consoleSize, setConsoleSize] = useCookie(cookieName.chatRsEditor, [85, 15]);
+  const [consoleSize, setConsoleSize] = useCookie(cookieName.chatRsEditor, [
+    100 - collapsedConsoleSize,
+    collapsedConsoleSize,
+  ]);
   const [isExplorerOpen, setIsExplorerOpen] = useCookie(cookieName.chatOpFileExplorer, false);
 
   const consolePanelReference = useRef<ImperativePanelHandle>(null);

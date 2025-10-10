@@ -71,7 +71,9 @@ jobs:
           # Get list of affected app projects as JSON
           affected_apps=$(pnpm nx show projects --affected --type=app --json)
           echo "Affected apps: $affected_apps"
-          echo "apps=$affected_apps" >> $GITHUB_OUTPUT
+          echo "apps<<EOF" >> $GITHUB_OUTPUT
+          echo "$affected_apps" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
   # Call API deployment workflow
   deploy-api:

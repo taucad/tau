@@ -174,7 +174,7 @@ export const ChatHistory = memo(function (props: {
         {/* Chat input area */}
         <div className="relative mx-2 mb-2 rounded-2xl">
           <ChatStatus className="absolute inset-x-0 -top-7" />
-          <ChatTextarea className="rounded-sm" onSubmit={onSubmit} />
+          <ChatTextarea className="rounded-sm" enableAutoFocus={false} onSubmit={onSubmit} />
         </div>
       </FloatingPanelContent>
     </FloatingPanel>

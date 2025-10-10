@@ -123,7 +123,7 @@ export function TagsTrigger({ className, placeholder = 'Type to add tags...' }: 
           type="text"
           value={value}
           placeholder={tags.length === 0 ? placeholder : ''}
-          className="w-0 flex-1 bg-transparent px-0.5 py-px outline-none group-focus-within/tags-trigger:w-[120px] placeholder:text-muted-foreground"
+          className="w-0 flex-1 bg-transparent px-0.5 py-px text-base outline-none group-focus-within/tags-trigger:w-[120px] placeholder:text-muted-foreground"
           onChange={(event) => {
             setValue(event.target.value);
           }}

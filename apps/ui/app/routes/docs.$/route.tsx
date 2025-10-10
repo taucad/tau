@@ -21,7 +21,24 @@ import { DocsSidebarProvider } from '#routes/docs.$/docs-sidebar.js';
 
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- loaders are inferred types by design.
 export async function loader({ params }: Route.LoaderArgs) {
-  const slugs = params['*'].split('/').filter((v) => v.length > 0);
+  const path = params['*'];
+
+  // If path ends with .mdx, redirect to /llms.mdx/ route
+  if (path.endsWith('.mdx')) {
+    const pathWithoutExtension = path.slice(0, -4);
+    const redirectUrl = `/llms.mdx/${pathWithoutExtension}`;
+    // Ideally this would be a URL rewrite to preserve the path, but that's not possible with react-router 7.
+    // @see https://fumadocs.dev/docs/ui/llms
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- this is the react-router pattern.
+    throw new Response(undefined, {
+      status: 302,
+      headers: {
+        Location: redirectUrl,
+      },
+    });
+  }
+
+  const slugs = path.split('/').filter((v) => v.length > 0);
   const page = source.getPage(slugs);
   if (!page) {
     // eslint-disable-next-line @typescript-eslint/only-throw-error -- this is the react-router pattern.
@@ -32,6 +49,7 @@ export async function loader({ params }: Route.LoaderArgs) {
 
   return {
     path: page.path,
+    url: page.url,
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- required to provide module boundary type.
     tree: source.pageTree as Record<string, PageTree.Root>,
     page: {

@@ -5,6 +5,7 @@ import { PerspectiveCamera } from '@react-three/drei';
 import { AxesHelper } from '#components/geometry/graphics/three/axes-helper.js';
 import { Grid } from '#components/geometry/graphics/three/grid.js';
 import { useCameraReset } from '#components/geometry/graphics/three/use-camera-reset.js';
+import { Lights } from '#components/geometry/graphics/three/lights.js';
 
 export type StageOptions = {
   /**
@@ -182,6 +183,7 @@ export function Stage({
         {properties.enableGrid ? <Grid /> : null}
         <group ref={inner}>{children}</group>
       </group>
+      <Lights />
     </group>
   );
 }

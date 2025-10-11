@@ -1,3 +1,4 @@
+/* eslint-disable react/no-unknown-property -- TODO: fix three.js types for linter */
 export function Lights(): React.JSX.Element {
   return (
     <>

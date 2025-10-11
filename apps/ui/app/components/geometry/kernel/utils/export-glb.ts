@@ -62,13 +62,72 @@ type GeometryData = {
    * colors = [1,0,0, 1,0,0, 1,0,0, 0,0,1, 0,0,1, 0,0,1]
    */
   colors?: Float32Array;
+
+  /**
+   * Per-vertex normal vectors for lighting calculations.
+   *
+   * Format: [nx1, ny1, nz1, nx2, ny2, nz2, ...]
+   * - Each vertex uses 3 consecutive Float32 values (normal vector components)
+   * - Normal vectors are normalized (unit length)
+   * - Same length as positions array (both have 3 components per vertex)
+   * - Used as the NORMAL attribute in glTF
+   * - Required for proper lighting in 3D rendering
+   *
+   * Note: Currently using flat normals where all vertices of a triangle
+   * share the same normal vector (perpendicular to the triangle face).
+   *
+   * @example
+   * // For a triangle in the XY plane facing up (positive Z):
+   * normals = [0,0,1, 0,0,1, 0,0,1]
+   */
+  normals: Float32Array;
 };
+
+/**
+ * Calculate the normal vector for a triangle using cross product.
+ * The normal points in the direction determined by the right-hand rule
+ * when traversing vertices v1 -> v2 -> v3 counter-clockwise.
+ *
+ * @param v1 - First vertex of the triangle
+ * @param v2 - Second vertex of the triangle
+ * @param v3 - Third vertex of the triangle
+ * @returns Normalized normal vector [nx, ny, nz]
+ */
+function calculateTriangleNormal(
+  v1: readonly [number, number, number],
+  v2: readonly [number, number, number],
+  v3: readonly [number, number, number],
+): [number, number, number] {
+  // Calculate two edge vectors
+  const edge1X = v2[0] - v1[0];
+  const edge1Y = v2[1] - v1[1];
+  const edge1Z = v2[2] - v1[2];
+
+  const edge2X = v3[0] - v1[0];
+  const edge2Y = v3[1] - v1[1];
+  const edge2Z = v3[2] - v1[2];
+
+  // Calculate cross product: edge1 × edge2
+  const normalX = edge1Y * edge2Z - edge1Z * edge2Y;
+  const normalY = edge1Z * edge2X - edge1X * edge2Z;
+  const normalZ = edge1X * edge2Y - edge1Y * edge2X;
+
+  // Normalize the vector
+  const length = Math.hypot(normalX, normalY, normalZ);
+
+  if (length === 0) {
+    // Degenerate triangle, return arbitrary normal
+    return [0, 0, 1];
+  }
+
+  return [normalX / length, normalY / length, normalZ / length];
+}
 
 /**
  * Create a primitive from geometry data
  */
 function createPrimitive(document: Document, baseColorFactor: Color, geometry: GeometryData): Primitive {
-  const { positions, indices, colors } = geometry;
+  const { positions, indices, colors, normals } = geometry;
 
   const material = document
     .createMaterial()
@@ -83,6 +142,7 @@ function createPrimitive(document: Document, baseColorFactor: Color, geometry: G
     .setMode(4) // TRIANGLES mode
     .setMaterial(material)
     .setAttribute('POSITION', document.createAccessor().setType('VEC3').setArray(positions))
+    .setAttribute('NORMAL', document.createAccessor().setType('VEC3').setArray(normals))
     .setIndices(document.createAccessor().setType('SCALAR').setArray(indices));
 
   if (colors) {
@@ -109,9 +169,11 @@ function convertMeshToGeometry(meshData: IndexedPolyhedron, enableTransform: boo
   const positions = new Float32Array(totalTriangles * 3 * 3); // 3 vertices per triangle, 3 components per vertex
   const indices = new Uint32Array(totalTriangles * 3); // 3 indices per triangle
   const vertexColors = new Float32Array(totalTriangles * 3 * 3); // 3 vertices per triangle, 3 components per color
+  const normals = new Float32Array(totalTriangles * 3 * 3); // 3 vertices per triangle, 3 components per normal
 
   let positionIndex = 0;
   let colorIndex = 0;
+  let normalIndex = 0;
   let triangleIndex = 0;
 
   // Process each face
@@ -150,6 +212,9 @@ function convertMeshToGeometry(meshData: IndexedPolyhedron, enableTransform: boo
         transformedV3 = transformVerticesGltf(v3);
       }
 
+      // Calculate normal for this triangle (after transformation)
+      const normal = calculateTriangleNormal(transformedV1, transformedV2, transformedV3);
+
       // Add positions
       positions[positionIndex++] = transformedV1[0];
       positions[positionIndex++] = transformedV1[1];
@@ -162,6 +227,19 @@ function convertMeshToGeometry(meshData: IndexedPolyhedron, enableTransform: boo
       positions[positionIndex++] = transformedV3[0];
       positions[positionIndex++] = transformedV3[1];
       positions[positionIndex++] = transformedV3[2];
+
+      // Add normals (same normal for all vertices of this triangle - flat shading)
+      normals[normalIndex++] = normal[0];
+      normals[normalIndex++] = normal[1];
+      normals[normalIndex++] = normal[2];
+
+      normals[normalIndex++] = normal[0];
+      normals[normalIndex++] = normal[1];
+      normals[normalIndex++] = normal[2];
+
+      normals[normalIndex++] = normal[0];
+      normals[normalIndex++] = normal[1];
+      normals[normalIndex++] = normal[2];
 
       // Add colors (same color for all vertices of this triangle)
       vertexColors[colorIndex++] = faceColor[0];
@@ -186,11 +264,13 @@ function convertMeshToGeometry(meshData: IndexedPolyhedron, enableTransform: boo
 
   // Trim arrays to actual size used
   const actualPositions = positions.slice(0, positionIndex);
+  const actualNormals = normals.slice(0, normalIndex);
   const actualColors = vertexColors.slice(0, colorIndex);
   const actualIndices = indices.slice(0, triangleIndex * 3);
 
   return {
     positions: actualPositions,
+    normals: actualNormals,
     indices: actualIndices,
     colors: actualColors.length > 0 ? actualColors : undefined,
   };
@@ -213,6 +293,7 @@ function createGltfDocument(meshData: IndexedPolyhedron, enableTransform: boolea
     // Create a simple point if no geometry
     const emptyGeometry: GeometryData = {
       positions: new Float32Array([0, 0, 0]),
+      normals: new Float32Array([0, 0, 1]),
       indices: new Uint32Array([0]),
     };
     const primitive = createPrimitive(document, [1, 1, 1], emptyGeometry);

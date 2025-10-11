@@ -174,7 +174,7 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
             <RgbColorPicker color={rgbValue} className="!h-48 !w-full" onChange={handleColorChange} />
             <div className="relative">
               <div
-                className="absolute top-px bottom-px left-px w-8 overflow-clip rounded-l border-r border-border bg-clip-padding"
+                className="absolute top-px bottom-px left-px w-8 overflow-clip rounded-l-sm border-r border-border bg-clip-padding"
                 style={{ backgroundColor: isValidColor(temporaryColor) ? temporaryColor : 'transparent' }}
               >
                 {!isValidColor(temporaryColor) && (

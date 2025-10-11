@@ -1,3 +1,4 @@
+// Import { GltfMesh } from '#components/geometry/graphics/three/gltf-mesh.js';
 import { GltfMesh } from '#components/geometry/graphics/three/gltf-mesh.js';
 import { ThreeProvider } from '#components/geometry/graphics/three/three-context.js';
 import type { ThreeViewerProperties } from '#components/geometry/graphics/three/three-context.js';
@@ -8,12 +9,14 @@ type CadViewerProperties = ThreeViewerProperties & {
   readonly geometries: Geometry[];
   readonly enableSurfaces?: boolean;
   readonly enableLines?: boolean;
+  readonly enableMatcap?: boolean;
 };
 
 export function CadViewer({
   geometries,
   enableSurfaces = true,
   enableLines = true,
+  enableMatcap = true,
   ...properties
 }: CadViewerProperties): React.JSX.Element {
   const svgGeometries = geometries.filter((geometry) => geometry.type === '2d');
@@ -28,8 +31,16 @@ export function CadViewer({
       {geometries.map((geometry, index) => {
         switch (geometry.type) {
           case 'gltf': {
-            // eslint-disable-next-line react/no-array-index-key -- TODO: add a unique key to the geometry (likely a hash key)
-            return <GltfMesh key={index} {...geometry} enableSurfaces={enableSurfaces} enableLines={enableLines} />;
+            return (
+              <GltfMesh
+                // eslint-disable-next-line react/no-array-index-key -- TODO: add a unique key to the geometry (likely a hash key)
+                key={index}
+                gltfBlob={geometry.gltfBlob}
+                enableMatcap={enableMatcap}
+                enableSurfaces={enableSurfaces}
+                enableLines={enableLines}
+              />
+            );
           }
 
           case '2d': {

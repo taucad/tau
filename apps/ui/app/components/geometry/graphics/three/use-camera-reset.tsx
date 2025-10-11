@@ -24,20 +24,28 @@ type ResetCameraParameters = {
   perspective: ResetPerspective;
   setSceneRadius: (radius: number) => void;
   originalDistanceReference?: RefObject<number | undefined>;
+  cameraFovAngle: number;
 };
 
 /**
  * Hook that provides camera reset functionality and registers it with the graphics context
+ *
+ * @param parameters - The parameters for the camera reset.
+ * @returns The reset function.
  */
-export function useCameraReset(
-  parameters: ResetCameraParameters,
-): (options?: { enableConfiguredAngles?: boolean }) => void {
+export function useCameraReset(parameters: ResetCameraParameters): (options?: {
+  /**
+   * Whether to enable configured angles.
+   * @default true
+   */
+  enableConfiguredAngles?: boolean;
+}) => void {
   const { camera, invalidate } = useThree();
   const isRegistered = useRef(false);
 
-  const { geometryRadius, rotation, perspective, setSceneRadius, originalDistanceReference } = parameters;
+  const { geometryRadius, rotation, perspective, setSceneRadius, originalDistanceReference, cameraFovAngle } =
+    parameters;
 
-  // Create the reset function that now accepts an optional options object
   const resetCamera = useCallback(
     (options?: { enableConfiguredAngles?: boolean }) => {
       // Reset original distance reference if available
@@ -53,9 +61,19 @@ export function useCameraReset(
         setSceneRadius,
         invalidate,
         enableConfiguredAngles: options?.enableConfiguredAngles,
+        cameraFovAngle,
       });
     },
-    [camera, invalidate, geometryRadius, rotation, perspective, setSceneRadius, originalDistanceReference],
+    [
+      originalDistanceReference,
+      camera,
+      geometryRadius,
+      rotation,
+      perspective,
+      setSceneRadius,
+      invalidate,
+      cameraFovAngle,
+    ],
   );
 
   // Register the reset function with the camera capability actor only once

@@ -2,10 +2,13 @@ import React, { useMemo, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import * as THREE from 'three';
 import { PerspectiveCamera } from '@react-three/drei';
+import { useSelector } from '@xstate/react';
+import { useFrame } from '@react-three/fiber';
 import { AxesHelper } from '#components/geometry/graphics/three/axes-helper.js';
 import { Grid } from '#components/geometry/graphics/three/grid.js';
 import { useCameraReset } from '#components/geometry/graphics/three/use-camera-reset.js';
 import { Lights } from '#components/geometry/graphics/three/lights.js';
+import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 
 export type StageOptions = {
   /**
@@ -73,6 +76,9 @@ export function Stage({
   const outer = React.useRef<THREE.Group>(null);
   const inner = React.useRef<THREE.Group>(null);
 
+  // Subscribe to camera FOV angle from graphics actor
+  const cameraFovAngle = useSelector(graphicsActor, (state) => state.context.cameraFovAngle);
+
   // State for camera reset functionality
   const originalDistanceReference = React.useRef<number | undefined>(undefined);
   const isInitialResetDoneRef = React.useRef<boolean>(false);
@@ -106,7 +112,6 @@ export function Stage({
   // Use the camera reset hook
   const resetCamera = useCameraReset({
     geometryRadius,
-    // Explicitly provide the required properties
     rotation: {
       side: rotation.side,
       vertical: rotation.vertical,
@@ -120,12 +125,14 @@ export function Stage({
     },
     setSceneRadius,
     originalDistanceReference,
+    cameraFovAngle,
   });
 
   /**
    * Position the scene.
    */
-  React.useLayoutEffect(() => {
+  // TODO: implement a solution that doesn't require hooking into the frame loop.
+  useFrame(() => {
     if (outer.current) {
       outer.current.updateWorldMatrix(true, true);
     }
@@ -150,11 +157,10 @@ export function Stage({
 
     const sphere = new THREE.Sphere();
     box3.getBoundingSphere(sphere);
-
     set((previous) => {
       return { geometryRadius: sphere.radius, sceneRadius: previous.sceneRadius };
     });
-  }, [enableCentering, children]);
+  });
 
   /**
    * Position the camera based on the scene's bounding box.

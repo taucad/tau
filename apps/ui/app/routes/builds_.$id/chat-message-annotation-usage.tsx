@@ -53,7 +53,10 @@ export function ChatMessageAnnotationUsage({
                   <TableRow>
                     <TableCell className="flex flex-row items-center gap-1">
                       <span>Input</span>
-                      <InfoTooltip tooltip="The number of tokens in the input prompt. This includes the user prompt, system message, and any previous messages." />
+                      <InfoTooltip>
+                        The number of tokens in the input prompt. This includes the user prompt, system message, and any
+                        previous messages.
+                      </InfoTooltip>
                     </TableCell>
                     <TableCell>{formatNumber(annotation.usageTokens.inputTokens)}</TableCell>
                     <TableCell>
@@ -63,7 +66,7 @@ export function ChatMessageAnnotationUsage({
                   <TableRow>
                     <TableCell className="flex flex-row items-center gap-1">
                       <span>Output</span>
-                      <InfoTooltip tooltip="The number of tokens in the output response." />
+                      <InfoTooltip>The number of tokens in the output response.</InfoTooltip>
                     </TableCell>
                     <TableCell>{formatNumber(annotation.usageTokens.outputTokens)}</TableCell>
                     <TableCell>
@@ -74,7 +77,10 @@ export function ChatMessageAnnotationUsage({
                     <TableRow>
                       <TableCell className="flex flex-row items-center gap-1">
                         <span>Cached Read</span>
-                        <InfoTooltip tooltip="The number of tokens read from the prompt cache. This improves performance by avoiding re-processing the same prompt." />
+                        <InfoTooltip>
+                          The number of tokens read from the prompt cache. This improves performance by avoiding
+                          re-processing the same prompt.
+                        </InfoTooltip>
                       </TableCell>
                       <TableCell>{formatNumber(annotation.usageTokens.cachedReadTokens)}</TableCell>
                       <TableCell>
@@ -86,7 +92,10 @@ export function ChatMessageAnnotationUsage({
                     <TableRow>
                       <TableCell className="flex flex-row items-center gap-1">
                         <span>Cached Write</span>
-                        <InfoTooltip tooltip="The number of tokens written to the prompt cache. This improves performance by avoiding re-processing the same prompt." />
+                        <InfoTooltip>
+                          The number of tokens written to the prompt cache. This improves performance by avoiding
+                          re-processing the same prompt.
+                        </InfoTooltip>
                       </TableCell>
                       <TableCell>{formatNumber(annotation.usageTokens.cachedWriteTokens)}</TableCell>
                       <TableCell>
@@ -211,7 +220,10 @@ export function ChatMessageAnnotationUsageAggregated({
               <TableRow>
                 <TableCell className="flex flex-row items-center gap-1">
                   <span>Input</span>
-                  <InfoTooltip tooltip="The number of tokens in the input prompt. This includes the user prompt, system message, and any previous messages." />
+                  <InfoTooltip>
+                    The number of tokens in the input prompt. This includes the user prompt, system message, and any
+                    previous messages.
+                  </InfoTooltip>
                 </TableCell>
                 {usageAnnotations.map((annotation, index) => (
                   // eslint-disable-next-line react/no-array-index-key -- no part key
@@ -232,7 +244,7 @@ export function ChatMessageAnnotationUsageAggregated({
               <TableRow>
                 <TableCell className="flex flex-row items-center gap-1">
                   <span>Output</span>
-                  <InfoTooltip tooltip="The number of tokens in the output response." />
+                  <InfoTooltip>The number of tokens in the output response.</InfoTooltip>
                 </TableCell>
                 {usageAnnotations.map((annotation, index) => (
                   // eslint-disable-next-line react/no-array-index-key -- no part key
@@ -254,7 +266,10 @@ export function ChatMessageAnnotationUsageAggregated({
                 <TableRow>
                   <TableCell className="flex flex-row items-center gap-1">
                     <span>Cached Read</span>
-                    <InfoTooltip tooltip="The number of tokens read from the prompt cache. This improves performance by avoiding re-processing the same prompt." />
+                    <InfoTooltip>
+                      The number of tokens read from the prompt cache. This improves performance by avoiding
+                      re-processing the same prompt.
+                    </InfoTooltip>
                   </TableCell>
                   {usageAnnotations.map((annotation, index) => (
                     // eslint-disable-next-line react/no-array-index-key -- no part key
@@ -277,7 +292,10 @@ export function ChatMessageAnnotationUsageAggregated({
                 <TableRow>
                   <TableCell className="flex flex-row items-center gap-1">
                     <span>Cached Write</span>
-                    <InfoTooltip tooltip="The number of tokens written to the prompt cache. This improves performance by avoiding re-processing the same prompt." />
+                    <InfoTooltip>
+                      The number of tokens written to the prompt cache. This improves performance by avoiding
+                      re-processing the same prompt.
+                    </InfoTooltip>
                   </TableCell>
                   {usageAnnotations.map((annotation, index) => (
                     // eslint-disable-next-line react/no-array-index-key -- no part key

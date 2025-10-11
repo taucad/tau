@@ -5,24 +5,43 @@ import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 
 export const ChatViewer = memo(function () {
-  const geometries = useSelector(cadActor, (state) => state.context.geometries);
+  // Combine selectors to reduce re-renders. By using a single selector with
+  // a custom equality function, we only re-render when actual values change.
+  const geometries = useSelector(
+    cadActor,
+    (state) => state.context.geometries,
+    (a, b) => a === b,
+  );
 
-  // Get all visibility states from graphics machine
-  const enableSurfaces = useSelector(graphicsActor, (state) => state.context.enableSurfaces);
-  const enableLines = useSelector(graphicsActor, (state) => state.context.enableLines);
-  const enableGizmo = useSelector(graphicsActor, (state) => state.context.enableGizmo);
-  const enableGrid = useSelector(graphicsActor, (state) => state.context.enableGrid);
-  const enableAxes = useSelector(graphicsActor, (state) => state.context.enableAxes);
+  const graphicsState = useSelector(
+    graphicsActor,
+    (state) => ({
+      enableSurfaces: state.context.enableSurfaces,
+      enableLines: state.context.enableLines,
+      enableGizmo: state.context.enableGizmo,
+      enableGrid: state.context.enableGrid,
+      enableAxes: state.context.enableAxes,
+      enableMatcap: state.context.enableMatcap,
+    }),
+    (a, b) =>
+      a.enableSurfaces === b.enableSurfaces &&
+      a.enableLines === b.enableLines &&
+      a.enableGizmo === b.enableGizmo &&
+      a.enableGrid === b.enableGrid &&
+      a.enableAxes === b.enableAxes &&
+      a.enableMatcap === b.enableMatcap,
+  );
 
   return (
     <CadViewer
       enableZoom
       enablePan
-      enableGizmo={enableGizmo}
-      enableGrid={enableGrid}
-      enableAxes={enableAxes}
-      enableSurfaces={enableSurfaces}
-      enableLines={enableLines}
+      enableGizmo={graphicsState.enableGizmo}
+      enableGrid={graphicsState.enableGrid}
+      enableAxes={graphicsState.enableAxes}
+      enableSurfaces={graphicsState.enableSurfaces}
+      enableLines={graphicsState.enableLines}
+      enableMatcap={graphicsState.enableMatcap}
       geometries={geometries}
     />
   );

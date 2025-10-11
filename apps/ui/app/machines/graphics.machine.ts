@@ -30,6 +30,7 @@ export type GraphicsContext = {
   enableGizmo: boolean;
   enableGrid: boolean;
   enableAxes: boolean;
+  enableMatcap: boolean;
 
   // Capability registrations
   screenshotCapability?: AnyActorRef;
@@ -65,6 +66,7 @@ export type GraphicsEvent =
   | { type: 'setGizmoVisibility'; payload: boolean }
   | { type: 'setGridVisibility'; payload: boolean }
   | { type: 'setAxesVisibility'; payload: boolean }
+  | { type: 'setMatcapVisibility'; payload: boolean }
   // Controls events
   | { type: 'controlsInteractionStart' }
   | { type: 'controlsChanged'; zoom: number; position: number; fov: number }
@@ -448,6 +450,13 @@ export const graphicsMachine = setup({
         return event.payload;
       },
     }),
+
+    setMatcapVisibility: assign({
+      enableMatcap({ event }) {
+        assertEvent(event, 'setMatcapVisibility');
+        return event.payload;
+      },
+    }),
   },
 }).createMachine({
   id: 'graphics',
@@ -474,6 +483,7 @@ export const graphicsMachine = setup({
     enableGizmo: true,
     enableGrid: true,
     enableAxes: true,
+    enableMatcap: false,
 
     // Capabilities
     screenshotCapability: undefined,
@@ -527,6 +537,9 @@ export const graphicsMachine = setup({
         },
         setAxesVisibility: {
           actions: 'setAxesVisibility',
+        },
+        setMatcapVisibility: {
+          actions: 'setMatcapVisibility',
         },
 
         // Controls events

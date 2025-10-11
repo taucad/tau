@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import type { ClassValue } from 'clsx';
-import { Axis3D, Box, Grid3X3, Rotate3D, Settings, PenLine } from 'lucide-react';
+import { Axis3D, Box, Grid3X3, Rotate3D, Settings, PenLine, Sparkles } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
@@ -16,6 +16,7 @@ import { Switch } from '#components/ui/switch.js';
 import { cn } from '#utils/ui.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { InfoTooltip } from '#components/ui/info-tooltip.js';
 
 type ViewSettings = {
   surface: boolean;
@@ -23,6 +24,7 @@ type ViewSettings = {
   gizmo: boolean;
   grid: boolean;
   axes: boolean;
+  matcap: boolean;
 };
 
 // Default settings
@@ -32,6 +34,7 @@ const defaultSettings: ViewSettings = {
   gizmo: true,
   grid: true,
   axes: true,
+  matcap: false,
 };
 
 type CameraSettingsProps = {
@@ -69,6 +72,10 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
     graphicsActor.send({ type: 'setAxesVisibility', payload: viewSettings.axes });
   }, [viewSettings.axes]);
 
+  useEffect(() => {
+    graphicsActor.send({ type: 'setMatcapVisibility', payload: viewSettings.matcap });
+  }, [viewSettings.matcap]);
+
   const handleMeshToggle = useCallback(
     (checked: boolean) => {
       setViewSettings((previous) => ({ ...previous, surface: checked }));
@@ -104,6 +111,13 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
     [setViewSettings],
   );
 
+  const handleMatcapToggle = useCallback(
+    (checked: boolean) => {
+      setViewSettings((previous) => ({ ...previous, matcap: checked }));
+    },
+    [setViewSettings],
+  );
+
   const preventClose = useCallback((event: Event) => {
     event.preventDefault();
   }, []);
@@ -127,7 +141,7 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
       <DropdownMenuContent
         align="start"
         side="left"
-        className="w-56"
+        className="w-72"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
         }}
@@ -158,6 +172,30 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
             Lines
           </span>
           <Switch variant="dropdown" checked={viewSettings.lines} onCheckedChange={handleLinesToggle} />
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="flex h-10 w-full justify-between"
+          onClick={() => {
+            handleMatcapToggle(!viewSettings.matcap);
+          }}
+          onSelect={preventClose}
+        >
+          <span className="flex items-center gap-2">
+            <Sparkles />
+            <div className="flex flex-col">
+              <span className="flex items-center gap-1">
+                Matcap{' '}
+                <InfoTooltip>
+                  A material that gives models a consistent appearance independent of scene lighting.
+                  <br /> Rendering performance is improved with this enabled.
+                </InfoTooltip>
+              </span>
+              <span className="text-xs font-medium text-muted-foreground/80">
+                Lighting effects are {viewSettings.matcap ? 'inactive' : 'active'}
+              </span>
+            </div>
+          </span>
+          <Switch variant="dropdown" checked={viewSettings.matcap} onCheckedChange={handleMatcapToggle} />
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Viewport</DropdownMenuLabel>

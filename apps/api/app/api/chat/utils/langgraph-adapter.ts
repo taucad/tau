@@ -530,6 +530,25 @@ export class LangGraphAdapter {
     const toolCallId = toolCallState.currentToolCallId;
     const toolName = toolCallState.currentToolName;
 
+    // Check if this is a resume operation (replaying tool execution from checkpoint)
+    const isResuming = streamEvent.metadata['__pregel_resuming'] === true;
+
+    // When resuming, tool events are replayed but chat model stream events are not,
+    // so toolCallState will be empty. Skip writing the tool call since it was already
+    // sent to the client in the original execution.
+    if (isResuming && (!toolCallId || !toolName)) {
+      // No-op: Skip writing duplicate tool call during resume
+      return;
+    }
+
+    // Validate that tool call ID and name are not empty for non-resume cases
+    if (!toolCallId || !toolName) {
+      throw new Error(
+        `Tool start event received with empty tool call ID or name. ` +
+          `toolCallId: "${toolCallId}", toolName: "${toolName}", event: ${JSON.stringify(streamEvent)}`,
+      );
+    }
+
     // Get tool name from map or use raw name
     const { input } = streamEvent.data.input;
 
@@ -570,6 +589,26 @@ export class LangGraphAdapter {
     const toolName = toolCallState.currentToolName;
     const { content } = streamEvent.data.output;
     const toolCallId = toolCallState.currentToolCallId;
+
+    // Check if this is a resume operation (replaying tool execution from checkpoint)
+    const isResuming = streamEvent.metadata['__pregel_resuming'] === true;
+
+    // When resuming, tool events are replayed but chat model stream events are not,
+    // so toolCallState will be empty. Skip writing the tool result since it was already
+    // sent to the client in the original execution.
+    if (isResuming && (!toolCallId || !toolName)) {
+      // No-op: Skip writing duplicate tool result during resume
+      return;
+    }
+
+    // Validate that tool call ID and name are not empty for non-resume cases
+    if (!toolCallId || !toolName) {
+      throw new Error(
+        `Tool end event received with empty tool call ID or name. ` +
+          `toolCallId: "${toolCallId}", toolName: "${toolName}", event: ${JSON.stringify(streamEvent)}`,
+      );
+    }
+
     toolCallState.currentToolCallId = ''; // Reset the current tool call ID
     toolCallState.currentToolName = ''; // Reset the current tool name
 

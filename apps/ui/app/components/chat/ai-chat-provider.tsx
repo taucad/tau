@@ -431,8 +431,28 @@ function ChatSyncWrapper({
         kernelError: cadActorState.context.kernelError,
       };
 
+      // Send messages needed for LangGraph to process the request:
+      // - Last user message (for model ID and context)
+      // - Last assistant message + messages after it (for resuming with tool results)
+      // LangGraph checkpointer maintains full conversation history via thread_id
+      const { messages } = requestBody;
+
+      // Find the last user message (needed for model ID)
+      const lastUserMessage = messages.findLast((m) => m.role === 'user');
+
+      // Find messages from last assistant onward (includes assistant + tool results for resume)
+      const lastAssistantIndex = messages.findLastIndex((m) => m.role === 'assistant');
+      const hasAssistantMessage = lastAssistantIndex !== -1;
+      const messagesFromAssistant = hasAssistantMessage
+        ? messages.slice(lastAssistantIndex).filter((m) => m.role !== 'user')
+        : [];
+
+      // Combine: last user message + [assistant message + tool results] if present
+      const newMessages = lastUserMessage ? [lastUserMessage, ...messagesFromAssistant] : [];
+
       return {
         ...requestBody,
+        messages: newMessages,
         ...feedback,
       };
     },

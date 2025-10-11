@@ -11,7 +11,7 @@ import { useChatConstants } from '#utils/chat.js';
 import { AiChatProvider, useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { BuildNameEditor } from '#routes/builds_.$id/build-name-editor.js';
-import { FileExplorerContext } from '#routes/builds_.$id/graphics-actor.js';
+import { FileExplorerContext, graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
 import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
@@ -22,6 +22,7 @@ import { useKeydown } from '#hooks/use-keydown.js';
 import { ChatControls } from '#routes/builds_.$id/chat-controls.js';
 import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
+import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 
 export const handle: Handle = {
   breadcrumb(match) {
@@ -202,7 +203,6 @@ function ChatWithProvider() {
                   const toolResult = {
                     codeErrors: cadState.context.codeErrors,
                     kernelError: cadState.context.kernelError,
-                    screenshot: '',
                   } satisfies FileEditToolResult['result'];
 
                   cadSubscription.unsubscribe();
@@ -226,6 +226,44 @@ function ChatWithProvider() {
             targetFile: toolCallArgs.targetFile,
             originalContent: currentCode,
             codeEdit: toolCallArgs.codeEdit,
+          },
+        });
+      });
+    }
+
+    if (toolCall.toolName === 'analyze_image') {
+      return new Promise<{ screenshot: string }>((resolve, reject) => {
+        // Create screenshot request machine instance
+        const screenshotActor = createActor(screenshotRequestMachine, {
+          input: { graphicsRef: graphicsActor },
+        }).start();
+
+        // Request screenshot capture - backend will handle the Vision API call
+        screenshotActor.send({
+          type: 'requestScreenshot',
+          options: {
+            output: {
+              format: 'image/webp',
+              quality: 0.85,
+            },
+            aspectRatio: 16 / 9,
+            maxResolution: 1200,
+            zoomLevel: 1.4,
+          },
+          onSuccess(dataUrls) {
+            const screenshot = dataUrls[0];
+            if (!screenshot) {
+              screenshotActor.stop();
+              reject(new Error('No screenshot data received'));
+              return;
+            }
+
+            screenshotActor.stop();
+            resolve({ screenshot });
+          },
+          onError(error) {
+            screenshotActor.stop();
+            reject(new Error(`Screenshot capture failed: ${error}`));
           },
         });
       });

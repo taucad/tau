@@ -4,6 +4,7 @@ import { ChatMessageToolWebSearch } from '#routes/builds_.$id/chat-message-tool-
 import { ChatMessageToolTransfer, transferToStartingWith } from '#routes/builds_.$id/chat-message-tool-transfer.js';
 import { ChatMessageToolWebBrowser } from '#routes/builds_.$id/chat-message-tool-web-browser.js';
 import { ChatMessageToolFileEdit } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
+import { ChatMessageToolImageAnalysis } from '#routes/builds_.$id/chat-message-tool-image-analysis.js';
 
 export function ChatMessageTool({ part }: { readonly part: ToolInvocationUIPart }): React.JSX.Element {
   switch (part.toolInvocation.toolName) {
@@ -17,6 +18,10 @@ export function ChatMessageTool({ part }: { readonly part: ToolInvocationUIPart 
 
     case 'edit_file': {
       return <ChatMessageToolFileEdit part={part} />;
+    }
+
+    case 'analyze_image': {
+      return <ChatMessageToolImageAnalysis part={part} />;
     }
 
     default: {

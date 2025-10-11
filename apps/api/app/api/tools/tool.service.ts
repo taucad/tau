@@ -3,12 +3,14 @@ import type { StructuredTool } from '@langchain/core/tools';
 import { OpenAI, OpenAIEmbeddings } from '@langchain/openai';
 import { createWebBrowserTool } from '#api/tools/tools/tool-web-browser.js';
 import { fileEditTool } from '#api/tools/tools/tool-file-edit.js';
+import { imageAnalysisTool } from '#api/tools/tools/tool-image-analysis.js';
 import { parseWebSearchResults, webSearchTool } from '#api/tools/tools/tool-web-search.js';
 
 export const toolCategory = {
   webSearch: 'web_search',
   webBrowser: 'web_browser',
   fileEdit: 'edit_file',
+  imageAnalysis: 'analyze_image',
 } as const satisfies Record<string, string>;
 
 export const toolChoice = {
@@ -47,12 +49,14 @@ export class ToolService {
         forceSummary: false,
       }),
       [toolCategory.fileEdit]: fileEditTool,
+      [toolCategory.imageAnalysis]: imageAnalysisTool,
     };
 
     const toolNameFromToolCategory: Record<ToolCategory, string> = {
       [toolCategory.webSearch]: toolCategoryToTool[toolCategory.webSearch].name,
       [toolCategory.webBrowser]: toolCategoryToTool[toolCategory.webBrowser].name,
       [toolCategory.fileEdit]: toolCategoryToTool[toolCategory.fileEdit].name,
+      [toolCategory.imageAnalysis]: toolCategoryToTool[toolCategory.imageAnalysis].name,
     };
 
     const toolNameFromToolChoice = {

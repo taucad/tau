@@ -93,7 +93,7 @@ export function ChatParametersInputNumber({
           ) : isUnitless ? (
             <Hash className="size-3" />
           ) : (
-            <span className="font-mono text-xs">{unit}</span>
+            <span className="font-mono text-xs tracking-wide">{unit}</span>
           )}
         </span>
       )}

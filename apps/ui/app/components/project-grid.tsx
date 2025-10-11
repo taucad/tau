@@ -207,6 +207,7 @@ function ProjectCard({
             <CadViewer
               enablePan={false}
               enableLines={false}
+              enableMatcap={false}
               geometries={geometries}
               className="bg-muted"
               stageOptions={{

@@ -693,6 +693,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
               geometries={geometries}
               enablePan={false}
               enableLines={false}
+              enableMatcap={false}
               className="bg-muted"
               stageOptions={{
                 zoomLevel: 1.5,

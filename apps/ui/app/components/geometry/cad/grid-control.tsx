@@ -1,11 +1,10 @@
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
 import { Lock, LockIcon, LockOpen } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { formatNumber } from '#utils/number.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import {
   DropdownMenu,
@@ -20,6 +19,7 @@ import {
 import { Switch } from '#components/ui/switch.js';
 import { cn } from '#utils/ui.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { formatNumberEngineeringNotation } from '#utils/number.js';
 
 type GridSizeIndicatorProps = {
   /**
@@ -31,32 +31,14 @@ type GridSizeIndicatorProps = {
 const getTextSizeClass = (sizeText: string) => {
   const { length } = sizeText;
 
-  if (length > 8) {
-    return 'text-[calc(var(--spacing)*1.2)]';
-  }
-
-  if (length > 7) {
-    return 'text-[calc(var(--spacing)*1.4)]';
-  }
-
-  if (length > 6) {
-    return 'text-[calc(var(--spacing)*1.6)]';
-  }
-
-  if (length > 5) {
-    return 'text-[calc(var(--spacing)*1.8)]';
-  }
-
-  if (length > 4) {
-    return 'text-[calc(var(--spacing)*2)]';
-  }
-
   if (length > 3) {
-    return 'text-[calc(var(--spacing)*2.2)]';
+    return 'text-[calc(var(--spacing)*2.2)] font-semibold';
   }
 
   return 'text-[calc(var(--spacing)*3)]';
 };
+
+const maxDigits = 3;
 
 const gridUnitOptions = [
   { label: 'Millimeter', value: 'mm', system: 'metric', factor: 1 },
@@ -118,11 +100,6 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
     event.preventDefault();
   }, []);
 
-  // If there's no valid grid size, don't render
-  if (!gridSizes.smallSize) {
-    return null;
-  }
-
   // Find the current unit's conversion factor
   const currentUnitOption = gridUnitOptions.find((option) => option.value === unit) ?? gridUnitOptions[0];
 
@@ -131,7 +108,12 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
   // (The comment is kept to explain different scenarios but the calculation is the same)
   const displaySize = gridSizes.smallSize / currentUnitOption.factor;
 
-  const localizedSmallGridSize = formatNumber(displaySize);
+  const localizedSmallGridSize = useMemo(() => formatNumberEngineeringNotation(displaySize, maxDigits), [displaySize]);
+
+  // If there's no valid grid size, don't render
+  if (!gridSizes.smallSize) {
+    return null;
+  }
 
   return (
     <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
@@ -142,14 +124,14 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
               <span
                 className={cn(
                   getTextSizeClass(localizedSmallGridSize),
-                  'absolute top-[calc(var(--spacing)*3)] left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center',
+                  'absolute top-2.75 flex -translate-y-1/2 items-center justify-center',
                 )}
               >
                 <span>{localizedSmallGridSize}</span>
               </span>
-              <span className="absolute bottom-1 left-1/2 flex -translate-x-1/2 items-center gap-0.5 text-[calc(var(--spacing)*2.5)] tracking-wide">
+              <span className="absolute bottom-2.25 flex translate-y-1/2 items-center justify-center gap-0.25 text-xs tracking-wide">
                 {unit}
-                {isGridSizeLocked ? <LockIcon className="size-2" /> : null}
+                {isGridSizeLocked ? <LockIcon className="size-2" strokeWidth={4} /> : null}
               </span>
             </Button>
           </DropdownMenuTrigger>

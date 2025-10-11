@@ -225,7 +225,7 @@ try {
 
       const gltfShapes = [];
       if (shapes3d.length > 0) {
-        const gltfBlob = await convertReplicadGeometriesToGltf(shapes3d, 'glb');
+        const gltfBlob = await convertReplicadGeometriesToGltf(shapes3d, 'glb', false);
         const gltfEndTime = performance.now();
         this.log(`GLTF conversion took ${gltfEndTime - gltfStartTime}ms`, {
           operation: 'computeGeometry',

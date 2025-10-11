@@ -95,7 +95,7 @@ function createPrimitive(document: Document, baseColorFactor: Color, geometry: G
 /**
  * Convert mesh data to geometry arrays suitable for glTF
  */
-function convertMeshToGeometry(meshData: IndexedPolyhedron): GeometryData {
+function convertMeshToGeometry(meshData: IndexedPolyhedron, enableTransform: boolean): GeometryData {
   const { vertices, faces, colors } = meshData;
 
   // Calculate total number of triangles
@@ -141,9 +141,14 @@ function convertMeshToGeometry(meshData: IndexedPolyhedron): GeometryData {
       }
 
       // Transform vertices from z-up to y-up coordinate system and convert units (mm to m)
-      const transformedV1 = transformVerticesGltf(v1);
-      const transformedV2 = transformVerticesGltf(v2);
-      const transformedV3 = transformVerticesGltf(v3);
+      let transformedV1 = v1;
+      let transformedV2 = v2;
+      let transformedV3 = v3;
+      if (enableTransform) {
+        transformedV1 = transformVerticesGltf(v1);
+        transformedV2 = transformVerticesGltf(v2);
+        transformedV3 = transformVerticesGltf(v3);
+      }
 
       // Add positions
       positions[positionIndex++] = transformedV1[0];
@@ -194,7 +199,7 @@ function convertMeshToGeometry(meshData: IndexedPolyhedron): GeometryData {
 /**
  * Create a GLTF document from mesh data (shared between GLB and GLTF exports)
  */
-function createGltfDocument(meshData: IndexedPolyhedron): Document {
+function createGltfDocument(meshData: IndexedPolyhedron, enableTransform: boolean): Document {
   const document = new Document();
   document.createBuffer();
 
@@ -202,7 +207,7 @@ function createGltfDocument(meshData: IndexedPolyhedron): Document {
   const mesh = document.createMesh();
 
   // Convert mesh data to geometry
-  const geometry = convertMeshToGeometry(meshData);
+  const geometry = convertMeshToGeometry(meshData, enableTransform);
 
   if (geometry.positions.length === 0) {
     // Create a simple point if no geometry
@@ -280,8 +285,8 @@ function createGltfDocument(meshData: IndexedPolyhedron): Document {
 /**
  * Create a GLB (binary GLTF) blob from mesh data with colors
  */
-export async function createGlb(meshData: IndexedPolyhedron): Promise<Blob> {
-  const document = createGltfDocument(meshData);
+export async function createGlb(meshData: IndexedPolyhedron, enableTransform: boolean): Promise<Blob> {
+  const document = createGltfDocument(meshData, enableTransform);
   const glbBuffer = await new NodeIO().writeBinary(document);
   return new Blob([glbBuffer], { type: 'model/gltf-binary' });
 }
@@ -290,8 +295,8 @@ export async function createGlb(meshData: IndexedPolyhedron): Promise<Blob> {
  * Create a GLTF (JSON format) blob from mesh data with colors
  * Note: This creates a self-contained GLTF with embedded binary data
  */
-export async function createGltf(meshData: IndexedPolyhedron): Promise<Blob> {
-  const document = createGltfDocument(meshData);
+export async function createGltf(meshData: IndexedPolyhedron, enableTransform: boolean): Promise<Blob> {
+  const document = createGltfDocument(meshData, enableTransform);
 
   // Use writeJSON which returns both the JSON and binary data
   const gltfData = await new NodeIO().writeJSON(document);

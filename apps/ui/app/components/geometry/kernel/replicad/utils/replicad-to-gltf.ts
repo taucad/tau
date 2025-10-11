@@ -10,7 +10,7 @@ import type { GeometryReplicad } from '#components/geometry/kernel/replicad/repl
  * This is necessary as Replicad uses z-up coordinates and millimeter units,
  * while glTF uses y-up coordinates and meter units.
  */
-function transformVertexArray(vertices: number[]): Float32Array {
+function transformVertexArray(vertices: number[], enableTransform: boolean): Float32Array {
   const transformedVertices = new Float32Array(vertices.length);
 
   for (let i = 0; i < vertices.length; i += 3) {
@@ -23,7 +23,11 @@ function transformVertexArray(vertices: number[]): Float32Array {
     }
 
     const vertex: [number, number, number] = [x, y, z];
-    const transformed = transformVerticesGltf(vertex);
+    let transformed = vertex;
+    if (enableTransform) {
+      transformed = transformVerticesGltf(vertex);
+    }
+
     transformedVertices[i] = transformed[0];
     transformedVertices[i + 1] = transformed[1];
     transformedVertices[i + 2] = transformed[2];
@@ -36,14 +40,18 @@ function transformVertexArray(vertices: number[]): Float32Array {
  * Create a glTF primitive directly from replicad Shape3D data
  * This preserves the original triangulation from replicad without re-triangulating
  */
-function createPrimitiveFromReplicadShape(document: Document, geometry: GeometryReplicad): Primitive {
+function createPrimitiveFromReplicadShape(
+  document: Document,
+  geometry: GeometryReplicad,
+  enableTransform: boolean,
+): Primitive {
   const { faces } = geometry;
   const { vertices: vertexData, triangles, normals } = faces;
 
   // Convert flat arrays to typed arrays and transform coordinates
-  const positions = transformVertexArray(vertexData);
+  const positions = transformVertexArray(vertexData, enableTransform);
   const indices = new Uint32Array(triangles);
-  const normalsArray = transformVertexArray(normals);
+  const normalsArray = transformVertexArray(normals, enableTransform);
 
   // Handle color - normalize and convert to RGB array
   let baseColor: [number, number, number, number] = [0.8, 0.8, 0.8, 1]; // Default light gray
@@ -108,13 +116,14 @@ function createLinePrimitiveFromReplicadEdges(
   document: Document,
   edges: GeometryReplicad['edges'],
   name: string,
+  enableTransform: boolean,
 ): Primitive | undefined {
   if (edges.lines.length === 0) {
     return undefined;
   }
 
   // Convert edges to typed arrays and transform coordinates
-  const linePositions = transformVertexArray(edges.lines);
+  const linePositions = transformVertexArray(edges.lines, enableTransform);
 
   // Create line indices - each pair of positions forms a line
   const lineIndices = new Uint32Array(linePositions.length / 3);
@@ -146,7 +155,7 @@ function createLinePrimitiveFromReplicadEdges(
  * Create a GLTF document directly from replicad Shape3D data
  * This preserves the original triangulation without re-triangulating
  */
-function createGltfDocumentFromReplicadShapes(geometries: GeometryReplicad[]): Document {
+function createGltfDocumentFromReplicadShapes(geometries: GeometryReplicad[], enableTransform: boolean): Document {
   const document = new Document();
   document.createBuffer();
 
@@ -158,12 +167,12 @@ function createGltfDocumentFromReplicadShapes(geometries: GeometryReplicad[]): D
 
     // Add main surface primitive
     if (geomtry.faces.vertices.length > 0 && geomtry.faces.triangles.length > 0) {
-      const surfacePrimitive = createPrimitiveFromReplicadShape(document, geomtry);
+      const surfacePrimitive = createPrimitiveFromReplicadShape(document, geomtry, enableTransform);
       mesh.addPrimitive(surfacePrimitive);
     }
 
     // Add line primitive for edges if available
-    const linePrimitive = createLinePrimitiveFromReplicadEdges(document, geomtry.edges, geomtry.name);
+    const linePrimitive = createLinePrimitiveFromReplicadEdges(document, geomtry.edges, geomtry.name, enableTransform);
     if (linePrimitive) {
       mesh.addPrimitive(linePrimitive);
     }
@@ -189,8 +198,8 @@ function createGltfDocumentFromReplicadShapes(geometries: GeometryReplicad[]): D
 /**
  * Convert replicad geometries to GLB blob format (preserving original triangulation)
  */
-async function createGlbFromReplicadShapes(geometries: GeometryReplicad[]): Promise<Blob> {
-  const document = createGltfDocumentFromReplicadShapes(geometries);
+async function createGlbFromReplicadShapes(geometries: GeometryReplicad[], enableTransform: boolean): Promise<Blob> {
+  const document = createGltfDocumentFromReplicadShapes(geometries, enableTransform);
   const glbBuffer = await new NodeIO().writeBinary(document);
   return new Blob([glbBuffer], { type: 'model/gltf-binary' });
 }
@@ -198,8 +207,8 @@ async function createGlbFromReplicadShapes(geometries: GeometryReplicad[]): Prom
 /**
  * Convert replicad geometries to GLTF blob format (preserving original triangulation)
  */
-async function createGltfFromReplicadShapes(geometries: GeometryReplicad[]): Promise<Blob> {
-  const document = createGltfDocumentFromReplicadShapes(geometries);
+async function createGltfFromReplicadShapes(geometries: GeometryReplicad[], enableTransform: boolean): Promise<Blob> {
+  const document = createGltfDocumentFromReplicadShapes(geometries, enableTransform);
 
   // Use writeJSON which returns both the JSON and binary data
   const gltfData = await new NodeIO().writeJSON(document);
@@ -240,6 +249,7 @@ async function createGltfFromReplicadShapes(geometries: GeometryReplicad[]): Pro
  * Convert replicad geometries to GLTF blob format
  * @param geometries - Array of Shape3D objects from replicad
  * @param format - Output format: 'glb' for binary, 'gltf' for JSON
+ * @param enableTransform - Whether to transform the vertices to the y-up coordinate system and convert units to meters
  * @returns GLTF blob
  *
  * This function preserves the original triangulation from replicad without re-triangulating,
@@ -248,10 +258,11 @@ async function createGltfFromReplicadShapes(geometries: GeometryReplicad[]): Pro
 export async function convertReplicadGeometriesToGltf(
   geometries: GeometryReplicad[],
   format: 'glb' | 'gltf' = 'glb',
+  enableTransform = true,
 ): Promise<Blob> {
   if (format === 'gltf') {
-    return createGltfFromReplicadShapes(geometries);
+    return createGltfFromReplicadShapes(geometries, enableTransform);
   }
 
-  return createGlbFromReplicadShapes(geometries);
+  return createGlbFromReplicadShapes(geometries, enableTransform);
 }

@@ -101,7 +101,7 @@ class OpenScadWorker extends KernelWorker {
       const offData = instance.FS.readFile(outputFile, { encoding: 'utf8' });
       this.offDataMemory[geometryId] = offData;
 
-      const gltfBlob = await convertOffToGltf(offData, 'glb');
+      const gltfBlob = await convertOffToGltf(offData, 'glb', false);
 
       const geometry: GeometryGltf = {
         type: 'gltf',

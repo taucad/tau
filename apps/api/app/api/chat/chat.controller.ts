@@ -127,16 +127,18 @@ export class ChatController {
 If code errors or kernel errors are present, use this information to fix the errors.
 
 ${objectToXml({
-  codeErrors: body.codeErrors.map((error) => ({
-    message: error.message,
-    startLineNum: error.startLineNumber,
-    endLineNum: error.endLineNumber,
-    startCol: error.startColumn,
-    endCol: error.endColumn,
-  })),
-  kernelError: body.kernelError
-    ? `${body.kernelError.message}${body.kernelError.startLineNumber ? ` (Line ${body.kernelError.startLineNumber}${body.kernelError.startColumn ? `:${body.kernelError.startColumn}` : ''})` : ''}${body.kernelError.stack ? `\n\nStack trace:\n${body.kernelError.stack}` : ''}`
-    : undefined,
+  ...(body.codeErrors.length > 0 && {
+    codeErrors: body.codeErrors.map((error) => ({
+      message: error.message,
+      startLineNum: error.startLineNumber,
+      endLineNum: error.endLineNumber,
+      startCol: error.startColumn,
+      endCol: error.endColumn,
+    })),
+  }),
+  ...(body.kernelError && {
+    kernelError: `${body.kernelError.message}${body.kernelError.startLineNumber ? ` (Line ${body.kernelError.startLineNumber}${body.kernelError.startColumn ? `:${body.kernelError.startColumn}` : ''})` : ''}${body.kernelError.stack ? `\n\nStack trace:\n${body.kernelError.stack}` : ''}`,
+  }),
   currentCode: body.code,
   selectedKernel,
 })}

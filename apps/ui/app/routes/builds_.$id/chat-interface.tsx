@@ -41,7 +41,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
     setIsDetailsOpen,
   } = useViewContext();
   const [chatResizeLeft, setChatResizeLeft] = useCookie(cookieName.chatRsLeft, [30, 20, 50]);
-  const [chatResizeRight, setChatResizeRight] = useCookie(cookieName.chatRsRight, [50, 30, 20, 0]);
+  const [chatResizeRight, setChatResizeRight] = useCookie(cookieName.chatRsRight, [50, 20, 30, 0]);
   const [activeTab, setActiveTab] = useCookie<(typeof chatTabs)[number]['id']>(cookieName.chatInterfaceTab, 'chat');
   const isMobile = useIsMobile();
 

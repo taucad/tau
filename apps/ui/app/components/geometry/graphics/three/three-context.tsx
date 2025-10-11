@@ -32,9 +32,9 @@ export function ThreeProvider({
   enableZoom = false,
   enablePan = false,
   enableDamping = false,
+  enableCentering = true,
   className,
   stageOptions,
-  enableCentering = true,
   zoomSpeed = 2,
   ...properties
 }: ThreeContextProperties): React.JSX.Element {

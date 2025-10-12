@@ -29,6 +29,8 @@ import { SettingsControl } from '#components/geometry/cad/settings-control.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { useSelector } from '@xstate/react';
 
+const yUpFormats = ['gltf', 'glb'];
+
 export const handle: Handle = {
   breadcrumb() {
     return (
@@ -274,10 +276,9 @@ export default function ConverterRoute(): React.JSX.Element {
             onDrop={handleDrop}
           >
             <CadViewer
-              enableYupRotation
+              enableYupRotation={yUpFormats.includes(uploadedFile?.format ?? '')}
               enableZoom
               enablePan
-              enableDamping
               enableMatcap={graphicsState.enableMatcap}
               enableLines={graphicsState.enableLines}
               enableAxes={graphicsState.enableAxes}

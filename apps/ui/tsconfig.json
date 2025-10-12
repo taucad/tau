@@ -4,6 +4,9 @@
   "include": [],
   "references": [
     {
+      "path": "../../packages/converter"
+    },
+    {
       "path": "../../libs/api-extractor"
     },
     {

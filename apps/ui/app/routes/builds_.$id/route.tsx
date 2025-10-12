@@ -244,7 +244,7 @@ function ChatWithProvider() {
           options: {
             output: {
               format: 'image/webp',
-              quality: 0.85,
+              quality: 0.5, // Lower quality for smaller filesize -> less LLM inference token usage.
             },
             aspectRatio: 16 / 9,
             maxResolution: 1200,

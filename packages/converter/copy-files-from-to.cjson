@@ -12,15 +12,29 @@
     // Draco3d - https://github.com/google/draco
     {
       "from": "https://www.gstatic.com/draco/versioned/decoders/1.5.7/draco_decoder_gltf.js",
-      "to": "src/assets/draco3d/gltf/draco_decoder.js"
+      "to": "src/assets/draco3d/gltf/draco_decoder_gltf.js"
     },
     {
       "from": "https://www.gstatic.com/draco/versioned/decoders/1.5.7/draco_decoder_gltf.wasm",
-      "to": "src/assets/draco3d/gltf/draco_decoder.wasm"
+      "to": "src/assets/draco3d/gltf/draco_decoder_gltf.wasm"
     },
     {
       "from": "https://www.gstatic.com/draco/versioned/decoders/1.5.7/draco_wasm_wrapper_gltf.js",
-      "to": "src/assets/draco3d/gltf/draco_wasm_wrapper.js"
+      "to": "src/assets/draco3d/gltf/draco_wasm_wrapper_gltf.js"
+    },
+    {
+      "from": "./node_modules/draco3dgltf/draco_encoder.wasm",
+      "to": "src/assets/draco3d/gltf/draco_encoder.wasm"
+    },
+    // Assimp - https://github.com/assimp/assimp
+    {
+      "from": "./node_modules/assimpjs/dist/assimpjs-all.wasm",
+      "to": "src/assets/assimpjs/assimpjs-all.wasm"
+    },
+    // OCCT - https://github.com/OCCT/OCCT
+    {
+      "from": "./node_modules/occt-import-js/dist/occt-import-js.wasm",
+      "to": "src/assets/occt-import-js/occt-import-js.wasm"
     }
   ],
   // Always overwrite files

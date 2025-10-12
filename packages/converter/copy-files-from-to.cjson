@@ -31,6 +31,14 @@
       "from": "./node_modules/assimpjs/dist/assimpjs-all.wasm",
       "to": "src/assets/assimpjs/assimpjs-all.wasm"
     },
+    {
+      "from": "./node_modules/assimpjs/dist/assimpjs-exporter.wasm",
+      "to": "src/assets/assimpjs/assimpjs-exporter.wasm"
+    },
+    {
+      "from": "./node_modules/assimpjs/dist/assimpjs-mini.wasm",
+      "to": "src/assets/assimpjs/assimpjs-mini.wasm"
+    },
     // OCCT - https://github.com/OCCT/OCCT
     {
       "from": "./node_modules/occt-import-js/dist/occt-import-js.wasm",

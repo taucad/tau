@@ -58,18 +58,6 @@ export const convertAiSdkMessagesToLangchainMessages: (
   // Track user message count to match correctly
   let userMessageCount = 0;
 
-  // Collect all valid tool call IDs from assistant messages
-  const validToolCallIds = new Set<string>();
-  for (const coreMessage of coreMessages) {
-    if (coreMessage.role === 'assistant' && Array.isArray(coreMessage.content)) {
-      for (const part of coreMessage.content) {
-        if (part.type === 'tool-call') {
-          validToolCallIds.add(part.toolCallId);
-        }
-      }
-    }
-  }
-
   const langchainMessages = coreMessages.flatMap((coreMessage) => {
     // Handle user messages which contain invalid attachments for Langchain.
     // AI SDK converts attachments to a buffer representation which is incompatible
@@ -109,19 +97,16 @@ export const convertAiSdkMessagesToLangchainMessages: (
       }
 
       // Handle tool messages which contain array `content`, the `content` must instead be a string.
-      // Filter out tool results that have no matching tool call.
       case 'tool': {
-        return coreMessage.content
-          .filter((part) => validToolCallIds.has(part.toolCallId))
-          .map(
-            (part) =>
-              new ToolMessage({
-                content: JSON.stringify(part.result),
-                // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
-                tool_call_id: part.toolCallId,
-                name: part.toolName,
-              }),
-          );
+        return coreMessage.content.map(
+          (part) =>
+            new ToolMessage({
+              content: JSON.stringify(part.result),
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
+              tool_call_id: part.toolCallId,
+              name: part.toolName,
+            }),
+        );
       }
 
       // Lastly, handle assistant messages.

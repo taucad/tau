@@ -140,7 +140,7 @@
   --l-high: 0.78;
   --l-intense: 0.88;
   --l-deepest: 0.95;
-  --l-secondary: 0.8;
+  --l-secondary: 0.7;
 
   --primary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
   --secondary-foreground: oklch(var(--l-base) 0.01 var(--hue-neutral));

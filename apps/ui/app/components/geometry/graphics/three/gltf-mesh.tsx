@@ -103,7 +103,7 @@ export function GltfMesh({
     return () => {
       cancelled = true;
     };
-  }, [gltfBlob, enableMatcap]);
+  }, [gltfBlob, enableMatcap, enableYupRotation]);
 
   // Toggle visibility of surfaces and lines based on props
   useEffect(() => {

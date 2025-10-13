@@ -54,6 +54,14 @@ export function applyLineSegments(gltf: GLTF, edgeThresholdDegrees = 30, edgeCol
     const lineSegments = new LineSegments(edgeGeometry, edgeMaterial);
     lineSegments.name = `${mesh.name || 'mesh'}-edges`;
 
+    // Copy the mesh's transformation to ensure lines match the mesh
+    lineSegments.position.copy(mesh.position);
+    lineSegments.rotation.copy(mesh.rotation);
+    lineSegments.scale.copy(mesh.scale);
+    lineSegments.quaternion.copy(mesh.quaternion);
+    lineSegments.matrix.copy(mesh.matrix);
+    lineSegments.matrixWorld.copy(mesh.matrixWorld);
+
     // Add the line segments to the same parent as the mesh
     // This ensures they follow the same transformation hierarchy
     if (mesh.parent) {

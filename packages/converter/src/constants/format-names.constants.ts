@@ -1,0 +1,48 @@
+import type { InputFormat, OutputFormat } from '#types.js';
+
+export const formatNames: Record<InputFormat | OutputFormat, string> = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- format name
+  '3dm': '3D Manufacturing (3DM)',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- format name
+  '3ds': '3D Studio (3DS)',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- format name
+  '3mf': '3D Manufacturing Format (3MF)',
+  ac: 'AC3D (AC)',
+  ase: 'Autodesk ASCII (ASE)',
+  amf: 'Additive Manufacturing (AMF)',
+  brep: 'BREP',
+  bvh: 'Biovision Hierarchy (BVH)',
+  cob: 'Caligari Object (COB)',
+  dae: 'COLLADA (DAE)',
+  drc: 'Draco (DRC)',
+  dxf: 'Drawing Exchange Format (DXF)',
+  fbx: 'Filmbox (FBX)',
+  glb: 'GL Transmission Format Binary (GLB)',
+  gltf: 'GL Transmission Format (GLTF)',
+  ifc: 'Industry Foundation Classes (IFC)',
+  iges: 'Initial Graphics Exchange Specification (IGES)',
+  igs: 'Initial Graphics Exchange Specification (IGS)',
+  lwo: 'LightWave Object (LWO)',
+  md2: 'Quake 2 Model (MD2)',
+  md5mesh: 'Doom 3 Model (MD5MESH)',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- format name
+  'mesh.xml': 'Mesh XML',
+  nff: 'Neutral File Format (NFF)',
+  obj: 'Wavefront Object (OBJ)',
+  off: 'Object File Format (OFF)',
+  ogex: 'Open Game Engine Exchange (OGEX)',
+  ply: 'Polygon File Format (PLY)',
+  smd: 'Source Engine Model (SMD)',
+  step: 'STEP',
+  stl: 'Stereolithography (STL)',
+  stp: 'STEP (STP)',
+  usda: 'Universal Scene Description ASCII (USDA)',
+  usdc: 'Universal Scene Description Crate (USDC)',
+  usdz: 'Universal Scene Description ZIP (USDZ)',
+  wrl: 'Virtual Reality Modeling Language (WRL)',
+  x: 'DirectX (X)',
+  x3d: 'Extensible 3D (X3D)',
+  x3db: 'Extensible 3D Binary (X3DB)',
+  x3dv: 'Extensible 3D VRML (X3DV)',
+  xgl: 'XGL',
+};

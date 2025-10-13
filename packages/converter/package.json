@@ -39,6 +39,16 @@
         "types": "./dist/esm/index.d.ts",
         "default": "./dist/esm/index.js"
       }
+    },
+    "./constants": {
+      "require": {
+        "types": "./dist/cjs/constants/index.d.cts",
+        "default": "./dist/cjs/constants/index.cjs"
+      },
+      "import": {
+        "types": "./dist/esm/constants/index.d.ts",
+        "default": "./dist/esm/constants/index.js"
+      }
     }
   },
   "imports": {

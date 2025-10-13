@@ -2,7 +2,7 @@ import { defineConfig } from 'tsup';
 import type { Options } from 'tsup';
 
 const baseConfig: Options = {
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/constants/index.ts'],
   sourcemap: false,
   clean: true,
   dts: true,

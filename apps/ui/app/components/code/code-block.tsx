@@ -42,7 +42,7 @@ const codeBlockActionVariants = cva('flex flex-row gap-1', {
       floating: 'p-0.25',
     },
     visibility: {
-      inivisibleUntilHover: 'opacity-0 group-hover/codeblock:opacity-100 transition-opacity',
+      inivisibleUntilHover: 'md:opacity-0 md:group-hover/codeblock:opacity-100 md:transition-opacity',
       alwaysVisible: '',
     },
   },

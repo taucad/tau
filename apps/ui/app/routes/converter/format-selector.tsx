@@ -19,7 +19,7 @@ export function FormatSelector({
 }: FormatSelectorProperties): React.JSX.Element {
   return (
     <div className="space-y-3">
-      <div className="flex h-6 items-center justify-between">
+      <div className="flex h-4 items-center justify-between">
         <h3 className="text-sm font-medium">Select formats to convert</h3>
         {selectedFormats.length > 0 ? (
           <Button variant="ghost" size="xs" onClick={onClearSelection}>

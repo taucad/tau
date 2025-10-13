@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 import JSZip from 'jszip';
 import { importToGlb, exportFromGlb, supportedImportFormats, supportedExportFormats } from '@taucad/converter';
 import type { InputFormat, OutputFormat } from '@taucad/converter';
-import { Download, Upload, RotateCcw } from 'lucide-react';
+import { Download, Upload, RotateCcw, Package, Code2 } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Button } from '#components/ui/button.js';
 import { toast } from '#components/ui/sonner.js';
@@ -26,6 +26,15 @@ import { ConverterFileTree } from '#routes/converter/converter-file-tree.js';
 import { FormatsList } from '#routes/converter/formats-list.js';
 import { FormatsListMobile } from '#routes/converter/formats-list-mobile.js';
 import {
+  CodeBlock,
+  CodeBlockHeader,
+  CodeBlockTitle,
+  CodeBlockAction,
+  CodeBlockContent,
+  Pre,
+} from '#components/code/code-block.js';
+import { CopyButton } from '#components/copy-button.js';
+import {
   getFormatFromFilename,
   formatDisplayName,
   formatFileSize,
@@ -47,6 +56,7 @@ export const handle: Handle = {
     );
   },
   enableFloatingSidebar: true,
+  enableOverflowY: true,
 };
 
 type UploadedFileInfo = {
@@ -414,14 +424,14 @@ export default function ConverterRoute(): React.JSX.Element {
         </>
       ) : (
         // Landing state - no model loaded
-        <div className="container mt-(--header-height) grid h-full items-start gap-8 overflow-y-auto pb-8 md:pt-10 lg:grid-cols-[300px_1fr_300px] lg:pt-40 xl:grid-cols-[350px_1fr_350px]">
+        <div className="container mt-(--header-height) grid h-full items-start gap-8 md:pt-8 lg:grid-cols-[300px_1fr_300px] xl:grid-cols-[350px_1fr_350px]">
           {/* Import Formats - Left */}
           <FormatsList
             icon={Upload}
             title="Import Formats"
             description="Formats you can upload"
             formats={supportedImportFormats}
-            className="max-lg:hidden"
+            className="mt-30 max-lg:hidden"
           />
 
           {/* Center - Hero & Upload */}
@@ -436,7 +446,7 @@ export default function ConverterRoute(): React.JSX.Element {
             {/* Upload Area */}
             <Dropzone className="w-full max-w-2xl" maxFiles={1} onDrop={handleFileDrop}>
               <DropzoneEmptyState>
-                <div className="flex flex-col items-center gap-6 py-8">
+                <div className="flex flex-col items-center gap-6 py-4">
                   <div className="flex size-20 items-center justify-center rounded-full bg-gradient-to-br from-primary/20 to-primary/10">
                     <Upload className="size-10 text-primary" />
                   </div>
@@ -453,6 +463,65 @@ export default function ConverterRoute(): React.JSX.Element {
               <FormatsListMobile title="Import Formats" formats={supportedImportFormats} />
               <FormatsListMobile title="Export Formats" formats={supportedExportFormats} />
             </div>
+
+            {/* Alternative Usage Methods */}
+            <div className="w-full max-w-2xl space-y-4 pb-8">
+              <div className="text-center">
+                <h2 className="text-lg font-semibold">Other Ways to Use the Converter</h2>
+                <p className="text-sm text-muted-foreground">Integrate conversion into your own projects</p>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-2">
+                {/* NPM Package */}
+                <div className="flex flex-col gap-3 rounded-lg border bg-card p-4 shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <div className="flex size-8 items-center justify-center rounded-md bg-primary/10">
+                      <Package className="size-4 text-primary" />
+                    </div>
+                    <h3 className="font-semibold">NPM Package</h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Install the converter package to use it directly in your JavaScript or TypeScript projects.
+                  </p>
+                  <CodeBlock>
+                    <CodeBlockHeader>
+                      <CodeBlockTitle>Installation</CodeBlockTitle>
+                      <CodeBlockAction>
+                        <CopyButton
+                          size="xs"
+                          getText={() => {
+                            return 'pnpm install @taucad/converter';
+                          }}
+                        />
+                      </CodeBlockAction>
+                    </CodeBlockHeader>
+                    <CodeBlockContent>
+                      <Pre language="bash">pnpm install @taucad/converter</Pre>
+                    </CodeBlockContent>
+                  </CodeBlock>
+                </div>
+
+                {/* API */}
+                <div className="flex flex-col justify-between gap-3 rounded-lg border bg-card p-4 shadow-sm">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex size-8 items-center justify-center rounded-md bg-primary/10">
+                        <Code2 className="size-4 text-primary" />
+                      </div>
+                      <h3 className="font-semibold">REST API</h3>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Use our REST API to convert 3D models from any platform or programming language.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button asChild variant="outline" size="sm" className="w-full">
+                      <Link to="#">View API Documentation</Link>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Export Formats - Right */}
@@ -461,7 +530,7 @@ export default function ConverterRoute(): React.JSX.Element {
             title="Export Formats"
             description="Formats you can convert to"
             formats={supportedExportFormats}
-            className="max-lg:hidden"
+            className="mt-30 max-lg:hidden"
           />
         </div>
       )}

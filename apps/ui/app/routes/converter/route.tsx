@@ -34,6 +34,7 @@ import {
   Pre,
 } from '#components/code/code-block.js';
 import { CopyButton } from '#components/copy-button.js';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '#components/ui/card.js';
 import {
   getFormatFromFilename,
   formatDisplayName,
@@ -441,6 +442,7 @@ export default function ConverterRoute(): React.JSX.Element {
               <p className="max-w-2xl text-lg text-muted-foreground">
                 Convert 3D models between formats instantly. Free, secure, and fully offline.
               </p>
+              <p className="text-md max-w-2xl text-muted-foreground italic">Your data never leaves your browser.</p>
             </div>
 
             {/* Upload Area */}
@@ -473,53 +475,57 @@ export default function ConverterRoute(): React.JSX.Element {
 
               <div className="grid gap-4 xl:grid-cols-2">
                 {/* NPM Package */}
-                <div className="flex flex-col gap-3 rounded-lg border bg-card p-4 shadow-sm">
-                  <div className="flex items-center gap-2">
-                    <div className="flex size-8 items-center justify-center rounded-md bg-primary/10">
-                      <Package className="size-4 text-primary" />
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center gap-2">
+                      <div className="flex size-8 items-center justify-center rounded-md bg-primary/10">
+                        <Package className="size-4 text-primary" />
+                      </div>
+                      <CardTitle>NPM Package</CardTitle>
                     </div>
-                    <h3 className="font-semibold">NPM Package</h3>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Install the converter package to use it directly in your JavaScript or TypeScript projects.
-                  </p>
-                  <CodeBlock>
-                    <CodeBlockHeader>
-                      <CodeBlockTitle>Installation</CodeBlockTitle>
-                      <CodeBlockAction>
-                        <CopyButton
-                          size="xs"
-                          getText={() => {
-                            return 'pnpm install @taucad/converter';
-                          }}
-                        />
-                      </CodeBlockAction>
-                    </CodeBlockHeader>
-                    <CodeBlockContent>
-                      <Pre language="bash">pnpm install @taucad/converter</Pre>
-                    </CodeBlockContent>
-                  </CodeBlock>
-                </div>
+                    <CardDescription>
+                      Install the converter package to use it directly in your JavaScript or TypeScript projects.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <CodeBlock>
+                      <CodeBlockHeader>
+                        <CodeBlockTitle>Installation</CodeBlockTitle>
+                        <CodeBlockAction>
+                          <CopyButton
+                            size="xs"
+                            getText={() => {
+                              return 'pnpm install @taucad/converter';
+                            }}
+                          />
+                        </CodeBlockAction>
+                      </CodeBlockHeader>
+                      <CodeBlockContent>
+                        <Pre language="bash">pnpm install @taucad/converter</Pre>
+                      </CodeBlockContent>
+                    </CodeBlock>
+                  </CardContent>
+                </Card>
 
                 {/* API */}
-                <div className="flex flex-col justify-between gap-3 rounded-lg border bg-card p-4 shadow-sm">
-                  <div className="flex flex-col gap-2">
+                <Card className="justify-between">
+                  <CardHeader>
                     <div className="flex items-center gap-2">
                       <div className="flex size-8 items-center justify-center rounded-md bg-primary/10">
                         <Code2 className="size-4 text-primary" />
                       </div>
-                      <h3 className="font-semibold">REST API</h3>
+                      <CardTitle>REST API</CardTitle>
                     </div>
-                    <p className="text-sm text-muted-foreground">
+                    <CardDescription>
                       Use our REST API to convert 3D models from any platform or programming language.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
                     <Button asChild variant="outline" size="sm" className="w-full">
                       <Link to="#">View API Documentation</Link>
                     </Button>
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               </div>
             </div>
           </div>

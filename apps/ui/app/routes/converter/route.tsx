@@ -486,7 +486,9 @@ export default function ConverterRoute(): React.JSX.Element {
                       <CardTitle>NPM Package</CardTitle>
                     </div>
                     <CardDescription>
-                      Install the converter package to use it directly in your JavaScript or TypeScript projects.
+                      <p>Integrate 3D conversion into your JavaScript and TypeScript applications.</p>
+                      <br />
+                      <p>Built for maximum flexibility with full support for both browser and Node.js environments.</p>
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -519,7 +521,11 @@ export default function ConverterRoute(): React.JSX.Element {
                       <CardTitle>REST API</CardTitle>
                     </div>
                     <CardDescription>
-                      Use our REST API to convert 3D models from any platform or programming language.
+                      <p>Convert 3D models instantly with our REST API, accessible from any platform or language.</p>
+                      <br />
+                      <p>
+                        Get started in minutes with our managed cloud service, or deploy on your own infrastructure.
+                      </p>
                     </CardDescription>
                   </CardHeader>
                   <CardContent>

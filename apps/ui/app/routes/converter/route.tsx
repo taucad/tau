@@ -1,9 +1,9 @@
 import { useCallback, useState } from 'react';
 import { Link } from 'react-router';
 import JSZip from 'jszip';
-import { importToGlb, exportFromGlb } from '@taucad/converter';
+import { importToGlb, exportFromGlb, supportedImportFormats, supportedExportFormats } from '@taucad/converter';
 import type { InputFormat, OutputFormat } from '@taucad/converter';
-import { Download, Upload, RefreshCcw } from 'lucide-react';
+import { Download, Upload, RotateCcw } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Button } from '#components/ui/button.js';
 import { toast } from '#components/ui/sonner.js';
@@ -23,6 +23,7 @@ import {
 import { Dropzone, DropzoneEmptyState } from '#components/ui/dropzone.js';
 import { FormatSelector } from '#routes/converter/format-selector.js';
 import { ConverterFileTree } from '#routes/converter/converter-file-tree.js';
+import { FormatsList } from '#routes/converter/formats-list.js';
 import {
   getFormatFromFilename,
   formatDisplayName,
@@ -400,7 +401,7 @@ export default function ConverterRoute(): React.JSX.Element {
                         </DropzoneEmptyState>
                       </Dropzone>
                       <Button variant="outline" className="w-full" size="lg" onClick={handleReset}>
-                        <RefreshCcw className="size-4" />
+                        <RotateCcw className="size-4" />
                         Clear and start over
                       </Button>
                     </div>
@@ -412,29 +413,49 @@ export default function ConverterRoute(): React.JSX.Element {
         </>
       ) : (
         // Landing state - no model loaded
-        <div className="container flex h-full flex-col items-center justify-center gap-4 px-4 py-8">
-          <h1 className="text-6xl font-medium tracking-tight">Converter</h1>
-          <p className="mb-8 text-lg text-muted-foreground">
-            Convert 3D models between formats. Free, secure, and fully offline.
-          </p>
-          <Dropzone className="w-full max-w-2xl" maxFiles={1} onDrop={handleFileDrop}>
-            <DropzoneEmptyState>
-              <div className="flex flex-col items-center gap-6">
-                <div className="flex size-16 items-center justify-center rounded-full bg-primary/10">
-                  <Upload className="size-8 text-primary" />
+        <div className="container mt-20 grid h-full items-start gap-8 overflow-y-auto px-4 py-8 lg:mt-40 lg:grid-cols-[350px_1fr_350px]">
+          {/* Import Formats - Left */}
+          <FormatsList
+            icon={Upload}
+            title="Import Formats"
+            description="Formats you can upload"
+            formats={supportedImportFormats}
+            className="max-lg:hidden"
+          />
+
+          {/* Center - Hero & Upload */}
+          <div className="flex flex-col items-center gap-8 pt-4">
+            <div className="flex flex-col items-center gap-3 text-center">
+              <h1 className="text-6xl font-bold tracking-tight">3D Model Converter</h1>
+              <p className="max-w-2xl text-lg text-muted-foreground">
+                Convert 3D models between formats instantly. Free, secure, and fully offline.
+              </p>
+            </div>
+
+            {/* Upload Area */}
+            <Dropzone className="w-full max-w-2xl" maxFiles={1} onDrop={handleFileDrop}>
+              <DropzoneEmptyState>
+                <div className="flex flex-col items-center gap-6 py-8">
+                  <div className="flex size-20 items-center justify-center rounded-full bg-gradient-to-br from-primary/20 to-primary/10">
+                    <Upload className="size-10 text-primary" />
+                  </div>
+                  <div className="flex flex-col items-center gap-2 text-center">
+                    <h3 className="text-xl font-semibold">Drop your 3D model here</h3>
+                    <p className="text-sm text-muted-foreground">or click to browse your files</p>
+                  </div>
                 </div>
-                <div className="flex flex-col items-center gap-2 text-center">
-                  <h3 className="text-lg font-medium">Drop your 3D model here</h3>
-                  <p className="text-sm text-muted-foreground">or click to browse</p>
-                </div>
-                <div className="max-w-md text-center">
-                  <p className="text-xs text-muted-foreground">
-                    Supports: STL, STEP, IGES, FBX, OBJ, GLTF, GLB, and many more 3D formats
-                  </p>
-                </div>
-              </div>
-            </DropzoneEmptyState>
-          </Dropzone>
+              </DropzoneEmptyState>
+            </Dropzone>
+          </div>
+
+          {/* Export Formats - Right */}
+          <FormatsList
+            icon={Download}
+            title="Export Formats"
+            description="Formats you can convert to"
+            formats={supportedExportFormats}
+            className="max-lg:hidden"
+          />
         </div>
       )}
 

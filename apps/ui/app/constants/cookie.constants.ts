@@ -74,6 +74,10 @@ export const cookieName = {
   // The last selected display configuration.
   consoleDisplayConfig: 'console-display-config',
 
+  /* Converter */
+  // The last selected output formats.
+  converterOutputFormats: 'converter-output-formats',
+
   /* Docs */
   // Whether the docs sidebar is open.
   docsOpSidebar: 'docs-op-sidebar',

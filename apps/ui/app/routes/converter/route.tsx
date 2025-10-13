@@ -20,6 +20,7 @@ import {
 } from '#components/ui/floating-panel.js';
 import { Dropzone, DropzoneEmptyState } from '#components/ui/dropzone.js';
 import { FormatSelector } from '#routes/converter/format-selector.js';
+import { ConverterFileTree } from '#routes/converter/converter-file-tree.js';
 import {
   getFormatFromFilename,
   formatDisplayName,
@@ -28,6 +29,8 @@ import {
 } from '#routes/converter/converter-utils.js';
 import { SettingsControl } from '#components/geometry/cad/settings-control.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 const yUpFormats = new Set<InputFormat>(['gltf', 'glb', 'ifc']);
 
@@ -51,7 +54,7 @@ type UploadedFileInfo = {
 export default function ConverterRoute(): React.JSX.Element {
   const [uploadedFile, setUploadedFile] = useState<UploadedFileInfo | undefined>(undefined);
   const [glbData, setGlbData] = useState<Uint8Array | undefined>(undefined);
-  const [selectedFormats, setSelectedFormats] = useState<Set<OutputFormat>>(new Set());
+  const [selectedFormats, setSelectedFormats] = useCookie<OutputFormat[]>(cookieName.converterOutputFormats, []);
   const [isConverting, setIsConverting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -97,7 +100,6 @@ export default function ConverterRoute(): React.JSX.Element {
             size: file.size,
           });
           setGlbData(glb);
-          setSelectedFormats(new Set());
         })(),
         {
           loading: `Converting ${file.name}...`,
@@ -124,30 +126,30 @@ export default function ConverterRoute(): React.JSX.Element {
     }
   }, []);
 
-  const handleFormatToggle = useCallback((format: OutputFormat) => {
-    setSelectedFormats((previous) => {
-      const next = new Set(previous);
-      if (next.has(format)) {
-        next.delete(format);
-      } else {
-        next.add(format);
-      }
+  const handleFormatToggle = useCallback(
+    (format: OutputFormat) => {
+      setSelectedFormats((previous) => {
+        if (previous.includes(format)) {
+          return previous.filter((f) => f !== format);
+        }
 
-      return next;
-    });
-  }, []);
+        return [...previous, format];
+      });
+    },
+    [setSelectedFormats],
+  );
 
   const handleDownload = useCallback(async () => {
-    if (!glbData || selectedFormats.size === 0) {
+    if (!glbData || selectedFormats.length === 0) {
       return;
     }
 
     setIsExporting(true);
 
     try {
-      if (selectedFormats.size === 1) {
+      if (selectedFormats.length === 1) {
         // Single file download
-        const format = [...selectedFormats][0];
+        const format = selectedFormats[0];
         if (!format) {
           return;
         }
@@ -187,7 +189,7 @@ export default function ConverterRoute(): React.JSX.Element {
 
             // Export all formats in parallel
             const results = await Promise.all(
-              [...selectedFormats].map(async (format) => {
+              selectedFormats.map(async (format) => {
                 const files = await exportFromGlb(glbData, format);
                 return { format, files };
               }),
@@ -211,8 +213,8 @@ export default function ConverterRoute(): React.JSX.Element {
             downloadBlob(zipBlob, zipFilename);
           })(),
           {
-            loading: `Exporting ${selectedFormats.size} formats...`,
-            success: `Downloaded ${selectedFormats.size} files in zip`,
+            loading: `Exporting ${selectedFormats.length} formats...`,
+            success: `Downloaded ${selectedFormats.length} files in zip`,
             error(error: unknown) {
               let message = 'Failed to export files';
               if (error instanceof Error) {
@@ -232,8 +234,11 @@ export default function ConverterRoute(): React.JSX.Element {
   const handleReset = useCallback(() => {
     setUploadedFile(undefined);
     setGlbData(undefined);
-    setSelectedFormats(new Set());
   }, []);
+
+  const handleClearFormats = useCallback(() => {
+    setSelectedFormats([]);
+  }, [setSelectedFormats]);
 
   const handleFileDrop = useCallback(
     (acceptedFiles: File[]) => {
@@ -292,30 +297,37 @@ export default function ConverterRoute(): React.JSX.Element {
                   <FloatingPanelContentHeader>
                     <FloatingPanelContentTitle>Export Options</FloatingPanelContentTitle>
                   </FloatingPanelContentHeader>
-                  <FloatingPanelContentBody className="flex h-full flex-col justify-between p-4">
+                  <FloatingPanelContentBody className="flex h-full flex-col justify-between gap-4 p-4">
                     <div className="flex flex-col gap-6">
-                      <FormatSelector selectedFormats={selectedFormats} onFormatToggle={handleFormatToggle} />
+                      <FormatSelector
+                        selectedFormats={selectedFormats}
+                        onFormatToggle={handleFormatToggle}
+                        onClearSelection={handleClearFormats}
+                      />
 
                       <div className="flex flex-col gap-2">
                         <Button
-                          disabled={selectedFormats.size === 0 || isExporting}
+                          disabled={selectedFormats.length === 0 || isExporting}
                           size="lg"
                           className="w-full"
                           onClick={handleDownload}
                         >
                           <Download className="size-4" />
-                          {selectedFormats.size === 0
+                          {selectedFormats.length === 0
                             ? 'Select formats to download'
-                            : selectedFormats.size === 1
+                            : selectedFormats.length === 1
                               ? 'Download'
-                              : `Download ${selectedFormats.size} formats as ZIP`}
+                              : `Download ${selectedFormats.length} formats as ZIP`}
                         </Button>
+
+                        {/* File tree preview */}
+                        <ConverterFileTree selectedFormats={selectedFormats} fileName={uploadedFile?.name} />
                       </div>
                     </div>
 
                     <div className="flex flex-col space-y-4">
                       {/* Drop area for uploading new file */}
-                      <Dropzone className="w-full" maxFiles={1} onDrop={handleFileDrop}>
+                      <Dropzone className="w-full max-md:hidden" maxFiles={1} onDrop={handleFileDrop}>
                         <DropzoneEmptyState>
                           <div className="flex flex-col items-center gap-2 py-4">
                             <Upload className="size-6 text-muted-foreground" />

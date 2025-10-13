@@ -17,7 +17,9 @@ const exportConfigs = {
   obj: { exporter: new AssimpExporter().initialize({ format: 'obj' }) },
   ply: { exporter: new AssimpExporter().initialize({ format: 'ply' }) },
   stl: { exporter: new AssimpExporter().initialize({ format: 'stl' }) },
-  stp: { exporter: new AssimpExporter().initialize({ format: 'stp' }) },
+  // These formats are intentionally different. `step` is the most widely used extension,
+  // whilst `stp` is the format supported by assimp.
+  step: { exporter: new AssimpExporter().initialize({ format: 'stp' }) },
   x: { exporter: new AssimpExporter().initialize({ format: 'x' }) },
   x3d: { exporter: new AssimpExporter().initialize({ format: 'x3d' }) },
 

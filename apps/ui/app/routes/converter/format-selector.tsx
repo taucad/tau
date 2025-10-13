@@ -29,7 +29,7 @@ export function FormatSelector({ selectedFormats, onFormatToggle }: FormatSelect
               />
               <Label
                 htmlFor={formatId}
-                className="cursor-pointer text-sm font-normal leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                className="cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
               >
                 {formatDisplayName(format)}
               </Label>
@@ -40,4 +40,3 @@ export function FormatSelector({ selectedFormats, onFormatToggle }: FormatSelect
     </div>
   );
 }
-

@@ -4,6 +4,7 @@ import JSZip from 'jszip';
 import { importToGlb, exportFromGlb } from '@taucad/converter';
 import type { InputFormat, OutputFormat } from '@taucad/converter';
 import { Download, Upload as UploadIcon, Upload } from 'lucide-react';
+import { useSelector } from '@xstate/react';
 import { Button } from '#components/ui/button.js';
 import { toast } from '#components/ui/sonner.js';
 import type { Handle } from '#types/matches.types.js';
@@ -17,7 +18,7 @@ import {
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
 } from '#components/ui/floating-panel.js';
-import { DropArea } from '#routes/converter/drop-area.js';
+import { Dropzone, DropzoneEmptyState } from '#components/ui/dropzone.js';
 import { FormatSelector } from '#routes/converter/format-selector.js';
 import {
   getFormatFromFilename,
@@ -27,9 +28,8 @@ import {
 } from '#routes/converter/converter-utils.js';
 import { SettingsControl } from '#components/geometry/cad/settings-control.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
-import { useSelector } from '@xstate/react';
 
-const yUpFormats = ['gltf', 'glb'];
+const yUpFormats = new Set<InputFormat>(['gltf', 'glb', 'ifc']);
 
 export const handle: Handle = {
   breadcrumb() {
@@ -54,7 +54,6 @@ export default function ConverterRoute(): React.JSX.Element {
   const [selectedFormats, setSelectedFormats] = useState<Set<OutputFormat>>(new Set());
   const [isConverting, setIsConverting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
 
   const graphicsState = useSelector(
     graphicsActor,
@@ -186,8 +185,16 @@ export default function ConverterRoute(): React.JSX.Element {
           (async () => {
             const zip = new JSZip();
 
-            for (const format of selectedFormats) {
-              const files = await exportFromGlb(glbData, format);
+            // Export all formats in parallel
+            const results = await Promise.all(
+              [...selectedFormats].map(async (format) => {
+                const files = await exportFromGlb(glbData, format);
+                return { format, files };
+              }),
+            );
+
+            // Add all files to zip
+            for (const { format, files } of results) {
               for (const file of files) {
                 const extension = getFileExtension(format);
                 const filename = uploadedFile
@@ -228,29 +235,11 @@ export default function ConverterRoute(): React.JSX.Element {
     setSelectedFormats(new Set());
   }, []);
 
-  const handleDragOver = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    setIsDragging(true);
-  }, []);
-
-  const handleDragLeave = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    // Only hide if leaving the viewer area completely
-    if (event.currentTarget === event.target) {
-      setIsDragging(false);
-    }
-  }, []);
-
-  const handleDrop = useCallback(
-    (event: React.DragEvent) => {
-      event.preventDefault();
-      setIsDragging(false);
-
-      if (event.dataTransfer.files.length > 0) {
-        const file = event.dataTransfer.files[0];
-        if (file) {
-          void handleFileSelect(file);
-        }
+  const handleFileDrop = useCallback(
+    (acceptedFiles: File[]) => {
+      const file = acceptedFiles[0];
+      if (file) {
+        void handleFileSelect(file);
       }
     },
     [handleFileSelect],
@@ -269,16 +258,11 @@ export default function ConverterRoute(): React.JSX.Element {
         // Loaded state - model rendered with floating panel
         <>
           {/* Main viewer area */}
-          <div
-            className="relative flex-1"
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-          >
+          <div className="relative flex-1">
             <CadViewer
-              enableYupRotation={yUpFormats.includes(uploadedFile?.format ?? '')}
               enableZoom
               enablePan
+              enableYupRotation={uploadedFile ? yUpFormats.has(uploadedFile.format) : false}
               enableMatcap={graphicsState.enableMatcap}
               enableLines={graphicsState.enableLines}
               enableAxes={graphicsState.enableAxes}
@@ -288,23 +272,9 @@ export default function ConverterRoute(): React.JSX.Element {
               geometries={geometries}
             />
 
-            {/* Drag overlay - only show when dragging */}
-            {isDragging ? (
-              <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-                <div className="flex h-1/2 w-1/2 flex-col items-center justify-center gap-4 rounded-lg border-2 border-dashed border-primary bg-background/50">
-                  <Upload className="size-12 text-primary" />
-                  <p className="text-lg font-medium">Drop files here</p>
-                </div>
-              </div>
-            ) : undefined}
-
             {/* File info overlay */}
             {uploadedFile ? (
-              <div className="absolute bottom-4 left-4 z-10 flex flex-col gap-2">
-                <Button variant="overlay" size="sm" className="w-fit justify-start" onClick={handleReset}>
-                  <UploadIcon className="size-4" />
-                  Upload New File
-                </Button>
+              <div className="absolute bottom-4 left-4 flex flex-col gap-2">
                 <div className="rounded-md border bg-sidebar/95 p-3 shadow-md backdrop-blur-sm">
                   <div className="text-sm font-medium">{uploadedFile.name}</div>
                   <div className="text-xs text-muted-foreground">
@@ -315,15 +285,15 @@ export default function ConverterRoute(): React.JSX.Element {
             ) : undefined}
 
             {/* Export panel trigger */}
-            <div className="absolute flex gap-2 top-(--header-height) right-2 z-10">
+            <div className="absolute top-(--header-height) right-2 z-10 flex gap-2">
               <SettingsControl />
               <FloatingPanel isOpen side="right">
                 <FloatingPanelContent>
                   <FloatingPanelContentHeader>
                     <FloatingPanelContentTitle>Export Options</FloatingPanelContentTitle>
                   </FloatingPanelContentHeader>
-                  <FloatingPanelContentBody className="p-4">
-                    <div className="space-y-6">
+                  <FloatingPanelContentBody className="flex h-full flex-col justify-between p-4">
+                    <div className="flex flex-col gap-6">
                       <FormatSelector selectedFormats={selectedFormats} onFormatToggle={handleFormatToggle} />
 
                       <div className="flex flex-col gap-2">
@@ -340,12 +310,24 @@ export default function ConverterRoute(): React.JSX.Element {
                               ? 'Download'
                               : `Download ${selectedFormats.size} formats as ZIP`}
                         </Button>
-
-                        <Button variant="outline" size="lg" className="w-full" onClick={handleReset}>
-                          <UploadIcon className="size-4" />
-                          Clear and Upload New
-                        </Button>
                       </div>
+                    </div>
+
+                    <div className="flex flex-col space-y-4">
+                      {/* Drop area for uploading new file */}
+                      <Dropzone className="w-full" maxFiles={1} onDrop={handleFileDrop}>
+                        <DropzoneEmptyState>
+                          <div className="flex flex-col items-center gap-2 py-4">
+                            <Upload className="size-6 text-muted-foreground" />
+                            <p className="text-sm font-medium">Drop new file here</p>
+                            <p className="text-xs text-muted-foreground">or click to browse</p>
+                          </div>
+                        </DropzoneEmptyState>
+                      </Dropzone>
+                      <Button variant="outline" className="w-full" size="lg" onClick={handleReset}>
+                        <UploadIcon className="size-4" />
+                        Clear and start over
+                      </Button>
                     </div>
                   </FloatingPanelContentBody>
                 </FloatingPanelContent>
@@ -360,7 +342,24 @@ export default function ConverterRoute(): React.JSX.Element {
           <p className="mb-8 text-lg text-muted-foreground">
             Convert 3D models between formats. Free, secure, and fully offline.
           </p>
-          <DropArea className="w-full max-w-2xl" onFileSelect={handleFileSelect} />
+          <Dropzone className="w-full max-w-2xl" maxFiles={1} onDrop={handleFileDrop}>
+            <DropzoneEmptyState>
+              <div className="flex flex-col items-center gap-6">
+                <div className="flex size-16 items-center justify-center rounded-full bg-primary/10">
+                  <Upload className="size-8 text-primary" />
+                </div>
+                <div className="flex flex-col items-center gap-2 text-center">
+                  <h3 className="text-lg font-medium">Drop your 3D model here</h3>
+                  <p className="text-sm text-muted-foreground">or click to browse</p>
+                </div>
+                <div className="max-w-md text-center">
+                  <p className="text-xs text-muted-foreground">
+                    Supports: STL, STEP, IGES, FBX, OBJ, GLTF, GLB, and many more 3D formats
+                  </p>
+                </div>
+              </div>
+            </DropzoneEmptyState>
+          </Dropzone>
         </div>
       )}
 

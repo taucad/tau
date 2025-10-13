@@ -24,6 +24,7 @@ import { Dropzone, DropzoneEmptyState } from '#components/ui/dropzone.js';
 import { FormatSelector } from '#routes/converter/format-selector.js';
 import { ConverterFileTree } from '#routes/converter/converter-file-tree.js';
 import { FormatsList } from '#routes/converter/formats-list.js';
+import { FormatsListMobile } from '#routes/converter/formats-list-mobile.js';
 import {
   getFormatFromFilename,
   formatDisplayName,
@@ -413,7 +414,7 @@ export default function ConverterRoute(): React.JSX.Element {
         </>
       ) : (
         // Landing state - no model loaded
-        <div className="container mt-20 grid h-full items-start gap-8 overflow-y-auto px-4 py-8 lg:mt-40 lg:grid-cols-[350px_1fr_350px]">
+        <div className="container mt-(--header-height) grid h-full items-start gap-8 overflow-y-auto pb-8 md:pt-10 lg:grid-cols-[300px_1fr_300px] lg:pt-40 xl:grid-cols-[350px_1fr_350px]">
           {/* Import Formats - Left */}
           <FormatsList
             icon={Upload}
@@ -446,6 +447,12 @@ export default function ConverterRoute(): React.JSX.Element {
                 </div>
               </DropzoneEmptyState>
             </Dropzone>
+
+            {/* Mobile Format Lists */}
+            <div className="w-full max-w-2xl space-y-6 lg:hidden">
+              <FormatsListMobile title="Import Formats" formats={supportedImportFormats} />
+              <FormatsListMobile title="Export Formats" formats={supportedExportFormats} />
+            </div>
           </div>
 
           {/* Export Formats - Right */}

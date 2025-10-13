@@ -68,6 +68,16 @@ const cookieStore = () => {
 
 export const store = cookieStore();
 
+/**
+ * A hook to get and set a cookie.
+ *
+ * The cookie must be serializable with `JSON.stringify`
+ * and deserializable with `JSON.parse`.
+ *
+ * @param name - The name of the cookie.
+ * @param defaultValue - The default value of the cookie.
+ * @returns The value of the cookie.
+ */
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- infer type for hooks
 export const useCookie = <T>(name: CookieName, defaultValue: T) => {
   const cookieName = `${metaConfig.cookiePrefix}${name}`;

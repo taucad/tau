@@ -77,6 +77,8 @@ export const cookieName = {
   /* Converter */
   // The last selected output formats.
   converterOutputFormats: 'converter-output-formats',
+  // Whether to download multiple files as ZIP.
+  converterMultifileZip: 'converter-multifile-zip',
 
   /* Docs */
   // Whether the docs sidebar is open.

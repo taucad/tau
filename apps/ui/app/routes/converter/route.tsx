@@ -3,10 +3,12 @@ import { Link } from 'react-router';
 import JSZip from 'jszip';
 import { importToGlb, exportFromGlb } from '@taucad/converter';
 import type { InputFormat, OutputFormat } from '@taucad/converter';
-import { Download, Upload as UploadIcon, Upload } from 'lucide-react';
+import { Download, Upload, RefreshCcw } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Button } from '#components/ui/button.js';
 import { toast } from '#components/ui/sonner.js';
+import { Checkbox } from '#components/ui/checkbox.js';
+import { Label } from '#components/ui/label.js';
 import type { Handle } from '#types/matches.types.js';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
 import type { Geometry } from '#types/cad.types.js';
@@ -55,6 +57,7 @@ export default function ConverterRoute(): React.JSX.Element {
   const [uploadedFile, setUploadedFile] = useState<UploadedFileInfo | undefined>(undefined);
   const [glbData, setGlbData] = useState<Uint8Array | undefined>(undefined);
   const [selectedFormats, setSelectedFormats] = useCookie<OutputFormat[]>(cookieName.converterOutputFormats, []);
+  const [useZipForMultiple, setUseZipForMultiple] = useCookie<boolean>(cookieName.converterMultifileZip, true);
   const [isConverting, setIsConverting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -181,7 +184,7 @@ export default function ConverterRoute(): React.JSX.Element {
             },
           },
         );
-      } else {
+      } else if (useZipForMultiple) {
         // Multiple files - create zip
         toast.promise(
           (async () => {
@@ -225,11 +228,47 @@ export default function ConverterRoute(): React.JSX.Element {
             },
           },
         );
+      } else {
+        // Multiple files - download individually
+        toast.promise(
+          (async () => {
+            // Export all formats in parallel
+            const results = await Promise.all(
+              selectedFormats.map(async (format) => {
+                const files = await exportFromGlb(glbData, format);
+                return { format, files };
+              }),
+            );
+
+            // Download each file individually
+            for (const { format, files } of results) {
+              for (const file of files) {
+                const extension = getFileExtension(format);
+                const filename = uploadedFile
+                  ? uploadedFile.name.replace(/\.[^.]+$/, `.${extension}`)
+                  : `model.${extension}`;
+                downloadBlob(new Blob([file.data]), filename);
+              }
+            }
+          })(),
+          {
+            loading: `Exporting ${selectedFormats.length} formats...`,
+            success: `Downloaded ${selectedFormats.length} files`,
+            error(error: unknown) {
+              let message = 'Failed to export files';
+              if (error instanceof Error) {
+                message = `${message}: ${error.message}`;
+              }
+
+              return message;
+            },
+          },
+        );
       }
     } finally {
       setIsExporting(false);
     }
-  }, [glbData, selectedFormats, uploadedFile]);
+  }, [glbData, selectedFormats, uploadedFile, useZipForMultiple]);
 
   const handleReset = useCallback(() => {
     setUploadedFile(undefined);
@@ -293,7 +332,7 @@ export default function ConverterRoute(): React.JSX.Element {
             <div className="absolute top-(--header-height) right-2 z-10 flex gap-2">
               <SettingsControl />
               <FloatingPanel isOpen side="right">
-                <FloatingPanelContent>
+                <FloatingPanelContent className="w-80">
                   <FloatingPanelContentHeader>
                     <FloatingPanelContentTitle>Export Options</FloatingPanelContentTitle>
                   </FloatingPanelContentHeader>
@@ -317,11 +356,35 @@ export default function ConverterRoute(): React.JSX.Element {
                             ? 'Select formats to download'
                             : selectedFormats.length === 1
                               ? 'Download'
-                              : `Download ${selectedFormats.length} formats as ZIP`}
+                              : useZipForMultiple
+                                ? `Download ${selectedFormats.length} formats as ZIP`
+                                : `Download ${selectedFormats.length} formats`}
                         </Button>
 
+                        {selectedFormats.length > 1 ? (
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="use-zip"
+                              checked={useZipForMultiple}
+                              onCheckedChange={(checked) => {
+                                setUseZipForMultiple(checked === true);
+                              }}
+                            />
+                            <Label
+                              htmlFor="use-zip"
+                              className="cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                            >
+                              Download as ZIP file
+                            </Label>
+                          </div>
+                        ) : undefined}
+
                         {/* File tree preview */}
-                        <ConverterFileTree selectedFormats={selectedFormats} fileName={uploadedFile?.name} />
+                        <ConverterFileTree
+                          selectedFormats={selectedFormats}
+                          fileName={uploadedFile?.name}
+                          asZip={useZipForMultiple}
+                        />
                       </div>
                     </div>
 
@@ -337,7 +400,7 @@ export default function ConverterRoute(): React.JSX.Element {
                         </DropzoneEmptyState>
                       </Dropzone>
                       <Button variant="outline" className="w-full" size="lg" onClick={handleReset}>
-                        <UploadIcon className="size-4" />
+                        <RefreshCcw className="size-4" />
                         Clear and start over
                       </Button>
                     </div>

@@ -493,7 +493,7 @@ export default function ConverterRoute(): React.JSX.Element {
                     <CodeBlock>
                       <CodeBlockHeader>
                         <CodeBlockTitle>Installation</CodeBlockTitle>
-                        <CodeBlockAction>
+                        <CodeBlockAction visibility="alwaysVisible">
                           <CopyButton
                             size="xs"
                             getText={() => {

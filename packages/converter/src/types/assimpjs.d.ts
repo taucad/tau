@@ -42,9 +42,3 @@ declare module 'assimpjs/exporter' {
   export * from 'assimpjs';
   export { default } from 'assimpjs';
 }
-
-// Re-export everything from the base module
-declare module 'assimpjs/mini' {
-  export * from 'assimpjs';
-  export { default } from 'assimpjs';
-}

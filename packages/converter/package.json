@@ -3,9 +3,6 @@
   "version": "0.1.0",
   "description": "Convert CAD files to other formats",
   "type": "module",
-  "publishConfig": {
-    "access": "public"
-  },
   "private": false,
   "repository": {
     "type": "git",
@@ -30,24 +27,31 @@
   "author": "Richard Fontein",
   "license": "MIT",
   "exports": {
-    ".": {
-      "require": {
-        "types": "./dist/cjs/index.d.cts",
-        "default": "./dist/cjs/index.cjs"
+    ".": "./src/index.ts",
+    "./constants": "./src/constants/index.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "require": {
+          "types": "./dist/cjs/index.d.cts",
+          "default": "./dist/cjs/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/index.d.ts",
+          "default": "./dist/esm/index.js"
+        }
       },
-      "import": {
-        "types": "./dist/esm/index.d.ts",
-        "default": "./dist/esm/index.js"
-      }
-    },
-    "./constants": {
-      "require": {
-        "types": "./dist/cjs/constants/index.d.cts",
-        "default": "./dist/cjs/constants/index.cjs"
-      },
-      "import": {
-        "types": "./dist/esm/constants/index.d.ts",
-        "default": "./dist/esm/constants/index.js"
+      "./constants": {
+        "require": {
+          "types": "./dist/cjs/constants/index.d.cts",
+          "default": "./dist/cjs/constants/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/constants/index.d.ts",
+          "default": "./dist/esm/constants/index.js"
+        }
       }
     }
   },

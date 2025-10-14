@@ -1,5 +1,5 @@
-import { defineConfig } from 'tsup';
-import type { Options } from 'tsup';
+import { defineConfig } from 'tsdown';
+import type { Options } from 'tsdown';
 
 const baseConfig: Options = {
   entry: ['src/index.ts', 'src/constants/index.ts'],
@@ -7,9 +7,6 @@ const baseConfig: Options = {
   clean: true,
   dts: true,
   minify: true,
-  minifyWhitespace: true,
-  minifyIdentifiers: true,
-  minifySyntax: true,
   publicDir: 'src/assets',
   tsconfig: 'tsconfig.build.json',
 };

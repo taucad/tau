@@ -3,7 +3,7 @@
   "defaultBase": "main",
   "plugins": [
     {
-      "plugin": "./tools/tsup.plugin.ts"
+      "plugin": "./tools/tsdown.plugin.ts"
     },
     {
       "plugin": "./tools/copy-files-from-to.plugin.ts"

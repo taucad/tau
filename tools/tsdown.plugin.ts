@@ -1,7 +1,7 @@
 /**
- * NX Plugin for tsup.
+ * NX Plugin for tsdown (https://tsdown.dev/).
  *
- * Used to automatically infer tsup targets for all projects.
+ * Used to automatically infer tsdown targets for all projects.
  */
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -72,14 +72,14 @@ const createTsupTarget = (configFilePath: string, context: CreateNodesContextV2)
             outputs: ['{projectRoot}/dist'],
             cache: true,
             options: {
-              command: 'tsup',
+              command: 'tsdown',
               cwd: projectRoot,
             },
             inputs: [
               ...('production' in namedInputs ? ['default', '^production'] : ['default', '^default']),
-              '{projectRoot}/tsup.config.ts',
+              '{projectRoot}/tsdown.config.ts',
               {
-                externalDependencies: ['tsup'],
+                externalDependencies: ['tsdown'],
               },
               {
                 env: 'CI',
@@ -93,7 +93,7 @@ const createTsupTarget = (configFilePath: string, context: CreateNodesContextV2)
 };
 
 export const createNodesV2: CreateNodesV2 = [
-  '**/tsup.config.ts',
+  '**/tsdown.config.ts',
   // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- not necessary as already has an explicit return type
   (configFiles, _options, context) => {
     const results: Array<[string, CreateNodesResult]> = [];

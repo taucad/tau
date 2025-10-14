@@ -14,19 +14,22 @@ export class OcctLoader extends BaseLoader<OcctImportResult, OcctOptions> {
 
   protected async parseAsync(files: File[], options: OcctOptions): Promise<OcctImportResult> {
     const { data } = this.findPrimaryFile(files);
-    // Configure the module to suppress console output
-    const moduleConfig = {
-      // Suppress console.log output from the WASM module
+
+    const occt = await occtimportjs({
       print() {
         // Suppress stdout
       },
       printErr() {
         // Suppress stderr
       },
-    };
+      locateFile() {
+        // Universal pattern for browsers and bundlers
+        // @see https://web.dev/articles/bundling-non-js-resources#universal_pattern_for_browsers_and_bundlers
+        const wasmPath = new URL('../assets/occt-import-js/occt-import-js.wasm', import.meta.url).href;
 
-    // Initialize OCCT with the custom module configuration
-    const occt = await occtimportjs(moduleConfig);
+        return wasmPath;
+      },
+    });
 
     // Choose the appropriate method based on the file format
     let result: OcctImportResult;

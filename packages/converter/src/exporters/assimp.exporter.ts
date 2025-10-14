@@ -27,7 +27,15 @@ export class AssimpExporter extends BaseExporter<AssimpExporterOptions> {
 
     try {
       // Initialize assimpjs exporter
-      const ajs = await assimpjsExporter();
+      const ajs = await assimpjsExporter({
+        locateFile() {
+          // Universal pattern for browsers and bundlers
+          // @see https://web.dev/articles/bundling-non-js-resources#universal_pattern_for_browsers_and_bundlers
+          const wasmPath = new URL('../assets/assimpjs/assimpjs-exporter.wasm', import.meta.url).href;
+
+          return wasmPath;
+        },
+      });
 
       // Create file list with GLB data
       const fileList = new ajs.FileList();

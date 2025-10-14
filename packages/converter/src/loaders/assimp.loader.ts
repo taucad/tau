@@ -29,7 +29,15 @@ export class AssimpLoader extends BaseLoader<Uint8Array, AssimpOptions> {
 
   protected async parseAsync(files: File[], options: AssimpOptions): Promise<Uint8Array> {
     // Initialize assimpjs
-    const ajs = await assimpjs();
+    const ajs = await assimpjs({
+      locateFile() {
+        // Universal pattern for browsers and bundlers
+        // @see https://web.dev/articles/bundling-non-js-resources#universal_pattern_for_browsers_and_bundlers
+        const wasmPath = new URL('../assets/assimpjs/assimpjs-all.wasm', import.meta.url).href;
+
+        return wasmPath;
+      },
+    });
 
     // Create file list with all input files, preserving original filenames
     const fileList = new ajs.FileList();

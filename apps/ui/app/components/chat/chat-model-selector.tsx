@@ -54,10 +54,10 @@ export const ChatModelSelector = memo(function ({
         items: models,
       }))}
       renderLabel={(item, selectedItem) => (
-        <span className="flex w-full items-center justify-between text-xs">
+        <span className="flex w-full items-center justify-between">
           <div className="flex items-center gap-2">
             <SvgIcon id={item.details.family} />
-            <span className="font-mono">{item.slug}</span>
+            <span>{item.slug}</span>
           </div>
           <div className="flex items-center gap-2">
             {item.details.parameterSize ? (

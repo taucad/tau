@@ -594,9 +594,10 @@ export const ChatTextarea = memo(function ({
             onSelect={focusInput}
             onClose={focusInput}
           >
-            {() => (
+            {(_props) => (
               <TooltipTrigger asChild>
                 <Button
+                  asChild
                   variant="outline"
                   size="sm"
                   className="h-7 rounded-full text-muted-foreground hover:text-foreground"

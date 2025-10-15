@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- allowed to follow convention of quicktype. */
-import { jsonSchemaFromJson } from '#utils/schema.js';
+import { jsonSchemaFromJson } from '#utils/schema.utils.js';
 
 describe('jsonSchemaFromJson', () => {
   it('should return a valid JSON schema', async () => {

@@ -6,21 +6,9 @@ Backend API service for Tau CAD, built with NestJS and Better Auth.
 
 The API uses [Better Auth](https://www.better-auth.com/) for authentication, which requires database schema generation from the auth configuration.
 
-### Automatic Generation
+### Schema Generation Workflow
 
-The Better Auth schema is **automatically generated** before every build:
-
-```bash
-# Schema generation runs automatically before build
-pnpm nx build api
-
-# Schema generation runs automatically before serve
-pnpm nx serve api
-```
-
-### Manual Generation
-
-To manually generate and apply the Better Auth schema:
+To generate and apply the Better Auth schema:
 
 ```bash
 # Step 1: Generate the schema
@@ -58,13 +46,13 @@ The runtime config includes validation that will throw a clear error if the plug
 
 ### When to Regenerate
 
-The schema should be regenerated when:
+The schema should be manually regenerated and synced when:
 
 1. Adding new Better Auth plugins (e.g., `apiKey`, `magicLink`, `twoFactor`)
 2. Changing authentication configuration in `auth.ts`
 3. After updating the `better-auth` package version
 
-The pre-build hook ensures the schema is always up-to-date during development and deployment.
+Remember to generate the schema, then manually copy changes to `schema.ts` before generating database migrations.
 
 ## Database Commands
 

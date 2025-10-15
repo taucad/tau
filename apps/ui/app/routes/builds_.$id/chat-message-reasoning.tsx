@@ -2,7 +2,7 @@ import type { ReasoningUIPart } from '@ai-sdk/ui-utils';
 import { ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 

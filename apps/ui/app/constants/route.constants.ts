@@ -1,6 +1,6 @@
 import { BookOpen, Bot, FileAxis3D, Frame, Hammer, Map, PieChart, UsersRound, Workflow } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { KeyCombination } from '#utils/keys.js';
+import type { KeyCombination } from '#utils/keys.utils.js';
 
 type NavRoute = {
   title: string;

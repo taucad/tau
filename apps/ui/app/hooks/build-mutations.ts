@@ -2,7 +2,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import type { Message } from '@ai-sdk/react';
 import type { Build, Chat, File } from '#types/build.types.js';
 import { storage } from '#db/storage.js';
-import { generatePrefixedId } from '#utils/id.js';
+import { generatePrefixedId } from '#utils/id.utils.js';
 import { idPrefix } from '#constants/id.constants.js';
 
 /**

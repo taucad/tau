@@ -3,7 +3,7 @@ import React from 'react';
 import { Input } from '#components/ui/input.js';
 import { Button } from '#components/ui/button.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 export type SearchInputProperties = {
   /**

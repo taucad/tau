@@ -2,7 +2,7 @@ import { setup, assertEvent, enqueueActions, assign, fromCallback } from 'xstate
 import type { ActorRefFrom, AnyActorRef } from 'xstate';
 import type { ScreenshotOptions, CameraAngle } from '#types/graphics.types.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
-import { generateSecureId } from '#utils/crypto.js';
+import { generateSecureId } from '#utils/crypto.utils.js';
 
 // Context type
 type ScreenshotRequestContext = {

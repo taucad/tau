@@ -1,6 +1,6 @@
 import { Info } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 export function InfoTooltip({
   children,

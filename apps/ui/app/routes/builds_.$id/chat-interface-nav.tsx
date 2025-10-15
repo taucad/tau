@@ -1,6 +1,6 @@
 import { Box, Code2, Info, MessageCircleIcon, SlidersHorizontal } from 'lucide-react';
 import { TabsList, TabsTrigger } from '#components/ui/tabs.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 export const chatTabs = [
   {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { stringToColor } from '#utils/color.utils.js';
-import * as cryptoUtils from '#utils/crypto.js';
+import * as cryptoUtils from '#utils/crypto.utils.js';
 
 describe('stringToColor', () => {
   it('should return a valid OKLCH color string for any input', () => {

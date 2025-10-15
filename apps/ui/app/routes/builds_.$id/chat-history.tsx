@@ -9,7 +9,7 @@ import { ChatError } from '#routes/builds_.$id/chat-error.js';
 import { ChatStatus } from '#routes/builds_.$id/chat-status.js';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
-import { createMessage } from '#utils/chat.js';
+import { createMessage } from '#utils/chat.utils.js';
 import { messageRole, messageStatus } from '#types/chat.types.js';
 import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
 import { ChatSelector } from '#routes/builds_.$id/chat-selector.js';
@@ -23,9 +23,9 @@ import {
   FloatingPanelTrigger,
 } from '#components/ui/floating-panel.js';
 import { useKeydown } from '#hooks/use-keydown.js';
-import type { KeyCombination } from '#utils/keys.js';
-import { formatKeyCombination } from '#utils/keys.js';
-import { cn } from '#utils/ui.js';
+import type { KeyCombination } from '#utils/keys.utils.js';
+import { formatKeyCombination } from '#utils/keys.utils.js';
+import { cn } from '#utils/ui.utils.js';
 import { ChatHistoryEmpty } from '#routes/builds_.$id/chat-history-empty.js';
 
 const toggleChatHistoryKeyCombination = {

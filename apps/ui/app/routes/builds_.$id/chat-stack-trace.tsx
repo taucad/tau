@@ -1,7 +1,7 @@
 import { useSelector } from '@xstate/react';
 import type { KernelStackFrame } from '#types/kernel.types.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 function StackFrame({ frame, index }: { readonly frame: KernelStackFrame; readonly index: number }): React.JSX.Element {
   const fileName = frame.fileName ?? '<unknown>';

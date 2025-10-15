@@ -4,7 +4,7 @@ import { useSelector } from '@xstate/react';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { useLogs } from '#hooks/use-logs.js';
 import type { LogLevel, LogOrigin } from '#types/console.types.js';
 import { logLevels } from '#types/console.types.js';

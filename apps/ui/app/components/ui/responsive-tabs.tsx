@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import { Link } from 'react-router';
 import { useMemo } from 'react';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { Tabs, TabsList, TabsTrigger, TabsContents } from '#components/ui/tabs.js';
 
 export type ResponsiveTabItem = {

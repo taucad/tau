@@ -21,7 +21,7 @@ import {
 } from '#components/ui/sidebar.js';
 import { useBuilds } from '#hooks/use-builds.js';
 import { toast } from '#components/ui/sonner.js';
-import { groupItemsByTimeHorizon } from '#utils/temporal.js';
+import { groupItemsByTimeHorizon } from '#utils/temporal.utils.js';
 import { SearchInput } from '#components/search-input.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 

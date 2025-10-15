@@ -16,7 +16,7 @@ import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 import { idPrefix } from '#constants/id.constants.js';
-import { generatePrefixedId } from '#utils/id.js';
+import { generatePrefixedId } from '#utils/id.utils.js';
 
 // Placeholder for language icons
 const kernelIcons: Record<KernelProvider, ComponentType<{ className?: string }>> = {

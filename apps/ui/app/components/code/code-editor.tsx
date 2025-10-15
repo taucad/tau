@@ -4,7 +4,7 @@ import { Theme, useTheme } from 'remix-themes';
 import { useCallback, useEffect, useRef } from 'react';
 import { shikiToMonaco } from '@shikijs/monaco';
 import type { CompletionRegistration, Monaco, StandaloneCodeEditor } from 'monacopilot';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { highlighter } from '#lib/shiki.js';
 import { configureMonaco, registerCompletions } from '#lib/monaco.js';
 import { useIsMobile } from '#hooks/use-mobile.js';

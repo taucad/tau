@@ -15,7 +15,7 @@ import { kernelOptions, getKernelOption } from '#constants/kernel.constants.js';
 import { toast } from '#components/ui/sonner.js';
 import type { KernelProvider } from '#types/kernel.types';
 import type { Handle } from '#types/matches.types.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';

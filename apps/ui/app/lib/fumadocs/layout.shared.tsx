@@ -1,5 +1,5 @@
 import type { DocsLayoutProps } from 'fumadocs-ui/layouts/docs';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { DocsSidebar } from '#routes/docs.$/docs-sidebar.js';
 
 export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {

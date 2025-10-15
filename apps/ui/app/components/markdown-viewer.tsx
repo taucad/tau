@@ -15,7 +15,7 @@ import {
   Pre,
 } from '#components/code/code-block.js';
 import { CopyButton } from '#components/copy-button.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 export const markdownViewerLinks: LinkDescriptor[] = [{ rel: 'stylesheet', href: katexUrl }];
 

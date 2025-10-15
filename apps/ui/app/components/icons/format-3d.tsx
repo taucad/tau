@@ -1,4 +1,4 @@
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import type { ExportFormat } from '#types/kernel.types.js';
 import { stringToColor } from '#utils/color.utils.js';
 

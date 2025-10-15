@@ -3,7 +3,7 @@ import * as Cookies from 'es-cookie';
 import { useRouteLoaderData } from 'react-router';
 import type { loader } from '#root.js';
 import { metaConfig } from '#config.js';
-import { isFunction } from '#utils/function.js';
+import { isFunction } from '#utils/function.utils.js';
 import type { CookieName } from '#constants/cookie.constants.js';
 
 type Listener = () => void;

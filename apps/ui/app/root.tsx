@@ -7,7 +7,7 @@ import type { ReactNode } from 'react';
 import { getEnvironment, metaConfig } from '#config.js';
 import { Page } from '#components/layout/page.js';
 import { themeSessionResolver } from '#sessions.server.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { markdownViewerLinks } from '#components/markdown-viewer.js';
 import { Toaster } from '#components/ui/sonner.js';
 import { webManifestLinks } from '#routes/manifest[.webmanifest].js';

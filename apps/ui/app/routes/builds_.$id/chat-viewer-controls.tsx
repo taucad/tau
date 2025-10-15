@@ -2,7 +2,7 @@ import { ClippingPlaneControl } from '#components/geometry/cad/clipping-plane-co
 import { FovControl } from '#components/geometry/cad/fov-control.js';
 import { GridSizeIndicator } from '#components/geometry/cad/grid-control.js';
 import { ResetCameraControl } from '#components/geometry/cad/reset-camera-control.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 export function ChatViewerControls({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.JSX.Element {
   return (

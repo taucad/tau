@@ -4,7 +4,7 @@ import { CreditCard, Key, Lock, Palette, User } from 'lucide-react';
 import { TabsContent } from '#components/ui/tabs.js';
 import type { Handle } from '#types/matches.types.js';
 import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { ResponsiveTabs } from '#components/ui/responsive-tabs.js';
 import type { ResponsiveTabItem } from '#components/ui/responsive-tabs.js';
 

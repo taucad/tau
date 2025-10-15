@@ -4,7 +4,7 @@ import { Badge } from '#components/ui/badge.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import type { KernelProvider } from '#types/kernel.types.js';
 import { kernelOptions } from '#constants/kernel.constants.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 export type KernelSelectorProperties = {
   readonly selectedKernel: KernelProvider;

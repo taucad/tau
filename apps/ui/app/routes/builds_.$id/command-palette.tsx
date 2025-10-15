@@ -19,7 +19,7 @@ import { useBuildSelector } from '#hooks/use-build.js';
 import { toast } from '#components/ui/sonner.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
-import { downloadBlob } from '#utils/file.js';
+import { downloadBlob } from '#utils/file.utils.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import { exportGeometryMachine } from '#machines/export-geometry.machine.js';
 import {
@@ -32,7 +32,7 @@ import {
 } from '#components/ui/command.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import type { KeyCombination } from '#utils/keys.js';
+import type { KeyCombination } from '#utils/keys.utils.js';
 import type { ExportFormat } from '#types/kernel.types.js';
 import { extensionFromFormat } from '#constants/kernel.constants.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';

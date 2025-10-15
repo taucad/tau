@@ -5,7 +5,7 @@ import { cva } from 'class-variance-authority';
 import { PanelLeftIcon } from 'lucide-react';
 import { useIsMobile } from '#hooks/use-mobile.js';
 import { useKeydown } from '#hooks/use-keydown.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
 import { Separator } from '#components/ui/separator.js';
@@ -13,8 +13,8 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Skeleton } from '#components/ui/skeleton.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { formatKeyCombination } from '#utils/keys.js';
-import type { KeyCombination } from '#utils/keys.js';
+import { formatKeyCombination } from '#utils/keys.utils.js';
+import type { KeyCombination } from '#utils/keys.utils.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 

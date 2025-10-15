@@ -11,7 +11,7 @@ import { CopyButton } from '#components/copy-button.js';
 import { Button } from '#components/ui/button.js';
 import { messageRole } from '#types/chat.types.js';
 import type { MessageAnnotation } from '#types/chat.types.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { When } from '#components/ui/utils/when.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import {

@@ -1,7 +1,7 @@
 import { useShikiHighlighter } from 'react-shiki/core';
 import type { ClassValue } from 'clsx';
 import { useTheme } from 'remix-themes';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { highlighter } from '#lib/shiki.js';
 import type { CodeLanguage } from '#types/code.types.js';
 

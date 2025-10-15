@@ -12,8 +12,8 @@ import {
 } from '#components/ui/floating-panel.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { useKeydown } from '#hooks/use-keydown.js';
-import type { KeyCombination } from '#utils/keys.js';
-import { formatKeyCombination } from '#utils/keys.js';
+import type { KeyCombination } from '#utils/keys.utils.js';
+import { formatKeyCombination } from '#utils/keys.utils.js';
 import { ChatEditorExplorerFiles } from '#routes/builds_.$id/chat-editor-explorer-files.js';
 import { ChatEditorExplorerMaterials } from '#routes/builds_.$id/chat-editor-explorer-materials.js';
 import { ChatEditorExplorerMeshes } from '#routes/builds_.$id/chat-editor-explorer-meshes.js';

@@ -2,7 +2,7 @@ import type { ComponentProps } from 'react';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
 import { CodeViewer } from '#components/code/code-viewer.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import type { CodeLanguage } from '#types/code.types.js';
 
 // Root CodeBlock container variants

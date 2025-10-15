@@ -7,7 +7,7 @@ import type { Route } from './+types/route.js';
 import { ChatInterface } from '#routes/builds_.$id/chat-interface.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
 import type { Handle } from '#types/matches.types.js';
-import { useChatConstants } from '#utils/chat.js';
+import { useChatConstants } from '#utils/chat.utils.js';
 import { AiChatProvider, useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { BuildNameEditor } from '#routes/builds_.$id/build-name-editor.js';

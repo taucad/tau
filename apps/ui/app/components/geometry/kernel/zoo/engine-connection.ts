@@ -2,7 +2,7 @@
 import type { Models } from '@kittycad/lib';
 import type { Context } from '@taucad/kcl-wasm-lib';
 import { BSON } from 'bson';
-import { binaryToUuid } from '#utils/binary.js';
+import { binaryToUuid } from '#utils/binary.utils.js';
 import { KclError, KclAuthError } from '#components/geometry/kernel/zoo/kcl-errors.js';
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- required

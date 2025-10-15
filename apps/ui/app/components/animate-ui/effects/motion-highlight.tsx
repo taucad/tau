@@ -1,7 +1,7 @@
 import * as React from 'react';
 import type { Transition } from 'motion/react';
 import { AnimatePresence, motion } from 'motion/react';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 type MotionHighlightMode = 'children' | 'parent';
 

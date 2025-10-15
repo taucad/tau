@@ -7,11 +7,11 @@ import Link from 'fumadocs-core/link';
 import { usePathname } from 'fumadocs-core/framework';
 import { cva } from 'class-variance-authority';
 import { MenuIcon, XIcon, SearchIcon } from 'lucide-react';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { formatKeyCombination } from '#utils/keys.js';
+import { formatKeyCombination } from '#utils/keys.utils.js';
 import {
   FloatingPanel,
   FloatingPanelTrigger,

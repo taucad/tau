@@ -5,7 +5,7 @@ import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
 import { defaultBuildName } from '#constants/build-names.js';
 import { useBuild } from '#hooks/use-build.js';
-import { useChatConstants } from '#utils/chat.js';
+import { useChatConstants } from '#utils/chat.utils.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 

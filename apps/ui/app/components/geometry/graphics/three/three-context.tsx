@@ -6,7 +6,7 @@ import { Scene } from '#components/geometry/graphics/three/scene.js';
 import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
 import rotateIconBase64 from '#components/geometry/graphics/rotate-icon.svg?base64';
 import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 export type ThreeViewerProperties = {
   readonly enableGizmo?: boolean;

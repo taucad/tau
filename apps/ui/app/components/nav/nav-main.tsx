@@ -13,8 +13,8 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from '#components/ui/sidebar.js';
-import type { KeyCombination } from '#utils/keys.js';
-import { formatKeyCombination } from '#utils/keys.js';
+import type { KeyCombination } from '#utils/keys.utils.js';
+import { formatKeyCombination } from '#utils/keys.utils.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 

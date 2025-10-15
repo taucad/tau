@@ -77,7 +77,11 @@ export const idPrefix = {
    */
   passkey: 'pk',
   /**
-   * A secret ID.
+   * A secret key ID (for API keys).
    */
-  secret: 'sec',
+  secretKey: 'sk',
+  /**
+   * A public key ID (for API keys).
+   */
+  publicKey: 'pk',
 } as const satisfies Record<string, string>;

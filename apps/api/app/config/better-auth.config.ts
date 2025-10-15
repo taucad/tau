@@ -53,7 +53,7 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       requireEmailVerification: true,
       autoSignIn: true,
       async sendResetPassword({ user, url, token }) {
-        logger.log('Sending reset password email to', user.email, 'with url', url, 'and token', token);
+        logger.log(`Sending reset password email to ${user.email} with url ${url} and token ${token}`);
       },
       resetPasswordTokenExpiresIn: 3600,
     },
@@ -62,6 +62,10 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       github: {
         clientId: configService.get('GITHUB_CLIENT_ID', { infer: true }),
         clientSecret: configService.get('GITHUB_CLIENT_SECRET', { infer: true }),
+      },
+      google: {
+        clientId: configService.get('GOOGLE_CLIENT_ID', { infer: true }),
+        clientSecret: configService.get('GOOGLE_CLIENT_SECRET', { infer: true }),
       },
     },
 
@@ -101,7 +105,7 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     account: {
       accountLinking: {
         enabled: true,
-        trustedProviders: ['github', 'email-password'],
+        trustedProviders: ['github', 'google', 'email-password'],
         allowDifferentEmails: false, // Require same email for linking
       },
     },

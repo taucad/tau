@@ -1,4 +1,4 @@
-import { AuthCard } from '@daveyplate/better-auth-ui';
+import { AuthView } from '@daveyplate/better-auth-ui';
 import { Link, useLocation } from 'react-router';
 import { Tau } from '#components/icons/tau.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
@@ -28,7 +28,7 @@ export default function AuthPage(): React.JSX.Element {
           </Tooltip>
         </div>
         <div className="flex flex-1 items-center justify-center">
-          <AuthCard
+          <AuthView
             pathname={pathname}
             className="w-full max-w-md"
             callbackURL={ENV.TAU_FRONTEND_URL}

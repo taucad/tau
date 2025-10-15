@@ -1,5 +1,4 @@
-import type { SettingsView } from '@daveyplate/better-auth-ui';
-import { SettingsCards, useAuthenticate } from '@daveyplate/better-auth-ui';
+import { AccountView, useAuthenticate } from '@daveyplate/better-auth-ui';
 import { Link, useLocation } from 'react-router';
 import { CreditCard, Key, Lock, Palette, User } from 'lucide-react';
 import { TabsContent } from '#components/ui/tabs.js';
@@ -9,25 +8,18 @@ import { cn } from '#utils/ui.js';
 import { ResponsiveTabs } from '#components/ui/responsive-tabs.js';
 import type { ResponsiveTabItem } from '#components/ui/responsive-tabs.js';
 
-type SettingsTab = ResponsiveTabItem & {
-  tabView?: SettingsView;
-};
-
-const authTabs: readonly SettingsTab[] = [
+const authTabs: readonly ResponsiveTabItem[] = [
   {
-    tabView: 'SETTINGS',
     label: 'Account',
     href: '/settings/account',
     icon: User,
   },
   {
-    tabView: 'SECURITY',
     label: 'Security',
     href: '/settings/security',
     icon: Lock,
   },
   {
-    tabView: 'API_KEYS',
     label: 'API Keys',
     href: '/settings/api-keys',
     icon: Key,
@@ -46,7 +38,7 @@ const authTabs: readonly SettingsTab[] = [
   // },
 ] as const;
 
-const nonAuthTabs: readonly SettingsTab[] = [
+const nonAuthTabs: readonly ResponsiveTabItem[] = [
   {
     label: 'Billing',
     href: '/settings/billing',
@@ -59,7 +51,7 @@ const nonAuthTabs: readonly SettingsTab[] = [
   },
 ] as const;
 
-const allTabs: readonly SettingsTab[] = [...authTabs, ...nonAuthTabs];
+const allTabs: readonly ResponsiveTabItem[] = [...authTabs, ...nonAuthTabs];
 
 const defaultTab = authTabs[0]!.label;
 const defaultLabel = authTabs[0]!.label;
@@ -97,9 +89,10 @@ export default function SettingsPage(): React.JSX.Element {
         <ResponsiveTabs tabs={allTabs} activeTab={activeTab}>
           {authTabs.map((tab) => (
             <TabsContent key={tab.label} value={tab.label} className="[&>*]:md:gap-0">
-              <SettingsCards
+              <AccountView
+                hideNav
+                pathname={location.pathname}
                 classNames={{ cards: 'h-full', sidebar: { base: 'hidden' }, base: 'h-full' }}
-                view={tab.tabView}
               />
             </TabsContent>
           ))}

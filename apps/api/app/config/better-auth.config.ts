@@ -1,5 +1,6 @@
 import type { BetterAuthOptions, Models } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { apiKey } from 'better-auth/plugins';
 import type { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import type { DatabaseService } from '#database/database.service.js';
@@ -8,6 +9,7 @@ import type { Environment } from '#config/environment.config.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
 import type { IdPrefix } from '#types/id.types.js';
 import { idPrefix } from '#constants/id.constants.js';
+import { staticAuthConfig } from '#config/auth.js';
 
 /**
  * Mapping between BetterAuth models and ID prefixes.
@@ -36,7 +38,38 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
   const logger = new Logger('BetterAuth');
   const { databaseService, configService } = options;
 
+  /**
+   * Runtime plugin configuration with custom options.
+   * IMPORTANT: This array must have the same number of plugins as staticAuthConfig.plugins
+   * in auth.ts. Add/remove plugins in both places to maintain sync.
+   */
+  const runtimePlugins = [
+    apiKey({
+      requireName: true,
+      customKeyGenerator() {
+        return generatePrefixedId(idPrefix.secretKey);
+      },
+    }),
+  ];
+
+  // Validation: Ensure plugin arrays are in sync
+  if (staticAuthConfig.plugins.length !== runtimePlugins.length) {
+    throw new Error(
+      `Plugin configuration mismatch! ` +
+        `auth.ts has ${staticAuthConfig.plugins.length} plugin(s), ` +
+        `but runtime config has ${runtimePlugins.length} plugin(s). ` +
+        `Please ensure both files declare the same plugins.`,
+    );
+  }
+
   return {
+    // Spread static configuration
+    ...staticAuthConfig,
+
+    // Override with runtime-configured plugins
+    plugins: runtimePlugins,
+
+    // Runtime-specific configuration
     database: drizzleAdapter(databaseService.database, {
       provider: 'pg',
     }),
@@ -44,14 +77,11 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     secret: configService.get('AUTH_SECRET', { infer: true }),
     // eslint-disable-next-line @typescript-eslint/naming-convention -- baseURL is a valid option
     baseURL: configService.get('AUTH_URL', { infer: true }),
-    basePath: '/v1/auth',
-    appName: 'Tau',
     trustedOrigins: [configService.get('TAU_FRONTEND_URL', { infer: true })],
 
+    // Override emailAndPassword with runtime-specific handlers
     emailAndPassword: {
-      enabled: true,
-      requireEmailVerification: true,
-      autoSignIn: true,
+      ...staticAuthConfig.emailAndPassword,
       async sendResetPassword({ user, url, token }) {
         logger.log(`Sending reset password email to ${user.email} with url ${url} and token ${token}`);
       },
@@ -67,11 +97,6 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
         clientId: configService.get('GOOGLE_CLIENT_ID', { infer: true }),
         clientSecret: configService.get('GOOGLE_CLIENT_SECRET', { infer: true }),
       },
-    },
-
-    session: {
-      expiresIn: 60 * 60 * 24 * 7, // 7 days
-      updateAge: 60 * 60 * 24, // 24 hours
     },
 
     // Advanced configuration
@@ -100,21 +125,6 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
         secure: import.meta.env.PROD, // Only secure cookies in production
         sameSite: 'lax',
       },
-    },
-
-    account: {
-      accountLinking: {
-        enabled: true,
-        trustedProviders: ['github', 'google', 'email-password'],
-        allowDifferentEmails: false, // Require same email for linking
-      },
-    },
-
-    rateLimit: {
-      enabled: true,
-      window: 10, // 10 seconds
-      max: 100, // 100 requests per window
-      storage: 'memory', // TODO: Change to Redis
     },
 
     // eslint-disable-next-line @typescript-eslint/naming-convention -- onAPIError is a valid option

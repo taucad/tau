@@ -5,6 +5,9 @@
   "projectType": "application",
   "tags": ["scope:api", "type:app"],
   "targets": {
+    "build": {
+      "dependsOn": ["auth-schema-generate"]
+    },
     "setup-env": {
       "command": "if [ ! -f \"./apps/api/.env\" ]; then cp ./apps/api/.env.example ./apps/api/.env; fi"
     },
@@ -27,6 +30,13 @@
         "production": {
           "buildTarget": "api:build:production"
         }
+      }
+    },
+    "auth-schema-generate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npx @better-auth/cli generate --config app/config/auth.ts --output app/database/auth-schema.ts --yes",
+        "cwd": "apps/api"
       }
     },
     "launch": {

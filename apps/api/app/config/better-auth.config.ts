@@ -1,10 +1,30 @@
-import type { BetterAuthOptions } from 'better-auth';
+import type { BetterAuthOptions, Models } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import type { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import type { DatabaseService } from '#database/database.service.js';
 import type { AuthService } from '#auth/auth.service.js';
 import type { Environment } from '#config/environment.config.js';
+import { generatePrefixedId } from '#utils/id.utils.js';
+import type { IdPrefix } from '#types/id.types.js';
+import { idPrefix } from '#constants/id.constants.js';
+
+/**
+ * Mapping between BetterAuth models and ID prefixes.
+ */
+const prefixFromModel: Record<Models, IdPrefix> = {
+  account: idPrefix.account,
+  organization: idPrefix.organization,
+  user: idPrefix.user,
+  session: idPrefix.session,
+  verification: idPrefix.verification,
+  'rate-limit': idPrefix.rateLimit,
+  'two-factor': idPrefix.twoFactor,
+  member: idPrefix.member,
+  invitation: idPrefix.invitation,
+  jwks: idPrefix.jwks,
+  passkey: idPrefix.passkey,
+};
 
 type BetterAuthConfigOptions = {
   databaseService: DatabaseService;
@@ -55,6 +75,18 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       crossSubDomainCookies: {
         enabled: true,
         domain: undefined, // Will be set based on request
+      },
+      database: {
+        generateId(options) {
+          const prefix = prefixFromModel[options.model as Models];
+
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- exhaustive check
+          if (!prefix) {
+            throw new Error(`Model ID not supported: ${options.model}`);
+          }
+
+          return generatePrefixedId(prefix);
+        },
       },
       cookiePrefix: 'tau',
       // Only use secure cookies in production. Note: this requires SSL.

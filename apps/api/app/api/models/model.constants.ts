@@ -179,7 +179,7 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
           inputTokens: 0.8,
           outputTokens: 4,
           cachedReadTokens: 0.08,
-          cachedWriteTokens: 1.0,
+          cachedWriteTokens: 1,
         },
       },
       configuration: {

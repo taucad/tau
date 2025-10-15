@@ -21,7 +21,7 @@ import {
 import { runInCjsContext, buildEsModule } from '#components/geometry/kernel/replicad/vm.js';
 import { renderOutput } from '#components/geometry/kernel/replicad/utils/render-output.js';
 import { convertReplicadGeometriesToGltf } from '#components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
-import { jsonSchemaFromJson } from '#utils/schema.js';
+import { jsonSchemaFromJson } from '#utils/schema.utils.js';
 import type { InputShape, MainResultShapes } from '#components/geometry/kernel/replicad/utils/render-output.js';
 import type { GeometryGltf, Geometry2D } from '#types/cad.types.js';
 import type { OnWorkerLog } from '#types/console.types.js';

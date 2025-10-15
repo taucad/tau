@@ -26,6 +26,8 @@ const prefixFromModel: Record<Models, IdPrefix> = {
   invitation: idPrefix.invitation,
   jwks: idPrefix.jwks,
   passkey: idPrefix.passkey,
+  // @ts-expect-error - apikey is a valid model
+  apikey: idPrefix.secretKey,
 };
 
 type BetterAuthConfigOptions = {

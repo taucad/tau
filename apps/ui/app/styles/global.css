@@ -459,7 +459,7 @@
  * Inspired by: https://lea.verou.me/2012/04/background-attachment-local/
  */
 @utility scroll-shadows-x {
-  --scroll-shadows-gradient-color: rgba(0, 0, 0, 0.15);
+  --scroll-shadows-gradient-color: rgba(0, 0, 0, 0.3);
   
   &:is(.dark *) {
     --scroll-shadows-gradient-color: rgba(0, 0, 0, 0.6);

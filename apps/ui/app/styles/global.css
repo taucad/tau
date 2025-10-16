@@ -394,6 +394,13 @@
     @apply font-sans bg-background text-foreground antialiased scroll-smooth;
     overflow: hidden;
   }
+
+  button,
+  [role="button"] {
+    @apply active:scale-95 md:active:scale-98 transition-transform;
+    @apply select-none transition-[transform];
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
 /* FONTS */

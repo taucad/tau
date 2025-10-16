@@ -459,7 +459,7 @@
  * Inspired by: https://lea.verou.me/2012/04/background-attachment-local/
  */
 @utility scroll-shadows-x {
-  --scroll-shadows-gradient-color: rgba(0, 0, 0, 0.3);
+  --scroll-shadows-gradient-color: rgba(0, 0, 0, 0.15);
   
   &:is(.dark *) {
     --scroll-shadows-gradient-color: rgba(0, 0, 0, 0.6);
@@ -476,9 +476,9 @@
     linear-gradient(270deg, var(--scroll-shadows-gradient-color), transparent) 0 100%;
   
   background-repeat: no-repeat;
-  background-color: var(--muted);
+  background-color: var(--sidebar-background);
   background-position: top left, top right, top left, top right;
-  background-size: 40px 100%, 40px 100%, 24px 100%, 24px 100%;
+  background-size: 40px 100%, 40px 100%, 20px 100%, 20px 100%;
   /* Covers scroll with content, shadows stay fixed */
   background-attachment: local, local, scroll, scroll;
 }

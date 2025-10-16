@@ -92,7 +92,9 @@ export default function ChatStart(): React.JSX.Element {
     <>
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 pb-12 md:space-y-8 md:px-6 md:pt-32">
         <div className="mb-12 text-center">
-          <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">What can I help you build?</h1>
+          <h1 className="mx-auto max-w-[16ch] text-3xl font-semibold tracking-tight text-balance md:max-w-[20ch] md:text-5xl">
+            What can I help you build?
+          </h1>
         </div>
 
         <AiChatProvider value={{}}>

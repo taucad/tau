@@ -447,3 +447,34 @@
 }
 
 /* END SCROLLBAR STYLES */
+
+/* START SCROLL SHADOWS */
+/* 
+ * Pure CSS scrolling shadows using gradients and background-attachment.
+ * Inspired by: https://lea.verou.me/2012/04/background-attachment-local/
+ */
+@utility scroll-shadows-x {
+  --scroll-shadows-gradient-color: rgba(0, 0, 0, 0.1);
+  
+  &:is(.dark *) {
+    --scroll-shadows-gradient-color: rgba(0, 0, 0, 0.6);
+  }
+
+  overflow: auto;
+  background:
+    /* Shadow covers - these stay fixed and hide shadows at edges */
+    linear-gradient(90deg, var(--muted) 30%, transparent),
+    linear-gradient(90deg, transparent, var(--muted) 70%) 0 100%,
+    
+    /* Shadows - these scroll with content (using linear for cleaner, more gradual effect) */
+    linear-gradient(90deg, var(--scroll-shadows-gradient-color), transparent),
+    linear-gradient(270deg, var(--scroll-shadows-gradient-color), transparent) 0 100%;
+  
+  background-repeat: no-repeat;
+  background-color: var(--muted);
+  background-position: top left, top right, top left, top right;
+  background-size: 40px 100%, 40px 100%, 24px 100%, 24px 100%;
+  /* Covers scroll with content, shadows stay fixed */
+  background-attachment: local, local, scroll, scroll;
+}
+/* END SCROLL SHADOWS */

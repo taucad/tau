@@ -3,6 +3,7 @@ import { Slot } from '@radix-ui/react-slot';
 import type { VariantProps } from 'class-variance-authority';
 import { cva } from 'class-variance-authority';
 import { PanelLeftIcon } from 'lucide-react';
+import { useLocation } from 'react-router';
 import { useIsMobile } from '#hooks/use-mobile.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { cn } from '#utils/ui.utils.js';
@@ -90,6 +91,14 @@ function SidebarProvider({
     preventDefault: true,
     stopPropagation: true,
   });
+
+  const location = useLocation();
+  React.useEffect(() => {
+    if (isMobile) {
+      // Location changes on mobile should close the sidebar
+      setOpenMobile(false);
+    }
+  }, [location, isMobile, setOpenMobile]);
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.
@@ -462,28 +471,14 @@ function SidebarMenuButton({
   tooltip,
   className,
   onClick,
-  shouldAutoClose = false,
   ...properties
 }: React.ComponentProps<'button'> & {
   readonly asChild?: boolean;
   readonly isActive?: boolean;
   readonly tooltip?: string | React.ComponentProps<typeof TooltipContent>;
-  readonly shouldAutoClose?: boolean;
 } & VariantProps<typeof sidebarMenuButtonVariants>): React.JSX.Element {
   const Comp = asChild ? Slot : 'button';
-  const { isMobile, state, toggleSidebar } = useSidebar();
-
-  // Auto-close the sidebar when clicking on a button in mobile mode.
-  const handleClick = React.useCallback(
-    (event: React.MouseEvent<HTMLButtonElement>) => {
-      if (isMobile && state === 'expanded' && !shouldAutoClose) {
-        toggleSidebar();
-      }
-
-      onClick?.(event);
-    },
-    [shouldAutoClose, isMobile, onClick, state, toggleSidebar],
-  );
+  const { isMobile, state } = useSidebar();
 
   const button = (
     <Comp
@@ -492,7 +487,7 @@ function SidebarMenuButton({
       data-size={size}
       data-active={isActive}
       className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
-      onClick={handleClick}
+      onClick={onClick}
       {...properties}
     />
   );

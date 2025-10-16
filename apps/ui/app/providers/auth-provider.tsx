@@ -1,6 +1,7 @@
 import { AuthUIProvider } from '@daveyplate/better-auth-ui';
 import { Link } from 'react-router';
 import { authClient } from '#lib/auth-client.js';
+import { ENV } from '#config.js';
 
 export function AuthConfigProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   // Const rrNavigate = useNavigate();
@@ -24,6 +25,7 @@ export function AuthConfigProvider({ children }: { readonly children: React.Reac
       // Navigate={navigate}
       // replace={replace}
       redirectTo="/"
+      baseURL={ENV.TAU_FRONTEND_URL}
       social={{
         providers: ['github', 'google'],
       }}

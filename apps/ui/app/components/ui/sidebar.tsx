@@ -169,7 +169,7 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="w-(--sidebar-width) bg-sidebar p-1 text-sidebar-foreground [&>button]:hidden"
+          className="w-(--sidebar-width) bg-sidebar text-sidebar-foreground [&>button]:hidden"
           style={{
             '--sidebar-width': sidebarWidthMobile,
           }}

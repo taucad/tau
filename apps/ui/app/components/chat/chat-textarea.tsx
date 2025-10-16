@@ -600,10 +600,10 @@ export const ChatTextarea = memo(function ({
                   asChild
                   variant="outline"
                   size="sm"
-                  className="h-7 rounded-full text-muted-foreground hover:text-foreground"
+                  className="h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground"
                 >
                   <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full @xs:max-w-fit">
-                    <span className="hidden truncate text-xs @[22rem]:block">{selectedModel?.slug ?? 'Offline'}</span>
+                    <span className="hidden truncate text-xs @[16rem]:block">{selectedModel?.slug ?? 'Offline'}</span>
                     <span className="relative flex size-4 items-center justify-center">
                       <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100" />
                       <CircuitBoard className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0" />
@@ -661,7 +661,7 @@ export const ChatTextarea = memo(function ({
             <Button
               variant="outline"
               size="icon"
-              className="rounded-full text-muted-foreground hover:text-foreground"
+              className="size-7 rounded-full text-muted-foreground hover:text-foreground"
               title="Add image"
               onClick={handleFileSelect}
             >
@@ -677,7 +677,7 @@ export const ChatTextarea = memo(function ({
         {status === 'streaming' ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="icon" className="rounded-full" onClick={handleCancelClick}>
+              <Button size="icon" className="size-7 rounded-full" onClick={handleCancelClick}>
                 <Square className="size-4 fill-primary-foreground" />
               </Button>
             </TooltipTrigger>
@@ -688,7 +688,12 @@ export const ChatTextarea = memo(function ({
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="icon" className="rounded-full" disabled={inputText.length === 0} onClick={handleSubmit}>
+              <Button
+                size="icon"
+                className="size-7 rounded-full"
+                disabled={inputText.length === 0}
+                onClick={handleSubmit}
+              >
                 <ArrowUp className="size-5" />
               </Button>
             </TooltipTrigger>

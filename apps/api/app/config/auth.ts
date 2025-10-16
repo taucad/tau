@@ -25,7 +25,6 @@ export const staticAuthConfig = {
   ],
   emailAndPassword: {
     enabled: true,
-    requireEmailVerification: true,
     autoSignIn: true,
     resetPasswordTokenExpiresIn: 60 * 60, // 1 hour
   },
@@ -47,6 +46,16 @@ export const staticAuthConfig = {
     window: 10,
     max: 100,
     storage: 'memory',
+  },
+  advanced: {
+    cookiePrefix: 'tau',
+    // Only use secure cookies in production. Note: this requires SSL.
+    useSecureCookies: import.meta.env.PROD,
+    defaultCookieAttributes: {
+      httpOnly: true,
+      secure: import.meta.env.PROD, // Only secure cookies in production
+      sameSite: 'lax',
+    },
   },
 } as const satisfies BetterAuthOptions;
 

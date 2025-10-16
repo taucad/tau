@@ -25,13 +25,15 @@ type ResponsiveTabsProps = {
  * Uses pure CSS via Tailwind responsive utilities (no JS media queries)
  */
 export function ResponsiveTabs({ tabs, activeTab, children, className }: ResponsiveTabsProps): React.JSX.Element {
-  const renderTabs = () => {
+  const tabsList = useMemo(() => {
     return (
       <>
         <TabsList
           className={cn(
-            // Mobile: horizontal scrollable tabs
-            'w-full overflow-x-auto',
+            // Mobile: horizontal scrollable tabs with scroll shadows
+            'max-md:w-full max-md:justify-start max-md:scroll-shadows-x',
+            'max-md:[scrollbar-width:none]',
+            // Desktop: remove scroll shadows and set width
             'md:mt-14 md:w-fit',
           )}
         >
@@ -59,13 +61,11 @@ export function ResponsiveTabs({ tabs, activeTab, children, className }: Respons
 
         <div className="flex flex-1 flex-col gap-6">
           <h2 className="hidden text-2xl font-bold md:block">{activeTab}</h2>
-          <TabsContents className={cn('h-full! w-full flex-1 overflow-y-auto')}>{children}</TabsContents>
+          <TabsContents className={cn('h-full! w-full')}>{children}</TabsContents>
         </div>
       </>
     );
-  };
-
-  const tabsList = useMemo(() => renderTabs(), [tabs, activeTab]);
+  }, [tabs, activeTab, children]);
 
   return (
     <>
@@ -75,7 +75,7 @@ export function ResponsiveTabs({ tabs, activeTab, children, className }: Respons
       </Tabs>
 
       {/* Mobile */}
-      <Tabs orientation="horizontal" value={activeTab} className={cn('flex md:hidden', className)}>
+      <Tabs orientation="horizontal" value={activeTab} className={cn('w-full md:hidden', className)}>
         {tabsList}
       </Tabs>
     </>

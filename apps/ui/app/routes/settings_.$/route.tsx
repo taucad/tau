@@ -69,6 +69,7 @@ export const handle: Handle = {
       </Button>
     );
   },
+  enableOverflowY: true,
 };
 
 export default function SettingsPage(): React.JSX.Element {

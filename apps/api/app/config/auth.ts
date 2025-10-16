@@ -1,7 +1,7 @@
 import { betterAuth } from 'better-auth';
 import type { BetterAuthOptions } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { apiKey } from 'better-auth/plugins';
+import { apiKey, magicLink } from 'better-auth/plugins';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 
@@ -15,11 +15,19 @@ import { drizzle } from 'drizzle-orm/postgres-js';
  * an error if the counts don't match.
  */
 export const staticAuthConfig = {
-  plugins: [apiKey()],
+  plugins: [
+    apiKey(),
+    magicLink({
+      sendMagicLink() {
+        // No-op for mock configuration
+      },
+    }),
+  ],
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,
     autoSignIn: true,
+    resetPasswordTokenExpiresIn: 60 * 60, // 1 hour
   },
   basePath: '/v1/auth',
   appName: 'Tau',

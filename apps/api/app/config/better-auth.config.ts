@@ -1,6 +1,6 @@
 import type { BetterAuthOptions, Models } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { apiKey } from 'better-auth/plugins';
+import { apiKey, magicLink } from 'better-auth/plugins';
 import type { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import type { DatabaseService } from '#database/database.service.js';
@@ -52,6 +52,11 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
         return generatePrefixedId(idPrefix.secretKey);
       },
     }),
+    magicLink({
+      sendMagicLink({ email, url, token }) {
+        logger.log(`Sending magic link to ${email} with url ${url} and token ${token}`);
+      },
+    }),
   ];
 
   // Validation: Ensure plugin arrays are in sync
@@ -87,7 +92,6 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       async sendResetPassword({ user, url, token }) {
         logger.log(`Sending reset password email to ${user.email} with url ${url} and token ${token}`);
       },
-      resetPasswordTokenExpiresIn: 3600,
     },
 
     socialProviders: {

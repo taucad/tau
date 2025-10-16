@@ -70,7 +70,7 @@ export function ResponsiveTabs({ tabs, activeTab, children, className }: Respons
               )}
             >
               <Link to={tab.href}>
-                <tab.icon className="hidden md:block" />
+                <tab.icon />
                 {tab.label}
               </Link>
             </TabsTrigger>

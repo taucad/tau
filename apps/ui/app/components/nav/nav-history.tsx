@@ -181,7 +181,7 @@ export function NavHistory(): ReactNode {
         <SidebarGroup className="-mt-3.5 group-data-[collapsible=icon]:hidden">
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton shouldAutoClose className="text-sidebar-foreground/70" onClick={handleLoadMore}>
+              <SidebarMenuButton className="text-sidebar-foreground/70" onClick={handleLoadMore}>
                 <MoreHorizontal className="size-4" />
                 <span>Load More</span>
               </SidebarMenuButton>

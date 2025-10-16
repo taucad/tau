@@ -26,7 +26,7 @@
 
   /* Base color hues */
   --hue-primary: 266deg;
-  --hue-secondary: calc(var(--hue-primary) - 86deg); /* Results in ~180deg - true teal */
+  --hue-secondary: calc(var(--hue-primary) - 10deg);
   --hue-neutral: calc(var(--hue-primary) - 10deg);
   --hue-destructive: 15deg;
   --hue-success: 150deg;
@@ -37,6 +37,7 @@
   --hue-stable: 185deg;
   --hue-alert: 90deg;
   --hue-verified: 210deg;
+  --hue-highlighter: calc(var(--hue-primary) - 86deg); /* Results in ~180deg - true teal */
 
   /* Lightness levels - will be flipped in dark mode */
   --l-base: 1.00;
@@ -62,7 +63,10 @@
   --c-primary: 0.1898;
 
   --l-secondary: 0.9;
-  --c-secondary: 0.12;
+  --c-secondary: 0.01;
+
+  --l-highlighter: 0.9;
+  --c-highlighter: 0.12;
 
   /* Base colors */
   --background: oklch(var(--l-base) 0.005 var(--hue-neutral));
@@ -124,7 +128,7 @@
   --scrollbar-padding: 1.5px;
 
   /* Highlighter specific */
-  --highlighter: oklch(var(--l-secondary) var(--c-secondary) var(--hue-secondary) / 0.5);
+  --highlighter: oklch(var(--l-highlighter) var(--c-highlighter) var(--hue-highlighter) / 0.5);
   --highlighter-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral) / 0.7);
 }
 
@@ -141,11 +145,12 @@
   --l-intense: 0.88;
   --l-deepest: 0.95;
   --l-secondary: 0.8;
+  --l-highlighter: 0.8;
 
   --primary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
   --secondary-foreground: oklch(var(--l-base) 0.01 var(--hue-neutral));
 
-  --highlighter: oklch(var(--l-secondary) var(--c-secondary) var(--hue-secondary) / 0.5);
+  --highlighter: oklch(var(--l-highlighter) var(--c-highlighter) var(--hue-highlighter) / 0.5);
   --highlighter-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral) / 0.85);
 }
 

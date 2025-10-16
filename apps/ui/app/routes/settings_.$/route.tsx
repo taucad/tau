@@ -85,26 +85,24 @@ export default function SettingsPage(): React.JSX.Element {
   const activeTab = getActiveTab();
 
   return (
-    <div className="h-full flex-1">
-      <div className={cn('mx-auto mb-6 size-full max-w-4xl p-4 md:p-6', '[&_[data-slot=drawer-trigger]]:hidden')}>
-        <ResponsiveTabs tabs={allTabs} activeTab={activeTab}>
-          {authTabs.map((tab) => (
-            <TabsContent key={tab.label} value={tab.label} className="[&>*]:md:gap-0">
-              <AccountView
-                hideNav
-                pathname={location.pathname}
-                classNames={{ cards: 'h-full', sidebar: { base: 'hidden' }, base: 'h-full' }}
-              />
-            </TabsContent>
-          ))}
-          <TabsContent value="Billing">
-            <div>Billing - TODO</div>
+    <div className="mx-auto size-full max-w-4xl flex-1 max-md:px-2">
+      <ResponsiveTabs tabs={allTabs} activeTab={activeTab}>
+        {authTabs.map((tab) => (
+          <TabsContent key={tab.label} value={tab.label} className="[&>*]:md:gap-0">
+            <AccountView
+              hideNav
+              pathname={location.pathname}
+              classNames={{ cards: 'h-full', sidebar: { base: 'hidden' }, base: 'h-full pb-6' }}
+            />
           </TabsContent>
-          <TabsContent value="Appearance">
-            <div>Appearance - TODO</div>
-          </TabsContent>
-        </ResponsiveTabs>
-      </div>
+        ))}
+        <TabsContent value="Billing">
+          <div>Billing - TODO</div>
+        </TabsContent>
+        <TabsContent value="Appearance">
+          <div>Appearance - TODO</div>
+        </TabsContent>
+      </ResponsiveTabs>
     </div>
   );
 }

@@ -4,12 +4,12 @@ import { apiKey, magicLink } from 'better-auth/plugins';
 import type { ConfigService } from '@nestjs/config';
 import type { LogLevel } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
+import type { IdPrefix } from '@taucad/types';
+import { idPrefix } from '@taucad/types/constants';
 import type { DatabaseService } from '#database/database.service.js';
 import type { AuthService } from '#auth/auth.service.js';
 import type { Environment } from '#config/environment.config.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
-import type { IdPrefix } from '#types/id.types.js';
-import { idPrefix } from '#constants/id.constants.js';
 import { staticAuthConfig } from '#config/auth.js';
 
 /**

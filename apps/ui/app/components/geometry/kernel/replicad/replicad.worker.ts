@@ -12,8 +12,11 @@ import type {
   KernelError,
   ExtractNameResult,
   ExportFormat,
-} from '#types/kernel.types.js';
-import { createKernelSuccess, createKernelError, isKernelError } from '#types/kernel.types.js';
+  GeometryGltf,
+  Geometry2D,
+} from '@taucad/types';
+import { isKernelError } from '@taucad/types/guards';
+import { createKernelError, createKernelSuccess } from '#components/geometry/kernel/utils/kernel-helpers.js';
 import {
   initOpenCascade,
   initOpenCascadeWithExceptions,
@@ -23,7 +26,6 @@ import { renderOutput } from '#components/geometry/kernel/replicad/utils/render-
 import { convertReplicadGeometriesToGltf } from '#components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
 import { jsonSchemaFromJson } from '#utils/schema.utils.js';
 import type { InputShape, MainResultShapes } from '#components/geometry/kernel/replicad/utils/render-output.js';
-import type { GeometryGltf, Geometry2D } from '#types/cad.types.js';
 import type { OnWorkerLog } from '#types/console.types.js';
 import { KernelWorker } from '#components/geometry/kernel/utils/kernel-worker.js';
 import type { GeometryReplicad } from '#components/geometry/kernel/replicad/replicad.types.js';

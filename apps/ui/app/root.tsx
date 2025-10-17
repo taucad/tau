@@ -4,6 +4,7 @@ import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from 'remix-
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
+import type { Model } from '@taucad/types';
 import { getEnvironment, metaConfig } from '#config.js';
 import { Page } from '#components/layout/page.js';
 import { themeSessionResolver } from '#sessions.server.js';
@@ -17,7 +18,6 @@ import { useFavicon } from '#hooks/use-favicon.js';
 import { TooltipProvider } from '#components/ui/tooltip.js';
 import { ErrorPage } from '#components/error-page.js';
 import { AuthConfigProvider } from '#providers/auth-provider.js';
-import type { Model } from '#types/model.types.js';
 import { globalStylesLinks } from '#styles/global.styles.js';
 
 export const links: LinksFunction = () => [...globalStylesLinks, ...webManifestLinks, ...markdownViewerLinks];

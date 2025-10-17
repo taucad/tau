@@ -2,7 +2,7 @@ import { Edit, History, MoreHorizontal, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router';
-import type { Build } from '#types/build.types.js';
+import type { Build } from '@taucad/types';
 import {
   DropdownMenu,
   DropdownMenuContent,

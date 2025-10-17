@@ -1,6 +1,6 @@
+import type { ExportFormat } from '@taucad/types';
 import { parseOff } from '#components/geometry/kernel/utils/import-off.js';
 import { createStlAscii, createStlBinary } from '#components/geometry/kernel/utils/export-stl.js';
-import type { ExportFormat } from '#types/kernel.types.js';
 
 /**
  * Convert OFF format data to STL blob

@@ -1,7 +1,7 @@
-export const modelProviders = ['sambanova', 'openai', 'anthropic', 'ollama', 'vertexai', 'cerebras'] as const;
+import type { modelFamilies, modelProviders } from '#/constants/model.constants.js';
+
 export type ModelProvider = (typeof modelProviders)[number];
 
-export const modelFamilies = ['gpt', 'claude', 'gemini'] as const;
 export type ModelFamily = (typeof modelFamilies)[number];
 
 export type Model = {

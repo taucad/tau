@@ -1,7 +1,7 @@
 import type { AnyShape, Drawing } from 'replicad';
 import type { SetRequired } from 'type-fest';
+import type { Geometry2D } from '@taucad/types';
 import { normalizeColor } from '#components/geometry/kernel/replicad/utils/normalize-color.js';
-import type { Geometry2D } from '#types/cad.types.js';
 import type { GeometryReplicad } from '#components/geometry/kernel/replicad/replicad.types.js';
 
 type Meshable = SetRequired<AnyShape, 'mesh' | 'meshEdges'>;

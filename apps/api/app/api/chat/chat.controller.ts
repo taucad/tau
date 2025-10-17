@@ -6,9 +6,9 @@ import { Command } from '@langchain/langgraph';
 import type { StateSnapshot } from '@langchain/langgraph';
 import type { IterableReadableStream } from '@langchain/core/utils/stream';
 import type { StreamEvent } from '@langchain/core/tracers/log_stream';
+import type { ToolWithSelection } from '@taucad/types';
 import { tryExtractLastToolResult } from '#api/chat/utils/extract-tool-result.js';
 import { ToolService, toolChoiceFromToolName } from '#api/tools/tool.service.js';
-import type { ToolChoiceWithCategory } from '#api/tools/tool.service.js';
 import { ChatService } from '#api/chat/chat.service.js';
 import { LangGraphAdapter } from '#api/chat/utils/langgraph-adapter.js';
 import {
@@ -43,8 +43,7 @@ export class ChatController {
 
     this.logger.debug(`Last human message: ${JSON.stringify(lastHumanMessage)}`);
     let modelId: string;
-
-    const selectedToolChoice: ToolChoiceWithCategory = 'auto';
+    const selectedToolChoice: ToolWithSelection = 'auto';
 
     if (lastHumanMessage?.role === 'user') {
       modelId = lastHumanMessage.model;

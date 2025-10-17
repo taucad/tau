@@ -1,4 +1,4 @@
-import type { BackendProvider, ExportFormat, KernelProvider } from '#types/kernel.types.js';
+import type { BackendProvider, ExportFormat, KernelProvider } from '@taucad/types';
 
 /**
  * Map of export formats to file extensions

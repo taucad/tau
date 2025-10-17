@@ -1,3 +1,4 @@
+import type { backendProviders, kernelProviders } from '#/constants/kernel.constants.js';
 import type { Geometry } from '#types/cad.types.js';
 
 export type KernelStackFrame = {
@@ -30,9 +31,7 @@ export type KernelErrorResult = {
   error: KernelError;
 };
 
-export const kernelProviders = ['replicad', 'openscad', 'zoo'] as const;
 export type KernelProvider = (typeof kernelProviders)[number];
-export const backendProviders = ['opencascade', 'zoo', 'manifold'] as const;
 export type BackendProvider = (typeof backendProviders)[number];
 
 export type KernelResult<T> = KernelSuccessResult<T> | KernelErrorResult;
@@ -50,23 +49,3 @@ export type ExtractNameResult = KernelResult<string | undefined>;
 export type ExtractSchemaResult = KernelResult<unknown>;
 
 export type ExportGeometryResult = KernelResult<Array<{ blob: Blob; name: string }>>;
-
-// Helper type guards
-export const isKernelSuccess = <T>(result: KernelResult<T>): result is KernelSuccessResult<T> => {
-  return result.success;
-};
-
-export const isKernelError = <T>(result: KernelResult<T>): result is KernelErrorResult => {
-  return !result.success;
-};
-
-// Helper functions for creating results
-export const createKernelSuccess = <T>(data: T): KernelSuccessResult<T> => ({
-  success: true,
-  data,
-});
-
-export const createKernelError = (error: KernelError): KernelErrorResult => ({
-  success: false,
-  error,
-});

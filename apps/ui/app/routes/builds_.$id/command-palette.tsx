@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelector, useActorRef } from '@xstate/react';
 import { Link, useNavigate } from 'react-router';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
+import type { ExportFormat } from '@taucad/types';
 import { Button } from '#components/ui/button.js';
 import { useBuildSelector } from '#hooks/use-build.js';
 import { toast } from '#components/ui/sonner.js';
@@ -33,7 +34,6 @@ import {
 import { useKeydown } from '#hooks/use-keydown.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
-import type { ExportFormat } from '#types/kernel.types.js';
 import { extensionFromFormat } from '#constants/kernel.constants.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { Format3D } from '#components/icons/format-3d.js';

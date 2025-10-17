@@ -43,6 +43,9 @@
   ],
   "references": [
     {
+      "path": "../../libs/types/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api-extractor/tsconfig.lib.json"
     },
     {

@@ -19,6 +19,9 @@
     },
     {
       "path": "../../libs/tau-examples/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/types/tsconfig.lib.json"
     }
   ]
 }

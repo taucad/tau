@@ -656,6 +656,9 @@ importers:
       '@taucad/tau-examples':
         specifier: workspace:*
         version: link:../../libs/tau-examples
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../libs/types
 
   apps/ui:
     dependencies:
@@ -665,10 +668,15 @@ importers:
       '@taucad/tau-examples':
         specifier: workspace:*
         version: link:../../libs/tau-examples
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../libs/types
 
   libs/api-extractor: {}
 
   libs/tau-examples: {}
+
+  libs/types: {}
 
   packages/converter:
     dependencies:

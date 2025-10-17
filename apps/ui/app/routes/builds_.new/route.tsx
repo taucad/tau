@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
+import type { KernelProvider } from '@taucad/types';
 import { Button } from '#components/ui/button.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '#components/ui/card.js';
 import { Input } from '#components/ui/input.js';
@@ -13,7 +14,6 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '#c
 import { storage } from '#db/storage.js';
 import { kernelOptions, getKernelOption } from '#constants/kernel.constants.js';
 import { toast } from '#components/ui/sonner.js';
-import type { KernelProvider } from '#types/kernel.types';
 import type { Handle } from '#types/matches.types.js';
 import { cn } from '#utils/ui.utils.js';
 import { useKeydown } from '#hooks/use-keydown.js';

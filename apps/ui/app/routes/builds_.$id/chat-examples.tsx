@@ -1,12 +1,12 @@
 import { memo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
+import { messageRole, messageStatus } from '@taucad/types/constants';
 import { getRandomExamples } from '#constants/chat-prompt-examples.js';
 import type { ChatExample } from '#constants/chat-prompt-examples.js';
 import { Button } from '#components/ui/button.js';
 import { useChatActions } from '#components/chat/ai-chat-provider.js';
 import { useModels } from '#hooks/use-models.js';
 import { createMessage } from '#utils/chat.utils.js';
-import { messageRole, messageStatus } from '#types/chat.types.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 
 export const ChatExamples = memo(function () {

@@ -1,0 +1,27 @@
+{
+  "name": "@taucad/types",
+  "version": "0.1.0",
+  "description": "Tau types",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": {
+      "types": "./src/types/index.ts",
+      "import": "./src/types/index.ts",
+      "default": "./src/types/index.ts"
+    },
+    "./constants": {
+      "types": "./src/constants/index.ts",
+      "import": "./src/constants/index.ts",
+      "default": "./src/constants/index.ts"
+    },
+    "./guards": {
+      "types": "./src/guards/index.ts",
+      "import": "./src/guards/index.ts",
+      "default": "./src/guards/index.ts"
+    }
+  },
+  "imports": {
+    "#*": ["./src/*"]
+  }
+}

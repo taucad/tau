@@ -1,5 +1,5 @@
 import { useSelector } from '@xstate/react';
-import type { KernelStackFrame } from '#types/kernel.types.js';
+import type { KernelStackFrame } from '@taucad/types';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { cn } from '#utils/ui.utils.js';
 

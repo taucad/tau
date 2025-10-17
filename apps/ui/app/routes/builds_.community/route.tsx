@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Link, NavLink } from 'react-router';
 import { Code2, SlidersHorizontal } from 'lucide-react';
+import type { KernelProvider } from '@taucad/types';
+import { kernelProviders } from '@taucad/types/constants';
 import { Button } from '#components/ui/button.js';
 import { SearchInput } from '#components/search-input.js';
 import {
@@ -10,8 +12,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu.js';
-import type { KernelProvider } from '#types/kernel.types.js';
-import { kernelProviders } from '#types/kernel.types.js';
 import { sampleBuilds } from '#constants/build-examples.js';
 import { CommunityBuildGrid } from '#components/project-grid.js';
 import type { Handle } from '#types/matches.types.js';

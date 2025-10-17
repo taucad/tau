@@ -39,7 +39,7 @@ function KernelDetailsContent({ kernelId }: { readonly kernelId: KernelProvider 
       <p className="text-sm leading-relaxed text-muted-foreground">{selectedOption.longDescription}</p>
 
       <div className="space-y-3">
-        <Badge variant="outline" className="text-xs font-medium text-primary">
+        <Badge variant="default" className="text-xs font-medium">
           Best for: {selectedOption.recommended}
         </Badge>
 

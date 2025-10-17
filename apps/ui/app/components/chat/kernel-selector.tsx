@@ -26,7 +26,7 @@ export function KernelSelector({
               variant="outline"
               size="sm"
               className={cn(
-                'flex h-auto flex-col items-center justify-center gap-2 rounded-lg border-border p-2 transition-all hover:border-ring/50 hover:bg-primary/5',
+                'flex h-auto flex-col items-center justify-center gap-2 rounded-lg border-border p-2 transition-all hover:border-ring/50 hover:bg-primary/20',
                 selectedKernel === option.id &&
                   'border-ring bg-primary/5 text-primary hover:border-ring hover:bg-primary/10',
               )}
@@ -55,7 +55,7 @@ export function KernelSelector({
                 <p className="text-sm leading-relaxed text-muted-foreground">{option.longDescription}</p>
 
                 <div className="space-y-2">
-                  <Badge variant="outline" className="text-xs font-medium text-primary">
+                  <Badge variant="default" className="text-xs font-medium">
                     Best for: {option.recommended}
                   </Badge>
 

@@ -400,7 +400,7 @@ const exportTestCases: ExportTestCase[] = [
   }),
 
   // STP Format - CAD format with limited capabilities and may subdivide geometry
-  createExportTestCase('stp', {
+  createExportTestCase('step', {
     expectations: {
       geometry: {
         ...standardGeometryExpectations,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toTitleCase } from '#utils/string.js';
+import { toTitleCase } from '#utils/string.utils.js';
 
 describe('toTitleCase', () => {
   describe('basic camelCase conversion', () => {

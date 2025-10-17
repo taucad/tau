@@ -161,6 +161,32 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
         temperature: 0,
       },
     },
+    'claude-3.5-haiku': {
+      id: 'anthropic-claude-3.5-haiku',
+      name: 'Claude 3.5 Haiku',
+      slug: 'claude-3.5-haiku',
+      provider: {
+        id: 'anthropic',
+        name: 'Anthropic',
+      },
+      model: 'claude-3-5-haiku-20241022',
+      details: {
+        family: 'claude',
+        families: ['Claude'],
+        contextWindow: 200_000,
+        maxTokens: 8192,
+        cost: {
+          inputTokens: 0.8,
+          outputTokens: 4,
+          cachedReadTokens: 0.08,
+          cachedWriteTokens: 1,
+        },
+      },
+      configuration: {
+        streaming: true,
+        temperature: 0,
+      },
+    },
   },
   openai: {
     'gpt-4.1': {

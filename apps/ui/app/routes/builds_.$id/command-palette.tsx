@@ -14,12 +14,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelector, useActorRef } from '@xstate/react';
 import { Link, useNavigate } from 'react-router';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
+import type { ExportFormat } from '@taucad/types';
+import { fileExtensionFromExportFormat } from '@taucad/types/constants';
 import { Button } from '#components/ui/button.js';
 import { useBuildSelector } from '#hooks/use-build.js';
 import { toast } from '#components/ui/sonner.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
-import { downloadBlob } from '#utils/file.js';
+import { downloadBlob } from '#utils/file.utils.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import { exportGeometryMachine } from '#machines/export-geometry.machine.js';
 import {
@@ -32,9 +34,7 @@ import {
 } from '#components/ui/command.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import type { KeyCombination } from '#utils/keys.js';
-import type { ExportFormat } from '#types/kernel.types.js';
-import { extensionFromFormat } from '#constants/kernel.constants.js';
+import type { KeyCombination } from '#utils/keys.utils.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { Format3D } from '#components/icons/format-3d.js';
 
@@ -108,7 +108,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
 
   const handleExport = useCallback(
     async (filename: string, format: ExportFormat) => {
-      const fileExtension = extensionFromFormat[format];
+      const fileExtension = fileExtensionFromExportFormat[format];
       const filenameWithExtension = `${filename}.${fileExtension}`;
       toast.promise(
         new Promise<Blob>((resolve, reject) => {

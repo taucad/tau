@@ -1,7 +1,7 @@
 import { useSelector } from '@xstate/react';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 export function ChatViewerStatus({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.JSX.Element {
   const state = useSelector(cadActor, (state) => state.value);

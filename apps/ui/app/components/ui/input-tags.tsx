@@ -5,7 +5,7 @@ import { Badge } from '#components/ui/badge.js';
 import type { CommandGroup } from '#components/ui/command.js';
 import { Command, CommandEmpty, CommandItem, CommandList } from '#components/ui/command.js';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { stringToColor } from '#utils/color.utils.js';
 
 type TagsContextType = {

@@ -3,7 +3,7 @@ import { FileExplorerContext } from '#routes/builds_.$id/graphics-actor.js';
 import { Tree, Folder, File } from '#components/magicui/file-tree.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
 import type { FileItem } from '#machines/file-explorer.machine.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import {
   FloatingPanelContentBody,
   FloatingPanelContentHeader,

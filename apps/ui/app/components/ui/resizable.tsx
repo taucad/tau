@@ -2,7 +2,7 @@ import { GripVertical } from 'lucide-react';
 import * as ResizablePrimitive from 'react-resizable-panels';
 import type { SetRequired } from 'type-fest';
 import { cva } from 'class-variance-authority';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 function ResizablePanelGroup({
   className,

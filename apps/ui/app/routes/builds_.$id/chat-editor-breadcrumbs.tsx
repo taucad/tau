@@ -6,7 +6,7 @@ import { CopyButton } from '#components/copy-button.js';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { toast } from '#components/ui/sonner.js';
-import { downloadBlob } from '#utils/file.js';
+import { downloadBlob } from '#utils/file.utils.js';
 import { FloatingPanelContentHeader, FloatingPanelContentTitle } from '#components/ui/floating-panel.js';
 
 export function ChatEditorBreadcrumbs(): ReactNode {

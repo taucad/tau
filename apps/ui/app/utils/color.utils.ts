@@ -1,4 +1,4 @@
-import { hashCode } from '#utils/crypto.js';
+import { hashCode } from '#utils/crypto.utils.js';
 
 /**
  * Converts a hash string to an OKLCH color using the design system

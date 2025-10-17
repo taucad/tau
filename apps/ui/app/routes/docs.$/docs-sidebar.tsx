@@ -1,5 +1,5 @@
 import type { PageTree } from 'fumadocs-core/server';
-import { useMemo, useCallback, createContext, useContext } from 'react';
+import { useMemo, useCallback, createContext, useContext, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useTreeContext } from 'fumadocs-ui/contexts/tree';
 import { useSearchContext } from 'fumadocs-ui/contexts/search';
@@ -7,11 +7,12 @@ import Link from 'fumadocs-core/link';
 import { usePathname } from 'fumadocs-core/framework';
 import { cva } from 'class-variance-authority';
 import { MenuIcon, XIcon, SearchIcon } from 'lucide-react';
-import { cn } from '#utils/ui.js';
+import { useLocation } from 'react-router';
+import { cn } from '#utils/ui.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { formatKeyCombination } from '#utils/keys.js';
+import { formatKeyCombination } from '#utils/keys.utils.js';
 import {
   FloatingPanel,
   FloatingPanelTrigger,
@@ -32,6 +33,7 @@ import {
 import { Separator } from '#components/ui/separator.js';
 import { Tau } from '#components/icons/tau.js';
 import { metaConfig } from '#config.js';
+import { useIsMobile } from '#hooks/use-mobile.js';
 
 const docsSidebarWidthIcon = 'calc(var(--spacing) * 17)';
 const docsSidebarWidth = 'calc(var(--spacing) * 72)';
@@ -71,6 +73,15 @@ export function DocsSidebarProvider({ children }: { readonly children: ReactNode
   const toggleDocsSidebar = useCallback(() => {
     setIsDocsSidebarOpen((previous) => !previous);
   }, [setIsDocsSidebarOpen]);
+
+  const isMobile = useIsMobile();
+  const location = useLocation();
+  useEffect(() => {
+    if (isMobile) {
+      // Location changes on mobile should close the sidebar
+      setIsDocsSidebarOpen(false);
+    }
+  }, [location, isMobile, setIsDocsSidebarOpen]);
 
   const value = useMemo(() => ({ isDocsSidebarOpen, toggleDocsSidebar }), [isDocsSidebarOpen, toggleDocsSidebar]);
 

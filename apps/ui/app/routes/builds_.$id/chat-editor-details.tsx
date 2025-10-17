@@ -16,8 +16,8 @@ import { Textarea } from '#components/ui/textarea.js';
 import { Tags, TagsTrigger } from '#components/ui/input-tags.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { useBuild } from '#hooks/use-build.js';
-import type { KeyCombination } from '#utils/keys.js';
-import { formatKeyCombination } from '#utils/keys.js';
+import type { KeyCombination } from '#utils/keys.utils.js';
+import { formatKeyCombination } from '#utils/keys.utils.js';
 
 const keyCombinationEditor = {
   key: 'i',

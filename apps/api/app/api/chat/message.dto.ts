@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod';
-import { kernelProviders } from '#types/kernel.types.js';
+import { kernelProviders, manufacturingMethods, tools, toolSelections } from '@taucad/types/constants';
 
 const requiredUnknownSchema = z.union([
   z.string(),
@@ -69,9 +69,12 @@ const toolInvocationPartSchema = z.object({
   toolInvocation: z.union([toolInvocationPartialCallSchema, toolInvocationCallSchema, toolInvocationResultSchema]),
 });
 
+const toolChoiceSchema = z.union([z.enum(toolSelections), z.array(z.enum(tools))]);
+
 const messageMetadataSchema = z.object({
   kernel: z.enum(kernelProviders),
-  toolChoice: z.enum(['auto', 'required', 'none']).optional(),
+  toolChoice: toolChoiceSchema.optional(),
+  manufacturingMethod: z.enum(manufacturingMethods).optional(),
 });
 
 export const uiMessageSchema = z.object({

@@ -2,7 +2,7 @@ import * as React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 

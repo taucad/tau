@@ -16,7 +16,7 @@ import { Badge } from '#components/ui/badge.js';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
 import { NavUser } from '#components/nav/nav-user.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 

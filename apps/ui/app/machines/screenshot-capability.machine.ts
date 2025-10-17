@@ -1,7 +1,7 @@
 import { setup, sendTo, fromCallback, assertEvent, enqueueActions, assign } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import * as THREE from 'three';
-import type { ScreenshotOptions, CameraAngle, CompositeScreenshotOptions } from '#types/graphics.types.js';
+import type { ScreenshotOptions, CameraAngle, CompositeScreenshotOptions } from '@taucad/types';
 
 // Context type
 type ScreenshotCapabilityContext = {

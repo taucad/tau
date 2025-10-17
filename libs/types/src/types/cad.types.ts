@@ -1,5 +1,5 @@
-import { Cog, Zap, Cpu } from 'lucide-react';
 import type { StandardSchemaV1 } from '#types/schema.types.js';
+import type { engineeringDisciplines } from '#constants/cad.constants.js';
 
 export type CodeError = {
   message: string;
@@ -27,12 +27,7 @@ export type GeometryGltf = {
 
 export type Geometry = Geometry2D | GeometryGltf;
 
-export const categories = {
-  mechanical: { icon: Cog, color: 'text-blue' },
-  electrical: { icon: Zap, color: 'text-yellow' },
-  firmware: { icon: Cpu, color: 'text-purple' },
-} as const;
-export type Category = keyof typeof categories;
+export type EngineeringDiscipline = keyof typeof engineeringDisciplines;
 
 /**
  * The main function signature that CAD modules must implement

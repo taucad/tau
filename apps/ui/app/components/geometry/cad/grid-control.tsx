@@ -17,9 +17,9 @@ import {
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu.js';
 import { Switch } from '#components/ui/switch.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { formatNumberEngineeringNotation } from '#utils/number.js';
+import { formatNumberEngineeringNotation } from '#utils/number.utils.js';
 
 type GridSizeIndicatorProps = {
   /**

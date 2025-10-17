@@ -3,9 +3,10 @@ import { Slot } from '@radix-ui/react-slot';
 import type { VariantProps } from 'class-variance-authority';
 import { cva } from 'class-variance-authority';
 import { PanelLeftIcon } from 'lucide-react';
+import { useLocation } from 'react-router';
 import { useIsMobile } from '#hooks/use-mobile.js';
 import { useKeydown } from '#hooks/use-keydown.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
 import { Separator } from '#components/ui/separator.js';
@@ -13,8 +14,8 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Skeleton } from '#components/ui/skeleton.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { formatKeyCombination } from '#utils/keys.js';
-import type { KeyCombination } from '#utils/keys.js';
+import { formatKeyCombination } from '#utils/keys.utils.js';
+import type { KeyCombination } from '#utils/keys.utils.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 
@@ -91,6 +92,14 @@ function SidebarProvider({
     stopPropagation: true,
   });
 
+  const location = useLocation();
+  React.useEffect(() => {
+    if (isMobile) {
+      // Location changes on mobile should close the sidebar
+      setOpenMobile(false);
+    }
+  }, [location, isMobile, setOpenMobile]);
+
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.
   const state = open ? 'expanded' : 'collapsed';
@@ -160,7 +169,7 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="w-(--sidebar-width) bg-sidebar p-1 text-sidebar-foreground [&>button]:hidden"
+          className="w-(--sidebar-width) bg-sidebar text-sidebar-foreground [&>button]:hidden"
           style={{
             '--sidebar-width': sidebarWidthMobile,
           }}
@@ -462,28 +471,14 @@ function SidebarMenuButton({
   tooltip,
   className,
   onClick,
-  shouldAutoClose = false,
   ...properties
 }: React.ComponentProps<'button'> & {
   readonly asChild?: boolean;
   readonly isActive?: boolean;
   readonly tooltip?: string | React.ComponentProps<typeof TooltipContent>;
-  readonly shouldAutoClose?: boolean;
 } & VariantProps<typeof sidebarMenuButtonVariants>): React.JSX.Element {
   const Comp = asChild ? Slot : 'button';
-  const { isMobile, state, toggleSidebar } = useSidebar();
-
-  // Auto-close the sidebar when clicking on a button in mobile mode.
-  const handleClick = React.useCallback(
-    (event: React.MouseEvent<HTMLButtonElement>) => {
-      if (isMobile && state === 'expanded' && !shouldAutoClose) {
-        toggleSidebar();
-      }
-
-      onClick?.(event);
-    },
-    [shouldAutoClose, isMobile, onClick, state, toggleSidebar],
-  );
+  const { isMobile, state } = useSidebar();
 
   const button = (
     <Comp
@@ -492,7 +487,7 @@ function SidebarMenuButton({
       data-size={size}
       data-active={isActive}
       className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
-      onClick={handleClick}
+      onClick={onClick}
       {...properties}
     />
   );

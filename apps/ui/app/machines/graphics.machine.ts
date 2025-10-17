@@ -1,7 +1,6 @@
 import { assign, assertEvent, setup, sendTo, emit, enqueueActions } from 'xstate';
 import type { AnyActorRef } from 'xstate';
-import type { GridSizes, ScreenshotOptions } from '#types/graphics.types.js';
-import type { Geometry } from '#types/cad.types.js';
+import type { GridSizes, ScreenshotOptions, Geometry } from '@taucad/types';
 
 // Context type definition
 export type GraphicsContext = {

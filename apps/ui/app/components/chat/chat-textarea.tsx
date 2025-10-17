@@ -1,20 +1,21 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
-import { ArrowUp, X, Square, CircuitBoard, ChevronDown, Paperclip } from 'lucide-react';
+import { ArrowUp, X, Square, CircuitBoard, ChevronDown, Paperclip, Wrench } from 'lucide-react';
 import type { Attachment } from 'ai';
 import type { ClassValue } from 'clsx';
+import type { MessagePart, ToolWithSelection } from '@taucad/types';
 import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
+import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
 import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { Button } from '#components/ui/button.js';
 import { Textarea } from '#components/ui/textarea.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { useModels } from '#hooks/use-models.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { formatKeyCombination } from '#utils/keys.js';
-import type { KeyCombination } from '#utils/keys.js';
+import { formatKeyCombination } from '#utils/keys.utils.js';
+import type { KeyCombination } from '#utils/keys.utils.js';
 import { toast } from '#components/ui/sonner.js';
-import { cn } from '#utils/ui.js';
-import type { MessagePart } from '#types/chat.types.js';
+import { cn } from '#utils/ui.utils.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { ChatContextActions } from '#components/chat/chat-context-actions.js';
 
@@ -37,7 +38,7 @@ export type ChatTextareaProperties = {
   }: {
     content: string;
     model: string;
-    metadata?: { toolChoice?: 'web_search' | 'none' | 'auto' | 'any' };
+    metadata?: { toolChoice?: ToolWithSelection };
     imageUrls?: string[];
   }) => Promise<void>;
   readonly onEscapePressed?: () => void;
@@ -97,6 +98,7 @@ export const ChatTextarea = memo(function ({
   const [atSymbolPosition, setAtSymbolPosition] = useState<number>(-1);
   const [contextSearchQuery, setContextSearchQuery] = useState<string>('');
   const [selectedMenuIndex, setSelectedMenuIndex] = useState<number>(0);
+  const [selectedToolChoice, setSelectedToolChoice] = useState<ToolWithSelection>('auto');
   const fileInputReference = useRef<HTMLInputElement>(null);
   const textareaReference = useRef<HTMLTextAreaElement>(null);
   const { selectedModel } = useModels();
@@ -116,7 +118,7 @@ export const ChatTextarea = memo(function ({
       content: inputText,
       model: selectedModel?.id ?? '',
       metadata: {
-        toolChoice: 'auto',
+        toolChoice: selectedToolChoice,
       },
       imageUrls: images,
     });
@@ -594,15 +596,16 @@ export const ChatTextarea = memo(function ({
             onSelect={focusInput}
             onClose={focusInput}
           >
-            {() => (
+            {(_props) => (
               <TooltipTrigger asChild>
                 <Button
+                  asChild
                   variant="outline"
                   size="sm"
-                  className="h-7 rounded-full text-muted-foreground hover:text-foreground"
+                  className="h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground"
                 >
                   <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full @xs:max-w-fit">
-                    <span className="hidden truncate text-xs @[22rem]:block">{selectedModel?.slug ?? 'Offline'}</span>
+                    <span className="hidden truncate text-xs @[16rem]:block">{selectedModel?.slug ?? 'Offline'}</span>
                     <span className="relative flex size-4 items-center justify-center">
                       <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100" />
                       <CircuitBoard className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0" />
@@ -618,30 +621,32 @@ export const ChatTextarea = memo(function ({
           </TooltipContent>
         </Tooltip>
 
-        {/* Search button */}
-        {/* <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              data-state={isSearching ? 'active' : 'inactive'}
-              variant="outline"
-              className="group rounded-full transition-transform duration-200 ease-in-out data-[state=active]:bg-neutral/20 data-[state=active]:text-primary data-[state=active]:shadow"
-              onMouseDown={(event) => {
-                // Prevent the button from being focused
-                event.stopPropagation();
-                event.preventDefault();
-              }}
-              onClick={() => {
-                setIsSearching((previous) => !previous);
-              }}
-            >
-              <span className="hidden text-xs @[22rem]:block">Search</span>
-              <Globe className="transition-transform duration-200 ease-in-out group-hover:rotate-180" />
-            </Button>
-          </TooltipTrigger>
+        {/* Tool selector */}
+        <Tooltip>
+          <ChatToolSelector value={selectedToolChoice} onValueChange={setSelectedToolChoice}>
+            {({ selectedMode }) => (
+              <TooltipTrigger asChild>
+                <Button
+                  data-chat-textarea-focustrap
+                  variant="outline"
+                  size="sm"
+                  className="h-7 rounded-full text-muted-foreground hover:text-foreground"
+                >
+                  <span className="hidden text-xs @[22rem]:block">
+                    {selectedMode === 'auto' && 'Auto'}
+                    {selectedMode === 'none' && 'No tools'}
+                    {selectedMode === 'any' && 'Any tool'}
+                    {selectedMode === 'custom' && 'Custom'}
+                  </span>
+                  <Wrench className="size-4" />
+                </Button>
+              </TooltipTrigger>
+            )}
+          </ChatToolSelector>
           <TooltipContent>
-            <p>{isSearching ? 'Stop searching' : 'Search the web'}</p>
+            <p>Tool selection</p>
           </TooltipContent>
-        </Tooltip> */}
+        </Tooltip>
 
         <input
           ref={fileInputReference}
@@ -660,7 +665,7 @@ export const ChatTextarea = memo(function ({
             <Button
               variant="outline"
               size="icon"
-              className="rounded-full text-muted-foreground hover:text-foreground"
+              className="size-7 rounded-full text-muted-foreground hover:text-foreground"
               title="Add image"
               onClick={handleFileSelect}
             >
@@ -676,7 +681,7 @@ export const ChatTextarea = memo(function ({
         {status === 'streaming' ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="icon" className="rounded-full" onClick={handleCancelClick}>
+              <Button size="icon" className="size-7 rounded-full" onClick={handleCancelClick}>
                 <Square className="size-4 fill-primary-foreground" />
               </Button>
             </TooltipTrigger>
@@ -687,7 +692,12 @@ export const ChatTextarea = memo(function ({
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="icon" className="rounded-full" disabled={inputText.length === 0} onClick={handleSubmit}>
+              <Button
+                size="icon"
+                className="size-7 rounded-full"
+                disabled={inputText.length === 0}
+                onClick={handleSubmit}
+              >
                 <ArrowUp className="size-5" />
               </Button>
             </TooltipTrigger>

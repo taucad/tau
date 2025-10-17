@@ -1,7 +1,7 @@
 import { ArrowLeft, Home, Search, MapPin } from 'lucide-react';
 import { useNavigate, Link } from 'react-router';
 import { Button, buttonVariants } from '#components/ui/button.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 export default function NotFoundPage(): React.JSX.Element {
   const navigate = useNavigate();

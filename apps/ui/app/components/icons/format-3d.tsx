@@ -1,5 +1,5 @@
-import { cn } from '#utils/ui.js';
-import type { ExportFormat } from '#types/kernel.types.js';
+import type { ExportFormat } from '@taucad/types';
+import { cn } from '#utils/ui.utils.js';
 import { stringToColor } from '#utils/color.utils.js';
 
 export function Format3D(properties: React.SVGProps<SVGSVGElement> & { extension: ExportFormat }): React.JSX.Element {

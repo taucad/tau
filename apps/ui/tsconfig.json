@@ -7,6 +7,9 @@
       "path": "../../packages/converter"
     },
     {
+      "path": "../../libs/types"
+    },
+    {
       "path": "../../libs/api-extractor"
     },
     {

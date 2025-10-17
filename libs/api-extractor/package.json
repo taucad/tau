@@ -5,10 +5,13 @@
   "type": "module",
   "private": true,
   "exports": {
-    ".": "./src/index.ts",
-    "replicad": "./src/replicad/index.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
   },
   "imports": {
-    "#*": ["./src/*"]
+    "#*": "./src/*"
   }
 }

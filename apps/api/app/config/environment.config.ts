@@ -44,6 +44,8 @@ const environmentSchema = z.object({
   AUTH_URL: z.string(),
   GITHUB_CLIENT_ID: z.string(),
   GITHUB_CLIENT_SECRET: z.string(),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
   /* eslint-enable @typescript-eslint/naming-convention -- renabling */
 });
 

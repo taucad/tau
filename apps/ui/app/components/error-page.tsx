@@ -1,7 +1,7 @@
 import { ArrowLeft, AlertCircle, Code } from 'lucide-react';
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
 import { Button, buttonVariants } from '#components/ui/button.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { CopyButton } from '#components/copy-button.js';
 
 export function ErrorPage(): React.JSX.Element {

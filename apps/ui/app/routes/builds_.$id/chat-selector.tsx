@@ -3,20 +3,20 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
+import type { Chat } from '@taucad/types';
 import { Button } from '#components/ui/button.js';
 import { useBuild } from '#hooks/use-build.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { cn } from '#utils/ui.js';
-import { useChatConstants } from '#utils/chat.js';
-import type { Chat } from '#types/build.types.js';
+import { cn } from '#utils/ui.utils.js';
+import { useChatConstants } from '#utils/chat.utils.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { formatRelativeTime } from '#utils/date.js';
+import { formatRelativeTime } from '#utils/date.utils.js';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '#components/ui/dialog.js';
 import { Input } from '#components/ui/input.js';
-import { groupItemsByTimeHorizon } from '#utils/temporal.js';
+import { groupItemsByTimeHorizon } from '#utils/temporal.utils.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { useKeydown } from '#hooks/use-keydown.js';
-import type { KeyCombination } from '#utils/keys.js';
+import type { KeyCombination } from '#utils/keys.utils.js';
 
 const newChatKeyCombination = {
   key: 'c',

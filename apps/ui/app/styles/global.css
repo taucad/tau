@@ -26,7 +26,7 @@
 
   /* Base color hues */
   --hue-primary: 266deg;
-  --hue-secondary: calc(var(--hue-primary) - 86deg); /* Results in ~180deg - true teal */
+  --hue-secondary: calc(var(--hue-primary) - 10deg);
   --hue-neutral: calc(var(--hue-primary) - 10deg);
   --hue-destructive: 15deg;
   --hue-success: 150deg;
@@ -37,6 +37,7 @@
   --hue-stable: 185deg;
   --hue-alert: 90deg;
   --hue-verified: 210deg;
+  --hue-highlighter: calc(var(--hue-primary) - 86deg); /* Results in ~180deg - true teal */
 
   /* Lightness levels - will be flipped in dark mode */
   --l-base: 1.00;
@@ -62,7 +63,10 @@
   --c-primary: 0.1898;
 
   --l-secondary: 0.9;
-  --c-secondary: 0.12;
+  --c-secondary: 0.01;
+
+  --l-highlighter: 0.9;
+  --c-highlighter: 0.12;
 
   /* Base colors */
   --background: oklch(var(--l-base) 0.005 var(--hue-neutral));
@@ -124,7 +128,7 @@
   --scrollbar-padding: 1.5px;
 
   /* Highlighter specific */
-  --highlighter: oklch(var(--l-secondary) var(--c-secondary) var(--hue-secondary) / 0.5);
+  --highlighter: oklch(var(--l-highlighter) var(--c-highlighter) var(--hue-highlighter) / 0.5);
   --highlighter-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral) / 0.7);
 }
 
@@ -140,12 +144,13 @@
   --l-high: 0.78;
   --l-intense: 0.88;
   --l-deepest: 0.95;
-  --l-secondary: 0.7;
+  --l-secondary: 0.8;
+  --l-highlighter: 0.8;
 
   --primary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
   --secondary-foreground: oklch(var(--l-base) 0.01 var(--hue-neutral));
 
-  --highlighter: oklch(var(--l-secondary) var(--c-secondary) var(--hue-secondary) / 0.5);
+  --highlighter: oklch(var(--l-highlighter) var(--c-highlighter) var(--hue-highlighter) / 0.5);
   --highlighter-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral) / 0.85);
 }
 
@@ -389,6 +394,13 @@
     @apply font-sans bg-background text-foreground antialiased scroll-smooth;
     overflow: hidden;
   }
+
+  button,
+  [role="button"] {
+    @apply active:scale-95 md:active:scale-98 transition-transform;
+    @apply select-none transition-[transform];
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
 /* FONTS */
@@ -447,3 +459,34 @@
 }
 
 /* END SCROLLBAR STYLES */
+
+/* START SCROLL SHADOWS */
+/* 
+ * Pure CSS scrolling shadows using gradients and background-attachment.
+ * Inspired by: https://lea.verou.me/2012/04/background-attachment-local/
+ */
+@utility scroll-shadows-x {
+  --scroll-shadows-gradient-color: rgba(0, 0, 0, 0.15);
+  
+  &:is(.dark *) {
+    --scroll-shadows-gradient-color: rgba(0, 0, 0, 0.6);
+  }
+
+  overflow: auto;
+  background:
+    /* Shadow covers - these stay fixed and hide shadows at edges */
+    linear-gradient(90deg, var(--muted) 30%, transparent),
+    linear-gradient(90deg, transparent, var(--muted) 70%) 0 100%,
+    
+    /* Shadows - these scroll with content (using linear for cleaner, more gradual effect) */
+    linear-gradient(90deg, var(--scroll-shadows-gradient-color), transparent),
+    linear-gradient(270deg, var(--scroll-shadows-gradient-color), transparent) 0 100%;
+  
+  background-repeat: no-repeat;
+  background-color: var(--sidebar-background);
+  background-position: top left, top right, top left, top right;
+  background-size: 40px 100%, 40px 100%, 20px 100%, 20px 100%;
+  /* Covers scroll with content, shadows stay fixed */
+  background-attachment: local, local, scroll, scroll;
+}
+/* END SCROLL SHADOWS */

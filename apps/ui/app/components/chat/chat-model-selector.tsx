@@ -1,10 +1,10 @@
 import { memo, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { Check } from 'lucide-react';
+import type { Model } from '@taucad/types';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Badge } from '#components/ui/badge.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import type { Model } from '#types/model.types.js';
 import { useModels } from '#hooks/use-models.js';
 
 type ChatModelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'onSelect'> & {
@@ -54,10 +54,10 @@ export const ChatModelSelector = memo(function ({
         items: models,
       }))}
       renderLabel={(item, selectedItem) => (
-        <span className="flex w-full items-center justify-between text-xs">
+        <span className="flex w-full items-center justify-between">
           <div className="flex items-center gap-2">
             <SvgIcon id={item.details.family} />
-            <span className="font-mono">{item.slug}</span>
+            <span>{item.slug}</span>
           </div>
           <div className="flex items-center gap-2">
             {item.details.parameterSize ? (

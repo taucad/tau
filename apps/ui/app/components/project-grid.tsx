@@ -1,29 +1,20 @@
-import type { ComponentType } from 'react';
 import { Star, Eye, ArrowRight } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useActor, useSelector } from '@xstate/react';
+import type { Build } from '@taucad/types';
+import { idPrefix } from '@taucad/types/constants';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
 import { Avatar, AvatarFallback, AvatarImage } from '#components/ui/avatar.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '#components/ui/card.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import type { Build } from '#types/build.types.js';
-import type { KernelProvider } from '#types/kernel.types';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
 import { storage } from '#db/storage.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
-import { idPrefix } from '#constants/id.constants.js';
-import { generatePrefixedId } from '#utils/id.js';
-
-// Placeholder for language icons
-const kernelIcons: Record<KernelProvider, ComponentType<{ className?: string }>> = {
-  replicad: ({ className }) => <SvgIcon id="replicad" className={className} />,
-  openscad: ({ className }) => <SvgIcon id="openscad" className={className} />,
-  zoo: ({ className }) => <SvgIcon id="zoo" className={className} />,
-};
+import { generatePrefixedId } from '#utils/id.utils.js';
 
 type CommunityBuildCardProperties = Build;
 
@@ -53,17 +44,7 @@ export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBui
   );
 }
 
-function ProjectCard({
-  id,
-  name,
-  description,
-  thumbnail,
-  stars,
-  chats,
-  author,
-  tags,
-  assets,
-}: CommunityBuildCardProperties) {
+function ProjectCard({ id, name, description, thumbnail, stars, author, tags, assets }: CommunityBuildCardProperties) {
   const [showPreview, setShowPreview] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const [isForking, setIsForking] = useState(false);
@@ -76,17 +57,7 @@ function ProjectCard({
 
   const navigate = useNavigate();
 
-  // Memoize the KernelIcon computation to prevent re-creation on every render
-  const KernelIcon = useMemo(
-    () =>
-      Object.values(assets)
-        .map((asset) => asset.language)
-        .map((kernel) => ({
-          Icon: kernelIcons[kernel],
-          language: kernel,
-        })),
-    [assets],
-  );
+  const kernels = useMemo(() => Object.values(assets).map((asset) => asset.language), [assets]);
 
   // Set up visibility observer
   useEffect(() => {
@@ -176,7 +147,7 @@ function ProjectCard({
       // TODO: Show error toast/notification to user
       setIsForking(false);
     }
-  }, [name, description, thumbnail, author, tags, assets, id, chats, navigate, isForking]);
+  }, [name, description, thumbnail, author, tags, assets, id, navigate, isForking]);
 
   const handlePreviewToggle = useCallback(
     (event: React.MouseEvent) => {
@@ -224,16 +195,16 @@ function ProjectCard({
         <div className="flex items-center justify-between">
           <CardTitle>{name}</CardTitle>
           <div className="flex flex-wrap gap-1">
-            {KernelIcon.map(({ language, Icon }) => (
-              <Tooltip key={language}>
+            {kernels.map((kernel) => (
+              <Tooltip key={kernel}>
                 <TooltipTrigger>
                   <Avatar className="h-5 w-5">
                     <AvatarFallback>
-                      <Icon className="size-3" />
+                      <SvgIcon id={kernel} className="size-3" />
                     </AvatarFallback>
                   </Avatar>
                 </TooltipTrigger>
-                <TooltipContent>{language}</TooltipContent>
+                <TooltipContent>{kernel}</TooltipContent>
               </Tooltip>
             ))}
           </div>

@@ -2,7 +2,7 @@ import { Pipette } from 'lucide-react';
 import { ColorPicker } from '#components/ui/color-picker.js';
 import { Button } from '#components/ui/button.js';
 import { SidebarMenuButton } from '#components/ui/sidebar.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { useColor } from '#hooks/use-color.js';
 
 export function ColorToggle(): React.JSX.Element {

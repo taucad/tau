@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Eye, LoaderCircle, ChevronDown, Camera } from 'lucide-react';
 import type { ToolResult } from 'ai';
 import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
 import { useChatSelector } from '#components/chat/ai-chat-provider.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';

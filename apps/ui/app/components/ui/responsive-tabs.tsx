@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import { Link } from 'react-router';
-import { useMemo } from 'react';
-import { cn } from '#utils/ui.js';
+import { useEffect, useMemo, useRef } from 'react';
+import { cn } from '#utils/ui.utils.js';
 import { Tabs, TabsList, TabsTrigger, TabsContents } from '#components/ui/tabs.js';
 
 export type ResponsiveTabItem = {
@@ -23,15 +23,35 @@ type ResponsiveTabsProps = {
  * - Desktop: vertical orientation with flex-row layout (tabs on left, content on right)
  *
  * Uses pure CSS via Tailwind responsive utilities (no JS media queries)
+ * Automatically scrolls active tab into view on mobile
  */
 export function ResponsiveTabs({ tabs, activeTab, children, className }: ResponsiveTabsProps): React.JSX.Element {
-  const renderTabs = () => {
+  const tabsListRef = useRef<HTMLDivElement>(null);
+
+  // Scroll active tab into view when activeTab changes
+  useEffect(() => {
+    if (tabsListRef.current) {
+      const activeTabElement = tabsListRef.current.querySelector(`[data-state="active"]`);
+      activeTabElement?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'center',
+      });
+    }
+  }, [activeTab]);
+
+  const tabsList = useMemo(() => {
     return (
       <>
         <TabsList
+          ref={tabsListRef}
           className={cn(
-            // Mobile: horizontal scrollable tabs
-            'w-full overflow-x-auto',
+            // Mobile: horizontal scrollable tabs with scroll shadows
+            'max-md:w-full max-md:justify-start max-md:scroll-shadows-x',
+            'max-md:[scrollbar-width:none]',
+            // Enable smooth scrolling with consistent speed
+            'max-md:scroll-smooth',
+            // Desktop: remove scroll shadows and set width
             'md:mt-14 md:w-fit',
           )}
         >
@@ -50,7 +70,7 @@ export function ResponsiveTabs({ tabs, activeTab, children, className }: Respons
               )}
             >
               <Link to={tab.href}>
-                <tab.icon className="hidden md:block" />
+                <tab.icon />
                 {tab.label}
               </Link>
             </TabsTrigger>
@@ -59,13 +79,11 @@ export function ResponsiveTabs({ tabs, activeTab, children, className }: Respons
 
         <div className="flex flex-1 flex-col gap-6">
           <h2 className="hidden text-2xl font-bold md:block">{activeTab}</h2>
-          <TabsContents className={cn('h-full! w-full flex-1 overflow-y-auto')}>{children}</TabsContents>
+          <TabsContents className={cn('h-full! w-full')}>{children}</TabsContents>
         </div>
       </>
     );
-  };
-
-  const tabsList = useMemo(() => renderTabs(), [tabs, activeTab]);
+  }, [tabs, activeTab, children]);
 
   return (
     <>
@@ -75,7 +93,7 @@ export function ResponsiveTabs({ tabs, activeTab, children, className }: Respons
       </Tabs>
 
       {/* Mobile */}
-      <Tabs orientation="horizontal" value={activeTab} className={cn('flex md:hidden', className)}>
+      <Tabs orientation="horizontal" value={activeTab} className={cn('w-full md:hidden', className)}>
         {tabsList}
       </Tabs>
     </>

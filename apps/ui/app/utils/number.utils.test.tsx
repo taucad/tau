@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatNumberEngineeringNotation } from '#utils/number.js';
+import { formatNumberEngineeringNotation } from '#utils/number.utils.js';
 
 describe('formatNumberEngineeringNotation', () => {
   describe('edge cases', () => {

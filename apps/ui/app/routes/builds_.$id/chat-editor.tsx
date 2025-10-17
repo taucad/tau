@@ -2,17 +2,16 @@ import { memo, useCallback, useEffect, useRef } from 'react';
 import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
+import type { Build, KernelProvider } from '@taucad/types';
 import { FileExplorerContext } from '#routes/builds_.$id/graphics-actor.js';
 import { CodeEditor } from '#components/code/code-editor.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { registerMonaco } from '#routes/builds_.$id/chat-editor-config.js';
 import { ChatEditorBreadcrumbs } from '#routes/builds_.$id/chat-editor-breadcrumbs.js';
 import { useBuild } from '#hooks/use-build.js';
-import type { Build } from '#types/build.types.js';
 import type { FileItem } from '#machines/file-explorer.machine.js';
-import type { KernelProvider } from '#types/kernel.types.js';
 
 const languageFromKernel = {
   replicad: 'typescript',

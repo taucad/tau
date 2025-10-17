@@ -1,9 +1,9 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { Message } from '@ai-sdk/react';
-import type { Build, Chat, File } from '#types/build.types.js';
+import type { Build, Chat, File } from '@taucad/types';
+import { idPrefix } from '@taucad/types/constants';
 import { storage } from '#db/storage.js';
-import { generatePrefixedId } from '#utils/id.js';
-import { idPrefix } from '#constants/id.constants.js';
+import { generatePrefixedId } from '#utils/id.utils.js';
 
 /**
  * Creates a shared set of build mutations that can be used by both useBuild and useBuilds hooks

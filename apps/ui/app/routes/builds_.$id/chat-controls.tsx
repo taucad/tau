@@ -1,6 +1,8 @@
 import { Clipboard, Download, GalleryThumbnails, ImageDown, Menu } from 'lucide-react';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useSelector, useActorRef } from '@xstate/react';
+import type { ExportFormat } from '@taucad/types';
+import { fileExtensionFromExportFormat } from '@taucad/types/constants';
 import { BoxDown } from '#components/icons/box-down.js';
 import { Button } from '#components/ui/button.js';
 import { useBuildSelector } from '#hooks/use-build.js';
@@ -9,11 +11,9 @@ import { toast } from '#components/ui/sonner.js';
 import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { downloadBlob } from '#utils/file.js';
+import { downloadBlob } from '#utils/file.utils.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import { exportGeometryMachine } from '#machines/export-geometry.machine.js';
-import type { ExportFormat } from '#types/kernel.types.js';
-import { extensionFromFormat } from '#constants/kernel.constants.js';
 
 type ViewerControlItem = {
   id: string;
@@ -74,7 +74,7 @@ export function ChatControls(): React.JSX.Element {
 
   const handleExport = useCallback(
     async (filename: string, format: ExportFormat) => {
-      const fileExtension = extensionFromFormat[format];
+      const fileExtension = fileExtensionFromExportFormat[format];
       const filenameWithExtension = `${filename}.${fileExtension}`;
       toast.promise(
         new Promise<Blob>((resolve, reject) => {

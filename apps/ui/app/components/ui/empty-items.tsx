@@ -1,6 +1,6 @@
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 export const emptyItemVariants = cva(
   'flex flex-col h-full items-center justify-center m-2 border border-dashed text-muted-foreground rounded-xs py-4 px-2 text-center text-sm',

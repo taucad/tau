@@ -29,6 +29,13 @@
         }
       }
     },
+    "auth-schema-generate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npx @better-auth/cli generate --config app/config/auth.ts --output app/database/auth-schema.ts --yes",
+        "cwd": "apps/api"
+      }
+    },
     "launch": {
       "executor": "nx:run-commands",
       "options": {

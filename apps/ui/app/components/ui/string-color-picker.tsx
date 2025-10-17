@@ -6,7 +6,7 @@ import { Check, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
 import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 type StringColorPickerProperties = {
   readonly value: string;

@@ -2,7 +2,7 @@ import { Edit, History, MoreHorizontal, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router';
-import type { Build } from '#types/build.types.js';
+import type { Build } from '@taucad/types';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,7 +21,7 @@ import {
 } from '#components/ui/sidebar.js';
 import { useBuilds } from '#hooks/use-builds.js';
 import { toast } from '#components/ui/sonner.js';
-import { groupItemsByTimeHorizon } from '#utils/temporal.js';
+import { groupItemsByTimeHorizon } from '#utils/temporal.utils.js';
 import { SearchInput } from '#components/search-input.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
@@ -181,7 +181,7 @@ export function NavHistory(): ReactNode {
         <SidebarGroup className="-mt-3.5 group-data-[collapsible=icon]:hidden">
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton shouldAutoClose className="text-sidebar-foreground/70" onClick={handleLoadMore}>
+              <SidebarMenuButton className="text-sidebar-foreground/70" onClick={handleLoadMore}>
                 <MoreHorizontal className="size-4" />
                 <span>Load More</span>
               </SidebarMenuButton>

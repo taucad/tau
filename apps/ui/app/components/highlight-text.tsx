@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 type HighlightTextProperties = {
   readonly text: string;

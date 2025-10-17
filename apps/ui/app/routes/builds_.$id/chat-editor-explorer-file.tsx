@@ -1,5 +1,5 @@
 import { File } from '#components/magicui/file-tree.js';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 type ExplorerFileProps = {
   readonly id: string;

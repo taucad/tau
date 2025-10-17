@@ -1,13 +1,14 @@
 import { Link, NavLink, useNavigate } from 'react-router';
 import { useCallback } from 'react';
+import { messageRole, messageStatus, idPrefix } from '@taucad/types/constants';
+import type { KernelProvider } from '@taucad/types';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { KernelSelector } from '#components/chat/kernel-selector.js';
 import { Button } from '#components/ui/button.js';
 import { storage } from '#db/storage.js';
-import { messageRole, messageStatus } from '#types/chat.types.js';
-import { createMessage } from '#utils/chat.js';
-import { getMainFile, getEmptyCode } from '#constants/kernel.constants.js';
+import { createMessage } from '#utils/chat.utils.js';
+import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { CommunityBuildGrid } from '#components/project-grid.js';
 import { sampleBuilds } from '#constants/build-examples.js';
 import { defaultBuildName } from '#constants/build-names.js';
@@ -15,9 +16,7 @@ import { AiChatProvider } from '#components/chat/ai-chat-provider.js';
 import { Separator } from '#components/ui/separator.js';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { toast } from '#components/ui/sonner.js';
-import { generatePrefixedId } from '#utils/id.js';
-import { idPrefix } from '#constants/id.constants.js';
-import type { KernelProvider } from '#types/kernel.types.js';
+import { generatePrefixedId } from '#utils/id.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
@@ -92,7 +91,9 @@ export default function ChatStart(): React.JSX.Element {
     <>
       <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 pb-12 md:space-y-8 md:px-6 md:pt-32">
         <div className="mb-12 text-center">
-          <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">What can I help you build?</h1>
+          <h1 className="mx-auto max-w-[16ch] text-3xl font-semibold tracking-tight text-balance md:max-w-[20ch] md:text-5xl">
+            What can I help you build?
+          </h1>
         </div>
 
         <AiChatProvider value={{}}>

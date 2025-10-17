@@ -18,9 +18,9 @@ import { useKeydown } from '#hooks/use-keydown.js';
 import { ChatEditorFileTree } from '#routes/builds_.$id/chat-editor-file-tree.js';
 import { ChatEditor } from '#routes/builds_.$id/chat-editor.js';
 import { ChatConsole, collapsedConsoleSize } from '#routes/builds_.$id/chat-console.js';
-import type { KeyCombination } from '#utils/keys.js';
-import { formatKeyCombination } from '#utils/keys.js';
-import { cn } from '#utils/ui.js';
+import type { KeyCombination } from '#utils/keys.utils.js';
+import { formatKeyCombination } from '#utils/keys.utils.js';
+import { cn } from '#utils/ui.utils.js';
 
 const keyCombinationFileExplorer = {
   key: 's',

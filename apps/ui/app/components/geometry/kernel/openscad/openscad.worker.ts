@@ -3,25 +3,25 @@ import { createOpenSCAD } from 'openscad-wasm-prebuilt';
 import type { OpenSCAD } from 'openscad-wasm-prebuilt';
 import { jsonDefault } from 'json-schema-default';
 import type { JSONSchema7 } from 'json-schema';
-import {
-  processOpenScadParameters,
-  flattenParametersForInjection,
-} from '#components/geometry/kernel/openscad/parse-parameters.js';
-import type { OpenScadParameterExport } from '#components/geometry/kernel/openscad/parse-parameters.js';
 import type {
   ComputeGeometryResult,
   ExportGeometryResult,
   ExtractParametersResult,
   ExportFormat,
-} from '#types/kernel.types.js';
-import { createKernelError, createKernelSuccess } from '#types/kernel.types.js';
-import type { GeometryGltf } from '#types/cad.types.js';
+  GeometryGltf,
+} from '@taucad/types';
+import type { OpenScadParameterExport } from '#components/geometry/kernel/openscad/parse-parameters.js';
+import {
+  processOpenScadParameters,
+  flattenParametersForInjection,
+} from '#components/geometry/kernel/openscad/parse-parameters.js';
 import { convertOffToGltf } from '#components/geometry/kernel/utils/off-to-gltf.js';
 import { convertOffToStl } from '#components/geometry/kernel/utils/off-to-stl.js';
 import { convertOffTo3mf } from '#components/geometry/kernel/utils/off-to-3mf.js';
 import { logLevels } from '#types/console.types.js';
 import type { LogLevel } from '#types/console.types.js';
 import { KernelWorker } from '#components/geometry/kernel/utils/kernel-worker.js';
+import { createKernelError, createKernelSuccess } from '#components/geometry/kernel/utils/kernel-helpers.js';
 
 class OpenScadWorker extends KernelWorker {
   protected static override readonly supportedExportFormats: ExportFormat[] = [

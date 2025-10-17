@@ -7,7 +7,7 @@ import { ComingSoon } from '#components/ui/coming-soon.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { Button } from '#components/ui/button.js';
-import { extractDomainFromUrl, createFaviconUrl } from '#utils/url.js';
+import { extractDomainFromUrl, createFaviconUrl } from '#utils/url.utils.js';
 
 // Const SOURCE_TOOLS = [
 //   { icon: Globe2, key: 'web' },

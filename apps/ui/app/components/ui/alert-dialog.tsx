@@ -1,6 +1,6 @@
 import * as React from 'react';
 import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 import { buttonVariants } from '#components/ui/button.js';
 
 function AlertDialog({ ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Root>): React.JSX.Element {

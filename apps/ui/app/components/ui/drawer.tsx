@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Drawer as DrawerPrimitive } from 'vaul';
-import { cn } from '#utils/ui.js';
+import { cn } from '#utils/ui.utils.js';
 
 function Drawer({ ...properties }: React.ComponentProps<typeof DrawerPrimitive.Root>): React.JSX.Element {
   return <DrawerPrimitive.Root data-slot="drawer" {...properties} />;

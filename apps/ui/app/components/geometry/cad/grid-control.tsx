@@ -9,14 +9,13 @@ import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSwitchItem,
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu.js';
-import { Switch } from '#components/ui/switch.js';
 import { cn } from '#utils/ui.utils.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { formatNumberEngineeringNotation } from '#utils/number.utils.js';
@@ -162,24 +161,17 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Grid</DropdownMenuLabel>
-        <DropdownMenuItem
+        <DropdownMenuSwitchItem
           className="flex w-full justify-between"
-          onClick={() => {
-            handleLockToggle(!isGridSizeLocked);
-          }}
-          onSelect={preventClose}
+          isChecked={isGridSizeLocked}
+          onIsCheckedChange={handleLockToggle}
         >
           <span data-locked={isGridSizeLocked} className="group flex items-center gap-2">
             <Lock className="hidden size-4 group-data-[locked=true]:block" />
             <LockOpen className="block size-4 group-data-[locked=true]:hidden" />
             Lock Grid Size ({localizedSmallGridSize} {unit})
           </span>
-          <Switch
-            className="data-[state=unchecked]:bg-muted-foreground!"
-            checked={isGridSizeLocked}
-            onCheckedChange={handleLockToggle}
-          />
-        </DropdownMenuItem>
+        </DropdownMenuSwitchItem>
         <span className="p-2 text-xs font-medium text-muted-foreground/80">
           Tip: Adjust grid size by changing zoom level
         </span>

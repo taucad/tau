@@ -7,12 +7,11 @@ import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSwitchItem,
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu.js';
-import { Switch } from '#components/ui/switch.js';
 import { cn } from '#utils/ui.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
@@ -118,10 +117,6 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
     [setViewSettings],
   );
 
-  const preventClose = useCallback((event: Event) => {
-    event.preventDefault();
-  }, []);
-
   return (
     <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
       <Tooltip>
@@ -147,38 +142,30 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
         }}
       >
         <DropdownMenuLabel>Model</DropdownMenuLabel>
-        <DropdownMenuItem
+        <DropdownMenuSwitchItem
           className="flex w-full justify-between"
-          onClick={() => {
-            handleMeshToggle(!viewSettings.surface);
-          }}
-          onSelect={preventClose}
+          isChecked={viewSettings.surface}
+          onIsCheckedChange={handleMeshToggle}
         >
           <span className="flex items-center gap-2">
             <Box />
             Surfaces
           </span>
-          <Switch variant="dropdown" checked={viewSettings.surface} onCheckedChange={handleMeshToggle} />
-        </DropdownMenuItem>
-        <DropdownMenuItem
+        </DropdownMenuSwitchItem>
+        <DropdownMenuSwitchItem
           className="flex w-full justify-between"
-          onClick={() => {
-            handleLinesToggle(!viewSettings.lines);
-          }}
-          onSelect={preventClose}
+          isChecked={viewSettings.lines}
+          onIsCheckedChange={handleLinesToggle}
         >
           <span className="flex items-center gap-2">
             <PenLine />
             Lines
           </span>
-          <Switch variant="dropdown" checked={viewSettings.lines} onCheckedChange={handleLinesToggle} />
-        </DropdownMenuItem>
-        <DropdownMenuItem
+        </DropdownMenuSwitchItem>
+        <DropdownMenuSwitchItem
           className="flex h-10 w-full justify-between"
-          onClick={() => {
-            handleMatcapToggle(!viewSettings.matcap);
-          }}
-          onSelect={preventClose}
+          isChecked={viewSettings.matcap}
+          onIsCheckedChange={handleMatcapToggle}
         >
           <span className="flex items-center gap-2">
             <Sparkles />
@@ -195,49 +182,39 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
               </span>
             </div>
           </span>
-          <Switch variant="dropdown" checked={viewSettings.matcap} onCheckedChange={handleMatcapToggle} />
-        </DropdownMenuItem>
+        </DropdownMenuSwitchItem>
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Viewport</DropdownMenuLabel>
-        <DropdownMenuItem
+        <DropdownMenuSwitchItem
           className="flex w-full justify-between"
-          onClick={() => {
-            handleGizmoToggle(!viewSettings.gizmo);
-          }}
-          onSelect={preventClose}
+          isChecked={viewSettings.gizmo}
+          onIsCheckedChange={handleGizmoToggle}
         >
           <span className="flex items-center gap-2">
             <Rotate3D />
             Gizmo
           </span>
-          <Switch variant="dropdown" checked={viewSettings.gizmo} onCheckedChange={handleGizmoToggle} />
-        </DropdownMenuItem>
-        <DropdownMenuItem
+        </DropdownMenuSwitchItem>
+        <DropdownMenuSwitchItem
           className="flex w-full justify-between"
-          onClick={() => {
-            handleGridToggle(!viewSettings.grid);
-          }}
-          onSelect={preventClose}
+          isChecked={viewSettings.grid}
+          onIsCheckedChange={handleGridToggle}
         >
           <span className="flex items-center gap-2">
             <Grid3X3 />
             Grid
           </span>
-          <Switch variant="dropdown" checked={viewSettings.grid} onCheckedChange={handleGridToggle} />
-        </DropdownMenuItem>
-        <DropdownMenuItem
+        </DropdownMenuSwitchItem>
+        <DropdownMenuSwitchItem
           className="flex w-full justify-between"
-          onClick={() => {
-            handleAxesHelperToggle(!viewSettings.axes);
-          }}
-          onSelect={preventClose}
+          isChecked={viewSettings.axes}
+          onIsCheckedChange={handleAxesHelperToggle}
         >
           <span className="flex items-center gap-2">
             <Axis3D />
             Axes
           </span>
-          <Switch variant="dropdown" checked={viewSettings.axes} onCheckedChange={handleAxesHelperToggle} />
-        </DropdownMenuItem>
+        </DropdownMenuSwitchItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

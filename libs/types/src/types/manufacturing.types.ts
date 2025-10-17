@@ -8,4 +8,4 @@ export type ManufacturingMethodConfiguration = {
   icon: keyof typeof icons;
 };
 
-export type ManufacturingMethod = keyof typeof manufacturingMethods;
+export type ManufacturingMethod = (typeof manufacturingMethods)[number];

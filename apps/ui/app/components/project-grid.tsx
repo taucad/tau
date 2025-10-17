@@ -1,9 +1,8 @@
-import type { ComponentType } from 'react';
 import { Star, Eye, ArrowRight } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useActor, useSelector } from '@xstate/react';
-import type { Build, KernelProvider } from '@taucad/types';
+import type { Build } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
@@ -16,13 +15,6 @@ import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
-
-// Placeholder for language icons
-const kernelIcons: Record<KernelProvider, ComponentType<{ className?: string }>> = {
-  replicad: ({ className }) => <SvgIcon id="replicad" className={className} />,
-  openscad: ({ className }) => <SvgIcon id="openscad" className={className} />,
-  zoo: ({ className }) => <SvgIcon id="zoo" className={className} />,
-};
 
 type CommunityBuildCardProperties = Build;
 
@@ -65,17 +57,7 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
 
   const navigate = useNavigate();
 
-  // Memoize the KernelIcon computation to prevent re-creation on every render
-  const KernelIcon = useMemo(
-    () =>
-      Object.values(assets)
-        .map((asset) => asset.language)
-        .map((kernel) => ({
-          Icon: kernelIcons[kernel],
-          language: kernel,
-        })),
-    [assets],
-  );
+  const kernels = useMemo(() => Object.values(assets).map((asset) => asset.language), [assets]);
 
   // Set up visibility observer
   useEffect(() => {
@@ -213,16 +195,16 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
         <div className="flex items-center justify-between">
           <CardTitle>{name}</CardTitle>
           <div className="flex flex-wrap gap-1">
-            {KernelIcon.map(({ language, Icon }) => (
-              <Tooltip key={language}>
+            {kernels.map((kernel) => (
+              <Tooltip key={kernel}>
                 <TooltipTrigger>
                   <Avatar className="h-5 w-5">
                     <AvatarFallback>
-                      <Icon className="size-3" />
+                      <SvgIcon id={kernel} className="size-3" />
                     </AvatarFallback>
                   </Avatar>
                 </TooltipTrigger>
-                <TooltipContent>{language}</TooltipContent>
+                <TooltipContent>{kernel}</TooltipContent>
               </Tooltip>
             ))}
           </div>

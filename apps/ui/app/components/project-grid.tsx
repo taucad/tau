@@ -175,7 +175,7 @@ function ProjectCard({
       // TODO: Show error toast/notification to user
       setIsForking(false);
     }
-  }, [name, description, thumbnail, author, tags, assets, id, chats, navigate, isForking]);
+  }, [name, description, thumbnail, author, tags, assets, id, navigate, isForking]);
 
   const handlePreviewToggle = useCallback(
     (event: React.MouseEvent) => {

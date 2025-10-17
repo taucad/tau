@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
+import { formatConfigurations } from '@taucad/converter';
 import type { InputFormat, OutputFormat } from '@taucad/converter';
 import { Badge } from '#components/ui/badge.js';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { SearchInput } from '#components/search-input.js';
 import { formatDisplayName } from '#routes/converter/converter-utils.js';
 
@@ -68,9 +70,31 @@ export function FormatsList({
             {filteredFormats.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {filteredFormats.map((format) => (
-                  <Badge key={format} variant="secondary" className="px-3 py-1.5 font-mono text-xs">
-                    {format.toUpperCase()}
-                  </Badge>
+                  <HoverCard key={format}>
+                    <HoverCardTrigger asChild>
+                      <Badge variant="outline" className="cursor-pointer font-mono text-xs">
+                        {format.toUpperCase()}
+                      </Badge>
+                    </HoverCardTrigger>
+                    <HoverCardContent className="w-80">
+                      <div className="space-y-3">
+                        <h4 className="font-semibold">{formatDisplayName(format)}</h4>
+                        <div className="text-sm text-muted-foreground">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">Extension:</span>
+                            <Badge variant="secondary" className="font-mono text-xs">
+                              .{format.toLowerCase()}
+                            </Badge>
+                          </div>
+                        </div>
+                        {Boolean(formatConfigurations[format].description) && (
+                          <p className="text-sm leading-relaxed text-muted-foreground">
+                            {formatConfigurations[format].description}
+                          </p>
+                        )}
+                      </div>
+                    </HoverCardContent>
+                  </HoverCard>
                 ))}
               </div>
             ) : (

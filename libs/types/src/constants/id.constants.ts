@@ -17,6 +17,10 @@ export const idPrefix = {
    */
   chat: 'chat',
   /**
+   * A build ID.
+   */
+  build: 'bld',
+  /**
    * An LLM chat tool call ID.
    */
   toolCall: 'tool',
@@ -84,4 +88,8 @@ export const idPrefix = {
    * A public key ID (for API keys).
    */
   publicKey: 'pk',
+  /**
+   * A log ID.
+   */
+  log: 'log',
 } as const satisfies Record<string, string>;

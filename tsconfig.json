@@ -21,6 +21,9 @@
     },
     {
       "path": "./libs/api-extractor"
+    },
+    {
+      "path": "./libs/types"
     }
   ],
   "files": [],

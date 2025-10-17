@@ -1,12 +1,12 @@
 import { useRouteLoaderData } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
+import type { Model } from '@taucad/types';
 import { ENV } from '#config.js';
 import type { loader } from '#root.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { defaultChatModel } from '#constants/chat.constants.js';
-import type { Model } from '#types/model.types.js';
 
 export const getModels = async (): Promise<Model[]> => {
   try {

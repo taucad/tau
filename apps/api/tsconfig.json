@@ -10,6 +10,9 @@
       "path": "../../libs/tau-examples"
     },
     {
+      "path": "../../libs/types"
+    },
+    {
       "path": "./tsconfig.app.json"
     },
     {

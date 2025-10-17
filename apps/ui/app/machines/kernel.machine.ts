@@ -2,10 +2,8 @@ import { assign, assertEvent, setup, sendTo, fromPromise } from 'xstate';
 import type { Snapshot, ActorRef, OutputFrom, DoneActorEvent } from 'xstate';
 import { proxy, wrap } from 'comlink';
 import type { Remote } from 'comlink';
-import { isBrowser } from 'motion/react';
-import type { Geometry } from '#types/cad.types.js';
-import type { ExportFormat, KernelError, KernelProvider } from '#types/kernel.types.js';
-import { isKernelSuccess } from '#types/kernel.types.js';
+import type { Geometry, ExportFormat, KernelError, KernelProvider } from '@taucad/types';
+import { isKernelSuccess } from '@taucad/types/guards';
 import type { ReplicadWorkerInterface as ReplicadWorker } from '#components/geometry/kernel/replicad/replicad.worker.js';
 import ReplicadBuilderWorker from '#components/geometry/kernel/replicad/replicad.worker.js?worker';
 import type { OpenScadBuilderInterface as OpenScadWorker } from '#components/geometry/kernel/openscad/openscad.worker.js';
@@ -14,6 +12,7 @@ import type { ZooBuilderInterface as ZooWorker } from '#components/geometry/kern
 import ZooBuilderWorker from '#components/geometry/kernel/zoo/zoo.worker.js?worker';
 import { assertActorDoneEvent } from '#lib/xstate.js';
 import type { LogLevel, LogOrigin, OnWorkerLog } from '#types/console.types.js';
+import { isBrowser } from '#constants/browser.constants.js';
 
 const workers = {
   replicad: ReplicadBuilderWorker,

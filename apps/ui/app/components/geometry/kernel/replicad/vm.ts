@@ -11,7 +11,7 @@
 
 import { init, parse } from 'es-module-lexer';
 import type { ImportSpecifier } from 'es-module-lexer';
-import type { CadModuleExports } from '#types/cad.types.js';
+import type { CadModuleExports } from '@taucad/types';
 import { hashCode } from '#utils/crypto.utils.js';
 
 // Module cache

@@ -3,11 +3,10 @@ import { ArrowRight } from 'lucide-react';
 import { NavLink } from 'react-router';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
+import type { Build, EngineeringDiscipline } from '@taucad/types';
 import { CategoryBadge } from '#components/category-badge.js';
 import { DataTableColumnHeader } from '#routes/builds_.library/data-table-column-header.js';
 import { Button } from '#components/ui/button.js';
-import type { Build } from '#types/build.types.js';
-import type { Category } from '#types/cad.types.js';
 import { Checkbox } from '#components/ui/checkbox.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import type { BuildActions } from '#routes/builds_.library/route.js';
@@ -133,8 +132,8 @@ export const createColumns = (actions: BuildActions): Array<ColumnDef<Build>> =>
       const build = row.original;
       return (
         <div className="flex flex-wrap gap-2">
-          {Object.keys(build.assets).map((cat) => (
-            <CategoryBadge key={cat} category={cat as Category} />
+          {(Object.keys(build.assets) as EngineeringDiscipline[]).map((cat) => (
+            <CategoryBadge key={cat} category={cat} />
           ))}
         </div>
       );

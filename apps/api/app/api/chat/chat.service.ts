@@ -6,14 +6,13 @@ import { streamText } from 'ai';
 import type { CoreMessage } from 'ai';
 import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
 import { ConfigService } from '@nestjs/config';
+import type { KernelProvider, ToolWithSelection } from '@taucad/types';
 import { ModelService } from '#api/models/model.service.js';
-import type { ToolChoiceWithCategory } from '#api/tools/tool.service.js';
 import { ToolService } from '#api/tools/tool.service.js';
 import { nameGenerationSystemPrompt } from '#api/chat/prompts/chat-prompt-name.js';
 import type { LangGraphAdapterCallbacks } from '#api/chat/utils/langgraph-adapter.js';
 import { getCadSystemPrompt } from '#api/chat/prompts/chat-prompt-cad.js';
 import type { Environment } from '#config/environment.config.js';
-import type { KernelProvider } from '#types/kernel.types.js';
 
 @Injectable()
 export class ChatService {
@@ -34,11 +33,7 @@ export class ChatService {
   }
 
   // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- This is a complex generic that can be left inferred.
-  public async createGraph(
-    modelId: string,
-    selectedToolChoice: ToolChoiceWithCategory,
-    selectedKernel: KernelProvider,
-  ) {
+  public async createGraph(modelId: string, selectedToolChoice: ToolWithSelection, selectedKernel: KernelProvider) {
     const { tools } = this.toolService.getTools(selectedToolChoice);
 
     const databaseUrl = this.configService.get('DATABASE_URL', { infer: true });
@@ -47,7 +42,7 @@ export class ChatService {
     });
     await checkpointer.setup();
 
-    const researchTools = [tools.web_search, tools.web_browser];
+    const researchTools = [tools.web_search, tools.web_browser].filter((tool) => tool !== undefined);
     const { model: supervisorModel } = this.modelService.buildModel(modelId);
     const { model: cadModel, support: cadSupport } = this.modelService.buildModel(modelId);
     const { model: researchModel, support: researchSupport } = this.modelService.buildModel(modelId);
@@ -63,7 +58,7 @@ export class ChatService {
     });
 
     // Create a general agent for handling direct responses
-    const cadTools = [tools.edit_file, tools.analyze_image];
+    const cadTools = [tools.edit_file, tools.analyze_image].filter((tool) => tool !== undefined);
     const cadSystemPrompt = await getCadSystemPrompt(selectedKernel);
     const cadAgent = createReactAgent({
       llm: cadSupport?.tools === false ? cadModel : (cadModel.bindTools?.(cadTools) ?? cadModel),
@@ -98,7 +93,6 @@ Pay special attention to messages that contain:
 - Geometric operation failures
 - Runtime exceptions from 3D modeling operations
 - Screenshots or visual feedback from rendered CAD models
-- Any mention of "error", "failed", "exception", or similar error indicators
 - Design iteration requests based on visual inspection of the model
 
 When any of these error conditions are present, immediately route to the CAD expert for resolution, even if the original request might seem like a research question. The CAD expert has the specialized knowledge and tools to diagnose and fix these technical issues.

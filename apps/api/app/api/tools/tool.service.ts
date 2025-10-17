@@ -1,45 +1,30 @@
 import { Injectable } from '@nestjs/common';
 import type { StructuredTool } from '@langchain/core/tools';
 import { OpenAI, OpenAIEmbeddings } from '@langchain/openai';
+import type { Tool, ToolSelection, ToolWithSelection } from '@taucad/types';
+import { tool, toolSelection } from '@taucad/types/constants';
 import { createWebBrowserTool } from '#api/tools/tools/tool-web-browser.js';
 import { fileEditTool } from '#api/tools/tools/tool-file-edit.js';
 import { imageAnalysisTool } from '#api/tools/tools/tool-image-analysis.js';
 import { parseWebSearchResults, webSearchTool } from '#api/tools/tools/tool-web-search.js';
 
-export const toolCategory = {
-  webSearch: 'web_search',
-  webBrowser: 'web_browser',
-  fileEdit: 'edit_file',
-  imageAnalysis: 'analyze_image',
-} as const satisfies Record<string, string>;
-
-export const toolChoice = {
-  none: 'none',
-  auto: 'auto',
-  any: 'any',
-} as const satisfies Record<string, string>;
-
-export type ToolCategory = (typeof toolCategory)[keyof typeof toolCategory];
-export type ToolChoice = (typeof toolChoice)[keyof typeof toolChoice];
-export type ToolChoiceWithCategory = ToolChoice | ToolCategory;
-
 export const toolChoiceFromToolName = {
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Tavily search tool name
-  tavily_search: toolCategory.webSearch,
-} as const satisfies Record<string, ToolCategory>;
+  tavily_search: tool.webSearch,
+} as const satisfies Record<string, Tool>;
 
 @Injectable()
 export class ToolService {
-  public getTools(selectedToolChoice: ToolChoiceWithCategory): {
-    tools: Record<ToolCategory, StructuredTool>;
+  public getTools(selectedToolChoice: ToolWithSelection): {
+    tools: Partial<Record<Tool, StructuredTool>>;
     resolvedToolChoice: string;
   } {
     const model = new OpenAI({ temperature: 0 });
     const embeddings = new OpenAIEmbeddings();
     // Define the tools for the agent to use
-    const toolCategoryToTool: Record<ToolCategory, StructuredTool> = {
-      [toolCategory.webSearch]: webSearchTool,
-      [toolCategory.webBrowser]: createWebBrowserTool({
+    const toolCategoryToTool: Record<Tool, StructuredTool> = {
+      [tool.webSearch]: webSearchTool,
+      [tool.webBrowser]: createWebBrowserTool({
         model,
         embeddings,
         chunkSize: 2000,
@@ -48,30 +33,40 @@ export class ToolService {
         maxResults: 4,
         forceSummary: false,
       }),
-      [toolCategory.fileEdit]: fileEditTool,
-      [toolCategory.imageAnalysis]: imageAnalysisTool,
+      [tool.fileEdit]: fileEditTool,
+      [tool.imageAnalysis]: imageAnalysisTool,
     };
 
-    const toolNameFromToolCategory: Record<ToolCategory, string> = {
-      [toolCategory.webSearch]: toolCategoryToTool[toolCategory.webSearch].name,
-      [toolCategory.webBrowser]: toolCategoryToTool[toolCategory.webBrowser].name,
-      [toolCategory.fileEdit]: toolCategoryToTool[toolCategory.fileEdit].name,
-      [toolCategory.imageAnalysis]: toolCategoryToTool[toolCategory.imageAnalysis].name,
+    const toolNameFromToolCategory: Record<Tool, string> = {
+      [tool.webSearch]: toolCategoryToTool[tool.webSearch].name,
+      [tool.webBrowser]: toolCategoryToTool[tool.webBrowser].name,
+      [tool.fileEdit]: toolCategoryToTool[tool.fileEdit].name,
+      [tool.imageAnalysis]: toolCategoryToTool[tool.imageAnalysis].name,
     };
 
     const toolNameFromToolChoice = {
       ...toolNameFromToolCategory,
-      ...toolChoice,
-    } as const satisfies Record<ToolChoiceWithCategory, string>;
+      ...toolSelection,
+    } as const satisfies Record<Tool | ToolSelection, string>;
+
+    // Handle array of specific tools
+    if (Array.isArray(selectedToolChoice)) {
+      const filteredTools: Partial<Record<Tool, StructuredTool>> = {};
+      for (const toolChoiceItem of selectedToolChoice) {
+        filteredTools[toolChoiceItem] = toolCategoryToTool[toolChoiceItem];
+      }
+
+      return { tools: filteredTools, resolvedToolChoice: 'required' };
+    }
 
     const resolvedToolChoice = toolNameFromToolChoice[selectedToolChoice];
 
     return { tools: toolCategoryToTool, resolvedToolChoice };
   }
 
-  public getToolParsers(): Partial<Record<ToolCategory, (content: string) => unknown[]>> {
+  public getToolParsers(): Partial<Record<Tool, (content: string) => unknown[]>> {
     return {
-      [toolCategory.webSearch]: parseWebSearchResults,
+      [tool.webSearch]: parseWebSearchResults,
     };
   }
 }

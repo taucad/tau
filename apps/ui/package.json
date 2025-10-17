@@ -5,10 +5,11 @@
   "private": true,
   "dependencies": {
     "@taucad/api-extractor": "workspace:*",
-    "@taucad/tau-examples": "workspace:*"
+    "@taucad/tau-examples": "workspace:*",
+    "@taucad/types": "workspace:*"
   },
   "imports": {
-    "#*": ["./app/*"]
+    "#*": "./app/*"
   },
   "files": [
     "build"

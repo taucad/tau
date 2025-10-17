@@ -1,6 +1,8 @@
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
 import type { Message } from '@ai-sdk/react';
+import { messageRole } from '@taucad/types/constants';
+import type { MessageAnnotation } from '@taucad/types';
 import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
 import { ChatMessageReasoning } from '#routes/builds_.$id/chat-message-reasoning.js';
 import { ChatMessageTool } from '#routes/builds_.$id/chat-message-tool.js';
@@ -9,8 +11,6 @@ import { ChatMessageText } from '#routes/builds_.$id/chat-message-text.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
 import { CopyButton } from '#components/copy-button.js';
 import { Button } from '#components/ui/button.js';
-import { messageRole } from '#types/chat.types.js';
-import type { MessageAnnotation } from '#types/chat.types.js';
 import { cn } from '#utils/ui.utils.js';
 import { When } from '#components/ui/utils/when.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';

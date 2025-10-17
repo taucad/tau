@@ -1,6 +1,6 @@
 /* CSpell:enableCompoundWords */
 import { expectTypeOf, it, assertType } from 'vitest';
-import type { ConstantRecord } from '#types/constant.types.js';
+import type { ConstantRecord } from '@taucad/types';
 
 /**
  * ConstantRecord Valid Tests

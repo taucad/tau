@@ -3,6 +3,7 @@ import { useCallback, useState, useEffect } from 'react';
 import { File, LoaderCircle, Play, X, ChevronDown, AlertTriangle, Bug, Camera, Check, RotateCcw } from 'lucide-react';
 import type { ToolResult } from 'ai';
 import { useActor } from '@xstate/react';
+import type { CodeError, KernelError } from '@taucad/types';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { CopyButton } from '#components/copy-button.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
@@ -13,8 +14,6 @@ import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { useChatSelector } from '#components/chat/ai-chat-provider.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
-import type { CodeError } from '#types/cad.types.js';
-import type { KernelError } from '#types/kernel.types.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 
 export type FileEditToolResult = ToolResult<

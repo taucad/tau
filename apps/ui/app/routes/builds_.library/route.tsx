@@ -16,7 +16,12 @@ import {
   ArrowUpDown,
   ArrowDown,
   ArrowUp,
+  Zap,
+  Brain,
+  Wrench,
+  Cpu,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { Link, NavLink, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -29,6 +34,8 @@ import {
 } from '@tanstack/react-table';
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import { useActor, useSelector } from '@xstate/react';
+import type { EngineeringDiscipline, Build } from '@taucad/types';
+import { engineeringDisciplines } from '@taucad/types/constants';
 import { createColumns } from '#routes/builds_.library/columns.js';
 import { CategoryBadge } from '#components/category-badge.js';
 import { Button, buttonVariants } from '#components/ui/button.js';
@@ -47,9 +54,6 @@ import {
 } from '#components/ui/dropdown-menu.js';
 import { cn } from '#utils/ui.utils.js';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '#components/ui/tabs.js';
-import type { Category } from '#types/cad.types.js';
-import { categories } from '#types/cad.types.js';
-import type { Build } from '#types/build.types.js';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
 import { useBuilds } from '#hooks/use-builds.js';
 import { toast } from '#components/ui/sonner.js';
@@ -77,6 +81,13 @@ import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
+
+const categoryIconsFromEngineeringDiscipline = {
+  mechanical: Wrench,
+  electrical: Zap,
+  firmware: Cpu,
+  software: Brain,
+} as const satisfies Record<EngineeringDiscipline, LucideIcon>;
 
 export const handle: Handle = {
   breadcrumb() {
@@ -181,7 +192,7 @@ export default function PersonalCadProjects(): React.JSX.Element {
       <Tabs
         value={activeFilter}
         onValueChange={(value) => {
-          setActiveFilter(value as 'all' | Category);
+          setActiveFilter(value as 'all' | EngineeringDiscipline);
         }}
       >
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -190,12 +201,15 @@ export default function PersonalCadProjects(): React.JSX.Element {
               <Layout className="size-4" />
               <span className="hidden sm:inline">All</span>
             </TabsTrigger>
-            {Object.entries(categories).map(([key, { icon: Icon, color }]) => (
-              <TabsTrigger key={key} value={key} className="flex items-center gap-2 capitalize">
-                <Icon className={`size-4 ${color}`} />
-                <span className="hidden sm:inline">{key}</span>
-              </TabsTrigger>
-            ))}
+            {Object.entries(engineeringDisciplines).map(([key, discipline]) => {
+              const Icon = categoryIconsFromEngineeringDiscipline[key as EngineeringDiscipline];
+              return (
+                <TabsTrigger key={key} value={key} className="flex items-center gap-2 capitalize">
+                  <Icon className="size-4" />
+                  <span className="hidden sm:inline">{discipline.name}</span>
+                </TabsTrigger>
+              );
+            })}
           </TabsList>
           <div className="flex items-center gap-2">
             {/* View mode toggle */}
@@ -749,7 +763,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap gap-2">
             {Object.keys(build.assets).map((cat) => (
-              <CategoryBadge key={cat} category={cat as Category} />
+              <CategoryBadge key={cat} category={cat as EngineeringDiscipline} />
             ))}
           </div>
         </div>

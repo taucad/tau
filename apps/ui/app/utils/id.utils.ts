@@ -1,6 +1,6 @@
 import { generateId } from 'ai';
-import type { IdPrefix } from '#constants/id.constants.js';
-import { idPrefix } from '#constants/id.constants.js';
+import type { IdPrefix } from '@taucad/types';
+import { idPrefix } from '@taucad/types/constants';
 
 const idLength = 21;
 
@@ -63,7 +63,7 @@ export function validatePrefixedId(id: string): void {
  * @param id - The string to validate
  * @returns boolean indicating if the string is a valid prefixed ID
  */
-export function isValidPrefixedId(id: string): boolean {
+export function isValidPrefixedId(id: string): id is `${IdPrefix}_${string}` {
   try {
     validatePrefixedId(id);
     return true;

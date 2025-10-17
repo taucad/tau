@@ -1,9 +1,8 @@
 import { assign, assertEvent, setup, sendTo, emit, enqueueActions } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
+import type { CodeError, Geometry, ExportFormat, KernelError, KernelProvider } from '@taucad/types';
 import { kernelMachine } from '#machines/kernel.machine.js';
 import type { KernelEventExternal } from '#machines/kernel.machine.js';
-import type { CodeError, Geometry } from '#types/cad.types.js';
-import type { ExportFormat, KernelError, KernelProvider } from '#types/kernel.types.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { logMachine } from '#machines/logs.machine.js';
 

@@ -9,11 +9,11 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { ConfigService } from '@nestjs/config';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import helmet from '@fastify/helmet';
+import { idPrefix } from '@taucad/types/constants';
 import { AppModule } from '#app.module.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
 import type { Environment } from '#config/environment.config.js';
 import { getFastifyLoggingConfig } from '#logger/fastify.logger.js';
-import { idPrefix } from '#constants/id.constants.js';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
 import { httpBodyLimit } from '#constants/http-body.constant.js';
 

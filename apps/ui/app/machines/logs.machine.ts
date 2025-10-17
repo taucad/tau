@@ -1,8 +1,8 @@
 import { setup, assign, createActor } from 'xstate';
+import { idPrefix } from '@taucad/types/constants';
 import type { LogEntry, LogOptions } from '#types/console.types.js';
 import { logLevels } from '#types/console.types.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
-import { idPrefix } from '#constants/id.constants.js';
 
 const defaultMaxLogs = 1000;
 
@@ -45,7 +45,7 @@ export const logMachine = setup({
           actions: assign({
             logs({ context, event }) {
               const newLog: LogEntry = {
-                id: generatePrefixedId('log'),
+                id: generatePrefixedId(idPrefix.log),
                 timestamp: Date.now(),
                 level: event.options?.level ?? logLevels.info,
                 message: event.message,

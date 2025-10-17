@@ -1,9 +1,15 @@
 import type { Message, useChat } from '@ai-sdk/react';
-import type { MessageRole, MessageStatus } from '#types/chat.types.js';
+import type {
+  MessageRole,
+  MessageStatus,
+  KernelProvider,
+  ToolWithSelection,
+  EngineeringDiscipline,
+  ManufacturingMethod,
+} from '@taucad/types';
+import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '#utils/id.utils.js';
-import { idPrefix } from '#constants/id.constants.js';
 import { ENV } from '#config.js';
-import type { KernelProvider } from '#types/kernel.types.js';
 
 export const useChatConstants = {
   api: `${ENV.TAU_API_URL}/v1/chat`,
@@ -46,8 +52,10 @@ export function createMessage({
   model: string;
   status: MessageStatus;
   metadata: {
-    toolChoice?: 'web_search' | 'none' | 'auto' | 'any';
-    kernel: KernelProvider;
+    toolChoice?: ToolWithSelection;
+    kernel?: KernelProvider;
+    manufacturingMethod?: ManufacturingMethod;
+    engineeringDiscipline?: EngineeringDiscipline;
   };
   imageUrls?: string[];
 }): Message {

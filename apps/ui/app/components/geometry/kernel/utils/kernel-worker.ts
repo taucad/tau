@@ -1,9 +1,4 @@
-import type {
-  ComputeGeometryResult,
-  ExportFormat,
-  ExportGeometryResult,
-  ExtractParametersResult,
-} from '#types/kernel.types';
+import type { ComputeGeometryResult, ExportFormat, ExportGeometryResult, ExtractParametersResult } from '@taucad/types';
 import { logLevels } from '#types/console.types';
 import type { OnWorkerLog } from '#types/console.types';
 

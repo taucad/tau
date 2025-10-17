@@ -1,5 +1,5 @@
 import type { Message } from '@ai-sdk/react';
-import type { Category } from '#types/cad.types.js';
+import type { EngineeringDiscipline } from '#types/cad.types.js';
 import type { KernelProvider } from '#types/kernel.types.js';
 
 export type File = {
@@ -47,5 +47,5 @@ export type Build = {
   forkedFrom?: string;
   deletedAt?: number;
   // Status: 'draft' | 'review' | 'published' | 'completed' | 'archived';
-  assets: Partial<Record<Category, Asset>>;
+  assets: Partial<Record<EngineeringDiscipline, Asset>>;
 };

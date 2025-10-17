@@ -92,7 +92,7 @@
     "@shikijs/themes": "^3.7.0",
     "@statelyai/inspect": "^0.4.0",
     "@swc/helpers": "~0.5.17",
-    "@tanstack/react-query": "4",
+    "@tanstack/react-query": "5",
     "@tanstack/react-table": "^8.21.3",
     "@taucad/kcl-wasm-lib": "0.1.85-beta.2",
     "@types/pg": "^8.15.4",

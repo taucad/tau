@@ -1,7 +1,13 @@
 import { useCallback, useState } from 'react';
 import { Link } from 'react-router';
 import JSZip from 'jszip';
-import { importToGlb, exportFromGlb, supportedImportFormats, supportedExportFormats } from '@taucad/converter';
+import {
+  importToGlb,
+  exportFromGlb,
+  supportedImportFormats,
+  supportedExportFormats,
+  formatConfigurations,
+} from '@taucad/converter';
 import type { InputFormat, OutputFormat } from '@taucad/converter';
 import { Download, Upload, RotateCcw, Package, Code2 } from 'lucide-react';
 import { useSelector } from '@xstate/react';
@@ -35,6 +41,7 @@ import {
 } from '#components/code/code-block.js';
 import { CopyButton } from '#components/copy-button.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '#components/ui/card.js';
+import { InfoTooltip } from '#components/ui/info-tooltip.js';
 import {
   getFormatFromFilename,
   formatDisplayName,
@@ -333,7 +340,10 @@ export default function ConverterRoute(): React.JSX.Element {
             {uploadedFile ? (
               <div className="absolute bottom-4 left-4 flex flex-col gap-2">
                 <div className="rounded-md border bg-sidebar/95 p-3 shadow-md backdrop-blur-sm">
-                  <div className="text-sm font-medium">{uploadedFile.name}</div>
+                  <div className="flex items-center gap-1">
+                    <div className="text-sm font-medium">{uploadedFile.name}</div>
+                    <InfoTooltip>{formatConfigurations[uploadedFile.format].description}</InfoTooltip>
+                  </div>
                   <div className="text-xs text-muted-foreground">
                     {formatDisplayName(uploadedFile.format)} · {formatFileSize(uploadedFile.size)}
                   </div>

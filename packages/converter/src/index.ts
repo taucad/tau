@@ -14,5 +14,8 @@ export {
 export { importFiles, supportedImportFormats } from '#import.js';
 export { exportFiles, supportedExportFormats } from '#export.js';
 
+// Format metadata
+export { formatConfigurations } from '#constants/format-names.constants.js';
+
 // Types
 export type { InputFormat, OutputFormat, File } from '#types.js';

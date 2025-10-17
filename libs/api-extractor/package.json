@@ -9,11 +9,6 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "replicad": {
-      "types": "./src/replicad/index.ts",
-      "import": "./src/replicad/index.ts",
-      "default": "./src/replicad/index.ts"
     }
   },
   "imports": {

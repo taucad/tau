@@ -1,3 +1,3 @@
-import type { idPrefix } from '#/constants/id.constants.js';
+import type { idPrefix } from '#constants/id.constants.js';
 
 export type IdPrefix = (typeof idPrefix)[keyof typeof idPrefix];

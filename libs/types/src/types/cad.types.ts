@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from '#types/schema.types.js';
-import type { engineeringDisciplines } from '#/constants/cad.constants.js';
+import type { engineeringDisciplines } from '#constants/cad.constants.js';
 
 export type CodeError = {
   message: string;

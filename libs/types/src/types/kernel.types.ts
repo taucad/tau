@@ -1,4 +1,4 @@
-import type { backendProviders, kernelProviders } from '#/constants/kernel.constants.js';
+import type { backendProviders, kernelProviders } from '#constants/kernel.constants.js';
 import type { Geometry } from '#types/cad.types.js';
 
 export type KernelStackFrame = {

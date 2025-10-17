@@ -1,4 +1,4 @@
-import type { tool, toolSelection } from '#/constants/tool.constants.js';
+import type { tool, toolSelection } from '#constants/tool.constants.js';
 
 export type Tool = (typeof tool)[keyof typeof tool];
 

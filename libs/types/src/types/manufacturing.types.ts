@@ -1,5 +1,5 @@
 import type { icons } from 'lucide-react';
-import type { manufacturingMethods } from '#/constants/manufacturing.constants.js';
+import type { manufacturingMethods } from '#constants/manufacturing.constants.js';
 
 export type ManufacturingMethodConfiguration = {
   name: string;

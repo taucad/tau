@@ -1,6 +1,6 @@
 import type { UIMessage } from 'ai';
-import type { ConstantRecord } from '#/types/constant.types.js';
-import type { messageRole, messageStatus } from '#/constants/message.constants.js';
+import type { ConstantRecord } from '#types/constant.types.js';
+import type { messageRole, messageStatus } from '#constants/message.constants.js';
 
 export type MessageRole = ConstantRecord<typeof messageRole>;
 

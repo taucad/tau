@@ -1,4 +1,4 @@
-import type { modelFamilies, modelProviders } from '#/constants/model.constants.js';
+import type { modelFamilies, modelProviders } from '#constants/model.constants.js';
 
 export type ModelProvider = (typeof modelProviders)[number];
 

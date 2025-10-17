@@ -5,14 +5,14 @@ import { importToGlb, exportFromGlb, supportedImportFormats, supportedExportForm
 import type { InputFormat, OutputFormat } from '@taucad/converter';
 import { Download, Upload, RotateCcw, Package, Code2 } from 'lucide-react';
 import { useSelector } from '@xstate/react';
+import type { Geometry } from '@taucad/types';
 import { Button } from '#components/ui/button.js';
 import { toast } from '#components/ui/sonner.js';
 import { Checkbox } from '#components/ui/checkbox.js';
 import { Label } from '#components/ui/label.js';
 import type { Handle } from '#types/matches.types.js';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
-import type { Geometry } from '#types/cad.types.js';
-import { downloadBlob } from '#utils/file.js';
+import { downloadBlob } from '#utils/file.utils.js';
 import {
   FloatingPanel,
   FloatingPanelContent,

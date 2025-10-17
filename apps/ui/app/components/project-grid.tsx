@@ -52,17 +52,7 @@ export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBui
   );
 }
 
-function ProjectCard({
-  id,
-  name,
-  description,
-  thumbnail,
-  stars,
-  chats,
-  author,
-  tags,
-  assets,
-}: CommunityBuildCardProperties) {
+function ProjectCard({ id, name, description, thumbnail, stars, author, tags, assets }: CommunityBuildCardProperties) {
   const [showPreview, setShowPreview] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const [isForking, setIsForking] = useState(false);

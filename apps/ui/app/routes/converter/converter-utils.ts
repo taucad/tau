@@ -1,6 +1,5 @@
 import type { InputFormat, OutputFormat } from '@taucad/converter';
-import { isInputFormatSupported } from '@taucad/converter';
-import { formatNames } from '@taucad/converter/constants';
+import { formatConfigurations, isInputFormatSupported } from '@taucad/converter';
 
 /**
  * Extract file format from filename extension
@@ -23,7 +22,7 @@ export function getFormatFromFilename(filename: string): InputFormat {
  * Get human-readable display name for format
  */
 export function formatDisplayName(format: InputFormat | OutputFormat): string {
-  return formatNames[format];
+  return formatConfigurations[format].name;
 }
 
 /**

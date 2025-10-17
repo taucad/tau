@@ -8,7 +8,7 @@ import { KernelSelector } from '#components/chat/kernel-selector.js';
 import { Button } from '#components/ui/button.js';
 import { storage } from '#db/storage.js';
 import { createMessage } from '#utils/chat.utils.js';
-import { getMainFile, getEmptyCode } from '#constants/kernel.constants.js';
+import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { CommunityBuildGrid } from '#components/project-grid.js';
 import { sampleBuilds } from '#constants/build-examples.js';
 import { defaultBuildName } from '#constants/build-names.js';

@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
 import type { KernelProvider } from '@taucad/types';
+import { kernelConfigurations } from '@taucad/types/constants';
 import { Button } from '#components/ui/button.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '#components/ui/card.js';
 import { Input } from '#components/ui/input.js';
@@ -12,7 +13,7 @@ import { RadioGroup, RadioGroupItem } from '#components/ui/radio-group.js';
 import { Textarea } from '#components/ui/textarea.js';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '#components/ui/accordion.js';
 import { storage } from '#db/storage.js';
-import { kernelOptions, getKernelOption } from '#constants/kernel.constants.js';
+import { getKernelOption } from '#utils/kernel.utils.js';
 import { toast } from '#components/ui/sonner.js';
 import type { Handle } from '#types/matches.types.js';
 import { cn } from '#utils/ui.utils.js';
@@ -226,7 +227,7 @@ export default function BuildsNew(): React.JSX.Element {
                     }
                   }}
                 >
-                  {kernelOptions.map((option) => (
+                  {kernelConfigurations.map((option) => (
                     <AccordionItem
                       key={option.id}
                       value={option.id}
@@ -281,7 +282,7 @@ export default function BuildsNew(): React.JSX.Element {
                     setSelectedKernel(value as KernelProvider);
                   }}
                 >
-                  {kernelOptions.map((option) => (
+                  {kernelConfigurations.map((option) => (
                     <Label
                       key={option.id}
                       htmlFor={option.id}

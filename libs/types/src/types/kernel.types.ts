@@ -18,8 +18,6 @@ export type KernelError = {
   type?: 'compilation' | 'runtime' | 'kernel' | 'unknown';
 };
 
-export type ExportFormat = 'stl' | 'stl-binary' | 'step' | 'step-assembly' | 'glb' | 'gltf' | '3mf';
-
 // Result pattern types for kernel operations
 export type KernelSuccessResult<T> = {
   success: true;

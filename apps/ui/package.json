@@ -9,7 +9,7 @@
     "@taucad/types": "workspace:*"
   },
   "imports": {
-    "#*": ["./app/*"]
+    "#*": "./app/*"
   },
   "files": [
     "build"

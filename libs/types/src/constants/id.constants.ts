@@ -88,4 +88,8 @@ export const idPrefix = {
    * A public key ID (for API keys).
    */
   publicKey: 'pk',
+  /**
+   * A log ID.
+   */
+  log: 'log',
 } as const satisfies Record<string, string>;

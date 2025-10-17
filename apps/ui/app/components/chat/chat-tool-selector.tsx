@@ -1,19 +1,18 @@
 import { memo, useCallback, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Globe, Code, Image, Eye, Check } from 'lucide-react';
+import { Globe, Code, Image, Eye } from 'lucide-react';
 import type { ToolWithSelection, Tool } from '@taucad/types';
 import { tool, toolSelection } from '@taucad/types/constants';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSwitchItem,
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu.js';
-import { cn } from '#utils/ui.utils.js';
 
 type ToolSelectorMode = 'auto' | 'none' | 'any' | 'custom';
 
@@ -188,7 +187,7 @@ export const ChatToolSelector = memo(function ({
           }}
         >
           {modeOptions.map((option) => (
-            <DropdownMenuRadioItem key={option.value} className="h-9" value={option.value} onSelect={preventClose}>
+            <DropdownMenuRadioItem key={option.value} className="h-10" value={option.value} onSelect={preventClose}>
               <div className="flex flex-col items-start gap-0">
                 <span className="text-sm font-medium">{option.label}</span>
                 <span className="text-xs text-muted-foreground">{option.description}</span>
@@ -207,20 +206,18 @@ export const ChatToolSelector = memo(function ({
               const isSelected = selectedTools.includes(toolKey);
 
               return (
-                <DropdownMenuItem
+                <DropdownMenuSwitchItem
                   key={toolKey}
-                  className="flex w-full items-center justify-between gap-2"
-                  onClick={() => {
+                  isChecked={isSelected}
+                  onIsCheckedChange={() => {
                     handleToolToggle(toolKey);
                   }}
-                  onSelect={preventClose}
                 >
-                  <span className={cn('flex items-center gap-2', isSelected && 'text-primary [&_svg]:text-primary!')}>
+                  <span className="flex items-center gap-2">
                     <Icon className="size-4" />
                     {metadata.label}
                   </span>
-                  {isSelected ? <Check className="size-4" /> : null}
-                </DropdownMenuItem>
+                </DropdownMenuSwitchItem>
               );
             })}
           </>

@@ -283,7 +283,7 @@ export function InfiniteGrid({
   minGridDistance = 10,
   gridDistanceMultiplier = 30,
   fadeStart = 0.05,
-  fadeEnd = 0.3,
+  fadeEnd = 0.2,
   alphaThreshold = 0.01,
 }: Partial<Omit<InfiniteGridProperties, 'smallSize' | 'largeSize' | 'color'>> &
   Pick<InfiniteGridProperties, 'smallSize' | 'largeSize' | 'color'>): React.JSX.Element {

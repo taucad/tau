@@ -8,6 +8,9 @@ import { AxesHelper } from '#components/geometry/graphics/three/axes-helper.js';
 import { Grid } from '#components/geometry/graphics/three/grid.js';
 import { useCameraReset } from '#components/geometry/graphics/three/use-camera-reset.js';
 import { Lights } from '#components/geometry/graphics/three/lights.js';
+import { ClippingPlane } from '#components/geometry/graphics/three/clipping-plane.js';
+import { Cutter } from '#components/geometry/graphics/three/cutter.js';
+import { createStripedMaterial } from '#components/geometry/graphics/three/striped-material.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 
 export type StageOptions = {
@@ -78,6 +81,36 @@ export function Stage({
 
   // Subscribe to camera FOV angle from graphics actor
   const cameraFovAngle = useSelector(graphicsActor, (state) => state.context.cameraFovAngle);
+
+  // Subscribe to clipping plane state from graphics actor
+  const isClippingPlaneActive = useSelector(graphicsActor, (state) => state.context.isClippingPlaneActive);
+  const selectedClippingPlaneId = useSelector(graphicsActor, (state) => state.context.selectedClippingPlaneId);
+  const clippingPlaneTranslation = useSelector(graphicsActor, (state) => state.context.clippingPlaneTranslation);
+  const clippingPlaneDirection = useSelector(graphicsActor, (state) => state.context.clippingPlaneDirection);
+  const availableClippingPlanes = useSelector(graphicsActor, (state) => state.context.availableClippingPlanes);
+  const enableClippingLines = useSelector(graphicsActor, (state) => state.context.enableClippingLines);
+  const enableClippingMesh = useSelector(graphicsActor, (state) => state.context.enableClippingMesh);
+
+  // Build THREE.Plane for the Cutter component
+  const clippingPlane = useMemo(() => {
+    if (!selectedClippingPlaneId) {
+      // Default plane when nothing is selected
+      return new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    }
+
+    const selectedPlane = availableClippingPlanes.find((plane) => plane.id === selectedClippingPlaneId);
+    if (!selectedPlane) {
+      return new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    }
+
+    const normal = new THREE.Vector3(...selectedPlane.normal).multiplyScalar(clippingPlaneDirection);
+    const constant = -clippingPlaneTranslation;
+
+    return new THREE.Plane(normal, constant);
+  }, [selectedClippingPlaneId, clippingPlaneTranslation, clippingPlaneDirection, availableClippingPlanes]);
+
+  // Create striped material for capping surface
+  const cappingMaterial = useMemo(() => createStripedMaterial(), []);
 
   // State for camera reset functionality
   const originalDistanceReference = React.useRef<number | undefined>(undefined);
@@ -187,7 +220,17 @@ export function Stage({
       <group ref={outer}>
         {properties.enableAxes ? <AxesHelper /> : null}
         {properties.enableGrid ? <Grid /> : null}
-        <group ref={inner}>{children}</group>
+
+        <ClippingPlane />
+        <Cutter
+          plane={clippingPlane}
+          enableCutting={Boolean(isClippingPlaneActive && selectedClippingPlaneId)}
+          enableLines={enableClippingLines}
+          enableMesh={enableClippingMesh}
+          cappingMaterial={cappingMaterial}
+        >
+          <group ref={inner}>{children}</group>
+        </Cutter>
       </group>
       <Lights />
     </group>

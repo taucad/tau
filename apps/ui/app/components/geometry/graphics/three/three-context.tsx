@@ -51,6 +51,8 @@ export function ThreeProvider({
         // eliminating visual artifacts on the object.
         logarithmicDepthBuffer: true,
         antialias: true,
+        // Enable stencil buffer for stencil-based cross-section rendering (Cutter component)
+        stencil: true,
       }}
       style={{
         cursor: `url(data:image/svg+xml;base64,${rotateIconBase64}) 13 13, auto`,

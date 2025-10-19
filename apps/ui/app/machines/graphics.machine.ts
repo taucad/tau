@@ -31,6 +31,24 @@ export type GraphicsContext = {
   enableAxes: boolean;
   enableMatcap: boolean;
 
+  // Clipping plane state
+  isClippingPlaneActive: boolean;
+  availableClippingPlanes: Array<{
+    id: 'xy' | 'xz' | 'yz';
+    normal: [number, number, number]; // Vector3 as tuple
+    constant: number;
+  }>;
+  selectedClippingPlaneId: 'xy' | 'xz' | 'yz' | undefined;
+  clippingPlaneVisualization: {
+    stripeColor: string;
+    stripeSpacing: number;
+    stripeWidth: number;
+  };
+  clippingPlaneTranslation: number; // Current translation offset
+  clippingPlaneDirection: 1 | -1; // Normal direction multiplier
+  enableClippingLines: boolean; // Whether to cut lines
+  enableClippingMesh: boolean; // Whether to cut meshes
+
   // Capability registrations
   screenshotCapability?: AnyActorRef;
   cameraCapability?: AnyActorRef;
@@ -66,6 +84,17 @@ export type GraphicsEvent =
   | { type: 'setGridVisibility'; payload: boolean }
   | { type: 'setAxesVisibility'; payload: boolean }
   | { type: 'setMatcapVisibility'; payload: boolean }
+  // Clipping plane events
+  | { type: 'setClippingPlaneActive'; payload: boolean }
+  | { type: 'selectClippingPlane'; payload: 'xy' | 'xz' | 'yz' | undefined }
+  | { type: 'setClippingPlaneTranslation'; payload: number }
+  | { type: 'toggleClippingPlaneDirection' }
+  | {
+      type: 'setClippingPlaneVisualization';
+      payload: Partial<GraphicsContext['clippingPlaneVisualization']>;
+    }
+  | { type: 'setClippingLinesEnabled'; payload: boolean }
+  | { type: 'setClippingMeshEnabled'; payload: boolean }
   // Controls events
   | { type: 'controlsInteractionStart' }
   | { type: 'controlsChanged'; zoom: number; position: number; fov: number }
@@ -456,6 +485,73 @@ export const graphicsMachine = setup({
         return event.payload;
       },
     }),
+
+    setClippingPlaneActive: assign({
+      isClippingPlaneActive({ event }) {
+        assertEvent(event, 'setClippingPlaneActive');
+        return event.payload;
+      },
+      // Reset selection when deactivating
+      selectedClippingPlaneId({ event }) {
+        assertEvent(event, 'setClippingPlaneActive');
+        return event.payload ? undefined : undefined;
+      },
+    }),
+
+    selectClippingPlane: assign({
+      selectedClippingPlaneId({ event }) {
+        assertEvent(event, 'selectClippingPlane');
+        return event.payload;
+      },
+      // Reset translation when changing planes
+      clippingPlaneTranslation({ event }) {
+        assertEvent(event, 'selectClippingPlane');
+        return event.payload === undefined ? 0 : 0;
+      },
+    }),
+
+    setClippingPlaneTranslation: assign({
+      clippingPlaneTranslation({ event }) {
+        assertEvent(event, 'setClippingPlaneTranslation');
+        return event.payload;
+      },
+    }),
+
+    toggleClippingPlaneDirection: assign({
+      clippingPlaneDirection({ context }) {
+        return context.clippingPlaneDirection === 1 ? -1 : 1;
+      },
+      // When flipping direction, negate translation to keep plane at same position
+      // Plane equation: normal · point + constant = 0
+      // If we negate normal, we must negate constant
+      clippingPlaneTranslation({ context }) {
+        return -context.clippingPlaneTranslation;
+      },
+    }),
+
+    setClippingPlaneVisualization: assign({
+      clippingPlaneVisualization({ event, context }) {
+        assertEvent(event, 'setClippingPlaneVisualization');
+        return {
+          ...context.clippingPlaneVisualization,
+          ...event.payload,
+        };
+      },
+    }),
+
+    setClippingLinesEnabled: assign({
+      enableClippingLines({ event }) {
+        assertEvent(event, 'setClippingLinesEnabled');
+        return event.payload;
+      },
+    }),
+
+    setClippingMeshEnabled: assign({
+      enableClippingMesh({ event }) {
+        assertEvent(event, 'setClippingMeshEnabled');
+        return event.payload;
+      },
+    }),
   },
 }).createMachine({
   id: 'graphics',
@@ -483,6 +579,24 @@ export const graphicsMachine = setup({
     enableGrid: true,
     enableAxes: true,
     enableMatcap: false,
+
+    // Clipping plane state
+    isClippingPlaneActive: false,
+    availableClippingPlanes: [
+      { id: 'xy', normal: [0, 0, 1], constant: 0 },
+      { id: 'xz', normal: [0, 1, 0], constant: 0 },
+      { id: 'yz', normal: [1, 0, 0], constant: 0 },
+    ],
+    selectedClippingPlaneId: undefined,
+    clippingPlaneVisualization: {
+      stripeColor: '#00ff00',
+      stripeSpacing: 10,
+      stripeWidth: 1,
+    },
+    clippingPlaneTranslation: 0,
+    clippingPlaneDirection: -1,
+    enableClippingLines: true,
+    enableClippingMesh: true,
 
     // Capabilities
     screenshotCapability: undefined,
@@ -539,6 +653,29 @@ export const graphicsMachine = setup({
         },
         setMatcapVisibility: {
           actions: 'setMatcapVisibility',
+        },
+
+        // Clipping plane events
+        setClippingPlaneActive: {
+          actions: 'setClippingPlaneActive',
+        },
+        selectClippingPlane: {
+          actions: 'selectClippingPlane',
+        },
+        setClippingPlaneTranslation: {
+          actions: 'setClippingPlaneTranslation',
+        },
+        toggleClippingPlaneDirection: {
+          actions: 'toggleClippingPlaneDirection',
+        },
+        setClippingPlaneVisualization: {
+          actions: 'setClippingPlaneVisualization',
+        },
+        setClippingLinesEnabled: {
+          actions: 'setClippingLinesEnabled',
+        },
+        setClippingMeshEnabled: {
+          actions: 'setClippingMeshEnabled',
         },
 
         // Controls events

@@ -354,7 +354,7 @@ export function InfiniteGrid({
       frustumCulled={false} // Ensure the grid is always rendered
       userData={{ isPreviewOnly: true }}
       material={material}
-      renderOrder={9999}
+      renderOrder={Infinity}
     />
   );
 }

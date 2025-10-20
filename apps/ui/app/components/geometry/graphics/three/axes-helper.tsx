@@ -77,17 +77,14 @@ export function AxesHelper({
   );
 
   return (
-    <group
-      // eslint-disable-next-line react/no-unknown-property -- TODO: add typings for Three.js
-      userData={{ isPreviewOnly: true }}
-    >
+    <group userData={{ isPreviewOnly: true }}>
       {axes.map((axis) => (
         <Fragment key={axis.id}>
           <Line
             points={axis.getPoints()}
             opacity={0.6}
             // Large render order to ensure the axes are placed on top of all other objects
-            renderOrder={9999}
+            renderOrder={Infinity}
             color={axis.color}
             lineWidth={hoveredAxis === axis.id ? hoverThickness : thickness}
           />

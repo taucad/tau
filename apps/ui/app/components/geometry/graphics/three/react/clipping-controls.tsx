@@ -450,6 +450,7 @@ export function ClippingControls({
       <TransformControls
         object={transformControlsRef as React.RefObject<THREE.Object3D>}
         mode="translate"
+        space="local"
         size={1}
         visible={false}
         showX={Math.abs(normal.x) > 0.5}
@@ -472,8 +473,9 @@ export function ClippingControls({
         }}
       />
       <TransformControls
-        object={transformControlsRef.current}
+        object={transformControlsRef as React.RefObject<THREE.Object3D>}
         mode="rotate"
+        space="local"
         size={1}
         visible={false}
         showX={Math.abs(normal.y) > 0.5 || Math.abs(normal.z) > 0.5}

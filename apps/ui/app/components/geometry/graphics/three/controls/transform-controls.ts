@@ -833,13 +833,13 @@ class TransformControlsGizmo extends Object3D {
     matYellow.color.set(0xff_ff_00);
 
     const matLineRed = gizmoLineMaterial.clone();
-    matLineRed.color.set(0xff_00_00);
+    matLineRed.color.set(0xef_44_44);
 
     const matLineGreen = gizmoLineMaterial.clone();
-    matLineGreen.color.set(0x00_ff_00);
+    matLineGreen.color.set(0x22_c5_5e);
 
     const matLineBlue = gizmoLineMaterial.clone();
-    matLineBlue.color.set(0x00_00_ff);
+    matLineBlue.color.set(0x3b_82_f6);
 
     const matLineCyan = gizmoLineMaterial.clone();
     matLineCyan.color.set(0x00_ff_ff);
@@ -896,6 +896,7 @@ class TransformControlsGizmo extends Object3D {
 
     const gizmoTranslationScaleFactor = 0.000_25;
     const gizmoRotationScaleFactor = 0.000_15;
+    const gizmoRotationScaleFactorZ = gizmoTranslationScaleFactor;
     const gizmoPickerTranslationScaleFactor = 0.0005;
     const gizmoTranslationScale = [
       gizmoTranslationScaleFactor,
@@ -908,7 +909,7 @@ class TransformControlsGizmo extends Object3D {
       gizmoPickerTranslationScaleFactor,
     ];
     const gizmoMeshOffset = 0.5;
-    const gizmoRotationScale = [gizmoRotationScaleFactor, gizmoRotationScaleFactor, gizmoRotationScaleFactor];
+    const gizmoRotationScale = [gizmoRotationScaleFactor, gizmoRotationScaleFactor, gizmoRotationScaleFactorZ];
 
     // Order is:
     // 1. The Object3D to render
@@ -1017,17 +1018,17 @@ class TransformControlsGizmo extends Object3D {
 
     const gizmoRotate = {
       X: [
-        // [new Line(CircleGeometry(1, 0.5), matLineRed)],
+        [new Line(CircleGeometry(1, 0.5), matLineRed)],
         [new Mesh(doubleArrowGeometry, matRed), [0, 0, 0.99], [0, Math.PI / 2, Math.PI / 2], gizmoRotationScale],
         // [new Mesh(new OctahedronGeometry(0.04, 0), matRed), [0, 0, 0.99], undefined, [1, 3, 1]],
       ],
       Y: [
-        // [new Line(CircleGeometry(1, 0.5), matLineGreen), undefined, [0, 0, -Math.PI / 2]],
+        [new Line(CircleGeometry(1, 0.5), matLineGreen), undefined, [0, 0, -Math.PI / 2]],
         [new Mesh(doubleArrowGeometry, matGreen), [0, 0, 0.99], [Math.PI / 2, 0, 0], gizmoRotationScale],
         // [new Mesh(new OctahedronGeometry(0.04, 0), matGreen), [0, 0, 0.99], undefined, [3, 1, 1]],
       ],
       Z: [
-        // [new Line(CircleGeometry(1, 0.5), matLineBlue), undefined, [0, Math.PI / 2, 0]],
+        [new Line(CircleGeometry(1, 0.5), matLineBlue), undefined, [0, Math.PI / 2, 0]],
         [new Mesh(doubleArrowGeometry, matBlue), [0.99, 0, 0], [0, 0, -Math.PI / 2], gizmoRotationScale],
         // [new Mesh(new OctahedronGeometry(0.04, 0), matBlue), [0.99, 0, 0], undefined, [1, 3, 1]],
       ],

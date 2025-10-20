@@ -295,9 +295,7 @@ Cutter.displayName = 'Cutter';
 function PlaneStencilGroup({ meshObj, plane, renderOrder }: PlaneStencilGroupProperties): React.JSX.Element {
   return (
     <group>
-      {}
       <mesh geometry={meshObj.geometry} renderOrder={renderOrder}>
-        {}
         <meshBasicMaterial
           stencilWrite
           depthWrite={false}
@@ -310,11 +308,8 @@ function PlaneStencilGroup({ meshObj, plane, renderOrder }: PlaneStencilGroupPro
           stencilZFail={THREE.DecrementWrapStencilOp}
           stencilZPass={THREE.DecrementWrapStencilOp}
         />
-        {}
       </mesh>
-      {}
       <mesh geometry={meshObj.geometry} renderOrder={renderOrder}>
-        {}
         <meshBasicMaterial
           stencilWrite
           depthWrite={false}
@@ -327,7 +322,6 @@ function PlaneStencilGroup({ meshObj, plane, renderOrder }: PlaneStencilGroupPro
           stencilZFail={THREE.IncrementWrapStencilOp}
           stencilZPass={THREE.IncrementWrapStencilOp}
         />
-        {}
       </mesh>
     </group>
   );

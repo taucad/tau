@@ -442,7 +442,7 @@ export function ClippingControls({
   return (
     <group>
       {/* Hidden transform controls for dragging logic */}
-      <mesh ref={transformControlsRef} position={controlPosition}>
+      <mesh ref={transformControlsRef}>
         <boxGeometry args={[0.1, 0.1, 0.1]} />
         <meshBasicMaterial visible={false} />
       </mesh>

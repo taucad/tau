@@ -85,6 +85,7 @@ export function Stage({
   const isClippingPlaneActive = useSelector(graphicsActor, (state) => state.context.isClippingPlaneActive);
   const selectedClippingPlaneId = useSelector(graphicsActor, (state) => state.context.selectedClippingPlaneId);
   const clippingPlaneTranslation = useSelector(graphicsActor, (state) => state.context.clippingPlaneTranslation);
+  const clippingPlaneRotation = useSelector(graphicsActor, (state) => state.context.clippingPlaneRotation);
   const clippingPlaneDirection = useSelector(graphicsActor, (state) => state.context.clippingPlaneDirection);
   const availableClippingPlanes = useSelector(graphicsActor, (state) => state.context.availableClippingPlanes);
   const enableClippingLines = useSelector(graphicsActor, (state) => state.context.enableClippingLines);
@@ -102,11 +103,29 @@ export function Stage({
       return new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
     }
 
-    const normal = new THREE.Vector3(...selectedPlane.normal).multiplyScalar(clippingPlaneDirection);
+    // Start with the base normal from the selected plane
+    const normal = new THREE.Vector3(...selectedPlane.normal);
+
+    // Apply rotation to the normal if rotation is set
+    const [rotX, rotY, rotZ] = clippingPlaneRotation;
+    if (rotX !== 0 || rotY !== 0 || rotZ !== 0) {
+      const euler = new THREE.Euler(rotX, rotY, rotZ);
+      normal.applyEuler(euler);
+    }
+
+    // Apply direction after rotation
+    normal.multiplyScalar(clippingPlaneDirection);
+
     const constant = -clippingPlaneTranslation;
 
     return new THREE.Plane(normal, constant);
-  }, [selectedClippingPlaneId, clippingPlaneTranslation, clippingPlaneDirection, availableClippingPlanes]);
+  }, [
+    selectedClippingPlaneId,
+    clippingPlaneTranslation,
+    clippingPlaneRotation,
+    clippingPlaneDirection,
+    availableClippingPlanes,
+  ]);
 
   // Create striped material for capping surface
   const cappingMaterial = useMemo(() => createStripedMaterial(), []);

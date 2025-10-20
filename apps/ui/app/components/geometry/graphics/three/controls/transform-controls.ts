@@ -32,6 +32,7 @@ import {
   MeshMatcapMaterial,
 } from 'three';
 import arrowSvg from '#components/geometry/graphics/three/icons/translation-arrow.svg?raw';
+import doubleArrowSvg from '#components/geometry/graphics/three/icons/translation-double-arrow.svg?raw';
 import { SvgGeometry } from '#components/geometry/graphics/three/geometries/svg-geometry.js';
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
 
@@ -863,6 +864,7 @@ class TransformControlsGizmo extends Object3D {
 
     // Const svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 13 4"><path d="M 0 1 H 7.881 L 7.881 0 L 13 2 L 7.881 4 L 7.881 3 H 0 V 1 Z"></path></svg>`;
     const arrowGeometry = SvgGeometry({ svg: arrowSvg, depth: 100 });
+    const doubleArrowGeometry = SvgGeometry({ svg: doubleArrowSvg, depth: 100 });
 
     const lineGeometry = new BufferGeometry();
     lineGeometry.setAttribute('position', new Float32BufferAttribute([0, 0, 0, 1, 0, 0], 3));
@@ -893,6 +895,7 @@ class TransformControlsGizmo extends Object3D {
     // Gizmo definitions - custom hierarchy definitions for setupGizmo() function
 
     const gizmoTranslationScaleFactor = 0.000_25;
+    const gizmoRotationScaleFactor = 0.000_15;
     const gizmoPickerTranslationScaleFactor = 0.0005;
     const gizmoTranslationScale = [
       gizmoTranslationScaleFactor,
@@ -905,6 +908,7 @@ class TransformControlsGizmo extends Object3D {
       gizmoPickerTranslationScaleFactor,
     ];
     const gizmoMeshOffset = 0.5;
+    const gizmoRotationScale = [gizmoRotationScaleFactor, gizmoRotationScaleFactor, gizmoRotationScaleFactor];
 
     // Order is:
     // 1. The Object3D to render
@@ -1013,16 +1017,19 @@ class TransformControlsGizmo extends Object3D {
 
     const gizmoRotate = {
       X: [
-        [new Line(CircleGeometry(1, 0.5), matLineRed)],
-        [new Mesh(new OctahedronGeometry(0.04, 0), matRed), [0, 0, 0.99], undefined, [1, 3, 1]],
+        // [new Line(CircleGeometry(1, 0.5), matLineRed)],
+        [new Mesh(doubleArrowGeometry, matRed), [0, 0, 0.99], [0, Math.PI / 2, Math.PI / 2], gizmoRotationScale],
+        // [new Mesh(new OctahedronGeometry(0.04, 0), matRed), [0, 0, 0.99], undefined, [1, 3, 1]],
       ],
       Y: [
-        [new Line(CircleGeometry(1, 0.5), matLineGreen), undefined, [0, 0, -Math.PI / 2]],
-        [new Mesh(new OctahedronGeometry(0.04, 0), matGreen), [0, 0, 0.99], undefined, [3, 1, 1]],
+        // [new Line(CircleGeometry(1, 0.5), matLineGreen), undefined, [0, 0, -Math.PI / 2]],
+        [new Mesh(doubleArrowGeometry, matGreen), [0, 0, 0.99], [Math.PI / 2, 0, 0], gizmoRotationScale],
+        // [new Mesh(new OctahedronGeometry(0.04, 0), matGreen), [0, 0, 0.99], undefined, [3, 1, 1]],
       ],
       Z: [
-        [new Line(CircleGeometry(1, 0.5), matLineBlue), undefined, [0, Math.PI / 2, 0]],
-        [new Mesh(new OctahedronGeometry(0.04, 0), matBlue), [0.99, 0, 0], undefined, [1, 3, 1]],
+        // [new Line(CircleGeometry(1, 0.5), matLineBlue), undefined, [0, Math.PI / 2, 0]],
+        [new Mesh(doubleArrowGeometry, matBlue), [0.99, 0, 0], [0, 0, -Math.PI / 2], gizmoRotationScale],
+        // [new Mesh(new OctahedronGeometry(0.04, 0), matBlue), [0.99, 0, 0], undefined, [1, 3, 1]],
       ],
       E: [
         [new Line(CircleGeometry(1.25, 1), matLineYellowTransparent), undefined, [0, Math.PI / 2, 0]],

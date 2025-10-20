@@ -1,5 +1,6 @@
 import { OrbitControls } from '@react-three/drei';
 import React from 'react';
+import type * as THREE from 'three';
 import { useSelector } from '@xstate/react';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { ViewportGizmoCube } from '#components/geometry/graphics/three/controls/viewport-gizmo-cube.js';
@@ -55,6 +56,13 @@ export const Controls = React.memo(function ({
     graphicsActor.send({ type: 'setClippingPlaneTranslation', payload: value });
   };
 
+  const handleSetRotation = (eulerRotation: THREE.Euler): void => {
+    graphicsActor.send({
+      type: 'setClippingPlaneRotation',
+      payload: [eulerRotation.x, eulerRotation.y, eulerRotation.z],
+    });
+  };
+
   return (
     <>
       <OrbitControls
@@ -73,6 +81,7 @@ export const Controls = React.memo(function ({
         onSelectPlane={handleSelectPlane}
         onToggleDirection={handleToggleDirection}
         onSetTranslation={handleSetTranslation}
+        onSetRotation={handleSetRotation}
       />
       {enableGizmo ? <ViewportGizmoCube /> : null}
     </>

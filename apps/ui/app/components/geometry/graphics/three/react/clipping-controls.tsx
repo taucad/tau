@@ -358,6 +358,7 @@ type ClippingControlsProperties = {
   readonly onSelectPlane: (planeId: PlaneId) => void;
   readonly onToggleDirection: () => void;
   readonly onSetTranslation: (value: number) => void;
+  readonly onSetRotation: (rotation: THREE.Euler) => void;
   readonly uiPadding?: number;
 };
 
@@ -370,6 +371,7 @@ export function ClippingControls({
   onSelectPlane,
   onToggleDirection,
   onSetTranslation,
+  onSetRotation,
   uiPadding = 15,
 }: ClippingControlsProperties): React.JSX.Element | undefined {
   const transformControlsRef = useRef<THREE.Object3D>(undefined);
@@ -466,6 +468,29 @@ export function ClippingControls({
             const { position } = currentObject;
             const projectedDistance = position.dot(normal);
             onSetTranslation(projectedDistance);
+          }
+        }}
+      />
+      <TransformControls
+        object={transformControlsRef.current}
+        mode="rotate"
+        size={1}
+        visible={false}
+        showX={Math.abs(normal.y) > 0.5 || Math.abs(normal.z) > 0.5}
+        showY={Math.abs(normal.x) > 0.5 || Math.abs(normal.z) > 0.5}
+        showZ={Math.abs(normal.x) > 0.5 || Math.abs(normal.y) > 0.5}
+        onMouseDown={() => {
+          setIsDragging(true);
+        }}
+        onMouseUp={() => {
+          setIsDragging(false);
+        }}
+        onChange={() => {
+          const currentObject = transformControlsRef.current;
+          if (currentObject) {
+            // Extract the rotation from the object
+            const rotation = currentObject.rotation.clone();
+            onSetRotation(rotation);
           }
         }}
       />

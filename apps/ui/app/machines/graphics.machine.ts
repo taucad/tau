@@ -45,6 +45,7 @@ export type GraphicsContext = {
     stripeWidth: number;
   };
   clippingPlaneTranslation: number; // Current translation offset
+  clippingPlaneRotation: [number, number, number]; // Euler rotation as tuple [x, y, z]
   clippingPlaneDirection: 1 | -1; // Normal direction multiplier
   enableClippingLines: boolean; // Whether to cut lines
   enableClippingMesh: boolean; // Whether to cut meshes
@@ -88,6 +89,7 @@ export type GraphicsEvent =
   | { type: 'setClippingPlaneActive'; payload: boolean }
   | { type: 'selectClippingPlane'; payload: 'xy' | 'xz' | 'yz' | undefined }
   | { type: 'setClippingPlaneTranslation'; payload: number }
+  | { type: 'setClippingPlaneRotation'; payload: [number, number, number] }
   | { type: 'toggleClippingPlaneDirection' }
   | {
       type: 'setClippingPlaneVisualization';
@@ -508,11 +510,23 @@ export const graphicsMachine = setup({
         assertEvent(event, 'selectClippingPlane');
         return event.payload === undefined ? 0 : 0;
       },
+      // Reset rotation when changing planes
+      clippingPlaneRotation({ event }): [number, number, number] {
+        assertEvent(event, 'selectClippingPlane');
+        return event.payload === undefined ? [0, 0, 0] : [0, 0, 0];
+      },
     }),
 
     setClippingPlaneTranslation: assign({
       clippingPlaneTranslation({ event }) {
         assertEvent(event, 'setClippingPlaneTranslation');
+        return event.payload;
+      },
+    }),
+
+    setClippingPlaneRotation: assign({
+      clippingPlaneRotation({ event }) {
+        assertEvent(event, 'setClippingPlaneRotation');
         return event.payload;
       },
     }),
@@ -594,6 +608,7 @@ export const graphicsMachine = setup({
       stripeWidth: 1,
     },
     clippingPlaneTranslation: 0,
+    clippingPlaneRotation: [0, 0, 0],
     clippingPlaneDirection: -1,
     enableClippingLines: true,
     enableClippingMesh: true,
@@ -664,6 +679,9 @@ export const graphicsMachine = setup({
         },
         setClippingPlaneTranslation: {
           actions: 'setClippingPlaneTranslation',
+        },
+        setClippingPlaneRotation: {
+          actions: 'setClippingPlaneRotation',
         },
         toggleClippingPlaneDirection: {
           actions: 'toggleClippingPlaneDirection',

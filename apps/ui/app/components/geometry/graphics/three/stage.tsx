@@ -6,7 +6,7 @@ import { useSelector } from '@xstate/react';
 import { useFrame } from '@react-three/fiber';
 import { AxesHelper } from '#components/geometry/graphics/three/react/axes-helper.js';
 import { Grid } from '#components/geometry/graphics/three/grid.js';
-import { useCameraReset } from '#components/geometry/graphics/three/hooks/use-camera-reset.js';
+import { useCameraReset } from '#components/geometry/graphics/three/use-camera-reset.js';
 import { Lights } from '#components/geometry/graphics/three/react/lights.js';
 import { Cutter } from '#components/geometry/graphics/three/react/cutter.js';
 import { createStripedMaterial } from '#components/geometry/graphics/three/materials/striped-material.js';

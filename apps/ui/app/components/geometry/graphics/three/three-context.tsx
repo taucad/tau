@@ -2,7 +2,7 @@ import type { CanvasProps } from '@react-three/fiber';
 import { Canvas } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useEffect, useState } from 'react';
-import { Scene } from '#components/geometry/graphics/three/react/scene.js';
+import { Scene } from '#components/geometry/graphics/three/scene.js';
 import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
 import rotateIconBase64 from '#components/geometry/graphics/three/icons/rotate-icon.svg?base64';
 import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js';

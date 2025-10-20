@@ -123,7 +123,6 @@ type PlaneSelectorProperties = {
   readonly planeId: PlaneId;
   readonly position: [number, number, number];
   readonly color: string;
-  readonly isSelected: boolean;
   readonly onClick: (planeId: PlaneId) => void;
   readonly matcapTexture: THREE.Texture;
   readonly size: number;
@@ -134,7 +133,6 @@ function PlaneSelector({
   planeId,
   position,
   color,
-  isSelected,
   onClick,
   matcapTexture,
   size,
@@ -200,7 +198,7 @@ function PlaneSelector({
 
   const rotation = getPlaneRotation(planeId);
 
-  const opacity = isSelected ? 1 : isHovered ? 0.7 : 0.5;
+  const opacity = isHovered ? 0.7 : 0.5;
 
   return (
     <mesh
@@ -361,7 +359,6 @@ type ClippingControlsProperties = {
   readonly onToggleDirection: () => void;
   readonly onSetTranslation: (value: number) => void;
   readonly uiPadding?: number;
-  readonly matcapTexture?: THREE.Texture;
 };
 
 export function ClippingControls({
@@ -374,12 +371,10 @@ export function ClippingControls({
   onToggleDirection,
   onSetTranslation,
   uiPadding = 15,
-  matcapTexture: matcapTextureProp,
 }: ClippingControlsProperties): React.JSX.Element | undefined {
   const transformControlsRef = useRef<THREE.Object3D>(undefined);
   const [isDragging, setIsDragging] = useState(false);
-  const fallbackMatcap = useMemo(() => matcapMaterial(), []);
-  const matcapTexture = matcapTextureProp ?? fallbackMatcap;
+  const matcapTexture = useMemo(() => matcapMaterial(), []);
 
   const camera = useThree((state) => state.camera);
 
@@ -416,7 +411,6 @@ export function ClippingControls({
           planeId="xy"
           position={[20, -20, 0]}
           color="#3b82f6"
-          isSelected={false}
           size={60}
           offset={60}
           onClick={onSelectPlane}
@@ -426,7 +420,6 @@ export function ClippingControls({
           planeId="xz"
           position={[20, 0, 20]}
           color="#22c55e"
-          isSelected={false}
           size={60}
           offset={60}
           onClick={onSelectPlane}
@@ -436,7 +429,6 @@ export function ClippingControls({
           planeId="yz"
           position={[0, -20, 20]}
           color="#ef4444"
-          isSelected={false}
           size={60}
           offset={60}
           onClick={onSelectPlane}
@@ -454,7 +446,7 @@ export function ClippingControls({
       </mesh>
 
       <TransformControls
-        object={transformControlsRef.current}
+        object={transformControlsRef as React.RefObject<THREE.Object3D>}
         mode="translate"
         size={1}
         visible={false}

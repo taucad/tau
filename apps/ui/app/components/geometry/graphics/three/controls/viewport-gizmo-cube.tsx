@@ -8,15 +8,17 @@ import type { OrbitControls } from 'three/addons';
 import type { ReactNode } from 'react';
 import { Theme, useTheme } from 'remix-themes';
 import { useColor } from '#hooks/use-color.js';
-import { createViewportGizmoCubeAxes } from '#components/geometry/graphics/three/viewport-gizmo-cube-axes.js';
+import { createViewportGizmoCubeAxes } from '#components/geometry/graphics/three/controls/viewport-gizmo-cube-axes.js';
 
-type ViewportGizmoOnshapeProps = {
+type ViewportGizmoCubeProps = {
   readonly size?: number;
 };
 
-export function ViewportGizmoOnshape({ size = 128 }: ViewportGizmoOnshapeProps): ReactNode {
+const className = 'viewport-gizmo-cube';
+
+export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): ReactNode {
   const { camera, gl, controls, scene, invalidate } = useThree((state) => ({
-    camera: state.camera,
+    camera: state.camera as THREE.PerspectiveCamera,
     gl: state.gl,
     controls: state.controls as OrbitControls,
     scene: state.scene,
@@ -45,6 +47,7 @@ export function ViewportGizmoOnshape({ size = 128 }: ViewportGizmoOnshapeProps):
 
     // Create a separate canvas for the gizmo
     const canvas = document.createElement('canvas');
+    canvas.className = className;
     canvas.style.position = 'absolute';
     canvas.style.bottom = '0';
     canvas.style.right = '0';
@@ -71,7 +74,6 @@ export function ViewportGizmoOnshape({ size = 128 }: ViewportGizmoOnshapeProps):
     renderer.setAnimationLoop(animation);
     renderer.setClearColor(0x00_00_00, 0);
 
-    const backgroundColor = theme === Theme.DARK ? 0x44_44_44 : 0xcc_cc_cc;
     const faceConfig = {
       color: theme === Theme.DARK ? 0x33_33_33 : 0xdd_dd_dd,
       labelColor: theme === Theme.DARK ? 0xff_ff_ff : 0x00_00_00,
@@ -96,22 +98,21 @@ export function ViewportGizmoOnshape({ size = 128 }: ViewportGizmoOnshapeProps):
 
     // Configure the gizmo options
     const gizmoConfig: GizmoOptions = {
-      type: 'cube',
+      type: 'rounded-cube',
       placement: 'bottom-right',
       size,
       font: {
         weight: 'normal',
         family: 'monospace',
       },
-      resolution: 256,
-      background: {
-        color: backgroundColor,
-        hover: { color: backgroundColor },
-      },
+      radius: 0.3,
       offset: {
         bottom: 0,
         right: 0,
       },
+      className,
+      resolution: 256,
+      container,
       corners: cornerConfig,
       edges: edgeConfig,
       right: faceConfig,

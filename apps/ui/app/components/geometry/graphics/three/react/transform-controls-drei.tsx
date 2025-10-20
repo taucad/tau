@@ -3,7 +3,7 @@ import { useThree } from '@react-three/fiber';
 import * as React from 'react';
 import * as THREE from 'three';
 import type { ForwardRefComponent } from '@react-three/drei/helpers/ts-utils.js';
-import { TransformControls as TransformControlsImpl } from '#components/geometry/graphics/three/transform-controls.js';
+import { TransformControls as TransformControlsImpl } from '#components/geometry/graphics/three/controls/transform-controls.js';
 
 type ControlsProto = {
   enabled: boolean;

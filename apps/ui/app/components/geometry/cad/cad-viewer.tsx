@@ -1,6 +1,5 @@
-// Import { GltfMesh } from '#components/geometry/graphics/three/gltf-mesh.js';
 import type { Geometry } from '@taucad/types';
-import { GltfMesh } from '#components/geometry/graphics/three/gltf-mesh.js';
+import { GltfMesh } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import { ThreeProvider } from '#components/geometry/graphics/three/three-context.js';
 import type { ThreeViewerProperties } from '#components/geometry/graphics/three/three-context.js';
 import { SvgViewer } from '#components/geometry/graphics/svg/svg-viewer.js';

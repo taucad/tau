@@ -1,6 +1,7 @@
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import type { Mesh } from 'three';
-import { MeshMatcapMaterial, SRGBColorSpace, TextureLoader } from 'three';
+import { MeshMatcapMaterial } from 'three';
+import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
 
 /**
  * Apply Three.js matcap to a GLTF scene, respecting vertex colors and material colors.
@@ -9,9 +10,7 @@ import { MeshMatcapMaterial, SRGBColorSpace, TextureLoader } from 'three';
  */
 export const applyMatcap = async (gltf: GLTF): Promise<void> => {
   // Load matcap texture
-  const textureLoader = new TextureLoader();
-  const matcapTexture = await textureLoader.loadAsync('/textures/matcap-soft.png');
-  matcapTexture.colorSpace = SRGBColorSpace;
+  const matcapTexture = matcapMaterial();
 
   gltf.scene.traverse((child) => {
     if ('isMesh' in child && child.isMesh) {

@@ -4,13 +4,12 @@ import * as THREE from 'three';
 import { PerspectiveCamera } from '@react-three/drei';
 import { useSelector } from '@xstate/react';
 import { useFrame } from '@react-three/fiber';
-import { AxesHelper } from '#components/geometry/graphics/three/axes-helper.js';
+import { AxesHelper } from '#components/geometry/graphics/three/react/axes-helper.js';
 import { Grid } from '#components/geometry/graphics/three/grid.js';
-import { useCameraReset } from '#components/geometry/graphics/three/use-camera-reset.js';
-import { Lights } from '#components/geometry/graphics/three/lights.js';
-import { ClippingPlane } from '#components/geometry/graphics/three/clipping-plane.js';
-import { Cutter } from '#components/geometry/graphics/three/cutter.js';
-import { createStripedMaterial } from '#components/geometry/graphics/three/striped-material.js';
+import { useCameraReset } from '#components/geometry/graphics/three/hooks/use-camera-reset.js';
+import { Lights } from '#components/geometry/graphics/three/react/lights.js';
+import { Cutter } from '#components/geometry/graphics/three/react/cutter.js';
+import { createStripedMaterial } from '#components/geometry/graphics/three/materials/striped-material.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 
 export type StageOptions = {
@@ -220,8 +219,6 @@ export function Stage({
       <group ref={outer}>
         {properties.enableAxes ? <AxesHelper /> : null}
         {properties.enableGrid ? <Grid /> : null}
-
-        <ClippingPlane />
         <Cutter
           plane={clippingPlane}
           enableCutting={Boolean(isClippingPlaneActive && selectedClippingPlaneId)}

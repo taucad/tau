@@ -5,7 +5,7 @@ import { useActorRef, useSelector } from '@xstate/react';
 import type { OrbitControls } from 'three/addons';
 import { graphicsActor, screenshotCapabilityActor } from '#routes/builds_.$id/graphics-actor.js';
 import { controlsListenerMachine } from '#machines/controls-listener.machine.js';
-import { updateCameraFov } from '#components/geometry/graphics/three/camera-reset.js';
+import { updateCameraFov } from '#components/geometry/graphics/three/utils/camera.utils.js';
 
 /**
  * Component that bridges Three.js context with XState actors

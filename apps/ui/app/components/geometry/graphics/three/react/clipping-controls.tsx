@@ -2,33 +2,15 @@ import React, { useRef, useState, useEffect, useMemo } from 'react';
 import type { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Html, RoundedBoxGeometry } from '@react-three/drei';
-import { useSelector } from '@xstate/react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { ArrowLeftRight } from 'lucide-react';
-import { TextureLoader } from 'three';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { Button } from '#components/ui/button.js';
 import { ChatParametersInputNumber } from '#routes/builds_.$id/chat-parameters-input-number.js';
-import { TransformControls } from '#components/geometry/graphics/three/transform-controls-drei.js';
+import { TransformControls } from '#components/geometry/graphics/three/react/transform-controls-drei.js';
+import { pixelsToWorldUnits } from '#components/geometry/graphics/three/utils/spatial.utils.js';
+import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
 
-type PlaneId = 'xy' | 'xz' | 'yz';
-
-// Convert a pixel measure to world units at a given world-space point.
-// Accepts a loosely-typed viewport to avoid version-specific type coupling.
-type PixelsToWorldUnitsInput = {
-  viewport: unknown;
-  camera: THREE.Camera;
-  size: { width: number; height: number };
-  at: THREE.Vector3;
-  pixels: number;
-};
-
-function pixelsToWorldUnits({ viewport, camera, size, at, pixels }: PixelsToWorldUnitsInput): number {
-  const { getCurrentViewport } = viewport as { getCurrentViewport: (...args: unknown[]) => unknown };
-  const vp = getCurrentViewport(camera, at) as { width: number; height: number };
-  const worldPerPixel = vp.height / size.height;
-  return pixels * worldPerPixel;
-}
+export type PlaneId = 'xy' | 'xz' | 'yz';
 
 // Calculate rotation for plane selector based on plane orientation
 // - XY plane: normal = [0, 0, 1], no rotation needed (default orientation)
@@ -367,65 +349,65 @@ function ArrowControls({
   );
 }
 
-export function ClippingPlane(): React.JSX.Element | undefined {
+export type AvailablePlane = { id: PlaneId; normal: [number, number, number]; constant: number };
+
+type ClippingControlsProperties = {
+  readonly isActive: boolean;
+  readonly selectedPlaneId: PlaneId | undefined;
+  readonly availablePlanes: AvailablePlane[];
+  readonly translation: number;
+  readonly direction: 1 | -1;
+  readonly onSelectPlane: (planeId: PlaneId) => void;
+  readonly onToggleDirection: () => void;
+  readonly onSetTranslation: (value: number) => void;
+  readonly uiPadding?: number;
+  readonly matcapTexture?: THREE.Texture;
+};
+
+export function ClippingControls({
+  isActive,
+  selectedPlaneId,
+  availablePlanes,
+  translation,
+  direction,
+  onSelectPlane,
+  onToggleDirection,
+  onSetTranslation,
+  uiPadding = 15,
+  matcapTexture: matcapTextureProp,
+}: ClippingControlsProperties): React.JSX.Element | undefined {
   const transformControlsRef = useRef<THREE.Object3D>(undefined);
   const [isDragging, setIsDragging] = useState(false);
-  const matcapTexture = useMemo(() => {
-    const textureLoader = new TextureLoader();
-    const matcapTexture = textureLoader.load('/textures/matcap-soft.png');
-    matcapTexture.colorSpace = THREE.SRGBColorSpace;
-    return matcapTexture;
-  }, []);
+  const fallbackMatcap = useMemo(() => matcapMaterial(), []);
+  const matcapTexture = matcapTextureProp ?? fallbackMatcap;
 
   const camera = useThree((state) => state.camera);
 
-  // Subscribe to graphics machine state
-  const isActive = useSelector(graphicsActor, (state) => state.context.isClippingPlaneActive);
-  const selectedPlaneId = useSelector(graphicsActor, (state) => state.context.selectedClippingPlaneId);
-  const translation = useSelector(graphicsActor, (state) => state.context.clippingPlaneTranslation);
-  const direction = useSelector(graphicsActor, (state) => state.context.clippingPlaneDirection);
-  const availablePlanes = useSelector(graphicsActor, (state) => state.context.availableClippingPlanes);
-
   // Find the selected plane configuration
   const selectedPlane = availablePlanes.find((plane) => plane.id === selectedPlaneId);
-
-  const handlePlaneSelect = (planeId: PlaneId): void => {
-    graphicsActor.send({
-      type: 'selectClippingPlane',
-      payload: planeId,
-    });
-  };
-
-  const handleDirectionToggle = (): void => {
-    graphicsActor.send({
-      type: 'toggleClippingPlaneDirection',
-    });
-  };
 
   // Calculate plane properties before any conditional returns
   const [nx, ny, nz] = selectedPlane?.normal ?? [0, 0, 1];
   const normal = new THREE.Vector3(nx, ny, nz).multiplyScalar(direction);
   const controlPosition = calculateControlPosition(normal, translation);
 
-  const uiPadding = 15;
   const uiPosition = calculateUiPosition(normal, translation, uiPadding);
 
   // Update transform controls position based on translation
-  useEffect(() => {
+  useFrame(() => {
     if (transformControlsRef.current && selectedPlane) {
       const [x, y, z] = selectedPlane.normal;
-      const normal = new THREE.Vector3(x, y, z).multiplyScalar(direction);
-      const position = normal.clone().multiplyScalar(translation);
+      const nextNormal = new THREE.Vector3(x, y, z).multiplyScalar(direction);
+      const position = nextNormal.clone().multiplyScalar(translation);
       transformControlsRef.current.position.copy(position);
     }
-  }, [translation, selectedPlane, direction]);
+  });
 
   if (!isActive) {
     return undefined;
   }
 
   // If no plane is selected, show the 3 plane selectors
-  // Position them spread out in 3D space so they're not stacked
   if (!selectedPlane) {
     return (
       <group>
@@ -437,7 +419,7 @@ export function ClippingPlane(): React.JSX.Element | undefined {
           isSelected={false}
           size={60}
           offset={60}
-          onClick={handlePlaneSelect}
+          onClick={onSelectPlane}
         />
         <PlaneSelector
           matcapTexture={matcapTexture}
@@ -447,7 +429,7 @@ export function ClippingPlane(): React.JSX.Element | undefined {
           isSelected={false}
           size={60}
           offset={60}
-          onClick={handlePlaneSelect}
+          onClick={onSelectPlane}
         />
         <PlaneSelector
           matcapTexture={matcapTexture}
@@ -457,7 +439,7 @@ export function ClippingPlane(): React.JSX.Element | undefined {
           isSelected={false}
           size={60}
           offset={60}
-          onClick={handlePlaneSelect}
+          onClick={onSelectPlane}
         />
       </group>
     );
@@ -491,10 +473,7 @@ export function ClippingPlane(): React.JSX.Element | undefined {
             // Project the position onto the normal axis
             const { position } = currentObject;
             const projectedDistance = position.dot(normal);
-            graphicsActor.send({
-              type: 'setClippingPlaneTranslation',
-              payload: projectedDistance,
-            });
+            onSetTranslation(projectedDistance);
           }
         }}
       />
@@ -506,13 +485,8 @@ export function ClippingPlane(): React.JSX.Element | undefined {
         translation={translation}
         isDragging={isDragging}
         normal={normal}
-        onTranslationChange={(value) => {
-          graphicsActor.send({
-            type: 'setClippingPlaneTranslation',
-            payload: value,
-          });
-        }}
-        onDirectionToggle={handleDirectionToggle}
+        onTranslationChange={onSetTranslation}
+        onDirectionToggle={onToggleDirection}
       />
     </group>
   );

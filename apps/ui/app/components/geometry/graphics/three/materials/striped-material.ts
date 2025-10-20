@@ -3,29 +3,29 @@ import * as THREE from 'three';
 type StripedMaterialProperties = {
   /**
    * The frequency of the stripes (distance between stripes in pixels).
-   * @default 15
+   * @default 2
    */
-  readonly stripeFrequency: number;
+  readonly stripeFrequency?: number;
   /**
    * The width of each stripe in pixels.
-   * @default 3.0
+   * @default 0.25
    */
-  readonly stripeWidth: number;
+  readonly stripeWidth?: number;
   /**
    * The base color of the material.
    * @default 0xffffff (white)
    */
-  readonly baseColor: number;
+  readonly baseColor?: number;
   /**
    * The color of the stripes.
    * @default 0xffffff (white)
    */
-  readonly stripeColor: THREE.Color;
+  readonly stripeColor?: number;
   /**
    * Stripe angle in radians (screen space). 0 = horizontal, PI/2 = vertical.
    * @default Math.PI / 4 (45° diagonal)
    */
-  readonly stripeAngle: number;
+  readonly stripeAngle?: number;
 };
 
 /**
@@ -42,13 +42,15 @@ type StripedMaterialProperties = {
  * @param stripeColor - Color of the stripes
  * @returns A THREE.ShaderMaterial with striped pattern
  */
-function createStripedMaterialInternal({
-  stripeFrequency,
-  baseColor,
-  stripeColor,
-  stripeWidth,
-  stripeAngle,
-}: Omit<StripedMaterialProperties, 'metalness' | 'roughness'>): THREE.ShaderMaterial {
+export function createStripedMaterial(properties?: StripedMaterialProperties): THREE.ShaderMaterial {
+  const {
+    stripeFrequency = 2,
+    stripeWidth = 0.25,
+    baseColor = 0xdd_dd_dd,
+    stripeColor = 0xbb_bb_bb,
+    stripeAngle = Math.PI / 4,
+  } = properties ?? {};
+
   const stripedMaterial = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
     transparent: true,
@@ -68,7 +70,7 @@ function createStripedMaterialInternal({
         value: stripeFrequency,
       },
       uStripeColor: {
-        value: stripeColor,
+        value: new THREE.Color(stripeColor),
       },
       uStripeWidth: {
         value: stripeWidth,
@@ -126,33 +128,4 @@ function createStripedMaterialInternal({
   });
 
   return stripedMaterial;
-}
-
-/**
- * Creates a striped material with default settings for cross-section capping.
- * The material displays white with white horizontal stripes in screen space.
- *
- * ### Features:
- * - **Screen-space stripes**: Stripes rendered using screen coordinates for consistent appearance
- * - **Stencil integration**: Works with Cutter component for cross-section rendering
- * - **Customizable appearance**: Configurable stripe frequency, width, and colors
- *
- * ### Usage:
- * ```tsx
- * const cappingMaterial = createStripedMaterial();
- * <Cutter cappingMaterial={cappingMaterial}>
- *   {children}
- * </Cutter>
- * ```
- *
- * @returns A THREE.ShaderMaterial with white horizontal stripes
- */
-export function createStripedMaterial(): THREE.ShaderMaterial {
-  return createStripedMaterialInternal({
-    stripeFrequency: 2,
-    stripeWidth: 0.25,
-    stripeAngle: Math.PI / 4,
-    baseColor: 0xdd_dd_dd,
-    stripeColor: new THREE.Color(0xbb_bb_bb),
-  });
 }

@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { GLTFLoader } from 'three/addons';
 import type { Group } from 'three';
-import { applyLineSegments } from '#components/geometry/graphics/three/gltf-edges.js';
-import { applyMatcap } from '#components/geometry/graphics/three/gltf-matcap.js';
+import { applyLineSegments } from '#components/geometry/graphics/three/materials/gltf-edges.js';
+import { applyMatcap } from '#components/geometry/graphics/three/materials/gltf-matcap.js';
 
 type GltfMeshDisplayProperties = {
   /**
@@ -124,6 +124,5 @@ export function GltfMesh({
     return undefined;
   }
 
-  // eslint-disable-next-line react/no-unknown-property -- Three.js primitive requires object prop
   return <primitive object={scene} />;
 }

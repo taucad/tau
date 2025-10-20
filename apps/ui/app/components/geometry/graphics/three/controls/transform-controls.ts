@@ -30,11 +30,10 @@ import {
   TorusGeometry,
   Vector3,
   MeshMatcapMaterial,
-  TextureLoader,
-  SRGBColorSpace,
 } from 'three';
-import arrowSvg from '#components/geometry/graphics/three/translation-arrow.svg?raw';
-import { SvgGeometry } from '#components/geometry/graphics/three/svg-geometry.js';
+import arrowSvg from '#components/geometry/graphics/three/icons/translation-arrow.svg?raw';
+import { SvgGeometry } from '#components/geometry/graphics/three/geometries/svg-geometry.js';
+import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
 
 export type TransformControlsPointerObject = {
   x: number;
@@ -766,9 +765,7 @@ class TransformControlsGizmo extends Object3D {
   public constructor() {
     super();
 
-    const textureLoader = new TextureLoader();
-    const matcapTexture = textureLoader.load('/textures/matcap-soft.png');
-    matcapTexture.colorSpace = SRGBColorSpace;
+    const matcapTexture = matcapMaterial();
 
     const gizmoMaterial = new MeshMatcapMaterial({
       matcap: matcapTexture,

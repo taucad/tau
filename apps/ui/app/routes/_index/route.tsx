@@ -29,6 +29,7 @@ export const handle: Handle = {
 export default function ChatStart(): React.JSX.Element {
   const navigate = useNavigate();
   const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
+  const [, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
 
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content, model, metadata, imageUrls }) => {
@@ -78,13 +79,16 @@ export default function ChatStart(): React.JSX.Element {
           },
         });
 
+        // Ensure chat is open when navigating to the build page
+        setIsChatOpen(true);
+
         // Navigate immediately - the build page will handle the streaming
         await navigate(`/builds/${build.id}`);
       } catch {
         toast.error('Failed to create build');
       }
     },
-    [navigate, selectedKernel],
+    [navigate, selectedKernel, setIsChatOpen],
   );
 
   return (

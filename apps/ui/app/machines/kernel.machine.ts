@@ -72,7 +72,7 @@ const createWorkersActor = fromPromise<
 
     // Initialize all workers with the default exception handling mode
     await Promise.all([
-      wrappedReplicadWorker.initialize(proxy(onLog), { withExceptions: true }),
+      wrappedReplicadWorker.initialize(proxy(onLog), { withExceptions: false }),
       wrappedOpenscadWorker.initialize(proxy(onLog), {}),
       wrappedZooWorker.initialize(proxy(onLog), { apiKey: '123' }),
     ]);

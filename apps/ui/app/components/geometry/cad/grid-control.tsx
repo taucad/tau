@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useEffect, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
-import { Lock, LockIcon, LockOpen } from 'lucide-react';
+import { Info, Lock, LockIcon, LockOpen } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
@@ -172,8 +172,8 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
             Lock Grid Size ({localizedSmallGridSize} {unit})
           </span>
         </DropdownMenuSwitchItem>
-        <span className="p-2 text-xs font-medium text-muted-foreground/80">
-          Tip: Adjust grid size by changing zoom level
+        <span className="inline-flex items-center gap-1 p-2 text-xs font-medium text-muted-foreground/80">
+          <Info className="size-3 stroke-2" /> Adjust grid size by changing zoom level
         </span>
       </DropdownMenuContent>
     </DropdownMenu>

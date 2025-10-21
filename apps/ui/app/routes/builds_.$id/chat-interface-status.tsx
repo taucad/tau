@@ -38,6 +38,22 @@ const infoFromState = (
       };
     }
 
+    case state.matches({ operational: { measure: 'selecting' } }): {
+      return {
+        label: 'Measuring Tool',
+        description: 'Click points to measure distances',
+        tooltipLabel: 'Close measuring tool',
+      };
+    }
+
+    case state.matches({ operational: { measure: 'selected' } }): {
+      return {
+        label: 'Measure Mode',
+        description: 'Click more points or clear to restart',
+        tooltipLabel: 'Close measure mode',
+      };
+    }
+
     default: {
       return {
         label: 'Unknown',
@@ -52,11 +68,12 @@ export function ChatInterfaceStatus({ className, ...props }: React.HTMLAttribute
   const state = useSelector(graphicsActor, (state) => state);
   const [isViewerStatusOpen, setIsViewerStatusOpen] = useCookie(cookieName.viewOpStatus, true);
 
-  const handleClose = () => {
-    graphicsActor.send({
-      type: 'setSectionViewActive',
-      payload: false,
-    });
+  const handleClose = (): void => {
+    if (state.matches({ operational: 'section-view' })) {
+      graphicsActor.send({ type: 'setSectionViewActive', payload: false });
+    } else if (state.matches({ operational: 'measure' })) {
+      graphicsActor.send({ type: 'setMeasureActive', payload: false });
+    }
   };
 
   const { formattedKeyCombination } = useKeydown(
@@ -68,7 +85,7 @@ export function ChatInterfaceStatus({ className, ...props }: React.HTMLAttribute
 
   const { label, description, tooltipLabel } = infoFromState(state);
 
-  return state.matches({ operational: 'section-view' }) ? (
+  return state.matches({ operational: 'section-view' }) || state.matches({ operational: 'measure' }) ? (
     <Collapsible
       {...props}
       open={isViewerStatusOpen}

@@ -50,6 +50,10 @@ export type GraphicsContext = {
   enableClippingLines: boolean; // Whether to cut lines
   enableClippingMesh: boolean; // Whether to cut meshes
 
+  // Measure state
+  isMeasureActive: boolean;
+  selectedMeasurePoints: Array<[number, number, number]>; // 3D points
+
   // Capability registrations
   screenshotCapability?: AnyActorRef;
   cameraCapability?: AnyActorRef;
@@ -97,6 +101,10 @@ export type GraphicsEvent =
     }
   | { type: 'setClippingLinesEnabled'; payload: boolean }
   | { type: 'setClippingMeshEnabled'; payload: boolean }
+  // Measure events
+  | { type: 'setMeasureActive'; payload: boolean }
+  | { type: 'addMeasurePoint'; payload: [number, number, number] }
+  | { type: 'clearMeasurePoints' }
   // Controls events
   | { type: 'controlsInteractionStart' }
   | { type: 'controlsChanged'; zoom: number; position: number; fov: number }
@@ -204,12 +212,14 @@ function calculateGeometryRadius(geometries: Geometry[]): number {
  *
  * operational (parent state)
  *   ├── ready (default state)
- *   └── section-view (modal viewing mode)
- *       ├── pending (waiting for plane selection)
- *       └── active (plane selected, can manipulate)
+ *   ├── section-view (modal viewing mode) [mutually exclusive]
+ *   │   ├── pending (waiting for plane selection)
+ *   │   └── active (plane selected, can manipulate)
+ *   └── measure (measurement mode) [mutually exclusive]
+ *       ├── selecting (clicking first points)
+ *       └── selected (points selected, can add more)
  *
- * Future modes can be added as siblings to section-view:
- *   ├── measurement (future)
+ * Future modes can be added as siblings:
  *   ├── annotation (future)
  *
  * Common events (grid, camera, visibility, screenshots) are handled
@@ -515,6 +525,13 @@ export const graphicsMachine = setup({
       },
     }),
 
+    deactivateSectionView: assign({
+      isSectionViewActive: false,
+      selectedSectionViewId: undefined,
+      sectionViewTranslation: 0,
+      sectionViewRotation: [0, 0, 0] as [number, number, number],
+    }),
+
     selectSectionView: assign({
       selectedSectionViewId({ event }) {
         assertEvent(event, 'selectSectionView');
@@ -581,6 +598,30 @@ export const graphicsMachine = setup({
         return event.payload;
       },
     }),
+
+    setMeasureActive: assign({
+      isMeasureActive({ event }) {
+        assertEvent(event, 'setMeasureActive');
+        return event.payload;
+      },
+      selectedMeasurePoints: [], // Clear points when toggling
+    }),
+
+    deactivateMeasure: assign({
+      isMeasureActive: false,
+      selectedMeasurePoints: [],
+    }),
+
+    addMeasurePoint: assign({
+      selectedMeasurePoints({ event, context }) {
+        assertEvent(event, 'addMeasurePoint');
+        return [...context.selectedMeasurePoints, event.payload];
+      },
+    }),
+
+    clearMeasurePoints: assign({
+      selectedMeasurePoints: [],
+    }),
   },
   guards: {
     isActivatingClipping({ event }) {
@@ -598,6 +639,17 @@ export const graphicsMachine = setup({
     isDeselectingPlane({ event }) {
       assertEvent(event, 'selectSectionView');
       return event.payload === undefined;
+    },
+    isActivatingMeasure({ event }) {
+      assertEvent(event, 'setMeasureActive');
+      return event.payload;
+    },
+    isDeactivatingMeasure({ event }) {
+      assertEvent(event, 'setMeasureActive');
+      return !event.payload;
+    },
+    hasSelectedPoints({ context }) {
+      return context.selectedMeasurePoints.length > 0;
     },
   },
 }).createMachine({
@@ -645,6 +697,10 @@ export const graphicsMachine = setup({
     sectionViewDirection: -1,
     enableClippingLines: true,
     enableClippingMesh: true,
+
+    // Measure state
+    isMeasureActive: false,
+    selectedMeasurePoints: [],
 
     // Capabilities
     screenshotCapability: undefined,
@@ -759,6 +815,11 @@ export const graphicsMachine = setup({
               actions: 'setSectionViewActive',
               target: 'section-view.pending',
             },
+            setMeasureActive: {
+              guard: 'isActivatingMeasure',
+              actions: 'setMeasureActive',
+              target: 'measure.selecting',
+            },
           },
         },
 
@@ -771,6 +832,11 @@ export const graphicsMachine = setup({
                   guard: 'isDeactivatingSectionView',
                   actions: 'setSectionViewActive',
                   target: '#graphics.operational.ready',
+                },
+                setMeasureActive: {
+                  guard: 'isActivatingMeasure',
+                  actions: ['deactivateSectionView', 'setMeasureActive'],
+                  target: '#graphics.operational.measure.selecting',
                 },
                 selectSectionView: {
                   guard: 'isSelectingPlane',
@@ -795,6 +861,11 @@ export const graphicsMachine = setup({
                   guard: 'isDeactivatingSectionView',
                   actions: 'setSectionViewActive',
                   target: '#graphics.operational.ready',
+                },
+                setMeasureActive: {
+                  guard: 'isActivatingMeasure',
+                  actions: ['deactivateSectionView', 'setMeasureActive'],
+                  target: '#graphics.operational.measure.selecting',
                 },
                 selectSectionView: [
                   {
@@ -823,6 +894,55 @@ export const graphicsMachine = setup({
                 },
                 setClippingMeshEnabled: {
                   actions: 'setClippingMeshEnabled',
+                },
+              },
+            },
+          },
+        },
+
+        measure: {
+          initial: 'selecting',
+          states: {
+            selecting: {
+              on: {
+                setMeasureActive: {
+                  guard: 'isDeactivatingMeasure',
+                  actions: 'setMeasureActive',
+                  target: '#graphics.operational.ready',
+                },
+                setSectionViewActive: {
+                  guard: 'isActivatingClipping',
+                  actions: ['deactivateMeasure', 'setSectionViewActive'],
+                  target: '#graphics.operational.section-view.pending',
+                },
+                addMeasurePoint: {
+                  actions: 'addMeasurePoint',
+                  target: 'selected',
+                },
+                clearMeasurePoints: {
+                  actions: 'clearMeasurePoints',
+                },
+              },
+            },
+
+            selected: {
+              on: {
+                setMeasureActive: {
+                  guard: 'isDeactivatingMeasure',
+                  actions: 'setMeasureActive',
+                  target: '#graphics.operational.ready',
+                },
+                setSectionViewActive: {
+                  guard: 'isActivatingClipping',
+                  actions: ['deactivateMeasure', 'setSectionViewActive'],
+                  target: '#graphics.operational.section-view.pending',
+                },
+                addMeasurePoint: {
+                  actions: 'addMeasurePoint',
+                },
+                clearMeasurePoints: {
+                  actions: 'clearMeasurePoints',
+                  target: 'selecting',
                 },
               },
             },

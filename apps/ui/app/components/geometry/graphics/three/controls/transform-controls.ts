@@ -35,6 +35,8 @@ import arrowSvg from '#components/geometry/graphics/three/icons/translation-arro
 import doubleArrowSvg from '#components/geometry/graphics/three/icons/translation-double-arrow.svg?raw';
 import { SvgGeometry } from '#components/geometry/graphics/three/geometries/svg-geometry.js';
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
+import { FontGeometry } from '#components/geometry/graphics/three/geometries/font-geometry.js';
+import { RoundedRectangleGeometry } from '#components/geometry/graphics/three/geometries/rounded-rectangle-geometry.js';
 
 export type TransformControlsPointerObject = {
   x: number;
@@ -808,6 +810,12 @@ class TransformControlsGizmo extends Object3D {
     matHelper.color.set(0x00_00_00);
     matHelper.opacity = 0.5;
 
+    const matHelperWhite = gizmoMaterial.clone();
+    matHelperWhite.color.set(0xff_ff_ff);
+
+    const matHelperBlack = gizmoMaterial.clone();
+    matHelperBlack.color.set(0x00_00_00);
+
     const matRed = gizmoMaterial.clone();
     matRed.color.set(0xef_44_44);
 
@@ -858,23 +866,37 @@ class TransformControlsGizmo extends Object3D {
 
     // Reusable geometry
 
-    // const arrowGeometry = new CylinderGeometry(0, 0.05, 0.2, 12, 1, false);
+    const arrowDepth = 100;
+    const textDepth = 25;
+    const boxDepth = 200;
 
     const scaleHandleGeometry = new BoxGeometry(0.125, 0.125, 0.125);
 
-    // Const svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 13 4"><path d="M 0 1 H 7.881 L 7.881 0 L 13 2 L 7.881 4 L 7.881 3 H 0 V 1 Z"></path></svg>`;
-    const arrowGeometry = SvgGeometry({ svg: arrowSvg, depth: 100 });
-    const doubleArrowGeometry = SvgGeometry({ svg: doubleArrowSvg, depth: 100 });
+    const arrowGeometry = SvgGeometry({ svg: arrowSvg, depth: arrowDepth });
+    const doubleArrowGeometry = SvgGeometry({ svg: doubleArrowSvg, depth: arrowDepth });
+
+    const fontGeometry = FontGeometry({ text: '10 mm', depth: textDepth, size: 300 });
+    const roundedBoxGeometry = RoundedRectangleGeometry({
+      width: 1600,
+      height: 800,
+      radius: 250,
+      smoothness: 16,
+      depth: 100,
+    });
 
     const lineGeometry = new BufferGeometry();
     lineGeometry.setAttribute('position', new Float32BufferAttribute([0, 0, 0, 1, 0, 0], 3));
 
-    const CircleGeometry = (radius: number, arc: number): BufferGeometry => {
+    const CircleGeometry = (radius: number, arc: number, arcOffset = 0): BufferGeometry => {
       const geometry = new BufferGeometry();
       const vertices = [];
 
       for (let i = 0; i <= 64 * arc; ++i) {
-        vertices.push(0, Math.cos((i / 32) * Math.PI) * radius, Math.sin((i / 32) * Math.PI) * radius);
+        vertices.push(
+          0,
+          Math.cos((i / 32) * Math.PI + arcOffset) * radius,
+          Math.sin((i / 32) * Math.PI + arcOffset) * radius,
+        );
       }
 
       geometry.setAttribute('position', new Float32BufferAttribute(vertices, 3));
@@ -895,9 +917,13 @@ class TransformControlsGizmo extends Object3D {
     // Gizmo definitions - custom hierarchy definitions for setupGizmo() function
 
     const gizmoTranslationScaleFactor = 0.000_25;
+    const gizmoPickerTranslationScaleFactor = 0.0005;
+
+    // Rotation scale factors
     const gizmoRotationScaleFactor = 0.000_15;
     const gizmoRotationScaleFactorZ = gizmoTranslationScaleFactor;
-    const gizmoPickerTranslationScaleFactor = 0.0005;
+    const gizmoPickerRotationScaleFactor = 0.0003;
+
     const gizmoTranslationScale = [
       gizmoTranslationScaleFactor,
       gizmoTranslationScaleFactor,
@@ -910,6 +936,11 @@ class TransformControlsGizmo extends Object3D {
     ];
     const gizmoMeshOffset = 0.5;
     const gizmoRotationScale = [gizmoRotationScaleFactor, gizmoRotationScaleFactor, gizmoRotationScaleFactorZ];
+    const gizmoPickerRotationScale = [
+      gizmoPickerRotationScaleFactor,
+      gizmoPickerRotationScaleFactor,
+      gizmoPickerRotationScaleFactor,
+    ];
 
     // Order is:
     // 1. The Object3D to render
@@ -921,6 +952,34 @@ class TransformControlsGizmo extends Object3D {
       X: [
         [new Mesh(arrowGeometry, matRed), [gizmoMeshOffset, 0, 0], [0, 0, -Math.PI / 2], gizmoTranslationScale, 'fwd'],
         [new Mesh(arrowGeometry, matRed), [-gizmoMeshOffset, 0, 0], [0, 0, Math.PI / 2], gizmoTranslationScale, 'bwd'],
+        [
+          new Mesh(fontGeometry, matHelper),
+          [gizmoMeshOffset * 3, 0, ((boxDepth + textDepth) / 2) * gizmoTranslationScaleFactor],
+          [0, 0, 0],
+          gizmoTranslationScale,
+          'fwd',
+        ],
+        [
+          new Mesh(roundedBoxGeometry, matHelperWhite),
+          [gizmoMeshOffset * 3, 0, 0],
+          [0, 0, 0],
+          gizmoTranslationScale,
+          'fwd',
+        ],
+        [
+          new Mesh(fontGeometry, matHelperBlack),
+          [-gizmoMeshOffset * 3, 0, ((boxDepth + textDepth) / 2) * gizmoTranslationScaleFactor],
+          [0, Math.PI, 0],
+          gizmoTranslationScale,
+          'bwd',
+        ],
+        [
+          new Mesh(roundedBoxGeometry, matHelperWhite),
+          [-gizmoMeshOffset * 3, 0, 0],
+          [0, 0, 0],
+          gizmoTranslationScale,
+          'bwd',
+        ],
       ],
       Y: [
         [new Mesh(arrowGeometry, matGreen), [0, gizmoMeshOffset, 0], undefined, gizmoTranslationScale, 'fwd'],
@@ -1018,19 +1077,21 @@ class TransformControlsGizmo extends Object3D {
 
     const gizmoRotate = {
       X: [
-        [new Line(CircleGeometry(1, 0.5), matLineRed)],
+        [new Line(CircleGeometry(1, 0.1, (Math.PI / 4) * 1.625), matLineRed)],
         [new Mesh(doubleArrowGeometry, matRed), [0, 0, 0.99], [0, Math.PI / 2, Math.PI / 2], gizmoRotationScale],
-        // [new Mesh(new OctahedronGeometry(0.04, 0), matRed), [0, 0, 0.99], undefined, [1, 3, 1]],
+        // [
+        //   new Mesh(new TorusGeometry(1, 0.01, 8, 24, Math.PI / 8), matRed),
+        //   undefined,
+        //   [Math.PI / 2, Math.PI / 2, Math.PI / 2],
+        // ],
       ],
       Y: [
-        [new Line(CircleGeometry(1, 0.5), matLineGreen), undefined, [0, 0, -Math.PI / 2]],
+        [new Line(CircleGeometry(1, 0.1, (Math.PI / 4) * 1.625), matLineGreen), undefined, [0, 0, -Math.PI / 2]],
         [new Mesh(doubleArrowGeometry, matGreen), [0, 0, 0.99], [Math.PI / 2, 0, 0], gizmoRotationScale],
-        // [new Mesh(new OctahedronGeometry(0.04, 0), matGreen), [0, 0, 0.99], undefined, [3, 1, 1]],
       ],
       Z: [
-        [new Line(CircleGeometry(1, 0.5), matLineBlue), undefined, [0, Math.PI / 2, 0]],
+        [new Line(CircleGeometry(1, 0.1, (Math.PI / 4) * 1.625), matLineBlue), undefined, [0, Math.PI / 2, 0]],
         [new Mesh(doubleArrowGeometry, matBlue), [0.99, 0, 0], [0, 0, -Math.PI / 2], gizmoRotationScale],
-        // [new Mesh(new OctahedronGeometry(0.04, 0), matBlue), [0.99, 0, 0], undefined, [1, 3, 1]],
       ],
       E: [
         [new Line(CircleGeometry(1.25, 1), matLineYellowTransparent), undefined, [0, Math.PI / 2, 0]],
@@ -1067,9 +1128,14 @@ class TransformControlsGizmo extends Object3D {
     };
 
     const pickerRotate = {
-      X: [[new Mesh(new TorusGeometry(1, 0.1, 4, 24), matInvisible), [0, 0, 0], [0, -Math.PI / 2, -Math.PI / 2]]],
-      Y: [[new Mesh(new TorusGeometry(1, 0.1, 4, 24), matInvisible), [0, 0, 0], [Math.PI / 2, 0, 0]]],
-      Z: [[new Mesh(new TorusGeometry(1, 0.1, 4, 24), matInvisible), [0, 0, 0], [0, 0, -Math.PI / 2]]],
+      X: [
+        [new Mesh(doubleArrowGeometry, matRed), [0, 0, 0.99], [0, Math.PI / 2, Math.PI / 2], gizmoPickerRotationScale],
+      ],
+      Y: [[new Mesh(doubleArrowGeometry, matGreen), [0, 0, 0.99], [Math.PI / 2, 0, 0], gizmoPickerRotationScale]],
+      Z: [[new Mesh(doubleArrowGeometry, matBlue), [0.99, 0, 0], [0, 0, -Math.PI / 2], gizmoPickerRotationScale]],
+      // X: [[new Mesh(new TorusGeometry(1, 0.1, 4, 24), matInvisible), [0, 0, 0], [0, -Math.PI / 2, -Math.PI / 2]]],
+      // Y: [[new Mesh(new TorusGeometry(1, 0.1, 4, 24), matInvisible), [0, 0, 0], [Math.PI / 2, 0, 0]]],
+      // Z: [[new Mesh(new TorusGeometry(1, 0.1, 4, 24), matInvisible), [0, 0, 0], [0, 0, -Math.PI / 2]]],
       E: [[new Mesh(new TorusGeometry(1.25, 0.1, 2, 24), matInvisible)]],
       XYZE: [[new Mesh(new SphereGeometry(0.7, 10, 8), matInvisible)]],
     };

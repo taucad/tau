@@ -37,6 +37,7 @@ import { SvgGeometry } from '#components/geometry/graphics/three/geometries/svg-
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
 import { FontGeometry } from '#components/geometry/graphics/three/geometries/font-geometry.js';
 import { RoundedRectangleGeometry } from '#components/geometry/graphics/three/geometries/rounded-rectangle-geometry.js';
+import { CircleGeometry } from '#components/geometry/graphics/three/geometries/circle-geometry.js';
 
 export type TransformControlsPointerObject = {
   x: number;
@@ -875,34 +876,20 @@ class TransformControlsGizmo extends Object3D {
     const arrowGeometry = SvgGeometry({ svg: arrowSvg, depth: arrowDepth });
     const doubleArrowGeometry = SvgGeometry({ svg: doubleArrowSvg, depth: arrowDepth });
 
-    const fontGeometry = FontGeometry({ text: '10 mm', depth: textDepth, size: 300 });
+    const fontGeometryTranslation = FontGeometry({ text: '24 mm', depth: textDepth, size: 300 });
+    const fontGeometryRotationX = FontGeometry({ text: '45°', depth: textDepth, size: 400 });
+    const fontGeometryRotationY = FontGeometry({ text: '15°', depth: textDepth, size: 400 });
+    const fontGeometryRotationZ = FontGeometry({ text: '67°', depth: textDepth, size: 400 });
     const roundedBoxGeometry = RoundedRectangleGeometry({
-      width: 1600,
-      height: 800,
-      radius: 250,
+      width: 1500,
+      height: 700,
+      radius: 200,
       smoothness: 16,
       depth: 100,
     });
 
     const lineGeometry = new BufferGeometry();
     lineGeometry.setAttribute('position', new Float32BufferAttribute([0, 0, 0, 1, 0, 0], 3));
-
-    const CircleGeometry = (radius: number, arc: number, arcOffset = 0): BufferGeometry => {
-      const geometry = new BufferGeometry();
-      const vertices = [];
-
-      for (let i = 0; i <= 64 * arc; ++i) {
-        vertices.push(
-          0,
-          Math.cos((i / 32) * Math.PI + arcOffset) * radius,
-          Math.sin((i / 32) * Math.PI + arcOffset) * radius,
-        );
-      }
-
-      geometry.setAttribute('position', new Float32BufferAttribute(vertices, 3));
-
-      return geometry;
-    };
 
     // Special geometry for transform helper. If scaled with position vector it spans from [0,0,0] to position
 
@@ -919,11 +906,6 @@ class TransformControlsGizmo extends Object3D {
     const gizmoTranslationScaleFactor = 0.000_25;
     const gizmoPickerTranslationScaleFactor = 0.0005;
 
-    // Rotation scale factors
-    const gizmoRotationScaleFactor = 0.000_15;
-    const gizmoRotationScaleFactorZ = gizmoTranslationScaleFactor;
-    const gizmoPickerRotationScaleFactor = 0.0003;
-
     const gizmoTranslationScale = [
       gizmoTranslationScaleFactor,
       gizmoTranslationScaleFactor,
@@ -934,7 +916,15 @@ class TransformControlsGizmo extends Object3D {
       gizmoPickerTranslationScaleFactor,
       gizmoPickerTranslationScaleFactor,
     ];
-    const gizmoMeshOffset = 0.5;
+    const gizmoMeshOffset = 0.3;
+    const gizmoMeshTranslationTextOffset = 0.7;
+
+    // Rotation text and box offsets
+    const gizmoRotationScaleFactor = 0.000_15;
+    const gizmoRotationScaleFactorZ = gizmoTranslationScaleFactor;
+    const gizmoPickerRotationScaleFactor = 0.0003;
+    const gizmoMeshRotationTextOffset = 1.2;
+    const gizmoMeshRotationTextBoxOffset = ((boxDepth + textDepth) / 2) * gizmoRotationScaleFactor;
     const gizmoRotationScale = [gizmoRotationScaleFactor, gizmoRotationScaleFactor, gizmoRotationScaleFactorZ];
     const gizmoPickerRotationScale = [
       gizmoPickerRotationScaleFactor,
@@ -950,33 +940,45 @@ class TransformControlsGizmo extends Object3D {
     // 5. The name of the object
     const gizmoTranslate = {
       X: [
-        [new Mesh(arrowGeometry, matRed), [gizmoMeshOffset, 0, 0], [0, 0, -Math.PI / 2], gizmoTranslationScale, 'fwd'],
-        [new Mesh(arrowGeometry, matRed), [-gizmoMeshOffset, 0, 0], [0, 0, Math.PI / 2], gizmoTranslationScale, 'bwd'],
         [
-          new Mesh(fontGeometry, matHelper),
-          [gizmoMeshOffset * 3, 0, ((boxDepth + textDepth) / 2) * gizmoTranslationScaleFactor],
-          [0, 0, 0],
+          new Mesh(arrowGeometry, matRed),
+          [gizmoMeshOffset, 0, 0],
+          [Math.PI / 2, 0, -Math.PI / 2],
+          gizmoTranslationScale,
+          'fwd',
+        ],
+        [
+          new Mesh(arrowGeometry, matRed),
+          [-gizmoMeshOffset, 0, 0],
+          [Math.PI / 2, 0, Math.PI / 2],
+          gizmoTranslationScale,
+          'bwd',
+        ],
+        [
+          new Mesh(fontGeometryTranslation, matHelper),
+          [gizmoMeshTranslationTextOffset, gizmoMeshRotationTextBoxOffset, 0],
+          [Math.PI / 2, Math.PI, Math.PI],
           gizmoTranslationScale,
           'fwd',
         ],
         [
           new Mesh(roundedBoxGeometry, matHelperWhite),
-          [gizmoMeshOffset * 3, 0, 0],
-          [0, 0, 0],
+          [gizmoMeshTranslationTextOffset, 0, 0],
+          [Math.PI / 2, 0, 0],
           gizmoTranslationScale,
           'fwd',
         ],
         [
-          new Mesh(fontGeometry, matHelperBlack),
-          [-gizmoMeshOffset * 3, 0, ((boxDepth + textDepth) / 2) * gizmoTranslationScaleFactor],
-          [0, Math.PI, 0],
+          new Mesh(fontGeometryTranslation, matHelperBlack),
+          [-gizmoMeshTranslationTextOffset, gizmoMeshRotationTextBoxOffset, 0],
+          [Math.PI / 2, 0, Math.PI],
           gizmoTranslationScale,
           'bwd',
         ],
         [
           new Mesh(roundedBoxGeometry, matHelperWhite),
-          [-gizmoMeshOffset * 3, 0, 0],
-          [0, 0, 0],
+          [-gizmoMeshTranslationTextOffset, 0, 0],
+          [Math.PI / 2, 0, Math.PI],
           gizmoTranslationScale,
           'bwd',
         ],
@@ -984,6 +986,34 @@ class TransformControlsGizmo extends Object3D {
       Y: [
         [new Mesh(arrowGeometry, matGreen), [0, gizmoMeshOffset, 0], undefined, gizmoTranslationScale, 'fwd'],
         [new Mesh(arrowGeometry, matGreen), [0, -gizmoMeshOffset, 0], [Math.PI, 0, 0], gizmoTranslationScale, 'bwd'],
+        [
+          new Mesh(fontGeometryTranslation, matHelper),
+          [0, gizmoMeshTranslationTextOffset, gizmoMeshRotationTextBoxOffset],
+          [0, 0, Math.PI / 2],
+          gizmoTranslationScale,
+          'fwd',
+        ],
+        [
+          new Mesh(roundedBoxGeometry, matHelperWhite),
+          [0, gizmoMeshTranslationTextOffset, 0],
+          [0, 0, Math.PI / 2],
+          gizmoTranslationScale,
+          'fwd',
+        ],
+        [
+          new Mesh(fontGeometryTranslation, matHelper),
+          [0, -gizmoMeshTranslationTextOffset, gizmoMeshRotationTextBoxOffset],
+          [Math.PI, 0, Math.PI / 2],
+          gizmoTranslationScale,
+          'bwd',
+        ],
+        [
+          new Mesh(roundedBoxGeometry, matHelperWhite),
+          [0, -gizmoMeshTranslationTextOffset, 0],
+          [0, 0, Math.PI / 2],
+          gizmoTranslationScale,
+          'bwd',
+        ],
       ],
       Z: [
         [new Mesh(arrowGeometry, matBlue), [0, 0, gizmoMeshOffset], [Math.PI / 2, 0, 0], gizmoTranslationScale, 'fwd'],
@@ -991,6 +1021,34 @@ class TransformControlsGizmo extends Object3D {
           new Mesh(arrowGeometry, matBlue),
           [0, 0, -gizmoMeshOffset],
           [-Math.PI / 2, 0, 0],
+          gizmoTranslationScale,
+          'bwd',
+        ],
+        [
+          new Mesh(fontGeometryTranslation, matHelper),
+          [0, gizmoMeshRotationTextBoxOffset, gizmoMeshTranslationTextOffset],
+          [Math.PI / 2, Math.PI, 0],
+          gizmoTranslationScale,
+          'fwd',
+        ],
+        [
+          new Mesh(roundedBoxGeometry, matHelperWhite),
+          [0, 0, gizmoMeshTranslationTextOffset],
+          [-Math.PI / 2, 0, 0],
+          gizmoTranslationScale,
+          'fwd',
+        ],
+        [
+          new Mesh(fontGeometryTranslation, matHelperBlack),
+          [0, gizmoMeshRotationTextBoxOffset, -gizmoMeshTranslationTextOffset],
+          [Math.PI / 2, 0, Math.PI],
+          gizmoTranslationScale,
+          'bwd',
+        ],
+        [
+          new Mesh(roundedBoxGeometry, matHelperWhite),
+          [0, 0, -gizmoMeshTranslationTextOffset],
+          [Math.PI / 2, 0, Math.PI],
           gizmoTranslationScale,
           'bwd',
         ],
@@ -1077,24 +1135,63 @@ class TransformControlsGizmo extends Object3D {
 
     const gizmoRotate = {
       X: [
-        [new Line(CircleGeometry(1, 0.1, (Math.PI / 4) * 1.625), matLineRed)],
-        [new Mesh(doubleArrowGeometry, matRed), [0, 0, 0.99], [0, Math.PI / 2, Math.PI / 2], gizmoRotationScale],
-        // [
-        //   new Mesh(new TorusGeometry(1, 0.01, 8, 24, Math.PI / 8), matRed),
-        //   undefined,
-        //   [Math.PI / 2, Math.PI / 2, Math.PI / 2],
-        // ],
+        [new Line(CircleGeometry({ radius: 1, arc: 0.1, arcOffset: (Math.PI / 4) * 1.625 }), matLineRed)],
+        [new Mesh(doubleArrowGeometry, matRed), [0, 0, 1], [0, Math.PI / 2, Math.PI / 2], gizmoRotationScale],
+        [
+          new Mesh(fontGeometryRotationX, matHelper),
+          [gizmoMeshRotationTextBoxOffset, 0, gizmoMeshRotationTextOffset],
+          [Math.PI / 2, Math.PI / 2, 0],
+          gizmoRotationScale,
+        ],
+        [
+          new Mesh(roundedBoxGeometry, matHelperWhite),
+          [0, 0, gizmoMeshRotationTextOffset],
+          [Math.PI / 2, Math.PI / 2, 0],
+          gizmoRotationScale,
+        ],
       ],
       Y: [
-        [new Line(CircleGeometry(1, 0.1, (Math.PI / 4) * 1.625), matLineGreen), undefined, [0, 0, -Math.PI / 2]],
-        [new Mesh(doubleArrowGeometry, matGreen), [0, 0, 0.99], [Math.PI / 2, 0, 0], gizmoRotationScale],
+        [
+          new Line(CircleGeometry({ radius: 1, arc: 0.1, arcOffset: (Math.PI / 4) * 1.625 }), matLineGreen),
+          undefined,
+          [0, 0, -Math.PI / 2],
+        ],
+        [new Mesh(doubleArrowGeometry, matGreen), [0, 0, 1], [Math.PI / 2, 0, 0], gizmoRotationScale],
+        [
+          new Mesh(fontGeometryRotationY, matHelper),
+          [0, -gizmoMeshRotationTextBoxOffset, gizmoMeshRotationTextOffset],
+          [Math.PI / 2, 0, 0],
+          gizmoRotationScale,
+        ],
+        [
+          new Mesh(roundedBoxGeometry, matHelperWhite),
+          [0, 0, gizmoMeshRotationTextOffset],
+          [Math.PI / 2, 0, 0],
+          gizmoRotationScale,
+        ],
       ],
       Z: [
-        [new Line(CircleGeometry(1, 0.1, (Math.PI / 4) * 1.625), matLineBlue), undefined, [0, Math.PI / 2, 0]],
-        [new Mesh(doubleArrowGeometry, matBlue), [0.99, 0, 0], [0, 0, -Math.PI / 2], gizmoRotationScale],
+        [
+          new Line(CircleGeometry({ radius: 1, arc: 0.1, arcOffset: (Math.PI / 4) * 1.625 }), matLineBlue),
+          undefined,
+          [0, Math.PI / 2, 0],
+        ],
+        [new Mesh(doubleArrowGeometry, matBlue), [1, 0, 0], [0, 0, -Math.PI / 2], gizmoRotationScale],
+        [
+          new Mesh(fontGeometryRotationZ, matHelper),
+          [gizmoMeshRotationTextOffset, 0, gizmoMeshRotationTextBoxOffset],
+          [0, 0, Math.PI / 2],
+          gizmoRotationScale,
+        ],
+        [
+          new Mesh(roundedBoxGeometry, matHelperWhite),
+          [gizmoMeshRotationTextOffset, 0, 0],
+          [0, 0, Math.PI / 2],
+          gizmoRotationScale,
+        ],
       ],
       E: [
-        [new Line(CircleGeometry(1.25, 1), matLineYellowTransparent), undefined, [0, Math.PI / 2, 0]],
+        [new Line(CircleGeometry({ radius: 1.25, arc: 1 }), matLineYellowTransparent), undefined, [0, Math.PI / 2, 0]],
         [
           new Mesh(new CylinderGeometry(0.03, 0, 0.15, 4, 1, false), matLineYellowTransparent),
           [1.17, 0, 0],
@@ -1120,7 +1217,7 @@ class TransformControlsGizmo extends Object3D {
           [1, 1, 0.001],
         ],
       ],
-      XYZE: [[new Line(CircleGeometry(1, 1), matLineGray), undefined, [0, Math.PI / 2, 0]]],
+      XYZE: [[new Line(CircleGeometry({ radius: 1, arc: 1 }), matLineGray), undefined, [0, Math.PI / 2, 0]]],
     };
 
     const helperRotate = {
@@ -1128,11 +1225,9 @@ class TransformControlsGizmo extends Object3D {
     };
 
     const pickerRotate = {
-      X: [
-        [new Mesh(doubleArrowGeometry, matRed), [0, 0, 0.99], [0, Math.PI / 2, Math.PI / 2], gizmoPickerRotationScale],
-      ],
-      Y: [[new Mesh(doubleArrowGeometry, matGreen), [0, 0, 0.99], [Math.PI / 2, 0, 0], gizmoPickerRotationScale]],
-      Z: [[new Mesh(doubleArrowGeometry, matBlue), [0.99, 0, 0], [0, 0, -Math.PI / 2], gizmoPickerRotationScale]],
+      X: [[new Mesh(doubleArrowGeometry, matRed), [0, 0, 1], [0, Math.PI / 2, Math.PI / 2], gizmoPickerRotationScale]],
+      Y: [[new Mesh(doubleArrowGeometry, matGreen), [0, 0, 1], [Math.PI / 2, 0, 0], gizmoPickerRotationScale]],
+      Z: [[new Mesh(doubleArrowGeometry, matBlue), [1, 0, 0], [0, 0, -Math.PI / 2], gizmoPickerRotationScale]],
       // X: [[new Mesh(new TorusGeometry(1, 0.1, 4, 24), matInvisible), [0, 0, 0], [0, -Math.PI / 2, -Math.PI / 2]]],
       // Y: [[new Mesh(new TorusGeometry(1, 0.1, 4, 24), matInvisible), [0, 0, 0], [Math.PI / 2, 0, 0]]],
       // Z: [[new Mesh(new TorusGeometry(1, 0.1, 4, 24), matInvisible), [0, 0, 0], [0, 0, -Math.PI / 2]]],
@@ -1303,6 +1398,7 @@ class TransformControlsGizmo extends Object3D {
       ...this.gizmo[this.mode].children,
       ...this.helper[this.mode].children,
     ];
+    console.log('updating matrix world');
 
     for (const handle of handles) {
       // Hide aligned to camera
@@ -1433,9 +1529,45 @@ class TransformControlsGizmo extends Object3D {
       handle.quaternion.copy(quaternion);
 
       if (this.mode === 'translate' || this.mode === 'scale') {
+        // Ensure translation arrows face the user by twisting around their axis using the camera orientation
+        if (this.mode === 'translate') {
+          const isAxisArrow =
+            (handle as unknown as { tag?: string }).tag &&
+            (handle.name === 'X' || handle.name === 'Y' || handle.name === 'Z');
+          if (isAxisArrow) {
+            // Calculate the camera rotation relative to the handle axis
+            const handleAxis = handle.name === 'X' ? this.unitX : handle.name === 'Y' ? this.unitY : this.unitZ;
+            const handleAxisWorld = this.alignVector.copy(handleAxis).applyQuaternion(quaternion).normalize();
+
+            // Project the camera direction (eye vector) onto the plane perpendicular to the handle axis
+            // This gives us the direction towards the camera, constrained to rotation around the axis
+            const eyeProjected = this.tempVector
+              .copy(this.eye)
+              .addScaledVector(handleAxisWorld, -this.eye.dot(handleAxisWorld))
+              .normalize();
+
+            // Get a reference "up" vector perpendicular to the handle axis
+            // We use the current handle's local Y-axis as the reference
+            const referenceAxis = handle.name === 'X' ? this.unitY : handle.name === 'Y' ? this.unitZ : this.unitY;
+            const handleUpWorld = new Vector3().copy(referenceAxis).applyQuaternion(quaternion).normalize();
+
+            // Project the reference up vector onto the same plane
+            const upProjected = handleUpWorld
+              .addScaledVector(handleAxisWorld, -handleUpWorld.dot(handleAxisWorld))
+              .normalize();
+
+            // Calculate the signed angle between the projected vectors
+            const cosAngle = upProjected.dot(eyeProjected);
+            const crossProduct = new Vector3().crossVectors(upProjected, eyeProjected);
+            const sinAngle = crossProduct.dot(handleAxisWorld);
+            const cameraRotationRelative = Math.atan2(sinAngle, cosAngle);
+
+            handle.rotateOnAxis(handleAxis, cameraRotationRelative);
+          }
+        }
         // Hide translate and scale axis facing the camera
 
-        const AXIS_HIDE_TRESHOLD = 0.99;
+        const AXIS_HIDE_TRESHOLD = 1;
         const PLANE_HIDE_TRESHOLD = 0.2;
         const AXIS_FLIP_TRESHOLD = 0;
 

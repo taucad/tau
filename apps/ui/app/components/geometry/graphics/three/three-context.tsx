@@ -4,7 +4,6 @@ import * as THREE from 'three';
 import { useEffect, useState } from 'react';
 import { Scene } from '#components/geometry/graphics/three/scene.js';
 import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
-import rotateIconBase64 from '#components/geometry/graphics/three/icons/rotate-icon.svg?base64';
 import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js';
 import { cn } from '#utils/ui.utils.js';
 
@@ -51,11 +50,8 @@ export function ThreeProvider({
         // eliminating visual artifacts on the object.
         logarithmicDepthBuffer: true,
         antialias: true,
-        // Enable stencil buffer for stencil-based cross-section rendering (Cutter component)
+        // Enable stencil buffer for stencil-based cross-section rendering (Section View component)
         stencil: true,
-      }}
-      style={{
-        cursor: `url(data:image/svg+xml;base64,${rotateIconBase64}) 13 13, auto`,
       }}
       dpr={dpr}
       frameloop="demand"

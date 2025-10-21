@@ -31,6 +31,18 @@ function getPlaneRotation(planeId: PlaneId): [number, number, number] {
   return [Math.PI / 2, Math.PI / 2, 0];
 }
 
+function getPlaneName(planeId: PlaneId): [string, string] {
+  if (planeId === 'xy') {
+    return ['Top', 'Bottom'];
+  }
+
+  if (planeId === 'xz') {
+    return ['Front', 'Back'];
+  }
+
+  return ['Right', 'Left'];
+}
+
 type PlaneSelectorProperties = {
   readonly planeId: PlaneId;
   readonly position: [number, number, number];
@@ -109,21 +121,28 @@ function PlaneSelector({
   };
 
   const textDepth = 0.025;
+  const [forwardPlaneName, backwardPlaneName] = getPlaneName(planeId);
 
-  const fontGeometry = useMemo(
+  const frontFontGeometry = useMemo(
     // eslint-disable-next-line new-cap -- Three.js naming convention
-    () => FontGeometry({ text: planeId.toUpperCase(), depth: textDepth, size: 0.2 }),
-    [planeId],
+    () => FontGeometry({ text: forwardPlaneName, depth: textDepth, size: 0.2 }),
+    [forwardPlaneName],
+  );
+  const backwardFontGeometry = useMemo(
+    // eslint-disable-next-line new-cap -- Three.js naming convention
+    () => FontGeometry({ text: backwardPlaneName, depth: textDepth, size: 0.2 }),
+    [backwardPlaneName],
   );
   const roundedRectangleGeometry = useMemo(
     // eslint-disable-next-line new-cap -- Three.js naming convention
     () => RoundedRectangleGeometry({ width: 1, height: 1, radius: 0.1, smoothness: 16, depth: 0.05 }),
     [],
   );
+  const darkenedColor = useMemo(() => adjustHexColorBrightness(color, -0.5), [color]);
+  const slightlyDarkenedColor = useMemo(() => adjustHexColorBrightness(color, -0.3), [color]);
 
   const rotation = getPlaneRotation(planeId);
-
-  const actualColor = isHovered ? adjustHexColorBrightness(color, -0.5) : adjustHexColorBrightness(color, -0.3);
+  const actualColor = isHovered ? darkenedColor : slightlyDarkenedColor;
 
   return (
     <group ref={groupRef} renderOrder={Infinity} position={position} rotation={rotation}>
@@ -140,7 +159,19 @@ function PlaneSelector({
         />
       </mesh>
       <mesh position={[0, 0, textDepth]}>
-        <primitive object={fontGeometry} />
+        <primitive object={frontFontGeometry} />
+        <meshMatcapMaterial
+          transparent
+          matcap={matcapTexture}
+          color="black"
+          opacity={1}
+          side={THREE.FrontSide}
+          depthTest={false}
+          depthWrite={false}
+        />
+      </mesh>
+      <mesh position={[0, 0, -textDepth]} rotation={[0, Math.PI, 0]}>
+        <primitive object={backwardFontGeometry} />
         <meshMatcapMaterial
           transparent
           matcap={matcapTexture}

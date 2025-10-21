@@ -16,20 +16,23 @@ import {
 
 type ToolSelectorMode = 'auto' | 'none' | 'any' | 'custom';
 
+type ToolMetadata = {
+  label: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+};
+
 type ChatToolSelectorProperties = {
   readonly value?: ToolWithSelection;
   readonly onValueChange?: (value: ToolWithSelection) => void;
-  readonly children: (properties: { selectedMode: ToolSelectorMode; selectedTools: Tool[] }) => ReactNode;
+  readonly children: (properties: {
+    selectedMode: ToolSelectorMode;
+    selectedTools: Tool[];
+    toolMetadata: Record<Tool, ToolMetadata>;
+  }) => ReactNode;
 };
 
-const toolMetadata: Record<
-  Tool,
-  {
-    label: string;
-    description: string;
-    icon: React.ComponentType<{ className?: string }>;
-  }
-> = {
+const toolMetadata: Record<Tool, ToolMetadata> = {
   [tool.webSearch]: {
     label: 'Web Search',
     description: 'Search the web for information',
@@ -75,7 +78,7 @@ const modeOptions: Array<{
   {
     value: 'custom',
     label: 'Custom',
-    description: 'Select specific tools to require',
+    description: 'Make these tools available',
   },
 ];
 
@@ -176,7 +179,7 @@ export const ChatToolSelector = memo(function ({
 
   return (
     <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
-      <DropdownMenuTrigger asChild>{children({ selectedMode: mode, selectedTools })}</DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild>{children({ selectedMode: mode, selectedTools, toolMetadata })}</DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-60">
         <DropdownMenuLabel>Tool Selection</DropdownMenuLabel>
         <DropdownMenuSeparator />

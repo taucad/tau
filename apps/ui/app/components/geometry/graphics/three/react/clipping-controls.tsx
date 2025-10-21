@@ -24,7 +24,7 @@ function getPlaneRotation(planeId: PlaneId): [number, number, number] {
 
   if (planeId === 'xz') {
     // Rotate to face +Y
-    return [-Math.PI / 2, 0, Math.PI];
+    return [-Math.PI / 2, Math.PI, Math.PI];
   }
 
   // PlaneId === 'yz'

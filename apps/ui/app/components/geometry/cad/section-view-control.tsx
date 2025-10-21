@@ -7,38 +7,38 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 
-type ClippingPlaneSettings = {
+type SectionViewSettings = {
   stripeColor: string;
   stripeSpacing: number;
   stripeWidth: number;
 };
 
-const defaultClippingPlaneSettings: ClippingPlaneSettings = {
+const defaultSectionViewSettings: SectionViewSettings = {
   stripeColor: '#00ff00',
   stripeSpacing: 10,
   stripeWidth: 1,
 };
 
-export function ClippingPlaneControl(): React.JSX.Element {
-  const isClippingPlaneActive = useSelector(graphicsActor, (state) => state.context.isClippingPlaneActive);
+export function SectionViewControl(): React.JSX.Element {
+  const isSectionViewActive = useSelector(graphicsActor, (state) => state.context.isSectionViewActive);
 
-  const [clippingSettings] = useCookie<ClippingPlaneSettings>(
-    cookieName.clippingPlaneSettings,
-    defaultClippingPlaneSettings,
+  const [sectionViewSettings] = useCookie<SectionViewSettings>(
+    cookieName.sectionViewSettings,
+    defaultSectionViewSettings,
   );
 
   // Sync cookie with graphics machine on mount/change
   useEffect(() => {
     graphicsActor.send({
-      type: 'setClippingPlaneVisualization',
-      payload: clippingSettings,
+      type: 'setSectionViewVisualization',
+      payload: sectionViewSettings,
     });
-  }, [clippingSettings]);
+  }, [sectionViewSettings]);
 
   const handleClick = (): void => {
     graphicsActor.send({
-      type: 'setClippingPlaneActive',
-      payload: !isClippingPlaneActive,
+      type: 'setSectionViewActive',
+      payload: !isSectionViewActive,
     });
   };
 
@@ -48,14 +48,14 @@ export function ClippingPlaneControl(): React.JSX.Element {
         <Button
           variant="overlay"
           size="icon"
-          data-active={isClippingPlaneActive ? 'true' : 'false'}
+          data-active={isSectionViewActive ? 'true' : 'false'}
           className="data-[active=true]:bg-accent data-[active=true]:text-primary"
           onClick={handleClick}
         >
           <FlipHorizontal className="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{isClippingPlaneActive ? 'Disable' : 'Enable'} clipping plane</TooltipContent>
+      <TooltipContent>{isSectionViewActive ? 'Disable' : 'Enable'} section view</TooltipContent>
     </Tooltip>
   );
 }

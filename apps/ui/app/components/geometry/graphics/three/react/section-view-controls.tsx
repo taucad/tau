@@ -188,7 +188,7 @@ function PlaneSelector({
 
 export type AvailablePlane = { id: PlaneId; normal: [number, number, number]; constant: number };
 
-type ClippingControlsProperties = {
+type SectionViewControlsProperties = {
   readonly isActive: boolean;
   readonly selectedPlaneId: PlaneId | undefined;
   readonly availablePlanes: AvailablePlane[];
@@ -200,7 +200,7 @@ type ClippingControlsProperties = {
   readonly onSetRotation: (rotation: THREE.Euler) => void;
 };
 
-export function ClippingControls({
+export function SectionViewControls({
   isActive,
   selectedPlaneId,
   availablePlanes,
@@ -211,7 +211,7 @@ export function ClippingControls({
   onToggleDirection,
   onSetTranslation,
   onSetRotation,
-}: ClippingControlsProperties): React.JSX.Element | undefined {
+}: SectionViewControlsProperties): React.JSX.Element | undefined {
   const transformControlsRef = useRef<THREE.Object3D>(undefined);
   const matcapTexture = useMemo(() => matcapMaterial(), []);
 

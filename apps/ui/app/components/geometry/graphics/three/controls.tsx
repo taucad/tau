@@ -4,7 +4,7 @@ import type * as THREE from 'three';
 import { useSelector } from '@xstate/react';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { ViewportGizmoCube } from '#components/geometry/graphics/three/controls/viewport-gizmo-cube.js';
-import { ClippingControls } from '#components/geometry/graphics/three/react/clipping-controls.js';
+import { SectionViewControls } from '#components/geometry/graphics/three/react/section-view-controls.js';
 
 type ControlsProperties = {
   /**
@@ -36,29 +36,28 @@ export const Controls = React.memo(function ({
   enablePan,
   zoomSpeed,
 }: ControlsProperties) {
-  // Read clipping state from xstate
-  const isActive = useSelector(graphicsActor, (state) => state.context.isClippingPlaneActive);
-  const selectedPlaneId = useSelector(graphicsActor, (state) => state.context.selectedClippingPlaneId);
-  const translation = useSelector(graphicsActor, (state) => state.context.clippingPlaneTranslation);
-  const direction = useSelector(graphicsActor, (state) => state.context.clippingPlaneDirection);
-  const availablePlanes = useSelector(graphicsActor, (state) => state.context.availableClippingPlanes);
+  const isActive = useSelector(graphicsActor, (state) => state.context.isSectionViewActive);
+  const selectedPlaneId = useSelector(graphicsActor, (state) => state.context.selectedSectionViewId);
+  const translation = useSelector(graphicsActor, (state) => state.context.sectionViewTranslation);
+  const direction = useSelector(graphicsActor, (state) => state.context.sectionViewDirection);
+  const availablePlanes = useSelector(graphicsActor, (state) => state.context.availableSectionViews);
 
   // Handlers to send events to xstate
   const handleSelectPlane = (planeId: 'xy' | 'xz' | 'yz'): void => {
-    graphicsActor.send({ type: 'selectClippingPlane', payload: planeId });
+    graphicsActor.send({ type: 'selectSectionView', payload: planeId });
   };
 
   const handleToggleDirection = (): void => {
-    graphicsActor.send({ type: 'toggleClippingPlaneDirection' });
+    graphicsActor.send({ type: 'toggleSectionViewDirection' });
   };
 
   const handleSetTranslation = (value: number): void => {
-    graphicsActor.send({ type: 'setClippingPlaneTranslation', payload: value });
+    graphicsActor.send({ type: 'setSectionViewTranslation', payload: value });
   };
 
   const handleSetRotation = (eulerRotation: THREE.Euler): void => {
     graphicsActor.send({
-      type: 'setClippingPlaneRotation',
+      type: 'setSectionViewRotation',
       payload: [eulerRotation.x, eulerRotation.y, eulerRotation.z],
     });
   };
@@ -72,7 +71,7 @@ export const Controls = React.memo(function ({
         enableDamping={enableDamping}
         enableZoom={enableZoom}
       />
-      <ClippingControls
+      <SectionViewControls
         isActive={isActive}
         selectedPlaneId={selectedPlaneId}
         availablePlanes={availablePlanes}

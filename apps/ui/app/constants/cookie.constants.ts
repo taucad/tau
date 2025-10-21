@@ -67,8 +67,10 @@ export const cookieName = {
   fovAngle: 'fov-angle',
   // The last selected view settings.
   viewSettings: 'view-settings',
-  // Clipping plane settings
-  clippingPlaneSettings: 'clipping-plane-settings',
+  // Section view settings
+  sectionViewSettings: 'section-view-settings',
+  // Whether the section view status is open.
+  viewOpStatus: 'view-op-status',
 
   /* Console */
   // The last selected log level.

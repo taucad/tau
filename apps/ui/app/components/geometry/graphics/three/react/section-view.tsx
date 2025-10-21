@@ -30,7 +30,7 @@ export function createGreenMaterial(): THREE.MeshBasicMaterial {
 export type CutterProperties = {
   readonly children: React.ReactNode;
   readonly plane: THREE.Plane;
-  readonly enableCutting?: boolean;
+  readonly enableSection?: boolean;
   readonly enableLines?: boolean;
   readonly enableMesh?: boolean;
   readonly cappingMaterial?: THREE.Material;
@@ -42,9 +42,9 @@ type PlaneStencilGroupProperties = {
   readonly renderOrder: number;
 };
 
-export const Cutter = React.forwardRef<{ update: () => void }, CutterProperties>(
+export const SectionView = React.forwardRef<{ update: () => void }, CutterProperties>(
   (
-    { children, plane, enableCutting = true, enableLines = true, enableMesh = true, cappingMaterial },
+    { children, plane, enableSection = true, enableLines = true, enableMesh = true, cappingMaterial },
     ref,
   ): React.JSX.Element => {
     const { gl } = useThree();
@@ -59,7 +59,7 @@ export const Cutter = React.forwardRef<{ update: () => void }, CutterProperties>
 
     const update: () => void = React.useCallback(() => {
       // Early return if cutting is disabled
-      if (!enableCutting) {
+      if (!enableSection) {
         setMeshList([]);
         setCapMaterialList([]);
 
@@ -173,7 +173,7 @@ export const Cutter = React.forwardRef<{ update: () => void }, CutterProperties>
       plane.normal.y,
       plane.normal.z,
       plane.constant,
-      enableCutting,
+      enableSection,
       enableLines,
       enableMesh,
       cappingMaterial,
@@ -189,7 +189,7 @@ export const Cutter = React.forwardRef<{ update: () => void }, CutterProperties>
     }
 
     useFrame(() => {
-      if (enableCutting && planeListRef.current && rootGroupRef.current) {
+      if (enableSection && planeListRef.current && rootGroupRef.current) {
         // Create a quaternion to rotate from default plane normal (0,0,1) to clipping plane normal
         const defaultNormal = new THREE.Vector3(0, 0, 1);
         const quaternion = new THREE.Quaternion();
@@ -220,13 +220,13 @@ export const Cutter = React.forwardRef<{ update: () => void }, CutterProperties>
 
     // Enable/disable local clipping and stencil based on cutting state
     React.useEffect(() => {
-      const shouldEnable = enableCutting && meshList.length > 0;
+      const shouldEnable = enableSection && meshList.length > 0;
       gl.localClippingEnabled = shouldEnable;
 
       return () => {
         gl.localClippingEnabled = false;
       };
-    }, [gl, enableCutting, meshList.length]);
+    }, [gl, enableSection, meshList.length]);
 
     // Cleanup materials on unmount
     React.useEffect(() => {
@@ -245,7 +245,7 @@ export const Cutter = React.forwardRef<{ update: () => void }, CutterProperties>
     return (
       <group>
         <group ref={rootGroupRef}>{children}</group>
-        {enableCutting && meshList.length > 0 ? (
+        {enableSection && meshList.length > 0 ? (
           <>
             <group>
               {meshList.map((meshObject, index) => (
@@ -290,7 +290,7 @@ export const Cutter = React.forwardRef<{ update: () => void }, CutterProperties>
   },
 );
 
-Cutter.displayName = 'Cutter';
+SectionView.displayName = 'Cutter';
 
 function PlaneStencilGroup({ meshObj, plane, renderOrder }: PlaneStencilGroupProperties): React.JSX.Element {
   return (

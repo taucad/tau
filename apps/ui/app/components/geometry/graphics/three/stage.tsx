@@ -8,7 +8,7 @@ import { AxesHelper } from '#components/geometry/graphics/three/react/axes-helpe
 import { Grid } from '#components/geometry/graphics/three/grid.js';
 import { useCameraReset } from '#components/geometry/graphics/three/use-camera-reset.js';
 import { Lights } from '#components/geometry/graphics/three/react/lights.js';
-import { Cutter } from '#components/geometry/graphics/three/react/cutter.js';
+import { SectionView } from '#components/geometry/graphics/three/react/section-view.js';
 import { createStripedMaterial } from '#components/geometry/graphics/three/materials/striped-material.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 
@@ -78,27 +78,25 @@ export function Stage({
   const outer = React.useRef<THREE.Group>(null);
   const inner = React.useRef<THREE.Group>(null);
 
-  // Subscribe to camera FOV angle from graphics actor
   const cameraFovAngle = useSelector(graphicsActor, (state) => state.context.cameraFovAngle);
 
-  // Subscribe to clipping plane state from graphics actor
-  const isClippingPlaneActive = useSelector(graphicsActor, (state) => state.context.isClippingPlaneActive);
-  const selectedClippingPlaneId = useSelector(graphicsActor, (state) => state.context.selectedClippingPlaneId);
-  const clippingPlaneTranslation = useSelector(graphicsActor, (state) => state.context.clippingPlaneTranslation);
-  const clippingPlaneRotation = useSelector(graphicsActor, (state) => state.context.clippingPlaneRotation);
-  const clippingPlaneDirection = useSelector(graphicsActor, (state) => state.context.clippingPlaneDirection);
-  const availableClippingPlanes = useSelector(graphicsActor, (state) => state.context.availableClippingPlanes);
+  const isSectionViewActive = useSelector(graphicsActor, (state) => state.context.isSectionViewActive);
+  const selectedSectionViewId = useSelector(graphicsActor, (state) => state.context.selectedSectionViewId);
+  const sectionViewTranslation = useSelector(graphicsActor, (state) => state.context.sectionViewTranslation);
+  const sectionViewRotation = useSelector(graphicsActor, (state) => state.context.sectionViewRotation);
+  const sectionViewDirection = useSelector(graphicsActor, (state) => state.context.sectionViewDirection);
+  const availableSectionViews = useSelector(graphicsActor, (state) => state.context.availableSectionViews);
   const enableClippingLines = useSelector(graphicsActor, (state) => state.context.enableClippingLines);
   const enableClippingMesh = useSelector(graphicsActor, (state) => state.context.enableClippingMesh);
 
-  // Build THREE.Plane for the Cutter component
-  const clippingPlane = useMemo(() => {
-    if (!selectedClippingPlaneId) {
+  // Build THREE.Plane for the SectionView component
+  const sectionView = useMemo(() => {
+    if (!selectedSectionViewId) {
       // Default plane when nothing is selected
       return new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
     }
 
-    const selectedPlane = availableClippingPlanes.find((plane) => plane.id === selectedClippingPlaneId);
+    const selectedPlane = availableSectionViews.find((plane) => plane.id === selectedSectionViewId);
     if (!selectedPlane) {
       return new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
     }
@@ -107,25 +105,19 @@ export function Stage({
     const normal = new THREE.Vector3(...selectedPlane.normal);
 
     // Apply rotation to the normal if rotation is set
-    const [rotX, rotY, rotZ] = clippingPlaneRotation;
+    const [rotX, rotY, rotZ] = sectionViewRotation;
     if (rotX !== 0 || rotY !== 0 || rotZ !== 0) {
       const euler = new THREE.Euler(rotX, rotY, rotZ);
       normal.applyEuler(euler);
     }
 
     // Apply direction after rotation
-    normal.multiplyScalar(clippingPlaneDirection);
+    normal.multiplyScalar(sectionViewDirection);
 
-    const constant = -clippingPlaneTranslation;
+    const constant = -sectionViewTranslation;
 
     return new THREE.Plane(normal, constant);
-  }, [
-    selectedClippingPlaneId,
-    clippingPlaneTranslation,
-    clippingPlaneRotation,
-    clippingPlaneDirection,
-    availableClippingPlanes,
-  ]);
+  }, [selectedSectionViewId, sectionViewTranslation, sectionViewRotation, sectionViewDirection, availableSectionViews]);
 
   // Create striped material for capping surface
   const cappingMaterial = useMemo(() => createStripedMaterial(), []);
@@ -238,15 +230,15 @@ export function Stage({
       <group ref={outer}>
         {properties.enableAxes ? <AxesHelper /> : null}
         {properties.enableGrid ? <Grid /> : null}
-        <Cutter
-          plane={clippingPlane}
-          enableCutting={Boolean(isClippingPlaneActive && selectedClippingPlaneId)}
+        <SectionView
+          plane={sectionView}
+          enableSection={Boolean(isSectionViewActive && selectedSectionViewId)}
           enableLines={enableClippingLines}
           enableMesh={enableClippingMesh}
           cappingMaterial={cappingMaterial}
         >
           <group ref={inner}>{children}</group>
-        </Cutter>
+        </SectionView>
       </group>
       <Lights />
     </group>

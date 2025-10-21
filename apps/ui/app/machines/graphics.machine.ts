@@ -32,21 +32,21 @@ export type GraphicsContext = {
   enableMatcap: boolean;
 
   // Clipping plane state
-  isClippingPlaneActive: boolean;
-  availableClippingPlanes: Array<{
+  isSectionViewActive: boolean;
+  availableSectionViews: Array<{
     id: 'xy' | 'xz' | 'yz';
     normal: [number, number, number]; // Vector3 as tuple
     constant: number;
   }>;
-  selectedClippingPlaneId: 'xy' | 'xz' | 'yz' | undefined;
-  clippingPlaneVisualization: {
+  selectedSectionViewId: 'xy' | 'xz' | 'yz' | undefined;
+  sectionViewVisualization: {
     stripeColor: string;
     stripeSpacing: number;
     stripeWidth: number;
   };
-  clippingPlaneTranslation: number; // Current translation offset
-  clippingPlaneRotation: [number, number, number]; // Euler rotation as tuple [x, y, z]
-  clippingPlaneDirection: 1 | -1; // Normal direction multiplier
+  sectionViewTranslation: number; // Current translation offset
+  sectionViewRotation: [number, number, number]; // Euler rotation as tuple [x, y, z]
+  sectionViewDirection: 1 | -1; // Normal direction multiplier
   enableClippingLines: boolean; // Whether to cut lines
   enableClippingMesh: boolean; // Whether to cut meshes
 
@@ -86,14 +86,14 @@ export type GraphicsEvent =
   | { type: 'setAxesVisibility'; payload: boolean }
   | { type: 'setMatcapVisibility'; payload: boolean }
   // Clipping plane events
-  | { type: 'setClippingPlaneActive'; payload: boolean }
-  | { type: 'selectClippingPlane'; payload: 'xy' | 'xz' | 'yz' | undefined }
-  | { type: 'setClippingPlaneTranslation'; payload: number }
-  | { type: 'setClippingPlaneRotation'; payload: [number, number, number] }
-  | { type: 'toggleClippingPlaneDirection' }
+  | { type: 'setSectionViewActive'; payload: boolean }
+  | { type: 'selectSectionView'; payload: 'xy' | 'xz' | 'yz' | undefined }
+  | { type: 'setSectionViewTranslation'; payload: number }
+  | { type: 'setSectionViewRotation'; payload: [number, number, number] }
+  | { type: 'toggleSectionViewDirection' }
   | {
-      type: 'setClippingPlaneVisualization';
-      payload: Partial<GraphicsContext['clippingPlaneVisualization']>;
+      type: 'setSectionViewVisualization';
+      payload: Partial<GraphicsContext['sectionViewVisualization']>;
     }
   | { type: 'setClippingLinesEnabled'; payload: boolean }
   | { type: 'setClippingMeshEnabled'; payload: boolean }
@@ -199,6 +199,21 @@ function calculateGeometryRadius(geometries: Geometry[]): number {
  * - Camera position and controls
  * - Screenshot capabilities
  * - Geometry rendering from CAD
+ *
+ * State Architecture:
+ *
+ * operational (parent state)
+ *   ├── ready (default state)
+ *   └── section-view (modal viewing mode)
+ *       ├── pending (waiting for plane selection)
+ *       └── active (plane selected, can manipulate)
+ *
+ * Future modes can be added as siblings to section-view:
+ *   ├── measurement (future)
+ *   ├── annotation (future)
+ *
+ * Common events (grid, camera, visibility, screenshots) are handled
+ * once at the operational parent level to avoid duplication.
  */
 export const graphicsMachine = setup({
   types: {
@@ -488,66 +503,66 @@ export const graphicsMachine = setup({
       },
     }),
 
-    setClippingPlaneActive: assign({
-      isClippingPlaneActive({ event }) {
-        assertEvent(event, 'setClippingPlaneActive');
+    setSectionViewActive: assign({
+      isSectionViewActive({ event }) {
+        assertEvent(event, 'setSectionViewActive');
         return event.payload;
       },
       // Reset selection when deactivating
-      selectedClippingPlaneId({ event }) {
-        assertEvent(event, 'setClippingPlaneActive');
+      selectedSectionViewId({ event }) {
+        assertEvent(event, 'setSectionViewActive');
         return event.payload ? undefined : undefined;
       },
     }),
 
-    selectClippingPlane: assign({
-      selectedClippingPlaneId({ event }) {
-        assertEvent(event, 'selectClippingPlane');
+    selectSectionView: assign({
+      selectedSectionViewId({ event }) {
+        assertEvent(event, 'selectSectionView');
         return event.payload;
       },
       // Reset translation when changing planes
-      clippingPlaneTranslation({ event }) {
-        assertEvent(event, 'selectClippingPlane');
+      sectionViewTranslation({ event }) {
+        assertEvent(event, 'selectSectionView');
         return event.payload === undefined ? 0 : 0;
       },
       // Reset rotation when changing planes
-      clippingPlaneRotation({ event }): [number, number, number] {
-        assertEvent(event, 'selectClippingPlane');
+      sectionViewRotation({ event }): [number, number, number] {
+        assertEvent(event, 'selectSectionView');
         return event.payload === undefined ? [0, 0, 0] : [0, 0, 0];
       },
     }),
 
-    setClippingPlaneTranslation: assign({
-      clippingPlaneTranslation({ event }) {
-        assertEvent(event, 'setClippingPlaneTranslation');
+    setSectionViewTranslation: assign({
+      sectionViewTranslation({ event }) {
+        assertEvent(event, 'setSectionViewTranslation');
         return event.payload;
       },
     }),
 
-    setClippingPlaneRotation: assign({
-      clippingPlaneRotation({ event }) {
-        assertEvent(event, 'setClippingPlaneRotation');
+    setSectionViewRotation: assign({
+      sectionViewRotation({ event }) {
+        assertEvent(event, 'setSectionViewRotation');
         return event.payload;
       },
     }),
 
-    toggleClippingPlaneDirection: assign({
-      clippingPlaneDirection({ context }) {
-        return context.clippingPlaneDirection === 1 ? -1 : 1;
+    toggleSectionViewDirection: assign({
+      sectionViewDirection({ context }) {
+        return context.sectionViewDirection === 1 ? -1 : 1;
       },
       // When flipping direction, negate translation to keep plane at same position
       // Plane equation: normal · point + constant = 0
       // If we negate normal, we must negate constant
-      clippingPlaneTranslation({ context }) {
-        return -context.clippingPlaneTranslation;
+      sectionViewTranslation({ context }) {
+        return -context.sectionViewTranslation;
       },
     }),
 
-    setClippingPlaneVisualization: assign({
-      clippingPlaneVisualization({ event, context }) {
-        assertEvent(event, 'setClippingPlaneVisualization');
+    setSectionViewVisualization: assign({
+      sectionViewVisualization({ event, context }) {
+        assertEvent(event, 'setSectionViewVisualization');
         return {
-          ...context.clippingPlaneVisualization,
+          ...context.sectionViewVisualization,
           ...event.payload,
         };
       },
@@ -566,6 +581,24 @@ export const graphicsMachine = setup({
         return event.payload;
       },
     }),
+  },
+  guards: {
+    isActivatingClipping({ event }) {
+      assertEvent(event, 'setSectionViewActive');
+      return event.payload;
+    },
+    isDeactivatingSectionView({ event }) {
+      assertEvent(event, 'setSectionViewActive');
+      return !event.payload;
+    },
+    isSelectingPlane({ event }) {
+      assertEvent(event, 'selectSectionView');
+      return event.payload !== undefined;
+    },
+    isDeselectingPlane({ event }) {
+      assertEvent(event, 'selectSectionView');
+      return event.payload === undefined;
+    },
   },
 }).createMachine({
   id: 'graphics',
@@ -595,21 +628,21 @@ export const graphicsMachine = setup({
     enableMatcap: false,
 
     // Clipping plane state
-    isClippingPlaneActive: false,
-    availableClippingPlanes: [
+    isSectionViewActive: false,
+    availableSectionViews: [
       { id: 'xy', normal: [0, 0, 1], constant: 0 },
       { id: 'xz', normal: [0, 1, 0], constant: 0 },
       { id: 'yz', normal: [1, 0, 0], constant: 0 },
     ],
-    selectedClippingPlaneId: undefined,
-    clippingPlaneVisualization: {
+    selectedSectionViewId: undefined,
+    sectionViewVisualization: {
       stripeColor: '#00ff00',
       stripeSpacing: 10,
       stripeWidth: 1,
     },
-    clippingPlaneTranslation: 0,
-    clippingPlaneRotation: [0, 0, 0],
-    clippingPlaneDirection: -1,
+    sectionViewTranslation: 0,
+    sectionViewRotation: [0, 0, 0],
+    sectionViewDirection: -1,
     enableClippingLines: true,
     enableClippingMesh: true,
 
@@ -627,9 +660,10 @@ export const graphicsMachine = setup({
     // Shapes
     geometries: [],
   }),
-  initial: 'ready',
+  initial: 'operational',
   states: {
-    ready: {
+    operational: {
+      initial: 'ready',
       on: {
         // Grid events
         updateGridSize: {
@@ -648,6 +682,9 @@ export const graphicsMachine = setup({
         },
         resetCamera: {
           actions: 'requestCameraReset',
+        },
+        cameraResetCompleted: {
+          actions: 'completeCameraReset',
         },
 
         // Visibility events
@@ -668,32 +705,6 @@ export const graphicsMachine = setup({
         },
         setMatcapVisibility: {
           actions: 'setMatcapVisibility',
-        },
-
-        // Clipping plane events
-        setClippingPlaneActive: {
-          actions: 'setClippingPlaneActive',
-        },
-        selectClippingPlane: {
-          actions: 'selectClippingPlane',
-        },
-        setClippingPlaneTranslation: {
-          actions: 'setClippingPlaneTranslation',
-        },
-        setClippingPlaneRotation: {
-          actions: 'setClippingPlaneRotation',
-        },
-        toggleClippingPlaneDirection: {
-          actions: 'toggleClippingPlaneDirection',
-        },
-        setClippingPlaneVisualization: {
-          actions: 'setClippingPlaneVisualization',
-        },
-        setClippingLinesEnabled: {
-          actions: 'setClippingLinesEnabled',
-        },
-        setClippingMeshEnabled: {
-          actions: 'setClippingMeshEnabled',
         },
 
         // Controls events
@@ -738,6 +749,84 @@ export const graphicsMachine = setup({
         // Geometry updates
         updateGeometries: {
           actions: 'updateGeometries',
+        },
+      },
+      states: {
+        ready: {
+          on: {
+            setSectionViewActive: {
+              guard: 'isActivatingClipping',
+              actions: 'setSectionViewActive',
+              target: 'section-view.pending',
+            },
+          },
+        },
+
+        'section-view': {
+          initial: 'pending',
+          states: {
+            pending: {
+              on: {
+                setSectionViewActive: {
+                  guard: 'isDeactivatingSectionView',
+                  actions: 'setSectionViewActive',
+                  target: '#graphics.operational.ready',
+                },
+                selectSectionView: {
+                  guard: 'isSelectingPlane',
+                  actions: 'selectSectionView',
+                  target: 'active',
+                },
+                setSectionViewVisualization: {
+                  actions: 'setSectionViewVisualization',
+                },
+                setClippingLinesEnabled: {
+                  actions: 'setClippingLinesEnabled',
+                },
+                setClippingMeshEnabled: {
+                  actions: 'setClippingMeshEnabled',
+                },
+              },
+            },
+
+            active: {
+              on: {
+                setSectionViewActive: {
+                  guard: 'isDeactivatingSectionView',
+                  actions: 'setSectionViewActive',
+                  target: '#graphics.operational.ready',
+                },
+                selectSectionView: [
+                  {
+                    guard: 'isDeselectingPlane',
+                    actions: 'selectSectionView',
+                    target: 'pending',
+                  },
+                  {
+                    actions: 'selectSectionView',
+                  },
+                ],
+                setSectionViewTranslation: {
+                  actions: 'setSectionViewTranslation',
+                },
+                setSectionViewRotation: {
+                  actions: 'setSectionViewRotation',
+                },
+                toggleSectionViewDirection: {
+                  actions: 'toggleSectionViewDirection',
+                },
+                setSectionViewVisualization: {
+                  actions: 'setSectionViewVisualization',
+                },
+                setClippingLinesEnabled: {
+                  actions: 'setClippingLinesEnabled',
+                },
+                setClippingMeshEnabled: {
+                  actions: 'setClippingMeshEnabled',
+                },
+              },
+            },
+          },
         },
       },
     },

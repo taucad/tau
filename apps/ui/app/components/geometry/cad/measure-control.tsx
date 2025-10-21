@@ -27,7 +27,7 @@ export function MeasureControl(): React.JSX.Element {
           <Ruler className="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{isMeasureActive ? 'Disable' : 'Enable'} measure</TooltipContent>
+      <TooltipContent>{isMeasureActive ? 'Disable' : 'Enable'} measuring tool</TooltipContent>
     </Tooltip>
   );
 }

@@ -52,7 +52,14 @@ export type GraphicsContext = {
 
   // Measure state
   isMeasureActive: boolean;
-  selectedMeasurePoints: Array<[number, number, number]>; // 3D points
+  measurements: Array<{
+    id: string;
+    startPoint: [number, number, number];
+    endPoint: [number, number, number];
+    distance: number;
+  }>;
+  currentMeasurementStart: [number, number, number] | undefined;
+  measureSnapDistance: number; // Pixels
 
   // Capability registrations
   screenshotCapability?: AnyActorRef;
@@ -103,8 +110,11 @@ export type GraphicsEvent =
   | { type: 'setClippingMeshEnabled'; payload: boolean }
   // Measure events
   | { type: 'setMeasureActive'; payload: boolean }
-  | { type: 'addMeasurePoint'; payload: [number, number, number] }
-  | { type: 'clearMeasurePoints' }
+  | { type: 'startMeasurement'; payload: [number, number, number] }
+  | { type: 'completeMeasurement'; payload: [number, number, number] }
+  | { type: 'cancelCurrentMeasurement' }
+  | { type: 'clearMeasurement'; payload: string } // Measurement id
+  | { type: 'clearAllMeasurements' }
   // Controls events
   | { type: 'controlsInteractionStart' }
   | { type: 'controlsChanged'; zoom: number; position: number; fov: number }
@@ -137,6 +147,7 @@ export type GraphicsEmitted =
 // Input type
 export type GraphicsInput = {
   defaultCameraFovAngle?: number;
+  measureSnapDistance?: number; // Default 20px
 };
 
 /**
@@ -604,23 +615,59 @@ export const graphicsMachine = setup({
         assertEvent(event, 'setMeasureActive');
         return event.payload;
       },
-      selectedMeasurePoints: [], // Clear points when toggling
     }),
 
     deactivateMeasure: assign({
       isMeasureActive: false,
-      selectedMeasurePoints: [],
+      measurements: [],
+      currentMeasurementStart: undefined,
     }),
 
-    addMeasurePoint: assign({
-      selectedMeasurePoints({ event, context }) {
-        assertEvent(event, 'addMeasurePoint');
-        return [...context.selectedMeasurePoints, event.payload];
+    startMeasurement: assign({
+      currentMeasurementStart({ event }) {
+        assertEvent(event, 'startMeasurement');
+        return event.payload;
       },
     }),
 
-    clearMeasurePoints: assign({
-      selectedMeasurePoints: [],
+    completeMeasurement: assign({
+      measurements({ event, context }) {
+        assertEvent(event, 'completeMeasurement');
+        if (!context.currentMeasurementStart) {
+          return context.measurements;
+        }
+
+        const start = context.currentMeasurementStart;
+        const end = event.payload;
+        const distance = Math.hypot(end[0] - start[0], end[1] - start[1], end[2] - start[2]);
+
+        return [
+          ...context.measurements,
+          {
+            id: `measurement-${Date.now()}`,
+            startPoint: start,
+            endPoint: end,
+            distance,
+          },
+        ];
+      },
+      currentMeasurementStart: undefined,
+    }),
+
+    cancelCurrentMeasurement: assign({
+      currentMeasurementStart: undefined,
+    }),
+
+    clearMeasurement: assign({
+      measurements({ event, context }) {
+        assertEvent(event, 'clearMeasurement');
+        return context.measurements.filter((m) => m.id !== event.payload);
+      },
+    }),
+
+    clearAllMeasurements: assign({
+      measurements: [],
+      currentMeasurementStart: undefined,
     }),
   },
   guards: {
@@ -649,7 +696,7 @@ export const graphicsMachine = setup({
       return !event.payload;
     },
     hasSelectedPoints({ context }) {
-      return context.selectedMeasurePoints.length > 0;
+      return context.measurements.length > 0;
     },
   },
 }).createMachine({
@@ -700,7 +747,9 @@ export const graphicsMachine = setup({
 
     // Measure state
     isMeasureActive: false,
-    selectedMeasurePoints: [],
+    measurements: [],
+    currentMeasurementStart: undefined,
+    measureSnapDistance: input.measureSnapDistance ?? 40,
 
     // Capabilities
     screenshotCapability: undefined,
@@ -915,12 +964,12 @@ export const graphicsMachine = setup({
                   actions: ['deactivateMeasure', 'setSectionViewActive'],
                   target: '#graphics.operational.section-view.pending',
                 },
-                addMeasurePoint: {
-                  actions: 'addMeasurePoint',
+                startMeasurement: {
+                  actions: 'startMeasurement',
                   target: 'selected',
                 },
-                clearMeasurePoints: {
-                  actions: 'clearMeasurePoints',
+                clearAllMeasurements: {
+                  actions: 'clearAllMeasurements',
                 },
               },
             },
@@ -929,7 +978,7 @@ export const graphicsMachine = setup({
               on: {
                 setMeasureActive: {
                   guard: 'isDeactivatingMeasure',
-                  actions: 'setMeasureActive',
+                  actions: ['clearAllMeasurements', 'setMeasureActive'],
                   target: '#graphics.operational.ready',
                 },
                 setSectionViewActive: {
@@ -937,11 +986,19 @@ export const graphicsMachine = setup({
                   actions: ['deactivateMeasure', 'setSectionViewActive'],
                   target: '#graphics.operational.section-view.pending',
                 },
-                addMeasurePoint: {
-                  actions: 'addMeasurePoint',
+                completeMeasurement: {
+                  actions: 'completeMeasurement',
+                  target: 'selecting',
                 },
-                clearMeasurePoints: {
-                  actions: 'clearMeasurePoints',
+                cancelCurrentMeasurement: {
+                  actions: 'cancelCurrentMeasurement',
+                  target: 'selecting',
+                },
+                clearMeasurement: {
+                  actions: 'clearMeasurement',
+                },
+                clearAllMeasurements: {
+                  actions: 'clearAllMeasurements',
                   target: 'selecting',
                 },
               },

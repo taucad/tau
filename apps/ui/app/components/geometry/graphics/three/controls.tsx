@@ -5,6 +5,7 @@ import { useSelector } from '@xstate/react';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { ViewportGizmoCube } from '#components/geometry/graphics/three/controls/viewport-gizmo-cube.js';
 import { SectionViewControls } from '#components/geometry/graphics/three/react/section-view-controls.js';
+import { MeasureTool } from '#components/geometry/graphics/three/react/measure-tool.js';
 
 type ControlsProperties = {
   /**
@@ -41,6 +42,7 @@ export const Controls = React.memo(function ({
   const translation = useSelector(graphicsActor, (state) => state.context.sectionViewTranslation);
   const direction = useSelector(graphicsActor, (state) => state.context.sectionViewDirection);
   const availablePlanes = useSelector(graphicsActor, (state) => state.context.availableSectionViews);
+  const isMeasureActive = useSelector(graphicsActor, (state) => state.matches({ operational: 'measure' }));
 
   // Handlers to send events to xstate
   const handleSelectPlane = (planeId: 'xy' | 'xz' | 'yz'): void => {
@@ -71,6 +73,7 @@ export const Controls = React.memo(function ({
         enableDamping={enableDamping}
         enableZoom={enableZoom}
       />
+      {Boolean(isMeasureActive) && <MeasureTool />}
       <SectionViewControls
         isActive={isActive}
         selectedPlaneId={selectedPlaneId}

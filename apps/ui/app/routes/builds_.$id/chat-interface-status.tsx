@@ -47,9 +47,19 @@ const infoFromState = (
     }
 
     case state.matches({ operational: { measure: 'selected' } }): {
+      const measurementCount = state.context.measurements.length;
+      const { gridUnit } = state.context;
+      const distances = state.context.measurements
+        .map((m) => (m.distance / state.context.gridUnitFactor).toFixed(1))
+        .join(` ${gridUnit}, `);
+      const description =
+        measurementCount > 0
+          ? `${measurementCount} measurement${measurementCount > 1 ? 's' : ''}: ${distances} ${gridUnit}`
+          : 'Click more points or clear to restart';
+
       return {
         label: 'Measure Mode',
-        description: 'Click more points or clear to restart',
+        description,
         tooltipLabel: 'Close measure mode',
       };
     }

@@ -1,6 +1,6 @@
 import { useSelector } from '@xstate/react';
 import type { StateFrom } from 'xstate';
-import { ChevronDown, X } from 'lucide-react';
+import { ChevronDown, Info, X } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { cn } from '#utils/ui.utils.js';
@@ -20,6 +20,7 @@ const infoFromState = (
   label: string;
   description: string;
   tooltipLabel: string;
+  tips?: React.ReactNode[];
 } => {
   switch (true) {
     case state.matches({ operational: { 'section-view': 'pending' } }): {
@@ -40,7 +41,7 @@ const infoFromState = (
 
     case state.matches({ operational: { measure: 'selecting' } }): {
       return {
-        label: 'Measuring Tool',
+        label: 'Measure',
         description: 'Click points to measure distances',
         tooltipLabel: 'Close measuring tool',
       };
@@ -61,6 +62,7 @@ const infoFromState = (
         label: 'Measure Mode',
         description,
         tooltipLabel: 'Close measure mode',
+        tips: ['Left click to add a point', 'Right click to cancel adding a point'],
       };
     }
 
@@ -93,7 +95,7 @@ export function ChatInterfaceStatus({ className, ...props }: React.HTMLAttribute
     handleClose,
   );
 
-  const { label, description, tooltipLabel } = infoFromState(state);
+  const { label, description, tooltipLabel, tips } = infoFromState(state);
 
   return state.matches({ operational: 'section-view' }) || state.matches({ operational: 'measure' }) ? (
     <Collapsible
@@ -103,7 +105,7 @@ export function ChatInterfaceStatus({ className, ...props }: React.HTMLAttribute
       onOpenChange={setIsViewerStatusOpen}
     >
       <CollapsibleTrigger className="flex flex-col items-center p-2 select-none md:px-3">
-        <div className="flex items-center gap-1">
+        <div className="flex w-full items-center justify-between gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -127,6 +129,12 @@ export function ChatInterfaceStatus({ className, ...props }: React.HTMLAttribute
         </div>
         <CollapsibleContent className="overflow-hidden text-balance">
           <p className="text-sm text-muted-foreground">{description}</p>
+          {tips?.map((tip) => (
+            <div key={tip} className="flex items-center gap-1 text-muted-foreground">
+              <Info className="size-3" />
+              <p className="text-sm text-muted-foreground">{tip}</p>
+            </div>
+          ))}
         </CollapsibleContent>
       </CollapsibleTrigger>
     </Collapsible>

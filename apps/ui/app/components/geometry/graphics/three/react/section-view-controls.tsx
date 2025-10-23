@@ -120,7 +120,9 @@ function PlaneSelector({
     gl.domElement.style.cursor = 'auto';
   };
 
-  const textDepth = 0.025;
+  const textDepth = 0.01;
+  const labelDepth = 0.05;
+  const labelPosition = (labelDepth + textDepth) / 2;
   const [forwardPlaneName, backwardPlaneName] = getPlaneName(planeId);
 
   const frontFontGeometry = useMemo(
@@ -135,7 +137,7 @@ function PlaneSelector({
   );
   const roundedRectangleGeometry = useMemo(
     // eslint-disable-next-line new-cap -- Three.js naming convention
-    () => RoundedRectangleGeometry({ width: 1, height: 1, radius: 0.1, smoothness: 16, depth: 0.05 }),
+    () => RoundedRectangleGeometry({ width: 1, height: 1, radius: 0.1, smoothness: 16, depth: labelDepth }),
     [],
   );
   const darkenedColor = useMemo(() => adjustHexColorBrightness(color, -0.5), [color]);
@@ -158,7 +160,7 @@ function PlaneSelector({
           depthWrite={false}
         />
       </mesh>
-      <mesh position={[0, 0, textDepth]}>
+      <mesh position={[0, 0, labelPosition]}>
         <primitive object={frontFontGeometry} />
         <meshMatcapMaterial
           transparent
@@ -170,7 +172,7 @@ function PlaneSelector({
           depthWrite={false}
         />
       </mesh>
-      <mesh position={[0, 0, -textDepth]} rotation={[0, Math.PI, 0]}>
+      <mesh position={[0, 0, -labelPosition]} rotation={[0, Math.PI, 0]}>
         <primitive object={backwardFontGeometry} />
         <meshMatcapMaterial
           transparent

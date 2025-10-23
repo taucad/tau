@@ -6,7 +6,7 @@ import { RoundedRectangleGeometry } from '#components/geometry/graphics/three/ge
 export const LabelTextGeometry = ({
   text,
   size = 30,
-  depth = 25,
+  depth = 2,
 }: {
   text: string;
   size?: number;
@@ -22,7 +22,7 @@ export const LabelBackgroundGeometry = ({
   padding = 40,
   height = 70,
   radius = 20,
-  depth = 100,
+  depth = 10,
 }: {
   text: string;
   characterWidth?: number;

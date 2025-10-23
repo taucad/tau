@@ -11,12 +11,27 @@ import {
   findClosestSnapPoint,
 } from '#components/geometry/graphics/three/utils/snap-detection.utils.js';
 import type { SnapPoint } from '#components/geometry/graphics/three/utils/snap-detection.utils.js';
+import { computeAxisRotationForCamera } from '#components/geometry/graphics/three/utils/rotation.utils.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
 
 function calculateScaleFromCamera(position: THREE.Vector3, camera: THREE.Camera): number {
   const distanceToCamera = camera.position.distanceTo(position);
-  return distanceToCamera * 0.0003; // Consistent scaling factor
+
+  let factor: number;
+
+  // Handle orthographic camera
+  if ('isOrthographicCamera' in camera && camera.isOrthographicCamera) {
+    const orthoCamera = camera as THREE.OrthographicCamera;
+    factor = (orthoCamera.top - orthoCamera.bottom) / orthoCamera.zoom;
+  } else {
+    // Handle perspective camera with FOV consideration
+    const perspCamera = camera as THREE.PerspectiveCamera;
+    factor = distanceToCamera * Math.min((1.9 * Math.tan((Math.PI * perspCamera.fov) / 360)) / perspCamera.zoom, 7);
+  }
+
+  const size = 1; // Base size (equivalent to this.size in transform-controls)
+  return (factor * size) / 4000;
 }
 
 export function MeasureTool(): React.JSX.Element {
@@ -229,14 +244,34 @@ function SnapPointIndicator({ position, isActive, camera }: SnapPointIndicatorPr
   useFrame(() => {
     if (meshRef.current) {
       const scale = calculateScaleFromCamera(position, camera);
-      meshRef.current.scale.setScalar(scale * 100);
+
+      // Calculate direction from snap point to camera
+      const direction = new THREE.Vector3();
+      direction.subVectors(camera.position, position).normalize();
+
+      // Create a quaternion that orients the cylinder's Y-axis toward the camera
+      const quaternion = new THREE.Quaternion();
+      quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+
+      meshRef.current.quaternion.copy(quaternion);
+
+      // Scale uniformly to maintain circular shape
+      meshRef.current.scale.set(scale * 500, scale * 500, scale * 500);
     }
   });
 
   return (
     <mesh ref={meshRef} position={position} userData={{ isMeasurementUi: true }}>
-      <sphereGeometry args={[1, 16, 16]} />
-      <meshBasicMaterial transparent color={isActive ? '#00ff00' : '#ffffff'} opacity={isActive ? 1 : 0.8} />
+      {/* Thin cylinder as a flat target disc */}
+      <cylinderGeometry args={[0.05, 0.05, 0.05, 32]} />
+      <meshMatcapMaterial
+        transparent
+        color={isActive ? '#ff0000' : '#00ff00'}
+        opacity={1}
+        depthTest={false}
+        depthWrite={false}
+        side={THREE.DoubleSide}
+      />
     </mesh>
   );
 }
@@ -261,6 +296,9 @@ function MeasurementLine({
   const { camera } = useThree();
   const labelGroupRef = useRef<THREE.Group>(null);
   const lineGroupRef = useRef<THREE.Group>(null);
+  const cylinderMeshRef = useRef<THREE.Mesh>(null);
+  const startConeMeshRef = useRef<THREE.Mesh>(null);
+  const endConeMeshRef = useRef<THREE.Mesh>(null);
 
   // Create matcap materials following transform-controls pattern
   const materials = useMemo(() => {
@@ -296,41 +334,106 @@ function MeasurementLine({
   const distanceInMm = calculatedDistance / gridUnitFactor;
   const labelText = `${distanceInMm.toFixed(1)} ${gridUnit}`;
 
-  // Billboard behavior - always face camera and scale with distance
+  const baseArrowHeadLength = 1.2;
+
+  // Track current scale for arrow positioning
+  const scaleRef = useRef<number>(1);
+
+  const arrowPositions = useMemo(() => {
+    const direction = new THREE.Vector3().subVectors(end, start).normalize();
+    // Use scaled arrow head length for positioning
+    const scaledArrowLength = baseArrowHeadLength * scaleRef.current;
+    const offset = direction.clone().multiplyScalar(scaledArrowLength / 2);
+
+    return {
+      start: start.clone().add(offset),
+      end: end.clone().sub(offset),
+    };
+  }, [start, end]);
+
+  // Calculate measurement line direction (axis of rotation for label)
+  const lineDirection = new THREE.Vector3().subVectors(end, start).normalize();
+
+  // Billboard behavior - rotate around line axis to face camera
   useFrame(() => {
     const scale = calculateScaleFromCamera(midpoint, camera);
+    scaleRef.current = scale;
 
-    // Scale label group
+    // Scale and orient label group
     if (labelGroupRef.current) {
-      labelGroupRef.current.quaternion.copy(camera.quaternion);
+      // First, establish base orientation: align Z-axis with the line direction
+      const baseQuaternion = new THREE.Quaternion();
+      baseQuaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), lineDirection);
+
+      // Then compute rotation around the line axis to face the camera
+      // We want to rotate the label's Y-axis (up) toward the camera
+      const axisRotation = computeAxisRotationForCamera(
+        lineDirection,
+        midpoint,
+        camera,
+        new THREE.Vector3(0, 0, 1), // Rotate Z-axis toward camera
+      );
+
+      // Combine: first align with line, then rotate around line to face camera
+      const finalQuaternion = new THREE.Quaternion().multiplyQuaternions(baseQuaternion, axisRotation);
+
+      labelGroupRef.current.quaternion.copy(finalQuaternion);
       labelGroupRef.current.scale.setScalar(scale);
     }
 
-    // Scale line group (cylinders and cones)
-    if (lineGroupRef.current) {
-      // TODO: scale the line group
-      // LineGroupRef.current.scale.setScalar(scale);
+    // Scale line elements (cylinders and cones)
+    // Scale radius while adjusting length to account for scaled arrows
+    if (cylinderMeshRef.current) {
+      const baseCylinderLength = lineDistance - baseArrowHeadLength * 2;
+      const scaledCylinderLength = lineDistance - baseArrowHeadLength * scale * 2;
+      const cylinderScaleY = baseCylinderLength > 0 ? scaledCylinderLength / baseCylinderLength : 1;
+
+      // Scale X and Z (perpendicular to line), and Y to account for scaled arrow heads
+      cylinderMeshRef.current.scale.set(scale * 50, Math.max(0, cylinderScaleY), scale * 50);
+    }
+
+    // Update arrow positions based on scaled arrow head length
+    const direction = new THREE.Vector3().subVectors(end, start).normalize();
+    const scaledArrowLength = baseArrowHeadLength * scale;
+    const offset = direction.clone().multiplyScalar((scaledArrowLength / 2) * 50);
+
+    if (startConeMeshRef.current) {
+      // Scale cones uniformly for consistent appearance
+      startConeMeshRef.current.scale.setScalar(scale * 50);
+      // Update position to account for scaled arrow length
+      startConeMeshRef.current.position.copy(start.clone().add(offset));
+    }
+
+    if (endConeMeshRef.current) {
+      // Scale cones uniformly for consistent appearance
+      endConeMeshRef.current.scale.setScalar(scale * 50);
+      // Update position to account for scaled arrow length
+      endConeMeshRef.current.position.copy(end.clone().sub(offset));
     }
   });
 
   // Calculate direction and distance for cylinder and cone rotation
-  const direction = new THREE.Vector3().subVectors(end, start).normalize();
   const lineDistance = start.distanceTo(end);
   const startQuaternion = new THREE.Quaternion();
   const endQuaternion = new THREE.Quaternion();
   const cylinderQuaternion = new THREE.Quaternion();
 
-  startQuaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().negate());
-  endQuaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
-  cylinderQuaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+  startQuaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), lineDirection.clone().negate());
+  endQuaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), lineDirection);
+  cylinderQuaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), lineDirection);
 
   return (
     <group>
       {/* Line group with scaling for cylinders and cones */}
       <group ref={lineGroupRef}>
         {/* Cylinder line */}
-        <mesh position={midpoint} quaternion={cylinderQuaternion} userData={{ isMeasurementUi: true }}>
-          <cylinderGeometry args={[0.1, 0.1, lineDistance, 16]} />
+        <mesh
+          ref={cylinderMeshRef}
+          position={midpoint}
+          quaternion={cylinderQuaternion}
+          userData={{ isMeasurementUi: true }}
+        >
+          <cylinderGeometry args={[0.1, 0.1, lineDistance - baseArrowHeadLength * 2, 16]} />
           <primitive
             object={
               isPreview
@@ -349,16 +452,26 @@ function MeasurementLine({
 
         {/* Cone at start */}
         {!isPreview && (
-          <mesh position={start} quaternion={startQuaternion} userData={{ isMeasurementUi: true }}>
-            <coneGeometry args={[0.2, 0.6, 16]} />
+          <mesh
+            ref={startConeMeshRef}
+            position={arrowPositions.start}
+            quaternion={startQuaternion}
+            userData={{ isMeasurementUi: true }}
+          >
+            <coneGeometry args={[0.4, baseArrowHeadLength, 16]} />
             <primitive object={materials.coneMaterial} attach="material" />
           </mesh>
         )}
 
         {/* Cone at end */}
         {!isPreview && (
-          <mesh position={end} quaternion={endQuaternion} userData={{ isMeasurementUi: true }}>
-            <coneGeometry args={[0.2, 0.6, 16]} />
+          <mesh
+            ref={endConeMeshRef}
+            position={arrowPositions.end}
+            quaternion={endQuaternion}
+            userData={{ isMeasurementUi: true }}
+          >
+            <coneGeometry args={[0.4, baseArrowHeadLength, 16]} />
             <primitive object={materials.coneMaterial} attach="material" />
           </mesh>
         )}
@@ -366,7 +479,7 @@ function MeasurementLine({
 
       {/* Label */}
       {!isPreview && (
-        <group ref={labelGroupRef} position={midpoint}>
+        <group ref={labelGroupRef} position={midpoint} rotation={[0, 0, 0]}>
           {/* Background */}
           <mesh position={[0, 0, 0]} userData={{ isMeasurementUi: true }}>
             {/* eslint-disable-next-line new-cap -- Three.js geometry function */}
@@ -375,7 +488,7 @@ function MeasurementLine({
           </mesh>
 
           {/* Text */}
-          <mesh position={[0, 0.035, 0.001]} userData={{ isMeasurementUi: true }}>
+          <mesh position={[0, 0.035, 5]} userData={{ isMeasurementUi: true }}>
             {/* eslint-disable-next-line new-cap -- Three.js geometry function */}
             <primitive object={LabelTextGeometry({ text: labelText })} />
             <primitive object={materials.textMaterial} attach="material" />

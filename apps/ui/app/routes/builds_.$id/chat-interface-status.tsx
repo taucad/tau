@@ -18,14 +18,14 @@ const infoFromState = (
   state: GraphicsState,
 ): {
   label: string;
-  description: string;
+  description: React.ReactNode;
   tooltipLabel: string;
   tips?: React.ReactNode[];
 } => {
   switch (true) {
     case state.matches({ operational: { 'section-view': 'pending' } }): {
       return {
-        label: 'Section View Pending',
+        label: 'Section View',
         description: 'Select a plane to view a cross section',
         tooltipLabel: 'Close section view',
       };
@@ -39,29 +39,19 @@ const infoFromState = (
       };
     }
 
-    case state.matches({ operational: { measure: 'selecting' } }): {
-      return {
-        label: 'Measure',
-        description: 'Click points to measure distances',
-        tooltipLabel: 'Close measuring tool',
-      };
-    }
-
+    case state.matches({ operational: { measure: 'selecting' } }):
     case state.matches({ operational: { measure: 'selected' } }): {
       const measurementCount = state.context.measurements.length;
-      const { gridUnit } = state.context;
-      const distances = state.context.measurements
-        .map((m) => (m.distance / state.context.gridUnitFactor).toFixed(1))
-        .join(` ${gridUnit}, `);
-      const description =
-        measurementCount > 0
-          ? `${measurementCount} measurement${measurementCount > 1 ? 's' : ''}: ${distances} ${gridUnit}`
-          : 'Click more points or clear to restart';
+      const hasMeasurements = measurementCount > 0;
 
       return {
-        label: 'Measure Mode',
-        description,
-        tooltipLabel: 'Close measure mode',
+        label: 'Measure',
+        description: (
+          <div className="flex flex-col gap-2">
+            {hasMeasurements ? <p>Click more points or clear to restart</p> : <p>Click points to measure distances</p>}
+          </div>
+        ),
+        tooltipLabel: 'Close measuring tool',
         tips: ['Left click to add a point', 'Right click to cancel adding a point'],
       };
     }
@@ -117,7 +107,7 @@ export function ChatInterfaceStatus({ className, ...props }: React.HTMLAttribute
                   handleClose();
                 }}
               >
-                <X className="size-4" />
+                <X className="size-3" />
               </Button>
             </TooltipTrigger>
             <TooltipContent className="flex items-center gap-2 align-baseline">
@@ -127,14 +117,18 @@ export function ChatInterfaceStatus({ className, ...props }: React.HTMLAttribute
           <span className="text-sm font-medium">{label}</span>
           <ChevronDown className="size-4 text-muted-foreground group-data-[state=open]/viewer-status:rotate-180" />
         </div>
-        <CollapsibleContent className="overflow-hidden text-balance">
+        <CollapsibleContent className="flex flex-col gap-2 overflow-hidden text-balance">
           <p className="text-sm text-muted-foreground">{description}</p>
-          {tips?.map((tip) => (
-            <div key={tip} className="flex items-center gap-1 text-muted-foreground">
-              <Info className="size-3" />
-              <p className="text-sm text-muted-foreground">{tip}</p>
+          {tips !== undefined && tips.length > 0 ? (
+            <div>
+              {tips.map((tip) => (
+                <div key={tip as string} className="flex items-center gap-1 text-muted-foreground">
+                  <Info className="size-3" />
+                  <p className="text-xs text-muted-foreground">{tip}</p>
+                </div>
+              ))}
             </div>
-          ))}
+          ) : null}
         </CollapsibleContent>
       </CollapsibleTrigger>
     </Collapsible>

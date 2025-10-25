@@ -623,6 +623,12 @@ export const graphicsMachine = setup({
       currentMeasurementStart: undefined,
     }),
 
+    // Deactivate measure mode but keep existing measurements in place
+    deactivateMeasurePreserveMeasurements: assign({
+      isMeasureActive: false,
+      currentMeasurementStart: undefined,
+    }),
+
     startMeasurement: assign({
       currentMeasurementStart({ event }) {
         assertEvent(event, 'startMeasurement');
@@ -961,7 +967,7 @@ export const graphicsMachine = setup({
                 },
                 setSectionViewActive: {
                   guard: 'isActivatingClipping',
-                  actions: ['deactivateMeasure', 'setSectionViewActive'],
+                  actions: ['deactivateMeasurePreserveMeasurements', 'setSectionViewActive'],
                   target: '#graphics.operational.section-view.pending',
                 },
                 startMeasurement: {
@@ -983,7 +989,7 @@ export const graphicsMachine = setup({
                 },
                 setSectionViewActive: {
                   guard: 'isActivatingClipping',
-                  actions: ['deactivateMeasure', 'setSectionViewActive'],
+                  actions: ['deactivateMeasurePreserveMeasurements', 'setSectionViewActive'],
                   target: '#graphics.operational.section-view.pending',
                 },
                 completeMeasurement: {

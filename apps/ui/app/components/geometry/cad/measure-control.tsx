@@ -24,7 +24,7 @@ export function MeasureControl(): React.JSX.Element {
           className="data-[active=true]:bg-accent data-[active=true]:text-primary"
           onClick={handleClick}
         >
-          <Ruler className="size-4" />
+          <Ruler className="size-4 -rotate-45" />
         </Button>
       </TooltipTrigger>
       <TooltipContent>{isMeasureActive ? 'Disable' : 'Enable'} measuring tool</TooltipContent>

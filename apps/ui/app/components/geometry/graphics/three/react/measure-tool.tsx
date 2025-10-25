@@ -376,7 +376,25 @@ function MeasurementLine({
       // 3) Combine rotations: apply base alignment, then rotate around the world line axis.
       //    Quaternion multiplication order matters: q = axisRotation * baseQuaternion
       //    applies the base first, then the axis rotation in world space.
-      const finalQuaternion = new THREE.Quaternion().multiplyQuaternions(axisRotation, baseQuaternion);
+      let finalQuaternion = new THREE.Quaternion().multiplyQuaternions(axisRotation, baseQuaternion);
+
+      // 4) Ensure text is upright relative to the camera. If the label's up vector
+      //    points opposite to the camera's up (projected onto the label plane), flip
+      //    180° around the measurement line axis.
+      const labelNormalWorld = new THREE.Vector3(0, 0, 1).applyQuaternion(finalQuaternion).normalize();
+      const labelUpWorld = new THREE.Vector3(0, 1, 0).applyQuaternion(finalQuaternion).normalize();
+
+      const cameraUpWorld = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+      const cameraUpProjected = new THREE.Vector3()
+        .copy(cameraUpWorld)
+        .addScaledVector(labelNormalWorld, -cameraUpWorld.dot(labelNormalWorld))
+        .normalize();
+
+      if (labelUpWorld.dot(cameraUpProjected) < 0) {
+        // Flip around the label's normal so it stays facing the camera
+        const flipQuaternion = new THREE.Quaternion().setFromAxisAngle(labelNormalWorld, Math.PI);
+        finalQuaternion = new THREE.Quaternion().multiplyQuaternions(flipQuaternion, finalQuaternion);
+      }
 
       labelGroupRef.current.quaternion.copy(finalQuaternion);
       labelGroupRef.current.scale.setScalar(scale);

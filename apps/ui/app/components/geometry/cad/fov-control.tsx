@@ -114,7 +114,7 @@ export function FovControl({ defaultAngle, className }: Omit<CameraControlProps,
         </div>
       </TooltipTrigger>
       <TooltipContent forceMount>
-        <span>Adjust field of view angle</span>
+        <span>Change field of view angle</span>
         <br />
         <span className="inline-flex items-center gap-1 text-neutral-foreground/60 dark:text-foreground/50">
           <Info className="size-3 stroke-2" /> Set to 0° for orthographic view

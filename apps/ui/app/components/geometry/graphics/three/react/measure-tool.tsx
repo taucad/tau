@@ -361,21 +361,22 @@ function MeasurementLine({
 
     // Scale and orient label group
     if (labelGroupRef.current) {
-      // First, establish base orientation: align Z-axis with the line direction
+      // 1) Establish base orientation: align X-axis with the measurement line
+      //    This makes the label plane (YZ) contain the line, and its normal (Z) be
+      //    perpendicular to the line so it can rotate around the line and face the camera.
       const baseQuaternion = new THREE.Quaternion();
-      baseQuaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), lineDirection);
+      baseQuaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), lineDirection);
 
-      // Then compute rotation around the line axis to face the camera
-      // We want to rotate the label's Y-axis (up) toward the camera
-      const axisRotation = computeAxisRotationForCamera(
-        lineDirection,
-        midpoint,
-        camera,
-        new THREE.Vector3(0, 0, 1), // Rotate Z-axis toward camera
-      );
+      // 2) Compute rotation around the line axis so the label's normal (local Z after base)
+      //    faces the camera. We pass the current normal (Z transformed by base) as the
+      //    reference vector to rotate from.
+      const currentNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(baseQuaternion);
+      const axisRotation = computeAxisRotationForCamera(lineDirection, midpoint, camera, currentNormal);
 
-      // Combine: first align with line, then rotate around line to face camera
-      const finalQuaternion = new THREE.Quaternion().multiplyQuaternions(baseQuaternion, axisRotation);
+      // 3) Combine rotations: apply base alignment, then rotate around the world line axis.
+      //    Quaternion multiplication order matters: q = axisRotation * baseQuaternion
+      //    applies the base first, then the axis rotation in world space.
+      const finalQuaternion = new THREE.Quaternion().multiplyQuaternions(axisRotation, baseQuaternion);
 
       labelGroupRef.current.quaternion.copy(finalQuaternion);
       labelGroupRef.current.scale.setScalar(scale);

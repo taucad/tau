@@ -1,3 +1,4 @@
+/* eslint-disable complexity -- Label/line sizing and camera-facing math in a single component */
 import { useEffect, useRef, useState, useMemo } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -283,6 +284,26 @@ type MeasurementLineProps = {
   readonly gridUnitFactor?: number;
   readonly gridUnit?: string;
   readonly isPreview?: boolean;
+  readonly coneHeight?: number; // Base cone height in scene units
+  readonly coneRadius?: number; // Base cone radius in scene units
+  readonly cylinderRadius?: number; // Base cylinder radius in scene units
+  // Text sizing
+  readonly textSize?: number;
+  readonly textDepth?: number;
+  // Label/background sizing
+  readonly labelHeight?: number;
+  readonly labelPadding?: number;
+  readonly labelCornerRadius?: number;
+  readonly labelDepth?: number;
+  readonly labelCharWidth?: number;
+  // Formatting and behavior
+  readonly decimals?: number;
+  readonly enableUnits?: boolean;
+  readonly materials?: {
+    readonly backgroundMaterial: THREE.Material;
+    readonly textMaterial: THREE.Material;
+    readonly coneMaterial: THREE.Material;
+  };
 };
 
 function MeasurementLine({
@@ -292,6 +313,19 @@ function MeasurementLine({
   gridUnitFactor = 1,
   gridUnit = 'mm',
   isPreview = false,
+  coneHeight = 80,
+  coneRadius = 10,
+  cylinderRadius = 2,
+  textSize = 40,
+  textDepth = 2,
+  labelHeight = 80,
+  labelPadding = 50,
+  labelCornerRadius = 20,
+  labelDepth = 10,
+  labelCharWidth = 24,
+  decimals = 1,
+  enableUnits = true,
+  materials,
 }: MeasurementLineProps): React.JSX.Element {
   const { camera } = useThree();
   const labelGroupRef = useRef<THREE.Group>(null);
@@ -301,7 +335,11 @@ function MeasurementLine({
   const endConeMeshRef = useRef<THREE.Mesh>(null);
 
   // Create matcap materials following transform-controls pattern
-  const materials = useMemo(() => {
+  const derivedMaterials = useMemo(() => {
+    if (materials) {
+      return materials;
+    }
+
     const matcapTexture = matcapMaterial();
 
     const baseMaterial = new THREE.MeshMatcapMaterial({
@@ -324,7 +362,7 @@ function MeasurementLine({
     coneMaterial.color.set(0x00_00_00); // Black
 
     return { backgroundMaterial, textMaterial, coneMaterial };
-  }, []);
+  }, [materials]);
 
   // Calculate label position (midpoint)
   const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
@@ -332,24 +370,10 @@ function MeasurementLine({
   // Calculate distance if not provided
   const calculatedDistance = distance ?? start.distanceTo(end);
   const distanceInMm = calculatedDistance / gridUnitFactor;
-  const labelText = `${distanceInMm.toFixed(1)} ${gridUnit}`;
+  const labelText = `${distanceInMm.toFixed(decimals)}${enableUnits ? ` ${gridUnit}` : ''}`;
 
-  const baseArrowHeadLength = 1.2;
-
-  // Track current scale for arrow positioning
+  // Track current scale for UI sizing
   const scaleRef = useRef<number>(1);
-
-  const arrowPositions = useMemo(() => {
-    const direction = new THREE.Vector3().subVectors(end, start).normalize();
-    // Use scaled arrow head length for positioning
-    const scaledArrowLength = baseArrowHeadLength * scaleRef.current;
-    const offset = direction.clone().multiplyScalar(scaledArrowLength / 2);
-
-    return {
-      start: start.clone().add(offset),
-      end: end.clone().sub(offset),
-    };
-  }, [start, end]);
 
   // Calculate measurement line direction (axis of rotation for label)
   const lineDirection = new THREE.Vector3().subVectors(end, start).normalize();
@@ -398,36 +422,33 @@ function MeasurementLine({
 
       labelGroupRef.current.quaternion.copy(finalQuaternion);
       labelGroupRef.current.scale.setScalar(scale);
+      labelGroupRef.current.position.copy(midpoint);
     }
 
-    // Scale line elements (cylinders and cones)
-    // Scale radius while adjusting length to account for scaled arrows
-    if (cylinderMeshRef.current) {
-      const baseCylinderLength = lineDistance - baseArrowHeadLength * 2;
-      const scaledCylinderLength = lineDistance - baseArrowHeadLength * scale * 2;
-      const cylinderScaleY = baseCylinderLength > 0 ? scaledCylinderLength / baseCylinderLength : 1;
-
-      // Scale X and Z (perpendicular to line), and Y to account for scaled arrow heads
-      cylinderMeshRef.current.scale.set(scale * 50, Math.max(0, cylinderScaleY), scale * 50);
-    }
-
-    // Update arrow positions based on scaled arrow head length
+    // Dynamically size cylinder and cones using transform scaling with unit geometries
     const direction = new THREE.Vector3().subVectors(end, start).normalize();
-    const scaledArrowLength = baseArrowHeadLength * scale;
-    const offset = direction.clone().multiplyScalar((scaledArrowLength / 2) * 50);
 
+    // Derive UI dimensions from scale using component props
+    const coneHeightScaled = coneHeight * scale; // Height of arrow heads
+    const coneRadiusScaled = coneRadius * scale; // Radius of arrow heads
+    const cylinderRadiusScaled = cylinderRadius * scale; // Thickness of the line
+
+    const effectiveCone = isPreview ? 0 : coneHeightScaled;
+    const cylinderHeight = Math.max(0.0001, lineDistance - 2 * effectiveCone);
+
+    if (cylinderMeshRef.current) {
+      cylinderMeshRef.current.scale.set(cylinderRadiusScaled, cylinderHeight, cylinderRadiusScaled);
+    }
+
+    const coneOffset = direction.clone().multiplyScalar(coneHeightScaled / 2);
     if (startConeMeshRef.current) {
-      // Scale cones uniformly for consistent appearance
-      startConeMeshRef.current.scale.setScalar(scale * 50);
-      // Update position to account for scaled arrow length
-      startConeMeshRef.current.position.copy(start.clone().add(offset));
+      startConeMeshRef.current.scale.set(coneRadiusScaled, coneHeightScaled, coneRadiusScaled);
+      startConeMeshRef.current.position.copy(start.clone().add(coneOffset));
     }
 
     if (endConeMeshRef.current) {
-      // Scale cones uniformly for consistent appearance
-      endConeMeshRef.current.scale.setScalar(scale * 50);
-      // Update position to account for scaled arrow length
-      endConeMeshRef.current.position.copy(end.clone().sub(offset));
+      endConeMeshRef.current.scale.set(coneRadiusScaled, coneHeightScaled, coneRadiusScaled);
+      endConeMeshRef.current.position.copy(end.clone().sub(coneOffset));
     }
   });
 
@@ -452,7 +473,8 @@ function MeasurementLine({
           quaternion={cylinderQuaternion}
           userData={{ isMeasurementUi: true }}
         >
-          <cylinderGeometry args={[0.1, 0.1, lineDistance - baseArrowHeadLength * 2, 16]} />
+          {/* Unit geometry – scaled per-frame */}
+          <cylinderGeometry args={[1, 1, 1, 16]} />
           <primitive
             object={
               isPreview
@@ -463,7 +485,7 @@ function MeasurementLine({
                     depthTest: false,
                     depthWrite: false,
                   })
-                : materials.coneMaterial
+                : derivedMaterials.coneMaterial
             }
             attach="material"
           />
@@ -473,25 +495,22 @@ function MeasurementLine({
         {!isPreview && (
           <mesh
             ref={startConeMeshRef}
-            position={arrowPositions.start}
+            position={start}
             quaternion={startQuaternion}
             userData={{ isMeasurementUi: true }}
           >
-            <coneGeometry args={[0.4, baseArrowHeadLength, 16]} />
-            <primitive object={materials.coneMaterial} attach="material" />
+            {/* Unit geometry – scaled per-frame */}
+            <coneGeometry args={[1, 1, 16]} />
+            <primitive object={derivedMaterials.coneMaterial} attach="material" />
           </mesh>
         )}
 
         {/* Cone at end */}
         {!isPreview && (
-          <mesh
-            ref={endConeMeshRef}
-            position={arrowPositions.end}
-            quaternion={endQuaternion}
-            userData={{ isMeasurementUi: true }}
-          >
-            <coneGeometry args={[0.4, baseArrowHeadLength, 16]} />
-            <primitive object={materials.coneMaterial} attach="material" />
+          <mesh ref={endConeMeshRef} position={end} quaternion={endQuaternion} userData={{ isMeasurementUi: true }}>
+            {/* Unit geometry – scaled per-frame */}
+            <coneGeometry args={[1, 1, 16]} />
+            <primitive object={derivedMaterials.coneMaterial} attach="material" />
           </mesh>
         )}
       </group>
@@ -501,16 +520,26 @@ function MeasurementLine({
         <group ref={labelGroupRef} position={midpoint} rotation={[0, 0, 0]}>
           {/* Background */}
           <mesh position={[0, 0, 0]} userData={{ isMeasurementUi: true }}>
-            {/* eslint-disable-next-line new-cap -- Three.js geometry function */}
-            <primitive object={LabelBackgroundGeometry({ text: labelText })} />
-            <primitive object={materials.backgroundMaterial} attach="material" />
+            {}
+            <primitive
+              // eslint-disable-next-line new-cap -- geometry factory naming from Three.js helpers
+              object={LabelBackgroundGeometry({
+                text: labelText,
+                characterWidth: labelCharWidth,
+                padding: labelPadding,
+                height: labelHeight,
+                radius: labelCornerRadius,
+                depth: labelDepth,
+              })}
+            />
+            <primitive object={derivedMaterials.backgroundMaterial} attach="material" />
           </mesh>
 
           {/* Text */}
           <mesh position={[0, 0.035, 5]} userData={{ isMeasurementUi: true }}>
-            {/* eslint-disable-next-line new-cap -- Three.js geometry function */}
-            <primitive object={LabelTextGeometry({ text: labelText })} />
-            <primitive object={materials.textMaterial} attach="material" />
+            {/* eslint-disable-next-line new-cap -- geometry factory naming from Three.js helpers */}
+            <primitive object={LabelTextGeometry({ text: labelText, size: textSize, depth: textDepth })} />
+            <primitive object={derivedMaterials.textMaterial} attach="material" />
           </mesh>
         </group>
       )}

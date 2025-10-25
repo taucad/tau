@@ -14,7 +14,7 @@ type KeydownOptions = {
  * Hook to handle keyboard shortcuts
  */
 export function useKeydown(
-  combo: KeyCombination,
+  keyCombination: KeyCombination,
   callback: (event: KeyboardEvent) => void,
   options: KeydownOptions = {},
 ): {
@@ -47,22 +47,22 @@ export function useKeydown(
       }
 
       // Check if the main key matches
-      const keyMatches = event.key.toLowerCase() === combo.key.toLowerCase();
+      const keyMatches = event.key.toLowerCase() === keyCombination.key.toLowerCase();
 
       if (!keyMatches) {
         return;
       }
 
       // For modifier keys (Shift, Control, Alt, Meta), we don't check their own modifier state
-      const isModifierKey = ['shift', 'control', 'alt', 'meta'].includes(combo.key.toLowerCase());
+      const isModifierKey = ['shift', 'control', 'alt', 'meta'].includes(keyCombination.key.toLowerCase());
 
       // Check modifier keys only if the target key is not itself a modifier
       const modifiersMatch =
         isModifierKey ||
-        (Boolean(event.metaKey) === Boolean(combo.metaKey) &&
-          Boolean(event.ctrlKey) === Boolean(combo.ctrlKey) &&
-          Boolean(event.altKey) === Boolean(combo.altKey) &&
-          Boolean(event.shiftKey) === Boolean(combo.shiftKey));
+        (Boolean(event.metaKey) === Boolean(keyCombination.metaKey) &&
+          Boolean(event.ctrlKey) === Boolean(keyCombination.ctrlKey) &&
+          Boolean(event.altKey) === Boolean(keyCombination.altKey) &&
+          Boolean(event.shiftKey) === Boolean(keyCombination.shiftKey));
 
       if (modifiersMatch) {
         if (preventDefault) {
@@ -84,7 +84,7 @@ export function useKeydown(
         }
       }
     },
-    [callback, combo, preventDefault, stopPropagation, repeat, enableKeydownCallback, enableKeyupCallback],
+    [callback, keyCombination, preventDefault, stopPropagation, repeat, enableKeydownCallback, enableKeyupCallback],
   );
 
   useEffect(() => {
@@ -97,10 +97,10 @@ export function useKeydown(
     };
   }, [handler]);
 
-  const formattedKeyCombination = useMemo(() => formatKeyCombination(combo), [combo]);
+  const formattedKeyCombination = useMemo(() => formatKeyCombination(keyCombination), [keyCombination]);
 
   return {
-    originalKeyCombination: combo,
+    originalKeyCombination: keyCombination,
     formattedKeyCombination,
     isKeyPressed,
   };

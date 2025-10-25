@@ -1550,7 +1550,7 @@ class TransformControlsGizmo extends Object3D {
         // Ensure translation arrows face the user by twisting around their axis using the camera orientation
         if (this.mode === 'translate') {
           const isAxisArrow =
-            (handle.tag?.includes('fwd') || handle.tag?.includes('bwd')) &&
+            (handle.tag?.includes('fwd') ?? handle.tag?.includes('bwd')) &&
             (handle.name === 'X' || handle.name === 'Y' || handle.name === 'Z');
           if (isAxisArrow) {
             // Calculate the camera rotation relative to the handle axis

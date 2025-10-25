@@ -189,6 +189,36 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
     },
   },
   openai: {
+    'gpt-5': {
+      id: 'openai-gpt-5',
+      name: 'GPT-5',
+      slug: 'gpt-5',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
+      model: 'gpt-5',
+      details: {
+        family: 'gpt',
+        families: ['GPT-5'],
+        contextWindow: 1_000_000,
+        maxTokens: 100_000,
+        cost: {
+          inputTokens: 2,
+          outputTokens: 8,
+          cachedReadTokens: 0.5,
+          cachedWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        temperature: 1,
+        // @ts-expect-error: OpenAI reasoning params not in typed schema
+        reasoning: {
+          effort: 'medium',
+        },
+      },
+    },
     'gpt-4.1': {
       id: 'openai-gpt-4.1',
       name: 'GPT-4.1',

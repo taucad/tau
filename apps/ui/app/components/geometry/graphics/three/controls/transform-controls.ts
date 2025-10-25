@@ -904,17 +904,17 @@ class TransformControlsGizmo extends Object3D {
     // Gizmo definitions - custom hierarchy definitions for setupGizmo() function
 
     const gizmoTranslationScaleFactor = 0.000_25;
-    const gizmoPickerTranslationScaleFactor = 0.0005;
+    const pickerTranslationScaleFactor = 0.000_25;
 
     const gizmoTranslationScale = [
       gizmoTranslationScaleFactor,
       gizmoTranslationScaleFactor,
       gizmoTranslationScaleFactor,
     ];
-    const gizmoPickerTranslationScale = [
-      gizmoPickerTranslationScaleFactor,
-      gizmoPickerTranslationScaleFactor,
-      gizmoPickerTranslationScaleFactor,
+    const pickerTranslationScale = [
+      pickerTranslationScaleFactor,
+      pickerTranslationScaleFactor,
+      pickerTranslationScaleFactor,
     ];
     const gizmoMeshOffset = 0.3;
     const gizmoMeshTranslationTextOffset = 0.7;
@@ -922,14 +922,15 @@ class TransformControlsGizmo extends Object3D {
     // Rotation text and box offsets
     const gizmoRotationScaleFactor = 0.000_15;
     const gizmoRotationScaleFactorZ = gizmoTranslationScaleFactor;
-    const gizmoPickerRotationScaleFactor = 0.0003;
+    const pickerRotationScaleFactor = 0.0003;
     const gizmoMeshRotationTextOffset = 1.2;
-    const gizmoMeshRotationTextBoxOffset = ((boxDepth + textDepth) / 2) * gizmoRotationScaleFactor;
+    const gizmoTextBoxOffset = ((boxDepth + textDepth) / 2) * gizmoRotationScaleFactor;
     const gizmoRotationScale = [gizmoRotationScaleFactor, gizmoRotationScaleFactor, gizmoRotationScaleFactorZ];
-    const gizmoPickerRotationScale = [
-      gizmoPickerRotationScaleFactor,
-      gizmoPickerRotationScaleFactor,
-      gizmoPickerRotationScaleFactor,
+    const pickerRotationScale = [
+      //
+      pickerRotationScaleFactor,
+      pickerRotationScaleFactor,
+      pickerRotationScaleFactor,
     ];
 
     // Order is:
@@ -945,112 +946,124 @@ class TransformControlsGizmo extends Object3D {
           [gizmoMeshOffset, 0, 0],
           [Math.PI / 2, 0, -Math.PI / 2],
           gizmoTranslationScale,
-          'fwd',
+          'fwd-handle',
         ],
         [
           new Mesh(arrowGeometry, matRed),
           [-gizmoMeshOffset, 0, 0],
           [Math.PI / 2, 0, Math.PI / 2],
           gizmoTranslationScale,
-          'bwd',
+          'bwd-handle',
         ],
         [
           new Mesh(fontGeometryTranslation, matHelper),
-          [gizmoMeshTranslationTextOffset, gizmoMeshRotationTextBoxOffset, 0],
+          [gizmoMeshTranslationTextOffset, gizmoTextBoxOffset, 0],
           [Math.PI / 2, Math.PI, Math.PI],
           gizmoTranslationScale,
-          'fwd',
+          'fwd-label',
         ],
         [
           new Mesh(roundedBoxGeometry, matHelperWhite),
           [gizmoMeshTranslationTextOffset, 0, 0],
           [Math.PI / 2, 0, 0],
           gizmoTranslationScale,
-          'fwd',
+          'fwd-label',
         ],
         [
           new Mesh(fontGeometryTranslation, matHelperBlack),
-          [-gizmoMeshTranslationTextOffset, gizmoMeshRotationTextBoxOffset, 0],
+          [-gizmoMeshTranslationTextOffset, gizmoTextBoxOffset, 0],
           [Math.PI / 2, 0, Math.PI],
           gizmoTranslationScale,
-          'bwd',
+          'bwd-label',
         ],
         [
           new Mesh(roundedBoxGeometry, matHelperWhite),
           [-gizmoMeshTranslationTextOffset, 0, 0],
           [Math.PI / 2, 0, Math.PI],
           gizmoTranslationScale,
-          'bwd',
+          'bwd-label',
         ],
       ],
       Y: [
-        [new Mesh(arrowGeometry, matGreen), [0, gizmoMeshOffset, 0], undefined, gizmoTranslationScale, 'fwd'],
-        [new Mesh(arrowGeometry, matGreen), [0, -gizmoMeshOffset, 0], [Math.PI, 0, 0], gizmoTranslationScale, 'bwd'],
+        [new Mesh(arrowGeometry, matGreen), [0, gizmoMeshOffset, 0], undefined, gizmoTranslationScale, 'fwd-handle'],
+        [
+          new Mesh(arrowGeometry, matGreen),
+          [0, -gizmoMeshOffset, 0],
+          [Math.PI, 0, 0],
+          gizmoTranslationScale,
+          'bwd-handle',
+        ],
         [
           new Mesh(fontGeometryTranslation, matHelper),
-          [0, gizmoMeshTranslationTextOffset, gizmoMeshRotationTextBoxOffset],
+          [0, gizmoMeshTranslationTextOffset, gizmoTextBoxOffset],
           [0, 0, Math.PI / 2],
           gizmoTranslationScale,
-          'fwd',
+          'fwd-label',
         ],
         [
           new Mesh(roundedBoxGeometry, matHelperWhite),
           [0, gizmoMeshTranslationTextOffset, 0],
           [0, 0, Math.PI / 2],
           gizmoTranslationScale,
-          'fwd',
+          'fwd-label',
         ],
         [
           new Mesh(fontGeometryTranslation, matHelper),
-          [0, -gizmoMeshTranslationTextOffset, gizmoMeshRotationTextBoxOffset],
+          [0, -gizmoMeshTranslationTextOffset, gizmoTextBoxOffset],
           [Math.PI, 0, Math.PI / 2],
           gizmoTranslationScale,
-          'bwd',
+          'bwd-label',
         ],
         [
           new Mesh(roundedBoxGeometry, matHelperWhite),
           [0, -gizmoMeshTranslationTextOffset, 0],
           [0, 0, Math.PI / 2],
           gizmoTranslationScale,
-          'bwd',
+          'bwd-label',
         ],
       ],
       Z: [
-        [new Mesh(arrowGeometry, matBlue), [0, 0, gizmoMeshOffset], [Math.PI / 2, 0, 0], gizmoTranslationScale, 'fwd'],
+        [
+          new Mesh(arrowGeometry, matBlue),
+          [0, 0, gizmoMeshOffset],
+          [Math.PI / 2, 0, 0],
+          gizmoTranslationScale,
+          'fwd-handle',
+        ],
         [
           new Mesh(arrowGeometry, matBlue),
           [0, 0, -gizmoMeshOffset],
           [-Math.PI / 2, 0, 0],
           gizmoTranslationScale,
-          'bwd',
+          'bwd-handle',
         ],
         [
           new Mesh(fontGeometryTranslation, matHelper),
-          [0, gizmoMeshRotationTextBoxOffset, gizmoMeshTranslationTextOffset],
+          [0, gizmoTextBoxOffset, gizmoMeshTranslationTextOffset],
           [Math.PI / 2, Math.PI, 0],
           gizmoTranslationScale,
-          'fwd',
+          'fwd-label',
         ],
         [
           new Mesh(roundedBoxGeometry, matHelperWhite),
           [0, 0, gizmoMeshTranslationTextOffset],
           [-Math.PI / 2, 0, 0],
           gizmoTranslationScale,
-          'fwd',
+          'fwd-label',
         ],
         [
           new Mesh(fontGeometryTranslation, matHelperBlack),
-          [0, gizmoMeshRotationTextBoxOffset, -gizmoMeshTranslationTextOffset],
+          [0, gizmoTextBoxOffset, -gizmoMeshTranslationTextOffset],
           [Math.PI / 2, 0, Math.PI],
           gizmoTranslationScale,
-          'bwd',
+          'bwd-label',
         ],
         [
           new Mesh(roundedBoxGeometry, matHelperWhite),
           [0, 0, -gizmoMeshTranslationTextOffset],
           [Math.PI / 2, 0, Math.PI],
           gizmoTranslationScale,
-          'bwd',
+          'bwd-label',
         ],
       ],
       XYZ: [[new Mesh(new OctahedronGeometry(0.1, 0), matWhiteTransparent.clone()), [0, 0, 0], [0, 0, 0]]],
@@ -1080,26 +1093,26 @@ class TransformControlsGizmo extends Object3D {
         [
           new Mesh(arrowGeometry, matInvisible),
           [gizmoMeshOffset, 0, 0],
-          [0, 0, -Math.PI / 2],
-          gizmoPickerTranslationScale,
-          'fwd',
+          [Math.PI / 2, 0, -Math.PI / 2],
+          pickerTranslationScale,
+          'fwd-picker',
         ],
         [
           new Mesh(arrowGeometry, matInvisible),
           [-gizmoMeshOffset, 0, 0],
           [0, 0, Math.PI / 2],
-          gizmoPickerTranslationScale,
-          'bwd',
+          pickerTranslationScale,
+          'bwd-picker',
         ],
       ],
       Y: [
-        [new Mesh(arrowGeometry, matGreen), [0, gizmoMeshOffset, 0], undefined, gizmoPickerTranslationScale, 'fwd'],
+        [new Mesh(arrowGeometry, matGreen), [0, gizmoMeshOffset, 0], undefined, pickerTranslationScale, 'fwd-picker'],
         [
           new Mesh(arrowGeometry, matGreen),
           [0, -gizmoMeshOffset, 0],
           [Math.PI, 0, 0],
-          gizmoPickerTranslationScale,
-          'bwd',
+          pickerTranslationScale,
+          'bwd-picker',
         ],
       ],
       Z: [
@@ -1107,15 +1120,15 @@ class TransformControlsGizmo extends Object3D {
           new Mesh(arrowGeometry, matBlue),
           [0, 0, gizmoMeshOffset],
           [Math.PI / 2, 0, 0],
-          gizmoPickerTranslationScale,
-          'fwd',
+          pickerTranslationScale,
+          'fwd-picker',
         ],
         [
           new Mesh(arrowGeometry, matBlue),
           [0, 0, -gizmoMeshOffset],
           [-Math.PI / 2, 0, 0],
-          gizmoPickerTranslationScale,
-          'bwd',
+          pickerTranslationScale,
+          'bwd-picker',
         ],
       ],
       XYZ: [[new Mesh(new OctahedronGeometry(0.2, 0), matInvisible)]],
@@ -1139,15 +1152,17 @@ class TransformControlsGizmo extends Object3D {
         [new Mesh(doubleArrowGeometry, matRed), [0, 0, 1], [0, Math.PI / 2, Math.PI / 2], gizmoRotationScale],
         [
           new Mesh(fontGeometryRotationX, matHelper),
-          [gizmoMeshRotationTextBoxOffset, 0, gizmoMeshRotationTextOffset],
+          [gizmoTextBoxOffset, 0, gizmoMeshRotationTextOffset],
           [Math.PI / 2, Math.PI / 2, 0],
           gizmoRotationScale,
+          'rotation-label',
         ],
         [
           new Mesh(roundedBoxGeometry, matHelperWhite),
           [0, 0, gizmoMeshRotationTextOffset],
           [Math.PI / 2, Math.PI / 2, 0],
           gizmoRotationScale,
+          'rotation-label',
         ],
       ],
       Y: [
@@ -1159,15 +1174,17 @@ class TransformControlsGizmo extends Object3D {
         [new Mesh(doubleArrowGeometry, matGreen), [0, 0, 1], [Math.PI / 2, 0, 0], gizmoRotationScale],
         [
           new Mesh(fontGeometryRotationY, matHelper),
-          [0, -gizmoMeshRotationTextBoxOffset, gizmoMeshRotationTextOffset],
+          [0, -gizmoTextBoxOffset, gizmoMeshRotationTextOffset],
           [Math.PI / 2, 0, 0],
           gizmoRotationScale,
+          'rotation-label',
         ],
         [
           new Mesh(roundedBoxGeometry, matHelperWhite),
           [0, 0, gizmoMeshRotationTextOffset],
           [Math.PI / 2, 0, 0],
           gizmoRotationScale,
+          'rotation-label',
         ],
       ],
       Z: [
@@ -1179,15 +1196,17 @@ class TransformControlsGizmo extends Object3D {
         [new Mesh(doubleArrowGeometry, matBlue), [1, 0, 0], [0, 0, -Math.PI / 2], gizmoRotationScale],
         [
           new Mesh(fontGeometryRotationZ, matHelper),
-          [gizmoMeshRotationTextOffset, 0, gizmoMeshRotationTextBoxOffset],
+          [gizmoMeshRotationTextOffset, 0, gizmoTextBoxOffset],
           [0, 0, Math.PI / 2],
           gizmoRotationScale,
+          'rotation-label',
         ],
         [
           new Mesh(roundedBoxGeometry, matHelperWhite),
           [gizmoMeshRotationTextOffset, 0, 0],
           [0, 0, Math.PI / 2],
           gizmoRotationScale,
+          'rotation-label',
         ],
       ],
       E: [
@@ -1225,9 +1244,9 @@ class TransformControlsGizmo extends Object3D {
     };
 
     const pickerRotate = {
-      X: [[new Mesh(doubleArrowGeometry, matRed), [0, 0, 1], [0, Math.PI / 2, Math.PI / 2], gizmoPickerRotationScale]],
-      Y: [[new Mesh(doubleArrowGeometry, matGreen), [0, 0, 1], [Math.PI / 2, 0, 0], gizmoPickerRotationScale]],
-      Z: [[new Mesh(doubleArrowGeometry, matBlue), [1, 0, 0], [0, 0, -Math.PI / 2], gizmoPickerRotationScale]],
+      X: [[new Mesh(doubleArrowGeometry, matRed), [0, 0, 1], [0, Math.PI / 2, Math.PI / 2], pickerRotationScale]],
+      Y: [[new Mesh(doubleArrowGeometry, matGreen), [0, 0, 1], [Math.PI / 2, 0, 0], pickerRotationScale]],
+      Z: [[new Mesh(doubleArrowGeometry, matBlue), [1, 0, 0], [0, 0, -Math.PI / 2], pickerRotationScale]],
       // X: [[new Mesh(new TorusGeometry(1, 0.1, 4, 24), matInvisible), [0, 0, 0], [0, -Math.PI / 2, -Math.PI / 2]]],
       // Y: [[new Mesh(new TorusGeometry(1, 0.1, 4, 24), matInvisible), [0, 0, 0], [Math.PI / 2, 0, 0]]],
       // Z: [[new Mesh(new TorusGeometry(1, 0.1, 4, 24), matInvisible), [0, 0, 0], [0, 0, -Math.PI / 2]]],
@@ -1398,7 +1417,6 @@ class TransformControlsGizmo extends Object3D {
       ...this.gizmo[this.mode].children,
       ...this.helper[this.mode].children,
     ];
-    console.log('updating matrix world');
 
     for (const handle of handles) {
       // Hide aligned to camera
@@ -1532,7 +1550,7 @@ class TransformControlsGizmo extends Object3D {
         // Ensure translation arrows face the user by twisting around their axis using the camera orientation
         if (this.mode === 'translate') {
           const isAxisArrow =
-            (handle as unknown as { tag?: string }).tag &&
+            (handle.tag?.includes('fwd') || handle.tag?.includes('bwd')) &&
             (handle.name === 'X' || handle.name === 'Y' || handle.name === 'Z');
           if (isAxisArrow) {
             // Calculate the camera rotation relative to the handle axis
@@ -1623,36 +1641,36 @@ class TransformControlsGizmo extends Object3D {
 
         if (handle.name.search('X') !== -1) {
           if (this.alignVector.copy(this.unitX).applyQuaternion(quaternion).dot(this.eye) < AXIS_FLIP_TRESHOLD) {
-            if (handle.tag === 'fwd') {
+            if (handle.tag?.includes('fwd')) {
               handle.visible = false;
             } else {
               handle.scale.x *= -1;
             }
-          } else if (handle.tag === 'bwd') {
+          } else if (handle.tag?.includes('bwd')) {
             handle.visible = false;
           }
         }
 
         if (handle.name.search('Y') !== -1) {
           if (this.alignVector.copy(this.unitY).applyQuaternion(quaternion).dot(this.eye) < AXIS_FLIP_TRESHOLD) {
-            if (handle.tag === 'fwd') {
+            if (handle.tag?.includes('fwd')) {
               handle.visible = false;
             } else {
               handle.scale.y *= -1;
             }
-          } else if (handle.tag === 'bwd') {
+          } else if (handle.tag?.includes('bwd')) {
             handle.visible = false;
           }
         }
 
         if (handle.name.search('Z') !== -1) {
           if (this.alignVector.copy(this.unitZ).applyQuaternion(quaternion).dot(this.eye) < AXIS_FLIP_TRESHOLD) {
-            if (handle.tag === 'fwd') {
+            if (handle.tag?.includes('fwd')) {
               handle.visible = false;
             } else {
               handle.scale.z *= -1;
             }
-          } else if (handle.tag === 'bwd') {
+          } else if (handle.tag?.includes('bwd')) {
             handle.visible = false;
           }
         }
@@ -1666,6 +1684,38 @@ class TransformControlsGizmo extends Object3D {
         if (handle.name.search('E') !== -1) {
           handle.quaternion.setFromRotationMatrix(this.lookAtMatrix.lookAt(this.eye, this.zeroVector, this.unitY));
         }
+
+        // Const isLabel = handle.tag?.includes('label');
+        // // Calculate the camera rotation relative to the handle axis
+        // const handleAxis = handle.name === 'X' ? this.unitX : handle.name === 'Y' ? this.unitY : this.unitZ;
+        // const handleAxisWorld = this.alignVector.copy(handleAxis).applyQuaternion(quaternion).normalize();
+
+        // // Project the camera direction (eye vector) onto the plane perpendicular to the handle axis
+        // // This gives us the direction towards the camera, constrained to rotation around the axis
+        // const eyeProjected = this.tempVector
+        //   .copy(this.eye)
+        //   .addScaledVector(handleAxisWorld, this.eye.dot(handleAxisWorld))
+        //   .normalize();
+
+        // // Get a reference "up" vector perpendicular to the handle axis
+        // // We use the current handle's local Y-axis as the reference
+        // const referenceAxis = handle.name === 'X' ? this.unitY : handle.name === 'Y' ? this.unitZ : this.unitY;
+        // const handleUpWorld = new Vector3().copy(referenceAxis).applyQuaternion(quaternion).normalize();
+
+        // // Project the reference up vector onto the same plane
+        // const upProjected = handleUpWorld
+        //   .addScaledVector(handleAxisWorld, handleUpWorld.dot(handleAxisWorld))
+        //   .normalize();
+
+        // // Calculate the signed angle between the projected vectors
+        // const cosAngle = upProjected.dot(eyeProjected);
+        // const crossProduct = new Vector3().crossVectors(upProjected, eyeProjected);
+        // const sinAngle = crossProduct.dot(handleAxisWorld);
+        // const cameraRotationRelative = Math.atan2(sinAngle, cosAngle);
+
+        // if (isLabel) {
+        //   handle.rotateOnAxis(handleAxis, cameraRotationRelative);
+        // }
 
         if (handle.name === 'X') {
           this.tempQuaternion.setFromAxisAngle(this.unitX, Math.atan2(-this.alignVector.y, this.alignVector.z));
@@ -1693,37 +1743,38 @@ class TransformControlsGizmo extends Object3D {
       handle.visible &&= !handle.name.includes('E') || (this.showX && this.showY && this.showZ);
 
       // Highlight selected axis
-
-      // @ts-expect-error -- TODO
-      handle.material.tempOpacity ??= handle.material.opacity;
-      // @ts-expect-error -- TODO
-      handle.material.tempColor ??= handle.material.color.clone();
-      // @ts-expect-error -- TODO
-      handle.material.color.copy(handle.material.tempColor);
-      // @ts-expect-error -- TODO
-      handle.material.opacity = handle.material.tempOpacity;
-
-      if (!this.enabled) {
+      if (!handle.tag?.includes('label')) {
         // @ts-expect-error -- TODO
-        handle.material.opacity *= 0.5;
+        handle.material.tempOpacity ??= handle.material.opacity;
         // @ts-expect-error -- TODO
-        handle.material.color.lerp(new Color(1, 1, 1), 0.5);
-      } else if (this.axis) {
-        if (handle.name === this.axis) {
+        handle.material.tempColor ??= handle.material.color.clone();
+        // @ts-expect-error -- TODO
+        handle.material.color.copy(handle.material.tempColor);
+        // @ts-expect-error -- TODO
+        handle.material.opacity = handle.material.tempOpacity;
+
+        if (!this.enabled) {
           // @ts-expect-error -- TODO
-          handle.material.opacity = 1;
-          // @ts-expect-error -- TODO
-          handle.material.color.lerp(new Color(1, 1, 1), 0.5);
-        } else if ([...this.axis].includes(handle.name)) {
-          // @ts-expect-error -- TODO
-          handle.material.opacity = 1;
-          // @ts-expect-error -- TODO
-          handle.material.color.lerp(new Color(1, 1, 1), 0.5);
-        } else {
-          // @ts-expect-error -- TODO
-          handle.material.opacity *= 0.25;
+          handle.material.opacity *= 0.5;
           // @ts-expect-error -- TODO
           handle.material.color.lerp(new Color(1, 1, 1), 0.5);
+        } else if (this.axis) {
+          if (handle.name === this.axis) {
+            // @ts-expect-error -- TODO
+            handle.material.opacity = 1;
+            // @ts-expect-error -- TODO
+            handle.material.color.lerp(new Color(1, 1, 1), 0.5);
+          } else if ([...this.axis].includes(handle.name)) {
+            // @ts-expect-error -- TODO
+            handle.material.opacity = 1;
+            // @ts-expect-error -- TODO
+            handle.material.color.lerp(new Color(1, 1, 1), 0.5);
+          } else {
+            // @ts-expect-error -- TODO
+            handle.material.opacity *= 0.25;
+            // @ts-expect-error -- TODO
+            handle.material.color.lerp(new Color(1, 1, 1), 0.5);
+          }
         }
       }
     }

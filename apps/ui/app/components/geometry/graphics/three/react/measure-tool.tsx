@@ -51,6 +51,9 @@ export function MeasureTool(): React.JSX.Element {
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
   const mouseDownOnMeshRef = useRef(false);
+  const mouseIsDownRef = useRef(false);
+  const startCameraQuatRef = useRef(new THREE.Quaternion());
+  const startCameraPosRef = useRef(new THREE.Vector3());
 
   // Handle mouse move for snapping
   useEffect(() => {
@@ -100,7 +103,14 @@ export function MeasureTool(): React.JSX.Element {
     };
 
     const handleMouseDown = (event: MouseEvent): void => {
-      // Only handle left clicks for measurement
+      // Track camera state at mouse down to detect rotations/translations during drag
+      if (event.button === 0 || event.button === 2) {
+        startCameraQuatRef.current.copy(camera.quaternion);
+        startCameraPosRef.current.copy(camera.position);
+        mouseIsDownRef.current = true;
+      }
+
+      // Only handle left clicks for measurement from here
       if (event.button !== 0) {
         return;
       }
@@ -121,20 +131,49 @@ export function MeasureTool(): React.JSX.Element {
     };
 
     const handleMouseUp = (event: MouseEvent): void => {
-      // Handle right click - cancel current measurement
+      // Handle right click - cancel current measurement only if no camera movement
       if (event.button === 2) {
-        if (currentStart) {
-          // Cancel the current measurement start without clearing completed measurements
-          graphicsActor.send({ type: 'cancelCurrentMeasurement' });
-          mouseDownOnMeshRef.current = false;
+        if (mouseIsDownRef.current) {
+          const endQuat = camera.quaternion.clone();
+          const endPos = camera.position.clone();
+          const dot = Math.abs(startCameraQuatRef.current.dot(endQuat));
+          const angle = 2 * Math.acos(Math.min(1, Math.max(-1, dot))); // Radians
+          const rotated = angle > 0.001; // ~0.057°
+          const translated = startCameraPosRef.current.distanceTo(endPos) > 1e-3;
+
+          if (!rotated && !translated && currentStart) {
+            // No camera movement: treat as explicit cancel
+            graphicsActor.send({ type: 'cancelCurrentMeasurement' });
+          }
         }
 
+        mouseDownOnMeshRef.current = false;
+        mouseIsDownRef.current = false;
         return;
       }
 
       // Only handle left clicks for measurement
       if (event.button !== 0) {
         return;
+      }
+
+      // If the camera rotated or translated while the mouse was held down, treat this as a view manipulation,
+      // not a measurement click. This avoids registering a start/end point upon releasing the drag.
+      if (mouseIsDownRef.current) {
+        const endQuat = camera.quaternion.clone();
+        const endPos = camera.position.clone();
+
+        const dot = Math.abs(startCameraQuatRef.current.dot(endQuat));
+        const angle = 2 * Math.acos(Math.min(1, Math.max(-1, dot))); // Radians
+        const rotated = angle > 0.001; // ~0.057°
+
+        const translated = startCameraPosRef.current.distanceTo(endPos) > 1e-3;
+
+        if (rotated || translated) {
+          mouseDownOnMeshRef.current = false;
+          mouseIsDownRef.current = false;
+          return;
+        }
       }
 
       // Only process if both mousedown and mouseup happened on a mesh
@@ -178,6 +217,7 @@ export function MeasureTool(): React.JSX.Element {
 
       // Reset the mousedown flag
       mouseDownOnMeshRef.current = false;
+      mouseIsDownRef.current = false;
     };
 
     const handleContextMenu = (event: MouseEvent): void => {
@@ -321,7 +361,7 @@ function MeasurementLine({
   labelHeight = 80,
   labelPadding = 50,
   labelCornerRadius = 20,
-  labelDepth = 10,
+  labelDepth = 1,
   labelCharWidth = 24,
   decimals = 1,
   enableUnits = true,
@@ -520,7 +560,6 @@ function MeasurementLine({
         <group ref={labelGroupRef} position={midpoint} rotation={[0, 0, 0]}>
           {/* Background */}
           <mesh position={[0, 0, 0]} userData={{ isMeasurementUi: true }}>
-            {}
             <primitive
               // eslint-disable-next-line new-cap -- geometry factory naming from Three.js helpers
               object={LabelBackgroundGeometry({

@@ -40,7 +40,6 @@ import { createColumns } from '#routes/builds_.library/columns.js';
 import { CategoryBadge } from '#components/category-badge.js';
 import { Button, buttonVariants } from '#components/ui/button.js';
 import { SearchInput } from '#components/search-input.js';
-import { Input } from '#components/ui/input.js';
 import { Card, CardContent, CardHeader, CardDescription, CardFooter } from '#components/ui/card.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
 import {
@@ -76,11 +75,12 @@ import { Checkbox } from '#components/ui/checkbox.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '#components/ui/table.js';
 import { toTitleCase } from '#utils/string.utils.js';
-import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
+import { InlineTextEditor } from '#components/inline-text-editor.js';
+import { Tooltip } from '#components/ui/tooltip.js';
 
 const categoryIconsFromEngineeringDiscipline = {
   mechanical: Wrench,
@@ -654,21 +654,6 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
   const { parameters } = mechanicalAsset;
   const status = useSelector(actorRef, (state) => state.value);
   const [showPreview, setShowPreview] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [name, setName] = useState(build.name);
-
-  const handleRename = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (name.trim() && name !== build.name) {
-      try {
-        await actions.handleRename(build.id, name);
-      } catch {
-        // Error is already handled in the action
-      }
-    }
-
-    setIsEditing(false);
-  };
 
   useEffect(() => {
     if (showPreview) {
@@ -729,36 +714,12 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
         </Button>
       </div>
       <CardHeader>
-        <div className="-mx-2 flex flex-1 items-start justify-start overflow-hidden">
-          <Popover open={isEditing} onOpenChange={setIsEditing}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                className="w-full max-w-full cursor-text justify-start px-2 text-xl font-semibold"
-              >
-                {build.name}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-64 -translate-x-2 p-1">
-              <form className="flex items-center gap-2 align-middle" onSubmit={handleRename}>
-                <Input
-                  autoFocus
-                  autoComplete="off"
-                  value={name}
-                  className="h-7"
-                  onChange={(event) => {
-                    setName(event.target.value);
-                  }}
-                  onFocus={(event) => {
-                    event.target.select();
-                  }}
-                />
-                <Button type="submit" size="sm" disabled={!name.trim() || name === build.name}>
-                  Save
-                </Button>
-              </form>
-            </PopoverContent>
-          </Popover>
+        <div className="-mx-2 flex flex-1 items-start justify-start overflow-hidden py-1">
+          <InlineTextEditor
+            value={build.name}
+            className="h-7 w-full [&_[data-slot=display]]:w-full [&_[data-slot=display]]:max-w-full [&_[data-slot=display]]:text-base [&_[data-slot=display]]:font-semibold"
+            onSave={async (value) => actions.handleRename(build.id, value)}
+          />
         </div>
         <CardDescription className="line-clamp-2">{build.description}</CardDescription>
       </CardHeader>
@@ -788,11 +749,6 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
     </Card>
   );
 }
-
-type BulkActionsProps = {
-  readonly table: ReturnType<typeof useReactTable<Build>>;
-  readonly deleteBuild: (build: Build) => void;
-};
 
 function BulkActions({ table, deleteBuild }: BulkActionsProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);

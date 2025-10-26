@@ -339,11 +339,17 @@ type MeasurementLineProps = {
   // Formatting and behavior
   readonly decimals?: number;
   readonly enableUnits?: boolean;
-  readonly materials?: {
-    readonly backgroundMaterial: THREE.Material;
-    readonly textMaterial: THREE.Material;
-    readonly coneMaterial: THREE.Material;
-  };
+  readonly materials?:
+    | {
+        readonly backgroundMaterial: THREE.Material;
+        readonly textMaterial: THREE.Material;
+        readonly coneMaterial: THREE.Material;
+      }
+    | {
+        readonly backgroundColor: THREE.Color;
+        readonly textColor: THREE.Color;
+        readonly coneColor: THREE.Color;
+      };
 };
 
 function MeasurementLine({
@@ -376,8 +382,12 @@ function MeasurementLine({
 
   // Create matcap materials following transform-controls pattern
   const derivedMaterials = useMemo(() => {
-    if (materials) {
-      return materials;
+    if (materials && 'backgroundMaterial' in materials && 'textMaterial' in materials && 'coneMaterial' in materials) {
+      return {
+        backgroundMaterial: materials.backgroundMaterial,
+        textMaterial: materials.textMaterial,
+        coneMaterial: materials.coneMaterial,
+      };
     }
 
     const matcapTexture = matcapMaterial();
@@ -393,13 +403,13 @@ function MeasurementLine({
     });
 
     const backgroundMaterial = baseMaterial.clone();
-    backgroundMaterial.color.set(0xff_ff_ff); // White
+    backgroundMaterial.color.set(materials?.backgroundColor ?? 0xff_ff_ff); // White
 
     const textMaterial = baseMaterial.clone();
-    textMaterial.color.set(0x00_00_00); // Black
+    textMaterial.color.set(materials?.textColor ?? 0x00_00_00); // Black
 
     const coneMaterial = baseMaterial.clone();
-    coneMaterial.color.set(0x00_00_00); // Black
+    coneMaterial.color.set(materials?.coneColor ?? 0x00_00_00); // Black
 
     return { backgroundMaterial, textMaterial, coneMaterial };
   }, [materials]);
@@ -411,6 +421,41 @@ function MeasurementLine({
   const calculatedDistance = distance ?? start.distanceTo(end);
   const distanceInMm = calculatedDistance / gridUnitFactor;
   const labelText = `${distanceInMm.toFixed(decimals)}${enableUnits ? ` ${gridUnit}` : ''}`;
+
+  // Memoize geometries to avoid re-creating large buffers every render frame
+  const textGeometry = useMemo(
+    // eslint-disable-next-line new-cap -- Three.js convention
+    () => LabelTextGeometry({ text: labelText, size: textSize, depth: textDepth }),
+    [labelText, textSize, textDepth],
+  );
+
+  const backgroundGeometry = useMemo(
+    () =>
+      // eslint-disable-next-line new-cap -- Three.js convention
+      LabelBackgroundGeometry({
+        text: labelText,
+        characterWidth: labelCharWidth,
+        padding: labelPadding,
+        height: labelHeight,
+        radius: labelCornerRadius,
+        depth: labelDepth,
+      }),
+    [labelText, labelCharWidth, labelPadding, labelHeight, labelCornerRadius, labelDepth],
+  );
+
+  const backgroundOutlineGeometry = useMemo(
+    () =>
+      // eslint-disable-next-line new-cap -- Three.js convention
+      LabelBackgroundGeometry({
+        text: labelText,
+        characterWidth: labelCharWidth,
+        padding: labelPadding + 5,
+        height: labelHeight + 10,
+        radius: labelCornerRadius + 5,
+        depth: labelDepth,
+      }),
+    [labelText, labelCharWidth, labelPadding, labelHeight, labelCornerRadius, labelDepth],
+  );
 
   // Track current scale for UI sizing
   const scaleRef = useRef<number>(1);
@@ -505,7 +550,7 @@ function MeasurementLine({
   return (
     <group>
       {/* Line group with scaling for cylinders and cones */}
-      <group ref={lineGroupRef}>
+      <group ref={lineGroupRef} renderOrder={1}>
         {/* Cylinder line */}
         <mesh
           ref={cylinderMeshRef}
@@ -515,20 +560,7 @@ function MeasurementLine({
         >
           {/* Unit geometry – scaled per-frame */}
           <cylinderGeometry args={[1, 1, 1, 16]} />
-          <primitive
-            object={
-              isPreview
-                ? new THREE.MeshBasicMaterial({
-                    color: '#888888',
-                    transparent: true,
-                    opacity: 0.5,
-                    depthTest: false,
-                    depthWrite: false,
-                  })
-                : derivedMaterials.coneMaterial
-            }
-            attach="material"
-          />
+          <primitive object={derivedMaterials.coneMaterial} attach="material" />
         </mesh>
 
         {/* Cone at start */}
@@ -557,27 +589,20 @@ function MeasurementLine({
 
       {/* Label */}
       {!isPreview && (
-        <group ref={labelGroupRef} position={midpoint} rotation={[0, 0, 0]}>
+        <group ref={labelGroupRef} renderOrder={2} position={midpoint} rotation={[0, 0, 0]}>
           {/* Background */}
           <mesh position={[0, 0, 0]} userData={{ isMeasurementUi: true }}>
-            <primitive
-              // eslint-disable-next-line new-cap -- geometry factory naming from Three.js helpers
-              object={LabelBackgroundGeometry({
-                text: labelText,
-                characterWidth: labelCharWidth,
-                padding: labelPadding,
-                height: labelHeight,
-                radius: labelCornerRadius,
-                depth: labelDepth,
-              })}
-            />
+            <primitive object={backgroundOutlineGeometry} attach="geometry" />
+            <primitive object={derivedMaterials.textMaterial} attach="material" />
+          </mesh>
+          <mesh position={[0, 0, 0]} userData={{ isMeasurementUi: true }}>
+            <primitive object={backgroundGeometry} attach="geometry" />
             <primitive object={derivedMaterials.backgroundMaterial} attach="material" />
           </mesh>
 
           {/* Text */}
-          <mesh position={[0, 0.035, 5]} userData={{ isMeasurementUi: true }}>
-            {/* eslint-disable-next-line new-cap -- geometry factory naming from Three.js helpers */}
-            <primitive object={LabelTextGeometry({ text: labelText, size: textSize, depth: textDepth })} />
+          <mesh position={[0, 0, 0]} userData={{ isMeasurementUi: true }}>
+            <primitive object={textGeometry} attach="geometry" />
             <primitive object={derivedMaterials.textMaterial} attach="material" />
           </mesh>
         </group>

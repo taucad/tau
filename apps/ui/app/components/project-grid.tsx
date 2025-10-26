@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useActor, useSelector } from '@xstate/react';
 import type { Build } from '@taucad/types';
-import { idPrefix } from '@taucad/types/constants';
+import { idPrefix, kernelConfigurations } from '@taucad/types/constants';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
 import { Avatar, AvatarFallback, AvatarImage } from '#components/ui/avatar.js';
@@ -27,7 +27,7 @@ export type CommunityBuildGridProperties = {
 export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBuildGridProperties): React.JSX.Element {
   return (
     <>
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
         {builds.map((build) => (
           <ProjectCard key={build.id} {...build} />
         ))}
@@ -159,17 +159,17 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
 
   return (
     <Card ref={cardReference} className="group relative flex flex-col overflow-hidden pt-0">
-      <div className="relative aspect-video overflow-hidden bg-muted">
+      <div className="inset-0 aspect-video h-fit w-full overflow-hidden bg-muted">
         {!showPreview && (
           <img
             src={thumbnail || '/placeholder.svg'}
             alt={name}
-            className="size-full scale-110 object-cover transition-transform group-hover:scale-120"
+            className="size-full origin-center object-cover transition-transform group-hover:scale-120"
             loading="lazy"
           />
         )}
         {showPreview ? (
-          <div className="absolute inset-0">
+          <div className="size-full origin-center scale-80 object-cover transition-transform group-hover:scale-100">
             {['initializing', 'booting'].includes(status) ? (
               <div className="flex size-full items-center justify-center">
                 <HammerAnimation className="size-10" />
@@ -191,66 +191,76 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
           <Eye className={showPreview ? 'size-4 text-primary' : 'size-4'} />
         </Button>
       </div>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>{name}</CardTitle>
-          <div className="flex flex-wrap gap-1">
-            {kernels.map((kernel) => (
-              <Tooltip key={kernel}>
-                <TooltipTrigger>
-                  <Avatar className="h-5 w-5">
-                    <AvatarFallback>
-                      <SvgIcon id={kernel} className="size-3" />
-                    </AvatarFallback>
-                  </Avatar>
-                </TooltipTrigger>
-                <TooltipContent>{kernel}</TooltipContent>
-              </Tooltip>
-            ))}
+      <div className="flex h-28 flex-col justify-between">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>{name}</CardTitle>
+            <div className="flex flex-wrap gap-1">
+              {kernels.map((kernel) => {
+                const kernelConfiguration = kernelConfigurations.find((k) => k.id === kernel);
+                if (!kernelConfiguration) {
+                  return null;
+                }
+
+                const kernelName = kernelConfiguration.name;
+                return (
+                  <Tooltip key={kernel}>
+                    <TooltipTrigger>
+                      <Avatar className="h-5 w-5">
+                        <AvatarFallback>
+                          <SvgIcon id={kernel} className="size-3" />
+                        </AvatarFallback>
+                      </Avatar>
+                    </TooltipTrigger>
+                    <TooltipContent>{kernelName}</TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </div>
           </div>
-        </div>
-        <CardDescription className="line-clamp-2">{description}</CardDescription>
-      </CardHeader>
-      <CardFooter className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Avatar className="h-6 w-6">
-            <AvatarImage src={author.avatar} alt={author.name} />
-            <AvatarFallback>{author.name.charAt(0)}</AvatarFallback>
-          </Avatar>
-          <span className="text-sm text-muted-foreground">{author.name}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="group flex items-center gap-1 text-sm text-muted-foreground hover:text-yellow"
-                onClick={handleStar}
-              >
-                {stars}
-                <Star />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Star this project</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex items-center gap-1 text-sm text-muted-foreground hover:text-blue"
-                disabled={isForking}
-                onClick={handleFork}
-              >
-                <span className="text-sm">Remix</span>
-                {isForking ? <LoadingSpinner /> : <ArrowRight />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{isForking ? 'Remixing project...' : 'Remix this project'}</TooltipContent>
-          </Tooltip>
-        </div>
-      </CardFooter>
+          <CardDescription className="line-clamp-2">{description}</CardDescription>
+        </CardHeader>
+        <CardFooter className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Avatar className="size-6">
+              <AvatarImage src={author.avatar} alt={author.name} />
+              <AvatarFallback>{author.name.charAt(0)}</AvatarFallback>
+            </Avatar>
+            <span className="line-clamp-1 text-sm text-muted-foreground">{author.name}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="group flex items-center gap-1 text-sm text-muted-foreground hover:text-yellow"
+                  onClick={handleStar}
+                >
+                  {stars}
+                  <Star />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Star this project</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-1 text-sm text-muted-foreground hover:text-blue"
+                  disabled={isForking}
+                  onClick={handleFork}
+                >
+                  <span className="text-sm">Remix</span>
+                  {isForking ? <LoadingSpinner /> : <ArrowRight />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{isForking ? 'Remixing project...' : 'Remix this project'}</TooltipContent>
+            </Tooltip>
+          </div>
+        </CardFooter>
+      </div>
     </Card>
   );
 }

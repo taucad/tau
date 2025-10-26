@@ -681,18 +681,18 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
       <div className="absolute top-2 left-2 z-10">
         <Checkbox size="large" checked={isSelected} onCheckedChange={() => onSelect?.()} />
       </div>
-      <div className="relative aspect-video overflow-hidden bg-muted">
+      <div className="relative aspect-video h-fit w-full overflow-hidden bg-muted">
         {!showPreview && (
           <img
             src={build.thumbnail || '/placeholder.svg'}
             alt={build.name}
-            className="size-full scale-95 object-cover transition-transform group-hover:scale-100"
+            className="size-full origin-center object-cover transition-transform group-hover:scale-120"
             loading="lazy"
           />
         )}
         {showPreview ? (
           <div
-            className="absolute inset-0"
+            className="size-full origin-center scale-80 object-cover transition-transform group-hover:scale-100"
             onClick={(event) => {
               event.stopPropagation();
               event.preventDefault();
@@ -729,10 +729,13 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
         </Button>
       </div>
       <CardHeader>
-        <div className="flex items-start justify-between">
+        <div className="-mx-2 flex flex-1 items-start justify-start overflow-hidden">
           <Popover open={isEditing} onOpenChange={setIsEditing}>
             <PopoverTrigger asChild>
-              <Button variant="ghost" className="-mx-2 cursor-text justify-start px-2 text-xl font-semibold">
+              <Button
+                variant="ghost"
+                className="w-full max-w-full cursor-text justify-start px-2 text-xl font-semibold"
+              >
                 {build.name}
               </Button>
             </PopoverTrigger>
@@ -757,7 +760,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
             </PopoverContent>
           </Popover>
         </div>
-        <CardDescription>{build.description}</CardDescription>
+        <CardDescription className="line-clamp-2">{build.description}</CardDescription>
       </CardHeader>
       <CardContent className="flex-grow">
         <div className="flex flex-wrap items-center justify-between gap-4">

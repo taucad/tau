@@ -80,7 +80,6 @@ import { HammerAnimation } from '#components/hammer-animation.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
-import { Tooltip } from '#components/ui/tooltip.js';
 
 const categoryIconsFromEngineeringDiscipline = {
   mechanical: Wrench,

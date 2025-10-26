@@ -86,7 +86,6 @@ export function InfiniteGrid(properties?: InfiniteGridProperties): React.JSX.Ele
       frustumCulled={false} // Ensure the grid is always rendered
       userData={{ isPreviewOnly: true }}
       material={material}
-      renderOrder={Infinity}
       {...planeProperties}
     />
   );

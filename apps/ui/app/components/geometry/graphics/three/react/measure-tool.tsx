@@ -43,6 +43,8 @@ export function MeasureTool(): React.JSX.Element {
   const snapDistance = useSelector(graphicsActor, (state) => state.context.measureSnapDistance);
   const gridUnitFactor = useSelector(graphicsActor, (state) => state.context.gridUnitFactor);
   const gridUnit = useSelector(graphicsActor, (state) => state.context.gridUnit);
+  const hoveredMeasurementId = useSelector(graphicsActor, (state) => state.context.hoveredMeasurementId);
+  const isMeasureActive = useSelector(graphicsActor, (state) => state.context.isMeasureActive);
 
   const [hoveredSnapPoints, setHoveredSnapPoints] = useState<SnapPoint[]>([]);
   const [activeSnapPoint, setActiveSnapPoint] = useState<SnapPoint | undefined>();
@@ -58,6 +60,11 @@ export function MeasureTool(): React.JSX.Element {
 
   // Handle mouse move for snapping
   useEffect(() => {
+    // Only enable interactive listeners when measure mode is active
+    if (!isMeasureActive) {
+      return undefined;
+    }
+
     const handleMouseMove = (event: MouseEvent): void => {
       const rect = gl.domElement.getBoundingClientRect();
       mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -220,6 +227,17 @@ export function MeasureTool(): React.JSX.Element {
       const pointArray: [number, number, number] = [point.x, point.y, point.z];
 
       if (currentStart) {
+        // Disallow 0-length measurements by ignoring a completion click
+        // that lands effectively on the start point (within a small epsilon)
+        const startVec = new THREE.Vector3(...currentStart);
+        const endVec = new THREE.Vector3(...pointArray);
+        const zeroLengthEpsilon = 1e-4; // Scene units
+        if (startVec.distanceTo(endVec) <= zeroLengthEpsilon) {
+          mouseDownOnMeshRef.current = false;
+          mouseIsDownRef.current = false;
+          return;
+        }
+
         graphicsActor.send({ type: 'completeMeasurement', payload: pointArray });
       } else {
         graphicsActor.send({ type: 'startMeasurement', payload: pointArray });
@@ -246,42 +264,50 @@ export function MeasureTool(): React.JSX.Element {
       gl.domElement.removeEventListener('mouseup', handleMouseUp);
       gl.domElement.removeEventListener('contextmenu', handleContextMenu);
     };
-  }, [camera, gl, scene, snapDistance, currentStart, activeSnapPoint, mousePosition]);
+  }, [camera, gl, scene, snapDistance, currentStart, activeSnapPoint, mousePosition, isMeasureActive]);
+
+  // Choose which measurements to display: all during measure mode, otherwise only pinned
+  const visibleMeasurements = isMeasureActive ? measurements : measurements.filter((m) => m.isPinned);
 
   return (
     <group>
       {/* Render snap point indicators */}
-      {hoveredSnapPoints.map((snapPoint) => {
-        const key = `snap-${snapPoint.position.x}-${snapPoint.position.y}-${snapPoint.position.z}`;
-        return (
-          <SnapPointIndicator
-            key={key}
-            position={snapPoint.position}
-            isActive={snapPoint === activeSnapPoint}
-            camera={camera}
-          />
-        );
-      })}
+      {isMeasureActive
+        ? hoveredSnapPoints.map((snapPoint) => {
+            const key = `snap-${snapPoint.position.x}-${snapPoint.position.y}-${snapPoint.position.z}`;
+            return (
+              <SnapPointIndicator
+                key={key}
+                position={snapPoint.position}
+                isActive={snapPoint === activeSnapPoint}
+                camera={camera}
+              />
+            );
+          })
+        : null}
 
       {/* Persistent indicator for the selected start point */}
-      {currentStart ? (
+      {isMeasureActive && currentStart ? (
         <SnapPointIndicator isActive position={new THREE.Vector3(...currentStart)} camera={camera} />
       ) : null}
 
       {/* Render preview line */}
-      {currentStart && mousePosition ? (
+      {isMeasureActive && currentStart && mousePosition ? (
         <MeasurementLine isPreview start={new THREE.Vector3(...currentStart)} end={mousePosition} />
       ) : null}
 
       {/* Render completed measurements */}
-      {measurements.map((measurement) => (
+      {visibleMeasurements.map((measurement) => (
         <MeasurementLine
           key={measurement.id}
+          id={measurement.id}
           start={new THREE.Vector3(...measurement.startPoint)}
           end={new THREE.Vector3(...measurement.endPoint)}
           distance={measurement.distance}
           gridUnitFactor={gridUnitFactor}
           gridUnit={gridUnit}
+          isExternallyHovered={hoveredMeasurementId === measurement.id}
+          isPinned={Boolean(measurement.isPinned)}
         />
       ))}
     </group>
@@ -325,7 +351,7 @@ function SnapPointIndicator({ position, isActive, camera }: SnapPointIndicatorPr
   });
 
   return (
-    <group renderOrder={11}>
+    <group renderOrder={isActive ? 10 : 0}>
       {/* Outer border (black) */}
       <mesh ref={outerRef} position={position} renderOrder={isActive ? 2 : 1} userData={{ isMeasurementUi: true }}>
         <cylinderGeometry args={[borderSize, borderSize, height, segments]} />
@@ -363,12 +389,15 @@ function SnapPointIndicator({ position, isActive, camera }: SnapPointIndicatorPr
 }
 
 type MeasurementLineProps = {
+  readonly id?: string;
   readonly start: THREE.Vector3;
   readonly end: THREE.Vector3;
   readonly distance?: number;
   readonly gridUnitFactor?: number;
   readonly gridUnit?: string;
   readonly isPreview?: boolean;
+  readonly isExternallyHovered?: boolean;
+  readonly isPinned?: boolean;
   readonly coneHeight?: number; // Base cone height in scene units
   readonly coneRadius?: number; // Base cone radius in scene units
   readonly cylinderRadius?: number; // Base cylinder radius in scene units
@@ -398,12 +427,15 @@ type MeasurementLineProps = {
 };
 
 function MeasurementLine({
+  id,
   start,
   end,
   distance,
   gridUnitFactor = 1,
   gridUnit = 'mm',
   isPreview = false,
+  isExternallyHovered = false,
+  isPinned = false,
   coneHeight = 80,
   coneRadius = 10,
   cylinderRadius = 2,
@@ -424,6 +456,8 @@ function MeasurementLine({
   const cylinderMeshRef = useRef<THREE.Mesh>(null);
   const startConeMeshRef = useRef<THREE.Mesh>(null);
   const endConeMeshRef = useRef<THREE.Mesh>(null);
+  const [isLabelHovered, setIsLabelHovered] = useState(false);
+  const isHovered = isLabelHovered || isExternallyHovered;
 
   // Create matcap materials following transform-controls pattern
   const derivedMaterials = useMemo(() => {
@@ -463,10 +497,11 @@ function MeasurementLine({
     textMaterial.color.set(materials?.textColor ?? 0x00_00_00); // Black
 
     const coneMaterial = baseMaterial.clone();
-    coneMaterial.color.set(materials?.coneColor ?? 0x00_00_00); // Black
+    // Highlight line and arrows when hovered (from UI or viewport)
+    coneMaterial.color.set(isHovered ? 0x00_ff_00 : (materials?.coneColor ?? 0x00_00_00));
 
     return { backgroundMaterial, textMaterial, coneMaterial };
-  }, [materials]);
+  }, [materials, isHovered]);
 
   // Calculate label position (midpoint)
   const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
@@ -474,7 +509,14 @@ function MeasurementLine({
   // Calculate distance if not provided
   const calculatedDistance = distance ?? start.distanceTo(end);
   const distanceInMm = calculatedDistance / gridUnitFactor;
-  const labelText = `${distanceInMm.toFixed(decimals)}${enableUnits ? ` ${gridUnit}` : ''}`;
+  const numericText = distanceInMm.toFixed(decimals);
+  const unitsText = enableUnits ? gridUnit : '';
+  const labelText = `${numericText}${enableUnits ? ` ${unitsText}` : ''}`;
+
+  // Keep a constant width box reserved for the units portion of the label background
+  const unitContainerChars = 3; // Reserve width for up to 3-char units
+  const backgroundCharsLength = numericText.length + (enableUnits ? 1 + unitContainerChars : 0);
+  const backgroundPlaceholderText = '0'.repeat(Math.max(1, backgroundCharsLength));
 
   // Memoize geometries to avoid re-creating large buffers every render frame
   const textGeometry = useMemo(
@@ -487,28 +529,29 @@ function MeasurementLine({
     () =>
       // eslint-disable-next-line new-cap -- Three.js convention
       LabelBackgroundGeometry({
-        text: labelText,
+        // Use placeholder string sized to reserve constant-width units area
+        text: backgroundPlaceholderText,
         characterWidth: labelCharWidth,
         padding: labelPadding,
         height: labelHeight,
         radius: labelCornerRadius,
         depth: labelDepth,
       }),
-    [labelText, labelCharWidth, labelPadding, labelHeight, labelCornerRadius, labelDepth],
+    [backgroundPlaceholderText, labelCharWidth, labelPadding, labelHeight, labelCornerRadius, labelDepth],
   );
 
   const backgroundOutlineGeometry = useMemo(
     () =>
       // eslint-disable-next-line new-cap -- Three.js convention
       LabelBackgroundGeometry({
-        text: labelText,
+        text: backgroundPlaceholderText,
         characterWidth: labelCharWidth,
         padding: labelPadding + 5,
         height: labelHeight + 10,
         radius: labelCornerRadius + 5,
         depth: labelDepth,
       }),
-    [labelText, labelCharWidth, labelPadding, labelHeight, labelCornerRadius, labelDepth],
+    [backgroundPlaceholderText, labelCharWidth, labelPadding, labelHeight, labelCornerRadius, labelDepth],
   );
 
   // Track current scale for UI sizing
@@ -560,7 +603,8 @@ function MeasurementLine({
       }
 
       labelGroupRef.current.quaternion.copy(finalQuaternion);
-      labelGroupRef.current.scale.setScalar(scale);
+      // Enlarge label by 20% when hovered (from UI or viewport)
+      labelGroupRef.current.scale.setScalar(scale * (isHovered ? 1.2 : 1));
       labelGroupRef.current.position.copy(midpoint);
     }
 
@@ -644,6 +688,43 @@ function MeasurementLine({
       {/* Label */}
       {!isPreview && (
         <group ref={labelGroupRef} renderOrder={2} position={midpoint} rotation={[0, 0, 0]}>
+          {/* Stable invisible hit area to prevent hover flicker when pin appears */}
+          <mesh
+            position={[0, 0, 0]}
+            userData={{ isMeasurementUi: true }}
+            onPointerEnter={(event) => {
+              event.stopPropagation();
+              setIsLabelHovered(true);
+              if (id) {
+                graphicsActor.send({ type: 'setHoveredMeasurement', payload: id });
+              }
+            }}
+            onPointerLeave={(event) => {
+              event.stopPropagation();
+              setIsLabelHovered(false);
+              graphicsActor.send({ type: 'setHoveredMeasurement', payload: undefined });
+            }}
+          >
+            {(() => {
+              const totalChars = backgroundPlaceholderText.length;
+              const baseWidth = totalChars * labelCharWidth + 2 * labelPadding;
+              const buttonDiameter = 2 * labelCharWidth;
+              const hitWidth = baseWidth + buttonDiameter + Math.max(5, labelPadding * 0.2);
+              const hitHeight = labelHeight + 2 * labelPadding;
+              return (
+                <>
+                  <planeGeometry args={[hitWidth, hitHeight]} />
+                  <meshBasicMaterial
+                    transparent
+                    opacity={0}
+                    depthTest={false}
+                    depthWrite={false}
+                    side={THREE.DoubleSide}
+                  />
+                </>
+              );
+            })()}
+          </mesh>
           {/* Background */}
           <mesh position={[0, 0, 0]} userData={{ isMeasurementUi: true }}>
             <primitive object={backgroundOutlineGeometry} attach="geometry" />
@@ -659,6 +740,88 @@ function MeasurementLine({
             <primitive object={textGeometry} attach="geometry" />
             <primitive object={derivedMaterials.textMaterial} attach="material" />
           </mesh>
+
+          {/* Pin button in top-right over label */}
+          {id && isHovered ? (
+            <group
+              position={(() => {
+                // Compute approximate background width from placeholder and char width/padding
+                const totalChars = backgroundPlaceholderText.length;
+                const width = totalChars * labelCharWidth + 2 * labelPadding;
+                const buttonDiameter = 2 * labelCharWidth; // 2 characters width
+                const offsetX = width / 2 - buttonDiameter / 2 - Math.max(5, labelPadding * 0.2);
+                const offsetY = 0; // Vertically centered
+                return [offsetX, offsetY, 0];
+              })()}
+              renderOrder={3}
+              userData={{ isMeasurementUi: true }}
+            >
+              {/* Yellow/gold circular pin button (appears only on label hover) */}
+              <mesh
+                userData={{ isMeasurementUi: true }}
+                onPointerOver={(event) => {
+                  event.stopPropagation();
+                  // Keep hover state active when over pin button
+                  setIsLabelHovered(true);
+                  if (id) {
+                    graphicsActor.send({ type: 'setHoveredMeasurement', payload: id });
+                  }
+                }}
+                onPointerOut={(event) => {
+                  event.stopPropagation();
+                  // Don't clear hover immediately - let the label group handle it
+                }}
+                onPointerDown={(event) => {
+                  if (event.nativeEvent.button === 0 && id) {
+                    graphicsActor.send({ type: 'toggleMeasurementPinned', id });
+                  }
+
+                  event.stopPropagation();
+                }}
+              >
+                <circleGeometry args={[labelCharWidth, 48]} />
+                <meshMatcapMaterial
+                  color={isPinned ? 0xff_d7_00 : 0xff_ff_99}
+                  opacity={1}
+                  depthTest={false}
+                  depthWrite={false}
+                  side={THREE.DoubleSide}
+                  fog={false}
+                  toneMapped={false}
+                  matcap={matcapMaterial()}
+                  transparent={false}
+                />
+              </mesh>
+
+              {/* Pin glyph using simple geometry */}
+              <mesh
+                position={[0, labelCharWidth * 0.15, 0]}
+                userData={{ isMeasurementUi: true }}
+                onPointerOver={(event) => {
+                  event.stopPropagation();
+                }}
+                onPointerOut={(event) => {
+                  event.stopPropagation();
+                }}
+              >
+                <cylinderGeometry args={[labelCharWidth * 0.12, labelCharWidth * 0.12, labelCharWidth * 0.4, 16]} />
+                <primitive object={derivedMaterials.textMaterial} attach="material" />
+              </mesh>
+              <mesh
+                position={[0, -labelCharWidth * 0.2, 0]}
+                userData={{ isMeasurementUi: true }}
+                onPointerOver={(event) => {
+                  event.stopPropagation();
+                }}
+                onPointerOut={(event) => {
+                  event.stopPropagation();
+                }}
+              >
+                <coneGeometry args={[labelCharWidth * 0.15, labelCharWidth * 0.35, 16]} />
+                <primitive object={derivedMaterials.textMaterial} attach="material" />
+              </mesh>
+            </group>
+          ) : null}
         </group>
       )}
     </group>

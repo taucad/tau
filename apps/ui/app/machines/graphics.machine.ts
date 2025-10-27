@@ -57,9 +57,12 @@ export type GraphicsContext = {
     startPoint: [number, number, number];
     endPoint: [number, number, number];
     distance: number;
+    name?: string;
+    isPinned?: boolean;
   }>;
   currentMeasurementStart: [number, number, number] | undefined;
   measureSnapDistance: number; // Pixels
+  hoveredMeasurementId?: string;
 
   // Capability registrations
   screenshotCapability?: AnyActorRef;
@@ -115,6 +118,10 @@ export type GraphicsEvent =
   | { type: 'cancelCurrentMeasurement' }
   | { type: 'clearMeasurement'; payload: string } // Measurement id
   | { type: 'clearAllMeasurements' }
+  | { type: 'clearUnpinnedMeasurements' }
+  | { type: 'setHoveredMeasurement'; payload: string | undefined }
+  | { type: 'setMeasurementName'; id: string; name: string }
+  | { type: 'toggleMeasurementPinned'; id: string }
   // Controls events
   | { type: 'controlsInteractionStart' }
   | { type: 'controlsChanged'; zoom: number; position: number; fov: number }
@@ -654,6 +661,7 @@ export const graphicsMachine = setup({
             startPoint: start,
             endPoint: end,
             distance,
+            isPinned: false,
           },
         ];
       },
@@ -667,13 +675,42 @@ export const graphicsMachine = setup({
     clearMeasurement: assign({
       measurements({ event, context }) {
         assertEvent(event, 'clearMeasurement');
-        return context.measurements.filter((m) => m.id !== event.payload);
+        const filtered = context.measurements.filter((m) => m.id !== event.payload);
+        return filtered;
       },
     }),
 
     clearAllMeasurements: assign({
       measurements: [],
       currentMeasurementStart: undefined,
+    }),
+
+    clearUnpinnedMeasurements: assign({
+      measurements({ context }) {
+        return context.measurements.filter((m) => m.isPinned);
+      },
+    }),
+
+    setHoveredMeasurement: assign({
+      hoveredMeasurementId({ event }) {
+        assertEvent(event, 'setHoveredMeasurement');
+        return event.payload;
+      },
+    }),
+
+    setMeasurementName: assign({
+      measurements({ event, context }) {
+        assertEvent(event, 'setMeasurementName');
+        return context.measurements.map((m) => (m.id === event.id ? { ...m, name: event.name } : m));
+      },
+    }),
+
+    toggleMeasurementPinned: assign({
+      measurements({ event, context }) {
+        assertEvent(event, 'toggleMeasurementPinned');
+        const updated = context.measurements.map((m) => (m.id === event.id ? { ...m, isPinned: !m.isPinned } : m));
+        return updated;
+      },
     }),
   },
   guards: {
@@ -756,6 +793,7 @@ export const graphicsMachine = setup({
     measurements: [],
     currentMeasurementStart: undefined,
     measureSnapDistance: input.measureSnapDistance ?? 40,
+    hoveredMeasurementId: undefined,
 
     // Capabilities
     screenshotCapability: undefined,
@@ -860,6 +898,23 @@ export const graphicsMachine = setup({
         // Geometry updates
         updateGeometries: {
           actions: 'updateGeometries',
+        },
+
+        // Measurement events (available in all operational states)
+        clearMeasurement: {
+          actions: 'clearMeasurement',
+        },
+        setHoveredMeasurement: {
+          actions: 'setHoveredMeasurement',
+        },
+        setMeasurementName: {
+          actions: 'setMeasurementName',
+        },
+        toggleMeasurementPinned: {
+          actions: 'toggleMeasurementPinned',
+        },
+        clearUnpinnedMeasurements: {
+          actions: 'clearUnpinnedMeasurements',
         },
       },
       states: {

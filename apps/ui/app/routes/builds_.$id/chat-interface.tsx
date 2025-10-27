@@ -22,6 +22,7 @@ import { ChatInterfaceNav } from '#routes/builds_.$id/chat-interface-nav.js';
 import { Tabs, TabsContents, TabsContent } from '#components/ui/tabs.js';
 import { Button } from '#components/ui/button.js';
 import { ChatInterfaceStatus } from '#routes/builds_.$id/chat-interface-status.js';
+import { ChatInterfaceGraphics } from '#routes/builds_.$id/chat-interface-graphics.js';
 
 /**
  * The spacing/gap between the panels in pixels.
@@ -318,8 +319,9 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           </div>
 
           {/* Bottom-left Content */}
-          <div className="pointer-events-auto absolute right-8 bottom-0 left-0 flex w-full flex-col gap-2">
+          <div className="pointer-events-auto absolute right-8 bottom-0 left-0 flex w-fit shrink-0 flex-col gap-2">
             <ChatStackTrace />
+            <ChatInterfaceGraphics />
             <ChatViewerControls />
           </div>
         </ResizablePanel>

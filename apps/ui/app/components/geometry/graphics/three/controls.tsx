@@ -73,7 +73,7 @@ export const Controls = React.memo(function ({
         enableDamping={enableDamping}
         enableZoom={enableZoom}
       />
-      {Boolean(isMeasureActive) && <MeasureTool />}
+      <MeasureTool />
       <SectionViewControls
         isActive={isActive}
         selectedPlaneId={selectedPlaneId}

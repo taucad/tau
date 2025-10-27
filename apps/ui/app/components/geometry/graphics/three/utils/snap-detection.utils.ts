@@ -314,12 +314,93 @@ export function detectSnapPoints(
     addPoint(new THREE.Vector3().addVectors(vi, vj).multiplyScalar(0.5), 'edge-midpoint');
   }
 
-  // Add midpoints for interior shared edges
-  for (const [i, j] of interiorEdges) {
-    const vi = worldPositions[i]!;
-    const vj = worldPositions[j]!;
-    addPoint(new THREE.Vector3().addVectors(vi, vj).multiplyScalar(0.5), 'edge-midpoint');
+  // Compute a single face center for arbitrary N-sided faces (polygonal or curved fallback)
+  // Strategy: order the boundary ring, project to face plane, compute area-weighted centroid; fallback to mean
+  const boundaryVertexIndexSet = new Set<number>();
+  for (const [i, j] of boundaryEdges) {
+    boundaryVertexIndexSet.add(i);
+    boundaryVertexIndexSet.add(j);
   }
+
+  const boundaryIndexList = [...boundaryVertexIndexSet];
+  const boundaryAdj = new Map<number, number[]>();
+  for (const [i, j] of boundaryEdges) {
+    const ai = boundaryAdj.get(i) ?? [];
+    ai.push(j);
+    boundaryAdj.set(i, ai);
+    const aj = boundaryAdj.get(j) ?? [];
+    aj.push(i);
+    boundaryAdj.set(j, aj);
+  }
+
+  // Walk the ring to order vertices
+  const ordered: number[] = [];
+  if (boundaryIndexList.length >= 3) {
+    const start = boundaryIndexList[0]!;
+    let previous = -1;
+    let curr = start;
+    const maxSteps = boundaryIndexList.length + 5;
+    for (let step = 0; step < maxSteps; step++) {
+      ordered.push(curr);
+      // eslint-disable-next-line @typescript-eslint/no-loop-func -- `previous` is always defined in the loop
+      const neighbors = (boundaryAdj.get(curr) ?? []).filter((n) => n !== previous);
+      if (neighbors.length === 0) {
+        break;
+      }
+
+      const next = neighbors[0]!;
+      previous = curr;
+      curr = next;
+      if (curr === start) {
+        break;
+      }
+    }
+  }
+
+  const { u: planeU, v: planeV } = constructPlaneAxes(refNormal);
+  let center: THREE.Vector3 | undefined;
+  if (ordered.length >= 3) {
+    // Area-weighted centroid in 2D then map back to 3D
+    let area = 0;
+    let cx = 0;
+    let cy = 0;
+    const to2D = (idx: number): { x: number; y: number } => {
+      const p = worldPositions[idx]!;
+      const rel = new THREE.Vector3().subVectors(p, pa);
+      return { x: rel.dot(planeU), y: rel.dot(planeV) };
+    };
+
+    for (let i = 0; i < ordered.length; i++) {
+      const a = to2D(ordered[i]!);
+      const b = to2D(ordered[(i + 1) % ordered.length]!);
+      const cross = a.x * b.y - a.y * b.x;
+      area += cross;
+      cx += (a.x + b.x) * cross;
+      cy += (a.y + b.y) * cross;
+    }
+
+    area *= 0.5;
+    if (Math.abs(area) > 1e-9) {
+      cx /= 6 * area;
+      cy /= 6 * area;
+      center = new THREE.Vector3()
+        .copy(pa)
+        .add(new THREE.Vector3().copy(planeU).multiplyScalar(cx))
+        .add(new THREE.Vector3().copy(planeV).multiplyScalar(cy));
+    }
+  }
+
+  if (!center) {
+    // Fallback: average of boundary vertices
+    center = new THREE.Vector3();
+    for (const idx of boundaryVertexIndexSet) {
+      center.add(worldPositions[idx]!);
+    }
+
+    center.multiplyScalar(1 / Math.max(1, boundaryIndexList.length));
+  }
+
+  addPoint(center, 'vertex');
 
   return snapPoints;
 }

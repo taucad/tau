@@ -47,6 +47,7 @@ export function MeasureTool(): React.JSX.Element {
   const [hoveredSnapPoints, setHoveredSnapPoints] = useState<SnapPoint[]>([]);
   const [activeSnapPoint, setActiveSnapPoint] = useState<SnapPoint | undefined>();
   const [mousePosition, setMousePosition] = useState<THREE.Vector3 | undefined>();
+  const lastSnapPointsRef = useRef<SnapPoint[] | undefined>(undefined);
 
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
@@ -73,10 +74,19 @@ export function MeasureTool(): React.JSX.Element {
         }
       });
 
+      // Find the closest intersected mesh (top-most object)
+      const intersects = raycasterRef.current.intersectObjects(meshes, true);
+      const firstIntersection = intersects[0];
+
+      // Only show snap points for the closest/top-most intersected object.
+      // If there is no intersection, fall back to the last detected face's snap points.
       let allSnapPoints: SnapPoint[] = [];
-      for (const mesh of meshes) {
-        const points = detectSnapPoints(mesh, raycasterRef.current, camera, snapDistance);
-        allSnapPoints = [...allSnapPoints, ...points];
+      if (firstIntersection?.object) {
+        const topMesh = firstIntersection.object as THREE.Mesh;
+        allSnapPoints = detectSnapPoints(topMesh, raycasterRef.current, camera, snapDistance);
+        lastSnapPointsRef.current = allSnapPoints;
+      } else if (lastSnapPointsRef.current?.length) {
+        allSnapPoints = lastSnapPointsRef.current;
       }
 
       setHoveredSnapPoints(allSnapPoints);
@@ -93,12 +103,11 @@ export function MeasureTool(): React.JSX.Element {
       // Update mouse position for preview line
       if (closest) {
         setMousePosition(closest.position);
-      } else {
-        const intersects = raycasterRef.current.intersectObjects(meshes, true);
-        const firstIntersection = intersects[0];
-        if (firstIntersection) {
-          setMousePosition(firstIntersection.point);
-        }
+      } else if (firstIntersection) {
+        setMousePosition(firstIntersection.point);
+      } else if (lastSnapPointsRef.current?.[0]) {
+        // Use the first snap point as a stable mouse position proxy when off-face
+        setMousePosition(lastSnapPointsRef.current[0].position);
       }
     };
 
@@ -127,7 +136,8 @@ export function MeasureTool(): React.JSX.Element {
       });
 
       const intersects = raycasterRef.current.intersectObjects(meshes, true);
-      mouseDownOnMeshRef.current = intersects.length > 0;
+      // Consider a valid mousedown when either on a mesh or over a valid snap indicator
+      mouseDownOnMeshRef.current = intersects.length > 0 || Boolean(activeSnapPoint);
     };
 
     const handleMouseUp = (event: MouseEvent): void => {
@@ -176,8 +186,8 @@ export function MeasureTool(): React.JSX.Element {
         }
       }
 
-      // Only process if both mousedown and mouseup happened on a mesh
-      if (!mouseDownOnMeshRef.current) {
+      // Only process if interaction started on mesh OR we still have a valid snap indicator
+      if (!mouseDownOnMeshRef.current && !activeSnapPoint) {
         mouseDownOnMeshRef.current = false;
         return;
       }
@@ -194,8 +204,8 @@ export function MeasureTool(): React.JSX.Element {
       });
 
       const intersects = raycasterRef.current.intersectObjects(meshes, true);
-      if (intersects.length === 0) {
-        // No intersection with mesh on mouseup, ignore
+      if (intersects.length === 0 && !activeSnapPoint) {
+        // No intersection and no active snap target, ignore
         mouseDownOnMeshRef.current = false;
         return;
       }
@@ -253,6 +263,11 @@ export function MeasureTool(): React.JSX.Element {
         );
       })}
 
+      {/* Persistent indicator for the selected start point */}
+      {currentStart ? (
+        <SnapPointIndicator isActive position={new THREE.Vector3(...currentStart)} camera={camera} />
+      ) : null}
+
       {/* Render preview line */}
       {currentStart && mousePosition ? (
         <MeasurementLine isPreview start={new THREE.Vector3(...currentStart)} end={mousePosition} />
@@ -275,45 +290,70 @@ export function MeasureTool(): React.JSX.Element {
 
 type SnapPointIndicatorProps = {
   readonly position: THREE.Vector3;
+  // Indicates hovered/selected state for color
   readonly isActive: boolean;
   readonly camera: THREE.Camera;
 };
 
 function SnapPointIndicator({ position, isActive, camera }: SnapPointIndicatorProps): React.JSX.Element {
-  const meshRef = useRef<THREE.Mesh>(null);
+  const outerRef = useRef<THREE.Mesh>(null);
+  const innerRef = useRef<THREE.Mesh>(null);
 
   useFrame(() => {
-    if (meshRef.current) {
-      const scale = calculateScaleFromCamera(position, camera);
+    const scale = calculateScaleFromCamera(position, camera);
 
-      // Calculate direction from snap point to camera
-      const direction = new THREE.Vector3();
-      direction.subVectors(camera.position, position).normalize();
+    // Face camera
+    const direction = new THREE.Vector3();
+    direction.subVectors(camera.position, position).normalize();
+    const quaternion = new THREE.Quaternion();
+    quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
 
-      // Create a quaternion that orients the cylinder's Y-axis toward the camera
-      const quaternion = new THREE.Quaternion();
-      quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+    if (outerRef.current) {
+      outerRef.current.quaternion.copy(quaternion);
+      outerRef.current.scale.set(scale * 500, scale * 500, scale * 500);
+    }
 
-      meshRef.current.quaternion.copy(quaternion);
-
-      // Scale uniformly to maintain circular shape
-      meshRef.current.scale.set(scale * 500, scale * 500, scale * 500);
+    if (innerRef.current) {
+      innerRef.current.quaternion.copy(quaternion);
+      innerRef.current.scale.set(scale * 500, scale * 500, scale * 500);
     }
   });
 
   return (
-    <mesh ref={meshRef} position={position} userData={{ isMeasurementUi: true }}>
-      {/* Thin cylinder as a flat target disc */}
-      <cylinderGeometry args={[0.05, 0.05, 0.05, 32]} />
-      <meshMatcapMaterial
-        transparent
-        color={isActive ? '#ff0000' : '#00ff00'}
-        opacity={1}
-        depthTest={false}
-        depthWrite={false}
-        side={THREE.DoubleSide}
-      />
-    </mesh>
+    <group>
+      {/* Outer border (black) */}
+      <mesh ref={outerRef} position={position} renderOrder={11} userData={{ isMeasurementUi: true }}>
+        <cylinderGeometry args={[0.04, 0.04, 0.05, 32]} />
+        <meshMatcapMaterial
+          transparent
+          color="#000000"
+          opacity={1}
+          depthTest={false}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {/* Inner fill (white or green when active/hovered/selected) */}
+      <mesh
+        ref={innerRef}
+        position={position}
+        // Ensure the hover/selected indicator is rendered on top of other indicators
+        renderOrder={isActive ? 12 : 11}
+        userData={{ isMeasurementUi: true }}
+      >
+        <cylinderGeometry args={[0.03, 0.03, 0.05, 32]} />
+        <meshBasicMaterial
+          transparent
+          toneMapped={false}
+          fog={false}
+          color={isActive ? '#00ff00' : '#ffffff'}
+          opacity={1}
+          depthTest={false}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+    </group>
   );
 }
 
@@ -401,8 +441,17 @@ function MeasurementLine({
       fog: false,
       toneMapped: false,
     });
+    const basicMaterial = new THREE.MeshBasicMaterial({
+      color: materials?.backgroundColor ?? 0xff_ff_ff, // White
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+      side: THREE.DoubleSide,
+      fog: false,
+      toneMapped: false,
+    });
 
-    const backgroundMaterial = baseMaterial.clone();
+    const backgroundMaterial = basicMaterial.clone();
     backgroundMaterial.color.set(materials?.backgroundColor ?? 0xff_ff_ff); // White
 
     const textMaterial = baseMaterial.clone();

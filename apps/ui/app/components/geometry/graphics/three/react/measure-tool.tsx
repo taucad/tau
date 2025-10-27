@@ -299,6 +299,11 @@ function SnapPointIndicator({ position, isActive, camera }: SnapPointIndicatorPr
   const outerRef = useRef<THREE.Mesh>(null);
   const innerRef = useRef<THREE.Mesh>(null);
 
+  const borderSize = isActive ? 0.05 : 0.04;
+  const innerSize = isActive ? 0.04 : 0.03;
+  const height = 0.05;
+  const segments = 32;
+
   useFrame(() => {
     const scale = calculateScaleFromCamera(position, camera);
 
@@ -320,10 +325,10 @@ function SnapPointIndicator({ position, isActive, camera }: SnapPointIndicatorPr
   });
 
   return (
-    <group>
+    <group renderOrder={11}>
       {/* Outer border (black) */}
-      <mesh ref={outerRef} position={position} renderOrder={11} userData={{ isMeasurementUi: true }}>
-        <cylinderGeometry args={[0.04, 0.04, 0.05, 32]} />
+      <mesh ref={outerRef} position={position} renderOrder={1} userData={{ isMeasurementUi: true }}>
+        <cylinderGeometry args={[borderSize, borderSize, height, segments]} />
         <meshMatcapMaterial
           transparent
           color="#000000"
@@ -338,10 +343,10 @@ function SnapPointIndicator({ position, isActive, camera }: SnapPointIndicatorPr
         ref={innerRef}
         position={position}
         // Ensure the hover/selected indicator is rendered on top of other indicators
-        renderOrder={isActive ? 12 : 11}
+        renderOrder={isActive ? 2 : 1}
         userData={{ isMeasurementUi: true }}
       >
-        <cylinderGeometry args={[0.03, 0.03, 0.05, 32]} />
+        <cylinderGeometry args={[innerSize, innerSize, height, segments]} />
         <meshBasicMaterial
           transparent
           toneMapped={false}

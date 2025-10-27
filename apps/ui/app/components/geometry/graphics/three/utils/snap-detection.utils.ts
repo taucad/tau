@@ -1,3 +1,4 @@
+/* eslint-disable complexity -- TODO: refactor */
 import * as THREE from 'three';
 
 export type SnapPoint = {
@@ -219,6 +220,21 @@ export function detectSnapPoints(
     canonicalIndex,
   });
 
+  // Precompute edge adjacency by canonical indices for neighborhood expansion
+  const edgeToTriangles = new Map<string, number[]>();
+  for (const [i, triangle] of triangles.entries()) {
+    const t = triangle;
+    const ca = canonicalIndex[t.a]!;
+    const cb = canonicalIndex[t.b]!;
+    const cc = canonicalIndex[t.c]!;
+    const keys = [edgeKey(ca, cb), edgeKey(cb, cc), edgeKey(cc, ca)];
+    for (const k of keys) {
+      const array = edgeToTriangles.get(k) ?? [];
+      array.push(i);
+      edgeToTriangles.set(k, array);
+    }
+  }
+
   // Gather boundary edges: edges that appear only once among the region triangles
   const edgeCount = new Map<string, [number, number]>();
   for (const idx of faceTriangleIndices) {
@@ -266,6 +282,19 @@ export function detectSnapPoints(
     }
   }
 
+  // Try circular-face detection first using boundary vertices
+  const boundaryVertexIndices = new Set<number>();
+  for (const [i, j] of boundaryEdges) {
+    boundaryVertexIndices.add(i);
+    boundaryVertexIndices.add(j);
+  }
+
+  const boundaryVerticesWorld: THREE.Vector3[] = [...boundaryVertexIndices].map((idx) => worldPositions[idx]!);
+  const maybeCircle = detectCircleOnFace(boundaryVerticesWorld, refNormal, pa);
+  if (maybeCircle) {
+    return maybeCircle;
+  }
+
   // Collect unique boundary vertices and edge midpoints
   const snapPoints: SnapPoint[] = [];
   const seen = new Set<string>();
@@ -293,6 +322,185 @@ export function detectSnapPoints(
   }
 
   return snapPoints;
+}
+
+// ---------------------- Circle detection helpers ----------------------
+
+function constructPlaneAxes(normal: THREE.Vector3): { u: THREE.Vector3; v: THREE.Vector3 } {
+  const tryAxis = (axis: THREE.Vector3): THREE.Vector3 => {
+    const proj = axis.clone().addScaledVector(normal, -axis.dot(normal));
+    if (proj.lengthSq() < 1e-10) {
+      return proj;
+    }
+
+    return proj.normalize();
+  };
+
+  let u = tryAxis(new THREE.Vector3(1, 0, 0));
+  if (u.lengthSq() < 1e-10) {
+    u = tryAxis(new THREE.Vector3(0, 1, 0));
+  }
+
+  if (u.lengthSq() < 1e-10) {
+    const temporary = Math.abs(normal.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    u = tryAxis(temporary);
+  }
+
+  const v = new THREE.Vector3().crossVectors(normal, u).normalize();
+  return { u, v };
+}
+
+function fitCircle2D(points: Array<{ x: number; y: number }>): { cx: number; cy: number; r: number } | undefined {
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+  let sx = 0;
+  let sy = 0;
+  let szz = 0;
+  let sxz = 0;
+  let syz = 0;
+
+  for (const p of points) {
+    const z = p.x * p.x + p.y * p.y;
+    sxx += p.x * p.x;
+    syy += p.y * p.y;
+    sxy += p.x * p.y;
+    sx += p.x;
+    sy += p.y;
+    szz += z;
+    sxz += p.x * z;
+    syz += p.y * z;
+  }
+
+  const n = points.length;
+
+  const aMatrix = [
+    [sxx, sxy, sx],
+    [sxy, syy, sy],
+    [sx, sy, n],
+  ];
+
+  const bVector = [sxz * 0.5, syz * 0.5, szz * 0.5];
+  const sol = solveSymmetric3(aMatrix, bVector);
+  if (!sol) {
+    return undefined;
+  }
+
+  const [cx, cy, c] = sol;
+  const r = Math.sqrt(Math.max(0, cx * cx + cy * cy + c));
+  if (!Number.isFinite(r)) {
+    return undefined;
+  }
+
+  return { cx, cy, r };
+}
+
+function solveSymmetric3(aMatrix: number[][], bVector: number[]): [number, number, number] | undefined {
+  const m: number[][] = [[...aMatrix[0]!], [...aMatrix[1]!], [...aMatrix[2]!]];
+  const b = [...bVector];
+
+  for (let i = 0; i < 3; i++) {
+    let pivot = i;
+    for (let r = i + 1; r < 3; r++) {
+      if (Math.abs(m[r]![i]!) > Math.abs(m[pivot]![i]!)) {
+        pivot = r;
+      }
+    }
+
+    if (Math.abs(m[pivot]![i]!) < 1e-12) {
+      return undefined;
+    }
+
+    if (pivot !== i) {
+      [m[i], m[pivot]] = [m[pivot]!, m[i]!];
+      [b[i], b[pivot]] = [b[pivot]!, b[i]!];
+    }
+
+    for (let r = i + 1; r < 3; r++) {
+      const factor = m[r]![i]! / m[i]![i]!;
+      for (let c = i; c < 3; c++) {
+        m[r]![c]! -= factor * m[i]![c]!;
+      }
+
+      b[r]! -= factor * b[i]!;
+    }
+  }
+
+  const x: [number, number, number] = [0, 0, 0];
+  for (let i = 2; i >= 0; i--) {
+    let sum = b[i]!;
+    for (let c = i + 1; c < 3; c++) {
+      sum -= m[i]![c]! * x[c]!;
+    }
+
+    x[i] = sum / m[i]![i]!;
+  }
+
+  return [x[0], x[1], x[2]];
+}
+
+function detectCircleOnFace(
+  boundaryVerticesWorld: THREE.Vector3[],
+  faceNormal: THREE.Vector3,
+  planePoint: THREE.Vector3,
+): SnapPoint[] | undefined {
+  const minSamples = 12;
+  if (boundaryVerticesWorld.length < minSamples) {
+    return undefined;
+  }
+
+  const { u, v } = constructPlaneAxes(faceNormal.clone().normalize());
+
+  const pts2D = boundaryVerticesWorld.map((p) => {
+    const rel = new THREE.Vector3().subVectors(p, planePoint);
+    return { x: rel.dot(u), y: rel.dot(v) };
+  });
+
+  const fit = fitCircle2D(pts2D);
+  if (!fit) {
+    return undefined;
+  }
+
+  const { cx, cy, r } = fit;
+  if (!Number.isFinite(r) || r <= 0) {
+    return undefined;
+  }
+
+  let r2sum = 0;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const p of pts2D) {
+    const dx = p.x - cx;
+    const dy = p.y - cy;
+    const di = Math.hypot(dx, dy);
+    r2sum += (di - r) * (di - r);
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y);
+  }
+
+  const rms = Math.sqrt(r2sum / pts2D.length);
+  const relRms = rms / r;
+  const width = maxX - minX;
+  const height = maxY - minY;
+  const aspect = Math.max(width, height) / Math.max(1e-9, Math.min(width, height));
+  if (!(relRms <= 0.03 && aspect <= 1.05)) {
+    return undefined;
+  }
+
+  const centerWorld = planePoint.clone().addScaledVector(u, cx).addScaledVector(v, cy);
+
+  const result: SnapPoint[] = [
+    { position: centerWorld.clone().addScaledVector(u, r), type: 'edge-midpoint' },
+    { position: centerWorld.clone().addScaledVector(u, -r), type: 'edge-midpoint' },
+    { position: centerWorld.clone().addScaledVector(v, r), type: 'edge-midpoint' },
+    { position: centerWorld.clone().addScaledVector(v, -r), type: 'edge-midpoint' },
+    { position: centerWorld, type: 'vertex' },
+  ];
+  return result;
 }
 
 export function findClosestSnapPoint(

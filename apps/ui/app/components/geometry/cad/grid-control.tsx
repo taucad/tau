@@ -135,7 +135,7 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Change grid size</TooltipContent>
+        <TooltipContent>Change unit settings</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
         className="w-72"

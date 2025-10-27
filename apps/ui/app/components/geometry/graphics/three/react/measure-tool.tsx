@@ -327,7 +327,7 @@ function SnapPointIndicator({ position, isActive, camera }: SnapPointIndicatorPr
   return (
     <group renderOrder={11}>
       {/* Outer border (black) */}
-      <mesh ref={outerRef} position={position} renderOrder={1} userData={{ isMeasurementUi: true }}>
+      <mesh ref={outerRef} position={position} renderOrder={isActive ? 2 : 1} userData={{ isMeasurementUi: true }}>
         <cylinderGeometry args={[borderSize, borderSize, height, segments]} />
         <meshMatcapMaterial
           transparent

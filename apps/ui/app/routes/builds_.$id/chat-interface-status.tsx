@@ -52,7 +52,7 @@ const infoFromState = (
           </div>
         ),
         tooltipLabel: 'Close measuring tool',
-        tips: ['Left click to add a point', 'Right click to cancel adding a point'],
+        tips: ['Left click to add a point', 'Right click to cancel adding a point', 'Zoom in for better accuracy'],
       };
     }
 

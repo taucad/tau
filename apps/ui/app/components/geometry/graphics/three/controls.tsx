@@ -40,9 +40,9 @@ export const Controls = React.memo(function ({
   const isActive = useSelector(graphicsActor, (state) => state.context.isSectionViewActive);
   const selectedPlaneId = useSelector(graphicsActor, (state) => state.context.selectedSectionViewId);
   const translation = useSelector(graphicsActor, (state) => state.context.sectionViewTranslation);
+  const rotation = useSelector(graphicsActor, (state) => state.context.sectionViewRotation);
   const direction = useSelector(graphicsActor, (state) => state.context.sectionViewDirection);
   const availablePlanes = useSelector(graphicsActor, (state) => state.context.availableSectionViews);
-  const isMeasureActive = useSelector(graphicsActor, (state) => state.matches({ operational: 'measure' }));
 
   // Handlers to send events to xstate
   const handleSelectPlane = (planeId: 'xy' | 'xz' | 'yz'): void => {
@@ -79,6 +79,7 @@ export const Controls = React.memo(function ({
         selectedPlaneId={selectedPlaneId}
         availablePlanes={availablePlanes}
         translation={translation}
+        rotation={rotation}
         direction={direction}
         onSelectPlane={handleSelectPlane}
         onToggleDirection={handleToggleDirection}

@@ -196,6 +196,7 @@ type SectionViewControlsProperties = {
   readonly availablePlanes: AvailablePlane[];
   readonly translation: number;
   readonly direction: 1 | -1;
+  readonly rotation: [number, number, number];
   readonly onSelectPlane: (planeId: PlaneId) => void;
   readonly onToggleDirection: () => void;
   readonly onSetTranslation: (value: number) => void;
@@ -208,6 +209,7 @@ export function SectionViewControls({
   availablePlanes,
   translation,
   direction,
+  rotation,
   onSelectPlane,
   // @ts-expect-error -- USE THIS
   onToggleDirection,
@@ -250,7 +252,30 @@ export function SectionViewControls({
     const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
     const position = rotatedNormal.multiplyScalar(translation);
     current.position.copy(position);
-  }, [selectedPlaneId, selectedPlane, translation, direction]);
+  }, [selectedPlaneId, selectedPlane, translation, direction, rotation]);
+
+  // Sync external rotation into gizmo when UI changes rotation
+  React.useEffect(() => {
+    const { current } = transformControlsRef;
+    if (!current || !selectedPlane) {
+      return;
+    }
+
+    if (isRotatingRef.current) {
+      return;
+    }
+
+    rotationRef.current.set(rotation[0], rotation[1], rotation[2]);
+    current.rotation.set(rotation[0], rotation[1], rotation[2]);
+
+    // Recompute position based on new rotation
+    const [bx, by, bz] = selectedPlane.normal;
+    const baseNormal = new THREE.Vector3(bx, by, bz).multiplyScalar(direction);
+    const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
+    const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
+    const position = rotatedNormal.multiplyScalar(translation);
+    current.position.copy(position);
+  }, [rotation, selectedPlane, direction, translation]);
 
   if (!isActive) {
     return undefined;

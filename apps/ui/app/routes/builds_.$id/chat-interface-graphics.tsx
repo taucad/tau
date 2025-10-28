@@ -5,6 +5,7 @@ import { ChatInterfaceGraphicsMeasure } from '#routes/builds_.$id/chat-interface
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { ChatInterfaceGraphicsSectionView } from '#routes/builds_.$id/chat-interface-graphics-section-view.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
+import { Button } from '#components/ui/button.js';
 
 const titleFromState = (state: StateFrom<typeof graphicsMachine>): string => {
   switch (true) {
@@ -31,11 +32,11 @@ export function ChatInterfaceGraphics(): React.ReactNode {
   return (
     <div className="pointer-events-auto flex h-1/2 w-80 flex-col gap-2 rounded-md border bg-sidebar p-2">
       <div className="flex items-center justify-between px-1">
-        <div className="text-sm font-medium text-muted-foreground">{title}</div>
-        <button
-          type="button"
-          className="rounded p-1 text-muted-foreground hover:bg-muted"
-          title="Close"
+        <div className="text-sm font-medium">{title}</div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="-mr-1 size-7"
           onClick={() => {
             // Reset to default: disable section view and measure, clear unpinned hovers
             if (graphicsState.context.isMeasureActive) {
@@ -51,7 +52,7 @@ export function ChatInterfaceGraphics(): React.ReactNode {
         >
           <X className="size-4" />
           <span className="sr-only">Close</span>
-        </button>
+        </Button>
       </div>
       <ChatInterfaceGraphicsInner />
     </div>

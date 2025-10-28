@@ -1482,7 +1482,9 @@ class TransformControlsGizmo extends Object3D {
 
         switch (handle.name) {
           case 'AXIS': {
-            handle.position.copy(this.worldPositionStart);
+            // During hover (not dragging) anchor to current world position;
+            // once dragging, keep the captured start position
+            handle.position.copy(this.dragging ? this.worldPositionStart : this.worldPosition);
             handle.visible = Boolean(this.axis);
 
             if (this.axis === 'X') {
@@ -1512,13 +1514,12 @@ class TransformControlsGizmo extends Object3D {
               }
             }
 
-            // Keep dash size constant for the long rotation helper regardless of camera-based gizmo scaling
-            if (handle.visible) {
-              const dashedMaterial = (handle as Line).material as LineDashedMaterial;
-              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ensure existence
-              if (dashedMaterial && typeof dashedMaterial.scale === 'number') {
-                dashedMaterial.scale = handle.scale.x;
-              }
+            // Keep the helper axis completely static (no camera-based gizmo scaling)
+            handle.scale.set(1, 1, 1);
+            const dashedMaterial = (handle as Line).material as LineDashedMaterial;
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ensure existence
+            if (dashedMaterial && typeof dashedMaterial.scale === 'number') {
+              dashedMaterial.scale = 1;
             }
 
             if (this.axis === 'XYZE') {

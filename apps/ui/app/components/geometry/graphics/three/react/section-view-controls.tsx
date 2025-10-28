@@ -215,6 +215,8 @@ export function SectionViewControls({
   onSetRotation,
 }: SectionViewControlsProperties): React.JSX.Element | undefined {
   const transformControlsRef = useRef<THREE.Object3D>(undefined);
+  // Track the latest rotation locally to project translation along the rotated plane normal
+  const rotationRef = useRef<THREE.Euler>(new THREE.Euler(0, 0, 0));
   const matcapTexture = useMemo(() => matcapMaterial(), []);
 
   // Find the selected plane configuration
@@ -224,12 +226,14 @@ export function SectionViewControls({
   const [nx, ny, nz] = selectedPlane?.normal ?? [0, 0, 1];
   const normal = new THREE.Vector3(nx, ny, nz).multiplyScalar(direction);
 
-  // Update transform controls position based on translation
+  // Update transform controls position based on translation along the ROTATED normal
   useFrame(() => {
     if (transformControlsRef.current && selectedPlane) {
       const [x, y, z] = selectedPlane.normal;
-      const nextNormal = new THREE.Vector3(x, y, z).multiplyScalar(direction);
-      const position = nextNormal.clone().multiplyScalar(translation);
+      const baseNormal = new THREE.Vector3(x, y, z).multiplyScalar(direction);
+      const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
+      const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
+      const position = rotatedNormal.multiplyScalar(translation);
       transformControlsRef.current.position.copy(position);
     }
   });
@@ -293,9 +297,11 @@ export function SectionViewControls({
         onChange={() => {
           const currentObject = transformControlsRef.current;
           if (currentObject) {
-            // Project the position onto the normal axis
+            // Project the position onto the ROTATED normal axis
             const { position } = currentObject;
-            const projectedDistance = position.dot(normal);
+            const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
+            const rotatedNormal = normal.clone().applyQuaternion(q).normalize();
+            const projectedDistance = position.dot(rotatedNormal);
             onSetTranslation(projectedDistance);
           }
         }}
@@ -314,6 +320,7 @@ export function SectionViewControls({
           if (currentObject) {
             // Extract the rotation from the object
             const rotation = currentObject.rotation.clone();
+            rotationRef.current.copy(rotation);
             onSetRotation(rotation);
           }
         }}

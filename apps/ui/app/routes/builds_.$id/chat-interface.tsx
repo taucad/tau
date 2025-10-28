@@ -352,7 +352,6 @@ export const ChatInterface = memo(function (): React.JSX.Element {
         >
           {/* Top-right Content */}
           <div className="pointer-events-auto absolute top-0 right-0 flex flex-col gap-2">
-            <SettingsControl />
             <ChatParametersTrigger
               isOpen={isParametersOpen}
               onToggle={() => {

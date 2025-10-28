@@ -87,7 +87,7 @@ function Chat() {
       metaKey: true,
     },
     () => {
-      toast.success('Your work is saved automatically');
+      toast.success('Your build is saved automatically');
     },
   );
 

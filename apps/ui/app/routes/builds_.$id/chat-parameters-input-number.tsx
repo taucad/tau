@@ -89,7 +89,7 @@ export function ChatParametersInputNumber({
           )}
         >
           {isAngle ? (
-            <Angle className="size-4" />
+            <Angle className="size-4 stroke-[1.5px]" />
           ) : isUnitless ? (
             <Hash className="size-3" />
           ) : (

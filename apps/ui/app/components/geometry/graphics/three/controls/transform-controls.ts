@@ -30,6 +30,7 @@ import {
   TorusGeometry,
   Vector3,
   MeshMatcapMaterial,
+  LineDashedMaterial,
 } from 'three';
 import arrowSvg from '#components/geometry/graphics/three/icons/translation-arrow.svg?raw';
 import doubleArrowSvg from '#components/geometry/graphics/three/icons/translation-double-arrow.svg?raw';
@@ -790,6 +791,22 @@ class TransformControlsGizmo extends Object3D {
       toneMapped: false,
     });
 
+    // Helper dotted line configuration (inline defaults)
+    const helperDashSize = 2;
+    const helperGapSize = 1.5;
+
+    const helperLineDashedMaterial = new LineDashedMaterial({
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+      linewidth: 1,
+      fog: false,
+      toneMapped: false,
+      dashSize: helperDashSize,
+      gapSize: helperGapSize,
+      color: 0x00_00_00,
+    });
+
     // Const gizmoLineDashed = new LineDashedMaterial({
     //   depthTest: false,
     //   depthWrite: false,
@@ -1137,13 +1154,14 @@ class TransformControlsGizmo extends Object3D {
       XZ: [[new Mesh(new PlaneGeometry(0.4, 0.4), matInvisible), [0.2, 0, 0.2], [-Math.PI / 2, 0, 0]]],
     };
 
+    // Dashed translate helper line
+    const helperTranslateDeltaLine = new Line(TranslateHelperGeometry(), helperLineDashedMaterial.clone());
+    helperTranslateDeltaLine.computeLineDistances();
+
     const helperTranslate = {
       START: [[new Mesh(new OctahedronGeometry(0.02, 2), matHelper), undefined, undefined, undefined, 'helper']],
       END: [[new Mesh(new OctahedronGeometry(0.02, 2), matHelper), undefined, undefined, undefined, 'helper']],
-      DELTA: [[new Line(TranslateHelperGeometry(), matHelper), undefined, undefined, undefined, 'helper']],
-      // X: [[new Line(lineGeometry, matHelper.clone()), [-1e3, 0, 0], undefined, [1e6, 1, 1], 'helper']],
-      // Y: [[new Line(lineGeometry, matHelper.clone()), [0, -1e3, 0], [0, 0, Math.PI / 2], [1e6, 1, 1], 'helper']],
-      // Z: [[new Line(lineGeometry, matHelper.clone()), [0, 0, -1e3], [0, -Math.PI / 2, 0], [1e6, 1, 1], 'helper']],
+      DELTA: [[helperTranslateDeltaLine, undefined, undefined, undefined, 'helper']],
     };
 
     const gizmoRotate = {
@@ -1239,8 +1257,12 @@ class TransformControlsGizmo extends Object3D {
       XYZE: [[new Line(CircleGeometry({ radius: 1, arc: 1 }), matLineGray), undefined, [0, Math.PI / 2, 0]]],
     };
 
+    // Dashed rotate helper long axis
+    const helperRotateAxisLine = new Line(lineGeometry, helperLineDashedMaterial.clone());
+    helperRotateAxisLine.computeLineDistances();
+
     const helperRotate = {
-      AXIS: [[new Line(lineGeometry, matHelper.clone()), [-1e3, 0, 0], undefined, [1e6, 1, 1], 'helper']],
+      AXIS: [[helperRotateAxisLine, [-1e3, 0, 0], undefined, [1e6, 1, 1], 'helper']],
     };
 
     const pickerRotate = {
@@ -1299,10 +1321,18 @@ class TransformControlsGizmo extends Object3D {
       XYZZ: [[new Mesh(new BoxGeometry(0.2, 0.2, 0.2), matInvisible), [0, 0, 1.1]]],
     };
 
+    // Dashed scale helpers for X/Y/Z
+    const helperScaleXLine = new Line(lineGeometry, helperLineDashedMaterial.clone());
+    helperScaleXLine.computeLineDistances();
+    const helperScaleYLine = new Line(lineGeometry, helperLineDashedMaterial.clone());
+    helperScaleYLine.computeLineDistances();
+    const helperScaleZLine = new Line(lineGeometry, helperLineDashedMaterial.clone());
+    helperScaleZLine.computeLineDistances();
+
     const helperScale = {
-      X: [[new Line(lineGeometry, matHelper.clone()), [-1e3, 0, 0], undefined, [1e6, 1, 1], 'helper']],
-      Y: [[new Line(lineGeometry, matHelper.clone()), [0, -1e3, 0], [0, 0, Math.PI / 2], [1e6, 1, 1], 'helper']],
-      Z: [[new Line(lineGeometry, matHelper.clone()), [0, 0, -1e3], [0, -Math.PI / 2, 0], [1e6, 1, 1], 'helper']],
+      X: [[helperScaleXLine, [-1e3, 0, 0], undefined, [1e6, 1, 1], 'helper']],
+      Y: [[helperScaleYLine, [0, -1e3, 0], [0, 0, Math.PI / 2], [1e6, 1, 1], 'helper']],
+      Z: [[helperScaleZLine, [0, 0, -1e3], [0, -Math.PI / 2, 0], [1e6, 1, 1], 'helper']],
     };
 
     // Creates an Object3D with gizmos described in custom hierarchy definition.
@@ -1346,6 +1376,11 @@ class TransformControlsGizmo extends Object3D {
           const temporaryGeometry = object.geometry.clone();
           temporaryGeometry.applyMatrix4(object.matrix);
           object.geometry = temporaryGeometry;
+          if (object instanceof Line) {
+            // Ensure dashed materials render correctly after baking transforms
+            object.computeLineDistances();
+          }
+
           object.renderOrder = Infinity;
 
           object.position.set(0, 0, 0);
@@ -1477,6 +1512,15 @@ class TransformControlsGizmo extends Object3D {
               }
             }
 
+            // Keep dash size constant for the long rotation helper regardless of camera-based gizmo scaling
+            if (handle.visible) {
+              const dashedMaterial = (handle as Line).material as LineDashedMaterial;
+              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ensure existence
+              if (dashedMaterial && typeof dashedMaterial.scale === 'number') {
+                dashedMaterial.scale = handle.scale.x;
+              }
+            }
+
             if (this.axis === 'XYZE') {
               this.tempQuaternion.setFromEuler(this.tempEuler.set(0, Math.PI / 2, 0));
               this.alignVector.copy(this.rotationAxis);
@@ -1518,6 +1562,17 @@ class TransformControlsGizmo extends Object3D {
               .multiplyScalar(-1);
             this.tempVector.applyQuaternion(this.worldQuaternionStart.clone().invert());
             handle.scale.copy(this.tempVector);
+            // Keep dash size constant in world units: adjust material scale by geometric stretch
+            // Base line geometry for translate helper is from (0,0,0) to (1,1,1), whose length is sqrt(3)
+            const baseLength = Math.sqrt(3);
+            const worldLength = this.tempVector.length();
+            const scaleFactor = worldLength / baseLength || 1;
+            const dashedMaterial = (handle as Line).material as LineDashedMaterial;
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ensure the cast worked
+            if (dashedMaterial && typeof dashedMaterial.scale === 'number') {
+              dashedMaterial.scale = scaleFactor;
+            }
+
             handle.visible = this.dragging;
 
             break;

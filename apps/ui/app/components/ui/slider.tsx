@@ -24,6 +24,7 @@ const sliderVariants = cva(
           // but non-clickable when the slider is disabled.
           '[&_[data-slot=slider-track]]:cursor-pointer',
           '[&_[data-slot=slider-track]]:data-[disabled]:cursor-not-allowed',
+          '[&_[data-slot=slider-thumb]]:data-[disabled]:cursor-not-allowed',
 
           // Default styles
           '[&_[data-slot=slider-track]]:h-4.5',

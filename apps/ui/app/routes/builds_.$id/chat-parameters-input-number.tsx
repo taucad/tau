@@ -57,6 +57,7 @@ export function ChatParametersInputNumber({
       className={cn(
         'group/input relative flex flex-row items-center rounded-md',
         'focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
+        'has-disabled:cursor-not-allowed',
       )}
     >
       {isCount ? (

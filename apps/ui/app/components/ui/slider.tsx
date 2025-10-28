@@ -20,8 +20,10 @@ const sliderVariants = cva(
           '[&:focus-within_[data-slot=slider-track]]:ring-ring/50',
           '[&:focus-within_[data-slot=slider-track]]:ring-3',
 
-          // Make the slider track appear clickable
+          // Make the slider track appear clickable,
+          // but non-clickable when the slider is disabled.
           '[&_[data-slot=slider-track]]:cursor-pointer',
+          '[&_[data-slot=slider-track]]:data-[disabled]:cursor-not-allowed',
 
           // Default styles
           '[&_[data-slot=slider-track]]:h-4.5',

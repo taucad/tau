@@ -218,6 +218,11 @@ export function SectionViewControls({
   // Track the latest rotation locally to project translation along the rotated plane normal
   const rotationRef = useRef<THREE.Euler>(new THREE.Euler(0, 0, 0));
   const matcapTexture = useMemo(() => matcapMaterial(), []);
+  // Track whether the user is actively dragging translate/rotate so we don't override the position mid-drag
+  const isTranslatingRef = useRef<boolean>(false);
+  const isRotatingRef = useRef<boolean>(false);
+  // World-space pivot point to keep the plane anchored during rotation
+  const pivotPointRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
   // Find the selected plane configuration
   const selectedPlane = availablePlanes.find((plane) => plane.id === selectedPlaneId);
@@ -226,17 +231,26 @@ export function SectionViewControls({
   const [nx, ny, nz] = selectedPlane?.normal ?? [0, 0, 1];
   const normal = new THREE.Vector3(nx, ny, nz).multiplyScalar(direction);
 
-  // Update transform controls position based on translation along the ROTATED normal
-  useFrame(() => {
-    if (transformControlsRef.current && selectedPlane) {
-      const [x, y, z] = selectedPlane.normal;
-      const baseNormal = new THREE.Vector3(x, y, z).multiplyScalar(direction);
-      const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
-      const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
-      const position = rotatedNormal.multiplyScalar(translation);
-      transformControlsRef.current.position.copy(position);
+  // Keep the gizmo positioned when translation/plane/direction change, but
+  // DO NOT change position while rotating. This ensures rotation happens
+  // around the translated pivot instead of the world origin.
+  React.useEffect(() => {
+    const { current } = transformControlsRef;
+    if (!current || !selectedPlane) {
+      return;
     }
-  });
+
+    if (isRotatingRef.current || isTranslatingRef.current) {
+      return;
+    }
+
+    const [x, y, z] = selectedPlane.normal;
+    const baseNormal = new THREE.Vector3(x, y, z).multiplyScalar(direction);
+    const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
+    const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
+    const position = rotatedNormal.multiplyScalar(translation);
+    current.position.copy(position);
+  }, [selectedPlaneId, selectedPlane, translation, direction]);
 
   if (!isActive) {
     return undefined;
@@ -295,6 +309,10 @@ export function SectionViewControls({
         showY={Math.abs(normal.y) > 0.5}
         showZ={Math.abs(normal.z) > 0.5}
         onChange={() => {
+          if (!isTranslatingRef.current) {
+            return;
+          }
+
           const currentObject = transformControlsRef.current;
           if (currentObject) {
             // Project the position onto the ROTATED normal axis
@@ -304,6 +322,12 @@ export function SectionViewControls({
             const projectedDistance = position.dot(rotatedNormal);
             onSetTranslation(projectedDistance);
           }
+        }}
+        onMouseDown={() => {
+          isTranslatingRef.current = true;
+        }}
+        onMouseUp={() => {
+          isTranslatingRef.current = false;
         }}
       />
       <TransformControls
@@ -316,13 +340,35 @@ export function SectionViewControls({
         showY={Math.abs(normal.x) > 0.5 || Math.abs(normal.z) > 0.5}
         showZ={Math.abs(normal.x) > 0.5 || Math.abs(normal.y) > 0.5}
         onChange={() => {
+          if (!isRotatingRef.current) {
+            return;
+          }
+
           const currentObject = transformControlsRef.current;
           if (currentObject) {
             // Extract the rotation from the object
             const rotation = currentObject.rotation.clone();
             rotationRef.current.copy(rotation);
             onSetRotation(rotation);
+
+            // Recompute translation so the plane rotates about the translated pivot
+            const [bx, by, bz] = selectedPlane.normal;
+            const baseNormal = new THREE.Vector3(bx, by, bz).multiplyScalar(direction);
+            const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
+            const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
+            const newTranslation = pivotPointRef.current.dot(rotatedNormal);
+            onSetTranslation(newTranslation);
           }
+        }}
+        onMouseDown={() => {
+          isRotatingRef.current = true;
+          if (transformControlsRef.current) {
+            // Capture current gizmo world position as the rotation pivot
+            pivotPointRef.current.copy(transformControlsRef.current.position);
+          }
+        }}
+        onMouseUp={() => {
+          isRotatingRef.current = false;
         }}
       />
     </group>

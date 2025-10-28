@@ -1,7 +1,7 @@
 import { Editor, useMonaco } from '@monaco-editor/react';
 import type { EditorProps } from '@monaco-editor/react';
 import { Theme, useTheme } from 'remix-themes';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { shikiToMonaco } from '@shikijs/monaco';
 import type { CompletionRegistration, Monaco, StandaloneCodeEditor } from 'monacopilot';
 import { cn } from '#utils/ui.utils.js';
@@ -15,18 +15,74 @@ type CodeEditorProperties = EditorProps & {
 
 await configureMonaco();
 
+/**
+ * Compute the minimum number of characters to display the line numbers.
+ * This is used to ensure that the line numbers are always visible and do not shift when the line count changes.
+ * @param lineCount - The number of lines in the editor.
+ * @returns The minimum number of characters to display the line numbers.
+ *
+ * @example
+ * computeMinCharsFromLineCount(100) // 3
+ */
+function computeMinCharsFromLineCount(lineCount: number): number {
+  const safeLineCount = Math.max(1, Math.floor(lineCount));
+  const digitCount = Math.floor(Math.log10(safeLineCount)) + 1;
+  return Math.max(3, digitCount + 1);
+}
+
 export function CodeEditor({ className, ...rest }: CodeEditorProperties): React.JSX.Element {
   const [theme] = useTheme();
   const completionRef = useRef<CompletionRegistration | undefined>(null);
   const isMobile = useIsMobile();
+  const editorRef = useRef<StandaloneCodeEditor | undefined>(undefined);
+  const editorDisposablesRef = useRef<Array<{ dispose: () => void }>>([]);
+
+  const initialText =
+    typeof rest.value === 'string' ? rest.value : typeof rest.defaultValue === 'string' ? rest.defaultValue : '';
+  const initialLineCount = initialText.split(/\r\n|\r|\n/).length;
+  const [lineNumbersMinChars, setLineNumbersMinChars] = useState<number>(() =>
+    computeMinCharsFromLineCount(initialLineCount),
+  );
 
   const handleMount = useCallback((editor: StandaloneCodeEditor, monaco: Monaco) => {
     completionRef.current = registerCompletions(editor, monaco);
+    editorRef.current = editor;
+
+    const updateFromEditor = (): void => {
+      const model = editor.getModel();
+      if (!model) {
+        return;
+      }
+
+      const lines = model.getLineCount();
+      setLineNumbersMinChars(computeMinCharsFromLineCount(lines));
+    };
+
+    updateFromEditor();
+
+    const disposables = [
+      editor.onDidChangeModelContent(() => {
+        updateFromEditor();
+      }),
+      editor.onDidChangeModel(() => {
+        updateFromEditor();
+      }),
+    ];
+    editorDisposablesRef.current = [...editorDisposablesRef.current, ...disposables];
   }, []);
 
   useEffect(() => {
     return () => {
       completionRef.current?.deregister();
+      for (const disposable of editorDisposablesRef.current) {
+        try {
+          disposable.dispose();
+        } catch {
+          // ignore
+        }
+      }
+
+      editorDisposablesRef.current = [];
     };
   }, []);
 
@@ -37,6 +93,14 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): React.
       shikiToMonaco(highlighter, monaco);
     }
   }, [monaco]);
+
+  useEffect(() => {
+    const text = typeof rest.defaultValue === 'string' ? rest.defaultValue : undefined;
+    if (typeof text === 'string') {
+      const lines = text.split(/\r\n|\r|\n/).length;
+      setLineNumbersMinChars(computeMinCharsFromLineCount(lines));
+    }
+  }, [rest.value, rest.defaultValue]);
 
   return (
     <Editor
@@ -70,7 +134,7 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): React.
         minimap: { enabled: false },
         // Explicitly configure line numbers
         lineNumbers: 'on',
-        lineNumbersMinChars: isMobile ? 3 : 5,
+        lineNumbersMinChars,
         renderLineHighlight: 'line',
         renderLineHighlightOnlyWhenFocus: false,
         // Disable horizontal scroll beyond last line

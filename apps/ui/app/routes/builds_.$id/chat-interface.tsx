@@ -320,8 +320,8 @@ export const ChatInterface = memo(function (): React.JSX.Element {
 
           {/* Bottom-left Content */}
           <div className="pointer-events-auto absolute right-8 bottom-0 left-0 flex w-fit shrink-0 flex-col gap-2">
-            <ChatStackTrace />
             <ChatInterfaceGraphics />
+            <ChatStackTrace />
             <ChatViewerControls />
           </div>
         </ResizablePanel>

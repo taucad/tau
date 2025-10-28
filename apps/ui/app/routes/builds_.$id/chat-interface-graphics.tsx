@@ -13,7 +13,7 @@ export function ChatInterfaceGraphics(): React.ReactNode {
   return (
     <div className="pointer-events-auto flex h-1/2 w-80 flex-col gap-2 rounded-md border bg-sidebar p-2">
       <div className="flex items-center justify-between px-1">
-        <div className="text-xs font-medium text-muted-foreground">Graphics</div>
+        <div className="text-sm font-medium text-muted-foreground">Graphics</div>
         <button
           type="button"
           className="rounded p-1 text-muted-foreground hover:bg-muted"

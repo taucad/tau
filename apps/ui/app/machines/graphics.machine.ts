@@ -217,6 +217,13 @@ function calculateGeometryRadius(geometries: Geometry[]): number {
   return geometries.length > 0 ? 100 : 0;
 }
 
+// Clamp a radian angle to the nearest whole degree and return radians
+function clampRadiansToNearestDegree(radians: number): number {
+  const degrees = (radians * 180) / Math.PI;
+  const rounded = Math.round(degrees);
+  return (rounded * Math.PI) / 180;
+}
+
 /**
  * Graphics Machine
  *
@@ -536,18 +543,10 @@ export const graphicsMachine = setup({
         assertEvent(event, 'setSectionViewActive');
         return event.payload;
       },
-      // Reset selection when deactivating
-      selectedSectionViewId({ event }) {
-        assertEvent(event, 'setSectionViewActive');
-        return event.payload ? undefined : undefined;
-      },
     }),
 
     deactivateSectionView: assign({
       isSectionViewActive: false,
-      selectedSectionViewId: undefined,
-      sectionViewTranslation: 0,
-      sectionViewRotation: [0, 0, 0] as [number, number, number],
     }),
 
     selectSectionView: assign({
@@ -575,9 +574,10 @@ export const graphicsMachine = setup({
     }),
 
     setSectionViewRotation: assign({
-      sectionViewRotation({ event }) {
+      sectionViewRotation({ event }): [number, number, number] {
         assertEvent(event, 'setSectionViewRotation');
-        return event.payload;
+        const [rx, ry, rz] = event.payload;
+        return [clampRadiansToNearestDegree(rx), clampRadiansToNearestDegree(ry), clampRadiansToNearestDegree(rz)];
       },
     }),
 

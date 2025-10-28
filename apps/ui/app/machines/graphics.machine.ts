@@ -39,6 +39,10 @@ export type GraphicsContext = {
     constant: number;
   }>;
   selectedSectionViewId: 'xy' | 'xz' | 'yz' | undefined;
+  /** Display naming for planes */
+  planeName: 'cartesian' | 'face';
+  /** Currently hovered section view selector id (including inverse faces) */
+  hoveredSectionViewId?: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy';
   sectionViewVisualization: {
     stripeColor: string;
     stripeSpacing: number;
@@ -105,6 +109,9 @@ export type GraphicsEvent =
   | { type: 'setSectionViewTranslation'; payload: number }
   | { type: 'setSectionViewRotation'; payload: [number, number, number] }
   | { type: 'toggleSectionViewDirection' }
+  | { type: 'setSectionViewDirection'; payload: 1 | -1 }
+  | { type: 'setPlaneName'; payload: 'cartesian' | 'face' }
+  | { type: 'setHoveredSectionView'; payload: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy' | undefined }
   | {
       type: 'setSectionViewVisualization';
       payload: Partial<GraphicsContext['sectionViewVisualization']>;
@@ -566,6 +573,21 @@ export const graphicsMachine = setup({
       },
     }),
 
+    setSectionViewDirection: assign({
+      sectionViewDirection({ event }) {
+        assertEvent(event, 'setSectionViewDirection');
+        return event.payload;
+      },
+      // Maintain plane position by flipping translation only when direction changes sign
+      sectionViewTranslation({ event, context }) {
+        assertEvent(event, 'setSectionViewDirection');
+        const newDir = event.payload;
+        return newDir === context.sectionViewDirection
+          ? context.sectionViewTranslation
+          : -context.sectionViewTranslation;
+      },
+    }),
+
     setSectionViewTranslation: assign({
       sectionViewTranslation({ event }) {
         assertEvent(event, 'setSectionViewTranslation');
@@ -613,6 +635,20 @@ export const graphicsMachine = setup({
     setClippingMeshEnabled: assign({
       enableClippingMesh({ event }) {
         assertEvent(event, 'setClippingMeshEnabled');
+        return event.payload;
+      },
+    }),
+
+    setPlaneName: assign({
+      planeName({ event }) {
+        assertEvent(event, 'setPlaneName');
+        return event.payload;
+      },
+    }),
+
+    setHoveredSectionView: assign({
+      hoveredSectionViewId({ event }) {
+        assertEvent(event, 'setHoveredSectionView');
         return event.payload;
       },
     }),
@@ -777,6 +813,8 @@ export const graphicsMachine = setup({
       { id: 'yz', normal: [1, 0, 0], constant: 0 },
     ],
     selectedSectionViewId: undefined,
+    planeName: 'face',
+    hoveredSectionViewId: undefined,
     sectionViewVisualization: {
       stripeColor: '#00ff00',
       stripeSpacing: 10,
@@ -854,6 +892,14 @@ export const graphicsMachine = setup({
         },
         setMatcapVisibility: {
           actions: 'setMatcapVisibility',
+        },
+
+        // Plane naming and hover are global in operational state
+        setPlaneName: {
+          actions: 'setPlaneName',
+        },
+        setHoveredSectionView: {
+          actions: 'setHoveredSectionView',
         },
 
         // Controls events
@@ -995,6 +1041,9 @@ export const graphicsMachine = setup({
                 },
                 toggleSectionViewDirection: {
                   actions: 'toggleSectionViewDirection',
+                },
+                setSectionViewDirection: {
+                  actions: 'setSectionViewDirection',
                 },
                 setSectionViewVisualization: {
                   actions: 'setSectionViewVisualization',

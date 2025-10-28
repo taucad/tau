@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { useSelector } from '@xstate/react';
 import { Box, PenLine, Ruler } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
+import { Tabs, TabsList, TabsTrigger } from '#components/ui/tabs.js';
 import { Switch } from '#components/ui/switch.js';
 import { ChatParametersNumber } from '#routes/builds_.$id/chat-parameters-number.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
@@ -20,21 +21,21 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
   const state = useSelector(graphicsActor, (s) => s);
 
   const {
-    availableSectionViews,
     selectedSectionViewId,
     sectionViewTranslation,
     sectionViewRotation,
     sectionViewDirection,
+    planeName,
     enableClippingLines,
     enableClippingMesh,
     geometryRadius,
     sceneRadius,
   } = state.context as unknown as {
-    availableSectionViews: Array<{ id: 'xy' | 'xz' | 'yz' }>;
     selectedSectionViewId: 'xy' | 'xz' | 'yz' | undefined;
     sectionViewTranslation: number;
     sectionViewRotation: [number, number, number];
     sectionViewDirection: 1 | -1;
+    planeName: 'cartesian' | 'face';
     enableClippingLines: boolean;
     enableClippingMesh: boolean;
     geometryRadius: number;
@@ -70,13 +71,46 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
     return { x: false, y: false, z: false } as const;
   }, [selectedSectionViewId]);
 
+  function getUiLabelFor(base: 'xy' | 'xz' | 'yz', dir: 1 | -1): string {
+    if (planeName === 'cartesian') {
+      if (base === 'xy') {
+        return dir === 1 ? 'XY' : 'YX';
+      }
+
+      if (base === 'xz') {
+        return dir === 1 ? 'XZ' : 'ZX';
+      }
+
+      return dir === 1 ? 'YZ' : 'ZY';
+    }
+    // Face naming
+
+    if (base === 'xy') {
+      return dir === 1 ? 'Top' : 'Bottom';
+    }
+
+    if (base === 'xz') {
+      return dir === 1 ? 'Front' : 'Back';
+    }
+
+    return dir === 1 ? 'Right' : 'Left';
+  }
+
+  function getSelectedHeader(): string {
+    if (!selectedSectionViewId) {
+      return '';
+    }
+
+    return getUiLabelFor(selectedSectionViewId, sectionViewDirection);
+  }
+
   return (
     <div className="flex h-full flex-col gap-3">
       {selectedSectionViewId ? (
         <div className="grid gap-3">
           <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
             <div>
-              Plane: <span className="font-medium text-foreground">{selectedSectionViewId.toUpperCase()}</span>
+              Plane: <span className="font-medium text-foreground">{getSelectedHeader()}</span>
             </div>
             <div className="flex items-center gap-2">
               <Button
@@ -215,18 +249,51 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
         <div className="grid gap-2">
           <div className="px-1 text-xs text-muted-foreground">Select a plane</div>
           <div className="grid grid-cols-3 gap-2">
-            {availableSectionViews.map((p) => (
+            {[
+              { id: 'xy' as const, dir: 1 as const },
+              { id: 'xz' as const, dir: 1 as const },
+              { id: 'yz' as const, dir: 1 as const },
+              { id: 'yx' as const, dir: -1 as const },
+              { id: 'zx' as const, dir: -1 as const },
+              { id: 'zy' as const, dir: -1 as const },
+            ].map((item) => (
               <Button
-                key={p.id}
+                key={`${item.id}`}
                 variant="outline"
                 size="xs"
+                onMouseEnter={() => {
+                  graphicsActor.send({ type: 'setHoveredSectionView', payload: item.id });
+                }}
+                onMouseLeave={() => {
+                  graphicsActor.send({ type: 'setHoveredSectionView', payload: undefined });
+                }}
                 onClick={() => {
-                  graphicsActor.send({ type: 'selectSectionView', payload: p.id });
+                  const base =
+                    item.id === 'xy' || item.id === 'yx' ? 'xy' : item.id === 'xz' || item.id === 'zx' ? 'xz' : 'yz';
+                  graphicsActor.send({ type: 'selectSectionView', payload: base });
+                  graphicsActor.send({ type: 'setSectionViewDirection', payload: item.dir });
                 }}
               >
-                {p.id.toUpperCase()}
+                {getUiLabelFor(
+                  item.id === 'xy' || item.id === 'yx' ? 'xy' : item.id === 'xz' || item.id === 'zx' ? 'xz' : 'yz',
+                  item.dir,
+                )}
               </Button>
             ))}
+          </div>
+          <div className="flex items-center justify-between gap-2 px-1">
+            <span className="text-xs text-muted-foreground">Naming</span>
+            <Tabs
+              value={planeName}
+              onValueChange={(v) => {
+                graphicsActor.send({ type: 'setPlaneName', payload: v as 'face' | 'cartesian' });
+              }}
+            >
+              <TabsList className="h-7 border bg-card" activeClassName="bg-secondary/80 border">
+                <TabsTrigger value="face">Face</TabsTrigger>
+                <TabsTrigger value="cartesian">Cartesian</TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
         </div>
       )}

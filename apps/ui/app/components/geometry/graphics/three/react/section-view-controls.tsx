@@ -10,7 +10,7 @@ import { RoundedRectangleGeometry } from '#components/geometry/graphics/three/ge
 import { adjustHexColorBrightness } from '#utils/color.utils.js';
 
 export type PlaneId = 'xy' | 'xz' | 'yz';
-
+export type PlaneSelectorId = 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy';
 // Calculate rotation for plane selector based on plane orientation
 // - XY plane: normal = [0, 0, 1], no rotation needed (default orientation)
 // - XZ plane: normal = [0, 1, 0], rotate -90° around X axis
@@ -31,26 +31,52 @@ function getPlaneRotation(planeId: PlaneId): [number, number, number] {
   return [Math.PI / 2, Math.PI / 2, 0];
 }
 
-function getPlaneName(planeId: PlaneId): [string, string] {
-  if (planeId === 'xy') {
-    return ['Top', 'Bottom'];
+function getBaseFromSelector(id: PlaneSelectorId): PlaneId {
+  if (id === 'xy' || id === 'yx') {
+    return 'xy';
   }
 
-  if (planeId === 'xz') {
-    return ['Front', 'Back'];
+  if (id === 'xz' || id === 'zx') {
+    return 'xz';
   }
 
-  return ['Right', 'Left'];
+  return 'yz';
+}
+
+function getLabelsFor(id: PlaneSelectorId, naming: 'cartesian' | 'face'): [string, string] {
+  if (naming === 'cartesian') {
+    const label = id.toUpperCase();
+    return [label, label];
+  }
+
+  // Face naming
+  const base = getBaseFromSelector(id);
+  if (base === 'xy') {
+    const isInverse = id === 'yx';
+    return isInverse ? ['Bottom', 'Top'] : ['Top', 'Bottom'];
+  }
+
+  if (base === 'xz') {
+    const isInverse = id === 'zx';
+    return isInverse ? ['Back', 'Front'] : ['Front', 'Back'];
+  }
+
+  // Base === 'yz'
+  const isInverse = id === 'zy';
+  return isInverse ? ['Left', 'Right'] : ['Right', 'Left'];
 }
 
 type PlaneSelectorProperties = {
-  readonly planeId: PlaneId;
+  readonly planeId: PlaneSelectorId;
   readonly position: [number, number, number];
   readonly color: string;
-  readonly onClick: (planeId: PlaneId) => void;
+  readonly onClick: (planeId: PlaneSelectorId) => void;
+  readonly onHover: (planeId: PlaneSelectorId | undefined) => void;
   readonly matcapTexture: THREE.Texture;
   readonly size: number;
   readonly offset: number;
+  readonly naming: 'cartesian' | 'face';
+  readonly isExternallyHovered?: boolean;
 };
 
 function PlaneSelector({
@@ -58,9 +84,12 @@ function PlaneSelector({
   position,
   color,
   onClick,
+  onHover,
   matcapTexture,
   size,
   offset,
+  naming,
+  isExternallyHovered,
 }: PlaneSelectorProperties): React.JSX.Element {
   const { gl, camera, size: threeSize, viewport } = useThree();
   const [isHovered, setIsHovered] = React.useState(false);
@@ -112,28 +141,25 @@ function PlaneSelector({
     event.stopPropagation();
     setIsHovered(true);
     gl.domElement.style.cursor = 'pointer';
+    onHover(planeId);
   };
 
   const handlePointerOut = (event: ThreeEvent<PointerEvent>): void => {
     event.stopPropagation();
     setIsHovered(false);
     gl.domElement.style.cursor = 'auto';
+    onHover(undefined);
   };
 
   const textDepth = 0.01;
   const labelDepth = 0.05;
   const labelPosition = (labelDepth + textDepth) / 2;
-  const [forwardPlaneName, backwardPlaneName] = getPlaneName(planeId);
+  const [forwardPlaneName] = getLabelsFor(planeId, naming);
 
   const frontFontGeometry = useMemo(
     // eslint-disable-next-line new-cap -- Three.js naming convention
     () => FontGeometry({ text: forwardPlaneName, depth: textDepth, size: 0.2 }),
     [forwardPlaneName],
-  );
-  const backwardFontGeometry = useMemo(
-    // eslint-disable-next-line new-cap -- Three.js naming convention
-    () => FontGeometry({ text: backwardPlaneName, depth: textDepth, size: 0.2 }),
-    [backwardPlaneName],
   );
   const roundedRectangleGeometry = useMemo(
     // eslint-disable-next-line new-cap -- Three.js naming convention
@@ -143,8 +169,9 @@ function PlaneSelector({
   const darkenedColor = useMemo(() => adjustHexColorBrightness(color, -0.5), [color]);
   const slightlyDarkenedColor = useMemo(() => adjustHexColorBrightness(color, -0.3), [color]);
 
-  const rotation = getPlaneRotation(planeId);
-  const actualColor = isHovered ? darkenedColor : slightlyDarkenedColor;
+  const rotation = getPlaneRotation(getBaseFromSelector(planeId));
+  const displayedHover = isHovered || Boolean(isExternallyHovered);
+  const actualColor = displayedHover ? darkenedColor : slightlyDarkenedColor;
 
   return (
     <group ref={groupRef} renderOrder={Infinity} position={position} rotation={rotation}>
@@ -172,18 +199,6 @@ function PlaneSelector({
           depthWrite={false}
         />
       </mesh>
-      <mesh position={[0, 0, -labelPosition]} rotation={[0, Math.PI, 0]}>
-        <primitive object={backwardFontGeometry} />
-        <meshMatcapMaterial
-          transparent
-          matcap={matcapTexture}
-          color="black"
-          opacity={1}
-          side={THREE.FrontSide}
-          depthTest={false}
-          depthWrite={false}
-        />
-      </mesh>
     </group>
   );
 }
@@ -197,7 +212,10 @@ type SectionViewControlsProperties = {
   readonly translation: number;
   readonly direction: 1 | -1;
   readonly rotation: [number, number, number];
-  readonly onSelectPlane: (planeId: PlaneId) => void;
+  readonly planeName: 'cartesian' | 'face';
+  readonly hoveredSectionViewId: PlaneSelectorId | undefined;
+  readonly onSelectPlane: (planeId: PlaneSelectorId) => void;
+  readonly onHover: (planeId: PlaneSelectorId | undefined) => void;
   readonly onToggleDirection: () => void;
   readonly onSetTranslation: (value: number) => void;
   readonly onSetRotation: (rotation: THREE.Euler) => void;
@@ -210,9 +228,12 @@ export function SectionViewControls({
   translation,
   direction,
   rotation,
+  planeName,
+  hoveredSectionViewId,
   onSelectPlane,
   // @ts-expect-error -- USE THIS
   onToggleDirection,
+  onHover,
   onSetTranslation,
   onSetRotation,
 }: SectionViewControlsProperties): React.JSX.Element | undefined {
@@ -281,36 +302,81 @@ export function SectionViewControls({
     return undefined;
   }
 
-  // If no plane is selected, show the 3 plane selectors
+  // If no plane is selected, show the 6 plane selectors (3 base + 3 inverse faces)
   if (!selectedPlane) {
     return (
       <group>
         <PlaneSelector
           matcapTexture={matcapTexture}
           planeId="xy"
-          position={[20, -20, 0]}
+          position={[0, 0, 1]}
           color="#3b82f6"
           size={60}
           offset={60}
+          naming={planeName}
+          isExternallyHovered={hoveredSectionViewId === 'xy'}
           onClick={onSelectPlane}
+          onHover={onHover}
+        />
+        <PlaneSelector
+          matcapTexture={matcapTexture}
+          planeId="yx"
+          position={[0, 0, -1]}
+          color="#3b82f6"
+          size={60}
+          offset={60}
+          naming={planeName}
+          isExternallyHovered={hoveredSectionViewId === 'yx'}
+          onClick={onSelectPlane}
+          onHover={onHover}
         />
         <PlaneSelector
           matcapTexture={matcapTexture}
           planeId="xz"
-          position={[20, 0, 20]}
+          position={[0, 1, 0]}
           color="#22c55e"
           size={60}
           offset={60}
+          naming={planeName}
+          isExternallyHovered={hoveredSectionViewId === 'xz'}
           onClick={onSelectPlane}
+          onHover={onHover}
+        />
+        <PlaneSelector
+          matcapTexture={matcapTexture}
+          planeId="zx"
+          position={[0, -1, 0]}
+          color="#22c55e"
+          size={60}
+          offset={60}
+          naming={planeName}
+          isExternallyHovered={hoveredSectionViewId === 'zx'}
+          onClick={onSelectPlane}
+          onHover={onHover}
         />
         <PlaneSelector
           matcapTexture={matcapTexture}
           planeId="yz"
-          position={[0, -20, 20]}
+          position={[1, 0, 0]}
           color="#ef4444"
           size={60}
           offset={60}
+          naming={planeName}
+          isExternallyHovered={hoveredSectionViewId === 'yz'}
           onClick={onSelectPlane}
+          onHover={onHover}
+        />
+        <PlaneSelector
+          matcapTexture={matcapTexture}
+          planeId="zy"
+          position={[-1, 0, 0]}
+          color="#ef4444"
+          size={60}
+          offset={60}
+          naming={planeName}
+          isExternallyHovered={hoveredSectionViewId === 'zy'}
+          onClick={onSelectPlane}
+          onHover={onHover}
         />
       </group>
     );

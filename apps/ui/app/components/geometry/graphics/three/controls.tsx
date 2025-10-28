@@ -43,10 +43,27 @@ export const Controls = React.memo(function ({
   const rotation = useSelector(graphicsActor, (state) => state.context.sectionViewRotation);
   const direction = useSelector(graphicsActor, (state) => state.context.sectionViewDirection);
   const availablePlanes = useSelector(graphicsActor, (state) => state.context.availableSectionViews);
+  const planeName = useSelector(graphicsActor, (state) => state.context.planeName);
+  const hoveredSectionViewId = useSelector(graphicsActor, (state) => state.context.hoveredSectionViewId);
 
   // Handlers to send events to xstate
-  const handleSelectPlane = (planeId: 'xy' | 'xz' | 'yz'): void => {
-    graphicsActor.send({ type: 'selectSectionView', payload: planeId });
+  const handleSelectPlane = (planeId: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy'): void => {
+    const id = planeId.toLowerCase() as 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy';
+    const isInverse = id === 'yx' || id === 'zx' || id === 'zy';
+    const base: 'xy' | 'xz' | 'yz' = ((): 'xy' | 'xz' | 'yz' => {
+      if (id === 'xy' || id === 'yx') {
+        return 'xy';
+      }
+
+      if (id === 'xz' || id === 'zx') {
+        return 'xz';
+      }
+
+      return 'yz';
+    })();
+    const newDir: 1 | -1 = isInverse ? -1 : 1;
+    graphicsActor.send({ type: 'selectSectionView', payload: base });
+    graphicsActor.send({ type: 'setSectionViewDirection', payload: newDir });
   };
 
   const handleToggleDirection = (): void => {
@@ -62,6 +79,10 @@ export const Controls = React.memo(function ({
       type: 'setSectionViewRotation',
       payload: [eulerRotation.x, eulerRotation.y, eulerRotation.z],
     });
+  };
+
+  const handleHover = (planeId: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy' | undefined): void => {
+    graphicsActor.send({ type: 'setHoveredSectionView', payload: planeId });
   };
 
   return (
@@ -81,7 +102,10 @@ export const Controls = React.memo(function ({
         translation={translation}
         rotation={rotation}
         direction={direction}
+        planeName={planeName}
+        hoveredSectionViewId={hoveredSectionViewId}
         onSelectPlane={handleSelectPlane}
+        onHover={handleHover}
         onToggleDirection={handleToggleDirection}
         onSetTranslation={handleSetTranslation}
         onSetRotation={handleSetRotation}

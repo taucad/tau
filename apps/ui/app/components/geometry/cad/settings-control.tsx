@@ -122,20 +122,16 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="overlay"
-              size="icon"
-              className={cn('text-muted-foreground hover:text-foreground', className)}
-            >
+            <Button variant="overlay" size="icon" className={cn(className)}>
               <Settings />
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent side="left">Viewer settings</TooltipContent>
+        <TooltipContent side="top">Viewer settings</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
-        align="start"
-        side="left"
+        align="end"
+        side="right"
         className="w-72"
         onCloseAutoFocus={(event) => {
           event.preventDefault();

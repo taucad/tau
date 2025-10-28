@@ -91,19 +91,15 @@ export const SectionView = React.forwardRef<{ update: () => void }, CutterProper
 
       if (rootGroup) {
         rootGroup.traverse((child: THREE.Object3D) => {
-          // Handle LineSegments - apply clipping but no caps
+          // Handle LineSegments - apply/clear clipping but no caps
           if (child instanceof THREE.LineSegments) {
-            if (!enableLines) {
-              return;
-            }
-
             if (child.material) {
               if (Array.isArray(child.material)) {
                 for (const mat of child.material) {
-                  mat.clippingPlanes = [plane];
+                  mat.clippingPlanes = enableLines ? [plane] : [];
                 }
               } else {
-                child.material.clippingPlanes = [plane];
+                child.material.clippingPlanes = enableLines ? [plane] : [];
               }
             }
 

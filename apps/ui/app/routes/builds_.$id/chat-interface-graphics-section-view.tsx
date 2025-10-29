@@ -138,7 +138,9 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
           <div className="grid gap-2">
             <div className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
               <span>Translation</span>
-              <InfoTooltip>Offset along the base plane axis. Stays constant while rotating.</InfoTooltip>
+              <InfoTooltip className="size-3">
+                Offset along the base plane axis. Stays constant while rotating.
+              </InfoTooltip>
             </div>
             <div className="grid grid-cols-[20px_1fr] items-center gap-2">
               <div className="px-1 text-xs text-muted-foreground">

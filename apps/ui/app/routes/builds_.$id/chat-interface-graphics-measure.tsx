@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
 import type { StateFrom } from 'xstate';
-import { Pin, PinOff, Trash2 } from 'lucide-react';
+import { Pin, PinOff, Trash } from 'lucide-react';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { Button } from '#components/ui/button.js';
+import { cn } from '#utils/ui.utils.js';
 
 type GraphicsState = StateFrom<typeof graphicsMachine>;
 
@@ -50,7 +51,7 @@ export function ChatInterfaceGraphicsMeasure({ state }: Properties): React.JSX.E
           return (
             <div
               key={m.id}
-              className={`group flex items-center gap-2 rounded-md border bg-card px-2 py-1.5 ${
+              className={`group flex items-center gap-2 rounded-md border bg-card px-1 py-1 ${
                 isExternallyHovered ? 'bg-accent/20 ring-1 ring-primary/30' : ''
               }`}
               onMouseEnter={() => {
@@ -62,8 +63,8 @@ export function ChatInterfaceGraphicsMeasure({ state }: Properties): React.JSX.E
             >
               <Button
                 variant="ghost"
-                size="xs"
-                className={m.isPinned ? 'text-yellow-600' : 'text-muted-foreground'}
+                size="icon"
+                className={cn('size-7', m.isPinned ? 'text-primary' : 'text-muted-foreground')}
                 title={m.isPinned ? 'Unpin' : 'Pin'}
                 onClick={() => {
                   graphicsActor.send({ type: 'toggleMeasurementPinned', id: m.id });
@@ -76,14 +77,15 @@ export function ChatInterfaceGraphicsMeasure({ state }: Properties): React.JSX.E
 
               <div className="flex items-center gap-1">
                 <Button
-                  variant="outline"
-                  size="xs"
+                  variant="ghost"
+                  size="icon"
                   title="Delete"
+                  className="size-7 text-muted-foreground hover:text-destructive"
                   onClick={() => {
                     graphicsActor.send({ type: 'clearMeasurement', payload: m.id });
                   }}
                 >
-                  <Trash2 className="size-4" />
+                  <Trash className="size-4" />
                 </Button>
               </div>
             </div>

@@ -90,7 +90,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
     }
 
     if (base === 'xz') {
-      return dir === 1 ? 'Front' : 'Back';
+      return dir === 1 ? 'Back' : 'Front';
     }
 
     return dir === 1 ? 'Right' : 'Left';
@@ -253,10 +253,10 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
           <div className="grid grid-cols-3 gap-2">
             {[
               { id: 'xy' as const, dir: 1 as const },
-              { id: 'xz' as const, dir: 1 as const },
+              { id: 'zx' as const, dir: -1 as const },
               { id: 'yz' as const, dir: 1 as const },
               { id: 'yx' as const, dir: -1 as const },
-              { id: 'zx' as const, dir: -1 as const },
+              { id: 'xz' as const, dir: 1 as const },
               { id: 'zy' as const, dir: -1 as const },
             ].map((item) => (
               <Button

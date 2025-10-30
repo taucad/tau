@@ -23,7 +23,7 @@ function getPlaneRotation(planeId: PlaneId): [number, number, number] {
 
   if (planeId === 'xz') {
     // Rotate to face +Y
-    return [-Math.PI / 2, Math.PI, Math.PI];
+    return [-Math.PI / 2, 0, Math.PI];
   }
 
   // PlaneId === 'yz'
@@ -58,7 +58,7 @@ function getLabelsFor(id: PlaneSelectorId, naming: 'cartesian' | 'face'): [strin
 
   if (base === 'xz') {
     const isInverse = id === 'zx';
-    return isInverse ? ['Back', 'Front'] : ['Front', 'Back'];
+    return isInverse ? ['Front', 'Back'] : ['Back', 'Front'];
   }
 
   // Base === 'yz'
@@ -77,6 +77,9 @@ type PlaneSelectorProperties = {
   readonly offset: number;
   readonly naming: 'cartesian' | 'face';
   readonly isExternallyHovered?: boolean;
+  readonly textDepth: number;
+  readonly labelDepth: number;
+  readonly isInverse?: boolean;
 };
 
 function PlaneSelector({
@@ -90,6 +93,9 @@ function PlaneSelector({
   offset,
   naming,
   isExternallyHovered,
+  textDepth,
+  labelDepth,
+  isInverse = false,
 }: PlaneSelectorProperties): React.JSX.Element {
   const { gl, camera, size: threeSize, viewport } = useThree();
   const [isHovered, setIsHovered] = React.useState(false);
@@ -127,8 +133,16 @@ function PlaneSelector({
     currentGroup.scale.set(scale, scale, scale);
 
     if (baseDirection.lengthSq() > 0) {
-      baseDirection.normalize().multiplyScalar(desiredWorldOffset);
-      currentGroup.position.copy(baseDirection);
+      const normalizedDir = baseDirection.clone().normalize();
+      const baseOffset = normalizedDir.clone().multiplyScalar(desiredWorldOffset);
+
+      // For inverse faces, add an additional offset to account for label depth
+      // so they're truly back-to-back without overlapping
+      const depthOffset = isInverse
+        ? normalizedDir.clone().multiplyScalar(-labelDepth * scale)
+        : new THREE.Vector3(0, 0, 0);
+
+      currentGroup.position.copy(baseOffset.add(depthOffset));
     }
   });
 
@@ -151,25 +165,41 @@ function PlaneSelector({
     onHover(undefined);
   };
 
-  const textDepth = 0.01;
-  const labelDepth = 0.05;
   const labelPosition = (labelDepth + textDepth) / 2;
   const [forwardPlaneName] = getLabelsFor(planeId, naming);
 
   const frontFontGeometry = useMemo(
     // eslint-disable-next-line new-cap -- Three.js naming convention
     () => FontGeometry({ text: forwardPlaneName, depth: textDepth, size: 0.2 }),
-    [forwardPlaneName],
+    [forwardPlaneName, textDepth],
   );
   const roundedRectangleGeometry = useMemo(
     // eslint-disable-next-line new-cap -- Three.js naming convention
     () => RoundedRectangleGeometry({ width: 1, height: 1, radius: 0.1, smoothness: 16, depth: labelDepth }),
-    [],
+    [labelDepth],
   );
   const darkenedColor = useMemo(() => adjustHexColorBrightness(color, -0.5), [color]);
   const slightlyDarkenedColor = useMemo(() => adjustHexColorBrightness(color, -0.3), [color]);
 
-  const rotation = getPlaneRotation(getBaseFromSelector(planeId));
+  const baseRotation = getPlaneRotation(getBaseFromSelector(planeId));
+  // For inverse faces, rotate 180 degrees around the plane's normal axis to face the opposite direction
+  const rotation = isInverse
+    ? baseRotation
+    : ((): [number, number, number] => {
+        const base = getBaseFromSelector(planeId);
+        if (base === 'xy') {
+          // Rotate 180° around Z axis
+          return [baseRotation[0] + Math.PI, baseRotation[1], baseRotation[2]];
+        }
+
+        if (base === 'xz') {
+          // Rotate 180° around Y axis
+          return [baseRotation[0], baseRotation[1] + Math.PI, baseRotation[2]];
+        }
+
+        // Base === 'yz', rotate 180° around X axis
+        return [baseRotation[0], baseRotation[1] + Math.PI, baseRotation[2]];
+      })();
   const displayedHover = isHovered || Boolean(isExternallyHovered);
   const actualColor = displayedHover ? darkenedColor : slightlyDarkenedColor;
 
@@ -237,6 +267,7 @@ export function SectionViewControls({
   onSetTranslation,
   onSetRotation,
 }: SectionViewControlsProperties): React.JSX.Element | undefined {
+  const { camera } = useThree();
   const transformControlsRef = useRef<THREE.Object3D>(undefined);
   // Track the latest rotation locally to project translation along the rotated plane normal
   const rotationRef = useRef<THREE.Euler>(new THREE.Euler(0, 0, 0));
@@ -247,17 +278,36 @@ export function SectionViewControls({
   // World-space pivot point to keep the plane anchored during rotation
   const pivotPointRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
+  // Determine camera-forward vector and score axes by how much they face the camera
+  const cameraForward = React.useMemo(() => {
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    dir.normalize();
+    return dir;
+  }, [camera]);
+
+  const scoredAxes = React.useMemo(() => {
+    const axes: Array<{ idPos: PlaneSelectorId; idNeg: PlaneSelectorId; normal: THREE.Vector3; color: string }> = [
+      { idPos: 'xy', idNeg: 'yx', normal: new THREE.Vector3(0, 0, -1), color: '#3b82f6' },
+      { idPos: 'xz', idNeg: 'zx', normal: new THREE.Vector3(0, -1, 0), color: '#22c55e' },
+      { idPos: 'yz', idNeg: 'zy', normal: new THREE.Vector3(-1, 0, 0), color: '#ef4444' },
+    ];
+
+    return axes;
+  }, [cameraForward]);
+  console.log(cameraForward);
+
   // Find the selected plane configuration
   const selectedPlane = availablePlanes.find((plane) => plane.id === selectedPlaneId);
 
   // Calculate plane properties before any conditional returns
   const [nx, ny, nz] = selectedPlane?.normal ?? [0, 0, 1];
-  const normal = new THREE.Vector3(nx, ny, nz).multiplyScalar(direction);
+  const normal = new THREE.Vector3(nx, ny, nz).multiplyScalar(-direction);
 
   // Keep the gizmo positioned when translation/plane/direction change, but
   // DO NOT change position while rotating. This ensures rotation happens
   // around the translated pivot instead of the world origin.
-  React.useEffect(() => {
+  useFrame(() => {
     const { current } = transformControlsRef;
     if (!current || !selectedPlane) {
       return;
@@ -268,12 +318,12 @@ export function SectionViewControls({
     }
 
     const [x, y, z] = selectedPlane.normal;
-    const baseNormal = new THREE.Vector3(x, y, z).multiplyScalar(direction);
+    const baseNormal = new THREE.Vector3(x, y, z).multiplyScalar(-direction);
     const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
     const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
     const position = rotatedNormal.multiplyScalar(translation);
     current.position.copy(position);
-  }, [selectedPlaneId, selectedPlane, translation, direction, rotation]);
+  });
 
   // Sync external rotation into gizmo when UI changes rotation
   useFrame(() => {
@@ -291,7 +341,7 @@ export function SectionViewControls({
 
     // Recompute position based on new rotation
     const [bx, by, bz] = selectedPlane.normal;
-    const baseNormal = new THREE.Vector3(bx, by, bz).multiplyScalar(direction);
+    const baseNormal = new THREE.Vector3(bx, by, bz).multiplyScalar(-direction);
     const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
     const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
     const position = rotatedNormal.multiplyScalar(translation);
@@ -303,81 +353,50 @@ export function SectionViewControls({
   }
 
   // If no plane is selected, show the 6 plane selectors (3 base + 3 inverse faces)
+  // Constants for depth calculations - extracted to allow precise back-to-back positioning
+  const textDepth = 0.01;
+  const labelDepth = 0.02;
+  const offsetPx = 40;
   if (!selectedPlane) {
     return (
       <group>
-        <PlaneSelector
-          matcapTexture={matcapTexture}
-          planeId="xy"
-          position={[0, 0, 1]}
-          color="#3b82f6"
-          size={60}
-          offset={60}
-          naming={planeName}
-          isExternallyHovered={hoveredSectionViewId === 'xy'}
-          onClick={onSelectPlane}
-          onHover={onHover}
-        />
-        <PlaneSelector
-          matcapTexture={matcapTexture}
-          planeId="yx"
-          position={[0, 0, -1]}
-          color="#3b82f6"
-          size={60}
-          offset={60}
-          naming={planeName}
-          isExternallyHovered={hoveredSectionViewId === 'yx'}
-          onClick={onSelectPlane}
-          onHover={onHover}
-        />
-        <PlaneSelector
-          matcapTexture={matcapTexture}
-          planeId="xz"
-          position={[0, 1, 0]}
-          color="#22c55e"
-          size={60}
-          offset={60}
-          naming={planeName}
-          isExternallyHovered={hoveredSectionViewId === 'xz'}
-          onClick={onSelectPlane}
-          onHover={onHover}
-        />
-        <PlaneSelector
-          matcapTexture={matcapTexture}
-          planeId="zx"
-          position={[0, -1, 0]}
-          color="#22c55e"
-          size={60}
-          offset={60}
-          naming={planeName}
-          isExternallyHovered={hoveredSectionViewId === 'zx'}
-          onClick={onSelectPlane}
-          onHover={onHover}
-        />
-        <PlaneSelector
-          matcapTexture={matcapTexture}
-          planeId="yz"
-          position={[1, 0, 0]}
-          color="#ef4444"
-          size={60}
-          offset={60}
-          naming={planeName}
-          isExternallyHovered={hoveredSectionViewId === 'yz'}
-          onClick={onSelectPlane}
-          onHover={onHover}
-        />
-        <PlaneSelector
-          matcapTexture={matcapTexture}
-          planeId="zy"
-          position={[-1, 0, 0]}
-          color="#ef4444"
-          size={60}
-          offset={60}
-          naming={planeName}
-          isExternallyHovered={hoveredSectionViewId === 'zy'}
-          onClick={onSelectPlane}
-          onHover={onHover}
-        />
+        {scoredAxes.map(({ idPos, idNeg, normal, color }) => {
+          const pos = normal.toArray();
+          return (
+            <group key={idPos}>
+              <PlaneSelector
+                isInverse
+                matcapTexture={matcapTexture}
+                planeId={idPos}
+                position={pos}
+                color={color}
+                size={60}
+                offset={offsetPx}
+                naming={planeName}
+                isExternallyHovered={hoveredSectionViewId === idPos}
+                textDepth={textDepth}
+                labelDepth={labelDepth}
+                onClick={onSelectPlane}
+                onHover={onHover}
+              />
+              <PlaneSelector
+                isInverse={false}
+                matcapTexture={matcapTexture}
+                planeId={idNeg}
+                position={pos}
+                color={color}
+                size={60}
+                offset={offsetPx}
+                naming={planeName}
+                isExternallyHovered={hoveredSectionViewId === idNeg}
+                textDepth={textDepth}
+                labelDepth={labelDepth}
+                onClick={onSelectPlane}
+                onHover={onHover}
+              />
+            </group>
+          );
+        })}
       </group>
     );
   }

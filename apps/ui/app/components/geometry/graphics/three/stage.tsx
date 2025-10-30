@@ -112,7 +112,7 @@ export function Stage({
     }
 
     // Apply direction after rotation
-    normal.multiplyScalar(sectionViewDirection);
+    normal.multiplyScalar(-sectionViewDirection);
 
     const constant = -sectionViewTranslation;
 

@@ -291,13 +291,9 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 graphicsActor.send({ type: 'setPlaneName', payload: v as 'face' | 'cartesian' });
               }}
             >
-              <TabsList enableAnimation className="h-7 [&_[data-slot=tabs-trigger]]:text-xs">
-                <TabsTrigger enableAnimation value="face">
-                  Face
-                </TabsTrigger>
-                <TabsTrigger enableAnimation value="cartesian">
-                  Cartesian
-                </TabsTrigger>
+              <TabsList className="h-7 [&_[data-slot=tabs-trigger]]:text-xs">
+                <TabsTrigger value="face">Face</TabsTrigger>
+                <TabsTrigger value="cartesian">Cartesian</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>

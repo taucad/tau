@@ -71,44 +71,7 @@ function TabsList({
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- radix requires `null` ref
   const localRef = React.useRef<HTMLDivElement | null>(null);
   React.useImperativeHandle(ref, () => localRef.current!);
-
-  const [activeValue, setActiveValue] = React.useState<string | undefined>(undefined);
   const contextValue = React.useContext(TabsValueContext);
-
-  const getActiveValue = React.useCallback(() => {
-    if (!localRef.current) {
-      return;
-    }
-
-    const activeTab = localRef.current.querySelector<HTMLElement>('[data-state="active"]');
-    if (!activeTab) {
-      return;
-    }
-
-    setActiveValue(activeTab.dataset['value'] ?? undefined);
-  }, []);
-
-  React.useEffect(() => {
-    if (!enableAnimation) {
-      return;
-    }
-
-    getActiveValue();
-
-    const observer = new MutationObserver(getActiveValue);
-
-    if (localRef.current) {
-      observer.observe(localRef.current, {
-        attributes: true,
-        childList: true,
-        subtree: true,
-      });
-    }
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [getActiveValue, enableAnimation]);
 
   if (!enableAnimation) {
     return (
@@ -133,7 +96,7 @@ function TabsList({
     <MotionHighlight
       controlledItems
       className={cn('rounded-sm bg-background shadow-sm', activeClassName)}
-      value={contextValue ?? activeValue}
+      value={contextValue}
       transition={transition}
     >
       <TabsPrimitive.List

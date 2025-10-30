@@ -131,7 +131,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                   graphicsActor.send({ type: 'toggleSectionViewDirection' });
                 }}
               >
-                {sectionViewDirection === 1 ? 'Normal' : 'Reverse'}
+                Flip
               </Button>
             </div>
           </div>

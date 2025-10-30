@@ -7,8 +7,44 @@ import { MotionHighlight, MotionHighlightItem } from '#components/animate-ui/eff
 
 type TabsProps = React.ComponentProps<typeof TabsPrimitive.Root>;
 
+// Provide current tabs value to descendants so animations can avoid DOM observers
+const TabsValueContext = React.createContext<string | undefined>(undefined);
+
 function Tabs({ className, ...props }: TabsProps): React.JSX.Element {
-  return <TabsPrimitive.Root data-slot="tabs" className={cn('flex flex-col gap-2', className)} {...props} />;
+  const { value, defaultValue, onValueChange, ...rest } = props as TabsProps & {
+    readonly value?: string;
+    readonly defaultValue?: string;
+    readonly onValueChange?: (value: string) => void;
+  };
+
+  const [currentValue, setCurrentValue] = React.useState<string | undefined>(value ?? defaultValue);
+
+  React.useEffect(() => {
+    if (value !== undefined) {
+      setCurrentValue(value);
+    }
+  }, [value]);
+
+  const handleValueChange = React.useCallback(
+    (newValue: string) => {
+      setCurrentValue(newValue);
+      onValueChange?.(newValue);
+    },
+    [onValueChange],
+  );
+
+  return (
+    <TabsValueContext.Provider value={currentValue}>
+      <TabsPrimitive.Root
+        data-slot="tabs"
+        className={cn('flex flex-col gap-2', className)}
+        value={value}
+        defaultValue={defaultValue}
+        onValueChange={handleValueChange}
+        {...rest}
+      />
+    </TabsValueContext.Provider>
+  );
 }
 
 type TabsListProps = React.ComponentProps<typeof TabsPrimitive.List> & {
@@ -37,6 +73,7 @@ function TabsList({
   React.useImperativeHandle(ref, () => localRef.current!);
 
   const [activeValue, setActiveValue] = React.useState<string | undefined>(undefined);
+  const contextValue = React.useContext(TabsValueContext);
 
   const getActiveValue = React.useCallback(() => {
     if (!localRef.current) {
@@ -96,7 +133,7 @@ function TabsList({
     <MotionHighlight
       controlledItems
       className={cn('rounded-sm bg-background shadow-sm', activeClassName)}
-      value={activeValue}
+      value={contextValue ?? activeValue}
       transition={transition}
     >
       <TabsPrimitive.List

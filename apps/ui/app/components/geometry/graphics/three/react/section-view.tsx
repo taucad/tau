@@ -106,8 +106,18 @@ export const SectionView = React.forwardRef<{ update: () => void }, CutterProper
             return; // Lines don't get caps, so return early
           }
 
-          // Skip meshes if not enabled
+          // Clear clipping planes from meshes if not enabled
           if (child instanceof THREE.Mesh && !enableMesh) {
+            if (child.material) {
+              if (Array.isArray(child.material)) {
+                for (const mat of child.material) {
+                  mat.clippingPlanes = [];
+                }
+              } else {
+                child.material.clippingPlanes = [];
+              }
+            }
+
             return;
           }
 
@@ -216,13 +226,13 @@ export const SectionView = React.forwardRef<{ update: () => void }, CutterProper
 
     // Enable/disable local clipping and stencil based on cutting state
     React.useEffect(() => {
-      const shouldEnable = enableSection && meshList.length > 0;
+      const shouldEnable = enableSection && (meshList.length > 0 || enableLines);
       gl.localClippingEnabled = shouldEnable;
 
       return () => {
         gl.localClippingEnabled = false;
       };
-    }, [gl, enableSection, meshList.length]);
+    }, [gl, enableSection, enableLines, meshList.length]);
 
     // Cleanup materials on unmount
     React.useEffect(() => {

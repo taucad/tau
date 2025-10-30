@@ -1514,12 +1514,42 @@ class TransformControlsGizmo extends Object3D {
               }
             }
 
-            // Keep the helper axis completely static (no camera-based gizmo scaling)
-            handle.scale.set(1, 1, 1);
+            // Dynamically size and center the axis helper near the gizmo so dash density
+            // stays consistent on screen and isn't skewed by extreme world lengths.
+            // Local line geometry runs along +X; we align quaternion above per-axis.
+            const axisWorldDir = new Vector3(1, 0, 0).applyQuaternion(handle.quaternion).normalize();
+            const axisHelperLength = Math.max(factor * 10, 1); // World units, camera-relative
+            const halfLength = axisHelperLength * 0.5;
+
+            // Center around pivot
+            handle.position
+              .copy(this.dragging ? this.worldPositionStart : this.worldPosition)
+              .addScaledVector(axisWorldDir, -halfLength);
+
+            // Stretch the 1-unit line to the desired length
+            handle.scale.set(axisHelperLength, 1, 1);
+
             const dashedMaterial = (handle as Line).material as LineDashedMaterial;
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ensure existence
-            if (dashedMaterial && typeof dashedMaterial.scale === 'number') {
-              dashedMaterial.scale = 1;
+            if (dashedMaterial) {
+              // Compensate for object scale so dashes stay constant in world units,
+              // then scale dash/gap with camera factor so they stay constant on screen.
+              dashedMaterial.scale = axisHelperLength;
+
+              type DashedWithUserData = LineDashedMaterial & {
+                userData: { baseDashSize?: number; baseGapSize?: number };
+              };
+              const dashed = dashedMaterial as DashedWithUserData;
+              dashed.userData.baseDashSize ??= dashed.dashSize;
+              dashed.userData.baseGapSize ??= dashed.gapSize;
+
+              const baseDash = dashed.userData.baseDashSize ?? dashed.dashSize;
+              const baseGap = dashed.userData.baseGapSize ?? dashed.gapSize;
+
+              const dashZoomScale = Math.max(factor / 200, 0.001);
+              dashed.dashSize = baseDash * dashZoomScale;
+              dashed.gapSize = baseGap * dashZoomScale;
+              dashed.needsUpdate = true;
             }
 
             if (this.axis === 'XYZE') {
@@ -1543,12 +1573,48 @@ class TransformControlsGizmo extends Object3D {
             handle.position.copy(this.worldPositionStart);
             handle.visible = this.dragging;
 
+            // Keep start marker a constant on-screen size based on its own distance to the camera
+            let startFactor: number;
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- camera can be ortho or perspective
+            if ((this.camera as OrthographicCamera).isOrthographicCamera) {
+              startFactor =
+                ((this.camera as OrthographicCamera).top - (this.camera as OrthographicCamera).bottom) /
+                (this.camera as OrthographicCamera).zoom;
+            } else {
+              startFactor =
+                handle.position.distanceTo(this.cameraPosition) *
+                Math.min(
+                  (1.9 * Math.tan((Math.PI * (this.camera as PerspectiveCamera).fov) / 360)) / this.camera.zoom,
+                  7,
+                );
+            }
+
+            handle.scale.set(1, 1, 1).multiplyScalar((startFactor * this.size) / 7);
+
             break;
           }
 
           case 'END': {
             handle.position.copy(this.worldPosition);
             handle.visible = this.dragging;
+
+            // Keep end marker a constant on-screen size based on its own distance to the camera
+            let endFactor: number;
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- camera can be ortho or perspective
+            if ((this.camera as OrthographicCamera).isOrthographicCamera) {
+              endFactor =
+                ((this.camera as OrthographicCamera).top - (this.camera as OrthographicCamera).bottom) /
+                (this.camera as OrthographicCamera).zoom;
+            } else {
+              endFactor =
+                handle.position.distanceTo(this.cameraPosition) *
+                Math.min(
+                  (1.9 * Math.tan((Math.PI * (this.camera as PerspectiveCamera).fov) / 360)) / this.camera.zoom,
+                  7,
+                );
+            }
+
+            handle.scale.set(1, 1, 1).multiplyScalar((endFactor * this.size) / 7);
 
             break;
           }
@@ -1572,6 +1638,53 @@ class TransformControlsGizmo extends Object3D {
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ensure the cast worked
             if (dashedMaterial && typeof dashedMaterial.scale === 'number') {
               dashedMaterial.scale = scaleFactor;
+              // Also make the dash/gap appear constant in screen-space like rotation helper,
+              // but anchor the zoom scale at drag start so dash lengths don't change while moving.
+              type DashedWithUserData = LineDashedMaterial & {
+                userData: {
+                  baseDashSize?: number;
+                  baseGapSize?: number;
+                  dashZoomScaleAtStart?: number;
+                };
+              };
+              const dashed = dashedMaterial as DashedWithUserData;
+              dashed.userData.baseDashSize ??= dashed.dashSize;
+              dashed.userData.baseGapSize ??= dashed.gapSize;
+
+              if (dashed.userData.dashZoomScaleAtStart === undefined) {
+                // Compute zoom factor anchored at the drag start position
+                let startFactor: number;
+                // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- camera can be ortho or perspective
+                if ((this.camera as OrthographicCamera).isOrthographicCamera) {
+                  startFactor =
+                    ((this.camera as OrthographicCamera).top - (this.camera as OrthographicCamera).bottom) /
+                    (this.camera as OrthographicCamera).zoom;
+                } else {
+                  startFactor =
+                    this.worldPositionStart.distanceTo(this.cameraPosition) *
+                    Math.min(
+                      (1.9 * Math.tan((Math.PI * (this.camera as PerspectiveCamera).fov) / 360)) / this.camera.zoom,
+                      7,
+                    );
+                }
+
+                dashed.userData.dashZoomScaleAtStart = Math.max(startFactor / 200, 0.001);
+              }
+
+              const baseDash = dashed.userData.baseDashSize ?? dashed.dashSize;
+              const baseGap = dashed.userData.baseGapSize ?? dashed.gapSize;
+              const dashZoom = dashed.userData.dashZoomScaleAtStart ?? 1;
+              dashed.dashSize = baseDash * dashZoom;
+              dashed.gapSize = baseGap * dashZoom;
+              dashed.needsUpdate = true;
+
+              // If dragging has ended, clear the cached zoom scale and restore base sizes
+              if (!this.dragging) {
+                dashed.userData.dashZoomScaleAtStart = undefined;
+                dashed.dashSize = dashed.userData.baseDashSize ?? dashed.dashSize;
+                dashed.gapSize = dashed.userData.baseGapSize ?? dashed.gapSize;
+                dashed.needsUpdate = true;
+              }
             }
 
             handle.visible = this.dragging;
@@ -1605,9 +1718,9 @@ class TransformControlsGizmo extends Object3D {
       if (this.mode === 'translate' || this.mode === 'scale') {
         // Ensure translation arrows face the user by twisting around their axis using the camera orientation
         if (this.mode === 'translate') {
-          const isAxisArrow =
-            (handle.tag?.includes('fwd') ?? handle.tag?.includes('bwd')) &&
-            (handle.name === 'X' || handle.name === 'Y' || handle.name === 'Z');
+          const hasFwd = handle.tag?.includes('fwd') ?? false;
+          const hasBwd = handle.tag?.includes('bwd') ?? false;
+          const isAxisArrow = (hasFwd || hasBwd) && (handle.name === 'X' || handle.name === 'Y' || handle.name === 'Z');
           if (isAxisArrow) {
             // Calculate the camera rotation relative to the handle axis
             const handleAxis = handle.name === 'X' ? this.unitX : handle.name === 'Y' ? this.unitY : this.unitZ;

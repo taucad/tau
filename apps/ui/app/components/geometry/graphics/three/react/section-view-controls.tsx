@@ -267,7 +267,6 @@ export function SectionViewControls({
   onSetTranslation,
   onSetRotation,
 }: SectionViewControlsProperties): React.JSX.Element | undefined {
-  const { camera } = useThree();
   const transformControlsRef = useRef<THREE.Object3D>(undefined);
   // Track the latest rotation locally to project translation along the rotated plane normal
   const rotationRef = useRef<THREE.Euler>(new THREE.Euler(0, 0, 0));
@@ -278,14 +277,6 @@ export function SectionViewControls({
   // World-space pivot point to keep the plane anchored during rotation
   const pivotPointRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
-  // Determine camera-forward vector and score axes by how much they face the camera
-  const cameraForward = React.useMemo(() => {
-    const dir = new THREE.Vector3();
-    camera.getWorldDirection(dir);
-    dir.normalize();
-    return dir;
-  }, [camera]);
-
   const scoredAxes = React.useMemo(() => {
     const axes: Array<{ idPos: PlaneSelectorId; idNeg: PlaneSelectorId; normal: THREE.Vector3; color: string }> = [
       { idPos: 'xy', idNeg: 'yx', normal: new THREE.Vector3(0, 0, -1), color: '#3b82f6' },
@@ -294,8 +285,7 @@ export function SectionViewControls({
     ];
 
     return axes;
-  }, [cameraForward]);
-  console.log(cameraForward);
+  }, []);
 
   // Find the selected plane configuration
   const selectedPlane = availablePlanes.find((plane) => plane.id === selectedPlaneId);

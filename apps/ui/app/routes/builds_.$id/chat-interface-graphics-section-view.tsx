@@ -284,16 +284,20 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
             ))}
           </div>
           <div className="flex items-center justify-between gap-2 px-1">
-            <span className="text-xs text-muted-foreground">Naming</span>
+            <span className="text-xs text-muted-foreground">Plane naming</span>
             <Tabs
               value={planeName}
               onValueChange={(v) => {
                 graphicsActor.send({ type: 'setPlaneName', payload: v as 'face' | 'cartesian' });
               }}
             >
-              <TabsList className="h-7 border bg-card" activeClassName="bg-secondary/80 border">
-                <TabsTrigger value="face">Face</TabsTrigger>
-                <TabsTrigger value="cartesian">Cartesian</TabsTrigger>
+              <TabsList enableAnimation className="h-7 [&_[data-slot=tabs-trigger]]:text-xs">
+                <TabsTrigger enableAnimation value="face">
+                  Face
+                </TabsTrigger>
+                <TabsTrigger enableAnimation value="cartesian">
+                  Cartesian
+                </TabsTrigger>
               </TabsList>
             </Tabs>
           </div>

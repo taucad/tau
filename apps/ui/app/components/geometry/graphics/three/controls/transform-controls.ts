@@ -561,8 +561,22 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
       case 'rotate': {
         this.offset.copy(this.pointEnd).sub(this.pointStart);
 
-        const ROTATION_SPEED =
-          20 / this.worldPosition.distanceTo(this.tempVector.setFromMatrixPosition(this.camera.matrixWorld));
+        // Normalize rotation sensitivity by camera distance AND perspective FOV so drag
+        // speed feels consistent across different FOV values.
+        const cameraDistance = this.worldPosition.distanceTo(
+          this.tempVector.setFromMatrixPosition(this.camera.matrixWorld),
+        );
+        const cameraMaybePerspective = this.camera as unknown as PerspectiveCamera;
+        let fovFactor = 1;
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- type guard
+        if (cameraMaybePerspective.isPerspectiveCamera) {
+          fovFactor = Math.tan((cameraMaybePerspective.fov * Math.PI) / 360);
+          if (!Number.isFinite(fovFactor) || fovFactor === 0) {
+            fovFactor = 1;
+          }
+        }
+
+        const ROTATION_SPEED = 20 / (cameraDistance * fovFactor);
 
         switch (axis) {
           case 'E': {

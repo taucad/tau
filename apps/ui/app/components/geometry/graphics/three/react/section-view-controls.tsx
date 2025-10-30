@@ -453,7 +453,7 @@ export function SectionViewControls({
 
             // Recompute translation so the plane rotates about the translated pivot
             const [bx, by, bz] = selectedPlane.normal;
-            const baseNormal = new THREE.Vector3(bx, by, bz).multiplyScalar(direction);
+            const baseNormal = new THREE.Vector3(bx, by, bz).multiplyScalar(-direction);
             const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
             const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
             const newTranslation = pivotPointRef.current.dot(rotatedNormal);

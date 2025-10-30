@@ -270,6 +270,8 @@ export function SectionViewControls({
   const transformControlsRef = useRef<THREE.Object3D>(undefined);
   // Track the latest rotation locally to project translation along the rotated plane normal
   const rotationRef = useRef<THREE.Euler>(new THREE.Euler(0, 0, 0));
+  // Keep an optional world-space anchor so the gizmo doesn't "jump" after rotations
+  const anchorPositionRef = useRef<THREE.Vector3 | undefined>(undefined);
   const matcapTexture = useMemo(() => matcapMaterial(), []);
   // Track whether the user is actively dragging translate/rotate so we don't override the position mid-drag
   const isTranslatingRef = useRef<boolean>(false);
@@ -307,6 +309,13 @@ export function SectionViewControls({
       return;
     }
 
+    // If we have an anchor (e.g. after a rotation), keep the gizmo at that world
+    // position to avoid snapping towards the plane's origin-projection.
+    if (anchorPositionRef.current) {
+      current.position.copy(anchorPositionRef.current);
+      return;
+    }
+
     const [x, y, z] = selectedPlane.normal;
     const baseNormal = new THREE.Vector3(x, y, z).multiplyScalar(-direction);
     const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
@@ -329,13 +338,16 @@ export function SectionViewControls({
     rotationRef.current.set(rotation[0], rotation[1], rotation[2]);
     current.rotation.set(rotation[0], rotation[1], rotation[2]);
 
-    // Recompute position based on new rotation
-    const [bx, by, bz] = selectedPlane.normal;
-    const baseNormal = new THREE.Vector3(bx, by, bz).multiplyScalar(-direction);
-    const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
-    const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
-    const position = rotatedNormal.multiplyScalar(translation);
-    current.position.copy(position);
+    // Do not move position here if an anchor is set; the primary frame loop
+    // will honor the anchor and keep the gizmo from jumping.
+    if (!anchorPositionRef.current) {
+      const [bx, by, bz] = selectedPlane.normal;
+      const baseNormal = new THREE.Vector3(bx, by, bz).multiplyScalar(-direction);
+      const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
+      const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
+      const position = rotatedNormal.multiplyScalar(translation);
+      current.position.copy(position);
+    }
   });
 
   if (!isActive) {
@@ -424,10 +436,15 @@ export function SectionViewControls({
           }
         }}
         onMouseDown={() => {
+          // Keep current anchor so the gizmo does not snap to the plane projection
           isTranslatingRef.current = true;
         }}
         onMouseUp={() => {
           isTranslatingRef.current = false;
+          // Persist the final world position as the new anchor to avoid any post-drag snapping
+          if (transformControlsRef.current) {
+            anchorPositionRef.current = transformControlsRef.current.position.clone();
+          }
         }}
       />
       <TransformControls
@@ -465,10 +482,13 @@ export function SectionViewControls({
           if (transformControlsRef.current) {
             // Capture current gizmo world position as the rotation pivot
             pivotPointRef.current.copy(transformControlsRef.current.position);
+            // Set anchor so when rotation ends the gizmo stays where it was left
+            anchorPositionRef.current = pivotPointRef.current.clone();
           }
         }}
         onMouseUp={() => {
           isRotatingRef.current = false;
+          // Keep anchor until the next manipulation (or translation drag)
         }}
       />
     </group>

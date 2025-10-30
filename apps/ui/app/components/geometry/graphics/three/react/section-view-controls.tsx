@@ -276,7 +276,7 @@ export function SectionViewControls({
   }, [selectedPlaneId, selectedPlane, translation, direction, rotation]);
 
   // Sync external rotation into gizmo when UI changes rotation
-  React.useEffect(() => {
+  useFrame(() => {
     const { current } = transformControlsRef;
     if (!current || !selectedPlane) {
       return;
@@ -296,7 +296,7 @@ export function SectionViewControls({
     const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
     const position = rotatedNormal.multiplyScalar(translation);
     current.position.copy(position);
-  }, [rotation, selectedPlane, direction, translation]);
+  });
 
   if (!isActive) {
     return undefined;

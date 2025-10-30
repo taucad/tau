@@ -777,6 +777,13 @@ export const graphicsMachine = setup({
     hasSelectedPoints({ context }) {
       return context.measurements.length > 0;
     },
+    hasSelectedSectionView({ context }) {
+      return context.selectedSectionViewId !== undefined;
+    },
+    isActivatingClippingWithSelection({ event, context }) {
+      assertEvent(event, 'setSectionViewActive');
+      return event.payload && context.selectedSectionViewId !== undefined;
+    },
   },
 }).createMachine({
   id: 'graphics',
@@ -1069,11 +1076,18 @@ export const graphicsMachine = setup({
                   actions: 'setMeasureActive',
                   target: '#graphics.operational.ready',
                 },
-                setSectionViewActive: {
-                  guard: 'isActivatingClipping',
-                  actions: ['deactivateMeasurePreserveMeasurements', 'setSectionViewActive'],
-                  target: '#graphics.operational.section-view.pending',
-                },
+                setSectionViewActive: [
+                  {
+                    guard: 'isActivatingClippingWithSelection',
+                    actions: ['deactivateMeasurePreserveMeasurements', 'setSectionViewActive'],
+                    target: '#graphics.operational.section-view.active',
+                  },
+                  {
+                    guard: 'isActivatingClipping',
+                    actions: ['deactivateMeasurePreserveMeasurements', 'setSectionViewActive'],
+                    target: '#graphics.operational.section-view.pending',
+                  },
+                ],
                 startMeasurement: {
                   actions: 'startMeasurement',
                   target: 'selected',
@@ -1091,11 +1105,18 @@ export const graphicsMachine = setup({
                   actions: ['clearAllMeasurements', 'setMeasureActive'],
                   target: '#graphics.operational.ready',
                 },
-                setSectionViewActive: {
-                  guard: 'isActivatingClipping',
-                  actions: ['deactivateMeasurePreserveMeasurements', 'setSectionViewActive'],
-                  target: '#graphics.operational.section-view.pending',
-                },
+                setSectionViewActive: [
+                  {
+                    guard: 'isActivatingClippingWithSelection',
+                    actions: ['deactivateMeasurePreserveMeasurements', 'setSectionViewActive'],
+                    target: '#graphics.operational.section-view.active',
+                  },
+                  {
+                    guard: 'isActivatingClipping',
+                    actions: ['deactivateMeasurePreserveMeasurements', 'setSectionViewActive'],
+                    target: '#graphics.operational.section-view.pending',
+                  },
+                ],
                 completeMeasurement: {
                   actions: 'completeMeasurement',
                   target: 'selecting',

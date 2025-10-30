@@ -32,8 +32,8 @@ import {
   MeshMatcapMaterial,
   LineDashedMaterial,
 } from 'three';
-import arrowSvg from '#components/geometry/graphics/three/icons/translation-arrow.svg?raw';
-import doubleArrowSvg from '#components/geometry/graphics/three/icons/translation-double-arrow.svg?raw';
+import translationArrowSvg from '#components/geometry/graphics/three/icons/translation-arrow.svg?raw';
+import rotationArrowSvg from '#components/geometry/graphics/three/icons/rotation-arrow.svg?raw';
 import { SvgGeometry } from '#components/geometry/graphics/three/geometries/svg-geometry.js';
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
 import { FontGeometry } from '#components/geometry/graphics/three/geometries/font-geometry.js';
@@ -890,8 +890,8 @@ class TransformControlsGizmo extends Object3D {
 
     const scaleHandleGeometry = new BoxGeometry(0.125, 0.125, 0.125);
 
-    const arrowGeometry = SvgGeometry({ svg: arrowSvg, depth: arrowDepth });
-    const doubleArrowGeometry = SvgGeometry({ svg: doubleArrowSvg, depth: arrowDepth });
+    const arrowGeometry = SvgGeometry({ svg: translationArrowSvg, depth: arrowDepth });
+    const doubleArrowGeometry = SvgGeometry({ svg: rotationArrowSvg, depth: arrowDepth });
 
     const fontGeometryTranslation = FontGeometry({ text: '24 mm', depth: textDepth, size: 300 });
     const fontGeometryRotationX = FontGeometry({ text: '45°', depth: textDepth, size: 400 });

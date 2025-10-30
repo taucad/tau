@@ -264,7 +264,7 @@ export const SectionView = React.forwardRef<{ update: () => void }, CutterProper
                       }
                     }}
                     args={[planeSize, planeSize]}
-                    renderOrder={index + 1.1}
+                    renderOrder={index + 1}
                     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Debug flag can be toggled
                     material={debugMode ? undefined : capMaterialList[index]}
                     onAfterRender={(renderer) => {

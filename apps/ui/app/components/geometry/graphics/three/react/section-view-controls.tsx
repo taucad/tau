@@ -142,7 +142,11 @@ function PlaneSelector({
         ? normalizedDir.clone().multiplyScalar(-labelDepth * scale)
         : new THREE.Vector3(0, 0, 0);
 
-      currentGroup.position.copy(baseOffset.add(depthOffset));
+      if (planeId === 'xz' || planeId === 'zx') {
+        currentGroup.position.copy(baseOffset.sub(depthOffset));
+      } else {
+        currentGroup.position.copy(baseOffset.add(depthOffset));
+      }
     }
   });
 
@@ -363,14 +367,35 @@ export function SectionViewControls({
     return (
       <group>
         {scoredAxes.map(({ idPos, idNeg, normal, color }) => {
-          const pos = normal.toArray();
+          let position: [number, number, number] = normal.toArray();
+          switch (idPos) {
+            case 'xy': {
+              position = [0, 0, -1];
+
+              break;
+            }
+
+            case 'xz': {
+              position = [0, 1, 0];
+
+              break;
+            }
+
+            case 'yz': {
+              position = [-1, 0, 0];
+
+              break;
+            }
+            // No default
+          }
+
           return (
             <group key={idPos}>
               <PlaneSelector
                 isInverse
                 matcapTexture={matcapTexture}
                 planeId={idPos}
-                position={pos}
+                position={position}
                 color={color}
                 size={60}
                 offset={offsetPx}
@@ -385,7 +410,7 @@ export function SectionViewControls({
                 isInverse={false}
                 matcapTexture={matcapTexture}
                 planeId={idNeg}
-                position={pos}
+                position={position}
                 color={color}
                 size={60}
                 offset={offsetPx}

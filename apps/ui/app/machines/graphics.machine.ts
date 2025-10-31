@@ -973,11 +973,18 @@ export const graphicsMachine = setup({
       states: {
         ready: {
           on: {
-            setSectionViewActive: {
-              guard: 'isActivatingClipping',
-              actions: 'setSectionViewActive',
-              target: 'section-view.pending',
-            },
+            setSectionViewActive: [
+              {
+                guard: 'isActivatingClippingWithSelection',
+                actions: 'setSectionViewActive',
+                target: 'section-view.active',
+              },
+              {
+                guard: 'isActivatingClipping',
+                actions: 'setSectionViewActive',
+                target: 'section-view.pending',
+              },
+            ],
             setMeasureActive: {
               guard: 'isActivatingMeasure',
               actions: 'setMeasureActive',

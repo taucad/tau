@@ -231,6 +231,17 @@ function clampRadiansToNearestDegree(radians: number): number {
   return (rounded * Math.PI) / 180;
 }
 
+// Round a translation value to a given number of decimals in the current unit,
+// then convert it back to the base unit (mm). For example, with unitFactor=1000 (m),
+// 6262 mm -> 6.262 m -> 6.26 m -> 6260 mm.
+function roundTranslationToUnitDecimals(valueInBase: number, unitFactor: number, decimals = 2): number {
+  const factor = unitFactor === 0 ? 1 : unitFactor;
+  const valueInUnit = valueInBase / factor;
+  const multiplier = 10 ** decimals;
+  const roundedInUnit = Math.round(valueInUnit * multiplier) / multiplier;
+  return roundedInUnit * factor;
+}
+
 /**
  * Graphics Machine
  *
@@ -581,9 +592,9 @@ export const graphicsMachine = setup({
     }),
 
     setSectionViewTranslation: assign({
-      sectionViewTranslation({ event }) {
+      sectionViewTranslation({ event, context }) {
         assertEvent(event, 'setSectionViewTranslation');
-        return event.payload;
+        return roundTranslationToUnitDecimals(event.payload, context.gridUnitFactor, 2);
       },
     }),
 

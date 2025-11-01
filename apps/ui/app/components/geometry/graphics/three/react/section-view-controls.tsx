@@ -169,7 +169,6 @@ function PlaneSelector({
     onHover(undefined);
   };
 
-  const labelPosition = (labelDepth + textDepth) / 2;
   const [forwardPlaneName] = getLabelsFor(planeId, naming);
 
   const frontFontGeometry = useMemo(
@@ -221,7 +220,7 @@ function PlaneSelector({
           depthWrite={false}
         />
       </mesh>
-      <mesh position={[0, 0, labelPosition]}>
+      <mesh>
         <primitive object={frontFontGeometry} />
         <meshMatcapMaterial
           transparent

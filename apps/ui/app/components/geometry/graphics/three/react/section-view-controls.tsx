@@ -243,7 +243,6 @@ type SectionViewControlsProperties = {
   readonly selectedPlaneId: PlaneId | undefined;
   readonly availablePlanes: AvailablePlane[];
   readonly translation: number;
-  readonly direction: 1 | -1;
   readonly rotation: [number, number, number];
   readonly planeName: 'cartesian' | 'face';
   readonly hoveredSectionViewId: PlaneSelectorId | undefined;
@@ -259,7 +258,6 @@ export function SectionViewControls({
   selectedPlaneId,
   availablePlanes,
   translation,
-  direction,
   rotation,
   planeName,
   hoveredSectionViewId,
@@ -297,7 +295,7 @@ export function SectionViewControls({
 
   // Calculate plane properties before any conditional returns
   const [nx, ny, nz] = selectedPlane?.normal ?? [0, 0, 1];
-  const normal = new THREE.Vector3(nx, ny, nz).multiplyScalar(-direction);
+  const normal = new THREE.Vector3(nx, ny, nz);
 
   // Keep the gizmo positioned when translation/plane/direction change, but
   // DO NOT change position while rotating. This ensures rotation happens
@@ -320,7 +318,7 @@ export function SectionViewControls({
     }
 
     const [x, y, z] = selectedPlane.normal;
-    const baseNormal = new THREE.Vector3(x, y, z).multiplyScalar(-direction);
+    const baseNormal = new THREE.Vector3(x, y, z);
     const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
     const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
     const position = rotatedNormal.multiplyScalar(translation);
@@ -345,7 +343,7 @@ export function SectionViewControls({
     // will honor the anchor and keep the gizmo from jumping.
     if (!anchorPositionRef.current) {
       const [bx, by, bz] = selectedPlane.normal;
-      const baseNormal = new THREE.Vector3(bx, by, bz).multiplyScalar(-direction);
+      const baseNormal = new THREE.Vector3(bx, by, bz);
       const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
       const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
       const position = rotatedNormal.multiplyScalar(translation);
@@ -491,14 +489,6 @@ export function SectionViewControls({
             const rotation = currentObject.rotation.clone();
             rotationRef.current.copy(rotation);
             onSetRotation(rotation);
-
-            // Recompute translation so the plane rotates about the translated pivot
-            const [bx, by, bz] = selectedPlane.normal;
-            const baseNormal = new THREE.Vector3(bx, by, bz).multiplyScalar(-direction);
-            const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
-            const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
-            const newTranslation = pivotPointRef.current.dot(rotatedNormal);
-            onSetTranslation(newTranslation);
           }
         }}
         onMouseDown={() => {

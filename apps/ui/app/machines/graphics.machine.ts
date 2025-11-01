@@ -578,14 +578,6 @@ export const graphicsMachine = setup({
         assertEvent(event, 'setSectionViewDirection');
         return event.payload;
       },
-      // Maintain plane position by flipping translation only when direction changes sign
-      sectionViewTranslation({ event, context }) {
-        assertEvent(event, 'setSectionViewDirection');
-        const newDir = event.payload;
-        return newDir === context.sectionViewDirection
-          ? context.sectionViewTranslation
-          : -context.sectionViewTranslation;
-      },
     }),
 
     setSectionViewTranslation: assign({
@@ -606,12 +598,6 @@ export const graphicsMachine = setup({
     toggleSectionViewDirection: assign({
       sectionViewDirection({ context }) {
         return context.sectionViewDirection === 1 ? -1 : 1;
-      },
-      // When flipping direction, negate translation to keep plane at same position
-      // Plane equation: normal · point + constant = 0
-      // If we negate normal, we must negate constant
-      sectionViewTranslation({ context }) {
-        return -context.sectionViewTranslation;
       },
     }),
 

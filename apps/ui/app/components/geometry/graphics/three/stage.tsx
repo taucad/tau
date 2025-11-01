@@ -114,7 +114,9 @@ export function Stage({
     // Apply direction after rotation
     normal.multiplyScalar(-sectionViewDirection);
 
-    const constant = -sectionViewTranslation;
+    // Bind plane constant to direction so flipping direction preserves the plane
+    // while keeping the numeric translation value unchanged in UI.
+    const constant = sectionViewTranslation * sectionViewDirection;
 
     return new THREE.Plane(normal, constant);
   }, [selectedSectionViewId, sectionViewTranslation, sectionViewRotation, sectionViewDirection, availableSectionViews]);

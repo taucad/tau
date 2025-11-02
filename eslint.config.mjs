@@ -45,7 +45,7 @@ const config = [
       '**/.cache',
       '**/build',
       '**/public/build',
-      '**/public/entry.worker.js',
+      '**/public/*.js',
       '**/.env',
       '**/.react-router',
       '**/stats.html',

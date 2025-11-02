@@ -68,13 +68,18 @@ export function ChatParametersInputNumber({
     }
   }, [value, isFocused]);
 
-  function commitIfValid(current: string): void {
+  function commitIfValid(current: string, source: 'change' | 'blur' = 'change'): void {
     if (current === '') {
       return; // Do not propagate empty values
     }
 
     const parsed = Number(current);
     if (Number.isFinite(parsed)) {
+      // On blur, only emit if the numeric value actually changed
+      if (source === 'blur' && parsed === value) {
+        return;
+      }
+
       onValueChange?.(parsed);
     }
   }
@@ -117,7 +122,7 @@ export function ChatParametersInputNumber({
             return;
           }
 
-          commitIfValid(text);
+          commitIfValid(text, 'blur');
         }}
         onChange={(event) => {
           const next = event.target.value;

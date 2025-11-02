@@ -230,9 +230,7 @@ export function ChatParametersNumber({
         name={name}
         className="h-7 w-24 bg-background"
         disabled={disabled}
-        onChange={(event) => {
-          onChange(Number.parseFloat(event.target.value));
-        }}
+        onValueChange={onChange}
       />
     </div>
   );

@@ -34,9 +34,11 @@ function getDescriptor(name?: string): MeasurementDescriptor {
 
 const baseIndicatorClass = 'flex h-7 w-7 items-center justify-center border bg-muted text-muted-foreground select-none';
 
-type ChatParametersInputNumberProps = Omit<React.ComponentProps<'input'>, 'type'> & {
+type ChatParametersInputNumberProps = Omit<React.ComponentProps<'input'>, 'type' | 'value' | 'onChange'> & {
   readonly unit?: string;
   readonly name: string;
+  readonly value: number;
+  readonly onValueChange?: (value: number) => void;
 };
 
 export function ChatParametersInputNumber({
@@ -44,6 +46,7 @@ export function ChatParametersInputNumber({
   unit = 'mm',
   value,
   name,
+  onValueChange,
   ...properties
 }: ChatParametersInputNumberProps): React.ReactNode {
   const descriptor = getDescriptor(name);
@@ -51,6 +54,30 @@ export function ChatParametersInputNumber({
   const isCount = descriptor === 'count';
   const isAngle = descriptor === 'angle';
   const isUnitless = descriptor === 'unitless';
+
+  // Local UI state so empty strings and partial numbers
+  // (i.e. starting with a negative sign or decimal point) don't immediately
+  // propagate to the parent component.
+  const [text, setText] = React.useState<string>(() => String(value));
+  const [isFocused, setIsFocused] = React.useState<boolean>(false);
+
+  // Sync UI when external value changes, but avoid clobbering while user is typing
+  React.useEffect(() => {
+    if (!isFocused) {
+      setText(String(value));
+    }
+  }, [value, isFocused]);
+
+  function commitIfValid(current: string): void {
+    if (current === '') {
+      return; // Do not propagate empty values
+    }
+
+    const parsed = Number(current);
+    if (Number.isFinite(parsed)) {
+      onValueChange?.(parsed);
+    }
+  }
 
   return (
     <div
@@ -76,9 +103,31 @@ export function ChatParametersInputNumber({
       <Input
         autoComplete="off"
         type="number"
-        value={value}
+        inputMode="decimal"
+        value={text}
         className={cn(isCount ? 'pl-8' : 'pr-8', 'focus-visible:ring-0', className)}
         {...properties}
+        onFocus={() => {
+          setIsFocused(true);
+        }}
+        onBlur={() => {
+          setIsFocused(false);
+          if (text === '') {
+            setText(String(value));
+            return;
+          }
+
+          commitIfValid(text);
+        }}
+        onChange={(event) => {
+          const next = event.target.value;
+          setText(next);
+          if (next === '') {
+            return; // Do not propagate empty values
+          }
+
+          commitIfValid(next);
+        }}
       />
       {!isCount && (
         <span

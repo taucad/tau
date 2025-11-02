@@ -296,8 +296,6 @@ export const SectionView = React.forwardRef<{ update: () => void }, CutterProper
   },
 );
 
-SectionView.displayName = 'Cutter';
-
 function PlaneStencilGroup({ meshObj, plane, renderOrder }: PlaneStencilGroupProperties): React.JSX.Element {
   return (
     <group>

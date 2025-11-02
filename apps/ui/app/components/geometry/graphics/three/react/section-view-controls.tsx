@@ -280,14 +280,14 @@ export function SectionViewControls({
   // World-space pivot point to keep the plane anchored during rotation
   const pivotPointRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
-  const scoredAxes = React.useMemo(() => {
-    const axes: Array<{ idPos: PlaneSelectorId; idNeg: PlaneSelectorId; normal: THREE.Vector3; color: string }> = [
+  const planes = React.useMemo(() => {
+    const planes: Array<{ idPos: PlaneSelectorId; idNeg: PlaneSelectorId; normal: THREE.Vector3; color: string }> = [
       { idPos: 'xy', idNeg: 'yx', normal: new THREE.Vector3(0, 0, -1), color: '#3b82f6' },
       { idPos: 'xz', idNeg: 'zx', normal: new THREE.Vector3(0, -1, 0), color: '#22c55e' },
       { idPos: 'yz', idNeg: 'zy', normal: new THREE.Vector3(-1, 0, 0), color: '#ef4444' },
     ];
 
-    return axes;
+    return planes;
   }, []);
 
   // Find the selected plane configuration
@@ -375,7 +375,7 @@ export function SectionViewControls({
   if (!selectedPlane) {
     return (
       <group>
-        {scoredAxes.map(({ idPos, idNeg, normal, color }) => {
+        {planes.map(({ idPos, idNeg, normal, color }) => {
           let position: [number, number, number] = normal.toArray();
           switch (idPos) {
             case 'xy': {

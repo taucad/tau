@@ -52,6 +52,7 @@ import { SettingsControl } from '#components/geometry/cad/settings-control.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { cn } from '#utils/ui.utils.js';
 
 const yUpFormats = new Set<InputFormat>(['gltf', 'glb', 'ifc']);
 
@@ -323,22 +324,32 @@ export default function ConverterRoute(): React.JSX.Element {
         <>
           {/* Main viewer area */}
           <div className="relative flex-1">
-            <CadViewer
-              enableZoom
-              enablePan
-              enableYupRotation={uploadedFile ? yUpFormats.has(uploadedFile.format) : false}
-              enableMatcap={graphicsState.enableMatcap}
-              enableLines={graphicsState.enableLines}
-              enableAxes={graphicsState.enableAxes}
-              enableGrid={graphicsState.enableGrid}
-              enableGizmo={graphicsState.enableGizmo}
-              enableSurfaces={graphicsState.enableSurfaces}
-              geometries={geometries}
-            />
+            {/* Viewer container - centered in the space not obstructed by sidebar and floating panel */}
+            {/* Uses the same centering logic as chat-interface.tsx */}
+            <div
+              className={cn(
+                'absolute inset-0 left-1/2 h-full w-[200dvw]',
+                '-translate-x-[calc((100%-var(--sidebar-width-current)+320px)/2)]',
+                'transition-all duration-200 ease-in-out',
+              )}
+            >
+              <CadViewer
+                enableZoom
+                enablePan
+                enableYupRotation={uploadedFile ? yUpFormats.has(uploadedFile.format) : false}
+                enableMatcap={graphicsState.enableMatcap}
+                enableLines={graphicsState.enableLines}
+                enableAxes={graphicsState.enableAxes}
+                enableGrid={graphicsState.enableGrid}
+                enableGizmo={graphicsState.enableGizmo}
+                enableSurfaces={graphicsState.enableSurfaces}
+                geometries={geometries}
+              />
+            </div>
 
             {/* File info overlay */}
             {uploadedFile ? (
-              <div className="absolute bottom-4 left-4 flex flex-col gap-2">
+              <div className="absolute bottom-2 left-2 flex flex-col gap-2 transition-[left] duration-200 ease-linear md:left-(--sidebar-width-current)">
                 <div className="rounded-md border bg-sidebar/95 p-3 shadow-md backdrop-blur-sm">
                   <div className="flex items-center gap-1">
                     <div className="text-sm font-medium">{uploadedFile.name}</div>
@@ -435,7 +446,7 @@ export default function ConverterRoute(): React.JSX.Element {
         </>
       ) : (
         // Landing state - no model loaded
-        <div className="container mt-(--header-height) grid h-full items-start gap-8 md:pt-8 lg:grid-cols-[300px_1fr_300px] xl:grid-cols-[350px_1fr_350px]">
+        <div className="container mt-(--header-height) grid h-full items-start gap-8 transition-[padding] duration-200 ease-linear md:pt-8 md:pl-(--sidebar-width-current) lg:grid-cols-[300px_1fr_300px] xl:grid-cols-[350px_1fr_350px]">
           {/* Import Formats - Left */}
           <FormatsList
             icon={Upload}

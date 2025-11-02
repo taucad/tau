@@ -1,4 +1,3 @@
-/* eslint-disable complexity -- TODO: refactor */
 import * as THREE from 'three';
 
 export type SnapPoint = {
@@ -148,32 +147,39 @@ function collectCoplanarContiguousFace(parameters: CoplanarFaceParameters): numb
   return [...visited];
 }
 
-export function detectSnapPoints(
+type ReferencePlane = {
+  normal: THREE.Vector3;
+  constant: number;
+  point: THREE.Vector3;
+};
+
+type BoundaryEdgeResult = {
+  boundaryEdges: Array<[number, number]>;
+  interiorEdges: Array<[number, number]>;
+};
+
+function getRaycastIntersection(
   mesh: THREE.Mesh,
   raycaster: THREE.Raycaster,
-  _camera: THREE.Camera,
-  _snapDistancePx = 20,
-): SnapPoint[] {
+): THREE.Intersection<THREE.Mesh> | undefined {
   const intersects = raycaster.intersectObject(mesh, true);
   if (intersects.length === 0) {
-    return [];
+    return undefined;
   }
 
   const intersection = intersects[0];
   if (!intersection?.face) {
-    return [];
+    return undefined;
   }
 
-  const object = intersection.object as THREE.Mesh;
-  const { geometry } = object;
-  const triangles = getTriangleIndexArray(geometry);
-  const worldPositions = computeWorldPositions(object, geometry);
+  return intersection as THREE.Intersection<THREE.Mesh>;
+}
 
-  // Build canonical indices for vertices that occupy the same world-space position.
-  // This merges edges of non-indexed geometries so adjacency works across triangles.
+function buildCanonicalVertexIndices(worldPositions: THREE.Vector3[]): number[] {
   const positionKey = (v: THREE.Vector3): string => `${v.x.toFixed(5)},${v.y.toFixed(5)},${v.z.toFixed(5)}`;
   const keyToCanonical = new Map<string, number>();
   const canonicalIndex: number[] = Array.from({ length: worldPositions.length });
+
   let idx = 0;
   for (const wp of worldPositions) {
     const key = positionKey(wp);
@@ -185,58 +191,41 @@ export function detectSnapPoints(
     idx++;
   }
 
-  // Reference plane from the hit triangle in world space
+  return canonicalIndex;
+}
 
-  const triIndex = (() => {
-    // Determine the triangle index corresponding to the hit face (a,b,c) within our triangles list
-    const { a } = intersection.face;
-    const { b } = intersection.face;
-    const { c } = intersection.face;
-    for (const [i, triangle] of triangles.entries()) {
-      const t = triangle;
-      if (
-        (t.a === a && t.b === b && t.c === c) ||
-        (t.a === b && t.b === c && t.c === a) ||
-        (t.a === c && t.b === a && t.c === b)
-      ) {
-        return i;
-      }
-    }
-
-    return 0; // Fallback
-  })();
-
-  const [pa, pb, pc] = getTriangleVertices(triangles[triIndex]!, worldPositions);
-  const refNormal = triangleNormalWorld(pa, pb, pc).normalize();
-  const refConstant = refNormal.dot(pa);
-
-  // Collect contiguous coplanar face region
-  const faceTriangleIndices = collectCoplanarContiguousFace({
-    hitTriIndex: triIndex,
-    triangles,
-    worldPositions,
-    refNormal,
-    refConstant,
-    canonicalIndex,
-  });
-
-  // Precompute edge adjacency by canonical indices for neighborhood expansion
-  const edgeToTriangles = new Map<string, number[]>();
+function findHitTriangleIndex(face: THREE.Face, triangles: Triangle[]): number {
+  const { a, b, c } = face;
   for (const [i, triangle] of triangles.entries()) {
     const t = triangle;
-    const ca = canonicalIndex[t.a]!;
-    const cb = canonicalIndex[t.b]!;
-    const cc = canonicalIndex[t.c]!;
-    const keys = [edgeKey(ca, cb), edgeKey(cb, cc), edgeKey(cc, ca)];
-    for (const k of keys) {
-      const array = edgeToTriangles.get(k) ?? [];
-      array.push(i);
-      edgeToTriangles.set(k, array);
+    if (
+      (t.a === a && t.b === b && t.c === c) ||
+      (t.a === b && t.b === c && t.c === a) ||
+      (t.a === c && t.b === a && t.c === b)
+    ) {
+      return i;
     }
   }
 
-  // Gather boundary edges: edges that appear only once among the region triangles
+  return 0; // Fallback
+}
+
+function computeReferencePlane(triangle: Triangle, worldPositions: THREE.Vector3[]): ReferencePlane {
+  const [pa, pb, pc] = getTriangleVertices(triangle, worldPositions);
+  const normal = triangleNormalWorld(pa, pb, pc).normalize();
+  const constant = normal.dot(pa);
+
+  return { normal, constant, point: pa };
+}
+
+function gatherBoundaryEdges(
+  faceTriangleIndices: number[],
+  triangles: Triangle[],
+  canonicalIndex: number[],
+): BoundaryEdgeResult {
   const edgeCount = new Map<string, [number, number]>();
+  const edgeCounter = new Map<string, number>();
+
   for (const idx of faceTriangleIndices) {
     const t = triangles[idx]!;
     const ca = canonicalIndex[t.a]!;
@@ -247,42 +236,38 @@ export function detectSnapPoints(
       [cb, cc],
       [cc, ca],
     ];
+
     for (const [i, j] of edges) {
       const k = edgeKey(i, j);
-      edgeCount.set(k, edgeCount.get(k) ? edgeCount.get(k)! : [i, j]);
-      // We store pair once; counting not required beyond presence across multiple triangles,
-      // but we will remove if seen twice below
-      // Use a second map to count
-    }
-  }
+      if (!edgeCount.has(k)) {
+        edgeCount.set(k, [i, j]);
+      }
 
-  // Proper counting of edges
-  const edgeCounter = new Map<string, number>();
-  for (const idx of faceTriangleIndices) {
-    const t = triangles[idx]!;
-    const ca = canonicalIndex[t.a]!;
-    const cb = canonicalIndex[t.b]!;
-    const cc = canonicalIndex[t.c]!;
-    const keys = [edgeKey(ca, cb), edgeKey(cb, cc), edgeKey(cc, ca)];
-    for (const k of keys) {
       edgeCounter.set(k, (edgeCounter.get(k) ?? 0) + 1);
     }
   }
 
   const boundaryEdges: Array<[number, number]> = [];
   const interiorEdges: Array<[number, number]> = [];
+
   for (const [k, count] of edgeCounter) {
+    const pair = edgeCount.get(k)!;
     if (count === 1) {
-      const pair = edgeCount.get(k)!;
       boundaryEdges.push(pair);
     } else if (count === 2) {
-      // Interior shared edge between two triangles within the same coplanar region
-      const pair = edgeCount.get(k)!;
       interiorEdges.push(pair);
     }
   }
 
-  // Try circular-face detection first using boundary vertices
+  return { boundaryEdges, interiorEdges };
+}
+
+function tryDetectCircularFace(
+  boundaryEdges: Array<[number, number]>,
+  worldPositions: THREE.Vector3[],
+  faceNormal: THREE.Vector3,
+  planePoint: THREE.Vector3,
+): SnapPoint[] | undefined {
   const boundaryVertexIndices = new Set<number>();
   for (const [i, j] of boundaryEdges) {
     boundaryVertexIndices.add(i);
@@ -290,14 +275,16 @@ export function detectSnapPoints(
   }
 
   const boundaryVerticesWorld: THREE.Vector3[] = [...boundaryVertexIndices].map((idx) => worldPositions[idx]!);
-  const maybeCircle = detectCircleOnFace(boundaryVerticesWorld, refNormal, pa);
-  if (maybeCircle) {
-    return maybeCircle;
-  }
+  return detectCircleOnFace(boundaryVerticesWorld, faceNormal, planePoint);
+}
 
-  // Collect unique boundary vertices and edge midpoints
+function collectBoundarySnapPoints(
+  boundaryEdges: Array<[number, number]>,
+  worldPositions: THREE.Vector3[],
+): { snapPoints: SnapPoint[]; addPoint: (v: THREE.Vector3, type: SnapPoint['type']) => void } {
   const snapPoints: SnapPoint[] = [];
   const seen = new Set<string>();
+
   const addPoint = (v: THREE.Vector3, type: SnapPoint['type']): void => {
     const key = `${v.x.toFixed(6)},${v.y.toFixed(6)},${v.z.toFixed(6)}`;
     if (!seen.has(key)) {
@@ -307,39 +294,45 @@ export function detectSnapPoints(
   };
 
   for (const [i, j] of boundaryEdges) {
-    const vi = worldPositions[i]!; // Canonical indices map to representative original index
+    const vi = worldPositions[i]!;
     const vj = worldPositions[j]!;
     addPoint(vi, 'vertex');
     addPoint(vj, 'vertex');
     addPoint(new THREE.Vector3().addVectors(vi, vj).multiplyScalar(0.5), 'edge-midpoint');
   }
 
-  // Compute a single face center for arbitrary N-sided faces (polygonal or curved fallback)
-  // Strategy: order the boundary ring, project to face plane, compute area-weighted centroid; fallback to mean
+  return { snapPoints, addPoint };
+}
+
+function orderBoundaryVertices(boundaryEdges: Array<[number, number]>): {
+  ordered: number[];
+  boundaryVertexIndexSet: Set<number>;
+} {
   const boundaryVertexIndexSet = new Set<number>();
+  const boundaryAdj = new Map<number, number[]>();
+
   for (const [i, j] of boundaryEdges) {
     boundaryVertexIndexSet.add(i);
     boundaryVertexIndexSet.add(j);
-  }
 
-  const boundaryIndexList = [...boundaryVertexIndexSet];
-  const boundaryAdj = new Map<number, number[]>();
-  for (const [i, j] of boundaryEdges) {
     const ai = boundaryAdj.get(i) ?? [];
     ai.push(j);
     boundaryAdj.set(i, ai);
+
     const aj = boundaryAdj.get(j) ?? [];
     aj.push(i);
     boundaryAdj.set(j, aj);
   }
 
-  // Walk the ring to order vertices
+  const boundaryIndexList = [...boundaryVertexIndexSet];
   const ordered: number[] = [];
+
   if (boundaryIndexList.length >= 3) {
     const start = boundaryIndexList[0]!;
     let previous = -1;
     let curr = start;
     const maxSteps = boundaryIndexList.length + 5;
+
     for (let step = 0; step < maxSteps; step++) {
       ordered.push(curr);
       // eslint-disable-next-line @typescript-eslint/no-loop-func -- `previous` is always defined in the loop
@@ -357,16 +350,31 @@ export function detectSnapPoints(
     }
   }
 
+  return { ordered, boundaryVertexIndexSet };
+}
+
+type FaceCenterParameters = {
+  ordered: number[];
+  boundaryVertexIndexSet: Set<number>;
+  worldPositions: THREE.Vector3[];
+  refNormal: THREE.Vector3;
+  refPoint: THREE.Vector3;
+};
+
+function computeFaceCenter(parameters: FaceCenterParameters): THREE.Vector3 {
+  const { ordered, boundaryVertexIndexSet, worldPositions, refNormal, refPoint } = parameters;
   const { u: planeU, v: planeV } = constructPlaneAxes(refNormal);
   let center: THREE.Vector3 | undefined;
+
   if (ordered.length >= 3) {
     // Area-weighted centroid in 2D then map back to 3D
     let area = 0;
     let cx = 0;
     let cy = 0;
+
     const to2D = (idx: number): { x: number; y: number } => {
       const p = worldPositions[idx]!;
-      const rel = new THREE.Vector3().subVectors(p, pa);
+      const rel = new THREE.Vector3().subVectors(p, refPoint);
       return { x: rel.dot(planeU), y: rel.dot(planeV) };
     };
 
@@ -384,7 +392,7 @@ export function detectSnapPoints(
       cx /= 6 * area;
       cy /= 6 * area;
       center = new THREE.Vector3()
-        .copy(pa)
+        .copy(refPoint)
         .add(new THREE.Vector3().copy(planeU).multiplyScalar(cx))
         .add(new THREE.Vector3().copy(planeV).multiplyScalar(cy));
     }
@@ -397,9 +405,70 @@ export function detectSnapPoints(
       center.add(worldPositions[idx]!);
     }
 
+    const boundaryIndexList = [...boundaryVertexIndexSet];
     center.multiplyScalar(1 / Math.max(1, boundaryIndexList.length));
   }
 
+  return center;
+}
+
+export function detectSnapPoints(mesh: THREE.Mesh, raycaster: THREE.Raycaster): SnapPoint[] {
+  // 1. Get raycast intersection
+  const intersection = getRaycastIntersection(mesh, raycaster);
+  if (!intersection) {
+    return [];
+  }
+
+  // 2. Extract geometry data
+  const { object } = intersection;
+  const { geometry } = object;
+  const triangles = getTriangleIndexArray(geometry);
+  const worldPositions = computeWorldPositions(object, geometry);
+
+  // 3. Build canonical vertex indices to merge coincident vertices
+  const canonicalIndex = buildCanonicalVertexIndices(worldPositions);
+
+  // 4. Find the hit triangle
+  const triIndex = findHitTriangleIndex(intersection.face!, triangles);
+
+  // 5. Compute reference plane from hit triangle
+  const {
+    normal: refNormal,
+    constant: refConstant,
+    point: refPoint,
+  } = computeReferencePlane(triangles[triIndex]!, worldPositions);
+
+  // 6. Collect contiguous coplanar face region
+  const faceTriangleIndices = collectCoplanarContiguousFace({
+    hitTriIndex: triIndex,
+    triangles,
+    worldPositions,
+    refNormal,
+    refConstant,
+    canonicalIndex,
+  });
+
+  // 7. Gather boundary edges
+  const { boundaryEdges } = gatherBoundaryEdges(faceTriangleIndices, triangles, canonicalIndex);
+
+  // 8. Try circular face detection first
+  const maybeCircle = tryDetectCircularFace(boundaryEdges, worldPositions, refNormal, refPoint);
+  if (maybeCircle) {
+    return maybeCircle;
+  }
+
+  // 9. Collect boundary snap points
+  const { snapPoints, addPoint } = collectBoundarySnapPoints(boundaryEdges, worldPositions);
+
+  // 10. Compute and add face center
+  const { ordered, boundaryVertexIndexSet } = orderBoundaryVertices(boundaryEdges);
+  const center = computeFaceCenter({
+    ordered,
+    boundaryVertexIndexSet,
+    worldPositions,
+    refNormal,
+    refPoint,
+  });
   addPoint(center, 'vertex');
 
   return snapPoints;

@@ -90,7 +90,7 @@ export function MeasureTool(): React.JSX.Element {
       let allSnapPoints: SnapPoint[] = [];
       if (firstIntersection?.object) {
         const topMesh = firstIntersection.object as THREE.Mesh;
-        allSnapPoints = detectSnapPoints(topMesh, raycasterRef.current, camera, snapDistance);
+        allSnapPoints = detectSnapPoints(topMesh, raycasterRef.current);
         lastSnapPointsRef.current = allSnapPoints;
       } else if (lastSnapPointsRef.current?.length) {
         allSnapPoints = lastSnapPointsRef.current;

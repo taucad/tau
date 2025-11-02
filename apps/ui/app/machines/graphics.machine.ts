@@ -684,7 +684,7 @@ export const graphicsMachine = setup({
         const pPerpR = sub(p, pParallelR);
 
         const denom = dot(a, r);
-        const s = Math.abs(denom) > 1e-8 ? (desired - dot(a, pPerpR)) / denom : desired;
+        const s = Math.abs(denom) > 1e-6 ? (desired - dot(a, pPerpR)) / denom : desired;
         const newPivot = add(pPerpR, scale(r, s));
         return newPivot;
       },

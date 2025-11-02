@@ -52,9 +52,9 @@ export function adjustHexColorBrightness(hex: string, amount = 0.1): string {
   const normalizedAmount = amount * 255;
 
   // Clamp values to ensure they stay in valid 0-255 range
-  const modifiedR = clamp(r - normalizedAmount, 0, 255);
-  const modifiedG = clamp(g - normalizedAmount, 0, 255);
-  const modifiedB = clamp(b - normalizedAmount, 0, 255);
+  const modifiedR = Math.floor(clamp(r - normalizedAmount, 0, 255));
+  const modifiedG = Math.floor(clamp(g - normalizedAmount, 0, 255));
+  const modifiedB = Math.floor(clamp(b - normalizedAmount, 0, 255));
 
   // Convert back to hex with padding
   const modifiedHex = [modifiedR, modifiedG, modifiedB]

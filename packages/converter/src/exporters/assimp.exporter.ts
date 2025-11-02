@@ -10,6 +10,12 @@ export type AssimpExportFormat = (typeof assimpExportFormats)[number];
 
 type AssimpExporterOptions = {
   format: AssimpExportFormat;
+  /**
+   * Optional target file extension to use instead of the format's default extension.
+   * Useful when the desired extension differs from assimp's internal format name.
+   * For example, 'step' when format is 'stp'.
+   */
+  targetExtension?: string;
 };
 
 /**
@@ -55,8 +61,17 @@ export class AssimpExporter extends BaseExporter<AssimpExporterOptions> {
 
       for (let i = 0; i < fileCount; i++) {
         const file = result.GetFile(i);
-        const fileName = file.GetPath();
+        let fileName = file.GetPath();
         const content = file.GetContent();
+
+        // Rename file extension if targetExtension is specified
+        if (mergedOptions.targetExtension) {
+          const parts = fileName.split('.');
+          if (parts.length > 1) {
+            parts[parts.length - 1] = mergedOptions.targetExtension;
+            fileName = parts.join('.');
+          }
+        }
 
         outputFiles.push({
           name: fileName,

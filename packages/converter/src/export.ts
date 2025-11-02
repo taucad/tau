@@ -19,7 +19,7 @@ const exportConfigs = {
   stl: { exporter: new AssimpExporter().initialize({ format: 'stl' }) },
   // These formats are intentionally different. `step` is the most widely used extension,
   // whilst `stp` is the format supported by assimp.
-  step: { exporter: new AssimpExporter().initialize({ format: 'stp' }) },
+  step: { exporter: new AssimpExporter().initialize({ format: 'stp', targetExtension: 'step' }) },
   x: { exporter: new AssimpExporter().initialize({ format: 'x' }) },
   x3d: { exporter: new AssimpExporter().initialize({ format: 'x3d' }) },
 

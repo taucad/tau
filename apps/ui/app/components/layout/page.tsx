@@ -58,8 +58,8 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
         <header className="pointer-events-none absolute top-0 z-20 flex h-[var(--header-height)] w-full shrink-0 items-center justify-between gap-2">
           <div className="pointer-events-auto ml-2 flex h-8 items-center gap-0.25 rounded-md border bg-sidebar p-0.25 pl-2.75 transition-[margin] duration-200 ease-linear md:ml-[var(--sidebar-width-current)] md:gap-1">
             <SidebarTrigger className="group/sidebar-trigger -ml-2.5 rounded-sm">
-              <Tau className="size-6 text-primary group-hover/sidebar-trigger:hidden group-data-[open=true]/sidebar-trigger:hidden" />
-              <PanelLeftIcon className="hidden size-4 group-hover/sidebar-trigger:block group-data-[open=true]/sidebar-trigger:block" />
+              <Tau className="size-6 text-primary group-hover/sidebar-trigger:hidden group-data-[open=true]/sidebar-trigger:hidden max-md:hidden" />
+              <PanelLeftIcon className="size-4 group-hover/sidebar-trigger:block group-data-[open=true]/sidebar-trigger:block md:hidden" />
             </SidebarTrigger>
             {hasBreadcrumbItems ? (
               <span className="h-4">

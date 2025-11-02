@@ -1,20 +1,17 @@
 import { useChat } from '@ai-sdk/react';
 import type { Message } from 'ai';
 import { useState, useEffect } from 'react';
-import { Button } from '#components/ui/button.js';
-import { Input } from '#components/ui/input.js';
 import { defaultBuildName } from '#constants/build-names.js';
 import { useBuild } from '#hooks/use-build.js';
 import { useChatConstants } from '#utils/chat.utils.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
+import { InlineTextEditor } from '#components/inline-text-editor.js';
 
 const animationDuration = 2000;
 
 export function BuildNameEditor(): React.JSX.Element {
   const { build, updateName, isLoading } = useBuild();
-  const [isEditing, setIsEditing] = useState(false);
-  const [editValue, setEditValue] = useState<string>('');
   const [displayName, setDisplayName] = useState<string>(build?.name ?? '');
   const [isNameAnimating, setIsNameAnimating] = useState(false);
   const { append } = useChat({
@@ -58,85 +55,22 @@ export function BuildNameEditor(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only run after loading completes
   }, [build?.name, isLoading]);
 
-  const handleEdit = () => {
-    setEditValue(displayName);
-    setIsEditing(true);
-  };
-
-  const handleSave = async () => {
-    if (editValue.trim()) {
-      updateName(editValue.trim());
-      setDisplayName(editValue.trim());
-      // Don't trigger animation for manual edits
-    }
-
-    setIsEditing(false);
-  };
-
-  const handleCancel = () => {
-    setEditValue(displayName);
-    setIsEditing(false);
-  };
-
-  const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      void handleSave();
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      handleCancel();
-    }
-  };
-
-  const handleBlur = () => {
-    void handleSave();
-  };
-
-  const handleInputClick = (event: React.MouseEvent) => {
-    event.stopPropagation();
-  };
-
-  const handleInputFocus = (event: React.FocusEvent<HTMLInputElement>) => {
-    event.target.select();
-  };
-
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault();
-    void handleSave();
-  };
-
-  if (isEditing) {
-    return (
-      <form className="flex items-center gap-1" onSubmit={handleSubmit}>
-        <Input
-          autoFocus
-          autoComplete="off"
-          type="text"
-          value={editValue}
-          className="bg-background px-2 focus-visible:ring-0"
-          onChange={(event) => {
-            setEditValue(event.target.value);
-          }}
-          onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
-          onFocus={handleInputFocus}
-          onClick={handleInputClick}
-        />
-        <Button type="submit" size="sm">
-          Save
-        </Button>
-      </form>
-    );
-  }
-
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="ghost" className="cursor-text justify-start" onClick={handleEdit}>
-          <span data-animate={isNameAnimating} className="truncate data-[animate=true]:animate-typewriter-20">
-            {displayName === '' ? <LoadingSpinner /> : displayName}
-          </span>
-        </Button>
+        <InlineTextEditor
+          value={displayName}
+          className="h-7 [&_[data-slot=display]]:w-auto [&_[data-slot=display]]:max-w-none"
+          renderDisplay={(value) => (
+            <span data-animate={isNameAnimating} className="truncate data-[animate=true]:animate-typewriter-20">
+              {value === '' ? <LoadingSpinner /> : value}
+            </span>
+          )}
+          onSave={(value) => {
+            updateName(value);
+            setDisplayName(value);
+          }}
+        />
       </TooltipTrigger>
       <TooltipContent>Edit name</TooltipContent>
     </Tooltip>

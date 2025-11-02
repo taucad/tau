@@ -39,7 +39,7 @@ function KernelDetailsContent({ kernelId }: { readonly kernelId: KernelProvider 
       <p className="text-sm leading-relaxed text-muted-foreground">{selectedOption.longDescription}</p>
 
       <div className="space-y-3">
-        <Badge variant="outline" className="text-xs font-medium text-primary">
+        <Badge variant="default" className="text-xs font-medium">
           Best for: {selectedOption.recommended}
         </Badge>
 
@@ -75,6 +75,7 @@ function useBuildCreation() {
   const navigate = useNavigate();
   const [isCreating, setIsCreating] = useState(false);
   const { user } = useAuthenticate({ enabled: false });
+  const [, setIsEditorOpen] = useCookie(cookieName.chatOpEditor, false);
 
   const createBuild = useCallback(
     async (buildData: { name: string; description: string; kernel: KernelProvider }) => {
@@ -108,6 +109,9 @@ function useBuildCreation() {
           },
         });
 
+        // Ensure editor is open when navigating to the build page
+        setIsEditorOpen(true);
+
         void navigate(`/builds/${build.id}`);
       } catch (error) {
         console.error('Failed to create build:', error);
@@ -116,7 +120,7 @@ function useBuildCreation() {
         setIsCreating(false);
       }
     },
-    [navigate, user?.image, user?.name],
+    [navigate, user?.image, user?.name, setIsEditorOpen],
   );
 
   return { createBuild, isCreating };

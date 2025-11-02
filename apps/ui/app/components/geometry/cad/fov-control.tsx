@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Info } from 'lucide-react';
 import { Slider } from '#components/ui/slider.js';
 import { buttonVariants } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
@@ -113,13 +114,16 @@ export function FovControl({ defaultAngle, className }: Omit<CameraControlProps,
         </div>
       </TooltipTrigger>
       <TooltipContent forceMount>
-        <span>Adjust field of view angle</span>
+        <span>Change field of view angle</span>
         <br />
-        <span className="text-neutral-foreground/60 dark:text-foreground/50">Tip: Set to 0° for orthographic view</span>
+        <span className="inline-flex items-center gap-1 text-neutral-foreground/60 dark:text-foreground/50">
+          <Info className="size-3 stroke-2" /> Set to 0° for orthographic view
+        </span>
         {/* Desktop only - shift key is usually not available on mobile */}
         <br className="max-md:hidden" />
-        <span className="text-neutral-foreground/60 max-md:hidden dark:text-foreground/50">
-          Tip: Hold <KeyShortcut variant="tooltip">{formatKeyCombination({ key: 'Shift' })}</KeyShortcut> for 5° steps
+        <span className="inline-flex items-center gap-1 text-neutral-foreground/60 max-md:hidden dark:text-foreground/50">
+          <Info className="size-3 stroke-2" /> Hold{' '}
+          <KeyShortcut variant="tooltip">{formatKeyCombination({ key: 'Shift' })}</KeyShortcut> for 5° steps
         </span>
       </TooltipContent>
     </Tooltip>

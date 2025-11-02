@@ -97,7 +97,16 @@ export class ThreeDmLoader extends BaseLoader<Document, ThreeDmLoaderOptions> {
    * Initialize the rhino3dm library if not already loaded
    */
   private async initializeRhino(): Promise<void> {
-    this.rhino = await rhino3dm();
+    // @ts-expect-error -- rhino3dm types are not correct.
+    this.rhino = await rhino3dm({
+      locateFile() {
+        // Universal pattern for browsers and bundlers
+        // @see https://web.dev/articles/bundling-non-js-resources#universal_pattern_for_browsers_and_bundlers
+        const wasmPath = new URL('../assets/rhino3dm/rhino3dm.wasm', import.meta.url).href;
+
+        return wasmPath;
+      },
+    });
   }
 
   /**

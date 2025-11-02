@@ -4,10 +4,12 @@ import * as THREE from 'three';
 import { PerspectiveCamera } from '@react-three/drei';
 import { useSelector } from '@xstate/react';
 import { useFrame } from '@react-three/fiber';
-import { AxesHelper } from '#components/geometry/graphics/three/axes-helper.js';
+import { AxesHelper } from '#components/geometry/graphics/three/react/axes-helper.js';
 import { Grid } from '#components/geometry/graphics/three/grid.js';
 import { useCameraReset } from '#components/geometry/graphics/three/use-camera-reset.js';
-import { Lights } from '#components/geometry/graphics/three/lights.js';
+import { Lights } from '#components/geometry/graphics/three/react/lights.js';
+import { SectionView } from '#components/geometry/graphics/three/react/section-view.js';
+import { createStripedMaterial } from '#components/geometry/graphics/three/materials/striped-material.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 
 export type StageOptions = {
@@ -76,8 +78,53 @@ export function Stage({
   const outer = React.useRef<THREE.Group>(null);
   const inner = React.useRef<THREE.Group>(null);
 
-  // Subscribe to camera FOV angle from graphics actor
   const cameraFovAngle = useSelector(graphicsActor, (state) => state.context.cameraFovAngle);
+
+  const isSectionViewActive = useSelector(graphicsActor, (state) => state.context.isSectionViewActive);
+  const selectedSectionViewId = useSelector(graphicsActor, (state) => state.context.selectedSectionViewId);
+  // Translation is derived from pivot for display; Stage uses pivot directly
+  const sectionViewRotation = useSelector(graphicsActor, (state) => state.context.sectionViewRotation);
+  const sectionViewDirection = useSelector(graphicsActor, (state) => state.context.sectionViewDirection);
+  const sectionViewPivot = useSelector(graphicsActor, (state) => state.context.sectionViewPivot);
+  const availableSectionViews = useSelector(graphicsActor, (state) => state.context.availableSectionViews);
+  const enableClippingLines = useSelector(graphicsActor, (state) => state.context.enableClippingLines);
+  const enableClippingMesh = useSelector(graphicsActor, (state) => state.context.enableClippingMesh);
+
+  // Build THREE.Plane for the SectionView component
+  const sectionView = useMemo(() => {
+    if (!selectedSectionViewId) {
+      // Default plane when nothing is selected
+      return new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    }
+
+    const selectedPlane = availableSectionViews.find((plane) => plane.id === selectedSectionViewId);
+    if (!selectedPlane) {
+      return new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    }
+
+    // Start with the base normal from the selected plane
+    const normal = new THREE.Vector3(...selectedPlane.normal);
+
+    // Apply rotation to the normal if rotation is set
+    const [rotX, rotY, rotZ] = sectionViewRotation;
+    if (rotX !== 0 || rotY !== 0 || rotZ !== 0) {
+      const euler = new THREE.Euler(rotX, rotY, rotZ);
+      normal.applyEuler(euler);
+    }
+
+    // Apply direction after rotation
+    normal.multiplyScalar(-sectionViewDirection);
+
+    // Compute plane constant from the world-space pivot point: n·p + c = 0
+    // => c = -n·p. Using pivot as source of truth ensures the plane remains
+    // anchored during rotations and flips while keeping display translation stable.
+    const constant = -normal.dot(new THREE.Vector3(...sectionViewPivot));
+
+    return new THREE.Plane(normal, constant);
+  }, [selectedSectionViewId, sectionViewPivot, sectionViewRotation, sectionViewDirection, availableSectionViews]);
+
+  // Create striped material for capping surface
+  const cappingMaterial = useMemo(() => createStripedMaterial(), []);
 
   // State for camera reset functionality
   const originalDistanceReference = React.useRef<number | undefined>(undefined);
@@ -187,7 +234,15 @@ export function Stage({
       <group ref={outer}>
         {properties.enableAxes ? <AxesHelper /> : null}
         {properties.enableGrid ? <Grid /> : null}
-        <group ref={inner}>{children}</group>
+        <SectionView
+          plane={sectionView}
+          enableSection={Boolean(isSectionViewActive && selectedSectionViewId)}
+          enableLines={enableClippingLines}
+          enableMesh={enableClippingMesh}
+          cappingMaterial={cappingMaterial}
+        >
+          <group ref={inner}>{children}</group>
+        </SectionView>
       </group>
       <Lights />
     </group>

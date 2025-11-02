@@ -6,6 +6,7 @@ import { NavLink } from 'react-router';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
+import { ClientOnly } from '#components/ui/utils/client-only.js';
 
 const additionalUserButtonLinks: UserButtonProps['additionalLinks'] = [
   {
@@ -27,7 +28,7 @@ export function NavUser(): React.JSX.Element {
   const { data: session } = hooks.useSession();
 
   return (
-    <>
+    <ClientOnly>
       <SignedOut>
         <Button asChild variant="overlay" className="hidden select-none lg:flex">
           <NavLink to="/auth/sign-in" tabIndex={-1}>
@@ -62,6 +63,6 @@ export function NavUser(): React.JSX.Element {
           <TooltipContent>Profile</TooltipContent>
         </Tooltip>
       </SignedIn>
-    </>
+    </ClientOnly>
   );
 }

@@ -43,6 +43,9 @@
   ],
   "references": [
     {
+      "path": "../../packages/converter/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/types/tsconfig.lib.json"
     },
     {

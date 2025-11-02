@@ -2,7 +2,7 @@ import React from 'react';
 import { useSelector } from '@xstate/react';
 import * as THREE from 'three';
 import { Theme, useTheme } from 'remix-themes';
-import { InfiniteGrid } from '#components/geometry/graphics/three/infinite-grid.js';
+import { InfiniteGrid } from '#components/geometry/graphics/three/react/infinite-grid.js';
 import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 
 /**
@@ -19,5 +19,9 @@ export const Grid = React.memo(() => {
     [theme],
   );
 
-  return <InfiniteGrid smallSize={gridSizes.smallSize} largeSize={gridSizes.largeSize} color={gridColor} />;
+  return (
+    <InfiniteGrid
+      materialProperties={{ smallSize: gridSizes.smallSize, largeSize: gridSizes.largeSize, color: gridColor }}
+    />
+  );
 });

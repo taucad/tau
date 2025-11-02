@@ -2,6 +2,7 @@ import * as React from 'react';
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
 import { CheckIcon, ChevronRightIcon, CircleIcon } from 'lucide-react';
 import { cn } from '#utils/ui.utils.js';
+import { Switch } from '#components/ui/switch.js';
 
 function DropdownMenu({ ...properties }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>): React.JSX.Element {
   return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...properties} />;
@@ -127,6 +128,40 @@ function DropdownMenuRadioItem({
   );
 }
 
+function DropdownMenuSwitchItem({
+  className,
+  children,
+  isChecked,
+  onIsCheckedChange,
+  ...properties
+}: Omit<React.ComponentProps<typeof DropdownMenuPrimitive.Item>, 'onSelect'> & {
+  readonly isChecked: boolean;
+  readonly onIsCheckedChange?: (checked: boolean) => void;
+}): React.JSX.Element {
+  return (
+    <DropdownMenuPrimitive.Item
+      data-slot="dropdown-menu-switch-item"
+      className={cn(
+        'focus:text-accent-foreground relative flex h-8 cursor-pointer items-center justify-between gap-2 rounded-sm px-2 text-sm outline-hidden select-none focus:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        "[&_svg]:pointer-events-none [&_svg]:text-muted-foreground [&_svg:not([class*='size-'])]:size-4",
+        className,
+      )}
+      onSelect={(event) => {
+        event.preventDefault();
+        onIsCheckedChange?.(!isChecked);
+      }}
+      {...properties}
+    >
+      {children}
+      <Switch
+        className="data-[state=unchecked]:bg-muted-foreground!"
+        checked={isChecked}
+        onCheckedChange={onIsCheckedChange}
+      />
+    </DropdownMenuPrimitive.Item>
+  );
+}
+
 function DropdownMenuLabel({
   className,
   isInset,
@@ -222,6 +257,7 @@ export {
   DropdownMenuCheckboxItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSwitchItem,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuSub,

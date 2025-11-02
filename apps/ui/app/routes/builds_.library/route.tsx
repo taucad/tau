@@ -40,7 +40,6 @@ import { createColumns } from '#routes/builds_.library/columns.js';
 import { CategoryBadge } from '#components/category-badge.js';
 import { Button, buttonVariants } from '#components/ui/button.js';
 import { SearchInput } from '#components/search-input.js';
-import { Input } from '#components/ui/input.js';
 import { Card, CardContent, CardHeader, CardDescription, CardFooter } from '#components/ui/card.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
 import {
@@ -76,11 +75,11 @@ import { Checkbox } from '#components/ui/checkbox.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '#components/ui/table.js';
 import { toTitleCase } from '#utils/string.utils.js';
-import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
+import { InlineTextEditor } from '#components/inline-text-editor.js';
 
 const categoryIconsFromEngineeringDiscipline = {
   mechanical: Wrench,
@@ -436,7 +435,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
         </Table>
       ) : (
         // Grid View
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {table.getRowModel().rows.map((row) => (
             <BuildProvider key={row.original.id} buildId={row.original.id}>
               <BuildLibraryCard
@@ -654,21 +653,6 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
   const { parameters } = mechanicalAsset;
   const status = useSelector(actorRef, (state) => state.value);
   const [showPreview, setShowPreview] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [name, setName] = useState(build.name);
-
-  const handleRename = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (name.trim() && name !== build.name) {
-      try {
-        await actions.handleRename(build.id, name);
-      } catch {
-        // Error is already handled in the action
-      }
-    }
-
-    setIsEditing(false);
-  };
 
   useEffect(() => {
     if (showPreview) {
@@ -681,18 +665,18 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
       <div className="absolute top-2 left-2 z-10">
         <Checkbox size="large" checked={isSelected} onCheckedChange={() => onSelect?.()} />
       </div>
-      <div className="relative aspect-video overflow-hidden bg-muted">
+      <div className="relative aspect-video h-fit w-full overflow-hidden bg-muted">
         {!showPreview && (
           <img
             src={build.thumbnail || '/placeholder.svg'}
             alt={build.name}
-            className="size-full scale-95 object-cover transition-transform group-hover:scale-100"
+            className="size-full origin-center object-cover transition-transform group-hover:scale-120"
             loading="lazy"
           />
         )}
         {showPreview ? (
           <div
-            className="absolute inset-0"
+            className="size-full origin-center scale-80 object-cover transition-transform group-hover:scale-100"
             onClick={(event) => {
               event.stopPropagation();
               event.preventDefault();
@@ -729,35 +713,14 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
         </Button>
       </div>
       <CardHeader>
-        <div className="flex items-start justify-between">
-          <Popover open={isEditing} onOpenChange={setIsEditing}>
-            <PopoverTrigger asChild>
-              <Button variant="ghost" className="-mx-2 cursor-text justify-start px-2 text-xl font-semibold">
-                {build.name}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-64 -translate-x-2 p-1">
-              <form className="flex items-center gap-2 align-middle" onSubmit={handleRename}>
-                <Input
-                  autoFocus
-                  autoComplete="off"
-                  value={name}
-                  className="h-7"
-                  onChange={(event) => {
-                    setName(event.target.value);
-                  }}
-                  onFocus={(event) => {
-                    event.target.select();
-                  }}
-                />
-                <Button type="submit" size="sm" disabled={!name.trim() || name === build.name}>
-                  Save
-                </Button>
-              </form>
-            </PopoverContent>
-          </Popover>
+        <div className="-mx-2 flex flex-1 items-start justify-start overflow-hidden py-1">
+          <InlineTextEditor
+            value={build.name}
+            className="h-7 w-full [&_[data-slot=display]]:w-full [&_[data-slot=display]]:max-w-full [&_[data-slot=display]]:text-base [&_[data-slot=display]]:font-semibold"
+            onSave={async (value) => actions.handleRename(build.id, value)}
+          />
         </div>
-        <CardDescription>{build.description}</CardDescription>
+        <CardDescription className="line-clamp-2">{build.description}</CardDescription>
       </CardHeader>
       <CardContent className="flex-grow">
         <div className="flex flex-wrap items-center justify-between gap-4">

@@ -4,11 +4,24 @@
     "---Getting Started---",
     "index",
 
-    "---CAD Kernels---",
+    "---Kernels---",
     "kernels/index",
     "kernels/replicad",
     "kernels/openscad",
     "kernels/zoo",
+
+    "---Components---",
+    "packages/index",
+    "packages/react",
+    "packages/js",
+
+    "--Graphics---",
+    "graphics/index",
+    "graphics/three",
+    "graphics/three/index",
+    "graphics/three/viewer",
+    "graphics/three/infinite-grid",
+    "graphics/three/lights",
 
     "---Architecture---",
     "architecture/index",

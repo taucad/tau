@@ -2,7 +2,6 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { ArrowRight } from 'lucide-react';
 import { NavLink } from 'react-router';
 import type { ReactNode } from 'react';
-import { useState } from 'react';
 import type { Build, EngineeringDiscipline } from '@taucad/types';
 import { CategoryBadge } from '#components/category-badge.js';
 import { DataTableColumnHeader } from '#routes/builds_.library/data-table-column-header.js';
@@ -11,33 +10,15 @@ import { Checkbox } from '#components/ui/checkbox.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import type { BuildActions } from '#routes/builds_.library/route.js';
 import { BuildActionDropdown } from '#routes/builds_.library/build-action-dropdown.js';
-import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
-import { Input } from '#components/ui/input.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
+import { InlineTextEditor } from '#components/inline-text-editor.js';
 
 // Rename component for table cells
 function BuildNameCell({ build, actions }: { readonly build: Build; readonly actions: BuildActions }) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [name, setName] = useState(build.name);
-
-  const handleRename = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (name.trim() && name !== build.name) {
-      try {
-        await actions.handleRename(build.id, name);
-        setIsEditing(false);
-      } catch {
-        // Error is already handled in the action
-      }
-    } else {
-      setIsEditing(false);
-    }
-  };
-
   return (
     <div className="flex w-full items-center justify-between gap-3 pr-2">
       <div className="flex items-center gap-3">
-        <div className="relative h-9 w-9 overflow-hidden rounded-full">
+        <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full">
           <img
             src={build.thumbnail || '/placeholder.svg'}
             alt={build.name}
@@ -49,32 +30,11 @@ function BuildNameCell({ build, actions }: { readonly build: Build; readonly act
             </div>
           )}
         </div>
-        <Popover open={isEditing} onOpenChange={setIsEditing}>
-          <PopoverTrigger asChild>
-            <Button variant="ghost" className="cursor-text justify-start p-2 font-medium">
-              {build.name}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-64 -translate-x-2 p-1">
-            <form className="flex items-center gap-2 align-middle" onSubmit={handleRename}>
-              <Input
-                autoFocus
-                autoComplete="off"
-                value={name}
-                className="h-7"
-                onChange={(event) => {
-                  setName(event.target.value);
-                }}
-                onFocus={(event) => {
-                  event.target.select();
-                }}
-              />
-              <Button type="submit" size="sm" disabled={!name.trim() || name === build.name}>
-                Save
-              </Button>
-            </form>
-          </PopoverContent>
-        </Popover>
+        <InlineTextEditor
+          value={build.name}
+          className="h-7 [&_[data-slot=display]]:font-medium"
+          onSave={async (value) => actions.handleRename(build.id, value)}
+        />
       </div>
     </div>
   );

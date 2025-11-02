@@ -42,7 +42,7 @@ const codeBlockActionVariants = cva('flex flex-row gap-1', {
       floating: 'p-0.25',
     },
     visibility: {
-      inivisibleUntilHover: 'opacity-0 group-hover/codeblock:opacity-100 transition-opacity',
+      inivisibleUntilHover: 'md:opacity-0 md:group-hover/codeblock:opacity-100 md:transition-opacity',
       alwaysVisible: '',
     },
   },
@@ -87,12 +87,7 @@ export function CodeBlock({ children, variant = 'standard', className, ...rest }
 /**
  * CodeBlock header component - contains title and actions
  */
-export function CodeBlockHeader({
-  variant = 'standard',
-  className,
-  children,
-  ...rest
-}: CodeBlockHeaderProps): React.JSX.Element {
+export function CodeBlockHeader({ variant, className, children, ...rest }: CodeBlockHeaderProps): React.JSX.Element {
   return (
     <div {...rest} data-slot="codeblock-header" className={cn(codeBlockHeaderVariants({ variant, className }))}>
       {children}
@@ -103,12 +98,7 @@ export function CodeBlockHeader({
 /**
  * CodeBlock title component - displays the code block title/filename
  */
-export function CodeBlockTitle({
-  variant = 'standard',
-  className,
-  children,
-  ...rest
-}: CodeBlockTitleProps): React.JSX.Element {
+export function CodeBlockTitle({ variant, className, children, ...rest }: CodeBlockTitleProps): React.JSX.Element {
   return (
     <div {...rest} data-slot="codeblock-title" className={cn(codeBlockTitleVariants({ variant, className }))}>
       {children}
@@ -120,13 +110,18 @@ export function CodeBlockTitle({
  * CodeBlock action container - houses action buttons like copy
  */
 export function CodeBlockAction({
-  variant = 'standard',
+  variant,
+  visibility,
   className,
   children,
   ...rest
 }: CodeBlockActionProps): React.JSX.Element {
   return (
-    <div {...rest} data-slot="codeblock-action" className={cn(codeBlockActionVariants({ variant, className }))}>
+    <div
+      {...rest}
+      data-slot="codeblock-action"
+      className={cn(codeBlockActionVariants({ variant, visibility, className }))}
+    >
       {children}
     </div>
   );

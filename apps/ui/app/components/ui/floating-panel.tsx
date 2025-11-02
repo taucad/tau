@@ -163,7 +163,7 @@ const floatingPanelTriggerButtonVariants = cva(
 
 const floatingPanelContentVariants = cva(
   cn(
-    'flex size-full flex-col bg-sidebar/50',
+    'flex h-full w-full flex-col bg-sidebar/50',
     'transition-opacity duration-300',
     'pointer-events-none opacity-0',
     'group-data-[state=open]/floating-panel:pointer-events-auto group-data-[state=open]/floating-panel:opacity-100 group-data-[state=open]/floating-panel:delay-200',

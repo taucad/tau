@@ -10,6 +10,12 @@ export type AssimpExportFormat = (typeof assimpExportFormats)[number];
 
 type AssimpExporterOptions = {
   format: AssimpExportFormat;
+  /**
+   * Optional target file extension to use instead of the format's default extension.
+   * Useful when the desired extension differs from assimp's internal format name.
+   * For example, 'step' when format is 'stp'.
+   */
+  targetExtension?: string;
 };
 
 /**
@@ -27,7 +33,15 @@ export class AssimpExporter extends BaseExporter<AssimpExporterOptions> {
 
     try {
       // Initialize assimpjs exporter
-      const ajs = await assimpjsExporter();
+      const ajs = await assimpjsExporter({
+        locateFile() {
+          // Universal pattern for browsers and bundlers
+          // @see https://web.dev/articles/bundling-non-js-resources#universal_pattern_for_browsers_and_bundlers
+          const wasmPath = new URL('../assets/assimpjs/assimpjs-exporter.wasm', import.meta.url).href;
+
+          return wasmPath;
+        },
+      });
 
       // Create file list with GLB data
       const fileList = new ajs.FileList();
@@ -47,8 +61,17 @@ export class AssimpExporter extends BaseExporter<AssimpExporterOptions> {
 
       for (let i = 0; i < fileCount; i++) {
         const file = result.GetFile(i);
-        const fileName = file.GetPath();
+        let fileName = file.GetPath();
         const content = file.GetContent();
+
+        // Rename file extension if targetExtension is specified
+        if (mergedOptions.targetExtension) {
+          const parts = fileName.split('.');
+          if (parts.length > 1) {
+            parts[parts.length - 1] = mergedOptions.targetExtension;
+            fileName = parts.join('.');
+          }
+        }
 
         outputFiles.push({
           name: fileName,

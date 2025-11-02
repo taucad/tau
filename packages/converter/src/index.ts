@@ -1,3 +1,7 @@
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference -- ensuring package consumers have access to the types
+/// <reference path="./types/assimpjs.d.ts" />
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference -- ensuring package consumers have access to the types
+/// <reference path="./types/occt-import-js.d.ts" />
 /* eslint-disable no-barrel-files/no-barrel-files -- barrel file */
 // Main conversion functions
 export { convertFile, importToGlb, exportFromGlb } from '#conversion.js';
@@ -13,6 +17,9 @@ export {
 // Direct access to import and export pipelines
 export { importFiles, supportedImportFormats } from '#import.js';
 export { exportFiles, supportedExportFormats } from '#export.js';
+
+// Format metadata
+export { formatConfigurations } from '#constants/format-names.constants.js';
 
 // Types
 export type { InputFormat, OutputFormat, File } from '#types.js';

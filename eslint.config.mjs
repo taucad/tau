@@ -4,6 +4,31 @@ import nxEslintPlugin from '@nx/eslint-plugin';
 import noBarrelFilesPlugin from 'eslint-plugin-no-barrel-files';
 
 /**
+ * Boolean property prefixes.
+ *
+ * Rules:
+ * - Names MUST always use the positive form of the word, never the antonym.
+ *
+ * Good vs Bad Examples:
+ * - isEnabled, not isDisabled
+ * - isVisible, not isHidden
+ * - shouldShow, not shouldHide
+ * - enableButton, not disableButton
+ * - makeDefault, not destroyDefault
+ * - withLabel, not withoutLabel
+ *
+ * More Usage Examples:
+ * `is`: isEnabled, isActive, isSelected
+ * `has`: hasValue, hasSelection, hasContent
+ * `as`: asChild
+ * `should`: shouldRender, shouldUpdate, shouldAnimate
+ * `enable`: enableEditing, enableDragging, enableZoom
+ * `make`: makeDefault, makeHandler, makeValidator
+ * `with`: withTheme, withContext, withRouter
+ */
+const booleanPropertyPrefixes = ['is', 'has', 'as', 'should', 'enable', 'make', 'with'];
+
+/**
  * @type {import('eslint').Linter.Config[]}
  */
 const config = [
@@ -20,7 +45,7 @@ const config = [
       '**/.cache',
       '**/build',
       '**/public/build',
-      '**/public/entry.worker.js',
+      '**/public/*.js',
       '**/.env',
       '**/.react-router',
       '**/stats.html',
@@ -196,6 +221,8 @@ const config = [
         },
       ],
       'n/no-extraneous-import': 'off', // Disabled as it has no monorepo support.
+
+      'react/no-unknown-property': 'off', // Disabled as Typescript will check unknown properties. It can cause false positives for custom-elements.
     },
   },
   {
@@ -240,7 +267,7 @@ const config = [
       'react/react-in-jsx-scope': 'off',
       'react/boolean-prop-naming': [
         'error',
-        { rule: '^(is|has|as|should|enable)[A-Z]([A-Za-z0-9]?)+$', validateNested: true },
+        { rule: `^(${booleanPropertyPrefixes.join('|')})[A-Z]([A-Za-z0-9]?)+$`, validateNested: true },
       ],
       // DefaultProps is deprecated and irrelevant when using functional components.
       'react/require-default-props': 'off',

@@ -624,7 +624,7 @@ export const ChatTextarea = memo(function ({
         {/* Tool selector */}
         <Tooltip>
           <ChatToolSelector value={selectedToolChoice} onValueChange={setSelectedToolChoice}>
-            {({ selectedMode }) => (
+            {({ selectedMode, selectedTools, toolMetadata }) => (
               <TooltipTrigger asChild>
                 <Button
                   data-chat-textarea-focustrap
@@ -638,7 +638,16 @@ export const ChatTextarea = memo(function ({
                     {selectedMode === 'any' && 'Any tool'}
                     {selectedMode === 'custom' && 'Custom'}
                   </span>
-                  <Wrench className="size-4" />
+                  {selectedMode === 'custom' && selectedTools.length > 0 ? (
+                    <span className="flex items-center gap-1">
+                      {selectedTools.map((tool) => {
+                        const Icon = toolMetadata[tool].icon;
+                        return <Icon key={tool} className="size-4" />;
+                      })}
+                    </span>
+                  ) : (
+                    <Wrench className="size-4" />
+                  )}
                 </Button>
               </TooltipTrigger>
             )}

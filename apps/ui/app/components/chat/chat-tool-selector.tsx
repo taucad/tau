@@ -1,36 +1,38 @@
 import { memo, useCallback, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Globe, Code, Image, Eye, Check } from 'lucide-react';
+import { Globe, Code, Image, Eye } from 'lucide-react';
 import type { ToolWithSelection, Tool } from '@taucad/types';
 import { tool, toolSelection } from '@taucad/types/constants';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSwitchItem,
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu.js';
-import { cn } from '#utils/ui.utils.js';
 
 type ToolSelectorMode = 'auto' | 'none' | 'any' | 'custom';
+
+type ToolMetadata = {
+  label: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+};
 
 type ChatToolSelectorProperties = {
   readonly value?: ToolWithSelection;
   readonly onValueChange?: (value: ToolWithSelection) => void;
-  readonly children: (properties: { selectedMode: ToolSelectorMode; selectedTools: Tool[] }) => ReactNode;
+  readonly children: (properties: {
+    selectedMode: ToolSelectorMode;
+    selectedTools: Tool[];
+    toolMetadata: Record<Tool, ToolMetadata>;
+  }) => ReactNode;
 };
 
-const toolMetadata: Record<
-  Tool,
-  {
-    label: string;
-    description: string;
-    icon: React.ComponentType<{ className?: string }>;
-  }
-> = {
+const toolMetadata: Record<Tool, ToolMetadata> = {
   [tool.webSearch]: {
     label: 'Web Search',
     description: 'Search the web for information',
@@ -76,7 +78,7 @@ const modeOptions: Array<{
   {
     value: 'custom',
     label: 'Custom',
-    description: 'Select specific tools to require',
+    description: 'Make these tools available',
   },
 ];
 
@@ -177,7 +179,7 @@ export const ChatToolSelector = memo(function ({
 
   return (
     <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
-      <DropdownMenuTrigger asChild>{children({ selectedMode: mode, selectedTools })}</DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild>{children({ selectedMode: mode, selectedTools, toolMetadata })}</DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-60">
         <DropdownMenuLabel>Tool Selection</DropdownMenuLabel>
         <DropdownMenuSeparator />
@@ -188,7 +190,7 @@ export const ChatToolSelector = memo(function ({
           }}
         >
           {modeOptions.map((option) => (
-            <DropdownMenuRadioItem key={option.value} className="h-9" value={option.value} onSelect={preventClose}>
+            <DropdownMenuRadioItem key={option.value} className="h-10" value={option.value} onSelect={preventClose}>
               <div className="flex flex-col items-start gap-0">
                 <span className="text-sm font-medium">{option.label}</span>
                 <span className="text-xs text-muted-foreground">{option.description}</span>
@@ -207,20 +209,18 @@ export const ChatToolSelector = memo(function ({
               const isSelected = selectedTools.includes(toolKey);
 
               return (
-                <DropdownMenuItem
+                <DropdownMenuSwitchItem
                   key={toolKey}
-                  className="flex w-full items-center justify-between gap-2"
-                  onClick={() => {
+                  isChecked={isSelected}
+                  onIsCheckedChange={() => {
                     handleToolToggle(toolKey);
                   }}
-                  onSelect={preventClose}
                 >
-                  <span className={cn('flex items-center gap-2', isSelected && 'text-primary [&_svg]:text-primary!')}>
+                  <span className="flex items-center gap-2">
                     <Icon className="size-4" />
                     {metadata.label}
                   </span>
-                  {isSelected ? <Check className="size-4" /> : null}
-                </DropdownMenuItem>
+                </DropdownMenuSwitchItem>
               );
             })}
           </>

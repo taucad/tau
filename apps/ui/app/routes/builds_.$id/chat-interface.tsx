@@ -21,6 +21,8 @@ import type { chatTabs } from '#routes/builds_.$id/chat-interface-nav.js';
 import { ChatInterfaceNav } from '#routes/builds_.$id/chat-interface-nav.js';
 import { Tabs, TabsContents, TabsContent } from '#components/ui/tabs.js';
 import { Button } from '#components/ui/button.js';
+import { ChatInterfaceStatus } from '#routes/builds_.$id/chat-interface-status.js';
+import { ChatInterfaceGraphics } from '#routes/builds_.$id/chat-interface-graphics.js';
 
 /**
  * The spacing/gap between the panels in pixels.
@@ -132,6 +134,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
             )}
           >
             <ChatViewerStatus />
+            <ChatInterfaceStatus />
           </div>
 
           {/* Bottom-left Content */}
@@ -316,7 +319,8 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           </div>
 
           {/* Bottom-left Content */}
-          <div className="pointer-events-auto absolute right-8 bottom-0 left-0 flex w-full flex-col gap-2">
+          <div className="pointer-events-auto absolute right-8 bottom-0 left-0 flex w-fit shrink-0 flex-col gap-2">
+            <ChatInterfaceGraphics />
             <ChatStackTrace />
             <ChatViewerControls />
           </div>
@@ -348,7 +352,6 @@ export const ChatInterface = memo(function (): React.JSX.Element {
         >
           {/* Top-right Content */}
           <div className="pointer-events-auto absolute top-0 right-0 flex flex-col gap-2">
-            <SettingsControl />
             <ChatParametersTrigger
               isOpen={isParametersOpen}
               onToggle={() => {
@@ -425,12 +428,13 @@ export const ChatInterface = memo(function (): React.JSX.Element {
       {/* Centered Content */}
       <div
         className={cn(
-          'absolute top-1/2 -translate-y-1/2',
+          'absolute top-[10%]',
           'left-1/2',
+          'flex flex-col gap-2',
           '-translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)]',
-          'top-[90%] -translate-y-[90%]',
         )}
       >
+        <ChatInterfaceStatus />
         <ChatViewerStatus />
       </div>
     </div>

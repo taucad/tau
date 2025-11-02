@@ -181,6 +181,8 @@ type ChatParametersNumberProps = {
   readonly min?: number;
   readonly max?: number;
   readonly step?: number;
+  // eslint-disable-next-line react/boolean-prop-naming -- following input boolean prop naming convention.
+  readonly disabled?: boolean;
 };
 
 export function ChatParametersNumber({
@@ -191,6 +193,7 @@ export function ChatParametersNumber({
   min,
   max,
   step,
+  disabled,
 }: ChatParametersNumberProps): React.JSX.Element {
   // Track Shift key state for adjusting slider step
   const { isKeyPressed: isShiftHeld } = useKeydown(
@@ -216,6 +219,7 @@ export function ChatParametersNumber({
         min={min ?? calculateSliderMin(defaultValue)}
         max={max ?? calculateSliderMax(defaultValue)}
         step={effectiveStep}
+        disabled={disabled}
         className={cn('[&_[data-slot=slider-track]]:h-7', 'md:[&_[data-slot=slider-track]]:h-4.5')}
         onValueChange={([newValue]) => {
           onChange(Number(newValue));
@@ -225,9 +229,8 @@ export function ChatParametersNumber({
         value={value}
         name={name}
         className="h-7 w-24 bg-background"
-        onChange={(event) => {
-          onChange(Number.parseFloat(event.target.value));
-        }}
+        disabled={disabled}
+        onValueChange={onChange}
       />
     </div>
   );

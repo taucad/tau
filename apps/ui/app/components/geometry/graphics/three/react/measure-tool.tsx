@@ -155,7 +155,7 @@ export function MeasureTool(): React.JSX.Element {
           const endPos = camera.position.clone();
           const dot = Math.abs(startCameraQuatRef.current.dot(endQuat));
           const angle = 2 * Math.acos(Math.min(1, Math.max(-1, dot))); // Radians
-          const rotated = angle > 0.001; // ~0.057°
+          const rotated = angle > 0.01; // ~0.57°
           const translated = startCameraPosRef.current.distanceTo(endPos) > 1e-3;
 
           if (!rotated && !translated && currentStart) {

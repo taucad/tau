@@ -351,6 +351,18 @@ export function SectionViewControls({
     }
   });
 
+  // Keep transform controls controlled by external state changes.
+  // When plane selection, translation, or rotation are changed via the UI/state
+  // (not by dragging), clear any anchor so the gizmo snaps to the computed
+  // position in the next frame.
+  React.useEffect(() => {
+    if (isTranslatingRef.current || isRotatingRef.current) {
+      return;
+    }
+
+    anchorPositionRef.current = undefined;
+  }, [selectedPlaneId, translation, rotation]);
+
   if (!isActive) {
     return undefined;
   }

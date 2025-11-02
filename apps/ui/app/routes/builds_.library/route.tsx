@@ -749,6 +749,11 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
   );
 }
 
+type BulkActionsProps = {
+  readonly table: ReturnType<typeof useReactTable<Build>>;
+  readonly deleteBuild: (build: Build) => void;
+};
+
 function BulkActions({ table, deleteBuild }: BulkActionsProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 

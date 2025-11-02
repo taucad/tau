@@ -242,31 +242,28 @@ type SectionViewControlsProperties = {
   readonly isActive: boolean;
   readonly selectedPlaneId: PlaneId | undefined;
   readonly availablePlanes: AvailablePlane[];
-  readonly translation: number;
+  readonly pivot?: [number, number, number];
   readonly rotation: [number, number, number];
   readonly planeName: 'cartesian' | 'face';
   readonly hoveredSectionViewId: PlaneSelectorId | undefined;
   readonly onSelectPlane: (planeId: PlaneSelectorId) => void;
   readonly onHover: (planeId: PlaneSelectorId | undefined) => void;
-  readonly onToggleDirection: () => void;
-  readonly onSetTranslation: (value: number) => void;
   readonly onSetRotation: (rotation: THREE.Euler) => void;
+  readonly onSetPivot?: (value: [number, number, number]) => void;
 };
 
 export function SectionViewControls({
   isActive,
   selectedPlaneId,
   availablePlanes,
-  translation,
+  pivot,
   rotation,
   planeName,
   hoveredSectionViewId,
   onSelectPlane,
-  // @ts-expect-error -- USE THIS
-  onToggleDirection,
   onHover,
-  onSetTranslation,
   onSetRotation,
+  onSetPivot,
 }: SectionViewControlsProperties): React.JSX.Element | undefined {
   const transformControlsRef = useRef<THREE.Object3D>(undefined);
   // Track the latest rotation locally to project translation along the rotated plane normal
@@ -297,57 +294,35 @@ export function SectionViewControls({
   const [nx, ny, nz] = selectedPlane?.normal ?? [0, 0, 1];
   const normal = new THREE.Vector3(nx, ny, nz);
 
-  // Keep the gizmo positioned when translation/plane/direction change, but
-  // DO NOT change position while rotating. This ensures rotation happens
-  // around the translated pivot instead of the world origin.
+  // Single frame loop to keep rotation and position in sync.
+  // - When not dragging rotate: sync object rotation from props
+  // - When not dragging translate/rotate: position object at pivot
   useFrame(() => {
     const { current } = transformControlsRef;
     if (!current || !selectedPlane) {
       return;
     }
 
+    // Sync external rotation when not rotating
+    if (!isRotatingRef.current) {
+      rotationRef.current.set(rotation[0], rotation[1], rotation[2]);
+      current.rotation.set(rotation[0], rotation[1], rotation[2]);
+    }
+
+    // While dragging, do not override transform-controls position
     if (isRotatingRef.current || isTranslatingRef.current) {
       return;
     }
 
-    // If we have an anchor (e.g. after a rotation), keep the gizmo at that world
-    // position to avoid snapping towards the plane's origin-projection.
+    // Keep anchor if set (post-drag/rotate)
     if (anchorPositionRef.current) {
       current.position.copy(anchorPositionRef.current);
       return;
     }
 
-    const [x, y, z] = selectedPlane.normal;
-    const baseNormal = new THREE.Vector3(x, y, z);
-    const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
-    const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
-    const position = rotatedNormal.multiplyScalar(translation);
-    current.position.copy(position);
-  });
-
-  // Sync external rotation into gizmo when UI changes rotation
-  useFrame(() => {
-    const { current } = transformControlsRef;
-    if (!current || !selectedPlane) {
-      return;
-    }
-
-    if (isRotatingRef.current) {
-      return;
-    }
-
-    rotationRef.current.set(rotation[0], rotation[1], rotation[2]);
-    current.rotation.set(rotation[0], rotation[1], rotation[2]);
-
-    // Do not move position here if an anchor is set; the primary frame loop
-    // will honor the anchor and keep the gizmo from jumping.
-    if (!anchorPositionRef.current) {
-      const [bx, by, bz] = selectedPlane.normal;
-      const baseNormal = new THREE.Vector3(bx, by, bz);
-      const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
-      const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
-      const position = rotatedNormal.multiplyScalar(translation);
-      current.position.copy(position);
+    // Controlled position from pivot
+    if (pivot) {
+      current.position.set(pivot[0], pivot[1], pivot[2]);
     }
   });
 
@@ -361,7 +336,7 @@ export function SectionViewControls({
     }
 
     anchorPositionRef.current = undefined;
-  }, [selectedPlaneId, translation, rotation]);
+  }, [selectedPlaneId, rotation, pivot]);
 
   if (!isActive) {
     return undefined;
@@ -461,12 +436,10 @@ export function SectionViewControls({
 
           const currentObject = transformControlsRef.current;
           if (currentObject) {
-            // Project the position onto the ROTATED normal axis
             const { position } = currentObject;
-            const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
-            const rotatedNormal = normal.clone().applyQuaternion(q).normalize();
-            const projectedDistance = position.dot(rotatedNormal);
-            onSetTranslation(projectedDistance);
+            if (onSetPivot) {
+              onSetPivot([position.x, position.y, position.z]);
+            }
           }
         }}
         onMouseDown={() => {
@@ -501,14 +474,7 @@ export function SectionViewControls({
             const rotation = currentObject.rotation.clone();
             rotationRef.current.copy(rotation);
             onSetRotation(rotation);
-
-            // Recompute translation so the plane rotates about the translated pivot
-            const [bx, by, bz] = selectedPlane.normal;
-            const baseNormal = new THREE.Vector3(bx, by, bz);
-            const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
-            const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
-            const newTranslation = pivotPointRef.current.dot(rotatedNormal);
-            onSetTranslation(newTranslation);
+            // Do not change translation here; machine derives display value from pivot
           }
         }}
         onMouseDown={() => {

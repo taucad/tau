@@ -51,6 +51,8 @@ export type GraphicsContext = {
   sectionViewTranslation: number; // Current translation offset
   sectionViewRotation: [number, number, number]; // Euler rotation as tuple [x, y, z]
   sectionViewDirection: 1 | -1; // Normal direction multiplier
+  /** World-space pivot point that the clipping plane passes through */
+  sectionViewPivot: [number, number, number];
   enableClippingLines: boolean; // Whether to cut lines
   enableClippingMesh: boolean; // Whether to cut meshes
 
@@ -110,6 +112,7 @@ export type GraphicsEvent =
   | { type: 'setSectionViewRotation'; payload: [number, number, number] }
   | { type: 'toggleSectionViewDirection' }
   | { type: 'setSectionViewDirection'; payload: 1 | -1 }
+  | { type: 'setSectionViewPivot'; payload: [number, number, number] }
   | { type: 'setPlaneName'; payload: 'cartesian' | 'face' }
   | { type: 'setHoveredSectionView'; payload: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy' | undefined }
   | {
@@ -229,6 +232,75 @@ function clampRadiansToNearestDegree(radians: number): number {
   const degrees = (radians * 180) / Math.PI;
   const rounded = Math.round(degrees);
   return (rounded * Math.PI) / 180;
+}
+
+// Return the fixed base axis for a given plane id. This axis is used for
+// computing the displayed translation from the world-space pivot so that
+// rotation does not change the displayed value.
+function getBaseAxis(planeId: 'xy' | 'xz' | 'yz' | undefined): [number, number, number] {
+  if (planeId === 'xz') {
+    return [0, 1, 0];
+  }
+
+  if (planeId === 'yz') {
+    return [1, 0, 0];
+  }
+
+  // Default and 'xy'
+  return [0, 0, 1];
+}
+
+function dot(a: [number, number, number], b: [number, number, number]): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function scale(v: [number, number, number], s: number): [number, number, number] {
+  return [v[0] * s, v[1] * s, v[2] * s];
+}
+
+function sub(a: [number, number, number], b: [number, number, number]): [number, number, number] {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+
+function add(a: [number, number, number], b: [number, number, number]): [number, number, number] {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+
+function length(v: [number, number, number]): number {
+  return Math.hypot(v[0], v[1], v[2]);
+}
+
+function normalize(v: [number, number, number]): [number, number, number] {
+  const length_ = length(v) || 1;
+  return [v[0] / length_, v[1] / length_, v[2] / length_];
+}
+
+// Apply XYZ-order Euler rotation to a vector
+function rotateVectorByEuler(v: [number, number, number], euler: [number, number, number]): [number, number, number] {
+  const [x, y, z] = v;
+  const [rx, ry, rz] = euler;
+
+  // Rotate around X
+  const cx = Math.cos(rx);
+  const sx = Math.sin(rx);
+  const y1 = y * cx - z * sx;
+  const z1 = y * sx + z * cx;
+
+  // Rotate around Y
+  const cy = Math.cos(ry);
+  const sy = Math.sin(ry);
+  const x2 = x * cy + z1 * sy;
+  const y2 = y1;
+  const z2 = -x * sy + z1 * cy;
+
+  // Rotate around Z
+  const cz = Math.cos(rz);
+  const sz = Math.sin(rz);
+  const x3 = x2 * cz - y2 * sz;
+  const y3 = x2 * sz + y2 * cz;
+  const z3 = z2;
+
+  return [x3, y3, z3];
 }
 
 // Round a translation value to a given number of decimals in the current unit,
@@ -572,10 +644,14 @@ export const graphicsMachine = setup({
         assertEvent(event, 'selectSectionView');
         return event.payload;
       },
-      // Reset translation when changing planes
+      // Reset translation and pivot when changing planes
       sectionViewTranslation({ event }) {
         assertEvent(event, 'selectSectionView');
         return event.payload === undefined ? 0 : 0;
+      },
+      sectionViewPivot({ event }): [number, number, number] {
+        assertEvent(event, 'selectSectionView');
+        return [0, 0, 0];
       },
       // Reset rotation when changing planes
       sectionViewRotation({ event }): [number, number, number] {
@@ -592,9 +668,30 @@ export const graphicsMachine = setup({
     }),
 
     setSectionViewTranslation: assign({
-      sectionViewTranslation({ event, context }) {
+      // Move pivot along the CURRENT rotated normal, preserving the component
+      // Perpendicular to that normal so no jump occurs; keep displayed
+      // translation as the rounded requested value.
+      sectionViewPivot({ event, context }): [number, number, number] {
         assertEvent(event, 'setSectionViewTranslation');
-        return roundTranslationToUnitDecimals(event.payload, context.gridUnitFactor, 2);
+        const desired = roundTranslationToUnitDecimals(event.payload, context.gridUnitFactor, 2);
+
+        const a = getBaseAxis(context.selectedSectionViewId); // Base axis
+        const r = normalize(rotateVectorByEuler(a, context.sectionViewRotation)); // Rotated normal
+
+        const p = context.sectionViewPivot;
+        const pr = dot(p, r);
+        const pParallelR = scale(r, pr);
+        const pPerpR = sub(p, pParallelR);
+
+        const denom = dot(a, r);
+        const s = Math.abs(denom) > 1e-8 ? (desired - dot(a, pPerpR)) / denom : desired;
+        const newPivot = add(pPerpR, scale(r, s));
+        return newPivot;
+      },
+      sectionViewTranslation({ context }) {
+        const axis = getBaseAxis(context.selectedSectionViewId);
+        const projected = dot(axis, context.sectionViewPivot);
+        return roundTranslationToUnitDecimals(projected, context.gridUnitFactor, 2);
       },
     }),
 
@@ -604,11 +701,31 @@ export const graphicsMachine = setup({
         const [rx, ry, rz] = event.payload;
         return [clampRadiansToNearestDegree(rx), clampRadiansToNearestDegree(ry), clampRadiansToNearestDegree(rz)];
       },
+      // Rotation does not change the pivot. Ensure displayed translation stays
+      // consistent with pivot projection onto the base axis.
+      sectionViewTranslation({ context }) {
+        const axis = getBaseAxis(context.selectedSectionViewId);
+        const projected = dot(axis, context.sectionViewPivot);
+        return roundTranslationToUnitDecimals(projected, context.gridUnitFactor, 2);
+      },
     }),
 
     toggleSectionViewDirection: assign({
       sectionViewDirection({ context }) {
         return context.sectionViewDirection === 1 ? -1 : 1;
+      },
+    }),
+
+    setSectionViewPivot: assign({
+      sectionViewPivot({ event }) {
+        assertEvent(event, 'setSectionViewPivot');
+        return event.payload;
+      },
+      sectionViewTranslation({ event, context }) {
+        assertEvent(event, 'setSectionViewPivot');
+        const axis = getBaseAxis(context.selectedSectionViewId);
+        const projected = dot(axis, event.payload);
+        return roundTranslationToUnitDecimals(projected, context.gridUnitFactor, 2);
       },
     }),
 
@@ -827,6 +944,7 @@ export const graphicsMachine = setup({
     sectionViewTranslation: 0,
     sectionViewRotation: [0, 0, 0],
     sectionViewDirection: -1,
+    sectionViewPivot: [0, 0, 0],
     enableClippingLines: true,
     enableClippingMesh: true,
 
@@ -948,6 +1066,11 @@ export const graphicsMachine = setup({
         // Geometry updates
         updateGeometries: {
           actions: 'updateGeometries',
+        },
+
+        // Section view pivot updates (world-space anchor)
+        setSectionViewPivot: {
+          actions: 'setSectionViewPivot',
         },
 
         // Measurement events (available in all operational states)

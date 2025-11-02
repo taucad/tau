@@ -39,9 +39,8 @@ export const Controls = React.memo(function ({
 }: ControlsProperties) {
   const isActive = useSelector(graphicsActor, (state) => state.context.isSectionViewActive);
   const selectedPlaneId = useSelector(graphicsActor, (state) => state.context.selectedSectionViewId);
-  const translation = useSelector(graphicsActor, (state) => state.context.sectionViewTranslation);
   const rotation = useSelector(graphicsActor, (state) => state.context.sectionViewRotation);
-  const direction = useSelector(graphicsActor, (state) => state.context.sectionViewDirection);
+  const pivot = useSelector(graphicsActor, (state) => state.context.sectionViewPivot);
   const availablePlanes = useSelector(graphicsActor, (state) => state.context.availableSectionViews);
   const planeName = useSelector(graphicsActor, (state) => state.context.planeName);
   const hoveredSectionViewId = useSelector(graphicsActor, (state) => state.context.hoveredSectionViewId);
@@ -66,19 +65,15 @@ export const Controls = React.memo(function ({
     graphicsActor.send({ type: 'setSectionViewDirection', payload: newDir });
   };
 
-  const handleToggleDirection = (): void => {
-    graphicsActor.send({ type: 'toggleSectionViewDirection' });
-  };
-
-  const handleSetTranslation = (value: number): void => {
-    graphicsActor.send({ type: 'setSectionViewTranslation', payload: value });
-  };
-
   const handleSetRotation = (eulerRotation: THREE.Euler): void => {
     graphicsActor.send({
       type: 'setSectionViewRotation',
       payload: [eulerRotation.x, eulerRotation.y, eulerRotation.z],
     });
+  };
+
+  const handleSetPivot = (value: [number, number, number]): void => {
+    graphicsActor.send({ type: 'setSectionViewPivot', payload: value });
   };
 
   const handleHover = (planeId: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy' | undefined): void => {
@@ -99,16 +94,14 @@ export const Controls = React.memo(function ({
         isActive={isActive}
         selectedPlaneId={selectedPlaneId}
         availablePlanes={availablePlanes}
-        translation={translation}
         rotation={rotation}
-        direction={direction}
+        pivot={pivot}
         planeName={planeName}
         hoveredSectionViewId={hoveredSectionViewId}
         onSelectPlane={handleSelectPlane}
         onHover={handleHover}
-        onToggleDirection={handleToggleDirection}
-        onSetTranslation={handleSetTranslation}
         onSetRotation={handleSetRotation}
+        onSetPivot={handleSetPivot}
       />
       {enableGizmo ? <ViewportGizmoCube /> : null}
     </>

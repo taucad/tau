@@ -82,9 +82,10 @@ export function Stage({
 
   const isSectionViewActive = useSelector(graphicsActor, (state) => state.context.isSectionViewActive);
   const selectedSectionViewId = useSelector(graphicsActor, (state) => state.context.selectedSectionViewId);
-  const sectionViewTranslation = useSelector(graphicsActor, (state) => state.context.sectionViewTranslation);
+  // Translation is derived from pivot for display; Stage uses pivot directly
   const sectionViewRotation = useSelector(graphicsActor, (state) => state.context.sectionViewRotation);
   const sectionViewDirection = useSelector(graphicsActor, (state) => state.context.sectionViewDirection);
+  const sectionViewPivot = useSelector(graphicsActor, (state) => state.context.sectionViewPivot);
   const availableSectionViews = useSelector(graphicsActor, (state) => state.context.availableSectionViews);
   const enableClippingLines = useSelector(graphicsActor, (state) => state.context.enableClippingLines);
   const enableClippingMesh = useSelector(graphicsActor, (state) => state.context.enableClippingMesh);
@@ -114,12 +115,13 @@ export function Stage({
     // Apply direction after rotation
     normal.multiplyScalar(-sectionViewDirection);
 
-    // Bind plane constant to direction so flipping direction preserves the plane
-    // while keeping the numeric translation value unchanged in UI.
-    const constant = sectionViewTranslation * sectionViewDirection;
+    // Compute plane constant from the world-space pivot point: n·p + c = 0
+    // => c = -n·p. Using pivot as source of truth ensures the plane remains
+    // anchored during rotations and flips while keeping display translation stable.
+    const constant = -normal.dot(new THREE.Vector3(...sectionViewPivot));
 
     return new THREE.Plane(normal, constant);
-  }, [selectedSectionViewId, sectionViewTranslation, sectionViewRotation, sectionViewDirection, availableSectionViews]);
+  }, [selectedSectionViewId, sectionViewPivot, sectionViewRotation, sectionViewDirection, availableSectionViews]);
 
   // Create striped material for capping surface
   const cappingMaterial = useMemo(() => createStripedMaterial(), []);

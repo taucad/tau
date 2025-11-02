@@ -501,6 +501,14 @@ export function SectionViewControls({
             const rotation = currentObject.rotation.clone();
             rotationRef.current.copy(rotation);
             onSetRotation(rotation);
+
+            // Recompute translation so the plane rotates about the translated pivot
+            const [bx, by, bz] = selectedPlane.normal;
+            const baseNormal = new THREE.Vector3(bx, by, bz);
+            const q = new THREE.Quaternion().setFromEuler(rotationRef.current);
+            const rotatedNormal = baseNormal.clone().applyQuaternion(q).normalize();
+            const newTranslation = pivotPointRef.current.dot(rotatedNormal);
+            onSetTranslation(newTranslation);
           }
         }}
         onMouseDown={() => {

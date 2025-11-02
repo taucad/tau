@@ -1,6 +1,8 @@
 import { assign, assertEvent, setup, sendTo, emit, enqueueActions } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import type { GridSizes, ScreenshotOptions, Geometry } from '@taucad/types';
+import { idPrefix } from '@taucad/types/constants';
+import { generatePrefixedId } from '#utils/id.utils.js';
 
 // Context type definition
 export type GraphicsContext = {
@@ -807,7 +809,7 @@ export const graphicsMachine = setup({
         return [
           ...context.measurements,
           {
-            id: `measurement-${Date.now()}`,
+            id: generatePrefixedId(idPrefix.measurement),
             startPoint: start,
             endPoint: end,
             distance,

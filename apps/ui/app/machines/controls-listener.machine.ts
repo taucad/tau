@@ -1,4 +1,4 @@
-import { setup, sendTo, fromCallback } from 'xstate';
+import { setup, sendTo, fromCallback, assertEvent } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import * as THREE from 'three';
 import type { OrbitControls } from 'three/addons';
@@ -154,17 +154,13 @@ export const controlsListenerMachine = setup({
     sendControlsChanged: sendTo(
       ({ context }) => context.graphicsActorRef,
       ({ event }) => {
-        if (event.type === 'controlsChanged') {
-          return {
-            type: 'controlsChanged',
-            zoom: event.zoom,
-            position: event.position,
-            fov: event.fov,
-          };
-        }
-
-        // This should never happen, but TypeScript requires it
-        return { type: 'controlsChanged', zoom: 1, position: 0, fov: 75 };
+        assertEvent(event, 'controlsChanged');
+        return {
+          type: 'controlsChanged',
+          zoom: event.zoom,
+          position: event.position,
+          fov: event.fov,
+        };
       },
     ),
   },

@@ -12,6 +12,7 @@ import { registerMonaco } from '#routes/builds_.$id/chat-editor-config.js';
 import { ChatEditorBreadcrumbs } from '#routes/builds_.$id/chat-editor-breadcrumbs.js';
 import { useBuild } from '#hooks/use-build.js';
 import type { FileItem } from '#machines/file-explorer.machine.js';
+import { ChatEditorTabs } from '#routes/builds_.$id/chat-editor-tabs.js';
 
 const languageFromKernel = {
   replicad: 'typescript',
@@ -138,7 +139,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
 
   return (
     <div className={cn('flex h-full flex-col bg-background', className)}>
-      {/* <ChatEditorTabs /> */}
+      <ChatEditorTabs />
       <ChatEditorBreadcrumbs />
       <div className="flex-1">
         <CodeEditor

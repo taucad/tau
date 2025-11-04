@@ -56,7 +56,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
 
   return (
     <>
-      <FloatingPanelContentHeader>
+      <FloatingPanelContentHeader className="flex items-center justify-between pr-1">
         <FloatingPanelContentTitle>Files</FloatingPanelContentTitle>
       </FloatingPanelContentHeader>
       <FloatingPanelContentBody className="py-2">

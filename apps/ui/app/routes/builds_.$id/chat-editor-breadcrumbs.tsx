@@ -7,7 +7,6 @@ import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { toast } from '#components/ui/sonner.js';
 import { downloadBlob } from '#utils/file.utils.js';
-import { FloatingPanelContentHeader, FloatingPanelContentTitle } from '#components/ui/floating-panel.js';
 
 export function ChatEditorBreadcrumbs(): ReactNode {
   const activeFile = FileExplorerContext.useSelector((state) =>
@@ -37,12 +36,12 @@ export function ChatEditorBreadcrumbs(): ReactNode {
   };
 
   return (
-    <FloatingPanelContentHeader>
-      <FloatingPanelContentTitle className="flex flex-row items-center gap-0.5">
+    <div className="flex flex-row items-center justify-between py-0.25 pr-0.25 pl-2 text-muted-foreground">
+      <div className="flex flex-row items-center gap-0.5">
         {displayPath ? (
           parts.map((part, index) => (
             <Fragment key={part}>
-              <span className="font-medium">{part}</span>
+              <span className="text-sm font-medium">{part}</span>
               {index < parts.length - 1 && <ChevronRight className="size-4" />}
             </Fragment>
           ))
@@ -50,7 +49,7 @@ export function ChatEditorBreadcrumbs(): ReactNode {
           // Maintain height with invisible content when empty
           <span className="opacity-0">placeholder</span>
         )}
-      </FloatingPanelContentTitle>
+      </div>
 
       {Boolean(activeFile) && (
         <div className="flex flex-row items-center gap-1">
@@ -71,6 +70,6 @@ export function ChatEditorBreadcrumbs(): ReactNode {
           </Tooltip>
         </div>
       )}
-    </FloatingPanelContentHeader>
+    </div>
   );
 }

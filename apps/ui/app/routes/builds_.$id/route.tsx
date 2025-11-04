@@ -16,13 +16,11 @@ import { fileEditMachine } from '#machines/file-edit.machine.js';
 import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
 import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
 import { CommandPaletteTrigger } from '#routes/builds_.$id/command-palette.js';
-import { Button } from '#components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { ChatControls } from '#routes/builds_.$id/chat-controls.js';
 import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';
-import { SvgIcon } from '#components/icons/svg-icon.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
+import { BuildGitConnector } from '#routes/builds_.$id/build-git-connector.js';
 
 export const handle: Handle = {
   breadcrumb(match) {

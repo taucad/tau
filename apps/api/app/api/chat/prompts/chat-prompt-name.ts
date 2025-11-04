@@ -1,4 +1,4 @@
-export const nameGenerationSystemPrompt = `
+export const buildNameGenerationSystemPrompt = `
 You are a helpful assistant that generates titles for AI chat conversations.
 
 The conversations primarily focus on designing and building 3D models,

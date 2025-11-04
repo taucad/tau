@@ -55,7 +55,17 @@ export class ChatController {
     }
 
     if (modelId === 'name-generator') {
-      const result = this.chatService.getNameGenerator(coreMessages);
+      const result = this.chatService.getBuildNameGenerator(coreMessages);
+
+      // Mark the response as a v1 data stream:
+      void response.header('X-Vercel-AI-Data-Stream', 'v1');
+      void response.header('Content-Type', 'text/plain; charset=utf-8');
+
+      return response.send(result.toDataStream());
+    }
+
+    if (modelId === 'commit-name-generator') {
+      const result = this.chatService.getCommitMessageGenerator(coreMessages);
 
       // Mark the response as a v1 data stream:
       void response.header('X-Vercel-AI-Data-Stream', 'v1');

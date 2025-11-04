@@ -21,5 +21,3 @@ Examples:
 You should ONLY respond with the commit message, and nothing else.
 No explanations, no markdown, just the commit message.
 `;
-
-

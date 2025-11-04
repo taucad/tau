@@ -1,26 +1,15 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo } from 'react';
+import { createContext, useContext, useEffect, useMemo, useCallback } from 'react';
+import { useActorRef, useSelector } from '@xstate/react';
 import type { Message } from '@ai-sdk/react';
 import type { Build, Chat } from '@taucad/types';
-import { storage } from '#db/storage.js';
-import { createBuildMutations } from '#hooks/build-mutations.js';
-
-// Function to fetch builds
-const fetchBuild = async (buildId: string): Promise<Build> => {
-  const clientBuild = await storage.getBuild(buildId);
-
-  if (clientBuild) {
-    return clientBuild;
-  }
-
-  throw new Error('Build not found');
-};
+import { buildMachine } from '#machines/build.machine.js';
+import { inspect } from '#machines/inspector.js';
 
 type BuildContextType = {
   isLoading: boolean;
   build: Build | undefined;
-  error: unknown;
+  error: Error | undefined;
   code: string;
   parameters: Record<string, unknown>;
   activeChat: Chat | undefined;
@@ -32,10 +21,10 @@ type BuildContextType = {
   updateTags: (tags: string[]) => void;
   updateThumbnail: (thumbnail: string) => void;
   // Chat related functions
-  addChat: (initialMessages?: Message[]) => Promise<Chat>;
+  addChat: (initialMessages?: Message[]) => void;
   setActiveChat: (chatId: string) => void;
   updateChatName: (chatId: string, name: string) => void;
-  deleteChat: (chatId: string) => Promise<void>;
+  deleteChat: (chatId: string) => void;
 };
 
 const BuildContext = createContext<BuildContextType | undefined>(undefined);
@@ -47,54 +36,130 @@ export function BuildProvider({
   readonly children: ReactNode;
   readonly buildId: string;
 }): React.JSX.Element {
-  const queryClient = useQueryClient();
-  const mutations = useMemo(() => createBuildMutations(queryClient), [queryClient]);
+  // Create the build machine actor
+  const actorRef = useActorRef(buildMachine, { input: { buildId }, inspect });
 
-  // Query for fetching build data
-  const buildQuery = useQuery({
-    queryKey: ['build', buildId],
-    queryFn: async () => fetchBuild(buildId),
-  });
+  // Load the build when component mounts or buildId changes
+  useEffect(() => {
+    actorRef.send({ type: 'loadBuild', buildId });
+  }, [buildId, actorRef]);
 
-  const value = useMemo(() => {
-    const { data, isLoading, error } = buildQuery;
+  // Select state from the machine
+  const build = useSelector(actorRef, (state) => state.context.build);
+  const isLoading = useSelector(actorRef, (state) => state.context.isLoading);
+  const error = useSelector(actorRef, (state) => state.context.error);
 
-    const activeChatId = data?.lastChatId;
-    const activeChat = data?.chats.find((chat) => chat.id === activeChatId);
+  // Memoize callbacks
+  const setChatMessages = useCallback(
+    (chatId: string, messages: Message[]) => {
+      actorRef.send({ type: 'updateChatMessages', buildId, chatId, messages });
+    },
+    [actorRef, buildId],
+  );
+
+  const setCodeParameters = useCallback(
+    (files: Record<string, { content: string }>, parameters: Record<string, unknown>) => {
+      actorRef.send({ type: 'updateCodeParameters', buildId, files, parameters });
+    },
+    [actorRef, buildId],
+  );
+
+  const updateName = useCallback(
+    (name: string) => {
+      actorRef.send({ type: 'updateBuild', buildId, updates: { name } });
+    },
+    [actorRef, buildId],
+  );
+
+  const updateDescription = useCallback(
+    (description: string) => {
+      actorRef.send({ type: 'updateBuild', buildId, updates: { description } });
+    },
+    [actorRef, buildId],
+  );
+
+  const updateTags = useCallback(
+    (tags: string[]) => {
+      actorRef.send({ type: 'updateBuild', buildId, updates: { tags }, options: { ignoreKeys: ['tags'] } });
+    },
+    [actorRef, buildId],
+  );
+
+  const updateThumbnail = useCallback(
+    (thumbnail: string) => {
+      actorRef.send({ type: 'updateBuild', buildId, updates: { thumbnail }, options: { noUpdatedAt: true } });
+    },
+    [actorRef, buildId],
+  );
+
+  const addChat = useCallback(
+    (initialMessages?: Message[]) => {
+      actorRef.send({ type: 'addChat', buildId, initialMessages });
+    },
+    [actorRef, buildId],
+  );
+
+  const setActiveChat = useCallback(
+    (chatId: string) => {
+      actorRef.send({ type: 'setActiveChat', buildId, chatId });
+    },
+    [actorRef, buildId],
+  );
+
+  const updateChatName = useCallback(
+    (chatId: string, name: string) => {
+      actorRef.send({ type: 'updateChatName', buildId, chatId, name });
+    },
+    [actorRef, buildId],
+  );
+
+  const deleteChat = useCallback(
+    (chatId: string) => {
+      actorRef.send({ type: 'deleteChat', buildId, chatId });
+    },
+    [actorRef, buildId],
+  );
+
+  const value = useMemo<BuildContextType>(() => {
+    const activeChatId = build?.lastChatId;
+    const activeChat = build?.chats.find((chat) => chat.id === activeChatId);
+    const code = build?.assets.mechanical?.files[build.assets.mechanical.main]?.content ?? '';
+    const parameters = build?.assets.mechanical?.parameters ?? {};
 
     return {
-      build: data,
+      build,
       isLoading,
       error,
-      code: data?.assets.mechanical?.files[data.assets.mechanical.main]?.content ?? '',
-      parameters: data?.assets.mechanical?.parameters ?? {},
+      code,
+      parameters,
       activeChatId,
       activeChat,
-      async setChatMessages(chatId: string, messages: Message[]) {
-        await mutations.updateChatMessages(buildId, chatId, messages);
-      },
-      setCodeParameters: async (files: Record<string, { content: string }>, parameters: Record<string, unknown>) =>
-        mutations.updateCodeParameters(buildId, files, parameters),
-      updateName: async (name: string) => mutations.updateName(buildId, name),
-      updateDescription: async (description: string) => mutations.updateDescription(buildId, description),
-      updateTags: async (tags: string[]) => mutations.updateTags(buildId, tags),
-      updateThumbnail: async (thumbnail: string) => mutations.updateThumbnail(buildId, thumbnail),
-      // Chat related functions
-      async addChat(initialMessages?: Message[]) {
-        const newChat = await mutations.addChat(buildId, initialMessages);
-        return newChat;
-      },
-      setActiveChat(chatId: string) {
-        void mutations.setActiveChat(buildId, chatId);
-      },
-      async updateChatName(chatId: string, name: string) {
-        return mutations.updateChatName(buildId, chatId, name);
-      },
-      async deleteChat(chatId: string) {
-        return mutations.deleteChat(buildId, chatId);
-      },
+      setChatMessages,
+      setCodeParameters,
+      updateName,
+      updateDescription,
+      updateTags,
+      updateThumbnail,
+      addChat,
+      setActiveChat,
+      updateChatName,
+      deleteChat,
     };
-  }, [buildQuery, mutations, buildId]);
+  }, [
+    build,
+    isLoading,
+    error,
+    setChatMessages,
+    setCodeParameters,
+    updateName,
+    updateDescription,
+    updateTags,
+    updateThumbnail,
+    addChat,
+    setActiveChat,
+    updateChatName,
+    deleteChat,
+  ]);
 
   return <BuildContext.Provider value={value}>{children}</BuildContext.Provider>;
 }
@@ -108,7 +173,7 @@ export function useBuild(): BuildContextType {
   return context;
 }
 
-// New selector hook that allows selecting specific properties from the build
+// Selector hook that allows selecting specific properties from the build context
 export function useBuildSelector<T>(selector: (state: BuildContextType) => T): T {
   const buildContext = useBuild();
 

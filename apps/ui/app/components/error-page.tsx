@@ -45,7 +45,7 @@ export function ErrorPage(): React.JSX.Element {
 
   if (error instanceof Error) {
     return (
-      <div className="flex min-h-full flex-col items-center justify-center py-8 pr-2 pl-[var(--sidebar-width-current)] transition-all duration-300">
+      <div className="flex min-h-full flex-col items-center justify-center py-8 pr-2 transition-all duration-200 ease-linear md:ml-[var(--sidebar-width-current)]">
         <div className="shadow-lg w-full animate-in rounded-lg border border-destructive/20 bg-destructive/5 p-8 duration-300 fade-in dark:border-destructive/30 dark:bg-destructive/10">
           <div className="mb-6 flex items-center gap-3">
             <div className="flex size-7 items-center justify-center rounded-full bg-destructive/20">

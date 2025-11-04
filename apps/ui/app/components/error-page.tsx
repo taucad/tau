@@ -1,4 +1,4 @@
-import { ArrowLeft, AlertCircle, Code } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Code, RefreshCcw } from 'lucide-react';
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
 import { Button, buttonVariants } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
@@ -10,6 +10,10 @@ export function ErrorPage(): React.JSX.Element {
 
   const goBack = () => {
     void navigate(-1);
+  };
+
+  const refreshPage = () => {
+    globalThis.location.reload();
   };
 
   if (isRouteErrorResponse(error)) {
@@ -31,13 +35,17 @@ export function ErrorPage(): React.JSX.Element {
           {', '}
           or navigate to a different page.
         </p>
+        <Button variant="outline" size="sm" className="mt-2 flex items-center gap-2" onClick={refreshPage}>
+          <RefreshCcw className="size-4" />
+          Reload
+        </Button>
       </div>
     );
   }
 
   if (error instanceof Error) {
     return (
-      <div className="flex min-h-full flex-col items-center justify-center px-4 py-8">
+      <div className="flex min-h-full flex-col items-center justify-center py-8 pr-2 pl-[var(--sidebar-width-current)] transition-all duration-300">
         <div className="shadow-lg w-full animate-in rounded-lg border border-destructive/20 bg-destructive/5 p-8 duration-300 fade-in dark:border-destructive/30 dark:bg-destructive/10">
           <div className="mb-6 flex items-center gap-3">
             <div className="flex size-7 items-center justify-center rounded-full bg-destructive/20">
@@ -60,6 +68,10 @@ export function ErrorPage(): React.JSX.Element {
                 <Button variant="outline" size="sm" onClick={goBack}>
                   <ArrowLeft />
                   Go back
+                </Button>
+                <Button variant="outline" size="sm" onClick={refreshPage}>
+                  <RefreshCcw className="size-4" />
+                  Reload
                 </Button>
                 <CopyButton size="sm" variant="outline" getText={() => error.stack ?? ''} tooltip="Copy stack trace" />
               </div>

@@ -28,47 +28,27 @@ export const handle: Handle = {
   breadcrumb(match) {
     const { id } = match.params as Route.LoaderArgs['params'];
 
-    return [
-      <BuildProvider key={`${id}-build-name-editor`} buildId={id}>
-        <BuildNameEditor />
-      </BuildProvider>,
-      <ChatModeSelector key={`${id}-chat-mode-selector`} />,
-    ];
+    return [<BuildNameEditor key={`${id}-build-name-editor`} />, <ChatModeSelector key={`${id}-chat-mode-selector`} />];
   },
   actions(match) {
     const { id } = match.params as Route.LoaderArgs['params'];
 
     return (
       <>
-        <BuildProvider buildId={id}>
-          <ChatControls />
-        </BuildProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon"
-              className="hidden md:flex"
-              onClick={() => {
-                toast.info('Github connection coming soon!');
-              }}
-            >
-              <SvgIcon id="github" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Connect to Github</TooltipContent>
-        </Tooltip>
+        <ChatControls />
+        <BuildGitConnector buildId={id} />
       </>
     );
   },
-  commandPalette(match) {
+  commandPalette() {
+    return <CommandPaletteTrigger />;
+  },
+  providers(match) {
     const { id } = match.params as Route.LoaderArgs['params'];
 
-    return (
-      <BuildProvider buildId={id}>
-        <CommandPaletteTrigger />
-      </BuildProvider>
-    );
+    return ({ children }) => {
+      return <BuildProvider buildId={id}>{children}</BuildProvider>;
+    };
   },
   enableFloatingSidebar: true,
 };
@@ -290,15 +270,5 @@ function ChatWithProvider() {
 }
 
 export default function ChatRoute(): React.JSX.Element {
-  const { id } = useParams();
-
-  if (!id) {
-    throw new Error('No build id provided');
-  }
-
-  return (
-    <BuildProvider buildId={id}>
-      <ChatWithProvider />
-    </BuildProvider>
-  );
+  return <ChatWithProvider />;
 }

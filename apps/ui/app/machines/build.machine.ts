@@ -328,6 +328,12 @@ export const buildMachine = setup({
     clearLoading: assign({
       isLoading: false,
     }),
+    updateBuildId: assign({
+      buildId({ event }) {
+        assertEvent(event, 'loadBuild');
+        return event.buildId;
+      },
+    }),
     setBuild: assign({
       build({ event }) {
         assertActorDoneEvent(event);
@@ -337,6 +343,31 @@ export const buildMachine = setup({
     }),
     clearBuild: assign({
       build: undefined,
+    }),
+    stopStatefulActors: enqueueActions(({ enqueue, context }) => {
+      // Stop the old stateful actors (they'll be garbage collected)
+      enqueue.stopChild(context.filesystemRef);
+      enqueue.stopChild(context.gitRef);
+      enqueue.stopChild(context.fileExplorerRef);
+    }),
+    respawnStatefulActors: assign({
+      filesystemRef({ context, spawn }) {
+        return spawn('filesystem', {
+          id: `filesystem-${context.buildId}`,
+          input: { buildId: context.buildId },
+        });
+      },
+      gitRef({ context, spawn }) {
+        return spawn('git', {
+          id: `git-${context.buildId}`,
+          input: { buildId: context.buildId },
+        });
+      },
+      fileExplorerRef({ context, spawn }) {
+        return spawn('fileExplorer', {
+          id: `file-explorer-${context.buildId}`,
+        });
+      },
     }),
     sendFilesToFilesystem: enqueueActions(({ enqueue, context }) => {
       if (context.build?.assets.mechanical) {
@@ -535,8 +566,16 @@ export const buildMachine = setup({
     }),
   },
   guards: {
-    isNotBrowser: () => !isBrowser,
-    shouldAutoLoad: () => isBrowser,
+    isNotBrowser() {
+      return !isBrowser;
+    },
+    shouldAutoLoad() {
+      return isBrowser;
+    },
+    isBuildIdChanging({ context, event }) {
+      assertEvent(event, 'loadBuild');
+      return context.buildId !== event.buildId;
+    },
   },
 }).createMachine({
   id: 'build',
@@ -622,7 +661,7 @@ export const buildMachine = setup({
       on: {
         loadBuild: {
           target: 'loading',
-          actions: 'setLoading',
+          actions: ['updateBuildId', 'setLoading'],
         },
         createBuild: {
           target: 'creating',
@@ -711,10 +750,17 @@ export const buildMachine = setup({
     },
     ready: {
       on: {
-        loadBuild: {
-          target: 'loading',
-          actions: 'setLoading',
-        },
+        loadBuild: [
+          {
+            guard: 'isBuildIdChanging',
+            target: 'loading',
+            actions: ['updateBuildId', 'stopStatefulActors', 'respawnStatefulActors', 'setLoading'],
+          },
+          {
+            target: 'loading',
+            actions: 'setLoading',
+          },
+        ],
         updateBuild: 'updating',
         deleteBuild: 'deleting',
         duplicateBuild: 'duplicating',
@@ -1027,10 +1073,17 @@ export const buildMachine = setup({
     },
     error: {
       on: {
-        loadBuild: {
-          target: 'loading',
-          actions: 'setLoading',
-        },
+        loadBuild: [
+          {
+            guard: 'isBuildIdChanging',
+            target: 'loading',
+            actions: ['updateBuildId', 'stopStatefulActors', 'respawnStatefulActors', 'setLoading'],
+          },
+          {
+            target: 'loading',
+            actions: 'setLoading',
+          },
+        ],
         createBuild: {
           target: 'creating',
           actions: 'setLoading',

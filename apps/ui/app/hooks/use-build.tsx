@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useCallback } from 'react';
+import { createContext, useContext, useMemo, useCallback, useEffect } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { Message } from '@ai-sdk/react';
@@ -67,6 +67,10 @@ export function BuildProvider({
   const cadRef = useSelector(actorRef, (state) => state.context.cadRef);
   const screenshotRef = useSelector(actorRef, (state) => state.context.screenshotRef);
   const cameraRef = useSelector(actorRef, (state) => state.context.cameraRef);
+
+  useEffect(() => {
+    actorRef.send({ type: 'loadBuild', buildId });
+  }, [actorRef, buildId]);
 
   // Memoize callbacks
   const setChatMessages = useCallback(

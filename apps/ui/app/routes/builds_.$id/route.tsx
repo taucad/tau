@@ -20,6 +20,12 @@ import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import { BuildGitConnector } from '#routes/builds_.$id/build-git-connector.js';
 
+// Define provider component at module level for stable reference across HMR
+function RouteProvider({ children }: { readonly children?: React.ReactNode }): React.JSX.Element {
+  const { id } = useParams();
+  return <BuildProvider buildId={id!}>{children}</BuildProvider>;
+}
+
 export const handle: Handle = {
   breadcrumb(match) {
     const { id } = match.params as Route.LoaderArgs['params'];
@@ -37,13 +43,7 @@ export const handle: Handle = {
   commandPalette() {
     return <CommandPaletteTrigger />;
   },
-  providers(match) {
-    const { id } = match.params as Route.LoaderArgs['params'];
-
-    return ({ children }) => {
-      return <BuildProvider buildId={id}>{children}</BuildProvider>;
-    };
-  },
+  providers: () => RouteProvider,
   enableFloatingSidebar: true,
 };
 

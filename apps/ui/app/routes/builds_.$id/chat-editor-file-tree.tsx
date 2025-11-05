@@ -13,6 +13,7 @@ import {
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
 import { useBuild } from '#hooks/use-build.js';
+import { EmptyItems } from '#components/ui/empty-items.js';
 
 function convertFileItemToTreeElement(items: FileItem[]): TreeViewElement[] {
   return items.map((item) => ({
@@ -168,7 +169,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
             ))}
           </Tree>
         ) : (
-          <div className="px-4 py-2 text-sm text-muted-foreground">No files available</div>
+          <EmptyItems>No files available</EmptyItems>
         )}
       </FloatingPanelContentBody>
     </>

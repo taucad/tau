@@ -282,7 +282,8 @@ export const cadMachine = setup({
             actions: assign({ isKernelInitialized: true, isKernelInitializing: false }),
           },
           {
-            // Otherwise just set the kernel to initialized.
+            // Otherwise transition to ready (kernel ready, waiting for code)
+            target: 'ready',
             actions: assign({ isKernelInitialized: true, isKernelInitializing: false }),
           },
         ],

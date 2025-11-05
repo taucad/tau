@@ -2,7 +2,7 @@ import { useSelector } from '@xstate/react';
 import { X } from 'lucide-react';
 import type { StateFrom } from 'xstate';
 import { ChatInterfaceGraphicsMeasure } from '#routes/builds_.$id/chat-interface-graphics-measure.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import { ChatInterfaceGraphicsSectionView } from '#routes/builds_.$id/chat-interface-graphics-section-view.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { Button } from '#components/ui/button.js';
@@ -22,6 +22,7 @@ const titleFromState = (state: StateFrom<typeof graphicsMachine>): string => {
 };
 
 export function ChatInterfaceGraphics(): React.ReactNode {
+  const { graphicsRef: graphicsActor } = useBuild();
   const graphicsState = useSelector(graphicsActor, (state) => state);
   if (graphicsState.matches({ operational: 'ready' })) {
     return null;
@@ -60,6 +61,7 @@ export function ChatInterfaceGraphics(): React.ReactNode {
 }
 
 function ChatInterfaceGraphicsInner(): React.JSX.Element {
+  const { graphicsRef: graphicsActor } = useBuild();
   const graphicsState = useSelector(graphicsActor, (state) => state);
 
   switch (true) {

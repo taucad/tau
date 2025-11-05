@@ -3,7 +3,7 @@ import type { ClassValue } from 'clsx';
 import { Axis3D, Box, Grid3X3, Rotate3D, Settings, PenLine, Sparkles } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,33 +47,34 @@ type CameraSettingsProps = {
  * Component that provides camera and visibility settings for the 3D viewer
  */
 export function SettingsControl({ className }: CameraSettingsProps): React.ReactNode {
+  const { graphicsRef: graphicsActor } = useBuild();
   const [viewSettings, setViewSettings] = useCookie<ViewSettings>(cookieName.viewSettings, defaultSettings);
   const [isOpen, setIsOpen] = useState(false);
 
   // Synchronize each setting to the Graphics context when settings change
   useEffect(() => {
     graphicsActor.send({ type: 'setSurfaceVisibility', payload: viewSettings.surface });
-  }, [viewSettings.surface]);
+  }, [viewSettings.surface, graphicsActor]);
 
   useEffect(() => {
     graphicsActor.send({ type: 'setLinesVisibility', payload: viewSettings.lines });
-  }, [viewSettings.lines]);
+  }, [viewSettings.lines, graphicsActor]);
 
   useEffect(() => {
     graphicsActor.send({ type: 'setGizmoVisibility', payload: viewSettings.gizmo });
-  }, [viewSettings.gizmo]);
+  }, [viewSettings.gizmo, graphicsActor]);
 
   useEffect(() => {
     graphicsActor.send({ type: 'setGridVisibility', payload: viewSettings.grid });
-  }, [viewSettings.grid]);
+  }, [viewSettings.grid, graphicsActor]);
 
   useEffect(() => {
     graphicsActor.send({ type: 'setAxesVisibility', payload: viewSettings.axes });
-  }, [viewSettings.axes]);
+  }, [viewSettings.axes, graphicsActor]);
 
   useEffect(() => {
     graphicsActor.send({ type: 'setMatcapVisibility', payload: viewSettings.matcap });
-  }, [viewSettings.matcap]);
+  }, [viewSettings.matcap, graphicsActor]);
 
   const handleMeshToggle = useCallback(
     (checked: boolean) => {

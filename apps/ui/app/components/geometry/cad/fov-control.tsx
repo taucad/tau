@@ -4,7 +4,7 @@ import { Slider } from '#components/ui/slider.js';
 import { buttonVariants } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useKeydown } from '#hooks/use-keydown.js';
@@ -48,10 +48,12 @@ export function FovControl({ defaultAngle, className }: Omit<CameraControlProps,
     },
   );
 
+  const { graphicsRef: graphicsActor } = useBuild();
+
   // Synchronize fov angle to the Graphics context when angle changes
   useEffect(() => {
     graphicsActor.send({ type: 'setFovAngle', payload: fovAngle });
-  }, [fovAngle]);
+  }, [fovAngle, graphicsActor]);
 
   return (
     <Tooltip>

@@ -1,9 +1,10 @@
 import { useSelector } from '@xstate/react';
 import { HammerAnimation } from '#components/hammer-animation.js';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import { cn } from '#utils/ui.utils.js';
 
 export function ChatViewerStatus({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.ReactNode {
+  const { cadRef: cadActor } = useBuild();
   const state = useSelector(cadActor, (state) => state.value);
 
   return ['buffering', 'rendering', 'booting', 'initializing'].includes(state) ? (

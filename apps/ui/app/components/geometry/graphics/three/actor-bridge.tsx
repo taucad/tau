@@ -3,9 +3,9 @@ import type { ReactNode } from 'react';
 import { useThree } from '@react-three/fiber';
 import { useActorRef, useSelector } from '@xstate/react';
 import type { OrbitControls } from 'three/addons';
-import { graphicsActor, screenshotCapabilityActor } from '#routes/builds_.$id/graphics-actor.js';
 import { controlsListenerMachine } from '#machines/controls-listener.machine.js';
 import { updateCameraFov } from '#components/geometry/graphics/three/utils/camera.utils.js';
+import { useBuild } from '#hooks/use-build.js';
 
 /**
  * Component that bridges Three.js context with XState actors
@@ -14,6 +14,7 @@ import { updateCameraFov } from '#components/geometry/graphics/three/utils/camer
  */
 export function ActorBridge(): ReactNode {
   const { gl, scene, camera, controls, invalidate } = useThree();
+  const { graphicsRef: graphicsActor, screenshotRef: screenshotCapabilityActor } = useBuild();
 
   // Subscribe to camera FOV angle from graphics actor
   const cameraFovAngle = useSelector(graphicsActor, (state) => state.context.cameraFovAngle);
@@ -30,7 +31,7 @@ export function ActorBridge(): ReactNode {
     return () => {
       screenshotCapabilityActor.send({ type: 'unregisterCapture' });
     };
-  }, [gl, scene, camera]);
+  }, [gl, scene, camera, screenshotCapabilityActor]);
 
   // Update camera FOV when angle changes, without resetting position
   // This preserves user's zoom and viewing angle while updating the FOV

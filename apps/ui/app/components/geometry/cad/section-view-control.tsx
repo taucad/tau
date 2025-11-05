@@ -5,7 +5,7 @@ import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 
 type SectionViewSettings = {
   stripeColor: string;
@@ -20,6 +20,7 @@ const defaultSectionViewSettings: SectionViewSettings = {
 };
 
 export function SectionViewControl(): React.JSX.Element {
+  const { graphicsRef: graphicsActor } = useBuild();
   const isSectionViewActive = useSelector(graphicsActor, (state) => state.context.isSectionViewActive);
 
   const [sectionViewSettings] = useCookie<SectionViewSettings>(
@@ -33,7 +34,7 @@ export function SectionViewControl(): React.JSX.Element {
       type: 'setSectionViewVisualization',
       payload: sectionViewSettings,
     });
-  }, [sectionViewSettings]);
+  }, [sectionViewSettings, graphicsActor]);
 
   const handleClick = (): void => {
     graphicsActor.send({

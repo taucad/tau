@@ -1,5 +1,5 @@
 import { Star, Eye, ArrowRight } from 'lucide-react';
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useActor, useSelector } from '@xstate/react';
 import type { Build } from '@taucad/types';
@@ -46,9 +46,7 @@ export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBui
 
 function ProjectCard({ id, name, description, thumbnail, stars, author, tags, assets }: CommunityBuildCardProperties) {
   const [showPreview, setShowPreview] = useState(false);
-  const [isVisible, setIsVisible] = useState(false);
   const [isForking, setIsForking] = useState(false);
-  const cardReference = useRef<HTMLDivElement>(null);
 
   // Create a unique instance of the CAD machine for this card using the card's ID
   const [_, send, actorRef] = useActor(cadMachine, { input: { shouldInitializeKernelOnStart: false } });
@@ -59,31 +57,6 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
 
   const kernels = useMemo(() => Object.values(assets).map((asset) => asset.language), [assets]);
 
-  // Set up visibility observer
-  useEffect(() => {
-    const currentElement = cardReference.current;
-    if (!currentElement) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          setIsVisible(true);
-          // Once we've detected visibility, we can stop observing
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.1 }, // Trigger when at least 10% of the card is visible
-    );
-
-    observer.observe(currentElement);
-
-    return () => {
-      observer.unobserve(currentElement);
-    };
-  }, []);
-
   const mechanicalAsset = assets.mechanical;
   if (!mechanicalAsset) {
     throw new Error('Mechanical asset not found');
@@ -91,7 +64,7 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
 
   // Only load the CAD model when the card is visible and preview is enabled
   useEffect(() => {
-    if (isVisible && showPreview) {
+    if (showPreview) {
       send({
         type: 'initializeModel',
         code: mechanicalAsset.files[mechanicalAsset.main]!.content,
@@ -99,7 +72,7 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
         kernelType: mechanicalAsset.language,
       });
     }
-  }, [isVisible, showPreview, mechanicalAsset, send]);
+  }, [showPreview, mechanicalAsset, send]);
 
   const handleStar = useCallback(() => {
     // TODO: Implement star functionality
@@ -158,7 +131,7 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
   );
 
   return (
-    <Card ref={cardReference} className="group relative flex flex-col overflow-hidden pt-0">
+    <Card className="group relative flex flex-col overflow-hidden pt-0">
       <div className="inset-0 aspect-video h-fit w-full overflow-hidden bg-muted">
         {!showPreview && (
           <img

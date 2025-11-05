@@ -3,8 +3,7 @@ import { AtSign, Image, Code, AlertTriangle, AlertCircle, Camera } from 'lucide-
 import { useSelector, useActorRef } from '@xstate/react';
 import { TooltipTrigger, TooltipContent, Tooltip } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import { toast } from '#components/ui/sonner.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { orthographicViews, screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
@@ -40,6 +39,7 @@ export function ChatContextActions({
   onSelectItem,
   ...properties
 }: ChatContextActionsProperties): React.JSX.Element {
+  const { cadRef: cadActor, graphicsRef: graphicsActor } = useBuild();
   const kernelError = useSelector(cadActor, (state) => state.context.kernelError);
   const codeErrors = useSelector(cadActor, (state) => state.context.codeErrors);
   const code = useSelector(cadActor, (state) => state.context.code);

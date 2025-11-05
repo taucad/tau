@@ -3,10 +3,8 @@ import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
 import type { Build, KernelProvider } from '@taucad/types';
-import { FileExplorerContext } from '#routes/builds_.$id/graphics-actor.js';
 import { CodeEditor } from '#components/code/code-editor.js';
 import { cn } from '#utils/ui.utils.js';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { registerMonaco } from '#routes/builds_.$id/chat-editor-config.js';
 import { ChatEditorBreadcrumbs } from '#routes/builds_.$id/chat-editor-breadcrumbs.js';
@@ -40,36 +38,37 @@ const getFileTree = (build: Build): FileItem[] => {
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }): React.JSX.Element {
   const monaco = useMonaco();
-  const { build } = useBuild();
+  const { build, fileExplorerRef: fileExplorerActor, cadRef: cadActor } = useBuild();
   const activeBuildId = useRef<string | undefined>(build?.id);
   const code = useSelector(cadActor, (state) => state.context.code);
-  const activeFile = FileExplorerContext.useSelector((state) =>
+  const activeFile = useSelector(fileExplorerActor, (state) =>
     state.context.openFiles.find((file) => file.id === state.context.activeFileId),
   );
-  const fileExplorerActorRef = FileExplorerContext.useActorRef();
 
   // Set file tree when build changes
   useEffect(() => {
-    if (build?.id !== activeBuildId.current) {
-      activeBuildId.current = build?.id;
-
-      // Clear tree if no build or no mechanical assets
-      if (!build?.assets.mechanical) {
-        fileExplorerActorRef.send({ type: 'setFileTree', tree: [], openFiles: [] });
-        return;
-      }
-
-      const mechanicalAsset = build.assets.mechanical;
-      const fileItems = getFileTree(build);
-      const openFiles = mechanicalAsset.main ? [mechanicalAsset.main] : [];
-
-      fileExplorerActorRef.send({
-        type: 'setFileTree',
-        tree: fileItems,
-        openFiles,
-      });
+    if (build?.id === activeBuildId.current) {
+      return;
     }
-  }, [fileExplorerActorRef, build]);
+
+    activeBuildId.current = build?.id;
+
+    // Clear tree if no build or no mechanical assets
+    if (!build?.assets.mechanical) {
+      fileExplorerActor.send({ type: 'setFileTree', tree: [], openFiles: [] });
+      return;
+    }
+
+    const mechanicalAsset = build.assets.mechanical;
+    const fileItems = getFileTree(build);
+    const openFiles = mechanicalAsset.main ? [mechanicalAsset.main] : [];
+
+    fileExplorerActor.send({
+      type: 'setFileTree',
+      tree: fileItems,
+      openFiles,
+    });
+  }, [fileExplorerActor, build]);
 
   // Subscribe to CAD actor code changes and propagate to file explorer
   useEffect(() => {
@@ -81,7 +80,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
 
     const subscription = cadActor.subscribe((state) => {
       // Update the main file content in file explorer when CAD actor code changes
-      fileExplorerActorRef.send({
+      fileExplorerActor.send({
         type: 'updateFileContent',
         fileId: mainFileName,
         content: state.context.code,
@@ -91,7 +90,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
     return () => {
       subscription.unsubscribe();
     };
-  }, [build?.assets.mechanical?.main, fileExplorerActorRef]);
+  }, [build?.assets.mechanical?.main, fileExplorerActor, cadActor]);
 
   // Fallback to build main file if no file explorer file is active
   const fallbackFilename = build?.assets.mechanical?.main ?? 'main.ts';
@@ -99,10 +98,13 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
 
   const displayCode = activeFile ? activeFile.content : fallbackContent;
 
-  const handleCodeChange = useCallback((value: ComponentProps<typeof CodeEditor>['value']) => {
-    // Update CAD actor as source of truth - subscription will propagate to file explorer
-    cadActor.send({ type: 'setCode', code: value ?? '' });
-  }, []);
+  const handleCodeChange = useCallback(
+    (value: ComponentProps<typeof CodeEditor>['value']) => {
+      // Update CAD actor as source of truth - subscription will propagate to file explorer
+      cadActor.send({ type: 'setCode', code: value ?? '' });
+    },
+    [cadActor],
+  );
 
   useEffect(() => {
     if (monaco) {
@@ -131,7 +133,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       // Clear errors when there are none
       cadActor.send({ type: 'setCodeErrors', errors: [] });
     }
-  }, [monaco]);
+  }, [monaco, cadActor]);
 
   const language = build?.assets.mechanical?.language
     ? languageFromKernel[build.assets.mechanical.language]

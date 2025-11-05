@@ -5,7 +5,7 @@ import { Button } from '#components/ui/button.js';
 import { Tabs, TabsList, TabsTrigger } from '#components/ui/tabs.js';
 import { Switch } from '#components/ui/switch.js';
 import { ChatParametersNumber } from '#routes/builds_.$id/chat-parameters-number.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
 
 function toDegrees(radians: number): number {
@@ -18,6 +18,7 @@ function toRadians(degrees: number): number {
 }
 
 export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
+  const { graphicsRef: graphicsActor } = useBuild();
   const state = useSelector(graphicsActor, (s) => s);
 
   const {

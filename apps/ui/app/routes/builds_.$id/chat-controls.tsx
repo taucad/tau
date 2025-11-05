@@ -5,11 +5,9 @@ import type { ExportFormat } from '@taucad/types';
 import { fileExtensionFromExportFormat } from '@taucad/types/constants';
 import { BoxDown } from '#components/icons/box-down.js';
 import { Button } from '#components/ui/button.js';
-import { useBuildSelector } from '#hooks/use-build.js';
+import { useBuildSelector, useBuild } from '#hooks/use-build.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { toast } from '#components/ui/sonner.js';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { downloadBlob } from '#utils/file.utils.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
@@ -25,6 +23,7 @@ type ViewerControlItem = {
 };
 
 export function ChatControls(): React.JSX.Element {
+  const { cadRef: cadActor, graphicsRef: graphicsActor } = useBuild();
   const geometries = useSelector(cadActor, (state) => state.context.geometries);
   const buildName = useBuildSelector((state) => state.build?.name) ?? 'file';
   const updateThumbnail = useBuildSelector((state) => state.updateThumbnail);
@@ -203,7 +202,7 @@ export function ChatControls(): React.JSX.Element {
     return () => {
       subscription.unsubscribe();
     };
-  }, [updateThumbnailScreenshot]);
+  }, [updateThumbnailScreenshot, cadActor]);
 
   const handleCopyPngToClipboard = useCallback(async () => {
     toast.promise(

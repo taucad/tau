@@ -33,7 +33,7 @@ export function ChatSelector(): ReactNode {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleAddChat = async () => {
-    await addChat();
+    addChat();
   };
 
   const { formattedKeyCombination } = useKeydown(newChatKeyCombination, handleAddChat);
@@ -97,7 +97,7 @@ export function ChatSelector(): ReactNode {
 
   const handleDeleteChat = useCallback(
     async (chatId: string) => {
-      await deleteChat(chatId);
+      deleteChat(chatId);
     },
     [deleteChat],
   );

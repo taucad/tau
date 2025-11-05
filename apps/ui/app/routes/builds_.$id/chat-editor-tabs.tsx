@@ -1,28 +1,29 @@
 import { X } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useRef } from 'react';
-import { FileExplorerContext } from '#routes/builds_.$id/graphics-actor.js';
+import { useSelector } from '@xstate/react';
+import { useBuild } from '#hooks/use-build.js';
 import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
 
 export function ChatEditorTabs(): React.JSX.Element {
-  const openFiles = FileExplorerContext.useSelector((state) => state.context.openFiles);
-  const activeFileId = FileExplorerContext.useSelector((state) => state.context.activeFileId);
-  const actorRef = FileExplorerContext.useActorRef();
+  const { fileExplorerRef } = useBuild();
+  const openFiles = useSelector(fileExplorerRef, (state) => state.context.openFiles);
+  const activeFileId = useSelector(fileExplorerRef, (state) => state.context.activeFileId);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const handleTabClick = useCallback(
     (fileId: string) => {
-      actorRef.send({ type: 'setActiveFile', fileId });
+      fileExplorerRef.send({ type: 'setActiveFile', fileId });
     },
-    [actorRef],
+    [fileExplorerRef],
   );
 
   const handleTabClose = useCallback(
     (event: React.MouseEvent, fileId: string) => {
       event.stopPropagation();
-      actorRef.send({ type: 'closeFile', fileId });
+      fileExplorerRef.send({ type: 'closeFile', fileId });
     },
-    [actorRef],
+    [fileExplorerRef],
   );
 
   useEffect(() => {

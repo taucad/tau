@@ -1,4 +1,5 @@
 import { assertEvent, setup, enqueueActions } from 'xstate';
+import type { FileStatus } from '@taucad/types';
 
 // Helper function to find a file by path in the tree
 function findFileByPath(tree: FileItem[], path: string): FileItem | undefined {
@@ -26,6 +27,7 @@ export type FileItem = {
   language?: string;
   isDirectory?: boolean;
   children?: FileItem[];
+  gitStatus?: FileStatus;
 };
 
 export type OpenFile = {
@@ -35,6 +37,7 @@ export type OpenFile = {
   content: string;
   language?: string;
   isDirty?: boolean;
+  gitStatus?: FileStatus;
 };
 
 // Interface defining the context for the file explorer machine
@@ -42,6 +45,8 @@ type FileExplorerContext = {
   openFiles: OpenFile[];
   activeFileId: string | undefined;
   fileTree: FileItem[];
+  dirtyFiles: Set<string>; // Track files modified in filesystem
+  gitFileStatuses: Map<string, FileStatus>; // Git status for each file
 };
 
 // Define the types of events the machine can receive
@@ -50,16 +55,18 @@ type FileExplorerEvent =
   | { type: 'closeFile'; fileId: string }
   | { type: 'setActiveFile'; fileId: string | undefined }
   | { type: 'updateFileContent'; fileId: string; content: string }
-  | { type: 'setFileTree'; tree: FileItem[]; openFiles: string[] };
+  | { type: 'setFileTree'; tree: FileItem[]; openFiles: string[] }
+  | { type: 'updateDirtyFiles'; dirtyFiles: Set<string> }
+  | { type: 'updateGitStatuses'; gitStatuses: Map<string, FileStatus> };
 
 type FileExplorerEmitted =
   | { type: 'fileOpened'; file: OpenFile }
   | { type: 'fileClosed'; fileId: string }
   | { type: 'activeFileChanged'; fileId: string | undefined }
   | { type: 'fileContentUpdated'; fileId: string; content: string; isDirty: boolean }
-  | { type: 'fileTreeUpdated'; tree: FileItem[] };
-
-type FileExplorerInput = Record<string, never>;
+  | { type: 'fileTreeUpdated'; tree: FileItem[] }
+  | { type: 'dirtyFilesUpdated'; dirtyFiles: Set<string> }
+  | { type: 'gitStatusesUpdated'; gitStatuses: Map<string, FileStatus> };
 
 /**
  * File Explorer Machine
@@ -76,8 +83,6 @@ export const fileExplorerMachine = setup({
     context: {} as FileExplorerContext,
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
     events: {} as FileExplorerEvent,
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    input: {} as FileExplorerInput,
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
     emitted: {} as FileExplorerEmitted,
   },
@@ -250,6 +255,100 @@ export const fileExplorerMachine = setup({
         }
       }
     }),
+
+    updateDirtyFiles: enqueueActions(({ enqueue, event, context }) => {
+      assertEvent(event, 'updateDirtyFiles');
+
+      const { dirtyFiles } = event;
+
+      enqueue.assign({
+        dirtyFiles,
+      });
+
+      // Update isDirty status for open files
+      const updatedOpenFiles = context.openFiles.map((file) => ({
+        ...file,
+        isDirty: dirtyFiles.has(file.path),
+      }));
+
+      enqueue.assign({
+        openFiles: updatedOpenFiles,
+      });
+
+      // Update file tree with dirty status
+      function updateTreeWithDirty(items: FileItem[]): FileItem[] {
+        return items.map((item) => {
+          if (item.isDirectory && item.children) {
+            return {
+              ...item,
+              children: updateTreeWithDirty(item.children),
+            };
+          }
+
+          return {
+            ...item,
+            gitStatus: dirtyFiles.has(item.path) ? 'modified' : item.gitStatus,
+          };
+        });
+      }
+
+      const updatedTree = updateTreeWithDirty(context.fileTree);
+      enqueue.assign({
+        fileTree: updatedTree,
+      });
+
+      enqueue.emit({
+        type: 'dirtyFilesUpdated' as const,
+        dirtyFiles,
+      });
+    }),
+
+    updateGitStatuses: enqueueActions(({ enqueue, event, context }) => {
+      assertEvent(event, 'updateGitStatuses');
+
+      const { gitStatuses } = event;
+
+      enqueue.assign({
+        gitFileStatuses: gitStatuses,
+      });
+
+      // Update Git status for open files
+      const updatedOpenFiles = context.openFiles.map((file) => ({
+        ...file,
+        gitStatus: gitStatuses.get(file.path),
+      }));
+
+      enqueue.assign({
+        openFiles: updatedOpenFiles,
+      });
+
+      // Update file tree with Git status
+      function updateTreeWithGitStatus(items: FileItem[]): FileItem[] {
+        return items.map((item) => {
+          if (item.isDirectory && item.children) {
+            return {
+              ...item,
+              children: updateTreeWithGitStatus(item.children),
+            };
+          }
+
+          return {
+            ...item,
+            gitStatus: gitStatuses.get(item.path),
+          };
+        });
+      }
+
+      const updatedTree = updateTreeWithGitStatus(context.fileTree);
+      enqueue.assign({
+        fileTree: updatedTree,
+      });
+
+      enqueue.emit({
+        type: 'gitStatusesUpdated' as const,
+        gitStatuses,
+      });
+    }),
   },
 }).createMachine({
   id: 'fileExplorer',
@@ -257,6 +356,8 @@ export const fileExplorerMachine = setup({
     openFiles: [],
     activeFileId: undefined,
     fileTree: [],
+    dirtyFiles: new Set(),
+    gitFileStatuses: new Map(),
   },
   initial: 'idle',
   states: {
@@ -276,6 +377,12 @@ export const fileExplorerMachine = setup({
         },
         setFileTree: {
           actions: 'setFileTree',
+        },
+        updateDirtyFiles: {
+          actions: 'updateDirtyFiles',
+        },
+        updateGitStatuses: {
+          actions: 'updateGitStatuses',
         },
       },
     },

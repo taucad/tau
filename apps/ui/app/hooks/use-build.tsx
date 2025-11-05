@@ -1,12 +1,21 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useEffect, useMemo, useCallback } from 'react';
+import { createContext, useContext, useMemo, useCallback } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
+import type { ActorRefFrom } from 'xstate';
 import type { Message } from '@ai-sdk/react';
 import type { Build, Chat } from '@taucad/types';
 import { buildMachine } from '#machines/build.machine.js';
+import type { gitMachine } from '#machines/git.machine.js';
+import type { fileExplorerMachine } from '#machines/file-explorer.machine.js';
 import { inspect } from '#machines/inspector.js';
+import type { filesystemMachine } from '#machines/filesystem.machine.js';
+import type { cadMachine } from '#machines/cad.machine.js';
+import type { graphicsMachine } from '#machines/graphics.machine.js';
+import type { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
+import type { cameraCapabilityMachine } from '#machines/camera-capability.machine.js';
 
 type BuildContextType = {
+  buildId: string;
   isLoading: boolean;
   build: Build | undefined;
   error: Error | undefined;
@@ -14,6 +23,13 @@ type BuildContextType = {
   parameters: Record<string, unknown>;
   activeChat: Chat | undefined;
   activeChatId: string | undefined;
+  gitRef: ActorRefFrom<typeof gitMachine>;
+  fileExplorerRef: ActorRefFrom<typeof fileExplorerMachine>;
+  filesystemRef: ActorRefFrom<typeof filesystemMachine>;
+  graphicsRef: ActorRefFrom<typeof graphicsMachine>;
+  cadRef: ActorRefFrom<typeof cadMachine>;
+  screenshotRef: ActorRefFrom<typeof screenshotCapabilityMachine>;
+  cameraRef: ActorRefFrom<typeof cameraCapabilityMachine>;
   setChatMessages: (chatId: string, messages: Message[]) => void;
   setCodeParameters: (files: Record<string, { content: string }>, parameters: Record<string, unknown>) => void;
   updateName: (name: string) => void;
@@ -36,18 +52,20 @@ export function BuildProvider({
   readonly children: ReactNode;
   readonly buildId: string;
 }): React.JSX.Element {
-  // Create the build machine actor
+  // Create the build machine actor - it will auto-load based on buildId
   const actorRef = useActorRef(buildMachine, { input: { buildId }, inspect });
-
-  // Load the build when component mounts or buildId changes
-  useEffect(() => {
-    actorRef.send({ type: 'loadBuild', buildId });
-  }, [buildId, actorRef]);
 
   // Select state from the machine
   const build = useSelector(actorRef, (state) => state.context.build);
   const isLoading = useSelector(actorRef, (state) => state.context.isLoading);
   const error = useSelector(actorRef, (state) => state.context.error);
+  const gitRef = useSelector(actorRef, (state) => state.context.gitRef);
+  const fileExplorerRef = useSelector(actorRef, (state) => state.context.fileExplorerRef);
+  const filesystemRef = useSelector(actorRef, (state) => state.context.filesystemRef);
+  const graphicsRef = useSelector(actorRef, (state) => state.context.graphicsRef);
+  const cadRef = useSelector(actorRef, (state) => state.context.cadRef);
+  const screenshotRef = useSelector(actorRef, (state) => state.context.screenshotRef);
+  const cameraRef = useSelector(actorRef, (state) => state.context.cameraRef);
 
   // Memoize callbacks
   const setChatMessages = useCallback(
@@ -127,6 +145,7 @@ export function BuildProvider({
     const parameters = build?.assets.mechanical?.parameters ?? {};
 
     return {
+      buildId,
       build,
       isLoading,
       error,
@@ -134,6 +153,13 @@ export function BuildProvider({
       parameters,
       activeChatId,
       activeChat,
+      gitRef,
+      fileExplorerRef,
+      filesystemRef,
+      graphicsRef,
+      cadRef,
+      screenshotRef,
+      cameraRef,
       setChatMessages,
       setCodeParameters,
       updateName,
@@ -146,9 +172,17 @@ export function BuildProvider({
       deleteChat,
     };
   }, [
+    buildId,
     build,
     isLoading,
     error,
+    gitRef,
+    fileExplorerRef,
+    filesystemRef,
+    graphicsRef,
+    cadRef,
+    screenshotRef,
+    cameraRef,
     setChatMessages,
     setCodeParameters,
     updateName,
@@ -164,9 +198,17 @@ export function BuildProvider({
   return <BuildContext.Provider value={value}>{children}</BuildContext.Provider>;
 }
 
-export function useBuild(): BuildContextType {
+export function useBuild<T extends BuildContextType = BuildContextType>(options?: {
+  readonly enableNoContext?: false;
+}): T;
+export function useBuild<T extends BuildContextType = BuildContextType>(options: {
+  readonly enableNoContext: true;
+}): T | undefined;
+export function useBuild({ enableNoContext = false }: { readonly enableNoContext?: boolean } = {}):
+  | BuildContextType
+  | undefined {
   const context = useContext(BuildContext);
-  if (context === undefined) {
+  if (context === undefined && !enableNoContext) {
     throw new Error('useBuild must be used within a BuildProvider');
   }
 

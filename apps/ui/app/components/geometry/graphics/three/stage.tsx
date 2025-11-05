@@ -10,7 +10,7 @@ import { useCameraReset } from '#components/geometry/graphics/three/use-camera-r
 import { Lights } from '#components/geometry/graphics/three/react/lights.js';
 import { SectionView } from '#components/geometry/graphics/three/react/section-view.js';
 import { createStripedMaterial } from '#components/geometry/graphics/three/materials/striped-material.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 
 export type StageOptions = {
   /**
@@ -77,6 +77,7 @@ export function Stage({
 }: StageProperties): React.JSX.Element {
   const outer = React.useRef<THREE.Group>(null);
   const inner = React.useRef<THREE.Group>(null);
+  const { graphicsRef: graphicsActor } = useBuild();
 
   const cameraFovAngle = useSelector(graphicsActor, (state) => state.context.cameraFovAngle);
 

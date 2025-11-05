@@ -2,7 +2,7 @@ import { useSelector } from '@xstate/react';
 import type { StateFrom } from 'xstate';
 import { ChevronDown, Info, X } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import { cn } from '#utils/ui.utils.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -67,6 +67,7 @@ const infoFromState = (
 };
 
 export function ChatInterfaceStatus({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.ReactNode {
+  const { graphicsRef: graphicsActor } = useBuild();
   const state = useSelector(graphicsActor, (state) => state);
   const [isViewerStatusOpen, setIsViewerStatusOpen] = useCookie(cookieName.viewOpStatus, true);
 

@@ -3,13 +3,14 @@ import { useSelector } from '@xstate/react';
 import * as THREE from 'three';
 import { Theme, useTheme } from 'remix-themes';
 import { InfiniteGrid } from '#components/geometry/graphics/three/react/infinite-grid.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 
 /**
  * Grid component that renders the infinite grid using sizes from the graphics machine
  * and handles theme-aware color selection
  */
 export const Grid = React.memo(() => {
+  const { graphicsRef: graphicsActor } = useBuild();
   const gridSizes = useSelector(graphicsActor, (state) => state.context.gridSizes);
   const [theme] = useTheme();
 

@@ -5,25 +5,38 @@ import type { Build, Chat } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import { storage } from '#db/storage.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
+import { isBrowser } from '#constants/browser.constants.js';
 import { filesystemMachine } from '#machines/filesystem.machine.js';
+import { gitMachine } from '#machines/git.machine.js';
+import { fileExplorerMachine } from '#machines/file-explorer.machine.js';
+import { cadMachine } from '#machines/cad.machine.js';
+import { graphicsMachine } from '#machines/graphics.machine.js';
+import { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
+import { cameraCapabilityMachine } from '#machines/camera-capability.machine.js';
 import { assertActorDoneEvent } from '#lib/xstate.js';
 
 /**
  * Build Machine Context
  */
 export type BuildContext = {
-  buildId: string | undefined;
+  buildId: string;
   build: Build | undefined;
   error: Error | undefined;
   isLoading: boolean;
-  filesystemRef: ActorRefFrom<typeof filesystemMachine> | undefined;
+  filesystemRef: ActorRefFrom<typeof filesystemMachine>;
+  gitRef: ActorRefFrom<typeof gitMachine>;
+  fileExplorerRef: ActorRefFrom<typeof fileExplorerMachine>;
+  graphicsRef: ActorRefFrom<typeof graphicsMachine>;
+  cadRef: ActorRefFrom<typeof cadMachine>;
+  screenshotRef: ActorRefFrom<typeof screenshotCapabilityMachine>;
+  cameraRef: ActorRefFrom<typeof cameraCapabilityMachine>;
 };
 
 /**
  * Build Machine Input
  */
 type BuildInput = {
-  buildId?: string;
+  buildId: string;
 };
 
 // Define the actors that the machine can invoke
@@ -209,6 +222,12 @@ const buildActors = {
   deleteChatActor,
   updateCodeParametersActor,
   filesystem: filesystemMachine,
+  git: gitMachine,
+  fileExplorer: fileExplorerMachine,
+  graphics: graphicsMachine,
+  cad: cadMachine,
+  screenshot: screenshotCapabilityMachine,
+  camera: cameraCapabilityMachine,
 } as const;
 
 type BuildActorNames = keyof typeof buildActors;
@@ -265,7 +284,6 @@ type BuildEmitted =
  * Build Machine
  *
  * Manages build lifecycle, storage operations, and filesystem coordination.
- * Replaces the core functionality from use-build.tsx and use-builds.ts.
  *
  * States:
  * - idle: No build loaded
@@ -308,47 +326,21 @@ export const buildMachine = setup({
     clearLoading: assign({
       isLoading: false,
     }),
-    setBuildId: assign({
-      buildId({ event }) {
-        assertEvent(event, 'loadBuild');
-        return event.buildId;
-      },
-    }),
     setBuild: assign({
       build({ event }) {
         assertActorDoneEvent(event);
         return event.output as Build;
       },
-      buildId({ event }) {
-        assertActorDoneEvent(event);
-        return (event.output as Build).id;
-      },
       isLoading: false,
     }),
     clearBuild: assign({
       build: undefined,
-      buildId: undefined,
-    }),
-    initializeFilesystem: assign({
-      filesystemRef({ context, spawn }) {
-        console.log('context.build', context.build);
-        if (context.build?.assets.mechanical) {
-          const id = `filesystem-${context.buildId}`;
-          const actor = spawn('filesystem', {
-            id,
-            input: { buildId: context.buildId },
-          });
-          return actor;
-        }
-
-        return context.filesystemRef;
-      },
     }),
     sendFilesToFilesystem: enqueueActions(({ enqueue, context }) => {
-      if (context.build?.assets.mechanical && context.filesystemRef) {
+      if (context.build?.assets.mechanical) {
         enqueue.sendTo(context.filesystemRef, {
           type: 'setFiles',
-          buildId: context.buildId!,
+          buildId: context.buildId,
           files: context.build.assets.mechanical.files,
         });
       }
@@ -359,23 +351,100 @@ export const buildMachine = setup({
         return event.output as Build;
       },
     }),
+    initializeKernelIfNeeded: enqueueActions(({ enqueue, context }) => {
+      if (context.build?.assets.mechanical) {
+        enqueue.sendTo(context.cadRef, { type: 'initializeKernel' });
+      }
+    }),
+  },
+  guards: {
+    isNotBrowser: () => !isBrowser,
+    shouldAutoLoad: () => isBrowser,
   },
 }).createMachine({
   id: 'build',
-  context: ({ input }) => ({
-    buildId: input.buildId,
-    build: undefined,
-    error: undefined,
-    isLoading: false,
-    filesystemRef: undefined,
-  }),
-  initial: 'idle',
+  context({ input, spawn }) {
+    const { buildId } = input;
+
+    const filesystemRef = spawn('filesystem', {
+      id: `filesystem-${buildId}`,
+      input: { buildId },
+    });
+
+    const gitRef = spawn('git', {
+      id: `git-${buildId}`,
+      input: { buildId },
+    });
+
+    const fileExplorerRef = spawn('fileExplorer', {
+      id: `file-explorer-${buildId}`,
+    });
+
+    const graphicsRef = spawn('graphics', {
+      id: `graphics-${buildId}`,
+      input: {
+        defaultCameraFovAngle: 60,
+        measureSnapDistance: 40,
+      },
+    });
+
+    const cadRef = spawn('cad', {
+      id: `cad-${buildId}`,
+      input: {
+        shouldInitializeKernelOnStart: false,
+        graphicsRef,
+      },
+    });
+
+    const screenshotRef = spawn('screenshot', {
+      id: `screenshot-${buildId}`,
+      input: { graphicsRef },
+    });
+
+    const cameraRef = spawn('camera', {
+      id: `camera-${buildId}`,
+      input: { graphicsRef },
+    });
+
+    return {
+      buildId,
+      build: undefined,
+      error: undefined,
+      isLoading: true,
+      filesystemRef,
+      gitRef,
+      fileExplorerRef,
+      graphicsRef,
+      cadRef,
+      screenshotRef,
+      cameraRef,
+    };
+  },
+  initial: 'checkEnvironment',
   states: {
+    checkEnvironment: {
+      always: [
+        {
+          guard: 'isNotBrowser',
+          target: 'ssr',
+        },
+        {
+          guard: 'shouldAutoLoad',
+          target: 'loading',
+        },
+        {
+          target: 'idle',
+        },
+      ],
+    },
+    ssr: {
+      type: 'final',
+    },
     idle: {
       on: {
         loadBuild: {
           target: 'loading',
-          actions: ['setBuildId', 'setLoading'],
+          actions: 'setLoading',
         },
         createBuild: {
           target: 'creating',
@@ -387,14 +456,14 @@ export const buildMachine = setup({
       entry: 'clearError',
       invoke: {
         src: 'loadBuildActor',
-        input: ({ context }) => ({ buildId: context.buildId! }),
+        input: ({ context }) => ({ buildId: context.buildId }),
         onDone: {
           target: 'ready',
           actions: [
             'setBuild',
             'clearLoading',
-            'initializeFilesystem',
             'sendFilesToFilesystem',
+            'initializeKernelIfNeeded',
             emit(({ event }) => {
               assertActorDoneEvent(event);
               return {
@@ -429,8 +498,8 @@ export const buildMachine = setup({
           actions: [
             'setBuild',
             'clearLoading',
-            'initializeFilesystem',
             'sendFilesToFilesystem',
+            'initializeKernelIfNeeded',
             emit(({ event }) => {
               assertActorDoneEvent(event);
               return {
@@ -456,7 +525,7 @@ export const buildMachine = setup({
       on: {
         loadBuild: {
           target: 'loading',
-          actions: ['setBuildId', 'setLoading'],
+          actions: 'setLoading',
         },
         updateBuild: 'updating',
         deleteBuild: 'deleting',
@@ -730,17 +799,15 @@ export const buildMachine = setup({
             enqueueActions(({ enqueue, context, event }) => {
               // Update filesystem with new files
               assertActorDoneEvent(event);
-              if (context.filesystemRef) {
-                const output = event.output as {
-                  files: Record<string, { content: string }>;
-                  parameters: Record<string, unknown>;
-                };
-                enqueue.sendTo(context.filesystemRef, {
-                  type: 'setFiles',
-                  buildId: context.buildId!,
-                  files: output.files,
-                });
-              }
+              const output = event.output as {
+                files: Record<string, { content: string }>;
+                parameters: Record<string, unknown>;
+              };
+              enqueue.sendTo(context.filesystemRef, {
+                type: 'setFiles',
+                buildId: context.buildId,
+                files: output.files,
+              });
             }),
             emit(({ event }) => {
               assertActorDoneEvent(event);
@@ -771,7 +838,7 @@ export const buildMachine = setup({
       on: {
         loadBuild: {
           target: 'loading',
-          actions: ['setBuildId', 'setLoading'],
+          actions: 'setLoading',
         },
         createBuild: {
           target: 'creating',

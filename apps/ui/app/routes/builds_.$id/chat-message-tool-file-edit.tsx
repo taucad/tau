@@ -10,7 +10,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.
 import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import { useChatSelector } from '#components/chat/ai-chat-provider.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
@@ -132,14 +132,18 @@ function Filename({
 // eslint-disable-next-line complexity -- refactor later
 export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocationUIPart }): React.JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
+  const { cadRef: cadActor } = useBuild();
   const status = useChatSelector((state) => state.context.status);
 
   // Create file edit machine
   const [fileEditState, fileEditSend] = useActor(fileEditMachine);
 
-  const setCode = useCallback((code: string) => {
-    cadActor.send({ type: 'setCode', code });
-  }, []);
+  const setCode = useCallback(
+    (code: string) => {
+      cadActor.send({ type: 'setCode', code });
+    },
+    [cadActor],
+  );
 
   const handleApplyEdit = useCallback(
     (targetFile: string, editInstructions: string) => {
@@ -155,7 +159,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
         },
       });
     },
-    [fileEditSend],
+    [cadActor, fileEditSend],
   );
 
   // When file edit is successful or failed with fallback content, set the code in the CAD actor

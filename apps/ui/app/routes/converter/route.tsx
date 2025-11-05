@@ -49,10 +49,10 @@ import {
   getFileExtension,
 } from '#routes/converter/converter-utils.js';
 import { SettingsControl } from '#components/geometry/cad/settings-control.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '#utils/ui.utils.js';
+import { useBuild } from '#hooks/use-build.js';
 
 const yUpFormats = new Set<InputFormat>(['gltf', 'glb', 'ifc']);
 
@@ -75,6 +75,7 @@ type UploadedFileInfo = {
 };
 
 export default function ConverterRoute(): React.JSX.Element {
+  const { graphicsRef: graphicsActor } = useBuild();
   const [uploadedFile, setUploadedFile] = useState<UploadedFileInfo | undefined>(undefined);
   const [glbData, setGlbData] = useState<Uint8Array | undefined>(undefined);
   const [selectedFormats, setSelectedFormats] = useCookie<OutputFormat[]>(cookieName.converterOutputFormats, []);

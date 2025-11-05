@@ -14,7 +14,7 @@ import { setup, assign } from 'xstate';
 import { useEffect } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { messageStatus } from '@taucad/types/constants';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 
 type UseChatArgs = NonNullable<Parameters<typeof useChat>[0]>;
 type UseChatReturn = ReturnType<typeof useChat>;
@@ -417,6 +417,7 @@ function ChatSyncWrapper({
   readonly value: Omit<UseChatArgs, 'onFinish' | 'onError' | 'onResponse'>;
 }): React.JSX.Element {
   const actorRef = AiChatContext.useActorRef();
+  const buildContext = useBuild({ enableNoContext: true });
 
   // Initialize useChat with sync callbacks
   const chat = useChat({
@@ -424,12 +425,15 @@ function ChatSyncWrapper({
     credentials: 'include',
     // eslint-disable-next-line @typescript-eslint/naming-convention -- experimental API
     experimental_prepareRequestBody(requestBody) {
-      const cadActorState = cadActor.getSnapshot();
-      const feedback = {
-        code: cadActorState.context.code,
-        codeErrors: cadActorState.context.codeErrors,
-        kernelError: cadActorState.context.kernelError,
-      };
+      let feedback = {};
+      if (buildContext) {
+        const cadActorState = buildContext.cadRef.getSnapshot();
+        feedback = {
+          code: cadActorState.context.code,
+          codeErrors: cadActorState.context.codeErrors,
+          kernelError: cadActorState.context.kernelError,
+        };
+      }
 
       // Send messages needed for LangGraph to process the request:
       // - Last user message (for model ID and context)

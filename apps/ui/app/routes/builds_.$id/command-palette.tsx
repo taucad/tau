@@ -17,10 +17,8 @@ import { useAuthenticate } from '@daveyplate/better-auth-ui';
 import type { ExportFormat } from '@taucad/types';
 import { fileExtensionFromExportFormat } from '@taucad/types/constants';
 import { Button } from '#components/ui/button.js';
-import { useBuildSelector } from '#hooks/use-build.js';
+import { useBuildSelector, useBuild } from '#hooks/use-build.js';
 import { toast } from '#components/ui/sonner.js';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { downloadBlob } from '#utils/file.utils.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import { exportGeometryMachine } from '#machines/export-geometry.machine.js';
@@ -57,6 +55,7 @@ type CommandPaletteProperties = {
 
 export function CommandPalette({ isOpen, onOpenChange }: CommandPaletteProperties): React.JSX.Element {
   const navigate = useNavigate();
+  const { cadRef: cadActor, graphicsRef: graphicsActor } = useBuild();
   const geometries = useSelector(cadActor, (state) => state.context.geometries);
   const buildName = useBuildSelector((state) => state.build?.name) ?? 'file';
   const updateThumbnail = useBuildSelector((state) => state.updateThumbnail);
@@ -374,7 +373,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
     return () => {
       subscription.unsubscribe();
     };
-  }, [updateThumbnailScreenshot]);
+  }, [updateThumbnailScreenshot, cadActor]);
 
   const commandItems = useMemo(
     (): CommandPaletteItem[] => [

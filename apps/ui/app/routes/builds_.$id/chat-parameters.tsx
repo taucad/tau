@@ -21,7 +21,7 @@ import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import { cn } from '#utils/ui.utils.js';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import { templates, uiSchema, widgets } from '#routes/builds_.$id/rjsf-theme.js';
 import type { RJSFContext } from '#routes/builds_.$id/rjsf-theme.js';
 import { rjsfIdPrefix, rjsfIdSeparator } from '#routes/builds_.$id/rjsf-utils.js';
@@ -67,6 +67,7 @@ export const ChatParameters = memo(function (props: {
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }) {
+  const { cadRef: cadActor } = useBuild();
   const { className, isExpanded = true, setIsExpanded } = props;
   const parameters = useSelector(cadActor, (state) => state.context.parameters);
   const defaultParameters = useSelector(cadActor, (state) => state.context.defaultParameters);

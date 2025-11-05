@@ -33,7 +33,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
-import { useActor, useSelector } from '@xstate/react';
+import { useSelector } from '@xstate/react';
 import type { EngineeringDiscipline, Build } from '@taucad/types';
 import { engineeringDisciplines } from '@taucad/types/constants';
 import { createColumns } from '#routes/builds_.library/columns.js';
@@ -67,7 +67,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '#components/ui/alert-dialog.js';
-import { BuildProvider } from '#hooks/use-build.js';
+import { BuildProvider, useBuild } from '#hooks/use-build.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { BuildActionDropdown } from '#routes/builds_.library/build-action-dropdown.js';
 import { createBuildMutations } from '#hooks/build-mutations.js';
@@ -75,7 +75,6 @@ import { Checkbox } from '#components/ui/checkbox.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '#components/ui/table.js';
 import { toTitleCase } from '#utils/string.utils.js';
-import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
@@ -437,7 +436,7 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
         // Grid View
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {table.getRowModel().rows.map((row) => (
-            <BuildProvider key={row.original.id} buildId={row.original.id}>
+            <BuildProvider key={row.original.id} buildId={row.original.id} input={{ shouldLoadModelOnStart: false }}>
               <BuildLibraryCard
                 build={row.original}
                 actions={actions}
@@ -641,24 +640,26 @@ type BuildLibraryCardProps = {
 };
 
 function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibraryCardProps) {
-  const [_, send, actorRef] = useActor(cadMachine, { input: { shouldInitializeKernelOnStart: false } });
-  const geometries = useSelector(actorRef, (state) => state.context.geometries);
+  const [showPreview, setShowPreview] = useState(false);
+  const [hasLoadedModel, setHasLoadedModel] = useState(false);
+
+  // Get actors from BuildProvider context
+  const { cadRef, buildRef } = useBuild();
+  const geometries = useSelector(cadRef, (state) => state.context.geometries);
+  const status = useSelector(cadRef, (state) => state.value);
 
   const mechanicalAsset = build.assets.mechanical;
   if (!mechanicalAsset) {
     throw new Error('Mechanical asset not found');
   }
 
-  const code = mechanicalAsset.files[mechanicalAsset.main]?.content ?? '';
-  const { parameters } = mechanicalAsset;
-  const status = useSelector(actorRef, (state) => state.value);
-  const [showPreview, setShowPreview] = useState(false);
-
+  // Load the CAD model when preview is enabled for the first time
   useEffect(() => {
-    if (showPreview) {
-      send({ type: 'initializeModel', code, parameters, kernelType: mechanicalAsset.language });
+    if (showPreview && !hasLoadedModel) {
+      buildRef.send({ type: 'loadModel' });
+      setHasLoadedModel(true);
     }
-  }, [code, parameters, mechanicalAsset.language, showPreview, send]);
+  }, [showPreview, hasLoadedModel, buildRef]);
 
   return (
     <Card className={cn('group relative flex flex-col overflow-hidden pt-0', isSelected && 'ring-3 ring-primary')}>

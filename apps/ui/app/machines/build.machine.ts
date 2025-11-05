@@ -24,6 +24,7 @@ export type BuildContext = {
   error: Error | undefined;
   isLoading: boolean;
   enableFilePreview: boolean;
+  shouldLoadModelOnStart: boolean;
   filesystemRef: ActorRefFrom<typeof filesystemMachine>;
   gitRef: ActorRefFrom<typeof gitMachine>;
   fileExplorerRef: ActorRefFrom<typeof fileExplorerMachine>;
@@ -38,6 +39,7 @@ export type BuildContext = {
  */
 type BuildInput = {
   buildId: string;
+  shouldLoadModelOnStart?: boolean;
 };
 
 // Define the actors that the machine can invoke
@@ -258,7 +260,8 @@ type BuildEventInternal =
       files: Record<string, { content: string }>;
       parameters: Record<string, unknown>;
     }
-  | { type: 'setEnableFilePreview'; enabled: boolean };
+  | { type: 'setEnableFilePreview'; enabled: boolean }
+  | { type: 'loadModel' };
 
 export type BuildEventExternal = OutputFrom<(typeof buildActors)[BuildActorNames]>;
 type BuildEventExternalDone = DoneActorEvent<BuildEventExternal, BuildActorNames>;
@@ -385,6 +388,11 @@ export const buildMachine = setup({
       },
     }),
     initializeKernelIfNeeded: enqueueActions(({ enqueue, context }) => {
+      // Only initialize if shouldLoadModelOnStart is true
+      if (!context.shouldLoadModelOnStart) {
+        return;
+      }
+
       const mechanicalAsset = context.build?.assets.mechanical;
       if (!mechanicalAsset) {
         return;
@@ -401,7 +409,23 @@ export const buildMachine = setup({
         kernelType: mechanicalAsset.language,
       });
     }),
-    subscribeToFileExplorer: enqueueActions(({ enqueue, context }) => {
+    loadModel: enqueueActions(({ enqueue, context }) => {
+      const mechanicalAsset = context.build?.assets.mechanical;
+      if (!mechanicalAsset) {
+        return;
+      }
+
+      // Initialize kernel first
+      enqueue.sendTo(context.cadRef, { type: 'initializeKernel' });
+
+      // Then initialize the model with current build data
+      enqueue.sendTo(context.cadRef, {
+        type: 'initializeModel',
+        code: mechanicalAsset.files[mechanicalAsset.main]!.content,
+        parameters: mechanicalAsset.parameters,
+        kernelType: mechanicalAsset.language,
+      });
+    }),
       // Subscribe to file explorer active file changes
       context.fileExplorerRef.subscribe((state) => {
         const { activeFileId, openFiles } = state.context;
@@ -580,7 +604,7 @@ export const buildMachine = setup({
 }).createMachine({
   id: 'build',
   context({ input, spawn }) {
-    const { buildId } = input;
+    const { buildId, shouldLoadModelOnStart = true } = input;
 
     const filesystemRef = spawn('filesystem', {
       id: `filesystem-${buildId}`,
@@ -628,6 +652,7 @@ export const buildMachine = setup({
       error: undefined,
       isLoading: true,
       enableFilePreview: true, // Default to enabled
+      shouldLoadModelOnStart,
       filesystemRef,
       gitRef,
       fileExplorerRef,
@@ -772,6 +797,9 @@ export const buildMachine = setup({
         updateCodeParameters: 'updatingCodeParameters',
         setEnableFilePreview: {
           actions: 'setEnableFilePreview',
+        },
+        loadModel: {
+          actions: 'loadModel',
         },
       },
     },

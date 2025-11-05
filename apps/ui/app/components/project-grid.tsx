@@ -1,9 +1,10 @@
 import { Star, Eye, ArrowRight } from 'lucide-react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import { useActor, useSelector } from '@xstate/react';
+import { useSelector } from '@xstate/react';
 import type { Build } from '@taucad/types';
 import { idPrefix, kernelConfigurations } from '@taucad/types/constants';
+import { fromPromise } from 'xstate';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
 import { Avatar, AvatarFallback, AvatarImage } from '#components/ui/avatar.js';
@@ -11,10 +12,10 @@ import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '#compo
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
 import { storage } from '#db/storage.js';
-import { cadMachine } from '#machines/cad.machine.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
+import { BuildProvider, useBuild } from '#hooks/use-build.js';
 
 type CommunityBuildCardProperties = Build;
 
@@ -29,7 +30,20 @@ export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBui
     <>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
         {builds.map((build) => (
-          <ProjectCard key={build.id} {...build} />
+          <BuildProvider
+            key={build.id}
+            buildId={build.id}
+            input={{ shouldLoadModelOnStart: false }}
+            provide={{
+              actors: {
+                loadBuildActor: fromPromise<Build, { buildId: string }>(async () => {
+                  return build;
+                }),
+              },
+            }}
+          >
+            <ProjectCard {...build} />
+          </BuildProvider>
         ))}
       </div>
 
@@ -47,11 +61,12 @@ export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBui
 function ProjectCard({ id, name, description, thumbnail, stars, author, tags, assets }: CommunityBuildCardProperties) {
   const [showPreview, setShowPreview] = useState(false);
   const [isForking, setIsForking] = useState(false);
+  const [hasLoadedModel, setHasLoadedModel] = useState(false);
 
-  // Create a unique instance of the CAD machine for this card using the card's ID
-  const [_, send, actorRef] = useActor(cadMachine, { input: { shouldInitializeKernelOnStart: false } });
-  const geometries = useSelector(actorRef, (state) => state.context.geometries);
-  const status = useSelector(actorRef, (state) => state.value);
+  // Get actors from BuildProvider context
+  const { cadRef, buildRef } = useBuild();
+  const geometries = useSelector(cadRef, (state) => state.context.geometries);
+  const status = useSelector(cadRef, (state) => state.value);
 
   const navigate = useNavigate();
 
@@ -62,17 +77,13 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
     throw new Error('Mechanical asset not found');
   }
 
-  // Only load the CAD model when the card is visible and preview is enabled
+  // Load the CAD model when preview is enabled for the first time
   useEffect(() => {
-    if (showPreview) {
-      send({
-        type: 'initializeModel',
-        code: mechanicalAsset.files[mechanicalAsset.main]!.content,
-        parameters: mechanicalAsset.parameters,
-        kernelType: mechanicalAsset.language,
-      });
+    if (showPreview && !hasLoadedModel) {
+      buildRef.send({ type: 'loadModel' });
+      setHasLoadedModel(true);
     }
-  }, [showPreview, mechanicalAsset, send]);
+  }, [showPreview, hasLoadedModel, buildRef]);
 
   const handleStar = useCallback(() => {
     // TODO: Implement star functionality

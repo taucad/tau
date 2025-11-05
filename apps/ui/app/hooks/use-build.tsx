@@ -49,12 +49,19 @@ const BuildContext = createContext<BuildContextType | undefined>(undefined);
 export function BuildProvider({
   children,
   buildId,
+  provide,
+  input,
 }: {
   readonly children: ReactNode;
   readonly buildId: string;
+  readonly provide?: Parameters<typeof buildMachine.provide>[0];
+  readonly input?: Omit<Parameters<typeof useActorRef<typeof buildMachine>>[1]['input'], 'buildId'>;
 }): React.JSX.Element {
   // Create the build machine actor - it will auto-load based on buildId
-  const actorRef = useActorRef(buildMachine, { input: { buildId }, inspect });
+  const actorRef = useActorRef(buildMachine.provide(provide ?? {}), {
+    input: { buildId, ...input },
+    inspect,
+  });
 
   // Select state from the machine
   const build = useSelector(actorRef, (state) => state.context.build);

@@ -57,7 +57,7 @@ export const ChatModelSelector = memo(function ({
         <span className="flex w-full items-center justify-between">
           <div className="flex items-center gap-2">
             <SvgIcon id={item.details.family} />
-            <span>{item.slug}</span>
+            <span>{item.name}</span>
           </div>
           <div className="flex items-center gap-2">
             {item.details.parameterSize ? (

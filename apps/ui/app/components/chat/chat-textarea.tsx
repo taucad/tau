@@ -486,7 +486,6 @@ export const ChatTextarea = memo(function ({
         'focus-within:border-primary',
         className,
       )}
-      data-has-context-actions={enableContextActions}
       onBlur={handleTextareaBlur}
     >
       {/* Textarea */}
@@ -498,11 +497,27 @@ export const ChatTextarea = memo(function ({
         onDrop={handleDrop}
         onMouseDown={handleMouseDown}
       >
-        {/* Context */}
-        <div className="m-2 hidden flex-wrap gap-1 group-data-[has-context-actions=true]/chat-textarea:flex">
-          {enableContextActions ? (
-            <ChatContextActions data-chat-textarea-focustrap addImage={handleAddImage} addText={handleAddText} />
-          ) : null}
+        {/* Input */}
+        <Textarea
+          ref={textareaReference}
+          className={cn(
+            'mb-10 size-full max-h-48 min-h-6 resize-none border-none bg-transparent dark:bg-transparent',
+            'px-3 pb-3',
+            'ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
+            images.length > 0 ? 'pt-10' : 'pt-3',
+          )}
+          rows={3}
+          autoFocus={enableAutoFocus}
+          value={inputText}
+          placeholder="Ask Tau to build anything..."
+          onChange={handleTextChange}
+          onKeyDown={handleTextareaKeyDown}
+        />
+      </div>
+
+      {/* Images overlay - only shown when images exist */}
+      {images.length > 0 ? (
+        <div className="absolute top-3 right-3 left-3 flex flex-wrap gap-1">
           {images.map((image, index) => (
             <div key={image} className="group/image-item relative text-muted-foreground hover:text-foreground">
               <HoverCard openDelay={100} closeDelay={100}>
@@ -535,24 +550,7 @@ export const ChatTextarea = memo(function ({
             </div>
           ))}
         </div>
-
-        {/* Input */}
-        <Textarea
-          ref={textareaReference}
-          className={cn(
-            'mb-10 size-full max-h-48 min-h-6 resize-none border-none bg-transparent dark:bg-transparent',
-            'px-3 pt-0 pb-3',
-            'group-data-[has-context-actions=false]/chat-textarea:pt-3',
-            'ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
-          )}
-          rows={3}
-          autoFocus={enableAutoFocus}
-          value={inputText}
-          placeholder="Ask Tau to build anything..."
-          onChange={handleTextChange}
-          onKeyDown={handleTextareaKeyDown}
-        />
-      </div>
+      ) : null}
 
       {/* Context Menu */}
       {showContextMenu ? (
@@ -605,7 +603,7 @@ export const ChatTextarea = memo(function ({
                   className="h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground"
                 >
                   <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full @xs:max-w-fit">
-                    <span className="hidden truncate text-xs @[16rem]:block">{selectedModel?.slug ?? 'Offline'}</span>
+                    <span className="hidden truncate text-xs @[16rem]:block">{selectedModel?.name ?? 'Offline'}</span>
                     <span className="relative flex size-4 items-center justify-center">
                       <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100" />
                       <CircuitBoard className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0" />
@@ -620,7 +618,6 @@ export const ChatTextarea = memo(function ({
             <span>({selectedModel?.slug ?? 'Offline'})</span>
           </TooltipContent>
         </Tooltip>
-
         {/* Tool selector */}
         <Tooltip>
           <ChatToolSelector value={selectedToolChoice} onValueChange={setSelectedToolChoice}>
@@ -630,7 +627,7 @@ export const ChatTextarea = memo(function ({
                   data-chat-textarea-focustrap
                   variant="outline"
                   size="sm"
-                  className="h-7 rounded-full text-muted-foreground hover:text-foreground"
+                  className="h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7"
                 >
                   <span className="hidden text-xs @[22rem]:block">
                     {selectedMode === 'auto' && 'Auto'}
@@ -668,6 +665,11 @@ export const ChatTextarea = memo(function ({
       </div>
 
       <div className="absolute right-2 bottom-2 flex flex-row items-center gap-1">
+        {/* Context actions */}
+        {enableContextActions ? (
+          <ChatContextActions data-chat-textarea-focustrap addImage={handleAddImage} addText={handleAddText} />
+        ) : null}
+
         {/* Upload button */}
         <Tooltip>
           <TooltipTrigger asChild>

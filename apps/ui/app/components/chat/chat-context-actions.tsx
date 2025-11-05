@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useEffect } from 'react';
-import type { ClassValue } from 'clsx';
 import { AtSign, Image, Code, AlertTriangle, AlertCircle, Camera } from 'lucide-react';
 import { useSelector, useActorRef } from '@xstate/react';
 import { TooltipTrigger, TooltipContent, Tooltip } from '#components/ui/tooltip.js';
@@ -8,7 +7,6 @@ import { useBuild } from '#hooks/use-build.js';
 import { toast } from '#components/ui/sonner.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { orthographicViews, screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
-import { cn } from '#utils/ui.utils.js';
 
 type ChatContextActionsProperties = {
   readonly addImage: (image: string) => void;
@@ -19,7 +17,6 @@ type ChatContextActionsProperties = {
   readonly selectedIndex?: number;
   readonly onSelectedIndexChange?: (index: number) => void;
   readonly onSelectItem?: (text: string) => void;
-  readonly triggerClassName?: ClassValue;
 };
 
 type ContextActionItem = {
@@ -40,7 +37,6 @@ export function ChatContextActions({
   selectedIndex,
   onSelectedIndexChange,
   onSelectItem,
-  triggerClassName,
   ...properties
 }: ChatContextActionsProperties): React.JSX.Element {
   const { cadRef: cadActor, graphicsRef: graphicsActor } = useBuild();
@@ -407,9 +403,9 @@ ${kernelError.stack ? `\n\`\`\`\n${kernelError.stack}\n\`\`\`` : ''}
           <Button
             variant="outline"
             size="icon"
-            className={cn('size-6 bg-background text-muted-foreground hover:text-foreground', triggerClassName)}
+            className="size-7 rounded-full text-muted-foreground hover:text-foreground"
           >
-            <AtSign className="size-3" />
+            <AtSign className="size-3.5" />
           </Button>
         </TooltipTrigger>
       </ComboBoxResponsive>

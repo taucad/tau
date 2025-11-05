@@ -821,20 +821,7 @@ class TransformControlsGizmo extends Object3D {
       color: 0x00_00_00,
     });
 
-    // Const gizmoLineDashed = new LineDashedMaterial({
-    //   depthTest: false,
-    //   depthWrite: false,
-    //   transparent: true,
-    //   linewidth: 1,
-    //   fog: false,
-    //   toneMapped: false,
-    //   dashSize: 1,
-    //   gapSize: 1,
-    //   color: 0x00_00_00,
-    // });
-
     // Make unique material for each axis/color
-
     const matInvisible = gizmoMaterial.clone();
     matInvisible.opacity = 0.15;
 
@@ -842,11 +829,13 @@ class TransformControlsGizmo extends Object3D {
     matHelper.color.set(0x00_00_00);
     matHelper.opacity = 0.5;
 
-    const matHelperWhite = gizmoMaterial.clone();
-    matHelperWhite.color.set(0xff_ff_ff);
+    const matLabelBackground = gizmoMaterial.clone();
+    matLabelBackground.color.set(0xff_ff_ff);
+    matLabelBackground.visible = false; // TODO: Show label text, update text as transform changes
 
-    const matHelperBlack = gizmoMaterial.clone();
-    matHelperBlack.color.set(0x00_00_00);
+    const matLabelText = gizmoMaterial.clone();
+    matLabelText.color.set(0x00_00_00);
+    matLabelText.visible = false; // TODO: Show label text, update text as transform changes
 
     const matRed = gizmoMaterial.clone();
     matRed.color.set(0xef_44_44);
@@ -987,28 +976,28 @@ class TransformControlsGizmo extends Object3D {
           'bwd-handle',
         ],
         [
-          new Mesh(fontGeometryTranslation, matHelper),
+          new Mesh(fontGeometryTranslation, matLabelText),
           [gizmoMeshTranslationTextOffset, gizmoTextBoxOffset, 0],
           [Math.PI / 2, Math.PI, Math.PI],
           gizmoTranslationScale,
           'fwd-label',
         ],
         [
-          new Mesh(roundedBoxGeometry, matHelperWhite),
+          new Mesh(roundedBoxGeometry, matLabelBackground),
           [gizmoMeshTranslationTextOffset, 0, 0],
           [Math.PI / 2, 0, 0],
           gizmoTranslationScale,
           'fwd-label',
         ],
         [
-          new Mesh(fontGeometryTranslation, matHelperBlack),
+          new Mesh(fontGeometryTranslation, matLabelText),
           [-gizmoMeshTranslationTextOffset, gizmoTextBoxOffset, 0],
           [Math.PI / 2, 0, Math.PI],
           gizmoTranslationScale,
           'bwd-label',
         ],
         [
-          new Mesh(roundedBoxGeometry, matHelperWhite),
+          new Mesh(roundedBoxGeometry, matLabelBackground),
           [-gizmoMeshTranslationTextOffset, 0, 0],
           [Math.PI / 2, 0, Math.PI],
           gizmoTranslationScale,
@@ -1031,28 +1020,28 @@ class TransformControlsGizmo extends Object3D {
           'bwd-handle',
         ],
         [
-          new Mesh(fontGeometryTranslation, matHelper),
+          new Mesh(fontGeometryTranslation, matLabelText),
           [0, gizmoMeshTranslationTextOffset, gizmoTextBoxOffset],
           [0, 0, Math.PI / 2],
           gizmoTranslationScale,
           'fwd-label',
         ],
         [
-          new Mesh(roundedBoxGeometry, matHelperWhite),
+          new Mesh(roundedBoxGeometry, matLabelBackground),
           [0, gizmoMeshTranslationTextOffset, 0],
           [0, 0, Math.PI / 2],
           gizmoTranslationScale,
           'fwd-label',
         ],
         [
-          new Mesh(fontGeometryTranslation, matHelper),
+          new Mesh(fontGeometryTranslation, matLabelText),
           [0, -gizmoMeshTranslationTextOffset, gizmoTextBoxOffset],
           [Math.PI, 0, Math.PI / 2],
           gizmoTranslationScale,
           'bwd-label',
         ],
         [
-          new Mesh(roundedBoxGeometry, matHelperWhite),
+          new Mesh(roundedBoxGeometry, matLabelBackground),
           [0, -gizmoMeshTranslationTextOffset, 0],
           [0, 0, Math.PI / 2],
           gizmoTranslationScale,
@@ -1075,28 +1064,28 @@ class TransformControlsGizmo extends Object3D {
           'bwd-handle',
         ],
         [
-          new Mesh(fontGeometryTranslation, matHelper),
+          new Mesh(fontGeometryTranslation, matLabelText),
           [0, gizmoTextBoxOffset, gizmoMeshTranslationTextOffset],
           [Math.PI / 2, Math.PI, 0],
           gizmoTranslationScale,
           'fwd-label',
         ],
         [
-          new Mesh(roundedBoxGeometry, matHelperWhite),
+          new Mesh(roundedBoxGeometry, matLabelBackground),
           [0, 0, gizmoMeshTranslationTextOffset],
           [-Math.PI / 2, 0, 0],
           gizmoTranslationScale,
           'fwd-label',
         ],
         [
-          new Mesh(fontGeometryTranslation, matHelperBlack),
+          new Mesh(fontGeometryTranslation, matLabelText),
           [0, gizmoTextBoxOffset, -gizmoMeshTranslationTextOffset],
           [Math.PI / 2, 0, Math.PI],
           gizmoTranslationScale,
           'bwd-label',
         ],
         [
-          new Mesh(roundedBoxGeometry, matHelperWhite),
+          new Mesh(roundedBoxGeometry, matLabelBackground),
           [0, 0, -gizmoMeshTranslationTextOffset],
           [Math.PI / 2, 0, Math.PI],
           gizmoTranslationScale,
@@ -1195,14 +1184,14 @@ class TransformControlsGizmo extends Object3D {
         [new Line(CircleGeometry({ radius: 1, arc: 0.1, arcOffset: (Math.PI / 4) * 1.625 }), matLineRed)],
         [new Mesh(rotationArrowGeometry, matRed), [0, 0, 1], [0, Math.PI / 2, Math.PI / 2], gizmoRotationScale],
         [
-          new Mesh(fontGeometryRotationX, matHelper),
+          new Mesh(fontGeometryRotationX, matLabelText),
           [gizmoTextBoxOffset, 0, gizmoMeshRotationTextOffset],
           [Math.PI / 2, Math.PI / 2, 0],
           gizmoRotationScale,
           'rotation-label',
         ],
         [
-          new Mesh(roundedBoxGeometry, matHelperWhite),
+          new Mesh(roundedBoxGeometry, matLabelBackground),
           [0, 0, gizmoMeshRotationTextOffset],
           [Math.PI / 2, Math.PI / 2, 0],
           gizmoRotationScale,
@@ -1217,14 +1206,14 @@ class TransformControlsGizmo extends Object3D {
         ],
         [new Mesh(rotationArrowGeometry, matGreen), [0, 0, 1], [Math.PI / 2, 0, 0], gizmoRotationScale],
         [
-          new Mesh(fontGeometryRotationY, matHelper),
+          new Mesh(fontGeometryRotationY, matLabelText),
           [0, -gizmoTextBoxOffset, gizmoMeshRotationTextOffset],
           [Math.PI / 2, 0, 0],
           gizmoRotationScale,
           'rotation-label',
         ],
         [
-          new Mesh(roundedBoxGeometry, matHelperWhite),
+          new Mesh(roundedBoxGeometry, matLabelBackground),
           [0, 0, gizmoMeshRotationTextOffset],
           [Math.PI / 2, 0, 0],
           gizmoRotationScale,
@@ -1239,14 +1228,14 @@ class TransformControlsGizmo extends Object3D {
         ],
         [new Mesh(rotationArrowGeometry, matBlue), [1, 0, 0], [0, 0, -Math.PI / 2], gizmoRotationScale],
         [
-          new Mesh(fontGeometryRotationZ, matHelper),
+          new Mesh(fontGeometryRotationZ, matLabelText),
           [gizmoMeshRotationTextOffset, 0, gizmoTextBoxOffset],
           [0, 0, Math.PI / 2],
           gizmoRotationScale,
           'rotation-label',
         ],
         [
-          new Mesh(roundedBoxGeometry, matHelperWhite),
+          new Mesh(roundedBoxGeometry, matLabelBackground),
           [gizmoMeshRotationTextOffset, 0, 0],
           [0, 0, Math.PI / 2],
           gizmoRotationScale,

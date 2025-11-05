@@ -42,7 +42,6 @@ export function ChatEditorBreadcrumbs(): ReactNode {
 
   const handleToggleFilePreview = () => {
     setEnableFilePreview(!enableFilePreview);
-    toast.success(enableFilePreview ? 'File preview disabled' : 'File preview enabled');
   };
 
   return (

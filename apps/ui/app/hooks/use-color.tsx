@@ -24,7 +24,7 @@ import { cookieName } from '#constants/cookie.constants.js';
  */
 
 const hueCssVariable = '--hue-primary';
-const defaultHue = 266;
+const defaultHue = 180;
 const defaultLightness = 0.5719;
 const defaultChroma = 0.1898;
 

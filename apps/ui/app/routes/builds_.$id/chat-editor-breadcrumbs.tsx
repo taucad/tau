@@ -45,7 +45,7 @@ export function ChatEditorBreadcrumbs(): ReactNode {
   };
 
   return (
-    <div className="flex flex-row items-center justify-between py-0.25 pr-0.25 pl-2 text-muted-foreground">
+    <div className="flex flex-row items-center justify-between py-0.25 pr-0.25 pl-3 text-muted-foreground">
       <div className="flex flex-row items-center gap-0.5">
         {displayPath ? (
           parts.map((part, index) => (

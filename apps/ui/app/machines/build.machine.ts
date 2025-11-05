@@ -2,7 +2,7 @@ import { assign, assertEvent, setup, fromPromise, emit, enqueueActions } from 'x
 import type { ActorRefFrom, OutputFrom, DoneActorEvent } from 'xstate';
 import type { Message } from '@ai-sdk/react';
 import type { Build, Chat } from '@taucad/types';
-import { idPrefix } from '@taucad/types/constants';
+import { idPrefix, languageFromKernel } from '@taucad/types/constants';
 import { storage } from '#db/storage.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
 import { isBrowser } from '#constants/browser.constants.js';
@@ -23,6 +23,7 @@ export type BuildContext = {
   build: Build | undefined;
   error: Error | undefined;
   isLoading: boolean;
+  enableFilePreview: boolean;
   filesystemRef: ActorRefFrom<typeof filesystemMachine>;
   gitRef: ActorRefFrom<typeof gitMachine>;
   fileExplorerRef: ActorRefFrom<typeof fileExplorerMachine>;
@@ -256,7 +257,8 @@ type BuildEventInternal =
       buildId: string;
       files: Record<string, { content: string }>;
       parameters: Record<string, unknown>;
-    };
+    }
+  | { type: 'setEnableFilePreview'; enabled: boolean };
 
 export type BuildEventExternal = OutputFrom<(typeof buildActors)[BuildActorNames]>;
 type BuildEventExternalDone = DoneActorEvent<BuildEventExternal, BuildActorNames>;
@@ -352,9 +354,184 @@ export const buildMachine = setup({
       },
     }),
     initializeKernelIfNeeded: enqueueActions(({ enqueue, context }) => {
-      if (context.build?.assets.mechanical) {
-        enqueue.sendTo(context.cadRef, { type: 'initializeKernel' });
+      const mechanicalAsset = context.build?.assets.mechanical;
+      if (!mechanicalAsset) {
+        return;
       }
+
+      // Initialize kernel first
+      enqueue.sendTo(context.cadRef, { type: 'initializeKernel' });
+
+      // Then initialize the model with current build data
+      enqueue.sendTo(context.cadRef, {
+        type: 'initializeModel',
+        code: mechanicalAsset.files[mechanicalAsset.main]!.content,
+        parameters: mechanicalAsset.parameters,
+        kernelType: mechanicalAsset.language,
+      });
+    }),
+    subscribeToFileExplorer: enqueueActions(({ enqueue, context }) => {
+      // Subscribe to file explorer active file changes
+      context.fileExplorerRef.subscribe((state) => {
+        const { activeFileId, openFiles } = state.context;
+        if (!activeFileId) {
+          return;
+        }
+
+        const activeFile = openFiles.find((file) => file.id === activeFileId);
+        if (!activeFile) {
+          return;
+        }
+
+        // Only send to CAD if file preview is enabled
+        if (!context.enableFilePreview) {
+          return;
+        }
+
+        // Get current CAD code to avoid unnecessary updates
+        const currentCode = context.cadRef.getSnapshot().context.code;
+        if (activeFile.content !== currentCode) {
+          enqueue.sendTo(context.cadRef, {
+            type: 'setCode',
+            code: activeFile.content,
+          });
+        }
+      });
+    }),
+    setEnableFilePreview: assign({
+      enableFilePreview({ event }) {
+        assertEvent(event, 'setEnableFilePreview');
+        return event.enabled;
+      },
+    }),
+    subscribeToCadUpdates: enqueueActions(({ context, self }) => {
+      // Subscribe to CAD's modelUpdated emissions
+      context.cadRef.on('modelUpdated', ({ code, parameters }) => {
+        const mainFile = context.build?.assets.mechanical?.main;
+        if (!mainFile) {
+          return;
+        }
+
+        // Send update event to self to trigger storage update
+        self.send({
+          type: 'updateCodeParameters',
+          buildId: context.buildId,
+          files: { [mainFile]: { content: code } },
+          parameters,
+        });
+      });
+    }),
+    initializeFileExplorer: enqueueActions(({ enqueue, context }) => {
+      const mechanicalAsset = context.build?.assets.mechanical;
+      if (!mechanicalAsset) {
+        // Clear tree if no mechanical assets
+        enqueue.sendTo(context.fileExplorerRef, {
+          type: 'setFileTree',
+          tree: [],
+          openFiles: [],
+        });
+        return;
+      }
+
+      // Convert build files to file tree format
+      const fileItems = Object.entries(mechanicalAsset.files).map(([filename, file]) => ({
+        id: filename,
+        name: filename,
+        path: filename,
+        content: file.content,
+        language: languageFromKernel[mechanicalAsset.language],
+        isDirectory: false,
+      }));
+
+      const openFiles = mechanicalAsset.main ? [mechanicalAsset.main] : [];
+
+      enqueue.sendTo(context.fileExplorerRef, {
+        type: 'setFileTree',
+        tree: fileItems,
+        openFiles,
+      });
+    }),
+    subscribeToCadFileExplorerSync: enqueueActions(({ context }) => {
+      // Subscribe to CAD actor state changes and update file explorer
+      context.cadRef.subscribe((state) => {
+        const mainFile = context.build?.assets.mechanical?.main;
+        if (!mainFile) {
+          return;
+        }
+
+        // Update the main file content in file explorer when CAD code changes
+        context.fileExplorerRef.send({
+          type: 'updateFileContent',
+          fileId: mainFile,
+          content: state.context.code,
+        });
+      });
+    }),
+    subscribeToFilesystemChanges: enqueueActions(({ context }) => {
+      // Helper to rebuild file tree from filesystem state
+      const rebuildFileTree = () => {
+        const mechanicalAsset = context.build?.assets.mechanical;
+        if (!mechanicalAsset) {
+          return;
+        }
+
+        // Get files directly from filesystem context
+        const { files } = context.filesystemRef.getSnapshot().context;
+
+        // Convert filesystem files to file tree format
+        const fileItems = [...files.entries()].map(([path, fileItem]) => ({
+          id: path,
+          name: path.split('/').pop() ?? path,
+          path,
+          content: fileItem.content,
+          language: languageFromKernel[mechanicalAsset.language],
+          isDirectory: false,
+        }));
+
+        // Determine which files should be open
+        const currentOpenFiles = context.fileExplorerRef.getSnapshot().context.openFiles;
+        const openFilePaths = currentOpenFiles.map((f) => f.path);
+
+        // Update file explorer with new tree
+        context.fileExplorerRef.send({
+          type: 'setFileTree',
+          tree: fileItems,
+          openFiles: openFilePaths.length > 0 ? openFilePaths : [mechanicalAsset.main].filter(Boolean),
+        });
+      };
+
+      // Subscribe to filesystem events and rebuild tree
+      context.filesystemRef.on('fileCreated', ({ path }) => {
+        // Rebuild tree from filesystem state
+        rebuildFileTree();
+
+        // Auto-open the newly created file
+        context.fileExplorerRef.send({
+          type: 'openFile',
+          path,
+        });
+      });
+
+      context.filesystemRef.on('fileUpdated', () => {
+        // Rebuild tree in case of metadata changes
+        rebuildFileTree();
+      });
+
+      context.filesystemRef.on('fileDeleted', () => {
+        // Rebuild tree when files are deleted
+        rebuildFileTree();
+      });
+
+      // Also listen to statusRefreshed to update git status indicators
+      context.filesystemRef.on('statusRefreshed', () => {
+        // Update git statuses in file explorer
+        const { dirtyFiles } = context.filesystemRef.getSnapshot().context;
+
+        context.fileExplorerRef.send({
+          type: 'updateDirtyFiles',
+          dirtyFiles,
+        });
+      });
     }),
   },
   guards: {
@@ -411,6 +588,7 @@ export const buildMachine = setup({
       build: undefined,
       error: undefined,
       isLoading: true,
+      enableFilePreview: true, // Default to enabled
       filesystemRef,
       gitRef,
       fileExplorerRef,
@@ -464,6 +642,11 @@ export const buildMachine = setup({
             'clearLoading',
             'sendFilesToFilesystem',
             'initializeKernelIfNeeded',
+            'initializeFileExplorer',
+            'subscribeToFileExplorer',
+            'subscribeToCadUpdates',
+            'subscribeToCadFileExplorerSync',
+            'subscribeToFilesystemChanges',
             emit(({ event }) => {
               assertActorDoneEvent(event);
               return {
@@ -500,6 +683,11 @@ export const buildMachine = setup({
             'clearLoading',
             'sendFilesToFilesystem',
             'initializeKernelIfNeeded',
+            'initializeFileExplorer',
+            'subscribeToFileExplorer',
+            'subscribeToCadUpdates',
+            'subscribeToCadFileExplorerSync',
+            'subscribeToFilesystemChanges',
             emit(({ event }) => {
               assertActorDoneEvent(event);
               return {
@@ -536,6 +724,9 @@ export const buildMachine = setup({
         setActiveChat: 'settingActiveChat',
         deleteChat: 'deletingChat',
         updateCodeParameters: 'updatingCodeParameters',
+        setEnableFilePreview: {
+          actions: 'setEnableFilePreview',
+        },
       },
     },
     updating: {

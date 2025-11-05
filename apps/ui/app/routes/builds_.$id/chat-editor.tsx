@@ -1,96 +1,36 @@
-import { memo, useCallback, useEffect, useRef } from 'react';
+import { memo, useCallback, useEffect } from 'react';
 import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
-import type { Build, KernelProvider } from '@taucad/types';
+import { languageFromKernel } from '@taucad/types/constants';
 import { CodeEditor } from '#components/code/code-editor.js';
 import { cn } from '#utils/ui.utils.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { registerMonaco } from '#routes/builds_.$id/chat-editor-config.js';
 import { ChatEditorBreadcrumbs } from '#routes/builds_.$id/chat-editor-breadcrumbs.js';
 import { useBuild } from '#hooks/use-build.js';
-import type { FileItem } from '#machines/file-explorer.machine.js';
 import { ChatEditorTabs } from '#routes/builds_.$id/chat-editor-tabs.js';
-
-const languageFromKernel = {
-  replicad: 'typescript',
-  openscad: 'openscad',
-  zoo: 'kcl',
-} as const satisfies Record<KernelProvider, string>;
-
-const getFileTree = (build: Build): FileItem[] => {
-  if (!build.assets.mechanical) {
-    return [];
-  }
-
-  const mechanicalAsset = build.assets.mechanical;
-  const { files } = mechanicalAsset;
-
-  return Object.entries(files).map(([filename, file]) => ({
-    id: filename,
-    name: filename,
-    path: filename,
-    content: file.content,
-    language: languageFromKernel[mechanicalAsset.language],
-    isDirectory: false,
-  }));
-};
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }): React.JSX.Element {
   const monaco = useMonaco();
-  const { build, fileExplorerRef: fileExplorerActor, cadRef: cadActor } = useBuild();
-  const activeBuildId = useRef<string | undefined>(build?.id);
+  const { build, fileExplorerRef: fileExplorerActor, cadRef: cadActor, buildRef } = useBuild();
   const code = useSelector(cadActor, (state) => state.context.code);
   const activeFile = useSelector(fileExplorerActor, (state) =>
     state.context.openFiles.find((file) => file.id === state.context.activeFileId),
   );
 
-  // Set file tree when build changes
+  // Sync file preview preference between cookie and build machine
+  const [enableFilePreview] = useCookie<boolean>(cookieName.cadFilePreview, true);
+  const enableFilePreviewInMachine = useSelector(buildRef, (state) => state.context.enableFilePreview);
+
+  // Sync cookie to build machine on mount and when cookie changes
   useEffect(() => {
-    if (build?.id === activeBuildId.current) {
-      return;
+    if (enableFilePreview !== enableFilePreviewInMachine) {
+      buildRef.send({ type: 'setEnableFilePreview', enabled: enableFilePreview });
     }
-
-    activeBuildId.current = build?.id;
-
-    // Clear tree if no build or no mechanical assets
-    if (!build?.assets.mechanical) {
-      fileExplorerActor.send({ type: 'setFileTree', tree: [], openFiles: [] });
-      return;
-    }
-
-    const mechanicalAsset = build.assets.mechanical;
-    const fileItems = getFileTree(build);
-    const openFiles = mechanicalAsset.main ? [mechanicalAsset.main] : [];
-
-    fileExplorerActor.send({
-      type: 'setFileTree',
-      tree: fileItems,
-      openFiles,
-    });
-  }, [fileExplorerActor, build]);
-
-  // Subscribe to CAD actor code changes and propagate to file explorer
-  useEffect(() => {
-    if (!build?.assets.mechanical?.main) {
-      return;
-    }
-
-    const mainFileName = build.assets.mechanical.main;
-
-    const subscription = cadActor.subscribe((state) => {
-      // Update the main file content in file explorer when CAD actor code changes
-      fileExplorerActor.send({
-        type: 'updateFileContent',
-        fileId: mainFileName,
-        content: state.context.code,
-      });
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [build?.assets.mechanical?.main, fileExplorerActor, cadActor]);
+  }, [enableFilePreview, enableFilePreviewInMachine, buildRef]);
 
   // Fallback to build main file if no file explorer file is active
   const fallbackFilename = build?.assets.mechanical?.main ?? 'main.ts';

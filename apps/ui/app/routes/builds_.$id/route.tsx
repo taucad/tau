@@ -1,7 +1,6 @@
 import { useParams } from 'react-router';
 import { useCallback, useEffect } from 'react';
 import { createActor } from 'xstate';
-import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 // eslint-disable-next-line no-restricted-imports -- allowed for route types
 import type { Route } from './+types/route.js';
@@ -50,19 +49,11 @@ export const handle: Handle = {
 
 function Chat() {
   const { id } = useParams();
-  const { build, isLoading, activeChat, activeChatId, setChatMessages, setCodeParameters, fileExplorerRef } =
-    useBuild();
+  const { build, isLoading, activeChat, activeChatId, setChatMessages } = useBuild();
 
   const messages = useChatSelector((state) => state.context.messages);
   const status = useChatSelector((state) => state.context.status);
   const { setMessages, reload } = useChatActions();
-
-  // Get actor refs from build context
-  const { cadRef: cadActor } = useBuild();
-
-  // Get file explorer state
-  const activeFileId = useSelector(fileExplorerRef, (state) => state.context.activeFileId);
-  const openFiles = useSelector(fileExplorerRef, (state) => state.context.openFiles);
 
   useKeydown(
     {
@@ -73,67 +64,6 @@ function Chat() {
       toast.success('Your build is saved automatically');
     },
   );
-
-  // TODO: replace this with a subscription to the file explorer machine.
-  // Listen to active file changes and update CAD machine
-  useEffect(() => {
-    if (!activeFileId || !build) {
-      return;
-    }
-
-    const activeFile = openFiles.find((file) => file.id === activeFileId);
-    if (!activeFile) {
-      return;
-    }
-
-    // Get the current code from CAD actor
-    const currentCode = cadActor.getSnapshot().context.code;
-
-    // Only update if the file content is different from current CAD code
-    if (activeFile.content !== currentCode) {
-      cadActor.send({
-        type: 'setCode',
-        code: activeFile.content,
-      });
-    }
-  }, [activeFileId, openFiles, build, cadActor]);
-
-  // Subscribe the build to persist code & parameters changes
-  useEffect(() => {
-    const subscription = cadActor.on('modelUpdated', ({ code, parameters }) => {
-      const mainFile = build?.assets.mechanical?.main;
-      if (!mainFile) {
-        return;
-      }
-
-      setCodeParameters({ [mainFile]: { content: code } }, parameters);
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [build?.assets.mechanical?.main, cadActor, setCodeParameters]);
-
-  useEffect(() => {
-    // On init, set the code and parameters
-    if (!build || isLoading) {
-      return;
-    }
-
-    const mechanicalAsset = build.assets.mechanical;
-    if (!mechanicalAsset) {
-      throw new Error('Mechanical asset not found');
-    }
-
-    // Initialize model
-    cadActor.send({
-      type: 'initializeModel',
-      code: mechanicalAsset.files[mechanicalAsset.main]!.content,
-      parameters: mechanicalAsset.parameters,
-      kernelType: mechanicalAsset.language,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on init
-  }, [id, isLoading]);
 
   useEffect(() => {
     if (!build || isLoading) {

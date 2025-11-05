@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Fragment } from 'react/jsx-runtime';
-import { ChevronRight, Download } from 'lucide-react';
+import { ChevronRight, Download, Eye, EyeOff } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { CopyButton } from '#components/copy-button.js';
 import { Button } from '#components/ui/button.js';
@@ -8,12 +8,15 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.
 import { toast } from '#components/ui/sonner.js';
 import { downloadBlob } from '#utils/file.utils.js';
 import { useBuild } from '#hooks/use-build.js';
+import { useCookie } from '#hooks/use-cookie.js';
 
 export function ChatEditorBreadcrumbs(): ReactNode {
   const { fileExplorerRef } = useBuild();
   const activeFile = useSelector(fileExplorerRef, (state) =>
     state.context.openFiles.find((file) => file.id === state.context.activeFileId),
   );
+
+  const [enableFilePreview, setEnableFilePreview] = useCookie<boolean>('cad-file-preview', true);
 
   // Keep empty string initially to avoid flickering
   const displayPath = String(activeFile?.path ?? '');
@@ -37,6 +40,11 @@ export function ChatEditorBreadcrumbs(): ReactNode {
     );
   };
 
+  const handleToggleFilePreview = () => {
+    setEnableFilePreview(!enableFilePreview);
+    toast.success(enableFilePreview ? 'File preview disabled' : 'File preview enabled');
+  };
+
   return (
     <div className="flex flex-row items-center justify-between py-0.25 pr-0.25 pl-2 text-muted-foreground">
       <div className="flex flex-row items-center gap-0.5">
@@ -53,25 +61,41 @@ export function ChatEditorBreadcrumbs(): ReactNode {
         )}
       </div>
 
-      {Boolean(activeFile) && (
-        <div className="flex flex-row items-center gap-1">
-          <CopyButton
-            size="icon"
-            variant="ghost"
-            className="size-7 rounded-sm"
-            getText={() => activeFile!.content}
-            tooltip="Copy"
-          />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button size="icon" variant="ghost" className="size-7 rounded-sm" onClick={handleDownloadCode}>
-                <Download className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Download</TooltipContent>
-          </Tooltip>
-        </div>
-      )}
+      <div className="flex flex-row items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7 rounded-sm"
+              aria-label={enableFilePreview ? 'Disable file preview' : 'Enable file preview'}
+              onClick={handleToggleFilePreview}
+            >
+              {enableFilePreview ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{enableFilePreview ? 'Disable file preview' : 'Enable file preview'}</TooltipContent>
+        </Tooltip>
+        {Boolean(activeFile) && (
+          <>
+            <CopyButton
+              size="icon"
+              variant="ghost"
+              className="size-7 rounded-sm"
+              getText={() => activeFile!.content}
+              tooltip="Copy"
+            />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button size="icon" variant="ghost" className="size-7 rounded-sm" onClick={handleDownloadCode}>
+                  <Download className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Download</TooltipContent>
+            </Tooltip>
+          </>
+        )}
+      </div>
     </div>
   );
 }

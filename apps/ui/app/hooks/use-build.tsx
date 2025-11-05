@@ -23,6 +23,7 @@ type BuildContextType = {
   parameters: Record<string, unknown>;
   activeChat: Chat | undefined;
   activeChatId: string | undefined;
+  buildRef: ActorRefFrom<typeof buildMachine>;
   gitRef: ActorRefFrom<typeof gitMachine>;
   fileExplorerRef: ActorRefFrom<typeof fileExplorerMachine>;
   filesystemRef: ActorRefFrom<typeof filesystemMachine>;
@@ -153,6 +154,7 @@ export function BuildProvider({
       parameters,
       activeChatId,
       activeChat,
+      buildRef: actorRef,
       gitRef,
       fileExplorerRef,
       filesystemRef,
@@ -176,6 +178,7 @@ export function BuildProvider({
     build,
     isLoading,
     error,
+    actorRef,
     gitRef,
     fileExplorerRef,
     filesystemRef,

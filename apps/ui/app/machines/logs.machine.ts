@@ -84,5 +84,3 @@ export const logMachine = setup({
     },
   },
 });
-
-export const logActor = createActor(logMachine).start();

@@ -60,7 +60,7 @@ export function BuildProvider({
   readonly input?: Omit<Parameters<typeof useActorRef<typeof buildMachine>>[1]['input'], 'buildId'>;
 }): React.JSX.Element {
   // Create the build machine actor - it will auto-load based on buildId
-  const actorRef = useActorRef(buildMachine.provide(provide ?? {}), {
+  const actorRef = useActorRef(buildMachine.provide({ ...provide }), {
     input: { buildId, ...input },
     inspect,
   });

@@ -13,6 +13,7 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
 import type { cameraCapabilityMachine } from '#machines/camera-capability.machine.js';
+import type { logMachine } from '#machines/logs.machine.js';
 
 type BuildContextType = {
   buildId: string;
@@ -31,6 +32,7 @@ type BuildContextType = {
   cadRef: ActorRefFrom<typeof cadMachine>;
   screenshotRef: ActorRefFrom<typeof screenshotCapabilityMachine>;
   cameraRef: ActorRefFrom<typeof cameraCapabilityMachine>;
+  logRef: ActorRefFrom<typeof logMachine>;
   setChatMessages: (chatId: string, messages: Message[]) => void;
   setCodeParameters: (files: Record<string, { content: string }>, parameters: Record<string, unknown>) => void;
   updateName: (name: string) => void;
@@ -74,6 +76,7 @@ export function BuildProvider({
   const cadRef = useSelector(actorRef, (state) => state.context.cadRef);
   const screenshotRef = useSelector(actorRef, (state) => state.context.screenshotRef);
   const cameraRef = useSelector(actorRef, (state) => state.context.cameraRef);
+  const logRef = useSelector(actorRef, (state) => state.context.logRef);
 
   useEffect(() => {
     actorRef.send({ type: 'loadBuild', buildId });
@@ -173,6 +176,7 @@ export function BuildProvider({
       cadRef,
       screenshotRef,
       cameraRef,
+      logRef,
       setChatMessages,
       setCodeParameters,
       updateName,
@@ -197,6 +201,7 @@ export function BuildProvider({
     cadRef,
     screenshotRef,
     cameraRef,
+    logRef,
     setChatMessages,
     setCodeParameters,
     updateName,

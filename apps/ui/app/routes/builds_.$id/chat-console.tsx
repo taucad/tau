@@ -5,7 +5,6 @@ import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { cn } from '#utils/ui.utils.js';
-import { useLogs } from '#hooks/use-logs.js';
 import type { LogLevel, LogOrigin } from '#types/console.types.js';
 import { logLevels } from '#types/console.types.js';
 import { Badge } from '#components/ui/badge.js';
@@ -18,8 +17,8 @@ import {
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { logActor } from '#machines/logs.machine.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { useBuild } from '#hooks/use-build.js';
 import { stringToColor } from '#utils/color.utils.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { SearchInput } from '#components/search-input.js';
@@ -139,7 +138,7 @@ export const ChatConsole = memo(function ({
   className,
   ...properties
 }: ChatConsoleProperties) {
-  const log = useLogs({ defaultOrigin: { component: 'ChatConsole' } });
+  const { logRef } = useBuild();
   const [filter, setFilter] = useState('');
 
   // Cookie-persisted state for log levels
@@ -147,7 +146,7 @@ export const ChatConsole = memo(function ({
   const [displayConfig, setDisplayConfig] = useCookie(cookieName.consoleDisplayConfig, defaultDisplayConfig);
 
   // Filter logs based on search text and verbosity levels
-  const filteredLogs = useSelector(logActor, (state) => {
+  const filteredLogs = useSelector(logRef, (state) => {
     const { logs } = state.context;
 
     const filtered = logs.filter((log) => {
@@ -185,8 +184,8 @@ export const ChatConsole = memo(function ({
 
   // Handle clear logs
   const handleClearLogs = useCallback(() => {
-    log.clear();
-  }, [log]);
+    logRef.send({ type: 'clearLogs' });
+  }, [logRef]);
 
   const handleClearFilter = useCallback(() => {
     setFilter('');

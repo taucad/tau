@@ -14,6 +14,7 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 import { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
 import { cameraCapabilityMachine } from '#machines/camera-capability.machine.js';
 import { assertActorDoneEvent } from '#lib/xstate.js';
+import { logMachine } from '#machines/logs.machine.js';
 
 /**
  * Build Machine Context
@@ -32,6 +33,7 @@ export type BuildContext = {
   cadRef: ActorRefFrom<typeof cadMachine>;
   screenshotRef: ActorRefFrom<typeof screenshotCapabilityMachine>;
   cameraRef: ActorRefFrom<typeof cameraCapabilityMachine>;
+  logRef: ActorRefFrom<typeof logMachine>;
 };
 
 /**
@@ -231,6 +233,7 @@ const buildActors = {
   cad: cadMachine,
   screenshot: screenshotCapabilityMachine,
   camera: cameraCapabilityMachine,
+  logs: logMachine,
 } as const;
 
 type BuildActorNames = keyof typeof buildActors;
@@ -628,11 +631,16 @@ export const buildMachine = setup({
       },
     });
 
+    const logRef = spawn('logs', {
+      id: `log-${buildId}`,
+    });
+
     const cadRef = spawn('cad', {
       id: `cad-${buildId}`,
       input: {
         shouldInitializeKernelOnStart: false,
         graphicsRef,
+        logActorRef: logRef,
       },
     });
 
@@ -660,6 +668,7 @@ export const buildMachine = setup({
       cadRef,
       screenshotRef,
       cameraRef,
+      logRef,
     };
   },
   initial: 'checkEnvironment',

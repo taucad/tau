@@ -1,6 +1,7 @@
 import { setup, fromPromise, assign, assertEvent } from 'xstate';
 import type { DoneActorEvent } from 'xstate';
 import { ENV } from '#config.js';
+import { assertActorDoneEvent } from '#lib/xstate.js';
 
 // Types for the API request and response
 export type FileEditRequest = {
@@ -107,9 +108,8 @@ export const fileEditMachine = setup({
     }),
     setResult: assign({
       result({ event }) {
-        // We need to cast here because the event is not typed correctly in XState
-        const assertedEvent = event as unknown as DoneActorEvent<FileEditResult>;
-        return assertedEvent.output;
+        assertActorDoneEvent(event);
+        return event.output;
       },
     }),
     setErrorFromResult: assign({
@@ -124,7 +124,7 @@ export const fileEditMachine = setup({
   },
   guards: {
     isFailure({ event }) {
-      assertEvent(event, 'xstate.done.actor.applyFileEditActor');
+      assertActorDoneEvent(event);
       return !event.output.success;
     },
   },

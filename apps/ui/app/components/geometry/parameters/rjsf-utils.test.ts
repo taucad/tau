@@ -5,7 +5,7 @@ import {
   rjsfIdToJsonPath,
   rjsfIdPrefix,
   rjsfIdSeparator,
-} from '#routes/builds_.$id/rjsf-utils.js';
+} from '#components/geometry/parameters/rjsf-utils.js';
 
 describe('isSchemaMatchingSearch', () => {
   describe('Empty search term', () => {

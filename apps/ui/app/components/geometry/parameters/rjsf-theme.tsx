@@ -28,7 +28,7 @@ import {
   rjsfIdPrefix,
   rjsfIdSeparator,
   isSchemaMatchingSearch,
-} from '#routes/builds_.$id/rjsf-utils.js';
+} from '#components/geometry/parameters/rjsf-utils.js';
 import { hasCustomValue } from '#utils/object.utils.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 
@@ -141,10 +141,10 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   };
 
   return (
-    <div className={cn('@container/parameter my-3 flex flex-col px-3 transition-colors')}>
+    <div className={cn('@container/parameter my-3 flex flex-col gap-0.5 px-3 transition-colors')}>
       <div className="flex h-auto min-h-5 flex-row justify-between gap-2">
         <span
-          className={cn('pb-0.25', fieldHasValue ? 'font-medium' : 'font-normal')}
+          className={cn('pb-0.25 text-sm', fieldHasValue ? 'font-medium' : 'font-normal')}
           aria-label={`Parameter: ${prettyLabel}`}
         >
           <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />

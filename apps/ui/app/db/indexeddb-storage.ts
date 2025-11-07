@@ -68,30 +68,42 @@ export class IndexedDbStorageProvider implements StorageProvider {
     },
   ): Promise<Build | undefined> {
     const db = await this.getDb();
-    const build = await this.getBuild(buildId);
+    const existingBuild = await this.getBuild(buildId);
 
-    if (!build) {
+    if (!existingBuild) {
       return undefined;
     }
 
-    const mergeIgnoreKeys = new Set(options?.ignoreKeys ?? []);
-    const optionalParameters = {
-      ...(options?.noUpdatedAt ? {} : { updatedAt: Date.now() }),
-    };
+    // If update contains an 'id' field matching buildId, treat it as a full build replacement
+    // This is the new pattern from the parallel state machine refactor
+    const isBuild = 'id' in update && update.id === buildId;
 
-    const updatedBuild = deepmerge(
-      build,
-      { ...update, ...optionalParameters },
-      {
-        customMerge(key) {
-          if (mergeIgnoreKeys.has(key)) {
-            return (_source: unknown, target: unknown) => target;
-          }
+    let updatedBuild: Build;
 
-          return undefined;
+    if (isBuild) {
+      // Full build replacement - no merging needed
+      updatedBuild = update as Build;
+    } else {
+      // Partial update - use deepmerge for backward compatibility
+      const mergeIgnoreKeys = new Set(options?.ignoreKeys ?? []);
+      const optionalParameters = {
+        ...(options?.noUpdatedAt ? {} : { updatedAt: Date.now() }),
+      };
+
+      updatedBuild = deepmerge(
+        existingBuild,
+        { ...update, ...optionalParameters },
+        {
+          customMerge(key) {
+            if (mergeIgnoreKeys.has(key)) {
+              return (_source: unknown, target: unknown) => target;
+            }
+
+            return undefined;
+          },
         },
-      },
-    ) as Build;
+      ) as Build;
+    }
 
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(this.storeName, 'readwrite');

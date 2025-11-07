@@ -8,7 +8,6 @@ import { buildMachine } from '#machines/build.machine.js';
 import type { gitMachine } from '#machines/git.machine.js';
 import type { fileExplorerMachine } from '#machines/file-explorer.machine.js';
 import { inspect } from '#machines/inspector.js';
-import type { filesystemMachine } from '#machines/filesystem.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
@@ -22,7 +21,6 @@ type BuildContextType = {
   buildRef: ActorRefFrom<typeof buildMachine>;
   gitRef: ActorRefFrom<typeof gitMachine>;
   fileExplorerRef: ActorRefFrom<typeof fileExplorerMachine>;
-  filesystemRef: ActorRefFrom<typeof filesystemMachine>;
   graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   cadRef: ActorRefFrom<typeof cadMachine>;
   screenshotRef: ActorRefFrom<typeof screenshotCapabilityMachine>;
@@ -66,7 +64,6 @@ export function BuildProvider({
   const error = useSelector(actorRef, (state) => state.context.error);
   const gitRef = useSelector(actorRef, (state) => state.context.gitRef);
   const fileExplorerRef = useSelector(actorRef, (state) => state.context.fileExplorerRef);
-  const filesystemRef = useSelector(actorRef, (state) => state.context.filesystemRef);
   const graphicsRef = useSelector(actorRef, (state) => state.context.graphicsRef);
   const cadRef = useSelector(actorRef, (state) => state.context.cadRef);
   const screenshotRef = useSelector(actorRef, (state) => state.context.screenshotRef);
@@ -168,7 +165,6 @@ export function BuildProvider({
       buildRef: actorRef,
       gitRef,
       fileExplorerRef,
-      filesystemRef,
       graphicsRef,
       cadRef,
       screenshotRef,
@@ -192,7 +188,6 @@ export function BuildProvider({
     actorRef,
     gitRef,
     fileExplorerRef,
-    filesystemRef,
     graphicsRef,
     cadRef,
     screenshotRef,

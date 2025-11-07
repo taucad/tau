@@ -60,16 +60,21 @@ function findFileByPath(items: FileItem[], path: string): FileItem | undefined {
 }
 
 export function ChatEditorFileTree(): React.JSX.Element {
-  const { buildRef, fileExplorerRef, filesystemRef, gitRef } = useBuild();
-  const mechanicalAsset = useSelector(buildRef, (state) => state.context.build?.assets.mechanical);
-  // Derive file tree from filesystem state (reactive selector)
-  const fileTree = useSelector(filesystemRef, (state): FileItem[] => {
-    const { files } = state.context;
-    if (!mechanicalAsset) {
+  const { buildRef, fileExplorerRef, gitRef } = useBuild();
+  const mechanicalAsset = useSelector(buildRef, (state) => {
+    return state.context.build?.assets.mechanical;
+  });
+  // Derive file tree from build state (reactive selector)
+  const fileTree = useSelector(buildRef, (state): FileItem[] => {
+    const files = state.context.build?.assets.mechanical?.files;
+    if (!files || !mechanicalAsset) {
       return [];
     }
 
-    return [...files.entries()].map(([path, item]) => ({
+    const gitSnapshot = gitRef.getSnapshot();
+    const { fileStatuses } = gitSnapshot.context;
+
+    return Object.entries(files).map(([path, item]) => ({
       id: path,
       name: path.split('/').pop() ?? path,
       path,
@@ -77,11 +82,11 @@ export function ChatEditorFileTree(): React.JSX.Element {
       language: languageFromKernel[mechanicalAsset.language],
       isDirectory: false,
       // Git status computed from git machine
-      gitStatus: gitRef.getSnapshot().context.fileStatuses.get(path)?.status,
+      gitStatus: fileStatuses.get(path)?.status,
     }));
   });
 
-  const activeFileId = useSelector(fileExplorerRef, (state) => state.context.activeFileId);
+  const activeFilePath = useSelector(fileExplorerRef, (state) => state.context.activeFilePath);
   const [isCreatingFile, setIsCreatingFile] = useState(false);
 
   const [lastSelectedPath, setLastSelectedPath] = useState<string>('');
@@ -96,8 +101,6 @@ export function ChatEditorFileTree(): React.JSX.Element {
           fileExplorerRef.send({
             type: 'openFile',
             path: file.path,
-            content: file.content,
-            language: file.language,
           });
         }
       }
@@ -131,16 +134,15 @@ export function ChatEditorFileTree(): React.JSX.Element {
 
         const newFilePath = targetDirectory ? `${targetDirectory}/${fileName}` : fileName;
 
-        // Send createFile event to filesystem machine
-        filesystemRef.send({
+        // Send createFile event to build machine
+        buildRef.send({
           type: 'createFile',
           path: newFilePath,
           content: '// New file\n',
         });
 
-        // Show success message and open the new file
+        // Show success message
         toast.success(`Created: ${newFilePath}`);
-        fileExplorerRef.send({ type: 'openFile', path: newFilePath });
       }
     } catch (error) {
       console.error('Error creating file:', error);
@@ -148,7 +150,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
     } finally {
       setIsCreatingFile(false);
     }
-  }, [fileTree, lastSelectedPath, fileExplorerRef, filesystemRef]);
+  }, [fileTree, lastSelectedPath, buildRef]);
 
   // Only convert to tree elements if we have files
   const treeElements = fileTree.length > 0 ? convertFileItemToTreeElement(fileTree) : [];
@@ -188,7 +190,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
                 key={element.id}
                 element={element}
                 fileTree={fileTree}
-                activeFileId={activeFileId}
+                activeFilePath={activeFilePath}
                 onSelect={handleFileSelect}
               />
             ))}
@@ -205,10 +207,10 @@ type TreeItemProps = {
   readonly element: TreeViewElement;
   readonly fileTree: FileItem[];
   readonly onSelect: (id: string) => void;
-  readonly activeFileId: string | undefined;
+  readonly activeFilePath: string | undefined;
 };
 
-function TreeItem({ element, fileTree, onSelect, activeFileId }: TreeItemProps): React.JSX.Element {
+function TreeItem({ element, fileTree, onSelect, activeFilePath }: TreeItemProps): React.JSX.Element {
   if (element.children && element.children.length > 0) {
     return (
       <Folder
@@ -221,7 +223,7 @@ function TreeItem({ element, fileTree, onSelect, activeFileId }: TreeItemProps):
             key={child.id}
             element={child}
             fileTree={fileTree}
-            activeFileId={activeFileId}
+            activeFilePath={activeFilePath}
             onSelect={onSelect}
           />
         ))}
@@ -229,7 +231,7 @@ function TreeItem({ element, fileTree, onSelect, activeFileId }: TreeItemProps):
     );
   }
 
-  const isActive = activeFileId === element.id;
+  const isActive = activeFilePath === element.id;
 
   // Find the file in the tree to get git status
   const file = findFileById(fileTree, element.id);

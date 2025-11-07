@@ -6,22 +6,25 @@ import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
 
 export function ChatEditorTabs(): React.JSX.Element {
-  const { fileExplorerRef } = useBuild();
+  const { fileExplorerRef, gitRef } = useBuild();
   const openFiles = useSelector(fileExplorerRef, (state) => state.context.openFiles);
-  const activeFileId = useSelector(fileExplorerRef, (state) => state.context.activeFileId);
+  const activeFilePath = useSelector(fileExplorerRef, (state) => state.context.activeFilePath);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  // Get git statuses for display
+  const gitStatuses = useSelector(gitRef, (state) => state.context.fileStatuses);
+
   const handleTabClick = useCallback(
-    (fileId: string) => {
-      fileExplorerRef.send({ type: 'setActiveFile', fileId });
+    (path: string) => {
+      fileExplorerRef.send({ type: 'setActiveFile', path });
     },
     [fileExplorerRef],
   );
 
   const handleTabClose = useCallback(
-    (event: React.MouseEvent, fileId: string) => {
+    (event: React.MouseEvent, path: string) => {
       event.stopPropagation();
-      fileExplorerRef.send({ type: 'closeFile', fileId });
+      fileExplorerRef.send({ type: 'closeFile', path });
     },
     [fileExplorerRef],
   );
@@ -54,59 +57,59 @@ export function ChatEditorTabs(): React.JSX.Element {
         className="h-7.5 overflow-x-auto overflow-y-hidden overscroll-x-none [scrollbar-width:none]"
       >
         <div className="flex h-full w-max">
-          {openFiles.map((file) => (
-            <Fragment key={file.path}>
-              <div
-                key={file.id}
-                className={cn(
-                  'group/editor-tab flex h-full min-w-0 cursor-pointer items-center gap-1 border-y border-y-transparent pr-2 pl-4 text-sm transition-colors',
-                  'hover:bg-muted/40',
-                  activeFileId === file.id
-                    ? 'border-b-primary bg-background text-foreground'
-                    : 'bg-muted/20 text-muted-foreground',
-                )}
-                role="tab"
-                tabIndex={0}
-                aria-selected={activeFileId === file.id}
-                onClick={() => {
-                  handleTabClick(file.id);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    handleTabClick(file.id);
-                  }
-                }}
-              >
-                <span className="flex max-w-32 items-center gap-1.5 truncate">
-                  <span className="truncate">{file.name}</span>
-                  {(file.isDirty ?? file.gitStatus !== 'clean') ? (
-                    <span
-                      aria-label={
-                        file.isDirty ? 'File has unsaved changes' : `File has git changes: ${file.gitStatus ?? ''}`
-                      }
-                      className="size-1.5 shrink-0 rounded-full bg-yellow"
-                      title={file.isDirty ? 'Unsaved changes' : `Git status: ${file.gitStatus ?? ''}`}
-                    />
-                  ) : null}
-                </span>
-                <Button
-                  size="icon"
-                  variant="ghost"
+          {openFiles.map((file) => {
+            const gitStatus = gitStatuses.get(file.path)?.status;
+            const isActive = activeFilePath === file.path;
+
+            return (
+              <Fragment key={file.path}>
+                <div
                   className={cn(
-                    'ml-1 size-4 p-0 transition-opacity hover:bg-primary/20',
-                    activeFileId === file.id ? 'opacity-100' : 'opacity-0 group-hover/editor-tab:opacity-100',
+                    'group/editor-tab flex h-full min-w-0 cursor-pointer items-center gap-1 border-y border-y-transparent pr-2 pl-4 text-sm transition-colors',
+                    'hover:bg-muted/40',
+                    isActive ? 'border-b-primary bg-background text-foreground' : 'bg-muted/20 text-muted-foreground',
                   )}
-                  aria-label={`Close ${file.name}`}
-                  onClick={(event) => {
-                    handleTabClose(event, file.id);
+                  role="tab"
+                  tabIndex={0}
+                  aria-selected={isActive}
+                  onClick={() => {
+                    handleTabClick(file.path);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      handleTabClick(file.path);
+                    }
                   }}
                 >
-                  <X className="size-3" />
-                </Button>
-              </div>
-              <div className="h-full w-px bg-border" />
-            </Fragment>
-          ))}
+                  <span className="flex max-w-32 items-center gap-1.5 truncate">
+                    <span className="truncate">{file.name}</span>
+                    {gitStatus && gitStatus !== 'clean' ? (
+                      <span
+                        aria-label={`File has git changes: ${gitStatus}`}
+                        className="size-1.5 shrink-0 rounded-full bg-yellow"
+                        title={`Git status: ${gitStatus}`}
+                      />
+                    ) : null}
+                  </span>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className={cn(
+                      'ml-1 size-4 p-0 transition-opacity hover:bg-primary/20',
+                      isActive ? 'opacity-100' : 'opacity-0 group-hover/editor-tab:opacity-100',
+                    )}
+                    aria-label={`Close ${file.name}`}
+                    onClick={(event) => {
+                      handleTabClose(event, file.path);
+                    }}
+                  >
+                    <X className="size-3" />
+                  </Button>
+                </div>
+                <div className="h-full w-px bg-border" />
+              </Fragment>
+            );
+          })}
         </div>
       </div>
     </div>

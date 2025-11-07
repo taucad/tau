@@ -3,19 +3,19 @@ import type { ActorRefFrom, OutputFrom, DoneActorEvent } from 'xstate';
 import { produce } from 'immer';
 import type { Message } from '@ai-sdk/react';
 import type { Build, Chat } from '@taucad/types';
-import { idPrefix, languageFromKernel } from '@taucad/types/constants';
+import { idPrefix } from '@taucad/types/constants';
 import { isBrowser } from '#constants/browser.constants.js';
 import { storage } from '#db/storage.js';
 import { assertActorDoneEvent } from '#lib/xstate.js';
 import { cameraCapabilityMachine } from '#machines/camera-capability.machine.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { fileExplorerMachine } from '#machines/file-explorer.machine.js';
-import { filesystemMachine } from '#machines/filesystem.machine.js';
 import { gitMachine } from '#machines/git.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
 import { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
+import { writeBuildToLightningFs } from '#lib/lightning-fs.lib.js';
 
 /**
  * Build Machine Context
@@ -27,7 +27,6 @@ export type BuildContext = {
   isLoading: boolean;
   enableFilePreview: boolean;
   shouldLoadModelOnStart: boolean;
-  filesystemRef: ActorRefFrom<typeof filesystemMachine>;
   gitRef: ActorRefFrom<typeof gitMachine>;
   fileExplorerRef: ActorRefFrom<typeof fileExplorerMachine>;
   graphicsRef: ActorRefFrom<typeof graphicsMachine>;
@@ -64,10 +63,16 @@ const writeBuildActor = fromPromise<Build, { build: Build }>(async ({ input }) =
   return updated;
 });
 
+const writeFilesystemActor = fromPromise<void, { buildId: string; files: Record<string, { content: string }> }>(
+  async ({ input }) => {
+    await writeBuildToLightningFs(input.buildId, input.files);
+  },
+);
+
 const buildActors = {
   loadBuildActor,
   writeBuildActor,
-  filesystem: filesystemMachine,
+  writeFilesystemActor,
   git: gitMachine,
   fileExplorer: fileExplorerMachine,
   graphics: graphicsMachine,
@@ -99,7 +104,11 @@ type BuildEventInternal =
       parameters: Record<string, unknown>;
     }
   | { type: 'setEnableFilePreview'; enabled: boolean }
-  | { type: 'loadModel' };
+  | { type: 'loadModel' }
+  | { type: 'createFile'; path: string; content: string }
+  | { type: 'updateFile'; path: string; content: string }
+  | { type: 'deleteFile'; path: string }
+  | { type: 'fileOpened'; path: string };
 
 export type BuildEventExternal = OutputFrom<(typeof buildActors)[BuildActorNames]>;
 type BuildEventExternalDone = DoneActorEvent<BuildEventExternal, BuildActorNames>;
@@ -112,7 +121,10 @@ type BuildEvent = BuildEventExternalDone | BuildEventInternal;
 type BuildEmitted =
   | { type: 'buildLoaded'; build: Build }
   | { type: 'error'; error: Error }
-  | { type: 'buildUpdated'; build: Build };
+  | { type: 'buildUpdated'; build: Build }
+  | { type: 'fileCreated'; path: string; content: string }
+  | { type: 'fileUpdated'; path: string; content: string }
+  | { type: 'fileDeleted'; path: string };
 
 /**
  * Build Machine
@@ -272,6 +284,7 @@ export const buildMachine = setup({
           updatedAt: timestamp,
         };
 
+        // @ts-expect-error -- Immer types struggle with this.
         draft.build!.chats[chatIndex] = updatedChat;
         draft.build!.updatedAt = timestamp;
       });
@@ -339,47 +352,89 @@ export const buildMachine = setup({
           }
         }),
       );
+    }),
+    createFileInContext: assign(({ context, event }) => {
+      assertEvent(event, 'createFile');
+      if (!context.build?.assets.mechanical) {
+        return {};
+      }
 
-      // Update filesystem with new files
-      enqueue.sendTo(context.filesystemRef, {
-        type: 'setFiles',
-        buildId: context.buildId,
-        files: event.files,
+      return produce(context, (draft) => {
+        if (draft.build?.assets.mechanical) {
+          draft.build.assets.mechanical.files[event.path] = { content: event.content };
+          draft.build.updatedAt = Date.now();
+        }
+      });
+    }),
+    updateFileInContext: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'updateFile');
+      if (!context.build?.assets.mechanical) {
+        return;
+      }
+
+      // Update the file content
+      enqueue.assign(
+        produce(context, (draft) => {
+          if (draft.build?.assets.mechanical) {
+            draft.build.assets.mechanical.files[event.path] = { content: event.content };
+            draft.build.updatedAt = Date.now();
+          }
+        }),
+      );
+
+      // Determine which file to send to CAD based on enableFilePreview
+      const { enableFilePreview } = context;
+      const mainFilePath = context.build.assets.mechanical.main;
+      const isMainFile = event.path === mainFilePath;
+
+      let codeToSend: string | undefined;
+
+      if (enableFilePreview) {
+        codeToSend = event.content;
+      } else {
+        // With preview disabled, always send main file when any file updates
+        codeToSend = isMainFile ? event.content : context.build.assets.mechanical.files[mainFilePath]?.content;
+      }
+
+      if (codeToSend) {
+        enqueue.sendTo(context.cadRef, {
+          type: 'setCode',
+          code: codeToSend,
+        });
+      }
+    }),
+    deleteFileFromContext: assign(({ context, event }) => {
+      assertEvent(event, 'deleteFile');
+      if (!context.build?.assets.mechanical) {
+        return {};
+      }
+
+      return produce(context, (draft) => {
+        if (draft.build?.assets.mechanical?.files[event.path]) {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- need to remove file from record
+          delete draft.build.assets.mechanical.files[event.path];
+          draft.build.updatedAt = Date.now();
+        }
       });
     }),
     stopStatefulActors: enqueueActions(({ enqueue, context }) => {
       // Stop the old stateful actors (they'll be garbage collected)
-      enqueue.stopChild(context.filesystemRef);
       enqueue.stopChild(context.gitRef);
       enqueue.stopChild(context.fileExplorerRef);
     }),
     respawnStatefulActors: assign({
-      filesystemRef({ context, spawn }) {
-        return spawn('filesystem', {
-          id: `filesystem-${context.buildId}`,
-          input: { buildId: context.buildId },
-        });
-      },
-      gitRef({ context, spawn }) {
+      gitRef({ context, spawn, self }) {
         return spawn('git', {
           id: `git-${context.buildId}`,
-          input: { buildId: context.buildId },
+          input: { buildId: context.buildId, parentRef: self },
         });
       },
-      fileExplorerRef({ context, spawn }) {
+      fileExplorerRef({ context, spawn, self }) {
         return spawn('fileExplorer', {
           id: `file-explorer-${context.buildId}`,
+          input: { parentRef: self },
         });
       },
-    }),
-    sendFilesToFilesystem: enqueueActions(({ enqueue, context }) => {
-      if (context.build?.assets.mechanical) {
-        enqueue.sendTo(context.filesystemRef, {
-          type: 'setFiles',
-          buildId: context.buildId,
-          files: context.build.assets.mechanical.files,
-        });
-      }
     }),
     initializeKernelIfNeeded: enqueueActions(({ enqueue, context }) => {
       // Only initialize if shouldLoadModelOnStart is true
@@ -420,127 +475,60 @@ export const buildMachine = setup({
         kernelType: mechanicalAsset.language,
       });
     }),
-    subscribeToFileExplorer: enqueueActions(({ enqueue, context, self }) => {
-      // Subscribe to file explorer active file changes
-      let previousActiveFileId: string | undefined;
-
-      context.fileExplorerRef.subscribe((state) => {
-        const { activeFileId } = state.context;
-
-        // Check if the active file has changed
-        const hasActiveFileChanged = previousActiveFileId !== activeFileId;
-        previousActiveFileId = activeFileId;
-
-        if (!activeFileId) {
-          return;
-        }
-
-        // Read enableFilePreview from current build machine state (not captured closure)
-        const { enableFilePreview } = self.getSnapshot().context;
-
-        // Only send to CAD if file preview is enabled
-        if (!enableFilePreview) {
-          return;
-        }
-
-        // Read the active file content directly from filesystem (source of truth)
-        const filesystemSnapshot = context.filesystemRef.getSnapshot();
-        const activeFileInFilesystem = filesystemSnapshot.context.files.get(activeFileId);
-
-        if (!activeFileInFilesystem) {
-          return;
-        }
-
-        // Get current CAD code
-        const currentCode = context.cadRef.getSnapshot().context.code;
-
-        // Update CAD when:
-        // 1. Active file changed (user switched files)
-        // 2. Active file content changed
-        if (hasActiveFileChanged || activeFileInFilesystem.content !== currentCode) {
-          enqueue.sendTo(context.cadRef, {
-            type: 'setCode',
-            code: activeFileInFilesystem.content,
-          });
-        }
-      });
-    }),
     setEnableFilePreview: assign({
       enableFilePreview({ event }) {
         assertEvent(event, 'setEnableFilePreview');
         return event.enabled;
       },
     }),
-    openInitialFile: enqueueActions(({ context }) => {
-      // Subscribe to filesystem to open main file when it's ready and has files
-      let hasOpened = false;
+    handleFileOpened: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'fileOpened');
 
-      context.filesystemRef.subscribe((state) => {
-        // Only proceed if we haven't opened yet and filesystem is ready with files
-        if (hasOpened || state.value !== 'ready' || state.context.files.size === 0) {
-          return;
-        }
+      const { enableFilePreview } = context;
+      const mechanicalAsset = context.build?.assets.mechanical;
+      if (!mechanicalAsset) {
+        return;
+      }
 
-        const mechanicalAsset = context.build?.assets.mechanical;
-        if (!mechanicalAsset?.main) {
-          return;
-        }
+      const mainFilePath = mechanicalAsset.main;
+      const isMainFile = event.path === mainFilePath;
 
-        const mainFile = state.context.files.get(mechanicalAsset.main);
-        if (!mainFile) {
-          return;
-        }
+      // Determine which file to show in CAD
+      let codeToSend: string | undefined;
 
-        hasOpened = true;
+      if (enableFilePreview) {
+        // Preview enabled: show the opened file
+        const file = mechanicalAsset.files[event.path];
+        codeToSend = file?.content;
+      } else if (isMainFile) {
+        // Preview disabled: only update CAD if opening the main file
+        const file = mechanicalAsset.files[event.path];
+        codeToSend = file?.content;
+      }
+      // If opening a non-main file with preview disabled, do nothing
 
-        // Open the main file
-        context.fileExplorerRef.send({
-          type: 'openFile',
-          path: mechanicalAsset.main,
-          content: mainFile.content,
-          language: languageFromKernel[mechanicalAsset.language],
+      if (codeToSend) {
+        enqueue.sendTo(context.cadRef, {
+          type: 'setCode',
+          code: codeToSend,
         });
-      });
+      }
     }),
-    subscribeToFilesystemChanges: enqueueActions(({ enqueue, context }) => {
-      // Subscribe to filesystem events for file explorer updates
-      context.filesystemRef.on('fileCreated', ({ path, content }) => {
-        // Get file metadata from filesystem
-        const mechanicalAsset = context.build?.assets.mechanical;
-        const language = mechanicalAsset ? languageFromKernel[mechanicalAsset.language] : undefined;
+    openInitialFile: enqueueActions(({ enqueue, context }) => {
+      const mechanicalAsset = context.build?.assets.mechanical;
+      if (!mechanicalAsset?.main) {
+        return;
+      }
 
-        // Auto-open the newly created file
-        enqueue.sendTo(context.fileExplorerRef, {
-          type: 'openFile',
-          path,
-          content,
-          language,
-        });
-      });
+      const mainFile = mechanicalAsset.files[mechanicalAsset.main];
+      if (!mainFile) {
+        return;
+      }
 
-      // Forward file updates to CAD for rendering
-      context.filesystemRef.on('fileUpdated', ({ path, content }) => {
-        // Only update CAD if this is the main file or active file
-        const { activeFileId } = context.fileExplorerRef.getSnapshot().context;
-        const mainFile = context.build?.assets.mechanical?.main;
-
-        // Update CAD if editing the main file or if it's the active file
-        if (path === mainFile || path === activeFileId) {
-          context.cadRef.send({
-            type: 'setCode',
-            code: content,
-          });
-        }
-      });
-
-      // Listen to statusRefreshed to update dirty files indicator
-      context.filesystemRef.on('statusRefreshed', () => {
-        const { dirtyFiles } = context.filesystemRef.getSnapshot().context;
-
-        context.fileExplorerRef.send({
-          type: 'updateDirtyFiles',
-          dirtyFiles,
-        });
+      // Open the main file
+      enqueue.sendTo(context.fileExplorerRef, {
+        type: 'openFile',
+        path: mechanicalAsset.main,
       });
     }),
   },
@@ -558,21 +546,17 @@ export const buildMachine = setup({
   },
 }).createMachine({
   id: 'build',
-  context({ input, spawn }) {
+  context({ input, spawn, self }) {
     const { buildId, shouldLoadModelOnStart = true } = input;
-
-    const filesystemRef = spawn('filesystem', {
-      id: `filesystem-${buildId}`,
-      input: { buildId },
-    });
 
     const gitRef = spawn('git', {
       id: `git-${buildId}`,
-      input: { buildId },
+      input: { buildId, parentRef: self },
     });
 
     const fileExplorerRef = spawn('fileExplorer', {
       id: `file-explorer-${buildId}`,
+      input: { parentRef: self },
     });
 
     const graphicsRef = spawn('graphics', {
@@ -592,7 +576,7 @@ export const buildMachine = setup({
       input: {
         shouldInitializeKernelOnStart: false,
         graphicsRef,
-        logActorRef: logRef,
+        logRef,
       },
     });
 
@@ -613,7 +597,6 @@ export const buildMachine = setup({
       isLoading: true,
       enableFilePreview: true, // Default to enabled
       shouldLoadModelOnStart,
-      filesystemRef,
       gitRef,
       fileExplorerRef,
       graphicsRef,
@@ -661,11 +644,8 @@ export const buildMachine = setup({
           actions: [
             'setBuild',
             'clearLoading',
-            'sendFilesToFilesystem',
             'initializeKernelIfNeeded',
             'openInitialFile',
-            'subscribeToFileExplorer',
-            'subscribeToFilesystemChanges',
             emit(({ event }) => {
               assertActorDoneEvent(event);
               return {
@@ -690,10 +670,101 @@ export const buildMachine = setup({
     ready: {
       type: 'parallel',
       states: {
+        filesystem: {
+          initial: 'writingInitial',
+          states: {
+            writingInitial: {
+              invoke: {
+                src: 'writeFilesystemActor',
+                input({ context }) {
+                  return {
+                    buildId: context.buildId,
+                    files: context.build?.assets.mechanical?.files ?? {},
+                  };
+                },
+                onDone: {
+                  target: 'idle',
+                },
+                onError: {
+                  target: 'idle',
+                  // Fail silently
+                },
+              },
+            },
+            idle: {},
+          },
+        },
         operation: {
           initial: 'idle',
           states: {
             idle: {},
+            creatingFile: {
+              invoke: {
+                src: 'writeFilesystemActor',
+                input({ context }) {
+                  return {
+                    buildId: context.buildId,
+                    files: context.build?.assets.mechanical?.files ?? {},
+                  };
+                },
+                onDone: {
+                  target: 'idle',
+                  actions: [
+                    emit(({ context, event }) => {
+                      assertActorDoneEvent(event);
+                      // Get the path and content from the last createFile event
+                      const mechanicalFiles = context.build?.assets.mechanical?.files ?? {};
+                      const paths = Object.keys(mechanicalFiles);
+                      const lastPath = paths.at(-1) ?? '';
+                      const lastFile = mechanicalFiles[lastPath];
+                      return {
+                        type: 'fileCreated' as const,
+                        path: lastPath,
+                        content: lastFile?.content ?? '',
+                      };
+                    }),
+                  ],
+                },
+                onError: {
+                  target: 'idle',
+                },
+              },
+            },
+            updatingFile: {
+              invoke: {
+                src: 'writeFilesystemActor',
+                input({ context, event }) {
+                  assertEvent(event, 'updateFile');
+                  return {
+                    buildId: context.buildId,
+                    files: context.build?.assets.mechanical?.files ?? {},
+                  };
+                },
+                onDone: {
+                  target: 'idle',
+                },
+                onError: {
+                  target: 'idle',
+                },
+              },
+            },
+            deletingFile: {
+              invoke: {
+                src: 'writeFilesystemActor',
+                input({ context }) {
+                  return {
+                    buildId: context.buildId,
+                    files: context.build?.assets.mechanical?.files ?? {},
+                  };
+                },
+                onDone: {
+                  target: 'idle',
+                },
+                onError: {
+                  target: 'idle',
+                },
+              },
+            },
           },
           on: {
             loadBuild: [
@@ -743,6 +814,21 @@ export const buildMachine = setup({
             loadModel: {
               actions: 'loadModel',
             },
+            createFile: {
+              target: '.creatingFile',
+              actions: ['createFileInContext'],
+            },
+            updateFile: {
+              target: '.updatingFile',
+              actions: 'updateFileInContext',
+            },
+            deleteFile: {
+              target: '.deletingFile',
+              actions: ['deleteFileFromContext'],
+            },
+            fileOpened: {
+              actions: 'handleFileOpened',
+            },
           },
         },
         storing: {
@@ -778,6 +864,15 @@ export const buildMachine = setup({
                   target: 'pending',
                 },
                 updateCodeParameters: {
+                  target: 'pending',
+                },
+                createFile: {
+                  target: 'pending',
+                },
+                updateFile: {
+                  target: 'pending',
+                },
+                deleteFile: {
                   target: 'pending',
                 },
               },
@@ -825,6 +920,18 @@ export const buildMachine = setup({
                   reenter: true,
                 },
                 updateCodeParameters: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                createFile: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                updateFile: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                deleteFile: {
                   target: 'pending',
                   reenter: true,
                 },

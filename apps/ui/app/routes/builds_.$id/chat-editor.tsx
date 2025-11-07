@@ -3,6 +3,7 @@ import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
 import { FileCode } from 'lucide-react';
+import { languageFromKernel } from '@taucad/types/constants';
 import { CodeEditor } from '#components/code/code-editor.js';
 import { cn } from '#utils/ui.utils.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
@@ -16,10 +17,32 @@ import { EmptyItems } from '#components/ui/empty-items.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }): React.JSX.Element {
   const monaco = useMonaco();
-  const { fileExplorerRef: fileExplorerActor, cadRef: cadActor, buildRef, filesystemRef } = useBuild();
-  const activeFile = useSelector(fileExplorerActor, (state) =>
-    state.context.openFiles.find((file) => file.id === state.context.activeFileId),
-  );
+  const { fileExplorerRef: fileExplorerActor, cadRef: cadActor, buildRef } = useBuild();
+  // Get active file path from file explorer
+  const activeFilePath = useSelector(fileExplorerActor, (state) => {
+    return state.context.activeFilePath;
+  });
+
+  // Get active file content from build machine (source of truth)
+  const activeFile = useSelector(buildRef, (state) => {
+    if (!activeFilePath) {
+      return undefined;
+    }
+
+    const files = state.context.build?.assets.mechanical?.files;
+    const fileContent = files?.[activeFilePath];
+    if (!fileContent) {
+      return undefined;
+    }
+
+    const language = state.context.build?.assets.mechanical?.language;
+    return {
+      path: activeFilePath,
+      name: activeFilePath.split('/').pop() ?? activeFilePath,
+      content: fileContent.content,
+      language: language ? languageFromKernel[language] : undefined,
+    };
+  });
 
   // Sync file preview preference between cookie and build machine
   const [enableFilePreview] = useCookie<boolean>(cookieName.cadFilePreview, true);
@@ -38,14 +61,14 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
         return;
       }
 
-      // Update filesystem as single source of truth
-      filesystemRef.send({
+      // Update build machine as single source of truth
+      buildRef.send({
         type: 'updateFile',
         path: activeFile.path,
         content: value ?? '',
       });
     },
-    [activeFile, filesystemRef],
+    [activeFile, buildRef],
   );
 
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { useParams } from 'react-router';
 import { useCallback, useEffect } from 'react';
 import { createActor } from 'xstate';
+import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 // eslint-disable-next-line no-restricted-imports -- allowed for route types
 import type { Route } from './+types/route.js';
@@ -49,7 +50,12 @@ export const handle: Handle = {
 
 function Chat() {
   const { id } = useParams();
-  const { build, isLoading, activeChat, activeChatId, setChatMessages } = useBuild();
+  const { buildRef, isLoading, setChatMessages } = useBuild();
+  const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId);
+  const activeChat = useSelector(buildRef, (state) =>
+    state.context.build?.chats.find((chat) => chat.id === activeChatId),
+  );
+  const hasBuild = useSelector(buildRef, (state) => state.context.build !== undefined);
 
   const messages = useChatSelector((state) => state.context.messages);
   const status = useChatSelector((state) => state.context.status);
@@ -66,7 +72,7 @@ function Chat() {
   );
 
   useEffect(() => {
-    if (!build || isLoading) {
+    if (!hasBuild || isLoading) {
       return;
     }
 

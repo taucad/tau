@@ -1,10 +1,10 @@
-import { assign, assertEvent, setup, fromPromise, emit } from 'xstate';
-import type { OutputFrom, DoneActorEvent } from 'xstate';
+import { assign, assertEvent, setup, fromPromise, emit, fromCallback } from 'xstate';
+import type { OutputFrom, DoneActorEvent, AnyActorRef } from 'xstate';
 import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/web';
 import { lightningFs } from '#db/storage.js';
 import { assertActorDoneEvent } from '#lib/xstate.js';
-import { getBuildDirectory } from '#machines/filesystem.machine.js';
+import { getBuildDirectory } from '#lib/lightning-fs.lib.js';
 
 /**
  * Git File Status
@@ -29,6 +29,7 @@ export type GitRepository = {
  * Git Machine Context
  */
 export type GitContext = {
+  parentRef: AnyActorRef | undefined;
   buildId: string | undefined;
   accessToken: string | undefined;
   provider: 'github' | undefined;
@@ -47,6 +48,7 @@ export type GitContext = {
  */
 type GitInput = {
   buildId?: string;
+  parentRef?: AnyActorRef;
 };
 
 // Define the actors that the machine can invoke
@@ -266,6 +268,36 @@ const refreshGitStatusActor = fromPromise<Map<string, GitFileStatus>, { buildId:
   }
 });
 
+const buildListenerActor = fromCallback<{ type: 'refreshStatus' }, { parentRef: AnyActorRef | undefined }>(
+  ({ input, sendBack }) => {
+    if (!input.parentRef) {
+      return () => {
+        // No cleanup needed
+      };
+    }
+
+    const { parentRef } = input;
+
+    const fileCreatedSub = parentRef.on('fileCreated', () => {
+      sendBack({ type: 'refreshStatus' });
+    });
+
+    const fileUpdatedSub = parentRef.on('fileUpdated', () => {
+      sendBack({ type: 'refreshStatus' });
+    });
+
+    const fileDeletedSub = parentRef.on('fileDeleted', () => {
+      sendBack({ type: 'refreshStatus' });
+    });
+
+    return () => {
+      fileCreatedSub.unsubscribe();
+      fileUpdatedSub.unsubscribe();
+      fileDeletedSub.unsubscribe();
+    };
+  },
+);
+
 const gitActors = {
   initGitActor,
   cloneRepositoryActor,
@@ -275,6 +307,7 @@ const gitActors = {
   pushChangesActor,
   pullChangesActor,
   refreshGitStatusActor,
+  buildListener: buildListenerActor,
 } as const;
 
 type GitActorNames = keyof typeof gitActors;
@@ -458,6 +491,7 @@ export const gitMachine = setup({
 }).createMachine({
   id: 'git',
   context: ({ input }) => ({
+    parentRef: input.parentRef,
     buildId: input.buildId,
     accessToken: undefined,
     provider: undefined,
@@ -567,6 +601,11 @@ export const gitMachine = setup({
       },
     },
     ready: {
+      invoke: {
+        id: 'buildListener',
+        src: 'buildListener',
+        input: ({ context }) => ({ parentRef: context.parentRef }),
+      },
       on: {
         stageFile: 'stagingFile',
         unstageFile: 'unstagingFile',

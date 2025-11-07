@@ -12,7 +12,6 @@ import type { ZooBuilderInterface as ZooWorker } from '#components/geometry/kern
 import ZooBuilderWorker from '#components/geometry/kernel/zoo/zoo.worker.js?worker';
 import { assertActorDoneEvent } from '#lib/xstate.js';
 import type { LogLevel, LogOrigin, OnWorkerLog } from '#types/console.types.js';
-import { isBrowser } from '#constants/browser.constants.js';
 
 const workers = {
   replicad: ReplicadBuilderWorker,
@@ -25,11 +24,6 @@ const createWorkersActor = fromPromise<
   { context: KernelContext }
 >(async ({ input }) => {
   const { context } = input;
-
-  // In non-browser environments, fake an initialization
-  if (!isBrowser) {
-    return { type: 'kernelInitialized' };
-  }
 
   // Clean up any existing workers
   if (context.workers.replicad) {
@@ -122,19 +116,6 @@ const parseParametersActor = fromPromise<
 >(async ({ input }) => {
   const { context, event } = input;
 
-  // Skip in non-browser environments
-  if (!isBrowser) {
-    return {
-      type: 'kernelError',
-      error: {
-        message: 'Not in browser environment',
-        startLineNumber: 0,
-        startColumn: 0,
-        type: 'runtime',
-      },
-    };
-  }
-
   // Get the correct worker based on kernel type
   const wrappedWorker = context.wrappedWorkers[event.kernelType];
 
@@ -211,18 +192,6 @@ const evaluateCodeActor = fromPromise<
 >(async ({ input }) => {
   const { context, event } = input;
 
-  if (!isBrowser) {
-    return {
-      type: 'kernelError',
-      error: {
-        message: 'Not in browser environment',
-        startLineNumber: 0,
-        startColumn: 0,
-        type: 'runtime',
-      },
-    };
-  }
-
   // Get the correct worker based on kernel type
   const wrappedWorker = context.wrappedWorkers[event.kernelType];
 
@@ -262,19 +231,6 @@ const exportGeometryActor = fromPromise<
   { context: KernelContext; event: { format: ExportFormat; kernelType: KernelProvider } }
 >(async ({ input }) => {
   const { context, event } = input;
-
-  // Skip in non-browser environments
-  if (!isBrowser) {
-    return {
-      type: 'geometryExportFailed',
-      error: {
-        message: 'Not in browser environment',
-        startLineNumber: 0,
-        startColumn: 0,
-        type: 'runtime',
-      },
-    };
-  }
 
   // Get the correct worker based on kernel type
   const wrappedWorker = context.wrappedWorkers[event.kernelType];

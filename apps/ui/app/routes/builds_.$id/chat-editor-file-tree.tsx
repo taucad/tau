@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { FilePlus, FolderPlus } from 'lucide-react';
 import { useSelector } from '@xstate/react';
+import { languageFromKernel } from '@taucad/types/constants';
 import { Tree, Folder, File } from '#components/magicui/file-tree.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
 import type { FileItem } from '#machines/file-explorer.machine.js';
@@ -59,8 +60,27 @@ function findFileByPath(items: FileItem[], path: string): FileItem | undefined {
 }
 
 export function ChatEditorFileTree(): React.JSX.Element {
-  const { fileExplorerRef, filesystemRef } = useBuild();
-  const fileTree = useSelector(fileExplorerRef, (state) => state.context.fileTree);
+  const { buildRef, fileExplorerRef, filesystemRef, gitRef } = useBuild();
+  const mechanicalAsset = useSelector(buildRef, (state) => state.context.build?.assets.mechanical);
+  // Derive file tree from filesystem state (reactive selector)
+  const fileTree = useSelector(filesystemRef, (state): FileItem[] => {
+    const { files } = state.context;
+    if (!mechanicalAsset) {
+      return [];
+    }
+
+    return [...files.entries()].map(([path, item]) => ({
+      id: path,
+      name: path.split('/').pop() ?? path,
+      path,
+      content: item.content,
+      language: languageFromKernel[mechanicalAsset.language],
+      isDirectory: false,
+      // Git status computed from git machine
+      gitStatus: gitRef.getSnapshot().context.fileStatuses.get(path)?.status,
+    }));
+  });
+
   const activeFileId = useSelector(fileExplorerRef, (state) => state.context.activeFileId);
   const [isCreatingFile, setIsCreatingFile] = useState(false);
 
@@ -73,7 +93,12 @@ export function ChatEditorFileTree(): React.JSX.Element {
         setLastSelectedPath(file.path);
 
         if (!file.isDirectory) {
-          fileExplorerRef.send({ type: 'openFile', path: file.path });
+          fileExplorerRef.send({
+            type: 'openFile',
+            path: file.path,
+            content: file.content,
+            language: file.language,
+          });
         }
       }
     },

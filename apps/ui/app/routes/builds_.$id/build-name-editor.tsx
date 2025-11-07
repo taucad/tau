@@ -1,6 +1,7 @@
 import { useChat } from '@ai-sdk/react';
 import type { Message } from 'ai';
 import { useState, useEffect } from 'react';
+import { useSelector } from '@xstate/react';
 import { defaultBuildName } from '#constants/build-names.js';
 import { useBuild } from '#hooks/use-build.js';
 import { useChatConstants } from '#utils/chat.utils.js';
@@ -11,8 +12,14 @@ import { InlineTextEditor } from '#components/inline-text-editor.js';
 const animationDuration = 2000;
 
 export function BuildNameEditor(): React.JSX.Element {
-  const { build, updateName, isLoading } = useBuild();
-  const [displayName, setDisplayName] = useState<string>(build?.name ?? '');
+  const { buildRef, updateName, isLoading } = useBuild();
+  const buildName = useSelector(buildRef, (state) => state.context.build?.name) ?? '';
+  const activeChatFirstMessage = useSelector(buildRef, (state) => {
+    const chats = state.context.build?.chats ?? [];
+    const activeChat = chats.find((chat) => chat.id === state.context.build?.lastChatId);
+    return activeChat?.messages[0];
+  });
+  const [displayName, setDisplayName] = useState<string>(buildName);
   const [isNameAnimating, setIsNameAnimating] = useState(false);
   const { append } = useChat({
     ...useChatConstants,
@@ -33,16 +40,14 @@ export function BuildNameEditor(): React.JSX.Element {
 
   // Set initial name and trigger generation if needed
   useEffect(() => {
-    if (isLoading || !build) {
+    if (isLoading || !buildName) {
       return;
     }
 
-    const activeChat = build.chats.find((chat) => chat.id === build.lastChatId);
-
-    if (build.name === defaultBuildName && activeChat?.messages[0]) {
+    if (buildName === defaultBuildName && activeChatFirstMessage) {
       // Create and send message for name generation
       const message = {
-        ...activeChat.messages[0],
+        ...activeChatFirstMessage,
         model: 'name-generator',
         metadata: {
           toolChoice: 'none',
@@ -50,10 +55,10 @@ export function BuildNameEditor(): React.JSX.Element {
       } as const satisfies Message;
       void append(message);
     } else {
-      setDisplayName(build.name);
+      setDisplayName(buildName);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only run after loading completes
-  }, [build?.name, isLoading]);
+  }, [buildName, isLoading]);
 
   return (
     <Tooltip>

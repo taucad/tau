@@ -5,7 +5,7 @@ import type { ExportFormat } from '@taucad/types';
 import { fileExtensionFromExportFormat } from '@taucad/types/constants';
 import { BoxDown } from '#components/icons/box-down.js';
 import { Button } from '#components/ui/button.js';
-import { useBuildSelector, useBuild } from '#hooks/use-build.js';
+import { useBuild } from '#hooks/use-build.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { toast } from '#components/ui/sonner.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
@@ -23,10 +23,9 @@ type ViewerControlItem = {
 };
 
 export function ChatControls(): React.JSX.Element {
-  const { cadRef: cadActor, graphicsRef: graphicsActor } = useBuild();
+  const { cadRef: cadActor, graphicsRef: graphicsActor, updateThumbnail, buildRef } = useBuild();
   const geometries = useSelector(cadActor, (state) => state.context.geometries);
-  const buildName = useBuildSelector((state) => state.build?.name) ?? 'file';
-  const updateThumbnail = useBuildSelector((state) => state.updateThumbnail);
+  const buildName = useSelector(buildRef, (state) => state.context.build?.name ?? 'file');
   const code = useSelector(cadActor, (state) => state.context.code);
   const isScreenshotReady = useSelector(graphicsActor, (state) => state.context.isScreenshotReady);
 

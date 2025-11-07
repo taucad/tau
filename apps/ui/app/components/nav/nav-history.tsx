@@ -178,10 +178,10 @@ export function NavHistory(): ReactNode {
 
       {/* Load More button */}
       {builds.length > totalVisibleBuildCount && !searchQuery.trim() && (
-        <SidebarGroup className="-mt-3.5 group-data-[collapsible=icon]:hidden">
+        <SidebarGroup className="group-data-[collapsible=icon]:hidden">
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton className="text-sidebar-foreground/70" onClick={handleLoadMore}>
+              <SidebarMenuButton className="-mt-3.5 text-sidebar-foreground/70" onClick={handleLoadMore}>
                 <MoreHorizontal className="size-4" />
                 <span>Load More</span>
               </SidebarMenuButton>

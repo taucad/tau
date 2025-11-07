@@ -108,7 +108,10 @@ function Chat() {
 
 // Wrapper component that has access to build context and can configure AiChatProvider
 function ChatWithProvider() {
-  const { cadRef: cadActor, graphicsRef: graphicsActor, activeChatId, buildId, build } = useBuild();
+  const { cadRef: cadActor, graphicsRef: graphicsActor, buildId, buildRef } = useBuild();
+  const name = useSelector(buildRef, (state) => state.context.build?.name);
+  const description = useSelector(buildRef, (state) => state.context.build?.description);
+  const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId);
 
   // Tool call handler that integrates with the new architecture
   const onToolCall = useCallback(
@@ -218,8 +221,8 @@ function ChatWithProvider() {
   return (
     <AiChatProvider value={{ ...useChatConstants, id: threadId, onToolCall }}>
       <ViewContextProvider>
-        {build?.name ? <title>{build.name}</title> : null}
-        {build?.description ? <meta name="description" content={build.description} /> : null}
+        {name ? <title>{name}</title> : null}
+        {description ? <meta name="description" content={description} /> : null}
         <Chat />
       </ViewContextProvider>
     </AiChatProvider>

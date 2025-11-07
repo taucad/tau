@@ -45,7 +45,7 @@ type CadEmitted =
 type CadInput = {
   shouldInitializeKernelOnStart: boolean;
   graphicsRef?: ActorRefFrom<typeof graphicsMachine>;
-  logActorRef?: ActorRefFrom<typeof logMachine>;
+  logRef?: ActorRefFrom<typeof logMachine>;
 };
 
 // Debounce delay for code changes in milliseconds
@@ -223,6 +223,10 @@ export const cadMachine = setup({
     isKernelNotInitialized: ({ context }) => !context.isKernelInitialized,
     isKernelInitializing: ({ context }) => context.isKernelInitializing,
     hasModel: ({ context }) => context.code !== '',
+    isCodeChanged({ context, event }) {
+      assertEvent(event, 'setCode');
+      return context.code !== event.code;
+    },
   },
 }).createMachine({
   id: 'cad',
@@ -245,7 +249,7 @@ export const cadMachine = setup({
     isKernelInitializing: false,
     isKernelInitialized: false,
     graphicsRef: input.graphicsRef,
-    logActorRef: input.logActorRef,
+    logActorRef: input.logRef,
     jsonSchema: undefined,
     kernelTypeSelected: 'openscad',
   }),
@@ -328,10 +332,13 @@ export const cadMachine = setup({
           target: 'initializing',
           actions: 'initializeModel',
         },
-        setCode: {
-          target: 'buffering',
-          actions: 'setCode',
-        },
+        setCode: [
+          {
+            guard: 'isCodeChanged',
+            target: 'buffering',
+            actions: 'setCode',
+          },
+        ],
         setParameters: {
           target: 'buffering',
           actions: 'setParameters',

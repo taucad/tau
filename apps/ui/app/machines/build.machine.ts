@@ -107,6 +107,7 @@ type BuildEventInternal =
   | { type: 'loadModel' }
   | { type: 'createFile'; path: string; content: string }
   | { type: 'updateFile'; path: string; content: string }
+  | { type: 'renameFile'; oldPath: string; newPath: string }
   | { type: 'deleteFile'; path: string }
   | { type: 'fileOpened'; path: string };
 
@@ -403,18 +404,55 @@ export const buildMachine = setup({
         });
       }
     }),
-    deleteFileFromContext: assign(({ context, event }) => {
-      assertEvent(event, 'deleteFile');
+    renameFileInContext: assign(({ context, event }) => {
+      assertEvent(event, 'renameFile');
       if (!context.build?.assets.mechanical) {
         return {};
       }
 
       return produce(context, (draft) => {
-        if (draft.build?.assets.mechanical?.files[event.path]) {
-          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- need to remove file from record
-          delete draft.build.assets.mechanical.files[event.path];
-          draft.build.updatedAt = Date.now();
+        const files = draft.build?.assets.mechanical?.files;
+        if (files?.[event.oldPath]) {
+          const fileContent = files[event.oldPath];
+          if (!fileContent) {
+            return;
+          }
+
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- need to remove old file path
+          delete files[event.oldPath];
+          files[event.newPath] = fileContent;
+
+          // Update main file path if renaming the main file
+          if (draft.build?.assets.mechanical?.main === event.oldPath) {
+            draft.build.assets.mechanical.main = event.newPath;
+          }
+
+          if (draft.build) {
+            draft.build.updatedAt = Date.now();
+          }
         }
+      });
+    }),
+    deleteFileFromContext: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'deleteFile');
+      if (!context.build?.assets.mechanical) {
+        return;
+      }
+
+      enqueue.assign(
+        produce(context, (draft) => {
+          if (draft.build?.assets.mechanical?.files[event.path]) {
+            // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- need to remove file from record
+            delete draft.build.assets.mechanical.files[event.path];
+            draft.build.updatedAt = Date.now();
+          }
+        }),
+      );
+
+      // Close the file in file explorer if it's open
+      enqueue.sendTo(context.fileExplorerRef, {
+        type: 'closeFile',
+        path: event.path,
       });
     }),
     stopStatefulActors: enqueueActions(({ enqueue, context }) => {
@@ -748,6 +786,23 @@ export const buildMachine = setup({
                 },
               },
             },
+            renamingFile: {
+              invoke: {
+                src: 'writeFilesystemActor',
+                input({ context }) {
+                  return {
+                    buildId: context.buildId,
+                    files: context.build?.assets.mechanical?.files ?? {},
+                  };
+                },
+                onDone: {
+                  target: 'idle',
+                },
+                onError: {
+                  target: 'idle',
+                },
+              },
+            },
             deletingFile: {
               invoke: {
                 src: 'writeFilesystemActor',
@@ -822,6 +877,10 @@ export const buildMachine = setup({
               target: '.updatingFile',
               actions: 'updateFileInContext',
             },
+            renameFile: {
+              target: '.renamingFile',
+              actions: 'renameFileInContext',
+            },
             deleteFile: {
               target: '.deletingFile',
               actions: ['deleteFileFromContext'],
@@ -870,6 +929,9 @@ export const buildMachine = setup({
                   target: 'pending',
                 },
                 updateFile: {
+                  target: 'pending',
+                },
+                renameFile: {
                   target: 'pending',
                 },
                 deleteFile: {
@@ -928,6 +990,10 @@ export const buildMachine = setup({
                   reenter: true,
                 },
                 updateFile: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                renameFile: {
                   target: 'pending',
                   reenter: true,
                 },

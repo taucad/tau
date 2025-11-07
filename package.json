@@ -130,6 +130,7 @@
     "katex": "^0.16.21",
     "langchain": "^0.3.29",
     "lucide-react": "^0.552.0",
+    "minimatch": "^10.1.1",
     "monaco-editor": "^0.52.2",
     "monacopilot": "^1.1.23",
     "motion": "^12.11.3",

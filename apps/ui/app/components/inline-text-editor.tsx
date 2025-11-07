@@ -1,7 +1,22 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { cva } from 'class-variance-authority';
+import type { VariantProps } from 'class-variance-authority';
 import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
+import { cn } from '#utils/ui.utils.js';
+
+const inlineTextEditorVariants = cva('h-full text-sm select-auto focus-visible:ring-0 focus-visible:ring-offset-0', {
+  variants: {
+    variant: {
+      default: 'bg-background px-2',
+      ghost: 'border-transparent bg-transparent px-0 shadow-none focus-visible:border-transparent',
+    },
+  },
+  defaultVariants: {
+    variant: 'default',
+  },
+});
 
 type InlineTextEditorProps = {
   readonly value: string;
@@ -10,9 +25,10 @@ type InlineTextEditorProps = {
   readonly isDisabled?: boolean;
   readonly shouldSubmitOnBlur?: boolean;
   readonly shouldAutoSelectOnFocus?: boolean;
+  readonly shouldStartEditing?: boolean;
   readonly className?: string;
   readonly renderDisplay?: (value: string) => ReactNode;
-};
+} & VariantProps<typeof inlineTextEditorVariants>;
 
 export function InlineTextEditor({
   value,
@@ -21,10 +37,12 @@ export function InlineTextEditor({
   isDisabled,
   shouldSubmitOnBlur = true,
   shouldAutoSelectOnFocus = true,
+  shouldStartEditing = false,
+  variant = 'default',
   className,
   renderDisplay,
 }: InlineTextEditorProps): React.JSX.Element {
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(shouldStartEditing);
   const [editValue, setEditValue] = useState<string>(value);
 
   useEffect(() => {
@@ -74,7 +92,7 @@ export function InlineTextEditor({
             type="text"
             value={editValue}
             placeholder={placeholder}
-            className="h-full bg-background px-2 select-auto focus-visible:ring-0"
+            className={cn(inlineTextEditorVariants({ variant }))}
             onChange={(event) => {
               setEditValue(event.target.value);
             }}

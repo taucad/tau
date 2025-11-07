@@ -3,7 +3,7 @@ import { createContext, useContext, useMemo, useCallback, useEffect } from 'reac
 import { useActorRef, useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { Message } from '@ai-sdk/react';
-import type { Build, Chat } from '@taucad/types';
+import { useQueryClient } from '@tanstack/react-query';
 import { buildMachine } from '#machines/build.machine.js';
 import type { gitMachine } from '#machines/git.machine.js';
 import type { fileExplorerMachine } from '#machines/file-explorer.machine.js';
@@ -18,12 +18,7 @@ import type { logMachine } from '#machines/logs.machine.js';
 type BuildContextType = {
   buildId: string;
   isLoading: boolean;
-  build: Build | undefined;
   error: Error | undefined;
-  code: string;
-  parameters: Record<string, unknown>;
-  activeChat: Chat | undefined;
-  activeChatId: string | undefined;
   buildRef: ActorRefFrom<typeof buildMachine>;
   gitRef: ActorRefFrom<typeof gitMachine>;
   fileExplorerRef: ActorRefFrom<typeof fileExplorerMachine>;
@@ -59,6 +54,7 @@ export function BuildProvider({
   readonly provide?: Parameters<typeof buildMachine.provide>[0];
   readonly input?: Omit<Parameters<typeof useActorRef<typeof buildMachine>>[1]['input'], 'buildId'>;
 }): React.JSX.Element {
+  const queryClient = useQueryClient();
   // Create the build machine actor - it will auto-load based on buildId
   const actorRef = useActorRef(buildMachine.provide({ ...provide }), {
     input: { buildId, ...input },
@@ -66,7 +62,6 @@ export function BuildProvider({
   });
 
   // Select state from the machine
-  const build = useSelector(actorRef, (state) => state.context.build);
   const isLoading = useSelector(actorRef, (state) => state.context.isLoading);
   const error = useSelector(actorRef, (state) => state.context.error);
   const gitRef = useSelector(actorRef, (state) => state.context.gitRef);
@@ -79,95 +74,97 @@ export function BuildProvider({
   const logRef = useSelector(actorRef, (state) => state.context.logRef);
 
   useEffect(() => {
+    // Load the new build when the buildId changes
     actorRef.send({ type: 'loadBuild', buildId });
-  }, [actorRef, buildId]);
+  }, [actorRef, buildId, queryClient]);
+
+  useEffect(() => {
+    const subscription = actorRef.on('buildUpdated', () => {
+      // The build updated, invalidate the builds query
+      void queryClient.invalidateQueries({ queryKey: ['builds'] });
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [actorRef, queryClient]);
 
   // Memoize callbacks
   const setChatMessages = useCallback(
     (chatId: string, messages: Message[]) => {
-      actorRef.send({ type: 'updateChatMessages', buildId, chatId, messages });
+      actorRef.send({ type: 'updateChatMessages', chatId, messages });
     },
-    [actorRef, buildId],
+    [actorRef],
   );
 
   const setCodeParameters = useCallback(
     (files: Record<string, { content: string }>, parameters: Record<string, unknown>) => {
-      actorRef.send({ type: 'updateCodeParameters', buildId, files, parameters });
+      actorRef.send({ type: 'updateCodeParameters', files, parameters });
     },
-    [actorRef, buildId],
+    [actorRef],
   );
 
   const updateName = useCallback(
     (name: string) => {
-      actorRef.send({ type: 'updateBuild', buildId, updates: { name } });
+      actorRef.send({ type: 'updateName', name });
     },
-    [actorRef, buildId],
+    [actorRef],
   );
 
   const updateDescription = useCallback(
     (description: string) => {
-      actorRef.send({ type: 'updateBuild', buildId, updates: { description } });
+      actorRef.send({ type: 'updateDescription', description });
     },
-    [actorRef, buildId],
+    [actorRef],
   );
 
   const updateTags = useCallback(
     (tags: string[]) => {
-      actorRef.send({ type: 'updateBuild', buildId, updates: { tags }, options: { ignoreKeys: ['tags'] } });
+      actorRef.send({ type: 'updateTags', tags });
     },
-    [actorRef, buildId],
+    [actorRef],
   );
 
   const updateThumbnail = useCallback(
     (thumbnail: string) => {
-      actorRef.send({ type: 'updateBuild', buildId, updates: { thumbnail }, options: { noUpdatedAt: true } });
+      actorRef.send({ type: 'updateThumbnail', thumbnail });
     },
-    [actorRef, buildId],
+    [actorRef],
   );
 
   const addChat = useCallback(
     (initialMessages?: Message[]) => {
-      actorRef.send({ type: 'addChat', buildId, initialMessages });
+      actorRef.send({ type: 'addChat', initialMessages });
     },
-    [actorRef, buildId],
+    [actorRef],
   );
 
   const setActiveChat = useCallback(
     (chatId: string) => {
-      actorRef.send({ type: 'setActiveChat', buildId, chatId });
+      actorRef.send({ type: 'setActiveChat', chatId });
     },
-    [actorRef, buildId],
+    [actorRef],
   );
 
   const updateChatName = useCallback(
     (chatId: string, name: string) => {
-      actorRef.send({ type: 'updateChatName', buildId, chatId, name });
+      actorRef.send({ type: 'updateChatName', chatId, name });
     },
-    [actorRef, buildId],
+    [actorRef],
   );
 
   const deleteChat = useCallback(
     (chatId: string) => {
-      actorRef.send({ type: 'deleteChat', buildId, chatId });
+      actorRef.send({ type: 'deleteChat', chatId });
     },
-    [actorRef, buildId],
+    [actorRef],
   );
 
   const value = useMemo<BuildContextType>(() => {
-    const activeChatId = build?.lastChatId;
-    const activeChat = build?.chats.find((chat) => chat.id === activeChatId);
-    const code = build?.assets.mechanical?.files[build.assets.mechanical.main]?.content ?? '';
-    const parameters = build?.assets.mechanical?.parameters ?? {};
-
     return {
       buildId,
-      build,
       isLoading,
       error,
-      code,
-      parameters,
-      activeChatId,
-      activeChat,
       buildRef: actorRef,
       gitRef,
       fileExplorerRef,
@@ -190,7 +187,6 @@ export function BuildProvider({
     };
   }, [
     buildId,
-    build,
     isLoading,
     error,
     actorRef,
@@ -232,12 +228,4 @@ export function useBuild({ enableNoContext = false }: { readonly enableNoContext
   }
 
   return context;
-}
-
-// Selector hook that allows selecting specific properties from the build context
-export function useBuildSelector<T>(selector: (state: BuildContextType) => T): T {
-  const buildContext = useBuild();
-
-  // Use useMemo to only recompute when the selected value changes
-  return useMemo(() => selector(buildContext), [buildContext, selector]);
 }

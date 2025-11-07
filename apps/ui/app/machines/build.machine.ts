@@ -1,20 +1,21 @@
 import { assign, assertEvent, setup, fromPromise, emit, enqueueActions } from 'xstate';
 import type { ActorRefFrom, OutputFrom, DoneActorEvent } from 'xstate';
+import { produce } from 'immer';
 import type { Message } from '@ai-sdk/react';
 import type { Build, Chat } from '@taucad/types';
 import { idPrefix, languageFromKernel } from '@taucad/types/constants';
-import { storage } from '#db/storage.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
 import { isBrowser } from '#constants/browser.constants.js';
+import { storage } from '#db/storage.js';
+import { assertActorDoneEvent } from '#lib/xstate.js';
+import { cameraCapabilityMachine } from '#machines/camera-capability.machine.js';
+import { cadMachine } from '#machines/cad.machine.js';
+import { fileExplorerMachine } from '#machines/file-explorer.machine.js';
 import { filesystemMachine } from '#machines/filesystem.machine.js';
 import { gitMachine } from '#machines/git.machine.js';
-import { fileExplorerMachine } from '#machines/file-explorer.machine.js';
-import { cadMachine } from '#machines/cad.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
-import { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
-import { cameraCapabilityMachine } from '#machines/camera-capability.machine.js';
-import { assertActorDoneEvent } from '#lib/xstate.js';
 import { logMachine } from '#machines/logs.machine.js';
+import { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
+import { generatePrefixedId } from '#utils/id.utils.js';
 
 /**
  * Build Machine Context
@@ -54,178 +55,18 @@ const loadBuildActor = fromPromise<Build, { buildId: string }>(async ({ input })
   return build;
 });
 
-const createBuildActor = fromPromise<Build, { build: Omit<Build, 'id' | 'createdAt' | 'updatedAt'> }>(
-  async ({ input }) => {
-    return storage.createBuild(input.build);
-  },
-);
-
-const updateBuildActor = fromPromise<
-  Build,
-  { buildId: string; updates: Partial<Build>; options?: { ignoreKeys?: string[]; noUpdatedAt?: boolean } }
->(async ({ input }) => {
-  const updated = await storage.updateBuild(input.buildId, input.updates, input.options ?? {});
+const writeBuildActor = fromPromise<Build, { build: Build }>(async ({ input }) => {
+  const updated = await storage.updateBuild(input.build.id, input.build, { noUpdatedAt: false });
   if (!updated) {
-    throw new Error(`Build not found: ${input.buildId}`);
+    throw new Error(`Build not found: ${input.build.id}`);
   }
 
   return updated;
 });
 
-const deleteBuildActor = fromPromise<string, { buildId: string }>(async ({ input }) => {
-  await storage.deleteBuild(input.buildId);
-  return input.buildId;
-});
-
-const duplicateBuildActor = fromPromise<Build, { buildId: string }>(async ({ input }) => {
-  const sourceBuild = await storage.getBuild(input.buildId);
-  if (!sourceBuild) {
-    throw new Error(`Build not found: ${input.buildId}`);
-  }
-
-  const newBuild = await storage.createBuild({
-    name: `${sourceBuild.name} (Copy)`,
-    description: sourceBuild.description,
-    thumbnail: sourceBuild.thumbnail,
-    stars: 0,
-    forks: 0,
-    author: sourceBuild.author,
-    tags: sourceBuild.tags,
-    assets: sourceBuild.assets,
-    chats: sourceBuild.chats,
-    lastChatId: sourceBuild.lastChatId,
-  });
-
-  return newBuild;
-});
-
-const addChatActor = fromPromise<Chat, { buildId: string; initialMessages?: Message[] }>(async ({ input }) => {
-  const build = await storage.getBuild(input.buildId);
-  if (!build) {
-    throw new Error(`Build not found: ${input.buildId}`);
-  }
-
-  const chatId = generatePrefixedId(idPrefix.chat);
-  const timestamp = Date.now();
-  const newChat: Chat = {
-    id: chatId,
-    name: 'New Chat',
-    messages: input.initialMessages ?? [],
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  };
-
-  const updatedChats = [...build.chats, newChat];
-  await storage.updateBuild(
-    input.buildId,
-    {
-      chats: updatedChats,
-      lastChatId: chatId,
-    },
-    { ignoreKeys: ['chats', 'lastChatId'] },
-  );
-
-  return newChat;
-});
-
-const updateChatMessagesActor = fromPromise<string, { buildId: string; chatId: string; messages: Message[] }>(
-  async ({ input }) => {
-    const build = await storage.getBuild(input.buildId);
-    if (!build) {
-      throw new Error(`Build not found: ${input.buildId}`);
-    }
-
-    const updatedChats = build.chats.map((chat) =>
-      chat.id === input.chatId ? { ...chat, messages: input.messages, updatedAt: Date.now() } : chat,
-    );
-
-    await storage.updateBuild(input.buildId, { chats: updatedChats }, { ignoreKeys: ['chats'] });
-    return input.chatId;
-  },
-);
-
-const updateChatNameActor = fromPromise<
-  { chatId: string; name: string },
-  { buildId: string; chatId: string; name: string }
->(async ({ input }) => {
-  const build = await storage.getBuild(input.buildId);
-  if (!build) {
-    throw new Error(`Build not found: ${input.buildId}`);
-  }
-
-  const updatedChats = build.chats.map((chat) =>
-    chat.id === input.chatId ? { ...chat, name: input.name, updatedAt: Date.now() } : chat,
-  );
-
-  await storage.updateBuild(input.buildId, { chats: updatedChats }, { ignoreKeys: ['chats'] });
-  return { chatId: input.chatId, name: input.name };
-});
-
-const setActiveChatActor = fromPromise<string, { buildId: string; chatId: string }>(async ({ input }) => {
-  await storage.updateBuild(input.buildId, { lastChatId: input.chatId }, {});
-  return input.chatId;
-});
-
-const deleteChatActor = fromPromise<string, { buildId: string; chatId: string }>(async ({ input }) => {
-  const build = await storage.getBuild(input.buildId);
-  if (!build) {
-    throw new Error(`Build not found: ${input.buildId}`);
-  }
-
-  const updatedChats = build.chats.filter((chat) => chat.id !== input.chatId);
-  const newLastChatId = build.lastChatId === input.chatId ? updatedChats.at(-1)?.id : build.lastChatId;
-
-  await storage.updateBuild(
-    input.buildId,
-    {
-      chats: updatedChats,
-      lastChatId: newLastChatId,
-    },
-    { ignoreKeys: ['chats', 'lastChatId'] },
-  );
-
-  return input.chatId;
-});
-
-const updateCodeParametersActor = fromPromise<
-  { files: Record<string, { content: string }>; parameters: Record<string, unknown> },
-  {
-    buildId: string;
-    files: Record<string, { content: string }>;
-    parameters: Record<string, unknown>;
-  }
->(async ({ input }) => {
-  const build = await storage.getBuild(input.buildId);
-  if (!build) {
-    throw new Error(`Build not found: ${input.buildId}`);
-  }
-
-  // Update the mechanical asset with new files and parameters
-  const updatedAssets = {
-    ...build.assets,
-    mechanical: {
-      ...build.assets.mechanical,
-      files: input.files,
-      parameters: input.parameters,
-    },
-  };
-
-  await storage.updateBuild(input.buildId, { assets: updatedAssets }, { ignoreKeys: ['parameters'] });
-  return { files: input.files, parameters: input.parameters };
-});
-
 const buildActors = {
   loadBuildActor,
-  createBuildActor,
-  updateBuildActor,
-  deleteBuildActor,
-  duplicateBuildActor,
-  addChatActor,
-  updateChatMessagesActor,
-  updateChatNameActor,
-  setActiveChatActor,
-  deleteChatActor,
-  updateCodeParametersActor,
+  writeBuildActor,
   filesystem: filesystemMachine,
   git: gitMachine,
   fileExplorer: fileExplorerMachine,
@@ -243,23 +84,17 @@ type BuildActorNames = keyof typeof buildActors;
  */
 type BuildEventInternal =
   | { type: 'loadBuild'; buildId: string }
-  | { type: 'createBuild'; build: Omit<Build, 'id' | 'createdAt' | 'updatedAt'> }
-  | {
-      type: 'updateBuild';
-      buildId: string;
-      updates: Partial<Build>;
-      options?: { ignoreKeys?: string[]; noUpdatedAt?: boolean };
-    }
-  | { type: 'deleteBuild'; buildId: string }
-  | { type: 'duplicateBuild'; buildId: string }
-  | { type: 'addChat'; buildId: string; initialMessages?: Message[] }
-  | { type: 'updateChatMessages'; buildId: string; chatId: string; messages: Message[] }
-  | { type: 'updateChatName'; buildId: string; chatId: string; name: string }
-  | { type: 'setActiveChat'; buildId: string; chatId: string }
-  | { type: 'deleteChat'; buildId: string; chatId: string }
+  | { type: 'updateName'; name: string }
+  | { type: 'updateDescription'; description: string }
+  | { type: 'updateTags'; tags: string[] }
+  | { type: 'updateThumbnail'; thumbnail: string }
+  | { type: 'addChat'; initialMessages?: Message[] }
+  | { type: 'updateChatMessages'; chatId: string; messages: Message[] }
+  | { type: 'updateChatName'; chatId: string; name: string }
+  | { type: 'setActiveChat'; chatId: string }
+  | { type: 'deleteChat'; chatId: string }
   | {
       type: 'updateCodeParameters';
-      buildId: string;
       files: Record<string, { content: string }>;
       parameters: Record<string, unknown>;
     }
@@ -276,17 +111,8 @@ type BuildEvent = BuildEventExternalDone | BuildEventInternal;
  */
 type BuildEmitted =
   | { type: 'buildLoaded'; build: Build }
-  | { type: 'buildCreated'; build: Build }
-  | { type: 'buildUpdated'; build: Build }
-  | { type: 'buildDeleted'; buildId: string }
-  | { type: 'buildDuplicated'; build: Build }
-  | { type: 'chatAdded'; chat: Chat }
-  | { type: 'chatMessagesUpdated'; chatId: string }
-  | { type: 'chatNameUpdated'; chatId: string; name: string }
-  | { type: 'activeChatSet'; chatId: string }
-  | { type: 'chatDeleted'; chatId: string }
-  | { type: 'codeParametersUpdated'; files: Record<string, { content: string }>; parameters: Record<string, unknown> }
-  | { type: 'error'; error: Error };
+  | { type: 'error'; error: Error }
+  | { type: 'buildUpdated'; build: Build };
 
 /**
  * Build Machine
@@ -343,12 +169,183 @@ export const buildMachine = setup({
     setBuild: assign({
       build({ event }) {
         assertActorDoneEvent(event);
-        return event.output as Build;
+        const build = event.output as Build;
+
+        return build;
       },
       isLoading: false,
     }),
     clearBuild: assign({
       build: undefined,
+    }),
+    updateName: assign(({ context, event }) => {
+      assertEvent(event, 'updateName');
+      if (!context.build) {
+        return {};
+      }
+
+      return produce(context, (draft) => {
+        draft.build!.name = event.name;
+        draft.build!.updatedAt = Date.now();
+      });
+    }),
+    updateDescription: assign(({ context, event }) => {
+      assertEvent(event, 'updateDescription');
+      if (!context.build) {
+        return {};
+      }
+
+      return produce(context, (draft) => {
+        draft.build!.description = event.description;
+        draft.build!.updatedAt = Date.now();
+      });
+    }),
+    updateTags: assign(({ context, event }) => {
+      assertEvent(event, 'updateTags');
+      if (!context.build) {
+        return {};
+      }
+
+      // Deduplicate tags to ensure uniqueness
+      const uniqueTags = [...new Set(event.tags)];
+
+      return produce(context, (draft) => {
+        draft.build!.tags = uniqueTags;
+        // Don't update updatedAt for tags - they're metadata
+      });
+    }),
+    updateThumbnail: assign(({ context, event }) => {
+      assertEvent(event, 'updateThumbnail');
+      if (!context.build) {
+        return {};
+      }
+
+      return produce(context, (draft) => {
+        draft.build!.thumbnail = event.thumbnail;
+        // Don't update updatedAt for thumbnails - they're metadata
+      });
+    }),
+    addChatToContext: assign(({ context, event }) => {
+      assertEvent(event, 'addChat');
+      if (!context.build) {
+        return {};
+      }
+
+      const chatId = generatePrefixedId(idPrefix.chat);
+      const timestamp = Date.now();
+      const newChat: Chat = {
+        id: chatId,
+        name: 'New Chat',
+        messages: event.initialMessages ?? [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+
+      return {
+        ...context,
+        build: {
+          ...context.build,
+          chats: [...context.build.chats, newChat],
+          lastChatId: chatId,
+          updatedAt: timestamp,
+        },
+      };
+    }),
+    updateChatMessagesInContext: assign(({ context, event }) => {
+      assertEvent(event, 'updateChatMessages');
+      if (!context.build) {
+        return {};
+      }
+
+      const timestamp = Date.now();
+      const chatIndex = context.build.chats.findIndex((c) => c.id === event.chatId);
+
+      if (chatIndex === -1) {
+        return {};
+      }
+
+      return produce(context, (draft) => {
+        const originalChat = context.build!.chats[chatIndex]!;
+        const updatedChat: Chat = {
+          ...originalChat,
+          messages: event.messages,
+          updatedAt: timestamp,
+        };
+
+        draft.build!.chats[chatIndex] = updatedChat;
+        draft.build!.updatedAt = timestamp;
+      });
+    }),
+    updateChatNameInContext: assign(({ context, event }) => {
+      assertEvent(event, 'updateChatName');
+      if (!context.build) {
+        return {};
+      }
+
+      const timestamp = Date.now();
+
+      return produce(context, (draft) => {
+        draft.build!.chats = draft.build!.chats.map((chat) =>
+          chat.id === event.chatId ? { ...chat, name: event.name, updatedAt: timestamp } : chat,
+        );
+        draft.build!.updatedAt = timestamp;
+      });
+    }),
+    setActiveChatInContext: assign(({ context, event }) => {
+      assertEvent(event, 'setActiveChat');
+      if (!context.build) {
+        return {};
+      }
+
+      return produce(context, (draft) => {
+        draft.build!.lastChatId = event.chatId;
+        // Don't update updatedAt for switching active chat
+      });
+    }),
+    deleteChatFromContext: assign(({ context, event }) => {
+      assertEvent(event, 'deleteChat');
+      if (!context.build) {
+        return {};
+      }
+
+      return produce(context, (draft) => {
+        const chatIndex = draft.build!.chats.findIndex((c) => c.id === event.chatId);
+        if (chatIndex !== -1) {
+          draft.build!.chats.splice(chatIndex, 1);
+        }
+
+        // Update lastChatId if we deleted the active chat
+        if (draft.build!.lastChatId === event.chatId) {
+          draft.build!.lastChatId = draft.build!.chats.at(-1)?.id;
+        }
+
+        draft.build!.updatedAt = Date.now();
+      });
+    }),
+    updateCodeParametersInContext: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'updateCodeParameters');
+
+      if (!context.build?.assets.mechanical) {
+        return;
+      }
+
+      // Update build in context using Immer
+      enqueue.assign(({ context: ctx }) =>
+        produce(ctx, (draft) => {
+          if (draft.build?.assets.mechanical) {
+            draft.build.assets.mechanical.files = event.files;
+            draft.build.assets.mechanical.parameters = event.parameters;
+            draft.build.updatedAt = Date.now();
+          }
+        }),
+      );
+
+      // Update filesystem with new files
+      enqueue.sendTo(context.filesystemRef, {
+        type: 'setFiles',
+        buildId: context.buildId,
+        files: event.files,
+      });
     }),
     stopStatefulActors: enqueueActions(({ enqueue, context }) => {
       // Stop the old stateful actors (they'll be garbage collected)
@@ -383,12 +380,6 @@ export const buildMachine = setup({
           files: context.build.assets.mechanical.files,
         });
       }
-    }),
-    updateBuildInContext: assign({
-      build({ event }) {
-        assertActorDoneEvent(event);
-        return event.output as Build;
-      },
     }),
     initializeKernelIfNeeded: enqueueActions(({ enqueue, context }) => {
       // Only initialize if shouldLoadModelOnStart is true
@@ -429,29 +420,47 @@ export const buildMachine = setup({
         kernelType: mechanicalAsset.language,
       });
     }),
+    subscribeToFileExplorer: enqueueActions(({ enqueue, context, self }) => {
       // Subscribe to file explorer active file changes
+      let previousActiveFileId: string | undefined;
+
       context.fileExplorerRef.subscribe((state) => {
-        const { activeFileId, openFiles } = state.context;
+        const { activeFileId } = state.context;
+
+        // Check if the active file has changed
+        const hasActiveFileChanged = previousActiveFileId !== activeFileId;
+        previousActiveFileId = activeFileId;
+
         if (!activeFileId) {
           return;
         }
 
-        const activeFile = openFiles.find((file) => file.id === activeFileId);
-        if (!activeFile) {
-          return;
-        }
+        // Read enableFilePreview from current build machine state (not captured closure)
+        const { enableFilePreview } = self.getSnapshot().context;
 
         // Only send to CAD if file preview is enabled
-        if (!context.enableFilePreview) {
+        if (!enableFilePreview) {
           return;
         }
 
-        // Get current CAD code to avoid unnecessary updates
+        // Read the active file content directly from filesystem (source of truth)
+        const filesystemSnapshot = context.filesystemRef.getSnapshot();
+        const activeFileInFilesystem = filesystemSnapshot.context.files.get(activeFileId);
+
+        if (!activeFileInFilesystem) {
+          return;
+        }
+
+        // Get current CAD code
         const currentCode = context.cadRef.getSnapshot().context.code;
-        if (activeFile.content !== currentCode) {
+
+        // Update CAD when:
+        // 1. Active file changed (user switched files)
+        // 2. Active file content changed
+        if (hasActiveFileChanged || activeFileInFilesystem.content !== currentCode) {
           enqueue.sendTo(context.cadRef, {
             type: 'setCode',
-            code: activeFile.content,
+            code: activeFileInFilesystem.content,
           });
         }
       });
@@ -462,127 +471,70 @@ export const buildMachine = setup({
         return event.enabled;
       },
     }),
-    subscribeToCadUpdates: enqueueActions(({ context, self }) => {
-      // Subscribe to CAD's modelUpdated emissions
-      context.cadRef.on('modelUpdated', ({ code, parameters }) => {
-        const mainFile = context.build?.assets.mechanical?.main;
-        if (!mainFile) {
+    openInitialFile: enqueueActions(({ context }) => {
+      // Subscribe to filesystem to open main file when it's ready and has files
+      let hasOpened = false;
+
+      context.filesystemRef.subscribe((state) => {
+        // Only proceed if we haven't opened yet and filesystem is ready with files
+        if (hasOpened || state.value !== 'ready' || state.context.files.size === 0) {
           return;
         }
 
-        // Send update event to self to trigger storage update
-        self.send({
-          type: 'updateCodeParameters',
-          buildId: context.buildId,
-          files: { [mainFile]: { content: code } },
-          parameters,
-        });
-      });
-    }),
-    initializeFileExplorer: enqueueActions(({ enqueue, context }) => {
-      const mechanicalAsset = context.build?.assets.mechanical;
-      if (!mechanicalAsset) {
-        // Clear tree if no mechanical assets
-        enqueue.sendTo(context.fileExplorerRef, {
-          type: 'setFileTree',
-          tree: [],
-          openFiles: [],
-        });
-        return;
-      }
-
-      // Convert build files to file tree format
-      const fileItems = Object.entries(mechanicalAsset.files).map(([filename, file]) => ({
-        id: filename,
-        name: filename,
-        path: filename,
-        content: file.content,
-        language: languageFromKernel[mechanicalAsset.language],
-        isDirectory: false,
-      }));
-
-      const openFiles = mechanicalAsset.main ? [mechanicalAsset.main] : [];
-
-      enqueue.sendTo(context.fileExplorerRef, {
-        type: 'setFileTree',
-        tree: fileItems,
-        openFiles,
-      });
-    }),
-    subscribeToCadFileExplorerSync: enqueueActions(({ context }) => {
-      // Subscribe to CAD actor state changes and update file explorer
-      context.cadRef.subscribe((state) => {
-        const mainFile = context.build?.assets.mechanical?.main;
-        if (!mainFile) {
-          return;
-        }
-
-        // Update the main file content in file explorer when CAD code changes
-        context.fileExplorerRef.send({
-          type: 'updateFileContent',
-          fileId: mainFile,
-          content: state.context.code,
-        });
-      });
-    }),
-    subscribeToFilesystemChanges: enqueueActions(({ context }) => {
-      // Helper to rebuild file tree from filesystem state
-      const rebuildFileTree = () => {
         const mechanicalAsset = context.build?.assets.mechanical;
-        if (!mechanicalAsset) {
+        if (!mechanicalAsset?.main) {
           return;
         }
 
-        // Get files directly from filesystem context
-        const { files } = context.filesystemRef.getSnapshot().context;
+        const mainFile = state.context.files.get(mechanicalAsset.main);
+        if (!mainFile) {
+          return;
+        }
 
-        // Convert filesystem files to file tree format
-        const fileItems = [...files.entries()].map(([path, fileItem]) => ({
-          id: path,
-          name: path.split('/').pop() ?? path,
-          path,
-          content: fileItem.content,
-          language: languageFromKernel[mechanicalAsset.language],
-          isDirectory: false,
-        }));
+        hasOpened = true;
 
-        // Determine which files should be open
-        const currentOpenFiles = context.fileExplorerRef.getSnapshot().context.openFiles;
-        const openFilePaths = currentOpenFiles.map((f) => f.path);
-
-        // Update file explorer with new tree
-        context.fileExplorerRef.send({
-          type: 'setFileTree',
-          tree: fileItems,
-          openFiles: openFilePaths.length > 0 ? openFilePaths : [mechanicalAsset.main].filter(Boolean),
-        });
-      };
-
-      // Subscribe to filesystem events and rebuild tree
-      context.filesystemRef.on('fileCreated', ({ path }) => {
-        // Rebuild tree from filesystem state
-        rebuildFileTree();
-
-        // Auto-open the newly created file
+        // Open the main file
         context.fileExplorerRef.send({
           type: 'openFile',
+          path: mechanicalAsset.main,
+          content: mainFile.content,
+          language: languageFromKernel[mechanicalAsset.language],
+        });
+      });
+    }),
+    subscribeToFilesystemChanges: enqueueActions(({ enqueue, context }) => {
+      // Subscribe to filesystem events for file explorer updates
+      context.filesystemRef.on('fileCreated', ({ path, content }) => {
+        // Get file metadata from filesystem
+        const mechanicalAsset = context.build?.assets.mechanical;
+        const language = mechanicalAsset ? languageFromKernel[mechanicalAsset.language] : undefined;
+
+        // Auto-open the newly created file
+        enqueue.sendTo(context.fileExplorerRef, {
+          type: 'openFile',
           path,
+          content,
+          language,
         });
       });
 
-      context.filesystemRef.on('fileUpdated', () => {
-        // Rebuild tree in case of metadata changes
-        rebuildFileTree();
+      // Forward file updates to CAD for rendering
+      context.filesystemRef.on('fileUpdated', ({ path, content }) => {
+        // Only update CAD if this is the main file or active file
+        const { activeFileId } = context.fileExplorerRef.getSnapshot().context;
+        const mainFile = context.build?.assets.mechanical?.main;
+
+        // Update CAD if editing the main file or if it's the active file
+        if (path === mainFile || path === activeFileId) {
+          context.cadRef.send({
+            type: 'setCode',
+            code: content,
+          });
+        }
       });
 
-      context.filesystemRef.on('fileDeleted', () => {
-        // Rebuild tree when files are deleted
-        rebuildFileTree();
-      });
-
-      // Also listen to statusRefreshed to update git status indicators
+      // Listen to statusRefreshed to update dirty files indicator
       context.filesystemRef.on('statusRefreshed', () => {
-        // Update git statuses in file explorer
         const { dirtyFiles } = context.filesystemRef.getSnapshot().context;
 
         context.fileExplorerRef.send({
@@ -697,10 +649,6 @@ export const buildMachine = setup({
           target: 'loading',
           actions: ['updateBuildId', 'setLoading'],
         },
-        createBuild: {
-          target: 'creating',
-          actions: 'setLoading',
-        },
       },
     },
     loading: {
@@ -715,10 +663,8 @@ export const buildMachine = setup({
             'clearLoading',
             'sendFilesToFilesystem',
             'initializeKernelIfNeeded',
-            'initializeFileExplorer',
+            'openInitialFile',
             'subscribeToFileExplorer',
-            'subscribeToCadUpdates',
-            'subscribeToCadFileExplorerSync',
             'subscribeToFilesystemChanges',
             emit(({ event }) => {
               assertActorDoneEvent(event);
@@ -741,370 +687,177 @@ export const buildMachine = setup({
         },
       },
     },
-    creating: {
-      entry: 'clearError',
-      invoke: {
-        src: 'createBuildActor',
-        input({ event }) {
-          assertEvent(event, 'createBuild');
-          return { build: event.build };
-        },
-        onDone: {
-          target: 'ready',
-          actions: [
-            'setBuild',
-            'clearLoading',
-            'sendFilesToFilesystem',
-            'initializeKernelIfNeeded',
-            'initializeFileExplorer',
-            'subscribeToFileExplorer',
-            'subscribeToCadUpdates',
-            'subscribeToCadFileExplorerSync',
-            'subscribeToFilesystemChanges',
-            emit(({ event }) => {
-              assertActorDoneEvent(event);
-              return {
-                type: 'buildCreated' as const,
-                build: event.output,
-              };
-            }),
-          ],
-        },
-        onError: {
-          target: 'error',
-          actions: [
-            'setError',
-            emit(({ event }) => ({
-              type: 'error' as const,
-              error: event.error as Error,
-            })),
-          ],
-        },
-      },
-    },
     ready: {
-      on: {
-        loadBuild: [
-          {
-            guard: 'isBuildIdChanging',
-            target: 'loading',
-            actions: ['updateBuildId', 'stopStatefulActors', 'respawnStatefulActors', 'setLoading'],
+      type: 'parallel',
+      states: {
+        operation: {
+          initial: 'idle',
+          states: {
+            idle: {},
           },
-          {
-            target: 'loading',
-            actions: 'setLoading',
+          on: {
+            loadBuild: [
+              {
+                guard: 'isBuildIdChanging',
+                target: '#build.loading',
+                actions: ['updateBuildId', 'stopStatefulActors', 'respawnStatefulActors', 'setLoading'],
+              },
+              {
+                target: '#build.loading',
+                actions: 'setLoading',
+              },
+            ],
+            updateName: {
+              actions: ['updateName'],
+            },
+            updateDescription: {
+              actions: ['updateDescription'],
+            },
+            updateTags: {
+              actions: ['updateTags'],
+            },
+            updateThumbnail: {
+              actions: ['updateThumbnail'],
+            },
+            addChat: {
+              actions: ['addChatToContext'],
+            },
+            updateChatMessages: {
+              actions: ['updateChatMessagesInContext'],
+            },
+            updateChatName: {
+              actions: ['updateChatNameInContext'],
+            },
+            setActiveChat: {
+              actions: ['setActiveChatInContext'],
+            },
+            deleteChat: {
+              actions: ['deleteChatFromContext'],
+            },
+            updateCodeParameters: {
+              actions: ['updateCodeParametersInContext'],
+            },
+            setEnableFilePreview: {
+              actions: 'setEnableFilePreview',
+            },
+            loadModel: {
+              actions: 'loadModel',
+            },
           },
-        ],
-        updateBuild: 'updating',
-        deleteBuild: 'deleting',
-        duplicateBuild: 'duplicating',
-        addChat: 'addingChat',
-        updateChatMessages: 'updatingChatMessages',
-        updateChatName: 'updatingChatName',
-        setActiveChat: 'settingActiveChat',
-        deleteChat: 'deletingChat',
-        updateCodeParameters: 'updatingCodeParameters',
-        setEnableFilePreview: {
-          actions: 'setEnableFilePreview',
         },
-        loadModel: {
-          actions: 'loadModel',
-        },
-      },
-    },
-    updating: {
-      entry: 'clearError',
-      invoke: {
-        src: 'updateBuildActor',
-        input({ event }) {
-          assertEvent(event, 'updateBuild');
-          return { buildId: event.buildId, updates: event.updates, options: event.options };
-        },
-        onDone: {
-          target: 'ready',
-          actions: [
-            'updateBuildInContext',
-            emit(({ event }) => {
-              assertActorDoneEvent(event);
-              return {
-                type: 'buildUpdated' as const,
-                build: event.output,
-              };
-            }),
-          ],
-        },
-        onError: {
-          target: 'error',
-          actions: [
-            'setError',
-            emit(({ event }) => ({
-              type: 'error' as const,
-              error: event.error as Error,
-            })),
-          ],
-        },
-      },
-    },
-    deleting: {
-      entry: 'clearError',
-      invoke: {
-        src: 'deleteBuildActor',
-        input({ event }) {
-          assertEvent(event, 'deleteBuild');
-          return { buildId: event.buildId };
-        },
-        onDone: {
-          target: 'idle',
-          actions: [
-            'clearBuild',
-            emit(({ event }) => {
-              assertActorDoneEvent(event);
-              return {
-                type: 'buildDeleted' as const,
-                buildId: event.output,
-              };
-            }),
-          ],
-        },
-        onError: {
-          target: 'error',
-          actions: [
-            'setError',
-            emit(({ event }) => ({
-              type: 'error' as const,
-              error: event.error as Error,
-            })),
-          ],
-        },
-      },
-    },
-    duplicating: {
-      entry: 'clearError',
-      invoke: {
-        src: 'duplicateBuildActor',
-        input({ event }) {
-          assertEvent(event, 'duplicateBuild');
-          return { buildId: event.buildId };
-        },
-        onDone: {
-          target: 'idle',
-          actions: emit(({ event }) => {
-            assertActorDoneEvent(event);
-            return {
-              type: 'buildDuplicated' as const,
-              build: event.output,
-            };
-          }),
-        },
-        onError: {
-          target: 'error',
-          actions: [
-            'setError',
-            emit(({ event }) => ({
-              type: 'error' as const,
-              error: event.error as Error,
-            })),
-          ],
-        },
-      },
-    },
-    addingChat: {
-      entry: 'clearError',
-      invoke: {
-        src: 'addChatActor',
-        input({ event }) {
-          assertEvent(event, 'addChat');
-          return { buildId: event.buildId, initialMessages: event.initialMessages };
-        },
-        onDone: {
-          target: 'loading', // Reload build to get updated chats
-          actions: emit(({ event }) => {
-            assertActorDoneEvent(event);
-
-            return {
-              type: 'chatAdded' as const,
-              chat: event.output,
-            };
-          }),
-        },
-        onError: {
-          target: 'error',
-          actions: [
-            'setError',
-            emit(({ event }) => ({
-              type: 'error' as const,
-              error: event.error as Error,
-            })),
-          ],
-        },
-      },
-    },
-    updatingChatMessages: {
-      entry: 'clearError',
-      invoke: {
-        src: 'updateChatMessagesActor',
-        input({ event }) {
-          assertEvent(event, 'updateChatMessages');
-          return { buildId: event.buildId, chatId: event.chatId, messages: event.messages };
-        },
-        onDone: {
-          target: 'loading', // Reload build to get updated messages
-          actions: emit(({ event }) => {
-            assertActorDoneEvent(event);
-            return {
-              type: 'chatMessagesUpdated' as const,
-              chatId: event.output,
-            };
-          }),
-        },
-        onError: {
-          target: 'error',
-          actions: [
-            'setError',
-            emit(({ event }) => ({
-              type: 'error' as const,
-              error: event.error as Error,
-            })),
-          ],
-        },
-      },
-    },
-    updatingChatName: {
-      entry: 'clearError',
-      invoke: {
-        src: 'updateChatNameActor',
-        input({ event }) {
-          assertEvent(event, 'updateChatName');
-          return { buildId: event.buildId, chatId: event.chatId, name: event.name };
-        },
-        onDone: {
-          target: 'loading', // Reload build to get updated chat name
-          actions: emit(({ event }) => {
-            assertActorDoneEvent(event);
-            return {
-              type: 'chatNameUpdated' as const,
-              ...event.output,
-            };
-          }),
-        },
-        onError: {
-          target: 'error',
-          actions: [
-            'setError',
-            emit(({ event }) => ({
-              type: 'error' as const,
-              error: event.error as Error,
-            })),
-          ],
-        },
-      },
-    },
-    settingActiveChat: {
-      entry: 'clearError',
-      invoke: {
-        src: 'setActiveChatActor',
-        input({ event }) {
-          assertEvent(event, 'setActiveChat');
-          return { buildId: event.buildId, chatId: event.chatId };
-        },
-        onDone: {
-          target: 'loading', // Reload build to get updated active chat
-          actions: emit(({ event }) => {
-            assertActorDoneEvent(event);
-            return {
-              type: 'activeChatSet' as const,
-              chatId: event.output,
-            };
-          }),
-        },
-        onError: {
-          target: 'error',
-          actions: [
-            'setError',
-            emit(({ event }) => ({
-              type: 'error' as const,
-              error: event.error as Error,
-            })),
-          ],
-        },
-      },
-    },
-    deletingChat: {
-      entry: 'clearError',
-      invoke: {
-        src: 'deleteChatActor',
-        input({ event }) {
-          assertEvent(event, 'deleteChat');
-          return { buildId: event.buildId, chatId: event.chatId };
-        },
-        onDone: {
-          target: 'loading', // Reload build to get updated chats
-          actions: emit(({ event }) => {
-            assertActorDoneEvent(event);
-            return {
-              type: 'chatDeleted' as const,
-              chatId: event.output,
-            };
-          }),
-        },
-        onError: {
-          target: 'error',
-          actions: [
-            'setError',
-            emit(({ event }) => ({
-              type: 'error' as const,
-              error: event.error as Error,
-            })),
-          ],
-        },
-      },
-    },
-    updatingCodeParameters: {
-      entry: 'clearError',
-      invoke: {
-        src: 'updateCodeParametersActor',
-        input({ event }) {
-          assertEvent(event, 'updateCodeParameters');
-          return { buildId: event.buildId, files: event.files, parameters: event.parameters };
-        },
-        onDone: {
-          target: 'ready',
-          actions: [
-            enqueueActions(({ enqueue, context, event }) => {
-              // Update filesystem with new files
-              assertActorDoneEvent(event);
-              const output = event.output as {
-                files: Record<string, { content: string }>;
-                parameters: Record<string, unknown>;
-              };
-              enqueue.sendTo(context.filesystemRef, {
-                type: 'setFiles',
-                buildId: context.buildId,
-                files: output.files,
-              });
-            }),
-            emit(({ event }) => {
-              assertActorDoneEvent(event);
-              const output = event.output as {
-                files: Record<string, { content: string }>;
-                parameters: Record<string, unknown>;
-              };
-              return {
-                type: 'codeParametersUpdated' as const,
-                ...output,
-              };
-            }),
-          ],
-        },
-        onError: {
-          target: 'error',
-          actions: [
-            'setError',
-            emit(({ event }) => ({
-              type: 'error' as const,
-              error: event.error as Error,
-            })),
-          ],
+        storing: {
+          initial: 'idle',
+          states: {
+            idle: {
+              on: {
+                updateName: {
+                  target: 'pending',
+                },
+                updateDescription: {
+                  target: 'pending',
+                },
+                updateTags: {
+                  target: 'pending',
+                },
+                updateThumbnail: {
+                  target: 'pending',
+                },
+                addChat: {
+                  target: 'pending',
+                },
+                updateChatMessages: {
+                  target: 'pending',
+                },
+                updateChatName: {
+                  target: 'pending',
+                },
+                setActiveChat: {
+                  target: 'pending',
+                },
+                deleteChat: {
+                  target: 'pending',
+                },
+                updateCodeParameters: {
+                  target: 'pending',
+                },
+              },
+            },
+            pending: {
+              after: {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- XState delayed transition syntax
+                500: 'writing',
+              },
+              on: {
+                updateName: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                updateDescription: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                updateTags: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                updateThumbnail: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                addChat: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                updateChatMessages: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                updateChatName: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                setActiveChat: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                deleteChat: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                updateCodeParameters: {
+                  target: 'pending',
+                  reenter: true,
+                },
+              },
+            },
+            writing: {
+              invoke: {
+                src: 'writeBuildActor',
+                input({ context }) {
+                  return { build: context.build! };
+                },
+                onDone: {
+                  target: 'idle',
+                  actions: [
+                    assign({
+                      build({ event }) {
+                        assertActorDoneEvent(event);
+                        return event.output;
+                      },
+                    }),
+                    emit(({ event }) => ({
+                      type: 'buildUpdated' as const,
+                      build: event.output,
+                    })),
+                  ],
+                },
+                onError: {
+                  target: 'pending',
+                  actions: ['setError'],
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -1121,10 +874,6 @@ export const buildMachine = setup({
             actions: 'setLoading',
           },
         ],
-        createBuild: {
-          target: 'creating',
-          actions: 'setLoading',
-        },
       },
     },
   },

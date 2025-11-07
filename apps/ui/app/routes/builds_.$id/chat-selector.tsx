@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
 import type { Chat } from '@taucad/types';
+import { useSelector } from '@xstate/react';
 import { Button } from '#components/ui/button.js';
 import { useBuild } from '#hooks/use-build.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
@@ -25,7 +26,12 @@ const newChatKeyCombination = {
 } satisfies KeyCombination;
 
 export function ChatSelector(): ReactNode {
-  const { build, isLoading, activeChat, activeChatId, addChat, setActiveChat, updateChatName, deleteChat } = useBuild();
+  const { buildRef, isLoading, addChat, setActiveChat, updateChatName, deleteChat } = useBuild();
+  const build = useSelector(buildRef, (state) => state.context.build);
+  const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId) ?? '';
+  const activeChat = useSelector(buildRef, (state) =>
+    state.context.build?.chats.find((chat) => chat.id === activeChatId),
+  );
   const [isGeneratingName, setIsGeneratingName] = useState(false);
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [chatToRename, setChatToRename] = useState<string | undefined>(undefined);

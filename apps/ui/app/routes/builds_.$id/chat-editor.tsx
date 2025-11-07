@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect } from 'react';
 import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
-import { languageFromKernel } from '@taucad/types/constants';
+import { FileCode } from 'lucide-react';
 import { CodeEditor } from '#components/code/code-editor.js';
 import { cn } from '#utils/ui.utils.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
@@ -12,11 +12,11 @@ import { useBuild } from '#hooks/use-build.js';
 import { ChatEditorTabs } from '#routes/builds_.$id/chat-editor-tabs.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { EmptyItems } from '#components/ui/empty-items.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }): React.JSX.Element {
   const monaco = useMonaco();
-  const { build, fileExplorerRef: fileExplorerActor, cadRef: cadActor, buildRef } = useBuild();
-  const code = useSelector(cadActor, (state) => state.context.code);
+  const { fileExplorerRef: fileExplorerActor, cadRef: cadActor, buildRef, filesystemRef } = useBuild();
   const activeFile = useSelector(fileExplorerActor, (state) =>
     state.context.openFiles.find((file) => file.id === state.context.activeFileId),
   );
@@ -32,18 +32,20 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
     }
   }, [enableFilePreview, enableFilePreviewInMachine, buildRef]);
 
-  // Fallback to build main file if no file explorer file is active
-  const fallbackFilename = build?.assets.mechanical?.main ?? 'main.ts';
-  const fallbackContent = build?.assets.mechanical?.files[fallbackFilename]?.content ?? code;
-
-  const displayCode = activeFile ? activeFile.content : fallbackContent;
-
   const handleCodeChange = useCallback(
     (value: ComponentProps<typeof CodeEditor>['value']) => {
-      // Update CAD actor as source of truth - subscription will propagate to file explorer
-      cadActor.send({ type: 'setCode', code: value ?? '' });
+      if (!activeFile) {
+        return;
+      }
+
+      // Update filesystem as single source of truth
+      filesystemRef.send({
+        type: 'updateFile',
+        path: activeFile.path,
+        content: value ?? '',
+      });
     },
-    [cadActor],
+    [activeFile, filesystemRef],
   );
 
   useEffect(() => {
@@ -75,23 +77,27 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
     }
   }, [monaco, cadActor]);
 
-  const language = build?.assets.mechanical?.language
-    ? languageFromKernel[build.assets.mechanical.language]
-    : undefined;
-
   return (
     <div className={cn('flex h-full flex-col bg-background', className)}>
       <ChatEditorTabs />
       <ChatEditorBreadcrumbs />
       <div className="flex-1">
-        <CodeEditor
-          loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
-          className="h-full bg-background"
-          language={language}
-          value={displayCode}
-          onChange={handleCodeChange}
-          onValidate={handleValidate}
-        />
+        {activeFile ? (
+          <CodeEditor
+            loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
+            className="h-full bg-background"
+            language={activeFile.language}
+            value={activeFile.content}
+            onChange={handleCodeChange}
+            onValidate={handleValidate}
+          />
+        ) : (
+          <EmptyItems>
+            <FileCode className="mb-4 size-12 stroke-1 text-muted-foreground" />
+            <p className="text-base font-medium">No file selected</p>
+            <p className="mt-1 text-xs text-muted-foreground/70">Select a file from the tree to start editing</p>
+          </EmptyItems>
+        )}
       </div>
     </div>
   );

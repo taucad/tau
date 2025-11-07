@@ -1,5 +1,6 @@
 import { XIcon, Info } from 'lucide-react';
 import { useCallback, useState } from 'react';
+import { useSelector } from '@xstate/react';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {
   FloatingPanel,
@@ -86,7 +87,12 @@ export function ChatEditorDetails({
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }): React.JSX.Element {
-  const { build, updateName, updateDescription, updateTags } = useBuild();
+  const { buildRef, updateName, updateDescription, updateTags } = useBuild();
+
+  const buildName = useSelector(buildRef, (state) => state.context.build?.name ?? '');
+  const buildDescription = useSelector(buildRef, (state) => state.context.build?.description ?? '');
+  const buildTags = useSelector(buildRef, (state) => state.context.build?.tags ?? []);
+
   const [geometryDetails, setGeometryDetails] = useState<GeometryDetails>(mockGeometryDetails);
   const [isCalculatingVolume, setIsCalculatingVolume] = useState(false);
   const [isCalculatingSurface, setIsCalculatingSurface] = useState(false);
@@ -151,7 +157,7 @@ export function ChatEditorDetails({
                 </label>
                 <Input
                   id="project-name"
-                  value={build?.name ?? ''}
+                  value={buildName}
                   placeholder="Enter your build name..."
                   onChange={(event) => {
                     updateName(event.target.value);
@@ -165,7 +171,7 @@ export function ChatEditorDetails({
                 </label>
                 <Textarea
                   id="project-description"
-                  value={build?.description ?? ''}
+                  value={buildDescription}
                   placeholder="Describe what you're building..."
                   className="min-h-20"
                   onChange={(event) => {
@@ -176,7 +182,7 @@ export function ChatEditorDetails({
 
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Tags:</label>
-                <Tags tags={build?.tags ?? []} onTagsChange={handleTagsChange}>
+                <Tags tags={buildTags} onTagsChange={handleTagsChange}>
                   <TagsTrigger placeholder="Add tags..." />
                 </Tags>
               </div>

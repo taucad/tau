@@ -55,12 +55,12 @@ const iconFromExtension: Partial<Record<string, IconConfig>> = {
     id: 'step',
   },
   gltf: {
-    type: 'format-3d',
+    type: 'lib',
     id: 'gltf',
   },
   glb: {
-    type: 'format-3d',
-    id: 'glb',
+    type: 'lib',
+    id: 'gltf',
   },
   // eslint-disable-next-line @typescript-eslint/naming-convention -- file extension
   '3mf': {
@@ -68,8 +68,8 @@ const iconFromExtension: Partial<Record<string, IconConfig>> = {
     id: '3mf',
   },
   fbx: {
-    type: 'format-3d',
-    id: 'fbx',
+    type: 'lib',
+    id: 'autodesk',
   },
   obj: {
     type: 'format-3d',
@@ -80,8 +80,8 @@ const iconFromExtension: Partial<Record<string, IconConfig>> = {
     id: 'ply',
   },
   dae: {
-    type: 'format-3d',
-    id: 'dae',
+    type: 'lib',
+    id: 'collada',
   },
 
   // Version Control

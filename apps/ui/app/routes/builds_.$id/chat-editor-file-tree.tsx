@@ -736,9 +736,10 @@ function TreeItem({
             type="button"
             className={cn(
               'group/file relative flex h-7 w-full cursor-pointer items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-              isActive && !isSelected && 'bg-sidebar-accent text-sidebar-accent-foreground',
+              isActive && !isSelected && 'bg-sidebar-accent',
               isSelected && 'bg-sidebar-accent/70 text-sidebar-accent-foreground',
               item.isMatchingSearch() && 'bg-primary/20',
+              item.isDragTarget() && 'bg-primary/30 ring-1 ring-primary',
               'border border-transparent',
               isFocused && !isActive && !isSelected && 'border-neutral',
             )}
@@ -746,25 +747,15 @@ function TreeItem({
           >
             <div className="flex min-w-0 flex-1 items-center gap-2">
               {isFolder ? (
-                <>
-                  {item.isExpanded() ? (
-                    <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-                  )}
-                  {item.isExpanded() ? (
-                    <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <Folder className="size-4 shrink-0 text-muted-foreground" />
-                  )}
-                </>
+                item.isExpanded() ? (
+                  <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                ) : (
+                  <Folder className="size-4 shrink-0 text-muted-foreground" />
+                )
               ) : (
-                <>
-                  <File className="size-4 shrink-0 text-muted-foreground" />
-                  {isOpen ? <Circle className="size-1.5 shrink-0 fill-primary text-primary" /> : null}
-                </>
+                <FileExtensionIcon filename={item.getItemName()} className="size-3 shrink-0 text-muted-foreground" />
               )}
-              <span className="truncate">
+              <span className={cn('truncate', isOpen && 'font-medium', isActive && 'text-primary')}>
                 <HighlightText text={item.getItemName()} searchTerm={searchQuery} />
               </span>
               {hasGitChanges ? (

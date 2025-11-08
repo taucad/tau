@@ -1,5 +1,5 @@
 import { memo, useState } from 'react';
-import { Box, Eye, Upload } from 'lucide-react';
+import { Box, Brain, Upload } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,7 +11,7 @@ import {
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 
-export type ChatMode = 'modeling' | 'visualizer' | 'publish';
+export type ChatMode = 'agent' | 'editor' | 'publish';
 
 type ChatModeSelectorProps = {
   readonly defaultMode?: ChatMode;
@@ -20,16 +20,16 @@ type ChatModeSelectorProps = {
 
 const chatModes = [
   {
-    id: 'modeling' as const,
-    label: 'Modeling',
-    icon: Box,
-    description: 'Create and edit 3D models',
+    id: 'agent' as const,
+    label: 'Agent',
+    icon: Brain,
+    description: 'Create and edit with AI',
   },
   {
-    id: 'visualizer' as const,
-    label: 'Visualizer',
-    icon: Eye,
-    description: 'View and inspect models',
+    id: 'editor' as const,
+    label: 'Editor',
+    icon: Box,
+    description: 'Create and edit 3D models',
   },
   {
     id: 'publish' as const,
@@ -37,10 +37,15 @@ const chatModes = [
     icon: Upload,
     description: 'Share and export models',
   },
-] as const;
+] as const satisfies Array<{
+  readonly id: ChatMode;
+  readonly label: string;
+  readonly icon: React.ElementType;
+  readonly description: string;
+}>;
 
 export const ChatModeSelector = memo(function ({
-  defaultMode = 'modeling',
+  defaultMode = 'editor',
   onModeChange,
 }: ChatModeSelectorProps): React.JSX.Element {
   const [selectedMode, setSelectedMode] = useState<ChatMode>(defaultMode);

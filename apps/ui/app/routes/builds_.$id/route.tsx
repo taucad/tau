@@ -9,7 +9,7 @@ import { ChatInterface } from '#routes/builds_.$id/chat-interface.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
 import type { Handle } from '#types/matches.types.js';
 import { useChatConstants } from '#utils/chat.utils.js';
-import { AiChatProvider, useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
+import { AiChatProvider, useChatSelector, AiChatContext } from '#components/chat/ai-chat-provider.js';
 import { BuildNameEditor } from '#routes/builds_.$id/build-name-editor.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
@@ -49,17 +49,15 @@ export const handle: Handle = {
 };
 
 function Chat() {
-  const { id } = useParams();
-  const { buildRef, isLoading, setChatMessages } = useBuild();
+  const { buildRef, setChatMessages } = useBuild();
   const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId);
   const activeChat = useSelector(buildRef, (state) =>
     state.context.build?.chats.find((chat) => chat.id === activeChatId),
   );
-  const hasBuild = useSelector(buildRef, (state) => state.context.build !== undefined);
 
   const messages = useChatSelector((state) => state.context.messages);
   const status = useChatSelector((state) => state.context.status);
-  const { setMessages, reload } = useChatActions();
+  const chatActorRef = AiChatContext.useActorRef();
 
   useKeydown(
     {
@@ -71,22 +69,46 @@ function Chat() {
     },
   );
 
+  // Consolidated event-driven coordination
   useEffect(() => {
-    if (!hasBuild || isLoading) {
-      return;
-    }
-
-    // Set initial messages based on active chat or legacy messages
-    if (activeChat) {
-      setMessages(activeChat.messages);
-
-      // Reload when the last message is not an assistant message
-      if (activeChat.messages.length > 0 && activeChat.messages.at(-1)?.role !== 'assistant') {
-        reload();
+    // 1. Build loaded - initialize all chat state atomically
+    const buildLoadedSub = buildRef.on('buildLoaded', ({ build }) => {
+      const activeChat = build.chats.find((c) => c.id === build.lastChatId);
+      if (!activeChat) {
+        return;
       }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run when build, activeChat, or loading state changes
-  }, [id, isLoading, activeChatId]);
+
+      chatActorRef.send({ type: 'initializeChat', chat: activeChat });
+    });
+
+    // 2. Chat switched - initialize new chat state atomically
+    const chatChangedSub = buildRef.on('activeChatChanged', ({ chat }) => {
+      chatActorRef.send({ type: 'initializeChat', chat });
+    });
+
+    // 3. Main draft changed - persist
+    const draftChangedSub = chatActorRef.on('draftChanged', ({ chatId, draft }) => {
+      buildRef.send({ type: 'updateChatDraft', chatId, draft });
+    });
+
+    // 4. Edit draft changed - persist
+    const editDraftChangedSub = chatActorRef.on('editDraftChanged', ({ chatId, messageId, draft }) => {
+      buildRef.send({ type: 'updateMessageEdit', chatId, messageId, draft });
+    });
+
+    // 5. Edit cleared (on submit) - remove from build
+    const editClearedSub = chatActorRef.on('messageEditCleared', ({ chatId, messageId }) => {
+      buildRef.send({ type: 'clearMessageEdit', chatId, messageId });
+    });
+
+    return () => {
+      buildLoadedSub.unsubscribe();
+      chatChangedSub.unsubscribe();
+      draftChangedSub.unsubscribe();
+      editDraftChangedSub.unsubscribe();
+      editClearedSub.unsubscribe();
+    };
+  }, [buildRef, chatActorRef]);
 
   // Persist message changes to the active build chat
   useEffect(() => {
@@ -225,7 +247,7 @@ function ChatWithProvider() {
   const threadId = activeChatId ?? buildId;
 
   return (
-    <AiChatProvider value={{ ...useChatConstants, id: threadId, onToolCall }}>
+    <AiChatProvider value={{ ...useChatConstants, id: threadId, onToolCall }} chatId={activeChatId}>
       <ViewContextProvider>
         {name ? <title>{name}</title> : null}
         {description ? <meta name="description" content={description} /> : null}

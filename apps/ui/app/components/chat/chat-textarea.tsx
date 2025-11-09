@@ -1,8 +1,7 @@
-import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
+import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { ArrowUp, X, Square, CircuitBoard, ChevronDown, Paperclip, Wrench } from 'lucide-react';
-import type { Attachment } from 'ai';
 import type { ClassValue } from 'clsx';
-import type { MessagePart, ToolWithSelection } from '@taucad/types';
+import type { ToolWithSelection } from '@taucad/types';
 import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
@@ -44,14 +43,10 @@ export type ChatTextareaProperties = {
   readonly onEscapePressed?: () => void;
   readonly onBlur?: () => void;
   readonly enableAutoFocus?: boolean;
-  readonly initialContent?: MessagePart[];
-  readonly initialAttachments?: Attachment[];
   readonly className?: ClassValue;
   readonly enableContextActions?: boolean;
+  readonly mode?: 'main' | 'edit';
 };
-
-const defaultContent: MessagePart[] = [];
-const defaultAttachments: Attachment[] = [];
 
 // Define the key combination for cancelling the stream
 export const cancelChatStreamKeyCombination = {
@@ -64,46 +59,77 @@ export const cancelChatStreamKeyCombination = {
 export const ChatTextarea = memo(function ({
   onSubmit,
   enableAutoFocus = true,
-  initialContent = defaultContent,
-  initialAttachments = defaultAttachments,
   onEscapePressed,
   onBlur,
   className,
   enableContextActions = true,
+  mode = 'main',
 }: ChatTextareaProperties): React.JSX.Element {
-  const { initialInputText, initialImageUrls } = useMemo(() => {
-    let initialInputText = '';
-    const initialImageUrls: string[] = [];
-
-    for (const content of initialContent) {
-      if (content.type === 'text') {
-        initialInputText = content.text;
-      }
-
-      if (content.type === 'file') {
-        initialImageUrls.push(content.data);
-      }
-    }
-
-    for (const attachment of initialAttachments) {
-      initialImageUrls.push(attachment.url);
-    }
-
-    return { initialInputText, initialImageUrls };
-  }, [initialContent, initialAttachments]);
-  const [inputText, setInputText] = useState(initialInputText);
-  const [images, setImages] = useState(initialImageUrls);
   const [isDragging, setIsDragging] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [atSymbolPosition, setAtSymbolPosition] = useState<number>(-1);
   const [contextSearchQuery, setContextSearchQuery] = useState<string>('');
   const [selectedMenuIndex, setSelectedMenuIndex] = useState<number>(0);
-  const [selectedToolChoice, setSelectedToolChoice] = useState<ToolWithSelection>('auto');
   const fileInputReference = useRef<HTMLInputElement>(null);
   const textareaReference = useRef<HTMLTextAreaElement>(null);
   const { selectedModel } = useModels();
   const status = useChatSelector((state) => state.context.status);
-  const { stop } = useChatActions();
+
+  // Read draft state from machine based on mode
+  const inputText = useChatSelector((state) =>
+    mode === 'main' ? state.context.draftText : state.context.editDraftText,
+  );
+  const images = useChatSelector((state) =>
+    mode === 'main' ? state.context.draftImages : state.context.editDraftImages,
+  );
+  const selectedToolChoice = useChatSelector((state) =>
+    mode === 'main' ? (state.context.draftToolChoice as ToolWithSelection) : 'auto',
+  );
+
+  const {
+    stop,
+    setDraftText,
+    addDraftImage,
+    removeDraftImage,
+    setDraftToolChoice,
+    setEditDraftText,
+    addEditDraftImage,
+    removeEditDraftImage,
+  } = useChatActions();
+
+  // Helper functions that call the correct action based on mode
+  const setText = useCallback(
+    (text: string) => {
+      if (mode === 'main') {
+        setDraftText(text);
+      } else {
+        setEditDraftText(text);
+      }
+    },
+    [mode, setDraftText, setEditDraftText],
+  );
+
+  const addImage = useCallback(
+    (image: string) => {
+      if (mode === 'main') {
+        addDraftImage(image);
+      } else {
+        addEditDraftImage(image);
+      }
+    },
+    [mode, addDraftImage, addEditDraftImage],
+  );
+
+  const removeImage = useCallback(
+    (index: number) => {
+      if (mode === 'main') {
+        removeDraftImage(index);
+      } else {
+        removeEditDraftImage(index);
+      }
+    },
+    [mode, removeDraftImage, removeEditDraftImage],
+  );
 
   const handleSubmit = async () => {
     // If there is no text or images, do not submit
@@ -112,8 +138,6 @@ export const ChatTextarea = memo(function ({
     }
 
     // The useChat hook will handle cancelling any ongoing stream
-    setInputText('');
-    setImages([]);
     await onSubmit({
       content: inputText,
       model: selectedModel?.id ?? '',
@@ -122,6 +146,7 @@ export const ChatTextarea = memo(function ({
       },
       imageUrls: images,
     });
+    // Draft will be cleared by the machine's submit action
   };
 
   const handleCancelClick = () => {
@@ -176,67 +201,69 @@ export const ChatTextarea = memo(function ({
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    setIsDragging(false);
+  const handleDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      setIsDragging(false);
 
-    if (event.dataTransfer.files.length > 0) {
-      for (const file of event.dataTransfer.files) {
-        if (file.type.startsWith('image/')) {
-          const reader = new FileReader();
-          const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
-            if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
-              const { result } = readerEvent.target;
-              if (result !== '') {
-                setImages((previous) => [...previous, result]);
+      if (event.dataTransfer.files.length > 0) {
+        for (const file of event.dataTransfer.files) {
+          if (file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
+              if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
+                const { result } = readerEvent.target;
+                if (result !== '') {
+                  addImage(result);
+                }
               }
-            }
 
-            reader.removeEventListener('load', handleLoad);
-          };
+              reader.removeEventListener('load', handleLoad);
+            };
 
-          reader.addEventListener('load', handleLoad);
-          reader.readAsDataURL(file);
-        } else {
-          toast.error('Only images are supported');
+            reader.addEventListener('load', handleLoad);
+            reader.readAsDataURL(file);
+          } else {
+            toast.error('Only images are supported');
+          }
         }
       }
-    }
-  }, []);
+    },
+    [addImage],
+  );
 
   const handleFileSelect = useCallback(() => {
     fileInputReference.current?.click();
   }, []);
 
-  const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files.length > 0) {
-      for (const file of event.target.files) {
-        if (file.type.startsWith('image/')) {
-          const reader = new FileReader();
-          const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
-            if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
-              const { result } = readerEvent.target;
-              if (result !== '') {
-                setImages((previous) => [...previous, result]);
+  const handleFileChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      if (event.target.files && event.target.files.length > 0) {
+        for (const file of event.target.files) {
+          if (file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
+              if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
+                const { result } = readerEvent.target;
+                if (result !== '') {
+                  addImage(result);
+                }
               }
-            }
 
-            reader.removeEventListener('load', handleLoad);
-          };
+              reader.removeEventListener('load', handleLoad);
+            };
 
-          reader.addEventListener('load', handleLoad);
-          reader.readAsDataURL(file);
+            reader.addEventListener('load', handleLoad);
+            reader.readAsDataURL(file);
+          }
         }
+
+        // Clear the input so the same file can be selected again
+        event.target.value = '';
       }
-
-      // Clear the input so the same file can be selected again
-      event.target.value = '';
-    }
-  }, []);
-
-  const removeImage = useCallback((index: number) => {
-    setImages((previous) => previous.filter((_, index_) => index_ !== index));
-  }, []);
+    },
+    [addImage],
+  );
 
   const focusInput = useCallback(() => {
     if (textareaReference.current) {
@@ -250,58 +277,61 @@ export const ChatTextarea = memo(function ({
   /**
    * Handle paste event to add images to the chat
    */
-  const handlePaste = useCallback((event: ClipboardEvent) => {
-    // Check if the textarea is the active element or its ancestor contains focus
-    const isTextareaFocused =
-      document.activeElement === textareaReference.current ||
-      textareaReference.current?.contains(document.activeElement);
+  const handlePaste = useCallback(
+    (event: ClipboardEvent) => {
+      // Check if the textarea is the active element or its ancestor contains focus
+      const isTextareaFocused =
+        document.activeElement === textareaReference.current ||
+        textareaReference.current?.contains(document.activeElement);
 
-    if (!isTextareaFocused) {
-      return;
-    }
+      if (!isTextareaFocused) {
+        return;
+      }
 
-    const items = event.clipboardData?.items;
-    if (!items) {
-      return;
-    }
+      const items = event.clipboardData?.items;
+      if (!items) {
+        return;
+      }
 
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        const file = item.getAsFile();
-        if (file) {
-          const reader = new FileReader();
-          const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
-            if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
-              const { result } = readerEvent.target;
-              if (result !== '') {
-                setImages((previous) => [...previous, result]);
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            const reader = new FileReader();
+            const handleLoad = (readerEvent: ProgressEvent<FileReader>) => {
+              if (readerEvent.target?.result && typeof readerEvent.target.result === 'string') {
+                const { result } = readerEvent.target;
+                if (result !== '') {
+                  addImage(result);
+                }
               }
-            }
 
-            reader.removeEventListener('load', handleLoad);
-          };
+              reader.removeEventListener('load', handleLoad);
+            };
 
-          reader.addEventListener('load', handleLoad);
-          reader.readAsDataURL(file);
+            reader.addEventListener('load', handleLoad);
+            reader.readAsDataURL(file);
+          }
         }
       }
-    }
-  }, []);
+    },
+    [addImage],
+  );
 
   const handleAddText = useCallback(
     (text: string) => {
-      setInputText((previous) => previous + text);
+      setText(inputText + text);
       focusInput();
     },
-    [focusInput],
+    [focusInput, inputText, setText],
   );
 
   const handleAddImage = useCallback(
     (image: string) => {
-      setImages((previous) => [...previous, image]);
+      addImage(image);
       focusInput();
     },
-    [focusInput],
+    [focusInput, addImage],
   );
 
   const handleTextChange = useCallback(
@@ -355,9 +385,9 @@ export const ChatTextarea = memo(function ({
         }
       }
 
-      setInputText(newValue);
+      setText(newValue);
     },
-    [inputText, showContextMenu, atSymbolPosition],
+    [inputText, showContextMenu, atSymbolPosition, setText],
   );
 
   const handleContextMenuSelect = useCallback(
@@ -367,7 +397,7 @@ export const ChatTextarea = memo(function ({
         const beforeAt = inputText.slice(0, atSymbolPosition);
         const afterAtAndQuery = inputText.slice(atSymbolPosition + 1 + contextSearchQuery.length);
         const newText = beforeAt + text + afterAtAndQuery;
-        setInputText(newText);
+        setText(newText);
 
         // Close the menu
         setShowContextMenu(false);
@@ -384,13 +414,12 @@ export const ChatTextarea = memo(function ({
         }, 0);
       }
     },
-    [inputText, atSymbolPosition, contextSearchQuery],
+    [inputText, atSymbolPosition, contextSearchQuery, setText],
   );
 
   const handleContextImageAdd = useCallback(
     (image: string) => {
-      setImages((previous) => [...previous, image]);
-      // Close the menu
+      // Close the menu and remove the @ symbol
       setShowContextMenu(false);
       setAtSymbolPosition(-1);
       setContextSearchQuery('');
@@ -399,12 +428,14 @@ export const ChatTextarea = memo(function ({
       if (atSymbolPosition >= 0) {
         const beforeAt = inputText.slice(0, atSymbolPosition);
         const afterAtAndQuery = inputText.slice(atSymbolPosition + 1 + contextSearchQuery.length);
-        setInputText(beforeAt + afterAtAndQuery);
+        const newText = beforeAt + afterAtAndQuery;
+        setText(newText);
       }
 
+      addImage(image);
       focusInput();
     },
-    [inputText, atSymbolPosition, contextSearchQuery, focusInput],
+    [inputText, atSymbolPosition, contextSearchQuery, focusInput, setText, addImage],
   );
 
   useEffect(() => {
@@ -620,7 +651,7 @@ export const ChatTextarea = memo(function ({
         </Tooltip>
         {/* Tool selector */}
         <Tooltip>
-          <ChatToolSelector value={selectedToolChoice} onValueChange={setSelectedToolChoice}>
+          <ChatToolSelector value={selectedToolChoice} onValueChange={setDraftToolChoice}>
             {({ selectedMode, selectedTools, toolMetadata }) => (
               <TooltipTrigger asChild>
                 <Button

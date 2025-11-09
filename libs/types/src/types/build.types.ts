@@ -13,6 +13,8 @@ export type Chat = {
   id: string;
   name: string;
   messages: Message[];
+  draft?: Message; // Main draft
+  messageEdits?: Record<string, Message>; // Edit drafts by messageId
   createdAt: number;
   updatedAt: number;
 };

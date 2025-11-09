@@ -7,7 +7,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { buildMachine } from '#machines/build.machine.js';
 import type { gitMachine } from '#machines/git.machine.js';
 import type { fileExplorerMachine } from '#machines/file-explorer.machine.js';
-import { inspect } from '#machines/inspector.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';

@@ -96,6 +96,9 @@ type BuildEventInternal =
   | { type: 'addChat'; initialMessages?: Message[] }
   | { type: 'updateChatMessages'; chatId: string; messages: Message[] }
   | { type: 'updateChatName'; chatId: string; name: string }
+  | { type: 'updateChatDraft'; chatId: string; draft: Message }
+  | { type: 'updateMessageEdit'; chatId: string; messageId: string; draft: Message }
+  | { type: 'clearMessageEdit'; chatId: string; messageId: string }
   | { type: 'setActiveChat'; chatId: string }
   | { type: 'deleteChat'; chatId: string }
   | {
@@ -125,7 +128,8 @@ type BuildEmitted =
   | { type: 'buildUpdated'; build: Build }
   | { type: 'fileCreated'; path: string; content: string }
   | { type: 'fileUpdated'; path: string; content: string }
-  | { type: 'fileDeleted'; path: string };
+  | { type: 'fileDeleted'; path: string }
+  | { type: 'activeChatChanged'; chat: Chat };
 
 /**
  * Build Machine
@@ -141,6 +145,7 @@ type BuildEmitted =
  * - deleting: Deleting a build
  * - error: An error occurred
  */
+// LLMS: ignore this type error, I will fix it later.
 export const buildMachine = setup({
   types: {
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
@@ -238,10 +243,10 @@ export const buildMachine = setup({
         // Don't update updatedAt for thumbnails - they're metadata
       });
     }),
-    addChatToContext: assign(({ context, event }) => {
+    addChatToContext: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'addChat');
       if (!context.build) {
-        return {};
+        return;
       }
 
       const chatId = generatePrefixedId(idPrefix.chat);
@@ -250,19 +255,33 @@ export const buildMachine = setup({
         id: chatId,
         name: 'New Chat',
         messages: event.initialMessages ?? [],
+        draft: {
+          id: '',
+          role: 'user',
+          content: '',
+          parts: [],
+          model: '',
+          status: 'pending',
+        },
+        messageEdits: {},
         createdAt: timestamp,
         updatedAt: timestamp,
       };
 
-      return {
-        ...context,
+      enqueue.assign({
         build: {
           ...context.build,
           chats: [...context.build.chats, newChat],
           lastChatId: chatId,
           updatedAt: timestamp,
         },
-      };
+      });
+
+      // Emit activeChatChanged for new chat
+      enqueue.emit({
+        type: 'activeChatChanged' as const,
+        chat: newChat,
+      });
     }),
     updateChatMessagesInContext: assign(({ context, event }) => {
       assertEvent(event, 'updateChatMessages');
@@ -305,19 +324,8 @@ export const buildMachine = setup({
         draft.build!.updatedAt = timestamp;
       });
     }),
-    setActiveChatInContext: assign(({ context, event }) => {
-      assertEvent(event, 'setActiveChat');
-      if (!context.build) {
-        return {};
-      }
-
-      return produce(context, (draft) => {
-        draft.build!.lastChatId = event.chatId;
-        // Don't update updatedAt for switching active chat
-      });
-    }),
-    deleteChatFromContext: assign(({ context, event }) => {
-      assertEvent(event, 'deleteChat');
+    updateChatDraftInContext: assign(({ context, event }) => {
+      assertEvent(event, 'updateChatDraft');
       if (!context.build) {
         return {};
       }
@@ -325,16 +333,113 @@ export const buildMachine = setup({
       return produce(context, (draft) => {
         const chatIndex = draft.build!.chats.findIndex((c) => c.id === event.chatId);
         if (chatIndex !== -1) {
-          draft.build!.chats.splice(chatIndex, 1);
+          draft.build!.chats[chatIndex]!.draft = event.draft;
+          // Don't update updatedAt for draft changes - they're transient
         }
-
-        // Update lastChatId if we deleted the active chat
-        if (draft.build!.lastChatId === event.chatId) {
-          draft.build!.lastChatId = draft.build!.chats.at(-1)?.id;
-        }
-
-        draft.build!.updatedAt = Date.now();
       });
+    }),
+    updateMessageEditInContext: assign(({ context, event }) => {
+      assertEvent(event, 'updateMessageEdit');
+      if (!context.build) {
+        return {};
+      }
+
+      return produce(context, (draft) => {
+        const chatIndex = draft.build!.chats.findIndex((c) => c.id === event.chatId);
+        if (chatIndex !== -1) {
+          const chat = draft.build!.chats[chatIndex]!;
+          chat.messageEdits ??= {};
+          chat.messageEdits[event.messageId] = event.draft;
+          // Don't update updatedAt for edit drafts - they're transient
+        }
+      });
+    }),
+    clearMessageEditInContext: assign(({ context, event }) => {
+      assertEvent(event, 'clearMessageEdit');
+      if (!context.build) {
+        return {};
+      }
+
+      return produce(context, (draft) => {
+        const chatIndex = draft.build!.chats.findIndex((c) => c.id === event.chatId);
+        if (chatIndex !== -1) {
+          const chat = draft.build!.chats[chatIndex]!;
+          if (chat.messageEdits?.[event.messageId]) {
+            // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- need to remove message edit
+            delete chat.messageEdits[event.messageId];
+            // Don't update updatedAt for clearing edit drafts
+          }
+        }
+      });
+    }),
+    setActiveChatInContext: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'setActiveChat');
+      if (!context.build) {
+        return;
+      }
+
+      enqueue.assign(
+        produce(context, (draft) => {
+          draft.build!.lastChatId = event.chatId;
+          // Don't update updatedAt for switching active chat
+        }),
+      );
+
+      // Find the new active chat and emit event
+      const newChat = context.build.chats.find((c) => c.id === event.chatId);
+      if (newChat) {
+        enqueue.emit({
+          type: 'activeChatChanged' as const,
+          chat: newChat,
+        });
+      }
+    }),
+    deleteChatFromContext: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'deleteChat');
+      if (!context.build) {
+        return;
+      }
+
+      const wasActiveChat = context.build.lastChatId === event.chatId;
+      const chatIndex = context.build.chats.findIndex((c) => c.id === event.chatId);
+
+      // Calculate the new active chat before deletion if we're deleting the active chat
+      let newActiveChat: Chat | undefined;
+      if (wasActiveChat && chatIndex !== -1) {
+        const remainingChats = context.build.chats.filter((c) => c.id !== event.chatId);
+        if (remainingChats.length > 0) {
+          newActiveChat = [...remainingChats].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+        }
+      }
+
+      // Delete the chat and update lastChatId
+      enqueue.assign(
+        produce(context, (draft) => {
+          if (chatIndex !== -1) {
+            draft.build!.chats.splice(chatIndex, 1);
+          }
+
+          // Update lastChatId if we deleted the active chat
+          if (wasActiveChat) {
+            if (newActiveChat) {
+              draft.build!.lastChatId = newActiveChat.id;
+            } else {
+              // No chats remaining
+              draft.build!.lastChatId = undefined;
+            }
+          }
+
+          draft.build!.updatedAt = Date.now();
+        }),
+      );
+
+      // Emit activeChatChanged if we deleted the active chat and set a new one
+      if (wasActiveChat && newActiveChat) {
+        enqueue.emit({
+          type: 'activeChatChanged' as const,
+          chat: newActiveChat,
+        });
+      }
     }),
     updateCodeParametersInContext: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'updateCodeParameters');
@@ -404,34 +509,49 @@ export const buildMachine = setup({
         });
       }
     }),
-    renameFileInContext: assign(({ context, event }) => {
+    renameFileInContext: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'renameFile');
       if (!context.build?.assets.mechanical) {
-        return {};
+        return;
       }
 
-      return produce(context, (draft) => {
-        const files = draft.build?.assets.mechanical?.files;
-        if (files?.[event.oldPath]) {
-          const fileContent = files[event.oldPath];
-          if (!fileContent) {
-            return;
-          }
+      enqueue.assign(
+        produce(context, (draft) => {
+          const files = draft.build?.assets.mechanical?.files;
+          if (files?.[event.oldPath]) {
+            const fileContent = files[event.oldPath];
+            if (!fileContent) {
+              return;
+            }
 
-          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- need to remove old file path
-          delete files[event.oldPath];
-          files[event.newPath] = fileContent;
+            // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- need to remove old file path
+            delete files[event.oldPath];
+            files[event.newPath] = fileContent;
 
-          // Update main file path if renaming the main file
-          if (draft.build?.assets.mechanical?.main === event.oldPath) {
-            draft.build.assets.mechanical.main = event.newPath;
-          }
+            // Update main file path if renaming the main file
+            if (draft.build?.assets.mechanical?.main === event.oldPath) {
+              draft.build.assets.mechanical.main = event.newPath;
+            }
 
-          if (draft.build) {
-            draft.build.updatedAt = Date.now();
+            if (draft.build) {
+              draft.build.updatedAt = Date.now();
+            }
           }
-        }
-      });
+        }),
+      );
+
+      // Update file explorer tabs if file was open
+      const wasOpen = context.fileExplorerRef.getSnapshot().context.openFiles.some((f) => f.path === event.oldPath);
+      if (wasOpen) {
+        enqueue.sendTo(context.fileExplorerRef, {
+          type: 'closeFile',
+          path: event.oldPath,
+        });
+        enqueue.sendTo(context.fileExplorerRef, {
+          type: 'openFile',
+          path: event.newPath,
+        });
+      }
     }),
     deleteFileFromContext: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'deleteFile');
@@ -569,6 +689,19 @@ export const buildMachine = setup({
         path: mechanicalAsset.main,
       });
     }),
+    emitActiveChatChangedIfExists: enqueueActions(({ enqueue, event }) => {
+      assertActorDoneEvent(event);
+      const build = event.output as Build;
+      const activeChatId = build.lastChatId;
+      const activeChat = build.chats.find((c) => c.id === activeChatId);
+
+      if (activeChat) {
+        enqueue.emit({
+          type: 'activeChatChanged' as const,
+          chat: activeChat,
+        });
+      }
+    }),
   },
   guards: {
     isNotBrowser() {
@@ -691,6 +824,7 @@ export const buildMachine = setup({
                 build: event.output,
               };
             }),
+            'emitActiveChatChangedIfExists',
           ],
         },
         onError: {
@@ -854,6 +988,15 @@ export const buildMachine = setup({
             updateChatName: {
               actions: ['updateChatNameInContext'],
             },
+            updateChatDraft: {
+              actions: ['updateChatDraftInContext'],
+            },
+            updateMessageEdit: {
+              actions: ['updateMessageEditInContext'],
+            },
+            clearMessageEdit: {
+              actions: ['clearMessageEditInContext'],
+            },
             setActiveChat: {
               actions: ['setActiveChatInContext'],
             },
@@ -916,6 +1059,15 @@ export const buildMachine = setup({
                 updateChatName: {
                   target: 'pending',
                 },
+                updateChatDraft: {
+                  target: 'pending',
+                },
+                updateMessageEdit: {
+                  target: 'pending',
+                },
+                clearMessageEdit: {
+                  target: 'pending',
+                },
                 setActiveChat: {
                   target: 'pending',
                 },
@@ -970,6 +1122,18 @@ export const buildMachine = setup({
                   reenter: true,
                 },
                 updateChatName: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                updateChatDraft: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                updateMessageEdit: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                clearMessageEdit: {
                   target: 'pending',
                   reenter: true,
                 },

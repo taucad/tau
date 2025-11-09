@@ -1,6 +1,7 @@
 import { assign, assertEvent, setup, sendTo, emit, enqueueActions } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { CodeError, Geometry, ExportFormat, KernelError, KernelProvider } from '@taucad/types';
+import type { JSONSchema7 } from 'json-schema';
 import { kernelMachine } from '#machines/kernel.machine.js';
 import type { KernelEventExternal } from '#machines/kernel.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
@@ -22,7 +23,7 @@ export type CadContext = {
   isKernelInitialized: boolean;
   graphicsRef?: ActorRefFrom<typeof graphicsMachine>;
   logActorRef?: ActorRefFrom<typeof logMachine>;
-  jsonSchema?: unknown;
+  jsonSchema?: JSONSchema7;
   kernelTypeSelected: KernelProvider;
 };
 

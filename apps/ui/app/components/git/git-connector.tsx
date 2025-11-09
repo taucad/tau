@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useState } from 'react';
+import { useCallback, useContext, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import { AuthUIContext } from '@daveyplate/better-auth-ui';
@@ -7,7 +7,7 @@ import type { gitMachine } from '#machines/git.machine.js';
 import { Button } from '#components/ui/button.js';
 import { toast } from '#components/ui/sonner.js';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '#components/ui/sheet.js';
-import { requestGitHubRepoAccess, hasGitHubRepoAccess, getGitHubAccessToken } from '#lib/git-auth.js';
+import { requestGitHubRepoAccess, hasGitHubRepoAccess } from '#lib/git-auth.js';
 import { GitTrigger } from '#components/git/git-trigger.js';
 import { GitWorkspace } from '#components/git/git-workspace.js';
 import { RepositorySelector } from '#components/git/repository-selector.js';

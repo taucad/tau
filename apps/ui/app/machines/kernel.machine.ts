@@ -4,6 +4,7 @@ import { proxy, wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import type { Geometry, ExportFormat, KernelError, KernelProvider } from '@taucad/types';
 import { isKernelSuccess } from '@taucad/types/guards';
+import type { JSONSchema7 } from 'json-schema';
 import type { ReplicadWorkerInterface as ReplicadWorker } from '#components/geometry/kernel/replicad/replicad.worker.types.js';
 import ReplicadBuilderWorker from '#components/geometry/kernel/replicad/replicad.worker.js?worker';
 import type { OpenScadBuilderInterface as OpenScadWorker } from '#components/geometry/kernel/openscad/openscad.worker.types.js';
@@ -102,7 +103,7 @@ const parseParametersActor = fromPromise<
       defaultParameters: Record<string, unknown>;
       code: string;
       parameters: Record<string, unknown>;
-      jsonSchema: unknown;
+      jsonSchema: JSONSchema7;
       kernelType: KernelProvider;
     }
   | {
@@ -137,7 +138,7 @@ const parseParametersActor = fromPromise<
     if (isKernelSuccess(parametersResult)) {
       const { defaultParameters, jsonSchema } = parametersResult.data as {
         defaultParameters: Record<string, unknown>;
-        jsonSchema: unknown;
+        jsonSchema: JSONSchema7;
       };
 
       return {

@@ -56,7 +56,11 @@ export function BuildProvider({
   // Create the build machine actor - it will auto-load based on buildId
   const actorRef = useActorRef(buildMachine.provide({ ...provide }), {
     input: { buildId, ...input },
-    inspect,
+    inspect(args) {
+      if (args.type === '@xstate.event') {
+        console.debug(args.event);
+      }
+    },
   });
 
   // Select state from the machine

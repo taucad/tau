@@ -391,7 +391,13 @@ const chatMachine = setup({
 type ChatMachineState = ReturnType<typeof chatMachine.getInitialSnapshot>;
 
 // Create the actor context using XState's createActorContext
-export const AiChatContext = createActorContext(chatMachine);
+export const AiChatContext = createActorContext(chatMachine, {
+  inspect(args) {
+    if (args.type === '@xstate.event') {
+      console.debug(args.event);
+    }
+  },
+});
 
 // Provider component that wraps useChat and syncs with XState
 export function AiChatProvider({

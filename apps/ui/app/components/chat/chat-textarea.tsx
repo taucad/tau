@@ -706,7 +706,7 @@ export const ChatTextarea = memo(function ({
               <Button
                 size="icon"
                 className="size-7 rounded-full"
-                disabled={inputText.length === 0}
+                disabled={inputText.trim().length === 0}
                 onClick={handleSubmit}
               >
                 <ArrowUp className="size-5" />

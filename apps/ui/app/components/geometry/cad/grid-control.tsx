@@ -78,11 +78,14 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
         },
       });
     }
-  }, [unit]);
+  }, [unit, graphicsActor]);
 
-  const handleLockToggle = useCallback((checked: boolean) => {
-    graphicsActor.send({ type: 'setGridSizeLocked', payload: checked });
-  }, []);
+  const handleLockToggle = useCallback(
+    (checked: boolean) => {
+      graphicsActor.send({ type: 'setGridSizeLocked', payload: checked });
+    },
+    [graphicsActor],
+  );
 
   const handleUnitChange = useCallback(
     (selectedUnit: string) => {

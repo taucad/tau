@@ -49,7 +49,7 @@ type CadInput = {
 };
 
 // Debounce delay for code changes in milliseconds
-const debounceDelay = 500;
+const debounceDelay = 200;
 
 /**
  * CAD Machine

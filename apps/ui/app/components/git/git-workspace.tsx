@@ -260,4 +260,3 @@ function FileStatusItem({ file, onStage, onUnstage }: FileStatusItemProperties):
     </div>
   );
 }
-

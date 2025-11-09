@@ -82,9 +82,9 @@ export function GitConnector({
   return (
     <>
       {triggerVariant === 'icon' ? (
-        <GitTrigger onClick={handleConnect} className={className} />
+        <GitTrigger className={className} onClick={handleConnect} />
       ) : (
-        <Button variant="outline" onClick={handleConnect} className={className}>
+        <Button variant="outline" className={className} onClick={handleConnect}>
           {triggerLabel}
         </Button>
       )}
@@ -278,4 +278,3 @@ function ErrorState({ message, onRetry, onClose }: ErrorStateProperties): React.
     </div>
   );
 }
-

@@ -19,4 +19,3 @@ export function GitTrigger({ onClick, className }: GitTriggerProperties): React.
     </Tooltip>
   );
 }
-

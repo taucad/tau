@@ -1,5 +1,5 @@
 import { assign, assertEvent, setup, fromPromise, emit, enqueueActions } from 'xstate';
-import type { ActorRefFrom, OutputFrom, DoneActorEvent } from 'xstate';
+import type { ActorRefFrom, OutputFrom, DoneActorEvent, AnyStateMachine } from 'xstate';
 import { produce } from 'immer';
 import type { Message } from '@ai-sdk/react';
 import type { Build, Chat } from '@taucad/types';
@@ -76,7 +76,13 @@ const buildActors = {
   git: gitMachine,
   fileExplorer: fileExplorerMachine,
   graphics: graphicsMachine,
-  cad: cadMachine,
+  // Having the cadMachine typed results in:
+  // `The inferred type of this node exceeds the maximum length the compiler will serialize`.
+  // We need to dig into this and possibly simplify the external type inferred from the machine.
+  //
+  // This has no impact on machine consumer typings, only to this machine where
+  // some types will need to be manually asserted (Eslint will report those places).
+  cad: cadMachine as AnyStateMachine,
   screenshot: screenshotCapabilityMachine,
   camera: cameraCapabilityMachine,
   logs: logMachine,
@@ -145,7 +151,6 @@ type BuildEmitted =
  * - deleting: Deleting a build
  * - error: An error occurred
  */
-// LLMS: ignore this type error, I will fix it later.
 export const buildMachine = setup({
   types: {
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
@@ -702,6 +707,39 @@ export const buildMachine = setup({
         });
       }
     }),
+    emitBuildLoaded: emit(({ event }) => {
+      assertActorDoneEvent(event);
+      return {
+        type: 'buildLoaded' as const,
+        build: event.output as Build,
+      };
+    }),
+    emitFileCreated: emit(({ context, event }) => {
+      assertActorDoneEvent(event);
+      // Get the path and content from the last createFile event
+      const mechanicalFiles = context.build?.assets.mechanical?.files ?? {};
+      const paths = Object.keys(mechanicalFiles);
+      const lastPath = paths.at(-1) ?? '';
+      const lastFile = mechanicalFiles[lastPath];
+      return {
+        type: 'fileCreated' as const,
+        path: lastPath,
+        content: lastFile?.content ?? '',
+      };
+    }),
+    updateBuildFromEvent: assign({
+      build({ event }) {
+        assertActorDoneEvent(event);
+        return event.output as Build;
+      },
+    }),
+    emitBuildUpdated: emit(({ event }) => {
+      assertActorDoneEvent(event);
+      return {
+        type: 'buildUpdated' as const,
+        build: event.output as Build,
+      };
+    }),
   },
   guards: {
     isNotBrowser() {
@@ -817,25 +855,13 @@ export const buildMachine = setup({
             'clearLoading',
             'initializeKernelIfNeeded',
             'openInitialFile',
-            emit(({ event }) => {
-              assertActorDoneEvent(event);
-              return {
-                type: 'buildLoaded' as const,
-                build: event.output,
-              };
-            }),
+            'emitBuildLoaded',
             'emitActiveChatChangedIfExists',
           ],
         },
         onError: {
           target: 'error',
-          actions: [
-            'setError',
-            emit(({ event }) => ({
-              type: 'error' as const,
-              error: event.error as Error,
-            })),
-          ],
+          actions: ['setError'],
         },
       },
     },
@@ -881,21 +907,7 @@ export const buildMachine = setup({
                 },
                 onDone: {
                   target: 'idle',
-                  actions: [
-                    emit(({ context, event }) => {
-                      assertActorDoneEvent(event);
-                      // Get the path and content from the last createFile event
-                      const mechanicalFiles = context.build?.assets.mechanical?.files ?? {};
-                      const paths = Object.keys(mechanicalFiles);
-                      const lastPath = paths.at(-1) ?? '';
-                      const lastFile = mechanicalFiles[lastPath];
-                      return {
-                        type: 'fileCreated' as const,
-                        path: lastPath,
-                        content: lastFile?.content ?? '',
-                      };
-                    }),
-                  ],
+                  actions: ['emitFileCreated'],
                 },
                 onError: {
                   target: 'idle',
@@ -1175,18 +1187,7 @@ export const buildMachine = setup({
                 },
                 onDone: {
                   target: 'idle',
-                  actions: [
-                    assign({
-                      build({ event }) {
-                        assertActorDoneEvent(event);
-                        return event.output;
-                      },
-                    }),
-                    emit(({ event }) => ({
-                      type: 'buildUpdated' as const,
-                      build: event.output,
-                    })),
-                  ],
+                  actions: ['updateBuildFromEvent', 'emitBuildUpdated'],
                 },
                 onError: {
                   target: 'pending',

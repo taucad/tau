@@ -65,7 +65,7 @@ export function BuildNameEditor(): React.JSX.Element {
       <TooltipTrigger asChild>
         <InlineTextEditor
           value={displayName}
-          className="h-7 [&_[data-slot=display]]:w-auto [&_[data-slot=display]]:max-w-48"
+          className="h-7 [&_[data-slot=button]]:w-auto [&_[data-slot=button]]:max-w-48"
           renderDisplay={(value) => (
             <span data-animate={isNameAnimating} className="truncate data-[animate=true]:animate-typewriter-20">
               {value === '' ? <LoadingSpinner /> : value}

@@ -32,7 +32,7 @@ function BuildNameCell({ build, actions }: { readonly build: Build; readonly act
         </div>
         <InlineTextEditor
           value={build.name}
-          className="h-7 [&_[data-slot=display]]:font-medium"
+          className="h-7 [&_[data-slot=button]]:font-medium"
           onSave={async (value) => actions.handleRename(build.id, value)}
         />
       </div>

@@ -717,7 +717,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
         <div className="-mx-2 flex flex-1 items-start justify-start overflow-hidden py-1">
           <InlineTextEditor
             value={build.name}
-            className="h-7 w-full [&_[data-slot=display]]:w-full [&_[data-slot=display]]:max-w-full [&_[data-slot=display]]:text-base [&_[data-slot=display]]:font-semibold"
+            className="h-7 w-full [&_[data-slot=button]]:w-full [&_[data-slot=button]]:max-w-full [&_[data-slot=button]]:text-base [&_[data-slot=button]]:font-semibold"
             onSave={async (value) => actions.handleRename(build.id, value)}
           />
         </div>

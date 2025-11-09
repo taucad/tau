@@ -16,6 +16,7 @@ import type { Message } from '@ai-sdk/react';
 import { messageStatus } from '@taucad/types/constants';
 import type { Chat } from '@taucad/types';
 import { useBuild } from '#hooks/use-build.js';
+import { inspect } from '#machines/inspector.js';
 
 type UseChatArgs = NonNullable<Parameters<typeof useChat>[0]>;
 type UseChatReturn = ReturnType<typeof useChat>;
@@ -1016,11 +1017,7 @@ type ChatMachineState = ReturnType<typeof chatMachine.getInitialSnapshot>;
 
 // Create the actor context using XState's createActorContext
 export const AiChatContext = createActorContext(chatMachine, {
-  inspect(args) {
-    if (args.type === '@xstate.event') {
-      console.debug(args.event);
-    }
-  },
+  inspect,
 });
 
 // Provider component that wraps useChat and syncs with XState

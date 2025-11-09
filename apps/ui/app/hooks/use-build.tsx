@@ -12,6 +12,7 @@ import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
 import type { cameraCapabilityMachine } from '#machines/camera-capability.machine.js';
 import type { logMachine } from '#machines/logs.machine.js';
+import { inspect } from '#machines/inspector.js';
 
 type BuildContextType = {
   buildId: string;
@@ -55,11 +56,7 @@ export function BuildProvider({
   // Create the build machine actor - it will auto-load based on buildId
   const actorRef = useActorRef(buildMachine.provide({ ...provide }), {
     input: { buildId, ...input },
-    inspect(args) {
-      if (args.type === '@xstate.event') {
-        console.debug(args.event);
-      }
-    },
+    inspect,
   });
 
   // Select state from the machine

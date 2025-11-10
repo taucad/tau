@@ -254,6 +254,7 @@ const config = [
             'UsePipes',
             'UseInterceptors',
             'UseFilters',
+            'Catch',
           ],
         },
       ],

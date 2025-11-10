@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { groupItemsByTimeHorizon, type TimestampItem } from './temporal.utils.js';
+import { groupItemsByTimeHorizon } from '#utils/temporal.utils.js';
+import type { TimestampItem } from '#utils/temporal.utils.js';
 
 // Mock date to have consistent tests
 const mockToday = new Date('2024-01-15T12:00:00Z');
@@ -135,13 +136,7 @@ describe('groupItemsByTimeHorizon', () => {
       const groups = groupItemsByTimeHorizon(items);
 
       expect(groups).toHaveLength(5);
-      expect(groups.map((g) => g.name)).toEqual([
-        '2 days ago',
-        '3 days ago',
-        '4 days ago',
-        '5 days ago',
-        '6 days ago',
-      ]);
+      expect(groups.map((g) => g.name)).toEqual(['2 days ago', '3 days ago', '4 days ago', '5 days ago', '6 days ago']);
     });
   });
 
@@ -165,11 +160,7 @@ describe('groupItemsByTimeHorizon', () => {
     });
 
     it('should group all items from last week together', () => {
-      const items = [
-        createItem(daysAgo(7)),
-        createItem(daysAgo(10)),
-        createItem(daysAgo(13)),
-      ];
+      const items = [createItem(daysAgo(7)), createItem(daysAgo(10)), createItem(daysAgo(13))];
 
       const groups = groupItemsByTimeHorizon(items);
 
@@ -217,10 +208,7 @@ describe('groupItemsByTimeHorizon', () => {
     });
 
     it('should create separate groups for 2 and 3 weeks ago', () => {
-      const items = [
-        createItem(daysAgo(14)),
-        createItem(daysAgo(21)),
-      ];
+      const items = [createItem(daysAgo(14)), createItem(daysAgo(21))];
 
       const groups = groupItemsByTimeHorizon(items);
 
@@ -317,12 +305,7 @@ describe('groupItemsByTimeHorizon', () => {
       const groups = groupItemsByTimeHorizon(items);
 
       expect(groups).toHaveLength(4);
-      expect(groups.map((g) => g.name)).toEqual([
-        '2 months ago',
-        '3 months ago',
-        '4 months ago',
-        '5 months ago',
-      ]);
+      expect(groups.map((g) => g.name)).toEqual(['2 months ago', '3 months ago', '4 months ago', '5 months ago']);
     });
   });
 
@@ -375,20 +358,12 @@ describe('groupItemsByTimeHorizon', () => {
     });
 
     it('should create separate groups for each year', () => {
-      const items = [
-        createItem(yearsAgo(2)),
-        createItem(yearsAgo(3)),
-        createItem(yearsAgo(4)),
-      ];
+      const items = [createItem(yearsAgo(2)), createItem(yearsAgo(3)), createItem(yearsAgo(4))];
 
       const groups = groupItemsByTimeHorizon(items);
 
       expect(groups).toHaveLength(3);
-      expect(groups.map((g) => g.name)).toEqual([
-        '2 years ago',
-        '3 years ago',
-        '4 years ago',
-      ]);
+      expect(groups.map((g) => g.name)).toEqual(['2 years ago', '3 years ago', '4 years ago']);
     });
   });
 
@@ -430,13 +405,7 @@ describe('groupItemsByTimeHorizon', () => {
 
       const groups = groupItemsByTimeHorizon(items);
 
-      expect(groups.map((g) => g.name)).toEqual([
-        '2 days ago',
-        '3 days ago',
-        '4 days ago',
-        '5 days ago',
-        '6 days ago',
-      ]);
+      expect(groups.map((g) => g.name)).toEqual(['2 days ago', '3 days ago', '4 days ago', '5 days ago', '6 days ago']);
     });
 
     it('should order weeks correctly', () => {
@@ -448,11 +417,7 @@ describe('groupItemsByTimeHorizon', () => {
 
       const groups = groupItemsByTimeHorizon(items);
 
-      expect(groups.map((g) => g.name)).toEqual([
-        'Last week',
-        '2 weeks ago',
-        '3 weeks ago',
-      ]);
+      expect(groups.map((g) => g.name)).toEqual(['Last week', '2 weeks ago', '3 weeks ago']);
     });
 
     it('should order months correctly', () => {
@@ -465,12 +430,7 @@ describe('groupItemsByTimeHorizon', () => {
 
       const groups = groupItemsByTimeHorizon(items);
 
-      expect(groups.map((g) => g.name)).toEqual([
-        'Last month',
-        '2 months ago',
-        '3 months ago',
-        '5 months ago',
-      ]);
+      expect(groups.map((g) => g.name)).toEqual(['Last month', '2 months ago', '3 months ago', '5 months ago']);
     });
 
     it('should order years correctly', () => {
@@ -482,11 +442,7 @@ describe('groupItemsByTimeHorizon', () => {
 
       const groups = groupItemsByTimeHorizon(items);
 
-      expect(groups.map((g) => g.name)).toEqual([
-        'Last year',
-        '2 years ago',
-        '3 years ago',
-      ]);
+      expect(groups.map((g) => g.name)).toEqual(['Last year', '2 years ago', '3 years ago']);
     });
   });
 
@@ -549,11 +505,7 @@ describe('groupItemsByTimeHorizon', () => {
 
     it('should handle items with same timestamp', () => {
       const timestamp = daysAgo(5);
-      const items = [
-        createItem(timestamp),
-        createItem(timestamp),
-        createItem(timestamp),
-      ];
+      const items = [createItem(timestamp), createItem(timestamp), createItem(timestamp)];
 
       const groups = groupItemsByTimeHorizon(items);
 
@@ -603,27 +555,16 @@ describe('groupItemsByTimeHorizon', () => {
 
       const groups = groupItemsByTimeHorizon(items);
 
-      expect(groups.map((g) => g.name)).toEqual([
-        '6 days ago',
-        'Last week',
-        '2 weeks ago',
-        '3 weeks ago',
-      ]);
+      expect(groups.map((g) => g.name)).toEqual(['6 days ago', 'Last week', '2 weeks ago', '3 weeks ago']);
     });
 
     it('should handle very old items', () => {
-      const items = [
-        createItem(yearsAgo(50)),
-        createItem(yearsAgo(100)),
-      ];
+      const items = [createItem(yearsAgo(50)), createItem(yearsAgo(100))];
 
       const groups = groupItemsByTimeHorizon(items);
 
       expect(groups).toHaveLength(2);
-      expect(groups.map((g) => g.name)).toEqual([
-        '50 years ago',
-        '100 years ago',
-      ]);
+      expect(groups.map((g) => g.name)).toEqual(['50 years ago', '100 years ago']);
     });
   });
 
@@ -639,11 +580,7 @@ describe('groupItemsByTimeHorizon', () => {
       const evening = new Date(mockToday);
       evening.setHours(22, 0, 0, 0);
 
-      const items = [
-        createItem(morning.getTime()),
-        createItem(afternoon.getTime()),
-        createItem(evening.getTime()),
-      ];
+      const items = [createItem(morning.getTime()), createItem(afternoon.getTime()), createItem(evening.getTime())];
 
       const groups = groupItemsByTimeHorizon(items);
 
@@ -654,4 +591,3 @@ describe('groupItemsByTimeHorizon', () => {
     });
   });
 });
-

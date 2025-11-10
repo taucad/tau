@@ -22,7 +22,6 @@ type ParametersProperties = {
   readonly className?: string;
   readonly enableSearch?: boolean;
   readonly searchPlaceholder?: string;
-  readonly searchShortcut?: string;
   readonly enableExpandAll?: boolean;
   readonly emptyMessage?: string;
   readonly emptyDescription?: string;
@@ -36,7 +35,6 @@ export function Parameters({
   className,
   enableSearch = true,
   searchPlaceholder = 'Search parameters...',
-  searchShortcut,
   enableExpandAll = true,
   emptyMessage = 'No parameters available',
   emptyDescription = 'Parameters will appear here when they become available for this model',
@@ -87,12 +85,12 @@ export function Parameters({
     setSearchTerm('');
   }, []);
 
-  const formContext = useMemo(
+  const formContext = useMemo<RJSFContext>(
     () => ({
       allExpanded,
       searchTerm,
       resetSingleParameter,
-      shouldShowField(text: string) {
+      shouldShowField(text) {
         if (!searchTerm) {
           return true;
         }
@@ -115,7 +113,7 @@ export function Parameters({
   };
 
   return (
-    <div className={cn('flex h-full w-full flex-col', className)}>
+    <div data-slot="parameters" className={cn('group flex h-full w-full flex-col', className)}>
       {hasParameters ? (
         <>
           {/* Search and Controls Bar */}
@@ -127,7 +125,6 @@ export function Parameters({
                   placeholder={searchPlaceholder}
                   value={searchTerm}
                   className="h-8 w-full bg-background"
-                  keyboardShortcut={searchShortcut}
                   onChange={handleSearchChange}
                   onClear={clearSearch}
                 />

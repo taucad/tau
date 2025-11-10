@@ -22,12 +22,6 @@ const toggleParametersKeyCombination = {
   ctrlKey: true,
 } satisfies KeyCombination;
 
-const focusSearchKeyCombination = {
-  key: 'x',
-  ctrlKey: true,
-  shiftKey: true,
-} satisfies KeyCombination;
-
 // Parameters Trigger Component
 export const ChatParametersTrigger = memo(function ({
   isOpen,
@@ -71,13 +65,6 @@ export const ChatParameters = memo(function (props: {
     toggleParametersOpen,
   );
 
-  const { formattedKeyCombination: formattedSearchKeyCombination } = useKeydown(focusSearchKeyCombination, () => {
-    // Open parameters panel if it's not already open
-    if (!isExpanded) {
-      setIsExpanded?.(true);
-    }
-  });
-
   const handleParametersChange = useCallback(
     (newParameters: Record<string, unknown>) => {
       cadRef.send({ type: 'setParameters', parameters: newParameters });
@@ -107,7 +94,6 @@ export const ChatParameters = memo(function (props: {
             parameters={parameters}
             defaultParameters={defaultParameters}
             jsonSchema={jsonSchema ?? undefined}
-            searchShortcut={formattedSearchKeyCombination}
             onParametersChange={handleParametersChange}
           />
         </FloatingPanelContentBody>

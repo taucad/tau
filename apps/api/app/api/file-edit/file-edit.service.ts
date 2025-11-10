@@ -43,7 +43,7 @@ export class FileEditService {
 
       // Send to Morph API using AI SDK
       const { text } = await generateText({
-        model: this.openai('morph-v2'),
+        model: this.openai('morph-v3-large'),
         prompt: `<code>${originalContent}</code>\n<update>${codeEdit}</update>`,
       });
 

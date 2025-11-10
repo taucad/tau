@@ -1,11 +1,21 @@
 import { memo } from 'react';
+import type React from 'react';
 import { ChevronRight, RefreshCcw } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { CodeViewer } from '#components/code/code-viewer.js';
+import { cn } from '#utils/ui.utils.js';
 
-export const ChatError = memo(() => {
+export const ChatError = memo(function ({
+  isOpen = false,
+  onOpenChange,
+  className,
+}: {
+  readonly isOpen?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
+  readonly className?: string;
+}): React.ReactNode {
   const error = useChatSelector((state) => state.context.error);
   const { reload } = useChatActions();
 
@@ -23,7 +33,14 @@ export const ChatError = memo(() => {
   }
 
   return (
-    <Collapsible className="group/collapsible flex w-full flex-col justify-center rounded-md border border-destructive/20 bg-destructive/10 text-sm">
+    <Collapsible
+      open={isOpen}
+      className={cn(
+        'group/collapsible flex flex-col justify-center rounded-md border border-destructive/20 bg-destructive/10 text-sm select-none',
+        className,
+      )}
+      onOpenChange={onOpenChange}
+    >
       <CollapsibleTrigger asChild>
         <div className="flex w-full cursor-pointer items-center justify-between gap-1 p-2">
           <ChevronRight className="size-4 transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
@@ -46,7 +63,7 @@ export const ChatError = memo(() => {
         <CodeViewer
           text={errorMessage}
           language="json"
-          className="overflow-x-scroll pb-1 text-xs whitespace-pre-wrap"
+          className="overflow-x-scroll pb-2 text-xs whitespace-pre-wrap"
         />
       </CollapsibleContent>
     </Collapsible>

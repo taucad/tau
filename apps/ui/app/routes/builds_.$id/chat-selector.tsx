@@ -120,7 +120,15 @@ export function ChatSelector(): ReactNode {
       return (
         <div className="group flex w-full items-start justify-between">
           <div className="flex flex-col">
-            <div className={cn('font-medium', isActive && 'text-primary')}>{chatName}</div>
+            <div
+              className={cn(
+                'font-medium',
+                chat.messages.length === 0 && 'text-muted-foreground',
+                isActive && 'text-primary',
+              )}
+            >
+              {chatName}
+            </div>
             <div className="text-xs text-muted-foreground">
               {chat.messages.length} {chat.messages.length === 1 ? 'message' : 'messages'} ·{' '}
               {formatRelativeTime(chat.updatedAt)}

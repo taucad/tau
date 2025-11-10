@@ -105,7 +105,7 @@ export default function ChatStart(): React.JSX.Element {
             <div className="flex justify-center">
               <KernelSelector selectedKernel={selectedKernel} onKernelChange={setSelectedKernel} />
             </div>
-            <ChatTextarea enableContextActions={false} onSubmit={onSubmit} />
+            <ChatTextarea enableContextActions={false} className="pt-1" onSubmit={onSubmit} />
           </div>
           <div className="mx-auto my-6 flex w-20 items-center justify-center">
             <Separator />

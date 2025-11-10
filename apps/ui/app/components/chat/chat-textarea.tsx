@@ -535,7 +535,7 @@ export const ChatTextarea = memo(function ({
             'mb-10 size-full max-h-48 min-h-6 resize-none border-none bg-transparent dark:bg-transparent',
             'px-3 pb-3',
             'ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
-            images.length > 0 ? 'pt-10' : 'pt-3',
+            images.length > 0 ? 'pt-10' : 'pt-2',
           )}
           rows={3}
           autoFocus={enableAutoFocus}

@@ -2,6 +2,7 @@ import { Catch, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import type { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
+import { httpHeader } from '#constants/http-header.constant.js';
 
 export type ErrorResponse = {
   error: string;
@@ -10,6 +11,7 @@ export type ErrorResponse = {
   message?: string | string[];
   path?: string;
   timestamp?: string;
+  requestId?: string;
 };
 
 @Catch()
@@ -20,6 +22,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<FastifyReply>();
     const request = ctx.getRequest<FastifyRequest>();
+
+    // Extract request ID: prefer header if present, otherwise use Fastify's generated ID
+    const headerRequestId = request.headers[httpHeader.requestId] as string | undefined;
+    const requestId = headerRequestId ?? (request.id as string | undefined);
 
     let statusCode: number;
     let errorResponse: ErrorResponse;
@@ -35,6 +41,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
           code: this.getErrorCode(exception),
           path: request.url,
           timestamp: new Date().toISOString(),
+          requestId,
         };
       } else if (typeof exceptionResponse === 'object') {
         // Handle structured error responses (e.g., { code: 'UNAUTHORIZED', message: '...' })
@@ -45,6 +52,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
           statusCode,
           path: request.url,
           timestamp: new Date().toISOString(),
+          requestId,
         };
         if (Array.isArray(message)) {
           baseResponse.message = message;
@@ -58,6 +66,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
           code: this.getErrorCode(exception),
           path: request.url,
           timestamp: new Date().toISOString(),
+          requestId,
         };
       }
     } else if (exception instanceof ZodError) {
@@ -70,6 +79,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         message: exception.errors.map((error) => `${error.path.join('.')}: ${error.message}`),
         path: request.url,
         timestamp: new Date().toISOString(),
+        requestId,
       };
     } else if (exception instanceof Error) {
       // Handle unknown errors
@@ -80,6 +90,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         statusCode,
         path: request.url,
         timestamp: new Date().toISOString(),
+        requestId,
       };
 
       // Log the full error for debugging
@@ -97,6 +108,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         statusCode,
         path: request.url,
         timestamp: new Date().toISOString(),
+        requestId,
       };
 
       this.logger.error(`Unknown exception type: ${String(exception)}`, undefined, `${request.method} ${request.url}`);
@@ -111,6 +123,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
       );
     } else if (statusCode >= 400) {
       this.logger.warn(`Client error: ${errorResponse.error}`, `${request.method} ${request.url}`);
+    }
+
+    // Set request ID in response header (matching middleware behavior)
+    if (requestId) {
+      void response.header(httpHeader.requestId, requestId);
     }
 
     void response.status(statusCode).send(errorResponse);

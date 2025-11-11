@@ -49,6 +49,8 @@ export const ChatModelSelector = memo(function ({
       className="[&[data-slot='popover-content']]:w-[300px]"
       popoverProperties={properties.popoverProperties}
       emptyListMessage="No models found."
+      title="Select a model"
+      description="Select the model to use for the chat. This will be used to generate a response."
       groupedItems={[...providerModelsMap.entries()].map(([provider, models]) => ({
         name: provider,
         items: models,

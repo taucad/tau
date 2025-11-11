@@ -177,8 +177,10 @@ export function ChatSelector(): ReactNode {
               renderLabel={renderChatLabel}
               getValue={getChatValue}
               defaultValue={activeChat}
-              placeholder="Search chats"
+              placeholder="Select a chat"
               searchPlaceHolder="Search chats..."
+              title="Chats"
+              description="Select a chat to continue the conversation."
               popoverProperties={{
                 align: 'start',
                 className: 'w-[300px]',

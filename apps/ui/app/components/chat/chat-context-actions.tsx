@@ -398,6 +398,8 @@ ${kernelError.stack ? `\n\`\`\`\n${kernelError.stack}\n\`\`\`` : ''}
         }}
         searchPlaceHolder="Search context..."
         placeholder="Add context"
+        title="Add chat context"
+        description="Provide additional context for the chat. This will be used to generate a response."
         onSelect={(itemId) => {
           const selectedItem = contextItems.find((item) => item.id === itemId);
           selectedItem?.action();

@@ -229,6 +229,8 @@ function CommandPaletteMobile({ items }: CommandPaletteMobileProperties): React.
         isDisabled={isItemDisabled}
         searchPlaceHolder="Search commands..."
         placeholder="Actions"
+        title="Search commands..."
+        description="Search for actions on the current page or across the entire platform."
         onSelect={(itemId) => {
           const selectedItem = items.find((item) => item.id === itemId);
           if (selectedItem) {

@@ -705,6 +705,8 @@ export const ChatTextarea = memo(function ({
                   className={cn(
                     'h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7',
                     selectedTools.length > 0 && 'px-2 @max-[22rem]:w-auto',
+                    // eslint-disable-next-line no-warning-comments -- keeping this file clean.
+                    'hidden', // TODO: add back when MCP is added.
                   )}
                 >
                   <span className="hidden text-xs @[22rem]:block">

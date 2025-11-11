@@ -1,12 +1,10 @@
-import { BookOpen, Bot, FileAxis3D, Frame, Hammer, Map, PieChart, UsersRound, Workflow } from 'lucide-react';
+import { BookOpen, Bot, FileAxis3D, Frame, Hammer, Map, PieChart, Settings, UsersRound, Workflow } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { KeyCombination } from '#utils/keys.utils.js';
 
 type NavRoute = {
   title: string;
   url: string;
   icon: LucideIcon;
-  keyCombination: KeyCombination;
 };
 
 type NavProject = {
@@ -24,10 +22,6 @@ export const navRoutes: {
       title: 'Builds',
       url: '/builds/library',
       icon: Hammer,
-      keyCombination: {
-        key: 'b',
-        ctrlKey: true,
-      },
       // Items: [
       //   {
       //     title: 'History',
@@ -47,46 +41,31 @@ export const navRoutes: {
       title: 'Community',
       url: '/builds/community',
       icon: UsersRound,
-      keyCombination: {
-        key: 'g',
-        ctrlKey: true,
-      },
     },
     {
       title: 'Converter',
       url: '/converter',
       icon: FileAxis3D,
-      keyCombination: {
-        key: 'o',
-        ctrlKey: true,
-      },
     },
     {
       title: 'Workflows',
       url: '/workflows',
       icon: Workflow,
-      keyCombination: {
-        key: 'w',
-        ctrlKey: true,
-      },
     },
     {
       title: 'Models',
       url: '/models',
       icon: Bot,
-      keyCombination: {
-        key: 'm',
-        ctrlKey: true,
-      },
     },
     {
       title: 'Documentation',
       url: '/docs',
       icon: BookOpen,
-      keyCombination: {
-        key: 'd',
-        ctrlKey: true,
-      },
+    },
+    {
+      title: 'Settings',
+      url: '/settings',
+      icon: Settings,
     },
   ],
   projects: [

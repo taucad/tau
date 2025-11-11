@@ -75,8 +75,6 @@ type CommandPaletteProperties = {
 };
 
 function CommandPalette({ isOpen, onOpenChange, items }: CommandPaletteProperties): React.JSX.Element {
-  const navigate = useNavigate();
-
   const groupedItems = useMemo(() => {
     const groups: Record<string, CommandPaletteItem[]> = {};
 
@@ -114,10 +112,11 @@ function CommandPalette({ isOpen, onOpenChange, items }: CommandPalettePropertie
                   className="h-8"
                   onSelect={() => {
                     if (item.link) {
+                      // Close dialog and let Link component handle navigation
                       onOpenChange(false);
-                      void navigate(item.link);
                     } else {
                       runCommand(item);
+                      onOpenChange(false);
                     }
                   }}
                 >
@@ -258,18 +257,7 @@ function CommandPaletteProvider({ children }: { readonly children: React.ReactNo
   const contextValue = useMemo(
     () => ({
       registerItems(id: string, newItems: CommandPaletteItem[]) {
-        setItemsMap((previous) => {
-          const existing = previous.get(id);
-
-          // Only update if items reference has changed
-          if (existing === newItems) {
-            return previous; // No change = no re-render
-          }
-
-          const next = new Map(previous);
-          next.set(id, newItems);
-          return next;
-        });
+        setItemsMap((previous) => new Map(previous).set(id, newItems));
       },
       unregisterItems(id: string) {
         setItemsMap((previous) => {
@@ -282,16 +270,20 @@ function CommandPaletteProvider({ children }: { readonly children: React.ReactNo
     [],
   );
 
-  // Aggregate all items, sorted by route depth (more specific routes first)
+  // Aggregate all items (sort by route depth to show child route commands first)
   const allItems = useMemo(() => {
-    // Convert Map entries to array and sort by route depth (count of '/' in the id)
-    const sortedEntries = [...itemsMap.entries()].sort((a, b) => {
-      const depthA = (a[0].match(/\//g) ?? []).length;
-      const depthB = (b[0].match(/\//g) ?? []).length;
-      return depthB - depthA; // Descending order (deeper routes first)
+    // Create array of [matchId, items] pairs to preserve route information
+    const entries = [...itemsMap.entries()];
+
+    // Sort by match ID depth (number of slashes in route ID) to ensure child routes render first
+    entries.sort(([idA], [idB]) => {
+      const depthA = (idA.match(/\//g) ?? []).length;
+      const depthB = (idB.match(/\//g) ?? []).length;
+      return depthB - depthA; // Descending order - deeper paths first
     });
 
-    return sortedEntries.flatMap(([, items]) => items);
+    // Flatten to get final items array
+    return entries.flatMap(([, items]) => items);
   }, [itemsMap]);
 
   return (

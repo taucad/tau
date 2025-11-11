@@ -260,101 +260,6 @@ export function BuildCommandPaletteItems({ match }: { readonly match: UIMatch })
     );
   }, [buildName, screenshotActorRef]);
 
-  const handleCopyDataUrlToClipboard = useCallback(async () => {
-    toast.promise(
-      async () => {
-        return new Promise<void>((resolve, reject) => {
-          screenshotActorRef.send({
-            type: 'requestScreenshot',
-            options: {
-              output: {
-                format: 'image/webp',
-                quality: 0.2,
-                isPreview: true,
-              },
-            },
-            async onSuccess(dataUrls) {
-              try {
-                const dataUrl = dataUrls[0];
-                if (!dataUrl) {
-                  throw new Error('No screenshot data received');
-                }
-
-                // Copy to clipboard
-                if (globalThis.isSecureContext) {
-                  await navigator.clipboard.writeText(dataUrl);
-                  resolve();
-                } else {
-                  console.warn('Clipboard operations are only allowed in secure contexts.');
-                  reject(new Error('Clipboard operations are only allowed in secure contexts.'));
-                }
-              } catch (error) {
-                reject(error instanceof Error ? error : new Error('Failed to copy data URL'));
-              }
-            },
-            onError(error) {
-              reject(new Error(error));
-            },
-          });
-        });
-      },
-      {
-        loading: `Copying data URL to clipboard...`,
-        success: `Copied data URL to clipboard`,
-        error: `Failed to copy data URL to clipboard`,
-      },
-    );
-  }, [screenshotActorRef]);
-
-  const handleDownloadMultipleAngles = useCallback(async () => {
-    toast.promise(
-      async () => {
-        return new Promise<void>((resolve, reject) => {
-          screenshotActorRef.send({
-            type: 'requestScreenshot',
-            options: {
-              output: {
-                format: 'image/png',
-                quality: 0.92,
-              },
-              cameraAngles: [
-                { phi: 90, theta: 0 }, // Front view
-                { phi: 90, theta: 90 }, // Right view
-                { phi: 0, theta: 0 }, // Top view
-              ],
-            },
-            async onSuccess(dataUrls) {
-              try {
-                // Download each screenshot with a descriptive filename
-                const angleNames = ['front', 'right', 'top'];
-                for (const [index, dataUrl] of dataUrls.entries()) {
-                  // eslint-disable-next-line no-await-in-loop -- we need to wait for the fetch to complete
-                  const response = await fetch(dataUrl);
-                  // eslint-disable-next-line no-await-in-loop -- we need to wait for the blob to be created
-                  const blob = await response.blob();
-                  const filename = `${buildName}-${angleNames[index] ?? `angle-${index}`}.png`;
-                  downloadBlob(blob, filename);
-                }
-
-                resolve();
-              } catch (error) {
-                reject(error instanceof Error ? error : new Error('Failed to download screenshots'));
-              }
-            },
-            onError(error) {
-              reject(new Error(error));
-            },
-          });
-        });
-      },
-      {
-        loading: 'Downloading multiple angle screenshots...',
-        success: 'Downloaded multiple angle screenshots',
-        error: 'Failed to download multiple angle screenshots',
-      },
-    );
-  }, [buildName, screenshotActorRef]);
-
   // Subscribe to the cadActor to update the thumbnail when the geometries change
   useEffect(() => {
     const subscription = cadActor.on('geometryEvaluated', (event) => {
@@ -437,15 +342,6 @@ export function BuildCommandPaletteItems({ match }: { readonly match: UIMatch })
         visible: import.meta.env.DEV,
       },
       {
-        id: 'copy-data-url',
-        label: 'Copy data URL to clipboard',
-        group: 'Preview',
-        icon: <Clipboard />,
-        action: handleCopyDataUrlToClipboard,
-        disabled: !isScreenshotReady,
-        visible: import.meta.env.DEV,
-      },
-      {
         id: 'download-png',
         label: 'Download PNG',
         group: 'Preview',
@@ -453,27 +349,17 @@ export function BuildCommandPaletteItems({ match }: { readonly match: UIMatch })
         action: async () => handleDownloadPng(`${buildName}.png`),
         disabled: !isScreenshotReady,
       },
-      {
-        id: 'download-multiple-angles',
-        label: 'Download multiple angles',
-        group: 'Preview',
-        icon: <ImageDown />,
-        action: handleDownloadMultipleAngles,
-        disabled: !isScreenshotReady,
-      },
     ],
     [
       handleUpdateThumbnail,
       isScreenshotReady,
       handleCopyPngToClipboard,
-      handleCopyDataUrlToClipboard,
       handleDownloadPng,
       buildName,
       handleExport,
       geometries,
       build,
       handleDownloadZip,
-      handleDownloadMultipleAngles,
     ],
   );
 

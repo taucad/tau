@@ -14,9 +14,8 @@ import { BuildNameEditor } from '#routes/builds_.$id/build-name-editor.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
 import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
-import { CommandPaletteTrigger } from '#routes/builds_.$id/command-palette.js';
 import { useKeydown } from '#hooks/use-keydown.js';
-import { ChatControls } from '#routes/builds_.$id/chat-controls.js';
+import { BuildCommandPaletteItems } from '#routes/builds_.$id/build-command-items.js';
 import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import { BuildGitConnector } from '#routes/builds_.$id/build-git-connector.js';
@@ -35,15 +34,10 @@ export const handle: Handle = {
     return [<BuildNameEditor key={`${id}-build-name-editor`} />, <ChatModeSelector key={`${id}-chat-mode-selector`} />];
   },
   actions() {
-    return (
-      <>
-        <ChatControls />
-        <BuildGitConnector />
-      </>
-    );
+    return <BuildGitConnector />;
   },
-  commandPalette() {
-    return <CommandPaletteTrigger />;
+  commandPalette(match) {
+    return <BuildCommandPaletteItems match={match} />;
   },
   providers: () => RouteProvider,
   enableFloatingSidebar: true,

@@ -1,61 +1,21 @@
-import {
-  Clipboard,
-  Cog,
-  Download,
-  GalleryThumbnails,
-  ImageDown,
-  List,
-  LogIn,
-  LogOut,
-  Plus,
-  Terminal,
-} from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Clipboard, Download, GalleryThumbnails, ImageDown } from 'lucide-react';
+import { useCallback, useEffect } from 'react';
 import { useSelector, useActorRef } from '@xstate/react';
-import { Link, useNavigate } from 'react-router';
-import { useAuthenticate } from '@daveyplate/better-auth-ui';
+import type { UIMatch } from 'react-router';
 import type { ExportFormat } from '@taucad/types';
 import { fileExtensionFromExportFormat } from '@taucad/types/constants';
-import { Button } from '#components/ui/button.js';
 import { useBuild } from '#hooks/use-build.js';
 import { toast } from '#components/ui/sonner.js';
 import { downloadBlob } from '#utils/file.utils.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import { exportGeometryMachine } from '#machines/export-geometry.machine.js';
 import { zipMachine } from '#machines/zip.machine.js';
-import {
-  CommandDialog,
-  CommandInput,
-  CommandList,
-  CommandEmpty,
-  CommandGroup,
-  CommandItem,
-} from '#components/ui/command.js';
-import { useKeydown } from '#hooks/use-keydown.js';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { Format3D } from '#components/icons/format-3d.js';
+import { useCommandPaletteItems } from '#components/layout/commands.js';
+import type { CommandPaletteItem } from '#components/layout/commands.js';
 
-type CommandPaletteItem = {
-  id: string;
-  label: string;
-  group: string;
-  icon: React.JSX.Element;
-  action?: () => void;
-  disabled?: boolean;
-  shortcut?: string;
-  link?: string;
-  visible?: boolean;
-};
-
-type CommandPaletteProperties = {
-  readonly isOpen: boolean;
-  readonly onOpenChange: (isOpen: boolean) => void;
-};
-
-export function CommandPalette({ isOpen, onOpenChange }: CommandPaletteProperties): React.JSX.Element {
-  const navigate = useNavigate();
+export function BuildCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
   const { cadRef: cadActor, graphicsRef: graphicsActor, updateThumbnail, buildRef } = useBuild();
   const geometries = useSelector(cadActor, (state) => state.context.geometries);
   const build = useSelector(buildRef, (state) => state.context.build);
@@ -76,39 +36,6 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
   const zipActorRef = useActorRef(zipMachine, {
     input: { zipFilename: `${buildName}.zip` },
   });
-
-  const { data: authData } = useAuthenticate({ enabled: false });
-
-  const getPngBlob = useCallback(async () => {
-    return new Promise<Blob>((resolve, reject) => {
-      screenshotActorRef.send({
-        type: 'requestScreenshot',
-        options: {
-          output: {
-            format: 'image/png',
-            quality: 0.92,
-          },
-        },
-        async onSuccess(dataUrls) {
-          try {
-            const dataUrl = dataUrls[0];
-            if (!dataUrl) {
-              throw new Error('No screenshot data received');
-            }
-
-            const response = await fetch(dataUrl);
-            const blob = await response.blob();
-            resolve(blob);
-          } catch (error) {
-            reject(error instanceof Error ? error : new Error('Failed to fetch screenshot'));
-          }
-        },
-        onError(error) {
-          reject(new Error(error));
-        },
-      });
-    });
-  }, [screenshotActorRef]);
 
   const handleExport = useCallback(
     async (filename: string, format: ExportFormat) => {
@@ -141,9 +68,8 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
           },
         },
       );
-      onOpenChange(false);
     },
-    [exportActorRef, onOpenChange],
+    [exportActorRef],
   );
 
   const handleDownloadZip = useCallback(async () => {
@@ -195,29 +121,57 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         error: 'Failed to create ZIP archive',
       },
     );
-    onOpenChange(false);
-  }, [build, buildName, zipActorRef, onOpenChange]);
+  }, [build, buildName, zipActorRef]);
 
   const handleDownloadPng = useCallback(
     async (filename: string) => {
-      toast.promise(getPngBlob(), {
-        loading: `Downloading ${filename}...`,
-        success(blob) {
-          downloadBlob(blob, filename);
-          return `Downloaded ${filename}`;
-        },
-        error(error) {
-          let message = `Failed to download ${filename}`;
-          if (error instanceof Error) {
-            message = `${message}: ${error.message}`;
-          }
+      toast.promise(
+        new Promise<Blob>((resolve, reject) => {
+          screenshotActorRef.send({
+            type: 'requestScreenshot',
+            options: {
+              output: {
+                format: 'image/png',
+                quality: 0.92,
+              },
+            },
+            async onSuccess(dataUrls) {
+              try {
+                const dataUrl = dataUrls[0];
+                if (!dataUrl) {
+                  throw new Error('No screenshot data received');
+                }
 
-          return message;
+                const response = await fetch(dataUrl);
+                const blob = await response.blob();
+                resolve(blob);
+              } catch (error) {
+                reject(error instanceof Error ? error : new Error('Failed to fetch screenshot'));
+              }
+            },
+            onError(error) {
+              reject(new Error(error));
+            },
+          });
+        }),
+        {
+          loading: `Downloading ${filename}...`,
+          success(blob) {
+            downloadBlob(blob, filename);
+            return `Downloaded ${filename}`;
+          },
+          error(error) {
+            let message = `Failed to download ${filename}`;
+            if (error instanceof Error) {
+              message = `${message}: ${error.message}`;
+            }
+
+            return message;
+          },
         },
-      });
-      onOpenChange(false);
+      );
     },
-    [getPngBlob, onOpenChange],
+    [screenshotActorRef],
   );
 
   const updateThumbnailScreenshot = useCallback(() => {
@@ -255,8 +209,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         error: 'Failed to update thumbnail',
       },
     );
-    onOpenChange(false);
-  }, [updateThumbnailScreenshot, onOpenChange]);
+  }, [updateThumbnailScreenshot]);
 
   const handleCopyPngToClipboard = useCallback(async () => {
     toast.promise(
@@ -305,8 +258,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         error: `Failed to copy ${buildName}.png to clipboard`,
       },
     );
-    onOpenChange(false);
-  }, [buildName, screenshotActorRef, onOpenChange]);
+  }, [buildName, screenshotActorRef]);
 
   const handleCopyDataUrlToClipboard = useCallback(async () => {
     toast.promise(
@@ -352,8 +304,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         error: `Failed to copy data URL to clipboard`,
       },
     );
-    onOpenChange(false);
-  }, [screenshotActorRef, onOpenChange]);
+  }, [screenshotActorRef]);
 
   const handleDownloadMultipleAngles = useCallback(async () => {
     toast.promise(
@@ -402,8 +353,7 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         error: 'Failed to download multiple angle screenshots',
       },
     );
-    onOpenChange(false);
-  }, [buildName, screenshotActorRef, onOpenChange]);
+  }, [buildName, screenshotActorRef]);
 
   // Subscribe to the cadActor to update the thumbnail when the geometries change
   useEffect(() => {
@@ -418,7 +368,8 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
     };
   }, [updateThumbnailScreenshot, cadActor]);
 
-  const commandItems = useMemo(
+  useCommandPaletteItems(
+    match.id,
     (): CommandPaletteItem[] => [
       {
         id: 'download-stl',
@@ -510,53 +461,6 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         action: handleDownloadMultipleAngles,
         disabled: !isScreenshotReady,
       },
-      {
-        id: 'new-build-from-prompt',
-        label: 'New build (from prompt)',
-        group: 'Builds',
-        icon: <Plus />,
-        link: '/',
-        shortcut: '⌃N',
-      },
-      {
-        id: 'new-build-from-template',
-        label: 'New build (from code)',
-        group: 'Builds',
-        icon: <Plus />,
-        link: '/builds/new',
-      },
-      {
-        id: 'all-builds',
-        label: 'All builds',
-        group: 'Builds',
-        icon: <List />,
-        link: '/builds/library',
-        shortcut: '⌃B',
-      },
-      {
-        id: 'open-settings',
-        label: 'Open settings',
-        group: 'Settings',
-        icon: <Cog />,
-        link: '/settings',
-        visible: Boolean(authData),
-      },
-      {
-        id: 'sign-in',
-        label: 'Sign in',
-        group: 'Settings',
-        icon: <LogIn />,
-        link: '/auth/sign-in',
-        visible: !authData,
-      },
-      {
-        id: 'sign-out',
-        label: 'Sign out',
-        group: 'Settings',
-        icon: <LogOut />,
-        link: '/auth/sign-out',
-        visible: Boolean(authData),
-      },
     ],
     [
       handleUpdateThumbnail,
@@ -570,106 +474,8 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
       build,
       handleDownloadZip,
       handleDownloadMultipleAngles,
-      authData,
     ],
   );
 
-  const groupedItems = useMemo(() => {
-    const groups: Record<string, CommandPaletteItem[]> = {};
-
-    for (const item of commandItems) {
-      if (item.visible === false) {
-        continue;
-      }
-
-      groups[item.group] ??= [];
-
-      groups[item.group]!.push(item);
-    }
-
-    return groups;
-  }, [commandItems]);
-
-  const runCommand = useCallback((command: CommandPaletteItem) => {
-    if (!command.disabled && command.action) {
-      command.action();
-    }
-  }, []);
-
-  return (
-    <CommandDialog open={isOpen} onOpenChange={onOpenChange}>
-      <CommandInput placeholder="Search for actions..." />
-      <CommandList className="pb-1">
-        <CommandEmpty>No results found.</CommandEmpty>
-        {Object.entries(groupedItems).map(([groupName, items]) => (
-          <CommandGroup key={groupName} heading={groupName}>
-            {items.map((item) => {
-              const commandItemContent = (
-                <CommandItem
-                  key={item.id}
-                  value={item.label}
-                  disabled={item.disabled}
-                  className="h-9"
-                  onSelect={() => {
-                    if (item.link) {
-                      onOpenChange(false);
-                      void navigate(item.link);
-                    } else {
-                      runCommand(item);
-                    }
-                  }}
-                >
-                  <div className="flex items-center gap-2">
-                    {item.icon}
-                    <span>{item.label}</span>
-                  </div>
-                  {item.shortcut ? <KeyShortcut className="ml-auto">{item.shortcut}</KeyShortcut> : null}
-                </CommandItem>
-              );
-
-              if (item.link) {
-                return (
-                  <Link key={item.id} tabIndex={-1} to={item.link}>
-                    {commandItemContent}
-                  </Link>
-                );
-              }
-
-              return commandItemContent;
-            })}
-          </CommandGroup>
-        ))}
-      </CommandList>
-    </CommandDialog>
-  );
-}
-
-const commandKeyCombination = {
-  key: 'k',
-  metaKey: true,
-} as const satisfies KeyCombination;
-
-export function CommandPaletteTrigger(): React.JSX.Element {
-  const [open, setOpen] = useState(false);
-
-  const { formattedKeyCombination } = useKeydown(commandKeyCombination, () => {
-    setOpen((previous) => !previous);
-  });
-
-  return (
-    <>
-      <Button
-        variant="outline"
-        className="relative h-8 w-full max-w-sm justify-start rounded-md bg-sidebar text-sm font-normal text-muted-foreground shadow-none max-md:hidden sm:pr-12 md:w-40 dark:bg-sidebar"
-        onClick={() => {
-          setOpen(true);
-        }}
-      >
-        <Terminal />
-        <span className="inline-flex">Search...</span>
-        <KeyShortcut className="absolute top-1/2 right-2 -translate-y-1/2">{formattedKeyCombination}</KeyShortcut>
-      </Button>
-      <CommandPalette isOpen={open} onOpenChange={setOpen} />
-    </>
-  );
+  return undefined;
 }

@@ -21,6 +21,7 @@ import { NavUser } from '#components/nav/nav-user.js';
 import { cn } from '#utils/ui.utils.js';
 import { Tau } from '#components/icons/tau.js';
 import { Compose } from '#components/ui/utils/compose.js';
+import { Commands } from '#components/layout/commands.js';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 
@@ -30,7 +31,6 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     hasBreadcrumbItems,
     actionItems,
     hasActionItems,
-    commandPaletteItems,
     hasCommandPaletteItems,
     noPageWrapper,
     enableFloatingSidebar,
@@ -41,7 +41,6 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     hasBreadcrumbItems: handles.breadcrumb.length > 0,
     actionItems: handles.actions,
     hasActionItems: handles.actions.length > 0,
-    commandPaletteItems: handles.commandPalette,
     hasCommandPaletteItems: handles.commandPalette.length > 0,
     noPageWrapper: handles.noPageWrapper.some((match) => match.handle.noPageWrapper === true),
     enableFloatingSidebar: handles.enableFloatingSidebar.some((match) => match.handle.enableFloatingSidebar === true),
@@ -118,35 +117,21 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
               </Breadcrumb>
             </div>
 
-            {/* Centered Command Palette */}
-            <div className="pointer-events-auto absolute top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2">
-              {hasCommandPaletteItems ? (
-                <div className="flex items-center gap-2">
-                  {commandPaletteItems.map((match) => (
-                    <Fragment key={match.id}>{match.handle.commandPalette?.(match)}</Fragment>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-
             <div className="pointer-events-auto flex items-center gap-2 px-2">
-              {!isOnline && (
+              {isOnline ? null : (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Badge className="font-mono font-normal" variant="outline">
+                    <Badge className="h-8 font-mono font-normal" variant="outline">
                       OFFLINE
                     </Badge>
                   </TooltipTrigger>
                   <TooltipContent>You are offline. Reconnect to access online features.</TooltipContent>
                 </Tooltip>
               )}
-              {hasActionItems ? (
-                <div className="flex items-center gap-2">
-                  {actionItems.map((match) => (
-                    <Fragment key={match.id}>{match.handle.actions?.(match)}</Fragment>
-                  ))}
-                </div>
-              ) : null}
+              {hasCommandPaletteItems ? <Commands /> : null}
+              {hasActionItems
+                ? actionItems.map((match) => <Fragment key={match.id}>{match.handle.actions?.(match)}</Fragment>)
+                : null}
 
               <NavUser />
             </div>

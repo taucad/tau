@@ -7,7 +7,7 @@ import JSZip from 'jszip';
  */
 export type ZipContext = {
   parentRef: AnyActorRef | undefined;
-  files: Map<string, { content: string | Blob; filename: string }>;
+  files: Map<string, { content: Uint8Array; filename: string }>;
   zipBlob: Blob | undefined;
   error: Error | undefined;
   zipFilename: string;
@@ -28,11 +28,11 @@ type ZipEventInternal =
   | {
       type: 'addFile';
       filename: string;
-      content: string | Blob;
+      content: Uint8Array;
     }
   | {
       type: 'addFiles';
-      files: Array<{ filename: string; content: string | Blob }>;
+      files: Array<{ filename: string; content: Uint8Array }>;
     }
   | { type: 'generate' }
   | { type: 'clear' }
@@ -41,7 +41,7 @@ type ZipEventInternal =
 type ZipEvent = ZipEventInternal;
 
 // Define the actors that the machine can invoke
-const generateZipActor = fromPromise<Blob, { files: Map<string, { content: string | Blob; filename: string }> }>(
+const generateZipActor = fromPromise<Blob, { files: Map<string, { content: Uint8Array; filename: string }> }>(
   async ({ input }) => {
     const zip = new JSZip();
 

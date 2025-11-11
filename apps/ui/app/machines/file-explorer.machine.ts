@@ -6,7 +6,7 @@ export type FileItem = {
   id: string;
   name: string;
   path: string;
-  content: string;
+  content: Uint8Array;
   language?: string;
   isDirectory?: boolean;
   children?: FileItem[];
@@ -34,7 +34,7 @@ type FileExplorerEvent =
   | { type: 'openFile'; path: string }
   | { type: 'closeFile'; path: string }
   | { type: 'setActiveFile'; path: string | undefined }
-  | { type: 'fileCreated'; path: string; content: string };
+  | { type: 'fileCreated'; path: string; content: Uint8Array };
 
 /**
  * File Explorer Machine
@@ -55,11 +55,11 @@ export const fileExplorerMachine = setup({
     input: {} as FileExplorerInput,
   },
   actors: {
-    buildListener: fromCallback<{ type: 'fileCreated'; path: string; content: string }, FileExplorerInput>(
+    buildListener: fromCallback<{ type: 'fileCreated'; path: string; content: Uint8Array }, FileExplorerInput>(
       ({ input, sendBack }) => {
         const { parentRef } = input;
 
-        const fileCreatedSub = parentRef.on('fileCreated', (event: { path: string; content: string }) => {
+        const fileCreatedSub = parentRef.on('fileCreated', (event: { path: string; content: Uint8Array }) => {
           sendBack({ type: 'fileCreated', path: event.path, content: event.content });
         });
 

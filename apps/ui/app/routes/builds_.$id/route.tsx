@@ -20,6 +20,7 @@ import { ChatControls } from '#routes/builds_.$id/chat-controls.js';
 import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import { BuildGitConnector } from '#routes/builds_.$id/build-git-connector.js';
+import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
 
 // Define provider component at module level for stable reference across HMR
 function RouteProvider({ children }: { readonly children?: React.ReactNode }): React.JSX.Element {
@@ -149,8 +150,18 @@ function ChatWithProvider() {
       if (toolCall.toolName === 'edit_file') {
         const toolCallArgs = toolCall.args as { targetFile: string; codeEdit: string };
 
-        // Get current code from CAD actor
-        const currentCode = cadActor.getSnapshot().context.code;
+        // Get current code from build machine
+        const buildSnapshot = buildRef.getSnapshot();
+        const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
+        const fileContent = mainFilePath
+          ? buildSnapshot.context.build?.assets.mechanical?.files[mainFilePath]?.content
+          : undefined;
+
+        if (!fileContent) {
+          throw new Error('No file content found');
+        }
+
+        const currentCode = decodeTextFile(fileContent);
 
         // Create file edit actor to process the edit through Morph
         const fileEditActor = createActor(fileEditMachine).start();
@@ -161,9 +172,22 @@ function ChatWithProvider() {
             if (state.matches('success') || state.matches('error')) {
               const { result } = state.context;
               if (result?.editedContent) {
-                // Set the processed code from Morph to the CAD actor
+                // Get the active file path from build machine
+                const buildSnapshot = buildRef.getSnapshot();
+                const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
+
+                if (!mainFilePath) {
+                  reject(new Error('No main file path found'));
+                  return;
+                }
+
+                // Update file through build machine, which handles CAD forwarding
                 // On error, this will be the original content as fallback
-                cadActor.send({ type: 'setCode', code: result.editedContent });
+                buildRef.send({
+                  type: 'updateFile',
+                  path: mainFilePath,
+                  content: encodeTextFile(result.editedContent),
+                });
 
                 // Wait for CAD processing to complete
                 const cadSubscription = cadActor.subscribe((cadState) => {
@@ -239,7 +263,7 @@ function ChatWithProvider() {
 
       return undefined;
     },
-    [cadActor, graphicsActor],
+    [buildRef, cadActor, graphicsActor],
   );
 
   // Use chat ID when available, fallback to build ID

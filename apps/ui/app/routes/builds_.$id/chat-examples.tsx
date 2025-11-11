@@ -20,7 +20,7 @@ export const ChatExamples = memo(function () {
       content: example.prompt,
       role: messageRole.user,
       status: messageStatus.pending,
-      metadata: { kernel: example.kernel },
+      metadata: {},
       model: selectedModel?.id ?? '',
     });
     append(userMessage);

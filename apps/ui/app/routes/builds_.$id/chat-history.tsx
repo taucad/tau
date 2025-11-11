@@ -1,7 +1,6 @@
 import { memo, useCallback, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { VirtuosoHandle } from 'react-virtuoso';
-import { useSelector } from '@xstate/react';
 import { XIcon, MessageCircle } from 'lucide-react';
 import { messageRole, messageStatus } from '@taucad/types/constants';
 import { ChatMessage } from '#routes/builds_.$id/chat-message.js';
@@ -13,7 +12,6 @@ import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { createMessage } from '#utils/chat.utils.js';
 import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
 import { ChatSelector } from '#routes/builds_.$id/chat-selector.js';
-import { useBuild } from '#hooks/use-build.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {
   FloatingPanel,
@@ -72,8 +70,6 @@ export const ChatHistory = memo(function (props: {
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }) {
   const { className, isExpanded = true, setIsExpanded } = props;
-  const { cadRef: cadActor } = useBuild();
-  const kernel = useSelector(cadActor, (state) => state.context.kernelTypeSelected);
   const messageIds = useChatSelector((state) => state.context.messageOrder);
   const { append } = useChatActions();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -90,13 +86,13 @@ export const ChatHistory = memo(function (props: {
         content,
         role: messageRole.user,
         status: messageStatus.pending,
-        metadata: { kernel, ...metadata },
+        metadata: metadata ?? {},
         model,
         imageUrls,
       });
       append(userMessage);
     },
-    [append, kernel],
+    [append],
   );
 
   // Memoize the item renderer for Virtuoso with stable references

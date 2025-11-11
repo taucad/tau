@@ -1,4 +1,4 @@
-import { assign, assertEvent, setup, sendTo, emit, enqueueActions } from 'xstate';
+import { assign, assertEvent, setup, sendTo, enqueueActions } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { CodeError, Geometry, ExportFormat, KernelError, GeometryFile } from '@taucad/types';
 import type { JSONSchema7 } from 'json-schema';

@@ -2,7 +2,7 @@ import type { Message } from '@ai-sdk/react';
 import type { EngineeringDiscipline } from '#types/cad.types.js';
 
 export type File = {
-  content: string;
+  content: Uint8Array;
   // Could add metadata in the future
   lastModified?: number;
   size?: number;

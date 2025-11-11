@@ -1,3 +1,4 @@
+import type { File } from '@taucad/types';
 import { lightningFs } from '#db/storage.js';
 
 /**
@@ -10,10 +11,7 @@ export function getBuildDirectory(buildId: string): string {
 /**
  * Write all build files to LightningFS
  */
-export async function writeBuildToLightningFs(
-  buildId: string,
-  files: Record<string, { content: string }>,
-): Promise<void> {
+export async function writeBuildToLightningFs(buildId: string, files: Record<string, File>): Promise<void> {
   if (!lightningFs) {
     throw new Error('LightningFS not initialized');
   }
@@ -54,7 +52,8 @@ export async function writeBuildToLightningFs(
       }
     }
 
+    // Write as binary data (Uint8Array)
     // eslint-disable-next-line no-await-in-loop -- need sequential file writing
-    await fs.promises.writeFile(`${buildDir}/${path}`, fileData.content, 'utf8');
+    await fs.promises.writeFile(`${buildDir}/${path}`, fileData.content);
   }
 }

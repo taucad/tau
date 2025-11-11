@@ -22,6 +22,7 @@ import { toast } from '#components/ui/sonner.js';
 import { downloadBlob } from '#utils/file.utils.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import { exportGeometryMachine } from '#machines/export-geometry.machine.js';
+import { zipMachine } from '#machines/zip.machine.js';
 import {
   CommandDialog,
   CommandInput,
@@ -57,8 +58,8 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
   const navigate = useNavigate();
   const { cadRef: cadActor, graphicsRef: graphicsActor, updateThumbnail, buildRef } = useBuild();
   const geometries = useSelector(cadActor, (state) => state.context.geometries);
+  const build = useSelector(buildRef, (state) => state.context.build);
   const buildName = useSelector(buildRef, (state) => state.context.build?.name) ?? 'file';
-  const code = useSelector(cadActor, (state) => state.context.code);
   const isScreenshotReady = useSelector(graphicsActor, (state) => state.context.isScreenshotReady);
 
   // Create screenshot request machine instance
@@ -69,6 +70,11 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
   // Create export geometry machine instance
   const exportActorRef = useActorRef(exportGeometryMachine, {
     input: { cadRef: cadActor },
+  });
+
+  // Create zip machine instance
+  const zipActorRef = useActorRef(zipMachine, {
+    input: { zipFilename: `${buildName}.zip` },
   });
 
   const { data: authData } = useAuthenticate({ enabled: false });
@@ -140,19 +146,57 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
     [exportActorRef, onOpenChange],
   );
 
-  const handleDownloadCode = useCallback(async () => {
+  const handleDownloadZip = useCallback(async () => {
+    if (!build) {
+      return;
+    }
+
     toast.promise(
       async () => {
-        downloadBlob(new Blob([code]), `${buildName}.ts`);
+        // Get mechanical asset files
+        const mechanicalAsset = build.assets.mechanical;
+        if (mechanicalAsset) {
+          const files: Array<{ filename: string; content: Uint8Array }> = [];
+
+          // Add all files from the mechanical asset
+          for (const [filename, file] of Object.entries(mechanicalAsset.files)) {
+            files.push({
+              filename,
+              content: file.content,
+            });
+          }
+
+          // Add files to zip machine
+          zipActorRef.send({ type: 'addFiles', files });
+        }
+
+        // Generate the zip
+        zipActorRef.send({ type: 'generate' });
+
+        // Wait for the zip to be ready
+        return new Promise<Blob>((resolve, reject) => {
+          const subscription = zipActorRef.subscribe((state) => {
+            if (state.matches('ready') && state.context.zipBlob) {
+              subscription.unsubscribe();
+              resolve(state.context.zipBlob);
+            } else if (state.matches('error')) {
+              subscription.unsubscribe();
+              reject(state.context.error ?? new Error('Failed to generate ZIP'));
+            }
+          });
+        });
       },
       {
-        loading: `Downloading ${buildName}.ts...`,
-        success: `Downloaded ${buildName}.ts`,
-        error: `Failed to download ${buildName}.ts`,
+        loading: 'Creating ZIP archive...',
+        success(blob) {
+          downloadBlob(blob, `${buildName}.zip`);
+          return 'ZIP downloaded successfully';
+        },
+        error: 'Failed to create ZIP archive',
       },
     );
     onOpenChange(false);
-  }, [code, buildName, onOpenChange]);
+  }, [build, buildName, zipActorRef, onOpenChange]);
 
   const handleDownloadPng = useCallback(
     async (filename: string) => {
@@ -417,6 +461,14 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         disabled: geometries.length === 0,
       },
       {
+        id: 'download-zip',
+        label: 'Download ZIP',
+        group: 'Code',
+        icon: <Download />,
+        action: handleDownloadZip,
+        disabled: !build?.assets.mechanical?.files,
+      },
+      {
         id: 'update-thumbnail',
         label: 'Update thumbnail',
         group: 'Preview',
@@ -457,14 +509,6 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
         icon: <ImageDown />,
         action: handleDownloadMultipleAngles,
         disabled: !isScreenshotReady,
-      },
-      {
-        id: 'download-code',
-        label: 'Download code',
-        group: 'Code',
-        icon: <Download />,
-        action: handleDownloadCode,
-        disabled: !code,
       },
       {
         id: 'new-build-from-prompt',
@@ -523,8 +567,8 @@ export function CommandPalette({ isOpen, onOpenChange }: CommandPalettePropertie
       buildName,
       handleExport,
       geometries,
-      code,
-      handleDownloadCode,
+      build,
+      handleDownloadZip,
       handleDownloadMultipleAngles,
       authData,
     ],

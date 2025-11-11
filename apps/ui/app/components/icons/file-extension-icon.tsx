@@ -14,7 +14,7 @@ type IconConfig =
       id: InputFormat;
     };
 
-const iconFromExtension: Partial<Record<string, IconConfig>> = {
+export const iconFromExtension: Partial<Record<string, IconConfig>> = {
   // Languages
   scad: {
     type: 'lib',

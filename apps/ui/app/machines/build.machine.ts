@@ -16,7 +16,7 @@ import { logMachine } from '#machines/logs.machine.js';
 import { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
 import { writeBuildToLightningFs } from '#lib/lightning-fs.lib.js';
-import { createGeometryFileFromCode } from '#utils/filesystem.utils.js';
+import { createGeometryFile } from '#utils/filesystem.utils.js';
 
 /**
  * Build Machine Context
@@ -64,7 +64,7 @@ const writeBuildActor = fromPromise<Build, { build: Build }>(async ({ input }) =
   return updated;
 });
 
-const writeFilesystemActor = fromPromise<void, { buildId: string; files: Record<string, { content: string }> }>(
+const writeFilesystemActor = fromPromise<void, { buildId: string; files: Record<string, { content: Uint8Array }> }>(
   async ({ input }) => {
     await writeBuildToLightningFs(input.buildId, input.files);
   },
@@ -110,13 +110,13 @@ type BuildEventInternal =
   | { type: 'deleteChat'; chatId: string }
   | {
       type: 'updateCodeParameters';
-      files: Record<string, { content: string }>;
+      files: Record<string, { content: Uint8Array }>;
       parameters: Record<string, unknown>;
     }
   | { type: 'setEnableFilePreview'; enabled: boolean }
   | { type: 'loadModel' }
-  | { type: 'createFile'; path: string; content: string }
-  | { type: 'updateFile'; path: string; content: string }
+  | { type: 'createFile'; path: string; content: Uint8Array }
+  | { type: 'updateFile'; path: string; content: Uint8Array }
   | { type: 'renameFile'; oldPath: string; newPath: string }
   | { type: 'deleteFile'; path: string }
   | { type: 'fileOpened'; path: string };
@@ -133,8 +133,8 @@ type BuildEmitted =
   | { type: 'buildLoaded'; build: Build }
   | { type: 'error'; error: Error }
   | { type: 'buildUpdated'; build: Build }
-  | { type: 'fileCreated'; path: string; content: string }
-  | { type: 'fileUpdated'; path: string; content: string }
+  | { type: 'fileCreated'; path: string; content: Uint8Array }
+  | { type: 'fileUpdated'; path: string; content: Uint8Array }
   | { type: 'fileDeleted'; path: string }
   | { type: 'activeChatChanged'; chat: Chat };
 
@@ -473,6 +473,7 @@ export const buildMachine = setup({
 
       return produce(context, (draft) => {
         if (draft.build?.assets.mechanical) {
+          // Content is already Uint8Array
           draft.build.assets.mechanical.files[event.path] = { content: event.content };
           draft.build.updatedAt = Date.now();
         }
@@ -499,18 +500,18 @@ export const buildMachine = setup({
       const mainFilePath = context.build.assets.mechanical.main;
       const isMainFile = event.path === mainFilePath;
 
-      let codeToSend: string | undefined;
+      let dataToSend: Uint8Array | undefined;
 
       if (enableFilePreview) {
-        codeToSend = event.content;
+        dataToSend = event.content;
       } else {
         // With preview disabled, always send main file when any file updates
-        codeToSend = isMainFile ? event.content : context.build.assets.mechanical.files[mainFilePath]?.content;
+        dataToSend = isMainFile ? event.content : context.build.assets.mechanical.files[mainFilePath]?.content;
       }
 
-      if (codeToSend) {
+      if (dataToSend) {
         const pathToSend = enableFilePreview ? event.path : mainFilePath;
-        const file = createGeometryFileFromCode(codeToSend, pathToSend);
+        const file = createGeometryFile(dataToSend, pathToSend);
         enqueue.sendTo(context.cadRef, {
           type: 'setFile',
           file,
@@ -617,10 +618,7 @@ export const buildMachine = setup({
       enqueue.sendTo(context.cadRef, { type: 'initializeKernel' });
 
       // Then initialize the model with current build data
-      const file = createGeometryFileFromCode(
-        mechanicalAsset.files[mechanicalAsset.main]!.content,
-        mechanicalAsset.main,
-      );
+      const file = createGeometryFile(mechanicalAsset.files[mechanicalAsset.main]!.content, mechanicalAsset.main);
 
       enqueue.sendTo(context.cadRef, {
         type: 'initializeModel',
@@ -638,10 +636,7 @@ export const buildMachine = setup({
       enqueue.sendTo(context.cadRef, { type: 'initializeKernel' });
 
       // Then initialize the model with current build data
-      const file = createGeometryFileFromCode(
-        mechanicalAsset.files[mechanicalAsset.main]!.content,
-        mechanicalAsset.main,
-      );
+      const file = createGeometryFile(mechanicalAsset.files[mechanicalAsset.main]!.content, mechanicalAsset.main);
 
       enqueue.sendTo(context.cadRef, {
         type: 'initializeModel',
@@ -668,21 +663,21 @@ export const buildMachine = setup({
       const isMainFile = event.path === mainFilePath;
 
       // Determine which file to show in CAD
-      let codeToSend: string | undefined;
+      let dataToSend: Uint8Array | undefined;
 
       if (enableFilePreview) {
         // Preview enabled: show the opened file
         const file = mechanicalAsset.files[event.path];
-        codeToSend = file?.content;
+        dataToSend = file?.content;
       } else if (isMainFile) {
         // Preview disabled: only update CAD if opening the main file
         const file = mechanicalAsset.files[event.path];
-        codeToSend = file?.content;
+        dataToSend = file?.content;
       }
       // If opening a non-main file with preview disabled, do nothing
 
-      if (codeToSend) {
-        const file = createGeometryFileFromCode(codeToSend, event.path);
+      if (dataToSend) {
+        const file = createGeometryFile(dataToSend, event.path);
         enqueue.sendTo(context.cadRef, {
           type: 'setFile',
           file,
@@ -726,17 +721,18 @@ export const buildMachine = setup({
         build: event.output as Build,
       };
     }),
-    emitFileCreated: emit(({ context, event }) => {
-      assertActorDoneEvent(event);
+    emitFileCreated: emit(({ context }) => {
       // Get the path and content from the last createFile event
       const mechanicalFiles = context.build?.assets.mechanical?.files ?? {};
       const paths = Object.keys(mechanicalFiles);
       const lastPath = paths.at(-1) ?? '';
       const lastFile = mechanicalFiles[lastPath];
+      const content: Uint8Array = lastFile?.content ?? new Uint8Array();
+
       return {
         type: 'fileCreated' as const,
         path: lastPath,
-        content: lastFile?.content ?? '',
+        content,
       };
     }),
     updateBuildFromEvent: assign({

@@ -9,6 +9,7 @@ import { toast } from '#components/ui/sonner.js';
 import { downloadBlob } from '#utils/file.utils.js';
 import { useBuild } from '#hooks/use-build.js';
 import { useCookie } from '#hooks/use-cookie.js';
+import { decodeTextFile } from '#utils/filesystem.utils.js';
 
 export function ChatEditorBreadcrumbs(): ReactNode {
   const { fileExplorerRef, buildRef } = useBuild();
@@ -100,7 +101,7 @@ export function ChatEditorBreadcrumbs(): ReactNode {
               size="icon"
               variant="ghost"
               className="size-7 rounded-sm"
-              getText={() => activeFile!.content}
+              getText={() => decodeTextFile(activeFile!.content)}
               tooltip="Copy code"
             />
             <Button size="icon" variant="ghost" className="size-7 rounded-sm" onClick={handleDownloadCode}>

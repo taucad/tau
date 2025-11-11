@@ -26,7 +26,6 @@ export function ChatControls(): React.JSX.Element {
   const { cadRef: cadActor, graphicsRef: graphicsActor, updateThumbnail, buildRef } = useBuild();
   const geometries = useSelector(cadActor, (state) => state.context.geometries);
   const buildName = useSelector(buildRef, (state) => state.context.build?.name ?? 'file');
-  const code = useSelector(cadActor, (state) => state.context.code);
   const isScreenshotReady = useSelector(graphicsActor, (state) => state.context.isScreenshotReady);
 
   // Create screenshot request machine instance
@@ -104,32 +103,6 @@ export function ChatControls(): React.JSX.Element {
     },
     [exportActorRef],
   );
-
-  const handleDownloadCode = useCallback(async () => {
-    toast.promise(
-      async () => {
-        downloadBlob(new Blob([code]), `${buildName}.ts`);
-      },
-      {
-        loading: `Downloading ${buildName}.ts...`,
-        success: `Downloaded ${buildName}.ts`,
-        error: `Failed to download ${buildName}.ts`,
-      },
-    );
-  }, [code, buildName]);
-
-  const handleCopyCodeToClipboard = useCallback(async () => {
-    toast.promise(
-      async () => {
-        await navigator.clipboard.writeText(code);
-      },
-      {
-        loading: `Copying ${buildName}.ts to clipboard...`,
-        success: `Copied ${buildName}.ts to clipboard`,
-        error: `Failed to copy ${buildName}.ts to clipboard`,
-      },
-    );
-  }, [code, buildName]);
 
   const handleDownloadPng = useCallback(
     async (filename: string) => {
@@ -413,22 +386,6 @@ export function ChatControls(): React.JSX.Element {
         action: handleDownloadMultipleAngles,
         disabled: !isScreenshotReady,
       },
-      {
-        id: 'copy-code',
-        label: 'Copy code to clipboard',
-        group: 'Code',
-        icon: <Clipboard className="mr-2 size-4" />,
-        action: handleCopyCodeToClipboard,
-        disabled: !code,
-      },
-      {
-        id: 'download-code',
-        label: 'Download code',
-        group: 'Code',
-        icon: <Download className="mr-2 size-4" />,
-        action: handleDownloadCode,
-        disabled: !code,
-      },
     ],
     [
       handleUpdateThumbnail,
@@ -439,9 +396,6 @@ export function ChatControls(): React.JSX.Element {
       buildName,
       handleExport,
       geometries,
-      code,
-      handleCopyCodeToClipboard,
-      handleDownloadCode,
       handleDownloadMultipleAngles,
     ],
   );

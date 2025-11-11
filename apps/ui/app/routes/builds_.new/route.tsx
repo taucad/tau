@@ -15,6 +15,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '#c
 import { storage } from '#db/storage.js';
 import { getKernelOption } from '#utils/kernel.utils.js';
 import { toast } from '#components/ui/sonner.js';
+import { encodeTextFile } from '#utils/filesystem.utils.js';
 import type { Handle } from '#types/matches.types.js';
 import { cn } from '#utils/ui.utils.js';
 import { useKeydown } from '#hooks/use-keydown.js';
@@ -99,7 +100,7 @@ function useBuildCreation() {
             mechanical: {
               files: {
                 [selectedOption.mainFile]: {
-                  content: selectedOption.emptyCode,
+                  content: encodeTextFile(selectedOption.emptyCode),
                 },
               },
               main: selectedOption.mainFile,

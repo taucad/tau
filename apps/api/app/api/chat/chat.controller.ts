@@ -74,8 +74,8 @@ export class ChatController {
       return response.send(result.toDataStream());
     }
 
-    // Extract kernel from message metadata
-    const selectedKernel = lastHumanMessage.metadata.kernel;
+    // Extract kernel from request body (default to openscad if not provided)
+    const selectedKernel = body.kernel ?? 'openscad';
 
     const langchainMessages = convertAiSdkMessagesToLangchainMessages(sanitizedMessages, coreMessages);
     const graph = await this.chatService.createGraph(modelId, selectedToolChoice, selectedKernel);

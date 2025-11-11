@@ -1,9 +1,8 @@
-import { memo, useCallback, useEffect } from 'react';
+import { memo, useCallback, useEffect, useState, useMemo } from 'react';
 import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
-import { FileCode } from 'lucide-react';
-import { languageFromKernel } from '@taucad/types/constants';
+import { FileCode, TriangleAlert } from 'lucide-react';
 import { CodeEditor } from '#components/code/code-editor.js';
 import { cn } from '#utils/ui.utils.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
@@ -14,10 +13,14 @@ import { ChatEditorTabs } from '#routes/builds_.$id/chat-editor-tabs.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
+import { Button } from '#components/ui/button.js';
+import { getFileExtension, isBinaryFile, decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
+import { iconFromExtension } from '#components/icons/file-extension-icon.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }): React.JSX.Element {
   const monaco = useMonaco();
   const { fileExplorerRef: fileExplorerActor, cadRef: cadActor, buildRef } = useBuild();
+  const [forceOpenBinary, setForceOpenBinary] = useState(false);
   // Get active file path from file explorer
   const activeFilePath = useSelector(fileExplorerActor, (state) => {
     return state.context.activeFilePath;
@@ -35,14 +38,24 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       return undefined;
     }
 
-    const language = state.context.build?.assets.mechanical?.language;
     return {
       path: activeFilePath,
       name: activeFilePath.split('/').pop() ?? activeFilePath,
       content: fileContent.content,
-      language: language ? languageFromKernel[language] : undefined,
+      language: iconFromExtension[getFileExtension(activeFilePath)]?.id,
     };
   });
+
+  // Detect if the active file is binary
+  const isBinary = useMemo(
+    () => (activeFile ? isBinaryFile(activeFile.name, activeFile.content) : false),
+    [activeFile],
+  );
+
+  // Reset force open when file changes
+  useEffect(() => {
+    setForceOpenBinary(false);
+  }, [activeFile?.path]);
 
   // Sync file preview preference between cookie and build machine
   const [enableFilePreview] = useCookie<boolean>(cookieName.cadFilePreview, true);
@@ -61,15 +74,22 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
         return;
       }
 
-      // Update build machine as single source of truth
+      // Encode string → Uint8Array before sending to machine
       buildRef.send({
         type: 'updateFile',
         path: activeFile.path,
-        content: value ?? '',
+        content: encodeTextFile(value ?? ''),
       });
     },
     [activeFile, buildRef],
   );
+
+  // Decode Uint8Array → string for editor
+  const editorContent = activeFile ? decodeTextFile(activeFile.content) : '';
+
+  const handleForceOpenBinary = useCallback(() => {
+    setForceOpenBinary(true);
+  }, []);
 
   useEffect(() => {
     if (monaco) {
@@ -106,14 +126,31 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       <ChatEditorBreadcrumbs />
       <div className="flex-1">
         {activeFile ? (
-          <CodeEditor
-            loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
-            className="h-full bg-background"
-            language={activeFile.language}
-            value={activeFile.content}
-            onChange={handleCodeChange}
-            onValidate={handleValidate}
-          />
+          isBinary && !forceOpenBinary ? (
+            <div className="flex h-full items-center justify-center bg-background p-4">
+              <div className="flex flex-col items-center gap-4 text-center">
+                <TriangleAlert className="size-10 stroke-1 text-warning" />
+                <div className="flex flex-col items-center gap-4">
+                  <p className="text-sm">
+                    The file is not displayed in the text editor because it is either binary or uses an unsupported text
+                    encoding.
+                  </p>
+                  <Button variant="outline" onClick={handleForceOpenBinary}>
+                    Open Anyway
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <CodeEditor
+              loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
+              className="h-full bg-background"
+              language={activeFile.language}
+              value={editorContent}
+              onChange={handleCodeChange}
+              onValidate={handleValidate}
+            />
+          )
         ) : (
           <EmptyItems>
             <FileCode className="mb-4 size-12 stroke-1 text-muted-foreground" />

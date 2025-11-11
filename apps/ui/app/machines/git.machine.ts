@@ -5,6 +5,7 @@ import http from 'isomorphic-git/http/web';
 import { lightningFs } from '#db/storage.js';
 import { assertActorDoneEvent } from '#lib/xstate.js';
 import { getBuildDirectory } from '#lib/lightning-fs.lib.js';
+import { gitAttributesTemplate } from '#constants/gitattributes-template.js';
 
 /**
  * Git File Status
@@ -71,6 +72,16 @@ const initGitActor = fromPromise<{ buildId: string }, { buildId: string; reposit
       remote: 'origin',
       url: input.repository.url,
     });
+
+    // Create .gitattributes file for binary file handling
+    const gitAttributesPath = `${dir}/.gitattributes`;
+    try {
+      // Check if .gitattributes already exists
+      await fs.promises.stat(gitAttributesPath);
+    } catch {
+      // Doesn't exist, create it
+      await fs.promises.writeFile(gitAttributesPath, gitAttributesTemplate, 'utf8');
+    }
 
     return { buildId: input.buildId };
   },

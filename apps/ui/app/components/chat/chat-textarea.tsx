@@ -4,11 +4,13 @@ import type { ClassValue } from 'clsx';
 import type { ToolWithSelection } from '@taucad/types';
 import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
+import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
 import { HoverCard, HoverCardContent, HoverCardPortal, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { Button } from '#components/ui/button.js';
 import { Textarea } from '#components/ui/textarea.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { SvgIcon } from '#components/icons/svg-icon.js';
 import { useModels } from '#hooks/use-models.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
@@ -45,6 +47,7 @@ export type ChatTextareaProperties = {
   readonly enableAutoFocus?: boolean;
   readonly className?: ClassValue;
   readonly enableContextActions?: boolean;
+  readonly enableKernelSelector?: boolean;
   readonly mode?: 'main' | 'edit';
 };
 
@@ -63,6 +66,7 @@ export const ChatTextarea = memo(function ({
   onBlur,
   className,
   enableContextActions = true,
+  enableKernelSelector = true,
   mode = 'main',
 }: ChatTextareaProperties): React.JSX.Element {
   const [isDragging, setIsDragging] = useState(false);
@@ -649,6 +653,46 @@ export const ChatTextarea = memo(function ({
             <span>({selectedModel?.slug ?? 'Offline'})</span>
           </TooltipContent>
         </Tooltip>
+        {/* Kernel selector */}
+        {enableKernelSelector ? (
+          <Tooltip>
+            <ChatKernelSelector
+              data-chat-textarea-focustrap
+              popoverProperties={{
+                align: 'start',
+              }}
+              onSelect={focusInput}
+              onClose={focusInput}
+            >
+              {({ selectedKernel }) => (
+                <TooltipTrigger asChild>
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    className="h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground"
+                  >
+                    <span className="flex max-w-24 shrink-0 flex-row items-center gap-2 rounded-full @max-[22rem]:w-7 @xs:max-w-fit">
+                      <span className="hidden truncate text-xs @[22rem]:block">
+                        {selectedKernel?.name ?? 'OpenSCAD'}
+                      </span>
+                      <span className="relative flex size-4 items-center justify-center">
+                        <ChevronDown className="absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100" />
+                        <SvgIcon
+                          id={selectedKernel?.id ?? 'openscad'}
+                          className="absolute scale-100 transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0"
+                        />
+                      </span>
+                    </span>
+                  </Button>
+                </TooltipTrigger>
+              )}
+            </ChatKernelSelector>
+            <TooltipContent>
+              <span>Select kernel</span>
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
         {/* Tool selector */}
         <Tooltip>
           <ChatToolSelector value={selectedToolChoice} onValueChange={setDraftToolChoice}>
@@ -658,7 +702,10 @@ export const ChatTextarea = memo(function ({
                   data-chat-textarea-focustrap
                   variant="outline"
                   size="sm"
-                  className="h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7"
+                  className={cn(
+                    'h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7',
+                    selectedTools.length > 0 && 'px-2 @max-[22rem]:w-auto',
+                  )}
                 >
                   <span className="hidden text-xs @[22rem]:block">
                     {selectedMode === 'auto' && 'Auto'}

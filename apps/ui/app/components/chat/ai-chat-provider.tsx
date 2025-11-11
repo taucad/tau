@@ -14,9 +14,12 @@ import { setup, assign, enqueueActions } from 'xstate';
 import { useEffect } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { messageStatus } from '@taucad/types/constants';
-import type { Chat } from '@taucad/types';
+import type { Chat, KernelProvider } from '@taucad/types';
 import { useBuild } from '#hooks/use-build.js';
 import { inspect } from '#machines/inspector.js';
+import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 type UseChatArgs = NonNullable<Parameters<typeof useChat>[0]>;
 type UseChatReturn = ReturnType<typeof useChat>;
@@ -1047,6 +1050,7 @@ function ChatSyncWrapper({
 }): React.JSX.Element {
   const actorRef = AiChatContext.useActorRef();
   const buildContext = useBuild({ enableNoContext: true });
+  const [kernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
 
   // Initialize useChat with sync callbacks
   const chat = useChat({
@@ -1056,9 +1060,20 @@ function ChatSyncWrapper({
     experimental_prepareRequestBody(requestBody) {
       let feedback = {};
       if (buildContext) {
+        // Get code from build machine (source of truth)
+        const buildSnapshot = buildContext.buildRef.getSnapshot();
+        const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
+        const fileContent = mainFilePath
+          ? buildSnapshot.context.build?.assets.mechanical?.files[mainFilePath]?.content
+          : undefined;
+
+        const code = fileContent ? decodeTextFile(fileContent) : undefined;
+
+        // Get error state from CAD machine
         const cadActorState = buildContext.cadRef.getSnapshot();
         feedback = {
-          code: cadActorState.context.code,
+          code,
+          kernel,
           codeErrors: cadActorState.context.codeErrors,
           kernelError: cadActorState.context.kernelError,
         };

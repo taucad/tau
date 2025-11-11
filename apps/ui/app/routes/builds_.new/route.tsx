@@ -103,7 +103,6 @@ function useBuildCreation() {
                 },
               },
               main: selectedOption.mainFile,
-              language: buildData.kernel,
               parameters: {},
             },
           },

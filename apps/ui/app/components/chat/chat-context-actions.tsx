@@ -7,6 +7,7 @@ import { useBuild } from '#hooks/use-build.js';
 import { toast } from '#components/ui/sonner.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { orthographicViews, screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
+import { decodeTextFile } from '#utils/filesystem.utils.js';
 
 type ChatContextActionsProperties = {
   readonly addImage: (image: string) => void;
@@ -39,10 +40,14 @@ export function ChatContextActions({
   onSelectItem,
   ...properties
 }: ChatContextActionsProperties): React.JSX.Element {
-  const { cadRef: cadActor, graphicsRef: graphicsActor } = useBuild();
+  const { cadRef: cadActor, graphicsRef: graphicsActor, buildRef: buildActor } = useBuild();
   const kernelError = useSelector(cadActor, (state) => state.context.kernelError);
   const codeErrors = useSelector(cadActor, (state) => state.context.codeErrors);
-  const code = useSelector(cadActor, (state) => state.context.code);
+  const code = useSelector(buildActor, (state) => {
+    const mainFilePath = state.context.build?.assets.mechanical?.main;
+    const fileContent = mainFilePath ? state.context.build?.assets.mechanical?.files[mainFilePath]?.content : undefined;
+    return fileContent ? decodeTextFile(fileContent) : '';
+  });
   const isScreenshotReady = useSelector(graphicsActor, (state) => state.context.isScreenshotReady);
 
   // Create screenshot request machine instance

@@ -9,6 +9,7 @@ import { Button } from '#components/ui/button.js';
 import { storage } from '#db/storage.js';
 import { createMessage } from '#utils/chat.utils.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
+import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { CommunityBuildGrid } from '#components/project-grid.js';
 import { sampleBuilds } from '#constants/build-examples.js';
 import { defaultBuildName } from '#constants/build-names.js';
@@ -43,7 +44,7 @@ export default function ChatStart(): React.JSX.Element {
           role: messageRole.user,
           model,
           status: messageStatus.pending, // Set as pending
-          metadata: { kernel: selectedKernel, ...metadata },
+          metadata: metadata ?? {},
           imageUrls,
         });
 
@@ -71,9 +72,8 @@ export default function ChatStart(): React.JSX.Element {
           lastChatId: chatId,
           assets: {
             mechanical: {
-              files: { [mainFileName]: { content: emptyCode } },
+              files: { [mainFileName]: { content: encodeTextFile(emptyCode) } },
               main: mainFileName,
-              language: selectedKernel,
               parameters: {},
             },
           },
@@ -105,7 +105,12 @@ export default function ChatStart(): React.JSX.Element {
             <div className="flex justify-center">
               <KernelSelector selectedKernel={selectedKernel} onKernelChange={setSelectedKernel} />
             </div>
-            <ChatTextarea enableContextActions={false} className="pt-1" onSubmit={onSubmit} />
+            <ChatTextarea
+              enableContextActions={false}
+              enableKernelSelector={false}
+              className="pt-1"
+              onSubmit={onSubmit}
+            />
           </div>
           <div className="mx-auto my-6 flex w-20 items-center justify-center">
             <Separator />

@@ -925,6 +925,43 @@ const chatMachine = setup({
             setDraftText: 'pendingEmit',
             addDraftImage: 'pendingEmit',
             removeDraftImage: 'pendingEmit',
+            // Handle draft clearing events with immediate emission
+            append: [
+              {
+                guard: 'isValidChatId',
+                actions: enqueueActions(({ context, enqueue }) => {
+                  enqueue.emit({
+                    type: 'draftChanged' as const,
+                    chatId: context.chatId!,
+                    draft: createEmptyDraftMessage(),
+                  });
+                }),
+              },
+            ],
+            submit: [
+              {
+                guard: 'isValidChatId',
+                actions: enqueueActions(({ context, enqueue }) => {
+                  enqueue.emit({
+                    type: 'draftChanged' as const,
+                    chatId: context.chatId!,
+                    draft: createEmptyDraftMessage(),
+                  });
+                }),
+              },
+            ],
+            clearDraft: [
+              {
+                guard: 'isValidChatId',
+                actions: enqueueActions(({ context, enqueue }) => {
+                  enqueue.emit({
+                    type: 'draftChanged' as const,
+                    chatId: context.chatId!,
+                    draft: createEmptyDraftMessage(),
+                  });
+                }),
+              },
+            ],
           },
         },
         pendingEmit: {
@@ -1019,12 +1056,12 @@ const chatMachine = setup({
 type ChatMachineState = ReturnType<typeof chatMachine.getInitialSnapshot>;
 
 // Create the actor context using XState's createActorContext
-export const AiChatContext = createActorContext(chatMachine, {
+export const ChatContext = createActorContext(chatMachine, {
   inspect,
 });
 
 // Provider component that wraps useChat and syncs with XState
-export function AiChatProvider({
+export function ChatProvider({
   children,
   value,
   chatId,
@@ -1034,9 +1071,9 @@ export function AiChatProvider({
   readonly chatId?: string;
 }): React.JSX.Element {
   return (
-    <AiChatContext.Provider options={{ input: { chatId } }}>
+    <ChatContext.Provider options={{ input: { chatId } }}>
       <ChatSyncWrapper value={value}>{children}</ChatSyncWrapper>
-    </AiChatContext.Provider>
+    </ChatContext.Provider>
   );
 }
 
@@ -1048,7 +1085,7 @@ function ChatSyncWrapper({
   readonly children: React.ReactNode;
   readonly value: Omit<UseChatArgs, 'onFinish' | 'onError' | 'onResponse'>;
 }): React.JSX.Element {
-  const actorRef = AiChatContext.useActorRef();
+  const actorRef = ChatContext.useActorRef();
   const buildContext = useBuild({ enableNoContext: true });
   const [kernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
 
@@ -1163,7 +1200,7 @@ export function useChatSelector<T>(
   selector: (state: ChatMachineState) => T,
   equalityFn?: (previous: T, next: T) => boolean,
 ): T {
-  return AiChatContext.useSelector(selector, equalityFn);
+  return ChatContext.useSelector(selector, equalityFn);
 }
 
 // Hook for accessing sync state (useful for debugging)
@@ -1194,7 +1231,7 @@ export function useChatActions(): {
   editMessage: (messageId: string, content: string, model: string, metadata?: unknown, imageUrls?: string[]) => void;
   retryMessage: (messageId: string, modelId?: string) => void;
 } {
-  const actorRef = AiChatContext.useActorRef();
+  const actorRef = ChatContext.useActorRef();
 
   return {
     append(message: Parameters<UseChatReturn['append']>[0]) {

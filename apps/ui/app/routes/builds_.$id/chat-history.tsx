@@ -10,7 +10,7 @@ import { ChatStatus } from '#routes/builds_.$id/chat-status.js';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { createMessage } from '#utils/chat.utils.js';
-import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
+import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
 import { ChatSelector } from '#routes/builds_.$id/chat-selector.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {

@@ -9,7 +9,7 @@ import { ChatInterface } from '#routes/builds_.$id/chat-interface.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
 import type { Handle } from '#types/matches.types.js';
 import { useChatConstants } from '#utils/chat.utils.js';
-import { AiChatProvider, useChatSelector, AiChatContext } from '#components/chat/ai-chat-provider.js';
+import { ChatProvider, useChatSelector, ChatContext } from '#components/chat/chat-provider.js';
 import { BuildNameEditor } from '#routes/builds_.$id/build-name-editor.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
@@ -58,7 +58,7 @@ function Chat() {
 
   const messages = useChatSelector((state) => state.context.messages);
   const status = useChatSelector((state) => state.context.status);
-  const chatActorRef = AiChatContext.useActorRef();
+  const chatActorRef = ChatContext.useActorRef();
 
   useKeydown(
     {
@@ -271,13 +271,13 @@ function ChatWithProvider() {
   const threadId = activeChatId ?? buildId;
 
   return (
-    <AiChatProvider value={{ ...useChatConstants, id: threadId, onToolCall }} chatId={activeChatId}>
+    <ChatProvider value={{ ...useChatConstants, id: threadId, onToolCall }} chatId={activeChatId}>
       <ViewContextProvider>
         {name ? <title>{name}</title> : null}
         {description ? <meta name="description" content={description} /> : null}
         <Chat />
       </ViewContextProvider>
-    </AiChatProvider>
+    </ChatProvider>
   );
 }
 

@@ -13,7 +13,7 @@ import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { CommunityBuildGrid } from '#components/project-grid.js';
 import { sampleBuilds } from '#constants/build-examples.js';
 import { defaultBuildName } from '#constants/build-names.js';
-import { AiChatProvider } from '#components/chat/ai-chat-provider.js';
+import { ChatProvider } from '#components/chat/chat-provider.js';
 import { Separator } from '#components/ui/separator.js';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { toast } from '#components/ui/sonner.js';
@@ -100,7 +100,7 @@ export default function ChatStart(): React.JSX.Element {
           </h1>
         </div>
 
-        <AiChatProvider value={{}}>
+        <ChatProvider value={{}}>
           <div className="space-y-4">
             <div className="flex justify-center">
               <KernelSelector selectedKernel={selectedKernel} onKernelChange={setSelectedKernel} />
@@ -126,7 +126,7 @@ export default function ChatStart(): React.JSX.Element {
               )}
             </NavLink>
           </div>
-        </AiChatProvider>
+        </ChatProvider>
       </div>
       <div className="container mx-auto px-4 py-8">
         <div className="mb-2 flex flex-row items-center justify-between">

@@ -5,7 +5,7 @@ import type { ToolResult } from 'ai';
 import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
-import { useChatSelector } from '#components/chat/ai-chat-provider.js';
+import { useChatSelector } from '#components/chat/chat-provider.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { CopyButton } from '#components/copy-button.js';

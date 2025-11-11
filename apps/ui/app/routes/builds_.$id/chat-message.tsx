@@ -3,7 +3,7 @@ import { memo, useState } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { messageRole } from '@taucad/types/constants';
 import type { MessageAnnotation } from '@taucad/types';
-import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
+import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
 import { ChatMessageReasoning } from '#routes/builds_.$id/chat-message-reasoning.js';
 import { ChatMessageTool } from '#routes/builds_.$id/chat-message-tool.js';
 import { ChatMessageAnnotations } from '#routes/builds_.$id/chat-message-annotation.js';

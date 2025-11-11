@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { ArrowUp, X, Square, CircuitBoard, ChevronDown, Paperclip, Wrench } from 'lucide-react';
 import type { ClassValue } from 'clsx';
 import type { ToolWithSelection } from '@taucad/types';
-import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
+import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';

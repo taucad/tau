@@ -101,16 +101,11 @@ export function ChatEditorBreadcrumbs(): ReactNode {
               variant="ghost"
               className="size-7 rounded-sm"
               getText={() => activeFile!.content}
-              tooltip="Copy"
+              tooltip="Copy code"
             />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button size="icon" variant="ghost" className="size-7 rounded-sm" onClick={handleDownloadCode}>
-                  <Download className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Download</TooltipContent>
-            </Tooltip>
+            <Button size="icon" variant="ghost" className="size-7 rounded-sm" onClick={handleDownloadCode}>
+              <Download className="size-4" />
+            </Button>
           </>
         )}
       </div>

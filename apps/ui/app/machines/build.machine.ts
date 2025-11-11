@@ -16,6 +16,7 @@ import { logMachine } from '#machines/logs.machine.js';
 import { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
 import { writeBuildToLightningFs } from '#lib/lightning-fs.lib.js';
+import { createGeometryFileFromCode } from '#utils/filesystem.utils.js';
 
 /**
  * Build Machine Context
@@ -508,9 +509,11 @@ export const buildMachine = setup({
       }
 
       if (codeToSend) {
+        const pathToSend = enableFilePreview ? event.path : mainFilePath;
+        const file = createGeometryFileFromCode(codeToSend, pathToSend);
         enqueue.sendTo(context.cadRef, {
-          type: 'setCode',
-          code: codeToSend,
+          type: 'setFile',
+          file,
         });
       }
     }),
@@ -614,11 +617,15 @@ export const buildMachine = setup({
       enqueue.sendTo(context.cadRef, { type: 'initializeKernel' });
 
       // Then initialize the model with current build data
+      const file = createGeometryFileFromCode(
+        mechanicalAsset.files[mechanicalAsset.main]!.content,
+        mechanicalAsset.main,
+      );
+
       enqueue.sendTo(context.cadRef, {
         type: 'initializeModel',
-        code: mechanicalAsset.files[mechanicalAsset.main]!.content,
+        file,
         parameters: mechanicalAsset.parameters,
-        kernelType: mechanicalAsset.language,
       });
     }),
     loadModel: enqueueActions(({ enqueue, context }) => {
@@ -631,11 +638,15 @@ export const buildMachine = setup({
       enqueue.sendTo(context.cadRef, { type: 'initializeKernel' });
 
       // Then initialize the model with current build data
+      const file = createGeometryFileFromCode(
+        mechanicalAsset.files[mechanicalAsset.main]!.content,
+        mechanicalAsset.main,
+      );
+
       enqueue.sendTo(context.cadRef, {
         type: 'initializeModel',
-        code: mechanicalAsset.files[mechanicalAsset.main]!.content,
+        file,
         parameters: mechanicalAsset.parameters,
-        kernelType: mechanicalAsset.language,
       });
     }),
     setEnableFilePreview: assign({
@@ -671,9 +682,10 @@ export const buildMachine = setup({
       // If opening a non-main file with preview disabled, do nothing
 
       if (codeToSend) {
+        const file = createGeometryFileFromCode(codeToSend, event.path);
         enqueue.sendTo(context.cadRef, {
-          type: 'setCode',
-          code: codeToSend,
+          type: 'setFile',
+          file,
         });
       }
     }),

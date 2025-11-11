@@ -1,4 +1,10 @@
-import type { ComputeGeometryResult, ExportFormat, ExportGeometryResult, ExtractParametersResult } from '@taucad/types';
+import type {
+  ComputeGeometryResult,
+  ExportFormat,
+  ExportGeometryResult,
+  ExtractParametersResult,
+  GeometryFile,
+} from '@taucad/types';
 import { logLevels } from '#types/console.types';
 import type { OnWorkerLog } from '#types/console.types';
 
@@ -7,6 +13,33 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * The supported export formats for the worker.
    */
   protected static readonly supportedExportFormats: ExportFormat[] = [];
+
+  /**
+   * Extract the file extension from a filename.
+   * Returns the extension without the leading dot, or empty string if no extension.
+   *
+   * @param filename - The filename to extract the extension from.
+   * @returns The file extension (e.g., 'ts', 'scad', 'kcl') or empty string.
+   */
+  protected static getFileExtension(filename: string): string {
+    const lastDotIndex = filename.lastIndexOf('.');
+    if (lastDotIndex === -1 || lastDotIndex === filename.length - 1) {
+      return '';
+    }
+
+    return filename.slice(lastDotIndex + 1).toLowerCase();
+  }
+
+  /**
+   * Extract code from a GeometryFile as a UTF-8 string.
+   *
+   * @param file - The geometry file to extract code from.
+   * @returns The code as a string.
+   */
+  protected static extractCodeFromFile(file: GeometryFile): string {
+    const decoder = new TextDecoder('utf8');
+    return decoder.decode(file.data);
+  }
 
   /**
    * The function to call when a log is emitted.
@@ -57,26 +90,35 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Compute geometry from code.
+   * Check if this worker can handle the given file.
+   * This is a lightweight check that should not require heavy initialization.
    *
-   * @param code - The code to compute geometry from.
+   * @param file - The geometry file to check.
+   * @returns True if this worker can handle the file, false otherwise.
+   */
+  public abstract canHandle(file: GeometryFile): Promise<boolean>;
+
+  /**
+   * Compute geometry from a file.
+   *
+   * @param file - The geometry file to compute geometry from.
    * @param parameters - The parameters to use when computing geometry.
    * @param geometryId - The geometry ID to use when computing geometry.
    * @returns The computed geometry.
    */
   public abstract computeGeometry(
-    code: string,
+    file: GeometryFile,
     parameters: Record<string, unknown>,
     geometryId?: string,
   ): Promise<ComputeGeometryResult>;
 
   /**
-   * Extract parameters from code.
+   * Extract parameters from a file.
    *
-   * @param code - The code to extract parameters from.
+   * @param file - The geometry file to extract parameters from.
    * @returns The extracted parameters.
    */
-  public abstract extractParameters(code: string): Promise<ExtractParametersResult>;
+  public abstract extractParameters(file: GeometryFile): Promise<ExtractParametersResult>;
 
   /**
    * Export geometry.

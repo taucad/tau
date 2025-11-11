@@ -14,6 +14,7 @@ import type {
   ExportFormat,
   GeometryGltf,
   Geometry2D,
+  GeometryFile,
 } from '@taucad/types';
 import { isKernelError } from '@taucad/types/guards';
 import { createKernelError, createKernelSuccess } from '#components/geometry/kernel/utils/kernel-helpers.js';
@@ -96,8 +97,21 @@ class ReplicadWorker extends KernelWorker<ReplicadOptions> {
     }
   }
 
-  public override async extractParameters(code: string): Promise<ExtractParametersResult> {
+  public override async canHandle(file: GeometryFile): Promise<boolean> {
+    // Check if the file format is a JavaScript/TypeScript file
+    const extension = KernelWorker.getFileExtension(file.filename);
+    if (!['ts', 'js', 'tsx', 'jsx'].includes(extension)) {
+      return false;
+    }
+
+    // Extract code and check for replicad imports
+    const code = KernelWorker.extractCodeFromFile(file);
+    return /import.*from\s+['"]replicad['"]/.test(code) || /require\s*\(['"]replicad['"]\)/.test(code);
+  }
+
+  public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {
     try {
+      const code = KernelWorker.extractCodeFromFile(file);
       let defaultParameters: Record<string, unknown> = {};
 
       if (/^\s*export\s+/m.test(code)) {
@@ -169,13 +183,16 @@ try {
   }
 
   public override async computeGeometry(
-    code: string,
+    file: GeometryFile,
     parameters: Record<string, unknown>,
   ): Promise<ComputeGeometryResult> {
     const startTime = performance.now();
     this.log('Computing geometry from code', { operation: 'computeGeometry' });
 
     try {
+      // Extract code from file
+      const code = KernelWorker.extractCodeFromFile(file);
+
       // Ensure font is loaded
       // TODO: Review font loading
       // if (!replicad.getFont()) {

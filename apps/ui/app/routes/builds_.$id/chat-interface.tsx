@@ -118,11 +118,6 @@ export const ChatInterface = memo(function (): React.JSX.Element {
             <ChatStackTrace />
           </div>
 
-          {/* Top-right Content */}
-          <div className="absolute top-(--header-height) right-2 hidden group-data-[active-tab=model]/chat-tabs:block group-data-[full-height-panel=true]/chat-tabs:block">
-            <SettingsControl />
-          </div>
-
           {/* Centered Content */}
           <div
             className={cn(

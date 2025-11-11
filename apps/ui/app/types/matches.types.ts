@@ -5,6 +5,9 @@ import type { SetNonNullable } from 'type-fest';
 export type Handle = {
   /**
    * Breadcrumb items for the current route. These are displayed in the breadcrumb trail.
+   *
+   * Use an array to display multiple breadcrumb items.
+   * Each ReactNode in the array will be displayed as a separate breadcrumb item.
    */
   breadcrumb?: (match: UIMatch) => ReactNode | ReactNode[];
   /**
@@ -18,6 +21,7 @@ export type Handle = {
   /**
    * Use this when you need to provide for the entire page,
    * such as providing for both the page content and breadcrumb items.
+   * This ensures only a single provider is rendered per page.
    */
   providers?: (match: UIMatch) => React.JSXElementConstructor<React.PropsWithChildren>;
   /**

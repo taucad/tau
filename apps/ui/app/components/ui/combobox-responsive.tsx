@@ -92,7 +92,7 @@ export function ComboBoxResponsive<T>({
           <DrawerTitle className="sr-only" id="drawer-title">
             {placeholder}
           </DrawerTitle>
-          <div className="mt-4 border-t">
+          <div className="mt-1">
             <ItemList
               groupedItems={groupedItems}
               setSelectedItem={handleSelect}

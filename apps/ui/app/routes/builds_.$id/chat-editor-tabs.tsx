@@ -54,7 +54,7 @@ export function ChatEditorTabs(): React.JSX.Element {
     <div className="border-b bg-muted/20">
       <div
         ref={scrollContainerRef}
-        className="h-7.5 overflow-x-auto overflow-y-hidden overscroll-x-none [scrollbar-width:none]"
+        className="mr-7.5 -mb-px h-7.75 overflow-x-auto overflow-y-hidden overscroll-x-none [scrollbar-width:none]"
       >
         <div className="flex h-full w-max">
           {openFiles.map((file) => {
@@ -67,7 +67,9 @@ export function ChatEditorTabs(): React.JSX.Element {
                   className={cn(
                     'group/editor-tab flex h-full min-w-0 cursor-pointer items-center gap-1 border-y border-y-transparent pr-2 pl-4 text-sm transition-colors',
                     'hover:bg-muted/40',
-                    isActive ? 'border-b-primary bg-background text-foreground' : 'bg-muted/20 text-muted-foreground',
+                    isActive
+                      ? 'border-b-[1.5px] border-b-primary bg-background text-foreground'
+                      : 'bg-muted/20 text-muted-foreground',
                   )}
                   role="tab"
                   tabIndex={0}

@@ -10,7 +10,6 @@ export type ErrorResponse = {
   statusCode: number;
   message?: string | string[];
   path?: string;
-  timestamp?: string;
   requestId?: string;
 };
 
@@ -40,7 +39,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
           statusCode,
           code: this.getErrorCode(exception),
           path: request.url,
-          timestamp: new Date().toISOString(),
           requestId,
         };
       } else if (typeof exceptionResponse === 'object') {
@@ -51,7 +49,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
           code: typeof code === 'string' ? code : this.getErrorCode(exception),
           statusCode,
           path: request.url,
-          timestamp: new Date().toISOString(),
           requestId,
         };
         if (Array.isArray(message)) {
@@ -65,7 +62,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
           statusCode,
           code: this.getErrorCode(exception),
           path: request.url,
-          timestamp: new Date().toISOString(),
           requestId,
         };
       }
@@ -78,7 +74,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
         statusCode,
         message: exception.errors.map((error) => `${error.path.join('.')}: ${error.message}`),
         path: request.url,
-        timestamp: new Date().toISOString(),
         requestId,
       };
     } else if (exception instanceof Error) {
@@ -89,7 +84,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
         code: 'INTERNAL_SERVER_ERROR',
         statusCode,
         path: request.url,
-        timestamp: new Date().toISOString(),
         requestId,
       };
 
@@ -107,7 +101,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
         code: 'INTERNAL_SERVER_ERROR',
         statusCode,
         path: request.url,
-        timestamp: new Date().toISOString(),
         requestId,
       };
 

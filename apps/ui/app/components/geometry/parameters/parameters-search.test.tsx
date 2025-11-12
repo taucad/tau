@@ -1,116 +1,70 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useMemo } from 'react';
-import { ChatParameters } from '#routes/builds_.$id/chat-parameters.js';
+import type { RJSFSchema } from '@rjsf/utils';
+import { Parameters } from '#components/geometry/parameters/parameters.js';
 import { TooltipProvider } from '#components/ui/tooltip.js';
 
 // Test wrapper component that provides necessary providers
 function TestWrapper({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
-  const queryClient = useMemo(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            networkMode: 'offlineFirst',
-            retry: false,
-          },
-          mutations: {
-            networkMode: 'offlineFirst',
-            retry: false,
-          },
-        },
-      }),
-    [],
-  );
-
-  return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>{children}</TooltipProvider>
-    </QueryClientProvider>
-  );
+  return <TooltipProvider>{children}</TooltipProvider>;
 }
 
 // Mock data for testing
-const mockState = {
-  parameters: {},
-  defaultParameters: {
-    isHidden: false,
-    siteUrl: '',
-    password: '',
-    phoneNumber: '',
-  },
-  jsonSchema: {
-    type: 'object',
-    properties: {
-      wifiType: {
-        type: 'object',
-        title: 'Wifi Type',
-        properties: {
-          isHidden: { type: 'boolean', title: 'Is Hidden' },
-          networkName: { type: 'string', title: 'Network Name' },
-          password: { type: 'string', title: 'Password' },
-        },
+const mockDefaultParameters = {
+  isHidden: false,
+  siteUrl: '',
+  password: '',
+  phoneNumber: '',
+};
+
+const mockJsonSchema: RJSFSchema = {
+  type: 'object',
+  properties: {
+    wifiType: {
+      type: 'object',
+      title: 'Wifi Type',
+      properties: {
+        isHidden: { type: 'boolean', title: 'Is Hidden' },
+        networkName: { type: 'string', title: 'Network Name' },
+        password: { type: 'string', title: 'Password' },
       },
-      phoneCallType: {
-        type: 'object',
-        title: 'Phone Call Type',
-        properties: {
-          phoneNumber: { type: 'string', title: 'Phone Number' },
-        },
+    },
+    phoneCallType: {
+      type: 'object',
+      title: 'Phone Call Type',
+      properties: {
+        phoneNumber: { type: 'string', title: 'Phone Number' },
       },
-      vCardType: {
-        type: 'object',
-        title: 'V Card Type',
-        properties: {
-          siteUrl: { type: 'string', title: 'Site Url' },
-        },
+    },
+    vCardType: {
+      type: 'object',
+      title: 'V Card Type',
+      properties: {
+        siteUrl: { type: 'string', title: 'Site Url' },
       },
     },
   },
 };
 
-// Mock the XState imports
-vi.mock('@xstate/react', () => ({
-  useSelector: vi.fn(),
-}));
-
-vi.mock('#routes/builds_.$id/cad-actor.js', () => ({
-  cadActor: {
-    send: vi.fn(),
-  },
-}));
-
-describe('ChatParameters Search Component', () => {
+describe('Parameters Search Component', () => {
   let user: ReturnType<typeof userEvent.setup>;
+  let mockOnParametersChange: ReturnType<typeof vi.fn>;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     user = userEvent.setup();
-    vi.clearAllMocks();
-
-    // Dynamic import and mock setup
-    const { useSelector } = await import('@xstate/react');
-    const { cadActor } = await import('#routes/builds_.$id/cad-actor.js');
-
-    // Fix: Mock useSelector to properly handle selector functions
-    vi.mocked(useSelector).mockImplementation((_actor, selector) => {
-      // Call the selector function with our mock state structure
-      const state = {
-        context: mockState,
-      };
-      return selector(state);
-    });
-
-    vi.mocked(cadActor.send).mockImplementation(() => {
-      // Noop
-    });
+    mockOnParametersChange = vi.fn();
   });
 
   it('shows "Is Hidden" parameter when searching for "hi"', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <Parameters
+          parameters={{}}
+          defaultParameters={mockDefaultParameters}
+          jsonSchema={mockJsonSchema}
+          onParametersChange={mockOnParametersChange}
+        />
       </TestWrapper>,
     );
 
@@ -130,7 +84,12 @@ describe('ChatParameters Search Component', () => {
   it('shows "Site Url" parameter when searching for "URL"', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <Parameters
+          parameters={{}}
+          defaultParameters={mockDefaultParameters}
+          jsonSchema={mockJsonSchema}
+          onParametersChange={mockOnParametersChange}
+        />
       </TestWrapper>,
     );
 
@@ -150,7 +109,12 @@ describe('ChatParameters Search Component', () => {
   it('shows groups when group title matches search', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <Parameters
+          parameters={{}}
+          defaultParameters={mockDefaultParameters}
+          jsonSchema={mockJsonSchema}
+          onParametersChange={mockOnParametersChange}
+        />
       </TestWrapper>,
     );
 
@@ -168,7 +132,12 @@ describe('ChatParameters Search Component', () => {
   it('shows groups when child parameters match search', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <Parameters
+          parameters={{}}
+          defaultParameters={mockDefaultParameters}
+          jsonSchema={mockJsonSchema}
+          onParametersChange={mockOnParametersChange}
+        />
       </TestWrapper>,
     );
 
@@ -185,7 +154,12 @@ describe('ChatParameters Search Component', () => {
   it('is case insensitive', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <Parameters
+          parameters={{}}
+          defaultParameters={mockDefaultParameters}
+          jsonSchema={mockJsonSchema}
+          onParametersChange={mockOnParametersChange}
+        />
       </TestWrapper>,
     );
 
@@ -207,7 +181,12 @@ describe('ChatParameters Search Component', () => {
   it('preserves case in search input while searching case-insensitively', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <Parameters
+          parameters={{}}
+          defaultParameters={mockDefaultParameters}
+          jsonSchema={mockJsonSchema}
+          onParametersChange={mockOnParametersChange}
+        />
       </TestWrapper>,
     );
 
@@ -226,7 +205,12 @@ describe('ChatParameters Search Component', () => {
   it('shows "No parameters matching" when no results found', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <Parameters
+          parameters={{}}
+          defaultParameters={mockDefaultParameters}
+          jsonSchema={mockJsonSchema}
+          onParametersChange={mockOnParametersChange}
+        />
       </TestWrapper>,
     );
 
@@ -246,7 +230,12 @@ describe('ChatParameters Search Component', () => {
   it('shows all parameters when search is cleared', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <Parameters
+          parameters={{}}
+          defaultParameters={mockDefaultParameters}
+          jsonSchema={mockJsonSchema}
+          onParametersChange={mockOnParametersChange}
+        />
       </TestWrapper>,
     );
 
@@ -272,7 +261,12 @@ describe('ChatParameters Search Component', () => {
   it('hides empty groups when no children match search', async () => {
     render(
       <TestWrapper>
-        <ChatParameters />
+        <Parameters
+          parameters={{}}
+          defaultParameters={mockDefaultParameters}
+          jsonSchema={mockJsonSchema}
+          onParametersChange={mockOnParametersChange}
+        />
       </TestWrapper>,
     );
 

@@ -31,6 +31,7 @@ import {
 } from '#components/geometry/parameters/rjsf-utils.js';
 import { hasCustomValue } from '#utils/object.utils.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
+import { InlineCode } from '#components/code/code-block.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for formContext
 export type RJSFContext = {
@@ -141,7 +142,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   };
 
   return (
-    <div className={cn('@container/parameter my-3 flex flex-col gap-0.5 px-3 transition-colors')}>
+    <div className={cn('@container/parameter my-3 flex flex-col gap-0.5 px-3 transition-colors last:mb-0')}>
       <div className="flex h-auto min-h-5 flex-row justify-between gap-2">
         <span
           className={cn('pb-0.25 text-sm', fieldHasValue ? 'font-medium' : 'font-normal')}
@@ -487,7 +488,46 @@ export const templates: TemplatesType = {
   FieldErrorTemplate: ({ errors }) => (errors ? <div className="mt-1 text-xs text-destructive">{errors}</div> : null),
   FieldHelpTemplate: ({ help }) => (help ? <div className="mt-1 text-xs text-muted-foreground">{help}</div> : null),
   TitleFieldTemplate: ({ title }) => (title ? <h2 className="mb-2 text-lg font-medium">{title}</h2> : null),
-  UnsupportedFieldTemplate: () => <div className="text-sm text-destructive">Unsupported field type</div>,
+  UnsupportedFieldTemplate({ reason, schema, idSchema }) {
+    const fieldPath = idSchema?.$id ? rjsfIdToJsonPath(idSchema.$id) : [];
+    const fieldName = fieldPath.at(-1) ?? 'root';
+    const isArrayType = schema.type === 'array';
+    const isObjectType = schema.type === 'object';
+
+    return (
+      <div
+        className={cn(
+          'flex flex-col gap-2.5 bg-warning/10 p-3',
+          // Since we don't have access to the parent field group,
+          // we inset the border by the same amount as the border of the field group,
+          // thus removing duplicate borders of different colors.
+          '-my-px -ml-1.5 border-y border-l-6 border-warning',
+          // Apply full border with rounded corners if the field is not an array or object,
+          // as we already have a border for those.
+          !isArrayType && !isObjectType && 'rounded-md border',
+        )}
+      >
+        <div className="flex items-start gap-2">
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <div className="flex flex-wrap items-baseline gap-1.5">
+              <span className="font-semibold">Invalid Field</span>
+              <span className="text-muted-foreground/40">&mdash;</span>
+              <InlineCode className="text-sm font-medium">{fieldName}</InlineCode>
+            </div>
+            {reason ? <p className="text-sm text-muted-foreground">Reason: {reason}</p> : null}
+            {isArrayType ? (
+              <div className="flex flex-col gap-1 rounded-md border border-warning/30 bg-background/80 p-2.5">
+                <p className="text-sm font-medium">Array Requirements</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  All items must be the same type. Use a single type instead of using mixed types or tuples.
+                </p>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  },
   WrapIfAdditionalTemplate: async ({ children }) => children,
 };
 

@@ -314,7 +314,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           </div>
 
           {/* Bottom-left Content */}
-          <div className="pointer-events-auto absolute right-8 bottom-0 left-0 flex w-fit shrink-0 flex-col gap-2">
+          <div className="pointer-events-auto absolute right-8 bottom-0 left-0 flex w-100 shrink-0 flex-col gap-2">
             <ChatInterfaceGraphics />
             <ChatStackTrace />
             <ChatViewerControls />

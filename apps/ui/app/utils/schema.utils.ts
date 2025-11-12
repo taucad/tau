@@ -28,7 +28,9 @@ function getTitleFromPropertyName(propertyName: string): string {
 export async function jsonSchemaFromJson(json: Record<string, unknown>): Promise<JSONSchema7> {
   const schema = toJsonSchema(json, {
     arrays: {
-      mode: 'all',
+      // Use the first item's schema for the array schema.
+      // anyOf, oneOf, allOf are not supported.
+      mode: 'first',
     },
     objects: {
       additionalProperties: false,

@@ -182,12 +182,14 @@ describe('jsonSchemaFromJson', () => {
       properties: {
         numbers: {
           items: {
+            default: 1,
             type: 'integer',
           },
           type: 'array',
         },
         strings: {
           items: {
+            default: 'a',
             type: 'string',
           },
           type: 'array',
@@ -213,6 +215,18 @@ describe('jsonSchemaFromJson', () => {
       properties: {
         items: {
           items: {
+            additionalProperties: false,
+            properties: {
+              id: {
+                default: 1,
+                type: 'integer',
+              },
+              name: {
+                default: 'Item 1',
+                type: 'string',
+              },
+            },
+            required: ['id', 'name'],
             type: 'object',
           },
           type: 'array',
@@ -263,6 +277,7 @@ describe('jsonSchemaFromJson', () => {
         matrix: {
           items: {
             items: {
+              default: 1,
               type: 'integer',
             },
             type: 'array',
@@ -524,6 +539,7 @@ describe('jsonSchemaFromJson', () => {
             },
             tags: {
               items: {
+                default: 'a',
                 type: 'string',
               },
               type: 'array',

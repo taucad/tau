@@ -21,7 +21,7 @@ import { NavUser } from '#components/nav/nav-user.js';
 import { cn } from '#utils/ui.utils.js';
 import { Tau } from '#components/icons/tau.js';
 import { Compose } from '#components/ui/utils/compose.js';
-import { Commands } from '#components/layout/commands.js';
+import { Commands } from '#components/layout/command-palette.js';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 

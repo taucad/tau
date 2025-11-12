@@ -7,7 +7,7 @@ import type {
   GeometryFile,
   GeometryGltf,
 } from '@taucad/types';
-import { importToGlb, exportFromGlb, supportedExportFormats } from '@taucad/converter';
+import { importToGlb, exportFromGlb, supportedExportFormats, supportedImportFormats } from '@taucad/converter';
 import type { InputFormat, OutputFormat } from '@taucad/converter';
 import { createKernelError, createKernelSuccess } from '#components/geometry/kernel/utils/kernel-helpers.js';
 import { KernelWorker } from '#components/geometry/kernel/utils/kernel-worker.js';
@@ -18,7 +18,6 @@ class TauWorker extends KernelWorker {
 
   public override async canHandle(file: GeometryFile): Promise<boolean> {
     // Import supported formats from converter
-    const { supportedImportFormats } = await import('@taucad/converter');
     const extension = KernelWorker.getFileExtension(file.filename);
     return supportedImportFormats.includes(extension as InputFormat);
   }

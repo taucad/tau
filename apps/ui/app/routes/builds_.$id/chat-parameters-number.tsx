@@ -183,7 +183,7 @@ type ChatParametersNumberProps = {
   readonly step?: number;
   // eslint-disable-next-line react/boolean-prop-naming -- following input boolean prop naming convention.
   readonly disabled?: boolean;
-} & Omit<React.ComponentProps<typeof ChatParametersInputNumber>, 'value' | 'onValueChange'>;
+} & Omit<React.ComponentProps<typeof ChatParametersInputNumber>, 'value' | 'onValueChange' | 'defaultValue'>;
 
 export function ChatParametersNumber({
   value,

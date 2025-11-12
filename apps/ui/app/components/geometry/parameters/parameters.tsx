@@ -13,6 +13,7 @@ import type { RJSFContext } from '#components/geometry/parameters/rjsf-theme.js'
 import { rjsfIdPrefix, rjsfIdSeparator } from '#components/geometry/parameters/rjsf-utils.js';
 import { deleteValueAtPath } from '#utils/object.utils.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
+import { hasJsonSchemaObjectProperties } from '#utils/schema.utils.js';
 
 type ParametersProperties = {
   readonly parameters: Record<string, unknown>;
@@ -124,7 +125,7 @@ export function Parameters({
                   ref={searchInputReference}
                   placeholder={searchPlaceholder}
                   value={searchTerm}
-                  className="h-8 w-full bg-background"
+                  className="h-7 w-full bg-background"
                   onChange={handleSearchChange}
                   onClear={clearSearch}
                 />
@@ -136,7 +137,7 @@ export function Parameters({
                     <Button
                       variant="overlay"
                       size="icon"
-                      className="text-muted-foreground transition-colors hover:text-foreground"
+                      className="size-7 text-muted-foreground transition-colors hover:text-foreground"
                       onClick={resetAllParameters}
                     >
                       <RefreshCcw />
@@ -146,13 +147,13 @@ export function Parameters({
                 </Tooltip>
               )}
 
-              {enableExpandAll ? (
+              {enableExpandAll && hasJsonSchemaObjectProperties(jsonSchema) ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       variant="overlay"
                       size="icon"
-                      className="text-muted-foreground transition-colors hover:text-foreground"
+                      className="size-7 text-muted-foreground transition-colors hover:text-foreground"
                       aria-expanded={allExpanded}
                       onClick={toggleAllGroups}
                     >

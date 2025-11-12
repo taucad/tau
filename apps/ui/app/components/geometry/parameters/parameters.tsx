@@ -11,7 +11,7 @@ import { cn } from '#utils/ui.utils.js';
 import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-theme.js';
 import { rjsfIdPrefix, rjsfIdSeparator } from '#components/geometry/parameters/rjsf-utils.js';
-import { deleteValueAtPath } from '#utils/object.utils.js';
+import { deleteValueAtPath, extractModifiedProperties, getValueAtPath, setValueAtPath } from '#utils/object.utils.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { hasJsonSchemaObjectProperties } from '#utils/schema.utils.js';
 
@@ -43,30 +43,42 @@ export function Parameters({
   const [allExpanded, setAllExpanded] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const searchInputReference = React.useRef<HTMLInputElement>(null);
+  // Ref to track current form data from RJSF's onChange handler
+  const currentFormDataRef = React.useRef<Record<string, unknown>>({});
 
   const setParameters = useCallback(
     (newParameters: Record<string, unknown>) => {
-      onParametersChange(newParameters);
+      // Extract only modified parameters before calling onParametersChange
+      const modifiedParameters = extractModifiedProperties(newParameters, defaultParameters);
+      onParametersChange(modifiedParameters);
     },
-    [onParametersChange],
+    [onParametersChange, defaultParameters],
   );
 
   // Enhanced reset function that handles nested paths and arrays
   const resetSingleParameter = useCallback(
     (fieldPath: string[]) => {
-      const currentParameters = { ...parameters };
+      // Use the current form data from RJSF instead of the parameters prop
+      // This ensures we're working with the actual form state, not stale props
+      const currentFormData = currentFormDataRef.current;
 
-      if (fieldPath.length === 0) {
-        // Root level reset (shouldn't happen in normal usage)
-        setParameters({});
-        return;
+      // Check if we're resetting an array item (path ends with a numeric string)
+      const lastSegment = fieldPath.at(-1);
+      const isArrayItem = lastSegment !== undefined && /^\d+$/.test(lastSegment);
+
+      if (isArrayItem) {
+        // For array items, restore the default value instead of deleting
+        // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -- getValueAtPath returns value or undefined, not void
+        const defaultValue = getValueAtPath(defaultParameters, fieldPath as readonly string[]);
+        const updatedParameters = setValueAtPath(currentFormData, fieldPath, defaultValue);
+        setParameters(updatedParameters);
+      } else {
+        // For non-array items, delete the value (which removes it from modified parameters)
+        const updatedParameters = deleteValueAtPath(currentFormData, fieldPath);
+        setParameters(updatedParameters);
       }
-
-      const updatedParameters = deleteValueAtPath(currentParameters, fieldPath);
-
-      setParameters(updatedParameters);
     },
-    [parameters, setParameters],
+    [setParameters, defaultParameters],
   );
 
   const resetAllParameters = useCallback(() => {
@@ -91,6 +103,7 @@ export function Parameters({
       allExpanded,
       searchTerm,
       resetSingleParameter,
+      defaultParameters,
       shouldShowField(text) {
         if (!searchTerm) {
           return true;
@@ -99,18 +112,20 @@ export function Parameters({
         return text.toLowerCase().includes(searchTerm.toLowerCase());
       },
     }),
-    [allExpanded, searchTerm, resetSingleParameter],
+    [allExpanded, searchTerm, resetSingleParameter, defaultParameters],
   );
 
-  const mergedData = { ...defaultParameters, ...parameters };
+  const mergedData = useMemo(() => ({ ...defaultParameters, ...parameters }), [defaultParameters, parameters]);
   const hasParameters = jsonSchema && Object.keys(mergedData).length > 0;
 
-  const handleChange = (event: IChangeEvent<Record<string, unknown>, RJSFSchema, RJSFContext>) => {
-    setParameters(event.formData ?? {});
-  };
+  // Initialize the ref with the current edited parameters when component mounts or data changes
+  React.useEffect(() => {
+    currentFormDataRef.current = mergedData;
+  }, [mergedData]);
 
-  const handleSubmit = (event: IChangeEvent<Record<string, unknown>, RJSFSchema, RJSFContext>) => {
-    setParameters(event.formData ?? {});
+  const handleChange = (event: IChangeEvent<Record<string, unknown>, RJSFSchema, RJSFContext>) => {
+    const formData = event.formData ?? {};
+    setParameters(formData);
   };
 
   return (
@@ -138,6 +153,7 @@ export function Parameters({
                       variant="overlay"
                       size="icon"
                       className="size-7 text-muted-foreground transition-colors hover:text-foreground"
+                      aria-label="Reset all parameters"
                       onClick={resetAllParameters}
                     >
                       <RefreshCcw />
@@ -155,6 +171,7 @@ export function Parameters({
                       size="icon"
                       className="size-7 text-muted-foreground transition-colors hover:text-foreground"
                       aria-expanded={allExpanded}
+                      aria-label={allExpanded ? 'Collapse all' : 'Expand all'}
                       onClick={toggleAllGroups}
                     >
                       <ChevronRight
@@ -185,7 +202,6 @@ export function Parameters({
             formContext={formContext}
             className="flex flex-1 flex-col px-0 py-0"
             onChange={handleChange}
-            onSubmit={handleSubmit}
           />
         </>
       ) : (

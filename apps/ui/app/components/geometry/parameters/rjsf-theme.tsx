@@ -12,7 +12,7 @@ import type {
   RJSFSchema,
 } from '@rjsf/utils';
 import { ChevronRight, RefreshCcwDot } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
 import { ChatParametersBoolean } from '#routes/builds_.$id/chat-parameters-boolean.js';
@@ -28,6 +28,7 @@ import {
   rjsfIdPrefix,
   rjsfIdSeparator,
   isSchemaMatchingSearch,
+  getFieldDefaultValue,
 } from '#components/geometry/parameters/rjsf-utils.js';
 import { hasCustomValue } from '#utils/object.utils.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
@@ -39,6 +40,7 @@ export type RJSFContext = {
   allExpanded: boolean;
   resetSingleParameter: (fieldPath: string[]) => void;
   shouldShowField: (prettyLabel: string) => boolean;
+  defaultParameters?: Record<string, unknown>;
 };
 
 // Custom Field Template with Reset Button and Search Filtering
@@ -133,16 +135,19 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   // Convert RJSF ID to JSON path using schema-aware parsing
   const fieldPath = rjsfIdToJsonPath(id);
 
-  // Check if field has custom value
-  const defaultValue = schema.default;
-  const fieldHasValue = hasCustomValue(formData, defaultValue);
+  // Get the appropriate default value (handles array items specially)
+  const defaultValue = formContext.defaultParameters
+    ? getFieldDefaultValue(fieldPath, formData, schema.default, formContext.defaultParameters)
+    : schema.default;
+
+  const fieldHasValue = hasCustomValue(formData, defaultValue, fieldPath);
 
   const handleReset = () => {
     formContext.resetSingleParameter(fieldPath);
   };
 
   return (
-    <div className={cn('@container/parameter my-3 flex flex-col gap-0.5 px-3 transition-colors last:mb-0')}>
+    <div className="@container/parameter my-3 flex flex-col gap-0.5 px-3 transition-colors">
       <div className="flex h-auto min-h-5 flex-row justify-between gap-2">
         <span
           className={cn('pb-0.25 text-sm', fieldHasValue ? 'font-medium' : 'font-normal')}
@@ -154,7 +159,13 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
         {fieldHasValue ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="xs" className="h-5 text-muted-foreground" onClick={handleReset}>
+              <Button
+                variant="ghost"
+                size="xs"
+                className="h-5 text-muted-foreground"
+                aria-label={`Reset ${prettyLabel}`}
+                onClick={handleReset}
+              >
                 <RefreshCcwDot className="size-3.5" />
               </Button>
             </TooltipTrigger>
@@ -344,7 +355,7 @@ function ArrayFieldTemplate(
 // Custom Select Widget for Enums
 function SelectWidget(props: WidgetProps): React.ReactNode {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
-  const { options, value, onChange, placeholder } = props;
+  const { options, value, onChange, placeholder, name } = props;
 
   const { enumOptions, enumDisabled } = options;
 
@@ -356,10 +367,16 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
     throw new Error('No enum options provided');
   }
 
+  const prettyLabel = name ? toTitleCase(name) : '';
+
   return (
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
     <Select value={value} onValueChange={handleChange}>
-      <SelectTrigger size="sm" className="min-w-0 flex-1 bg-background">
+      <SelectTrigger
+        size="sm"
+        className="min-w-0 flex-1 bg-background"
+        aria-label={prettyLabel ? `Select for ${prettyLabel}` : undefined}
+      >
         <SelectValue placeholder={placeholder ?? 'Choose an option'} />
       </SelectTrigger>
       <SelectContent>
@@ -387,13 +404,14 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
 
 function CustomCheckboxWidget(props: WidgetProps): React.ReactNode {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
-  const { value, onChange } = props;
-  return <ChatParametersBoolean value={Boolean(value)} onChange={onChange} />;
+  const { value, onChange, name } = props;
+  return <ChatParametersBoolean value={Boolean(value)} name={name} onChange={onChange} />;
 }
 
 function SimpleInputWidget(props: WidgetProps & { readonly inputType: string }): React.ReactNode {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
-  const { value, onChange, inputType, schema } = props;
+  const { value, onChange, inputType, schema, name } = props;
+  const prettyLabel = name ? toTitleCase(name) : '';
   return (
     <Input
       type={inputType}
@@ -401,6 +419,7 @@ function SimpleInputWidget(props: WidgetProps & { readonly inputType: string }):
       value={value}
       defaultValue={schema.default as string}
       className="h-6 flex-1 bg-background p-1"
+      aria-label={prettyLabel ? `Input for ${prettyLabel}` : undefined}
       onChange={(event) => {
         onChange(event.target.value);
       }}
@@ -498,6 +517,7 @@ export const templates: TemplatesType = {
 
     return (
       <div
+        aria-label={`Invalid Field: ${fieldName}`}
         className={cn(
           'flex flex-col gap-2.5 bg-warning/10 p-3',
           // Since we don't have access to the parent field group,
@@ -516,9 +536,16 @@ export const templates: TemplatesType = {
               <span className="text-muted-foreground/40">&mdash;</span>
               <InlineCode className="text-sm font-medium">{fieldName}</InlineCode>
             </div>
-            {reason ? <p className="text-sm text-muted-foreground">Reason: {reason}</p> : null}
+            {reason ? (
+              <p aria-label={`Invalid Field Reason: ${fieldName}`} className="text-sm text-muted-foreground">
+                Reason: {reason}
+              </p>
+            ) : null}
             {isArrayType ? (
-              <div className="flex flex-col gap-1 rounded-md border border-warning/30 bg-background/80 p-2.5">
+              <div
+                aria-label={`Array Requirements: ${fieldName}`}
+                className="flex flex-col gap-1 rounded-md border border-warning/30 bg-background/80 p-2.5"
+              >
                 <p className="text-sm font-medium">Array Requirements</p>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   All items must be the same type. Use a single type instead of using mixed types or tuples.

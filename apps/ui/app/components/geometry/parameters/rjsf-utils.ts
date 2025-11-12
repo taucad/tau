@@ -54,6 +54,7 @@ export function rjsfIdToJsonPath(rjsfId: string): string[] {
  * @param propertyName - The name of the property to check
  * @returns true if the schema or its nested properties match the search term
  */
+// eslint-disable-next-line complexity -- consider refactoring.
 export function isSchemaMatchingSearch(schema: RJSFSchema, searchTerm: string, propertyName?: string): boolean {
   if (!searchTerm) {
     return true;
@@ -106,4 +107,52 @@ export function isSchemaMatchingSearch(schema: RJSFSchema, searchTerm: string, p
   }
 
   return false;
+}
+
+/**
+ * Gets the appropriate default value for a field, handling array items specially.
+ * For array items, extracts the default value from the parent array at the item's index.
+ *
+ * @param fieldPath - The JSON path to the field (e.g., ['strings', '0'] for first array item)
+ * @param formData - The current form data value for this field
+ * @param schemaDefault - The default value from the schema
+ * @param defaultParameters - The default parameters object containing all default values
+ * @returns The default value to use for comparison (schema default or array item default)
+ */
+export function getFieldDefaultValue(
+  fieldPath: readonly string[],
+  formData: unknown,
+  schemaDefault: unknown,
+  defaultParameters: Record<string, unknown>,
+): unknown {
+  // For array items, we need to compare against the default array item at this index
+  if (fieldPath.length > 1 && typeof formData !== 'object') {
+    // Check if the last segment is numeric (array index)
+    const lastSegment = fieldPath.at(-1);
+    if (lastSegment !== undefined) {
+      const arrayIndex = Number.parseInt(lastSegment, 10);
+      if (!Number.isNaN(arrayIndex) && arrayIndex >= 0) {
+        // Get the parent array path (everything except the last segment)
+        const parentPath = fieldPath.slice(0, -1);
+        // Navigate to the parent array in defaultParameters
+        let parentArray: unknown = defaultParameters;
+        for (const segment of parentPath) {
+          // eslint-disable-next-line max-depth -- this is easier to read.
+          if (typeof parentArray === 'object' && parentArray !== null && segment in parentArray) {
+            parentArray = (parentArray as Record<string, unknown>)[segment];
+          } else {
+            parentArray = undefined;
+            break;
+          }
+        }
+
+        // If parent is an array and index is valid, use the default array item
+        if (Array.isArray(parentArray) && arrayIndex < parentArray.length) {
+          return parentArray[arrayIndex];
+        }
+      }
+    }
+  }
+
+  return schemaDefault;
 }

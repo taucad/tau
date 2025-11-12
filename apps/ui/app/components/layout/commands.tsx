@@ -292,10 +292,12 @@ function CommandPaletteProvider({ children }: { readonly children: React.ReactNo
     <CommandPaletteContext.Provider value={contextValue}>
       {children}
       {/* Render UI with aggregated items */}
-      <div className="flex items-center gap-2">
-        <CommandPaletteTrigger items={allItems} />
-        <CommandPaletteMobile items={allItems} />
-      </div>
+      {allItems.length > 0 ? (
+        <div className="flex items-center gap-2">
+          <CommandPaletteTrigger items={allItems} />
+          <CommandPaletteMobile items={allItems} />
+        </div>
+      ) : null}
     </CommandPaletteContext.Provider>
   );
 }

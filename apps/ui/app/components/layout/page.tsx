@@ -31,7 +31,6 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     hasBreadcrumbItems,
     actionItems,
     hasActionItems,
-    hasCommandPaletteItems,
     noPageWrapper,
     enableFloatingSidebar,
     enableOverflowY,
@@ -41,7 +40,6 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     hasBreadcrumbItems: handles.breadcrumb.length > 0,
     actionItems: handles.actions,
     hasActionItems: handles.actions.length > 0,
-    hasCommandPaletteItems: handles.commandPalette.length > 0,
     noPageWrapper: handles.noPageWrapper.some((match) => match.handle.noPageWrapper === true),
     enableFloatingSidebar: handles.enableFloatingSidebar.some((match) => match.handle.enableFloatingSidebar === true),
     enableOverflowY: handles.enableOverflowY.some((match) => match.handle.enableOverflowY === true),
@@ -128,7 +126,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                   <TooltipContent>You are offline. Reconnect to access online features.</TooltipContent>
                 </Tooltip>
               )}
-              {hasCommandPaletteItems ? <Commands /> : null}
+              <Commands />
               {hasActionItems
                 ? actionItems.map((match) => <Fragment key={match.id}>{match.handle.actions?.(match)}</Fragment>)
                 : null}

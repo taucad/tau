@@ -10,7 +10,7 @@ export function ChatParameterWidget(props: WidgetProps): React.JSX.Element {
   const { value, onChange, name, schema } = props;
 
   const prettyLabel = name ? toTitleCase(name) : '';
-  const defaultValue = schema.default as string | number | boolean;
+  const defaultValue = schema.default as string | number | boolean | undefined;
   const type = schema.type as 'boolean' | 'integer' | 'number' | 'string';
 
   switch (type) {

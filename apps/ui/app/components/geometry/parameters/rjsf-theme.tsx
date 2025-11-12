@@ -328,7 +328,9 @@ function ArrayFieldTemplate(
       </CollapsibleTrigger>
 
       <CollapsibleContent className="px-0 py-0">
-        {items.map((item) => item.children)}
+        {items.map((item) => (
+          <Fragment key={item.key}>{item.children}</Fragment>
+        ))}
         {canAdd ? (
           <Button type="button" variant="outline" size="sm" className="mx-2 my-2" onClick={onAddClick}>
             Add item ({prettyTitle})

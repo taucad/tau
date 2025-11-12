@@ -1,6 +1,12 @@
 /* eslint-disable @typescript-eslint/naming-convention -- allowed for test fixtures */
 import { describe, expect, it } from 'vitest';
-import { getValueAtPath, setValueAtPath, deleteValueAtPath } from '#utils/object.utils.js';
+import {
+  deleteValueAtPath,
+  extractModifiedProperties,
+  getValueAtPath,
+  hasCustomValue,
+  setValueAtPath,
+} from '#utils/object.utils.js';
 
 describe('getValueAtPath', () => {
   describe('Basic functionality', () => {
@@ -914,6 +920,572 @@ describe('deleteValueAtPath', () => {
       };
       const result = deleteValueAtPath(object, ['user', 'profile', 'name']);
       expect(result.user.profile).toEqual({});
+    });
+  });
+});
+
+describe('extractModifiedProperties', () => {
+  describe('Basic functionality', () => {
+    it('should return empty object when all properties match defaults', () => {
+      const formData = { name: 'test', count: 5 };
+      const defaultProperties = { name: 'test', count: 5 };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({});
+    });
+
+    it('should extract only modified primitive properties', () => {
+      const formData = { name: 'modified', count: 5, enabled: true };
+      const defaultProperties = { name: 'default', count: 5, enabled: true };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ name: 'modified' });
+      expect(result).not.toHaveProperty('count');
+      expect(result).not.toHaveProperty('enabled');
+    });
+
+    it('should extract multiple modified properties', () => {
+      const formData = { name: 'modified', count: 10, enabled: true };
+      const defaultProperties = { name: 'default', count: 5, enabled: false };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ name: 'modified', count: 10, enabled: true });
+    });
+
+    it('should handle empty formData', () => {
+      const formData = {};
+      const defaultProperties = { name: 'test', count: 5 };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({});
+    });
+
+    it('should handle empty defaultProperties', () => {
+      const formData = { name: 'test', count: 5 };
+      const defaultProperties = {};
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ name: 'test', count: 5 });
+    });
+  });
+
+  describe('Nested objects', () => {
+    it('should extract only modified nested properties', () => {
+      const formData = {
+        config: {
+          host: 'example.com',
+          port: 8080,
+        },
+      };
+      const defaultProperties = {
+        config: {
+          host: 'localhost',
+          port: 8080,
+        },
+      };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({
+        config: {
+          host: 'example.com',
+        },
+      });
+      expect(result.config).not.toHaveProperty('port');
+    });
+
+    it('should exclude nested object if all properties match defaults', () => {
+      const formData = {
+        config: {
+          host: 'localhost',
+          port: 8080,
+        },
+      };
+      const defaultProperties = {
+        config: {
+          host: 'localhost',
+          port: 8080,
+        },
+      };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({});
+    });
+
+    it('should handle deeply nested objects', () => {
+      const formData = {
+        level1: {
+          level2: {
+            level3: {
+              value: 'modified',
+              unchanged: 'same',
+            },
+          },
+        },
+      };
+      const defaultProperties = {
+        level1: {
+          level2: {
+            level3: {
+              value: 'default',
+              unchanged: 'same',
+            },
+          },
+        },
+      };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({
+        level1: {
+          level2: {
+            level3: {
+              value: 'modified',
+            },
+          },
+        },
+      });
+    });
+
+    it('should handle multiple nested objects with mixed modifications', () => {
+      const formData = {
+        config1: {
+          host: 'example.com',
+          port: 8080,
+        },
+        config2: {
+          host: 'localhost',
+          port: 9000,
+        },
+      };
+      const defaultProperties = {
+        config1: {
+          host: 'localhost',
+          port: 8080,
+        },
+        config2: {
+          host: 'localhost',
+          port: 8080,
+        },
+      };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({
+        config1: {
+          host: 'example.com',
+        },
+        config2: {
+          port: 9000,
+        },
+      });
+    });
+  });
+
+  describe('Arrays', () => {
+    it('should extract modified array values', () => {
+      const formData = { items: [1, 2, 3] };
+      const defaultProperties = { items: [1, 2, 4] };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ items: [1, 2, 3] });
+    });
+
+    it('should exclude arrays that match defaults', () => {
+      const formData = { items: [1, 2, 3] };
+      const defaultProperties = { items: [1, 2, 3] };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({});
+    });
+
+    it('should handle empty arrays', () => {
+      const formData = { items: [] };
+      const defaultProperties = { items: [1, 2, 3] };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ items: [] });
+    });
+
+    it('should handle arrays with different lengths', () => {
+      const formData = { items: [1, 2] };
+      const defaultProperties = { items: [1, 2, 3] };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ items: [1, 2] });
+    });
+  });
+
+  describe('Edge cases', () => {
+    it('should handle null values', () => {
+      const formData = { value: null };
+      const defaultProperties = { value: 'default' };
+      // @ts-expect-error -- edge test case for null values
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ value: null });
+    });
+
+    it('should handle undefined values', () => {
+      const formData = { value: undefined };
+      const defaultProperties = { value: 'default' };
+      // @ts-expect-error -- edge test case for undefined values
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ value: undefined });
+    });
+
+    it('should handle zero values', () => {
+      const formData = { count: 0 };
+      const defaultProperties = { count: 5 };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ count: 0 });
+    });
+
+    it('should handle empty string values', () => {
+      const formData = { name: '' };
+      const defaultProperties = { name: 'default' };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ name: '' });
+    });
+
+    it('should handle boolean false values', () => {
+      const formData = { enabled: false };
+      const defaultProperties = { enabled: true };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ enabled: false });
+    });
+
+    it('should handle properties not in defaults', () => {
+      const formData = { name: 'test', newProp: 'value' };
+      const defaultProperties = { name: 'test' };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ newProp: 'value' });
+    });
+
+    it('should handle properties missing from formData but present in defaults', () => {
+      const formData = { name: 'test' };
+      const defaultProperties = { name: 'test', count: 5 };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({});
+    });
+
+    it('should handle nested objects with properties not in defaults', () => {
+      const formData = {
+        config: {
+          host: 'localhost',
+          newProp: 'value',
+        },
+      };
+      const defaultProperties = {
+        config: {
+          host: 'localhost',
+        },
+      };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({
+        config: {
+          newProp: 'value',
+        },
+      });
+    });
+
+    it('should handle type mismatches (object vs primitive)', () => {
+      const formData = { value: { nested: 'object' } };
+      const defaultProperties = { value: 'string' };
+      // @ts-expect-error -- edge test case for mismatched types
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ value: { nested: 'object' } });
+    });
+
+    it('should handle type mismatches (array vs object)', () => {
+      const formData = { value: [1, 2, 3] };
+      const defaultProperties = { value: { nested: 'object' } };
+      // @ts-expect-error -- edge test case for mismatched types
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({ value: [1, 2, 3] });
+    });
+  });
+
+  describe('Complex scenarios', () => {
+    it('should handle mixed primitive and nested modifications', () => {
+      const formData = {
+        name: 'modified',
+        count: 5,
+        config: {
+          host: 'example.com',
+          port: 8080,
+        },
+        tags: ['tag1', 'tag2'],
+      };
+      const defaultProperties = {
+        name: 'default',
+        count: 5,
+        config: {
+          host: 'localhost',
+          port: 8080,
+        },
+        tags: ['tag1', 'tag2'],
+      };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({
+        name: 'modified',
+        config: {
+          host: 'example.com',
+        },
+      });
+    });
+
+    it('should handle multiple levels of nesting with partial modifications', () => {
+      const formData = {
+        level1: {
+          level2: {
+            level3: {
+              modified: 'changed',
+              unchanged: 'same',
+            },
+            other: 'same',
+          },
+          top: 'same',
+        },
+      };
+      const defaultProperties = {
+        level1: {
+          level2: {
+            level3: {
+              modified: 'default',
+              unchanged: 'same',
+            },
+            other: 'same',
+          },
+          top: 'same',
+        },
+      };
+      const result = extractModifiedProperties(formData, defaultProperties);
+      expect(result).toEqual({
+        level1: {
+          level2: {
+            level3: {
+              modified: 'changed',
+            },
+          },
+        },
+      });
+    });
+  });
+});
+
+describe('hasCustomValue', () => {
+  describe('Primitive values', () => {
+    it('should return false when string matches default', () => {
+      expect(hasCustomValue('test', 'test')).toBe(false);
+    });
+
+    it('should return true when string differs from default', () => {
+      expect(hasCustomValue('modified', 'default')).toBe(true);
+    });
+
+    it('should return false when number matches default', () => {
+      expect(hasCustomValue(5, 5)).toBe(false);
+    });
+
+    it('should return true when number differs from default', () => {
+      expect(hasCustomValue(10, 5)).toBe(true);
+    });
+
+    it('should return false when boolean matches default', () => {
+      expect(hasCustomValue(true, true)).toBe(false);
+      expect(hasCustomValue(false, false)).toBe(false);
+    });
+
+    it('should return true when boolean differs from default', () => {
+      expect(hasCustomValue(true, false)).toBe(true);
+      expect(hasCustomValue(false, true)).toBe(true);
+    });
+
+    it('should handle zero values correctly', () => {
+      expect(hasCustomValue(0, 0)).toBe(false);
+      expect(hasCustomValue(0, 5)).toBe(true);
+    });
+
+    it('should handle empty string values correctly', () => {
+      expect(hasCustomValue('', '')).toBe(false);
+      expect(hasCustomValue('', 'default')).toBe(true);
+    });
+  });
+
+  describe('Null and undefined', () => {
+    it('should return false for undefined formData', () => {
+      expect(hasCustomValue(undefined, 'default')).toBe(false);
+      expect(hasCustomValue(undefined, undefined)).toBe(false);
+    });
+
+    it('should return false for null formData', () => {
+      expect(hasCustomValue(null, 'default')).toBe(false);
+      expect(hasCustomValue(null, null)).toBe(false);
+    });
+
+    it('should return true when formData is defined but default is null', () => {
+      expect(hasCustomValue('value', null)).toBe(true);
+    });
+
+    it('should return true when formData is defined but default is undefined', () => {
+      expect(hasCustomValue('value', undefined)).toBe(true);
+    });
+  });
+
+  describe('Arrays', () => {
+    it('should return false when arrays match exactly', () => {
+      expect(hasCustomValue([1, 2, 3], [1, 2, 3])).toBe(false);
+    });
+
+    it('should return true when arrays have different values', () => {
+      expect(hasCustomValue([1, 2, 3], [1, 2, 4])).toBe(true);
+    });
+
+    it('should return true when arrays have different lengths', () => {
+      expect(hasCustomValue([1, 2], [1, 2, 3])).toBe(true);
+      expect(hasCustomValue([1, 2, 3], [1, 2])).toBe(true);
+    });
+
+    it('should return true when array vs non-array', () => {
+      expect(hasCustomValue([1, 2, 3], 'string')).toBe(true);
+      expect(hasCustomValue([1, 2, 3], 5)).toBe(true);
+      expect(hasCustomValue([1, 2, 3], { key: 'value' })).toBe(true);
+    });
+
+    it('should return false when empty arrays match', () => {
+      expect(hasCustomValue([], [])).toBe(false);
+    });
+
+    it('should return true when empty array vs non-empty array', () => {
+      expect(hasCustomValue([], [1, 2, 3])).toBe(true);
+      expect(hasCustomValue([1, 2, 3], [])).toBe(true);
+    });
+
+    it('should handle arrays with objects (deep comparison)', () => {
+      // Deep comparison: same content means same value
+      expect(hasCustomValue([{ a: 1 }], [{ a: 1 }])).toBe(false);
+      expect(hasCustomValue([{ a: 1 }], [{ a: 2 }])).toBe(true);
+    });
+
+    it('should handle arrays with nested arrays (deep comparison)', () => {
+      // Deep comparison: same content means same value
+      expect(hasCustomValue([[1, 2]], [[1, 2]])).toBe(false);
+      expect(hasCustomValue([[1, 2]], [[1, 3]])).toBe(true);
+    });
+  });
+
+  describe('Objects', () => {
+    it('should return false when objects match exactly', () => {
+      expect(hasCustomValue({ a: 1, b: 2 }, { a: 1, b: 2 })).toBe(false);
+    });
+
+    it('should return true when objects have different values', () => {
+      expect(hasCustomValue({ a: 1, b: 2 }, { a: 1, b: 3 })).toBe(true);
+    });
+
+    it('should return true when objects have different keys', () => {
+      expect(hasCustomValue({ a: 1, b: 2 }, { a: 1, c: 2 })).toBe(true);
+    });
+
+    it('should return true when objects have different number of keys', () => {
+      expect(hasCustomValue({ a: 1, b: 2 }, { a: 1 })).toBe(true);
+      expect(hasCustomValue({ a: 1 }, { a: 1, b: 2 })).toBe(true);
+    });
+
+    it('should return false when empty objects match', () => {
+      expect(hasCustomValue({}, {})).toBe(false);
+    });
+
+    it('should return true when empty object vs non-empty object', () => {
+      expect(hasCustomValue({}, { a: 1 })).toBe(true);
+      expect(hasCustomValue({ a: 1 }, {})).toBe(true);
+    });
+
+    it('should handle nested objects (deep comparison)', () => {
+      // Deep comparison: same content means same value
+      expect(hasCustomValue({ a: { b: 1 } }, { a: { b: 1 } })).toBe(false);
+      expect(hasCustomValue({ a: { b: 1 } }, { a: { b: 2 } })).toBe(true);
+    });
+
+    it('should handle objects with arrays (deep comparison)', () => {
+      // Deep comparison: same content means same value
+      expect(hasCustomValue({ items: [1, 2] }, { items: [1, 2] })).toBe(false);
+      expect(hasCustomValue({ items: [1, 2] }, { items: [1, 3] })).toBe(true);
+    });
+
+    it('should handle objects with null values', () => {
+      expect(hasCustomValue({ a: null }, { a: null })).toBe(false);
+      expect(hasCustomValue({ a: null }, { a: 'value' })).toBe(true);
+    });
+
+    it('should handle objects with undefined values', () => {
+      expect(hasCustomValue({ a: undefined }, { a: undefined })).toBe(false);
+      expect(hasCustomValue({ a: undefined }, { a: 'value' })).toBe(true);
+    });
+  });
+
+  describe('Type mismatches', () => {
+    it('should return true when comparing string to number', () => {
+      expect(hasCustomValue('5', 5)).toBe(true);
+    });
+
+    it('should return true when comparing number to string', () => {
+      expect(hasCustomValue(5, '5')).toBe(true);
+    });
+
+    it('should return true when comparing boolean to number', () => {
+      expect(hasCustomValue(true, 1)).toBe(true);
+      expect(hasCustomValue(false, 0)).toBe(true);
+    });
+
+    it('should return true when comparing object to primitive', () => {
+      expect(hasCustomValue({ a: 1 }, 'string')).toBe(true);
+      expect(hasCustomValue({ a: 1 }, 5)).toBe(true);
+    });
+
+    it('should return true when comparing array to primitive', () => {
+      expect(hasCustomValue([1, 2], 'string')).toBe(true);
+      expect(hasCustomValue([1, 2], 5)).toBe(true);
+    });
+
+    it('should return true when comparing array to object', () => {
+      expect(hasCustomValue([1, 2], { a: 1 })).toBe(true);
+    });
+  });
+
+  describe('Edge cases', () => {
+    it('should handle same object reference', () => {
+      const object = { a: 1 };
+      expect(hasCustomValue(object, object)).toBe(false);
+    });
+
+    it('should handle different object references with same content (deep comparison)', () => {
+      // Deep comparison: same content means same value, regardless of reference
+      expect(hasCustomValue({ a: 1 }, { a: 1 })).toBe(false);
+      expect(hasCustomValue({ a: { b: 1 } }, { a: { b: 1 } })).toBe(false);
+    });
+
+    it('should handle NaN values', () => {
+      expect(hasCustomValue(Number.NaN, Number.NaN)).toBe(true); // NaN !== NaN in JavaScript
+      expect(hasCustomValue(Number.NaN, 5)).toBe(true);
+    });
+
+    it('should handle Infinity values', () => {
+      expect(hasCustomValue(Infinity, Infinity)).toBe(false);
+      expect(hasCustomValue(Infinity, 5)).toBe(true);
+    });
+
+    it('should handle negative zero', () => {
+      expect(hasCustomValue(-0, 0)).toBe(false); // -0 === 0 in JavaScript
+      expect(hasCustomValue(0, -0)).toBe(false);
+    });
+
+    it('should handle very large numbers', () => {
+      expect(hasCustomValue(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)).toBe(false);
+      expect(hasCustomValue(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1)).toBe(true);
+    });
+
+    it('should handle objects with many properties', () => {
+      const largeObject = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`key${i}`, i]));
+      const largeObjectCopy = { ...largeObject };
+      expect(hasCustomValue(largeObject, largeObjectCopy)).toBe(false);
+
+      const modifiedObject = { ...largeObject, key50: 999 };
+      expect(hasCustomValue(modifiedObject, largeObject)).toBe(true);
+    });
+
+    it('should handle arrays with many elements', () => {
+      const largeArray = Array.from({ length: 100 }, (_, i) => i);
+      const largeArrayCopy = [...largeArray];
+      expect(hasCustomValue(largeArray, largeArrayCopy)).toBe(false);
+
+      const modifiedArray = [...largeArray];
+      modifiedArray[50] = 999;
+      expect(hasCustomValue(modifiedArray, largeArray)).toBe(true);
     });
   });
 });

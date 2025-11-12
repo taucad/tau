@@ -8,7 +8,6 @@ import { cookieName } from '#constants/cookie.constants.js';
 import { ChatViewer } from '#routes/builds_.$id/chat-viewer.js';
 import { useIsMobile } from '#hooks/use-mobile.js';
 import { ChatEditorLayout, ChatEditorLayoutTrigger } from '#routes/builds_.$id/chat-editor-layout.js';
-import { SettingsControl } from '#components/geometry/cad/settings-control.js';
 import { ChatViewerStatus } from '#routes/builds_.$id/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/builds_.$id/chat-viewer-controls.js';
 import { ChatStackTrace } from '#routes/builds_.$id/chat-stack-trace.js';

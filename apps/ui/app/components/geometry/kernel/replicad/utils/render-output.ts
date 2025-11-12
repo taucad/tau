@@ -1,6 +1,6 @@
 import type { AnyShape, Drawing } from 'replicad';
 import type { SetRequired } from 'type-fest';
-import type { Geometry2D } from '@taucad/types';
+import type { GeometrySvg } from '@taucad/types';
 import { normalizeColor } from '#components/geometry/kernel/replicad/utils/normalize-color.js';
 import type { GeometryReplicad } from '#components/geometry/kernel/replicad/replicad.types.js';
 
@@ -93,15 +93,14 @@ function normalizeColorAndOpacity<T extends InputShape>(shape: T): InputShape {
   };
 }
 
-function renderSvg(shapeConfig: SvgShapeConfiguration): Geometry2D {
+function renderSvg(shapeConfig: SvgShapeConfiguration): GeometrySvg {
   const { name, shape, color, strokeType, opacity } = shapeConfig;
   return {
-    type: '2d',
+    format: 'svg',
     name,
     color,
     strokeType,
     opacity,
-    format: 'svg',
     paths: shape.toSVGPaths() as string[],
     viewbox: shape.toSVGViewBox(),
   };
@@ -110,7 +109,7 @@ function renderSvg(shapeConfig: SvgShapeConfiguration): Geometry2D {
 function renderMesh(shapeConfig: MeshableConfiguration) {
   const { name, shape, color, opacity } = shapeConfig;
   const geometry: GeometryReplicad = {
-    type: '3d',
+    format: 'replicad',
     name,
     color,
     opacity,
@@ -143,7 +142,7 @@ function renderMesh(shapeConfig: MeshableConfiguration) {
   return geometry;
 }
 
-export function render(shapes: InputShape[]): Array<Geometry2D | GeometryReplicad> {
+export function render(shapes: InputShape[]): Array<GeometrySvg | GeometryReplicad> {
   return shapes.map((shapeConfig) => {
     if (isSvgable(shapeConfig.shape)) {
       // TODO: fix this type
@@ -163,7 +162,7 @@ export function renderOutput(
   shapes: MainResultShapes,
   beforeRender?: (shapes: InputShape[]) => InputShape[],
   defaultName = 'AnyShape',
-): Array<Geometry2D | GeometryReplicad> {
+): Array<GeometrySvg | GeometryReplicad> {
   const baseShape = createBasicShapeConfig(shapes, defaultName).map((element) => normalizeColorAndOpacity(element));
 
   const config = beforeRender ? beforeRender(baseShape) : baseShape;

@@ -50,7 +50,7 @@ class TauWorker extends KernelWorker {
 
       // Create geometry object
       const geometry: GeometryGltf = {
-        type: 'gltf',
+        format: 'gltf',
         gltfBlob: new Blob([glbData], { type: 'model/gltf-binary' }),
       };
 

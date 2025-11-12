@@ -14,7 +14,7 @@ describe('convertReplicadShapesToGltf', () => {
   it('should convert a simple cube geometry to GLTF', async () => {
     // Mock a simple cube geometry data
     const cubeShape: GeometryReplicad = {
-      type: '3d',
+      format: 'replicad',
       name: 'Test Cube',
       color: '#ff0000',
       opacity: 1,
@@ -74,7 +74,7 @@ describe('convertReplicadShapesToGltf', () => {
 
   it('should handle GLTF JSON format output', async () => {
     const simpleShape: GeometryReplicad = {
-      type: '3d',
+      format: 'replicad',
       name: 'Test Geometry',
       faces: {
         vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
@@ -97,7 +97,7 @@ describe('convertReplicadShapesToGltf', () => {
 
   it('should preserve colors from multiple geometries', async () => {
     const redShape: GeometryReplicad = {
-      type: '3d',
+      format: 'replicad',
       name: 'Red Geometry',
       color: '#ff0000',
       faces: {
@@ -110,7 +110,7 @@ describe('convertReplicadShapesToGltf', () => {
     };
 
     const blueShape: GeometryReplicad = {
-      type: '3d',
+      format: 'replicad',
       name: 'Blue Geometry',
       color: '#0000ff',
       faces: {
@@ -136,7 +136,7 @@ describe('convertReplicadShapesToGltf', () => {
 
   it('should preserve edge lines from Shape3D in GLTF conversion', async () => {
     const shapeWithoutLines: GeometryReplicad = {
-      type: '3d',
+      format: 'replicad',
       name: 'Geometry without Lines',
       faces: {
         vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
@@ -151,7 +151,7 @@ describe('convertReplicadShapesToGltf', () => {
     };
 
     const shapeWithLines: GeometryReplicad = {
-      type: '3d',
+      format: 'replicad',
       name: 'Geometry with Lines',
       faces: {
         vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],

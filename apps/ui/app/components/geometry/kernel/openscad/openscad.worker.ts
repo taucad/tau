@@ -112,7 +112,7 @@ class OpenScadWorker extends KernelWorker {
       const gltfBlob = await convertOffToGltf(offData, 'glb', false);
 
       const geometry: GeometryGltf = {
-        type: 'gltf',
+        format: 'gltf',
         gltfBlob,
       };
 

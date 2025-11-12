@@ -134,7 +134,7 @@ class ZooWorker extends KernelWorker<ZooOptions> {
         const view = new Uint8Array(arrayBuffer);
         view.set(gltf.contents);
         const geometry: GeometryGltf = {
-          type: 'gltf',
+          format: 'gltf',
           gltfBlob: new Blob([gltf.contents]),
         };
         return createKernelSuccess([geometry]);

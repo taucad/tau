@@ -313,7 +313,7 @@ export default function ConverterRoute(): React.JSX.Element {
 
   // Construct geometries array for CadViewer
   const geometries: Geometry[] = glbData
-    ? [{ type: 'gltf', gltfBlob: new Blob([glbData], { type: 'model/gltf-binary' }) }]
+    ? [{ format: 'gltf', gltfBlob: new Blob([glbData], { type: 'model/gltf-binary' }) }]
     : [];
 
   const hasModel = glbData !== undefined;

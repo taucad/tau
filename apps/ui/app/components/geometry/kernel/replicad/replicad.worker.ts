@@ -13,7 +13,7 @@ import type {
   ExtractNameResult,
   ExportFormat,
   GeometryGltf,
-  Geometry2D,
+  GeometrySvg,
   GeometryFile,
 } from '@taucad/types';
 import { isKernelError } from '@taucad/types/guards';
@@ -235,8 +235,8 @@ try {
       this.log(`Tessellation took ${renderEndTime - renderStartTime}ms`, { operation: 'computeGeometry' });
 
       const gltfStartTime = performance.now();
-      const shapes3d = renderedShapes.filter((shape): shape is GeometryReplicad => shape.type === '3d');
-      const shapes2d = renderedShapes.filter((shape): shape is Geometry2D => shape.type === '2d');
+      const shapes3d = renderedShapes.filter((shape): shape is GeometryReplicad => shape.format === 'replicad');
+      const shapes2d = renderedShapes.filter((shape): shape is GeometrySvg => shape.format === 'svg');
 
       if (shapes3d.length === 0 && shapes2d.length === 0) {
         return createKernelSuccess([]);
@@ -251,7 +251,7 @@ try {
         });
 
         const shapeGltf: GeometryGltf = {
-          type: 'gltf',
+          format: 'gltf',
           gltfBlob,
         };
         gltfShapes.push(shapeGltf);
@@ -303,7 +303,7 @@ try {
           });
 
           return {
-            type: '3d' as const,
+            format: 'replicad',
             name: shapeConfig.name ?? 'Geometry',
             color: (shapeConfig as { color?: string }).color,
             opacity: (shapeConfig as { opacity?: number }).opacity,

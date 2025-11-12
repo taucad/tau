@@ -7,7 +7,7 @@
  * @see https://replicad.dev/docs/api/classes/Shape3D.html
  */
 export type GeometryReplicad = {
-  type: '3d';
+  format: 'replicad';
   faces: {
     triangles: number[];
     vertices: number[];

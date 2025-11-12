@@ -150,7 +150,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
               <ChatParametersNumber
                 value={sectionViewTranslation}
                 defaultValue={0}
-                name="translation"
+                descriptor="length"
                 min={-maxDistance}
                 max={maxDistance}
                 onChange={(value) => {
@@ -169,7 +169,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 <ChatParametersNumber
                   value={rotationDegrees.x}
                   defaultValue={0}
-                  name="rotation-x"
+                  descriptor="angle"
                   min={-180}
                   max={180}
                   step={1}
@@ -187,7 +187,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 <ChatParametersNumber
                   value={rotationDegrees.y}
                   defaultValue={0}
-                  name="rotation-y"
+                  descriptor="angle"
                   min={-180}
                   max={180}
                   step={1}
@@ -205,7 +205,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 <ChatParametersNumber
                   value={rotationDegrees.z}
                   defaultValue={0}
-                  name="rotation-z"
+                  descriptor="angle"
                   min={-180}
                   max={180}
                   step={1}

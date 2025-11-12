@@ -180,3 +180,30 @@ export const isUnitlessParameter = (parameterName: string): boolean => {
   const normalizedName = parameterName.toLowerCase();
   return unitlessTerms.some((term) => normalizedName.includes(term));
 };
+
+export type MeasurementDescriptor = 'length' | 'angle' | 'count' | 'unitless';
+
+/**
+ * Determine the descriptor type based on parameter name
+ * @param name - Parameter name to analyze
+ * @returns The appropriate descriptor for the parameter
+ */
+export function getDescriptor(name?: string): MeasurementDescriptor {
+  if (!name) {
+    return 'length';
+  }
+
+  if (isCountParameter(name)) {
+    return 'count';
+  }
+
+  if (isAngleParameter(name)) {
+    return 'angle';
+  }
+
+  if (isUnitlessParameter(name)) {
+    return 'unitless';
+  }
+
+  return 'length';
+}

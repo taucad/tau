@@ -1,7 +1,7 @@
 import { Slider } from '#components/ui/slider.js';
 import { ChatParametersInputNumber } from '#routes/builds_.$id/chat-parameters-input-number.js';
-import { cn } from '#utils/ui.utils.js';
 import { useKeydown } from '#hooks/use-keydown.js';
+import type { MeasurementDescriptor } from '#constants/build-parameters.js';
 
 // Slider calculation constants
 
@@ -177,23 +177,24 @@ type ChatParametersNumberProps = {
   readonly value: number;
   readonly defaultValue: number;
   readonly onChange: (value: number) => void;
-  readonly name: string;
+  readonly descriptor: MeasurementDescriptor;
   readonly min?: number;
   readonly max?: number;
   readonly step?: number;
   // eslint-disable-next-line react/boolean-prop-naming -- following input boolean prop naming convention.
   readonly disabled?: boolean;
-};
+} & Omit<React.ComponentProps<typeof ChatParametersInputNumber>, 'value' | 'onValueChange'>;
 
 export function ChatParametersNumber({
   value,
   defaultValue,
   onChange,
-  name,
+  descriptor,
   min,
   max,
   step,
   disabled,
+  ...properties
 }: ChatParametersNumberProps): React.JSX.Element {
   // Track Shift key state for adjusting slider step
   const { isKeyPressed: isShiftHeld } = useKeydown(
@@ -220,17 +221,18 @@ export function ChatParametersNumber({
         max={max ?? calculateSliderMax(defaultValue)}
         step={effectiveStep}
         disabled={disabled}
-        className={cn('[&_[data-slot=slider-track]]:h-7', 'md:[&_[data-slot=slider-track]]:h-4.5')}
+        className="[&_[data-slot=slider-track]]:h-7 md:[&_[data-slot=slider-track]]:h-4.5"
         onValueChange={([newValue]) => {
           onChange(Number(newValue));
         }}
       />
       <ChatParametersInputNumber
         value={value}
-        name={name}
+        descriptor={descriptor}
         className="h-7 w-24 bg-background"
         disabled={disabled}
         onValueChange={onChange}
+        {...properties}
       />
     </div>
   );

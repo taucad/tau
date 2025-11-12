@@ -12,8 +12,8 @@ import { exportGeometryMachine } from '#machines/export-geometry.machine.js';
 import { zipMachine } from '#machines/zip.machine.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { Format3D } from '#components/icons/format-3d.js';
-import { useCommandPaletteItems } from '#components/layout/commands.js';
-import type { CommandPaletteItem } from '#components/layout/commands.js';
+import { useCommandPaletteItems } from '#components/layout/command-palette.js';
+import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 
 export function BuildCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
   const { cadRef: cadActor, graphicsRef: graphicsActor, updateThumbnail, buildRef } = useBuild();

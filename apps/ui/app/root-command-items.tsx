@@ -3,8 +3,8 @@ import { useMemo } from 'react';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
 import { useLocation } from 'react-router';
 import type { UIMatch } from 'react-router';
-import { useCommandPaletteItems } from '#components/layout/commands.js';
-import type { CommandPaletteItem } from '#components/layout/commands.js';
+import { useCommandPaletteItems } from '#components/layout/command-palette.js';
+import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useBuilds } from '#hooks/use-builds.js';
 
 export function RootCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {

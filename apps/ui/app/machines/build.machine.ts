@@ -113,6 +113,7 @@ type BuildEventInternal =
       files: Record<string, { content: Uint8Array }>;
       parameters: Record<string, unknown>;
     }
+  | { type: 'setParameters'; parameters: Record<string, unknown> }
   | { type: 'setEnableFilePreview'; enabled: boolean }
   | { type: 'loadModel' }
   | { type: 'createFile'; path: string; content: Uint8Array }
@@ -464,6 +465,29 @@ export const buildMachine = setup({
           }
         }),
       );
+    }),
+    setParametersInContext: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'setParameters');
+
+      if (!context.build?.assets.mechanical) {
+        return;
+      }
+
+      // Update build in context using Immer
+      enqueue.assign(({ context: ctx }) =>
+        produce(ctx, (draft) => {
+          if (draft.build?.assets.mechanical) {
+            draft.build.assets.mechanical.parameters = event.parameters;
+            draft.build.updatedAt = Date.now();
+          }
+        }),
+      );
+
+      // Forward to CAD machine
+      enqueue.sendTo(context.cadRef, {
+        type: 'setParameters',
+        parameters: event.parameters,
+      });
     }),
     createFileInContext: assign(({ context, event }) => {
       assertEvent(event, 'createFile');
@@ -1026,6 +1050,9 @@ export const buildMachine = setup({
             updateCodeParameters: {
               actions: ['updateCodeParametersInContext'],
             },
+            setParameters: {
+              actions: ['setParametersInContext'],
+            },
             setEnableFilePreview: {
               actions: 'setEnableFilePreview',
             },
@@ -1097,6 +1124,9 @@ export const buildMachine = setup({
                 updateCodeParameters: {
                   target: 'pending',
                 },
+                setParameters: {
+                  target: 'pending',
+                },
                 createFile: {
                   target: 'pending',
                 },
@@ -1166,6 +1196,10 @@ export const buildMachine = setup({
                   reenter: true,
                 },
                 updateCodeParameters: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                setParameters: {
                   target: 'pending',
                   reenter: true,
                 },

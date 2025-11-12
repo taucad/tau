@@ -50,9 +50,9 @@ export const ChatParameters = memo(function (props: {
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }) {
-  const { cadRef } = useBuild();
+  const { buildRef, cadRef, setParameters } = useBuild();
   const { className, isExpanded = true, setIsExpanded } = props;
-  const parameters = useSelector(cadRef, (state) => state.context.parameters);
+  const parameters = useSelector(buildRef, (state) => state.context.build?.assets.mechanical?.parameters ?? {});
   const defaultParameters = useSelector(cadRef, (state) => state.context.defaultParameters);
   const jsonSchema = useSelector(cadRef, (state) => state.context.jsonSchema);
 
@@ -63,13 +63,6 @@ export const ChatParameters = memo(function (props: {
   const { formattedKeyCombination: formattedParametersKeyCombination } = useKeydown(
     toggleParametersKeyCombination,
     toggleParametersOpen,
-  );
-
-  const handleParametersChange = useCallback(
-    (newParameters: Record<string, unknown>) => {
-      cadRef.send({ type: 'setParameters', parameters: newParameters });
-    },
-    [cadRef],
   );
 
   return (
@@ -84,7 +77,6 @@ export const ChatParameters = memo(function (props: {
         )}
       />
       <FloatingPanelContent>
-        {/* Header */}
         <FloatingPanelContentHeader>
           <FloatingPanelContentTitle>Parameters</FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
@@ -93,8 +85,8 @@ export const ChatParameters = memo(function (props: {
           <Parameters
             parameters={parameters}
             defaultParameters={defaultParameters}
-            jsonSchema={jsonSchema ?? undefined}
-            onParametersChange={handleParametersChange}
+            jsonSchema={jsonSchema}
+            onParametersChange={setParameters}
           />
         </FloatingPanelContentBody>
       </FloatingPanelContent>

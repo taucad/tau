@@ -28,6 +28,7 @@ type BuildContextType = {
   logRef: ActorRefFrom<typeof logMachine>;
   setChatMessages: (chatId: string, messages: Message[]) => void;
   setCodeParameters: (files: Record<string, { content: Uint8Array }>, parameters: Record<string, unknown>) => void;
+  setParameters: (parameters: Record<string, unknown>) => void;
   updateName: (name: string) => void;
   updateDescription: (description: string) => void;
   updateTags: (tags: string[]) => void;
@@ -97,6 +98,13 @@ export function BuildProvider({
   const setCodeParameters = useCallback(
     (files: Record<string, { content: Uint8Array }>, parameters: Record<string, unknown>) => {
       actorRef.send({ type: 'updateCodeParameters', files, parameters });
+    },
+    [actorRef],
+  );
+
+  const setParameters = useCallback(
+    (parameters: Record<string, unknown>) => {
+      actorRef.send({ type: 'setParameters', parameters });
     },
     [actorRef],
   );
@@ -172,6 +180,7 @@ export function BuildProvider({
       logRef,
       setChatMessages,
       setCodeParameters,
+      setParameters,
       updateName,
       updateDescription,
       updateTags,
@@ -195,6 +204,7 @@ export function BuildProvider({
     logRef,
     setChatMessages,
     setCodeParameters,
+    setParameters,
     updateName,
     updateDescription,
     updateTags,

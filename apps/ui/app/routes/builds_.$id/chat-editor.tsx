@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useState, useMemo } from 'react';
 import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
-import { FileCode, TriangleAlert } from 'lucide-react';
+import { FileCode } from 'lucide-react';
 import { CodeEditor } from '#components/code/code-editor.js';
 import { cn } from '#utils/ui.utils.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
@@ -13,9 +13,9 @@ import { ChatEditorTabs } from '#routes/builds_.$id/chat-editor-tabs.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
-import { Button } from '#components/ui/button.js';
 import { getFileExtension, isBinaryFile, decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
 import { iconFromExtension } from '#components/icons/file-extension-icon.js';
+import { ChatEditorBinaryWarning } from '#routes/builds_.$id/chat-editor-binary-warning.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }): React.JSX.Element {
   const monaco = useMonaco();
@@ -127,20 +127,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       <div className="flex-1">
         {activeFile ? (
           isBinary && !forceOpenBinary ? (
-            <div className="flex h-full items-center justify-center bg-background p-4">
-              <div className="flex flex-col items-center gap-4 text-center">
-                <TriangleAlert className="size-10 stroke-1 text-warning" />
-                <div className="flex flex-col items-center gap-4">
-                  <p className="text-sm">
-                    The file is not displayed in the text editor because it is either binary or uses an unsupported text
-                    encoding.
-                  </p>
-                  <Button variant="outline" onClick={handleForceOpenBinary}>
-                    Open Anyway
-                  </Button>
-                </div>
-              </div>
-            </div>
+            <ChatEditorBinaryWarning onForceOpen={handleForceOpenBinary} />
           ) : (
             <CodeEditor
               loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}

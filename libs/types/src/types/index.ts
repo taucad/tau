@@ -14,3 +14,4 @@ export type * from '#types/manufacturing.types.js';
 export type * from '#types/model.types.js';
 export type * from '#types/schema.types.js';
 export type * from '#types/tool.types.js';
+export type * from '#types/unit.types.js';

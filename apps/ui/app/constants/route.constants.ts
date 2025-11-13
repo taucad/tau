@@ -15,6 +15,7 @@ type NavProject = {
 
 export const navRoutes: {
   navMain: NavRoute[];
+  navSecondary: NavRoute[];
   projects: NavProject[];
 } = {
   navMain: [
@@ -57,6 +58,8 @@ export const navRoutes: {
       url: '/models',
       icon: Bot,
     },
+  ],
+  navSecondary: [
     {
       title: 'Documentation',
       url: '/docs',

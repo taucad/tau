@@ -30,6 +30,9 @@
     },
     {
       "path": "./packages/js"
+    },
+    {
+      "path": "./packages/kernels"
     }
   ],
   "files": [],

@@ -13,7 +13,8 @@ import type {
   ExtractNameResult,
   ExportFormat,
   GeometryGltf,
-  Geometry2D,
+  GeometrySvg,
+  GeometryFile,
 } from '@taucad/types';
 import { isKernelError } from '@taucad/types/guards';
 import { createKernelError, createKernelSuccess } from '#components/geometry/kernel/utils/kernel-helpers.js';
@@ -96,8 +97,25 @@ class ReplicadWorker extends KernelWorker<ReplicadOptions> {
     }
   }
 
-  public override async extractParameters(code: string): Promise<ExtractParametersResult> {
+  public override async canHandle(file: GeometryFile): Promise<boolean> {
+    // Check if the file format is a JavaScript/TypeScript file
+    const extension = KernelWorker.getFileExtension(file.filename);
+    if (!['ts', 'js', 'tsx', 'jsx'].includes(extension)) {
+      return false;
+    }
+
+    // Extract code and check for replicad imports
+    const code = KernelWorker.extractCodeFromFile(file);
+    // Also support: "const {...} = replicad;" pattern (see user image)
+    const hasImportStatement = (() => /import.*from\s+['"]replicad['"]/.test(code))();
+    const hasRequireStatement = (() => /require\s*\(['"]replicad['"]\)/.test(code))();
+    const hasDestructuredAssignment = (() => /\bconst\s*{\s*[\w\s,]*}\s*=\s*replicad\s*;/.test(code))();
+    return hasImportStatement || hasRequireStatement || hasDestructuredAssignment;
+  }
+
+  public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {
     try {
+      const code = KernelWorker.extractCodeFromFile(file);
       let defaultParameters: Record<string, unknown> = {};
 
       if (/^\s*export\s+/m.test(code)) {
@@ -169,13 +187,16 @@ try {
   }
 
   public override async computeGeometry(
-    code: string,
+    file: GeometryFile,
     parameters: Record<string, unknown>,
   ): Promise<ComputeGeometryResult> {
     const startTime = performance.now();
     this.log('Computing geometry from code', { operation: 'computeGeometry' });
 
     try {
+      // Extract code from file
+      const code = KernelWorker.extractCodeFromFile(file);
+
       // Ensure font is loaded
       // TODO: Review font loading
       // if (!replicad.getFont()) {
@@ -218,8 +239,8 @@ try {
       this.log(`Tessellation took ${renderEndTime - renderStartTime}ms`, { operation: 'computeGeometry' });
 
       const gltfStartTime = performance.now();
-      const shapes3d = renderedShapes.filter((shape): shape is GeometryReplicad => shape.type === '3d');
-      const shapes2d = renderedShapes.filter((shape): shape is Geometry2D => shape.type === '2d');
+      const shapes3d = renderedShapes.filter((shape): shape is GeometryReplicad => shape.format === 'replicad');
+      const shapes2d = renderedShapes.filter((shape): shape is GeometrySvg => shape.format === 'svg');
 
       if (shapes3d.length === 0 && shapes2d.length === 0) {
         return createKernelSuccess([]);
@@ -234,7 +255,7 @@ try {
         });
 
         const shapeGltf: GeometryGltf = {
-          type: 'gltf',
+          format: 'gltf',
           gltfBlob,
         };
         gltfShapes.push(shapeGltf);
@@ -286,7 +307,7 @@ try {
           });
 
           return {
-            type: '3d' as const,
+            format: 'replicad',
             name: shapeConfig.name ?? 'Geometry',
             color: (shapeConfig as { color?: string }).color,
             opacity: (shapeConfig as { opacity?: number }).opacity,

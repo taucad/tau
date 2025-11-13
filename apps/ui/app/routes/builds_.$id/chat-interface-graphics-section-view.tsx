@@ -5,7 +5,7 @@ import { Button } from '#components/ui/button.js';
 import { Tabs, TabsList, TabsTrigger } from '#components/ui/tabs.js';
 import { Switch } from '#components/ui/switch.js';
 import { ChatParametersNumber } from '#routes/builds_.$id/chat-parameters-number.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
 
 function toDegrees(radians: number): number {
@@ -18,6 +18,7 @@ function toRadians(degrees: number): number {
 }
 
 export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
+  const { graphicsRef: graphicsActor } = useBuild();
   const state = useSelector(graphicsActor, (s) => s);
 
   const {
@@ -149,7 +150,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
               <ChatParametersNumber
                 value={sectionViewTranslation}
                 defaultValue={0}
-                name="translation"
+                descriptor="length"
                 min={-maxDistance}
                 max={maxDistance}
                 onChange={(value) => {
@@ -168,7 +169,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 <ChatParametersNumber
                   value={rotationDegrees.x}
                   defaultValue={0}
-                  name="rotation-x"
+                  descriptor="angle"
                   min={-180}
                   max={180}
                   step={1}
@@ -186,7 +187,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 <ChatParametersNumber
                   value={rotationDegrees.y}
                   defaultValue={0}
-                  name="rotation-y"
+                  descriptor="angle"
                   min={-180}
                   max={180}
                   step={1}
@@ -204,7 +205,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 <ChatParametersNumber
                   value={rotationDegrees.z}
                   defaultValue={0}
-                  name="rotation-z"
+                  descriptor="angle"
                   min={-180}
                   max={180}
                   step={1}

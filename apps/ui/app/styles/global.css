@@ -25,12 +25,12 @@
   --radius-xs: 0.4375rem;
 
   /* Base color hues */
-  --hue-primary: 266deg;
+  --hue-primary: 180deg;
   --hue-secondary: calc(var(--hue-primary) - 10deg);
   --hue-neutral: calc(var(--hue-primary) - 10deg);
   --hue-destructive: 15deg;
   --hue-success: 150deg;
-  --hue-warning: 40deg;
+  --hue-warning: 70deg;
   --hue-feature: 280deg;
   --hue-information: 250deg;
   --hue-highlighted: 330deg;

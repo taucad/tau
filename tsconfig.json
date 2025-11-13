@@ -24,6 +24,12 @@
     },
     {
       "path": "./libs/types"
+    },
+    {
+      "path": "./packages/json-schema"
+    },
+    {
+      "path": "./packages/js"
     }
   ],
   "files": [],

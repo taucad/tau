@@ -8,7 +8,6 @@ import { cookieName } from '#constants/cookie.constants.js';
 import { ChatViewer } from '#routes/builds_.$id/chat-viewer.js';
 import { useIsMobile } from '#hooks/use-mobile.js';
 import { ChatEditorLayout, ChatEditorLayoutTrigger } from '#routes/builds_.$id/chat-editor-layout.js';
-import { SettingsControl } from '#components/geometry/cad/settings-control.js';
 import { ChatViewerStatus } from '#routes/builds_.$id/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/builds_.$id/chat-viewer-controls.js';
 import { ChatStackTrace } from '#routes/builds_.$id/chat-stack-trace.js';
@@ -116,11 +115,6 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           {/* Top-left Content */}
           <div className="absolute top-(--header-height) right-12 left-2 hidden group-data-[active-tab=model]/chat-tabs:block group-data-[full-height-panel=true]/chat-tabs:block">
             <ChatStackTrace />
-          </div>
-
-          {/* Top-right Content */}
-          <div className="absolute top-(--header-height) right-2 hidden group-data-[active-tab=model]/chat-tabs:block group-data-[full-height-panel=true]/chat-tabs:block">
-            <SettingsControl />
           </div>
 
           {/* Centered Content */}
@@ -319,7 +313,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           </div>
 
           {/* Bottom-left Content */}
-          <div className="pointer-events-auto absolute right-8 bottom-0 left-0 flex w-fit shrink-0 flex-col gap-2">
+          <div className="pointer-events-auto absolute right-8 bottom-0 left-0 flex w-100 shrink-0 flex-col gap-2">
             <ChatInterfaceGraphics />
             <ChatStackTrace />
             <ChatViewerControls />

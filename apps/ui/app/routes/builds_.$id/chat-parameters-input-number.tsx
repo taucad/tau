@@ -3,40 +3,13 @@ import { Hash } from 'lucide-react';
 import { Angle } from '#components/icons/angle.js';
 import { cn } from '#utils/ui.utils.js';
 import { Input } from '#components/ui/input.js';
-import { isCountParameter, isAngleParameter, isUnitlessParameter } from '#constants/build-parameters.js';
-
-type MeasurementDescriptor = 'length' | 'angle' | 'count' | 'unitless';
-
-/**
- * Determine the descriptor type based on parameter name
- * @param name - Parameter name to analyze
- * @returns The appropriate descriptor for the parameter
- */
-function getDescriptor(name?: string): MeasurementDescriptor {
-  if (!name) {
-    return 'length';
-  }
-
-  if (isCountParameter(name)) {
-    return 'count';
-  }
-
-  if (isAngleParameter(name)) {
-    return 'angle';
-  }
-
-  if (isUnitlessParameter(name)) {
-    return 'unitless';
-  }
-
-  return 'length';
-}
+import type { MeasurementDescriptor } from '#constants/build-parameters.js';
 
 const baseIndicatorClass = 'flex h-7 w-7 items-center justify-center border bg-muted text-muted-foreground select-none';
 
 type ChatParametersInputNumberProps = Omit<React.ComponentProps<'input'>, 'type' | 'value' | 'onChange'> & {
   readonly unit?: string;
-  readonly name: string;
+  readonly descriptor: MeasurementDescriptor;
   readonly value: number;
   readonly onValueChange?: (value: number) => void;
 };
@@ -45,12 +18,10 @@ export function ChatParametersInputNumber({
   className,
   unit = 'mm',
   value,
-  name,
+  descriptor,
   onValueChange,
   ...properties
 }: ChatParametersInputNumberProps): React.ReactNode {
-  const descriptor = getDescriptor(name);
-
   const isCount = descriptor === 'count';
   const isAngle = descriptor === 'angle';
   const isUnitless = descriptor === 'unitless';

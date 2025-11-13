@@ -16,6 +16,9 @@
       "path": "../../libs/tau-examples"
     },
     {
+      "path": "../../packages/json-schema"
+    },
+    {
       "path": "./tsconfig.app.json"
     },
     {

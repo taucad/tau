@@ -1,0 +1,7 @@
+{
+  "name": "js",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/js",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:lib"]
+}

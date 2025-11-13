@@ -5,7 +5,7 @@ import { useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,6 +54,7 @@ type GridUnitOption = (typeof gridUnitOptions)[number]['value'];
  * Component that displays the current grid size from the GraphicsProvider
  */
 export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.ReactNode {
+  const { graphicsRef: graphicsActor } = useBuild();
   const gridSizes = useSelector(graphicsActor, (state) => state.context.gridSizes);
   const isGridSizeLocked = useSelector(graphicsActor, (state) => state.context.isGridSizeLocked);
   const gridUnitSystem = useSelector(graphicsActor, (state) => state.context.gridUnitSystem);
@@ -77,11 +78,14 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
         },
       });
     }
-  }, [unit]);
+  }, [unit, graphicsActor]);
 
-  const handleLockToggle = useCallback((checked: boolean) => {
-    graphicsActor.send({ type: 'setGridSizeLocked', payload: checked });
-  }, []);
+  const handleLockToggle = useCallback(
+    (checked: boolean) => {
+      graphicsActor.send({ type: 'setGridSizeLocked', payload: checked });
+    },
+    [graphicsActor],
+  );
 
   const handleUnitChange = useCallback(
     (selectedUnit: string) => {

@@ -9,6 +9,7 @@ import type {
   ExtractParametersResult,
   ExportFormat,
   GeometryGltf,
+  GeometryFile,
 } from '@taucad/types';
 import type { OpenScadParameterExport } from '#components/geometry/kernel/openscad/parse-parameters.js';
 import {
@@ -34,7 +35,13 @@ class OpenScadWorker extends KernelWorker {
 
   private offDataMemory: Record<string, string> = {};
 
-  public override async extractParameters(code: string): Promise<ExtractParametersResult> {
+  public override async canHandle(file: GeometryFile): Promise<boolean> {
+    const extension = KernelWorker.getFileExtension(file.filename);
+    return extension === 'scad';
+  }
+
+  public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {
+    const code = KernelWorker.extractCodeFromFile(file);
     try {
       const instance = await this.createInstance();
       const inputFile = '/input.scad';
@@ -71,11 +78,12 @@ class OpenScadWorker extends KernelWorker {
   }
 
   public override async computeGeometry(
-    code: string,
+    file: GeometryFile,
     parameters?: Record<string, unknown>,
     geometryId = 'defaultGeometry',
   ): Promise<ComputeGeometryResult> {
     try {
+      const code = KernelWorker.extractCodeFromFile(file);
       const trimmedCode = code.trim();
       if (trimmedCode === '') {
         return createKernelSuccess([]);
@@ -104,7 +112,7 @@ class OpenScadWorker extends KernelWorker {
       const gltfBlob = await convertOffToGltf(offData, 'glb', false);
 
       const geometry: GeometryGltf = {
-        type: 'gltf',
+        format: 'gltf',
         gltfBlob,
       };
 

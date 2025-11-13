@@ -1,0 +1,301 @@
+---
+description: XState v5 machine development patterns and best practices
+globs: *.machine.ts
+alwaysApply: false
+---
+
+# XState Machine Development Guide
+
+## File Structure
+
+**Naming**: Files must end with `.machine.ts` (e.g., `create-repository.machine.ts`)
+
+**Template Structure**:
+```typescript
+import { assign, assertEvent, setup, fromPromise, emit, enqueueActions } from 'xstate';
+import type { ActorRefFrom, OutputFrom, DoneActorEvent } from 'xstate';
+
+type MyMachineContext = {
+  data: string;
+  error: Error | undefined;
+  childRef: ActorRefFrom<typeof childMachine>;
+};
+
+type MyMachineInput = {
+  id: string;
+  parentRef?: AnyActorRef;
+};
+
+type MyMachineEventInternal = 
+  | { type: 'start'; payload: string }
+  | { type: 'stop' };
+
+type MyMachineEmitted =
+  | { type: 'success'; data: unknown }
+  | { type: 'error'; error: Error };
+
+const myActor = fromPromise<Result, Input>(async ({ input }) => {
+  // Implementation
+});
+
+const myActors = { myActor } as const;
+
+export const myMachine = setup({
+  types: {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
+    context: {} as MyMachineContext,
+    events: {} as MyMachineEventInternal,
+    input: {} as MyMachineInput,
+    emitted: {} as MyMachineEmitted,
+  },
+  actors: myActors,
+}).createMachine({
+  id: 'myMachine',
+  // ...
+});
+
+export type MyMachineActor = typeof myMachine;
+```
+
+## Type Definitions
+
+**Context**: Always include `error: Error | undefined`
+```typescript
+type Context = {
+  error: Error | undefined; // Required
+  data: string;
+  childRef: ActorRefFrom<typeof childMachine>; // Use ActorRefFrom for type safety
+};
+```
+
+**Events**: Separate internal and external
+```typescript
+type EventInternal = | { type: 'start' } | { type: 'stop' };
+type EventExternal = OutputFrom<(typeof actors)[keyof typeof actors]>;
+type EventExternalDone = DoneActorEvent<EventExternal, keyof typeof actors>;
+type Event = EventExternalDone | EventInternal;
+```
+
+**Naming**: Use verb-noun for events (`createFile`, `updateUser`), past tense for emitted (`fileCreated`)
+
+## Actors
+
+**Promise Actors**: Use `fromPromise` for async operations
+```typescript
+const fetchActor = fromPromise<Result, { id: string }>(async ({ input }) => {
+  const response = await fetch(`/api/${input.id}`);
+  if (!response.ok) throw new Error(`Failed: ${response.status}`);
+  return await response.json();
+});
+```
+
+**Callback Actors**: Use `fromCallback` for event-driven operations
+```typescript
+const listenerActor = fromCallback<Event, { parentRef: AnyActorRef }>(
+  ({ input, sendBack, receive }) => {
+    const sub = input.parentRef.on('event', (e) => sendBack({ type: 'received', data: e }));
+    receive((e) => { if (e.type === 'stop') sub.unsubscribe(); });
+    return () => sub.unsubscribe(); // Always return cleanup
+  }
+);
+```
+
+## Actions
+
+**Assign**: Use `assertEvent` for type narrowing
+```typescript
+actions: {
+  setData: assign({
+    data({ event }) {
+      assertEvent(event, 'setData');
+      return event.data;
+    },
+    error: undefined, // Clear error when setting data
+  }),
+}
+```
+
+**Enqueue Actions**: For multiple sequential actions
+```typescript
+actions: {
+  processAndEmit: enqueueActions(({ enqueue, context, event }) => {
+    assertEvent(event, 'process');
+    enqueue.assign({ processed: true });
+    enqueue.emit({ type: 'processed' as const, result: event.result });
+    enqueue.sendTo(context.childRef, { type: 'notify', data: event.result });
+  }),
+}
+```
+
+**Emit**: Always use `as const` for emitted types
+```typescript
+emit(({ event }) => ({
+  type: 'success' as const,
+  result: event.output,
+}))
+```
+
+**Complex Updates**: Use Immer `produce` for nested updates
+```typescript
+import { produce } from 'immer';
+
+assign(({ context, event }) => {
+  return produce(context, (draft) => {
+    draft.build!.nested.property = event.value;
+    draft.build!.updatedAt = Date.now();
+  });
+})
+```
+
+## Guards
+
+**Definition**: Use descriptive names (is/has/can patterns)
+```typescript
+guards: {
+  hasData({ context }) {
+    return context.data !== undefined;
+  },
+  isValid({ event }) {
+    assertEvent(event, 'validate');
+    return event.value > 0;
+  },
+}
+```
+
+**Usage**: Use in conditional transitions
+```typescript
+on: {
+  process: [
+    { guard: 'hasData', target: 'processing' },
+    { target: 'error', actions: 'setError' },
+  ],
+}
+```
+
+## States
+
+**Naming**: Present participle for active (`loading`, `processing`), past/noun for done (`ready`, `success`)
+
+**Structure**: Always handle errors
+```typescript
+states: {
+  loading: {
+    entry: ['clearError', 'setLoading'],
+    invoke: {
+      src: 'fetchData',
+      onDone: { target: 'ready', actions: ['setData', 'clearLoading'] },
+      onError: { target: 'error', actions: ['setError', 'clearLoading'] },
+    },
+  },
+  error: {
+    on: {
+      retry: { target: 'loading', actions: 'clearError' },
+    },
+  },
+}
+```
+
+**Parallel States**: For independent concerns
+```typescript
+states: {
+  ready: {
+    type: 'parallel',
+    states: {
+      operation: { initial: 'idle', states: { idle: {}, processing: {} } },
+      storage: { initial: 'idle', states: { idle: {}, saving: {} } },
+    },
+  },
+}
+```
+
+**Reenter**: Use `reenter: true` to reset timers/debouncing
+```typescript
+on: {
+  update: { target: 'buffering', reenter: true }, // Resets after timer
+}
+```
+
+## Actor Communication
+
+**Parent References**: Store in context, send with `sendTo`
+```typescript
+type Context = { parentRef?: AnyActorRef };
+
+sendTo(({ context }) => context.parentRef!, ({ event }) => ({
+  type: 'childEvent',
+  data: event.data,
+}))
+```
+
+**Child Spawning**: Spawn in context initialization
+```typescript
+context: ({ input, spawn, self }) => ({
+  childRef: spawn(childMachine, {
+    id: `child-${input.id}`,
+    input: { parentRef: self },
+  }),
+})
+```
+
+**Respawn**: Stop old, spawn new when context changes
+```typescript
+actions: {
+  respawnChild: assign({
+    childRef({ context, spawn, self }) {
+      return spawn(childMachine, { id: `child-${context.id}`, input: { parentRef: self } });
+    },
+  }),
+  stopChild: enqueueActions(({ enqueue, context }) => {
+    enqueue.stopChild(context.childRef);
+  }),
+}
+```
+
+## Common Patterns
+
+**Debouncing**:
+```typescript
+buffering: {
+  after: { 500: { target: 'processing', actions: 'process' } },
+  on: {
+    update: { target: 'buffering', actions: 'setData', reenter: true },
+  },
+}
+```
+
+**Retry**:
+```typescript
+error: {
+  on: {
+    retry: { target: 'loading', actions: 'clearError' },
+  },
+}
+```
+
+**Capability Registration**:
+```typescript
+waitingForRegistration: {
+  after: { 5000: { target: 'registrationFailed' } },
+  on: {
+    register: { target: 'registered', actions: 'registerCapability' },
+  },
+}
+```
+
+## Best Practices
+
+- **Type Safety**: Always use `assertEvent` for type narrowing
+- **Error Handling**: Always include `error` in context, handle all `onError`
+- **Cleanup**: Return cleanup functions from callback actors
+- **Documentation**: JSDoc for machine purpose, list states
+- **Immutability**: Use `produce` from Immer for complex updates
+- **Naming**: Consistent verb-noun events, descriptive state names
+- **Performance**: Minimize context size, clean up subscriptions
+
+## Codebase Conventions
+
+- **Actor naming**: `*Actor` suffix for promises, `*Listener` for callbacks
+- **Actor collections**: `*Actors` suffix (e.g., `buildActors`)
+- **Event naming**: camelCase verbs (`createFile`), past tense emitted (`fileCreated`)
+- **State naming**: Present participle active (`loading`), noun/past done (`ready`)
+- **File organization**: One machine per file, export machine and actor type

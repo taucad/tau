@@ -1,4 +1,4 @@
-import { setup, assign, createActor } from 'xstate';
+import { setup, assign } from 'xstate';
 import { idPrefix } from '@taucad/types/constants';
 import type { LogEntry, LogOptions } from '#types/console.types.js';
 import { logLevels } from '#types/console.types.js';
@@ -84,5 +84,3 @@ export const logMachine = setup({
     },
   },
 });
-
-export const logActor = createActor(logMachine).start();

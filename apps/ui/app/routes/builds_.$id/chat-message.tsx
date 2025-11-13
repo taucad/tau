@@ -3,7 +3,7 @@ import { memo, useState } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { messageRole } from '@taucad/types/constants';
 import type { MessageAnnotation } from '@taucad/types';
-import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
+import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
 import { ChatMessageReasoning } from '#routes/builds_.$id/chat-message-reasoning.js';
 import { ChatMessageTool } from '#routes/builds_.$id/chat-message-tool.js';
 import { ChatMessageAnnotations } from '#routes/builds_.$id/chat-message-annotation.js';
@@ -41,11 +41,14 @@ const getMessageContent = (message: Message): string => {
 
 export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties): React.JSX.Element {
   const message = useChatSelector((state) => state.context.messagesById.get(messageId));
-  const { editMessage, retryMessage } = useChatActions();
+  const displayMessage = useChatSelector(
+    (state) => state.context.messageEdits[messageId] ?? state.context.messagesById.get(messageId),
+  );
+  const { editMessage, retryMessage, startEditingMessage, exitEditMode } = useChatActions();
   const [isEditing, setIsEditing] = useState(false);
 
   // Early return if message not found (shouldn't happen in normal operation)
-  if (!message) {
+  if (!message || !displayMessage) {
     return <div>Message not found</div>;
   }
 
@@ -54,6 +57,10 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
   const handleEditClick = () => {
     if (!isUser) {
       return;
+    }
+
+    if (!isEditing) {
+      startEditingMessage(messageId);
     }
 
     setIsEditing((previous) => !previous);
@@ -73,17 +80,19 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
       >
         <When shouldRender={isUser ? isEditing : false}>
           <ChatTextarea
-            initialContent={message.parts}
-            initialAttachments={message.experimental_attachments}
+            mode="edit"
             className="rounded-sm"
             onSubmit={async (event) => {
               editMessage(messageId, event.content, event.model, event.metadata, event.imageUrls);
+              exitEditMode();
               setIsEditing(false);
             }}
             onEscapePressed={() => {
+              exitEditMode();
               setIsEditing(false);
             }}
             onBlur={() => {
+              exitEditMode();
               setIsEditing(false);
             }}
           />
@@ -92,17 +101,17 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
           <div
             className={cn(
               'flex flex-col gap-2',
-              isUser && 'cursor-pointer rounded-sm border bg-background p-2 hover:border-primary',
+              isUser && 'cursor-pointer rounded-sm border bg-background px-3 py-2 hover:border-primary',
             )}
             onClick={handleEditClick}
           >
-            {message.parts?.map((part, index) => {
+            {displayMessage.parts?.map((part, index) => {
               switch (part.type) {
                 case 'text': {
                   return (
                     <ChatMessageText
                       // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                      key={`${message.id}-message-part-${index}`}
+                      key={`${displayMessage.id}-message-part-${index}`}
                       part={part}
                     />
                   );
@@ -114,9 +123,9 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                     part.reasoning.trim().length > 0 && (
                       <ChatMessageReasoning
                         // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                        key={`${message.id}-message-part-${index}`}
+                        key={`${displayMessage.id}-message-part-${index}`}
                         part={part}
-                        hasContent={message.content.length > 0}
+                        hasContent={displayMessage.content.length > 0}
                       />
                     )
                   );
@@ -124,7 +133,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
 
                 case 'tool-invocation': {
                   // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                  return <ChatMessageTool key={`${message.id}-message-part-${index}`} part={part} />;
+                  return <ChatMessageTool key={`${displayMessage.id}-message-part-${index}`} part={part} />;
                 }
 
                 case 'source': {
@@ -157,7 +166,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
             <CopyButton
               tooltipContentProperties={{ side: 'bottom' }}
               size="icon"
-              getText={() => getMessageContent(message)}
+              getText={() => getMessageContent(displayMessage)}
               tooltip="Copy message"
               className="size-7"
             />
@@ -204,8 +213,8 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
               <TooltipContent side="bottom">Switch model</TooltipContent>
             </Tooltip>
             <div className="mx-1 flex flex-row items-center justify-end gap-1">
-              {message.annotations && message.annotations.length > 0 ? (
-                <ChatMessageAnnotations annotations={message.annotations as MessageAnnotation[]} />
+              {displayMessage.annotations && displayMessage.annotations.length > 0 ? (
+                <ChatMessageAnnotations annotations={displayMessage.annotations as MessageAnnotation[]} />
               ) : null}
             </div>
           </div>

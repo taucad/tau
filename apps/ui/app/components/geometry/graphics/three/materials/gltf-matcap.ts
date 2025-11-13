@@ -1,6 +1,6 @@
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import type { Mesh } from 'three';
-import { MeshMatcapMaterial } from 'three';
+import { DoubleSide, MeshMatcapMaterial } from 'three';
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
 
 /**
@@ -16,6 +16,7 @@ export const applyMatcap = async (gltf: GLTF): Promise<void> => {
     if ('isMesh' in child && child.isMesh) {
       const meshMatcap = new MeshMatcapMaterial({
         matcap: matcapTexture,
+        side: DoubleSide,
       });
       const mesh = child as Mesh;
 

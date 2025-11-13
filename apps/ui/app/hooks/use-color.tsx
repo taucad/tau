@@ -11,22 +11,7 @@ import {
 } from 'culori/fn';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
-
-/**
- * Colors are defined in OKLCH space.
- * The hue is the hue in the OKLCH space.
- * The chroma is the chroma in the OKLCH space.
- * The lightness is the lightness in the OKLCH space.
- *
- * Other colors are derived from the primary OKLCH color.
- *
- * The hue is the hue in the OKLCH space.
- */
-
-const hueCssVariable = '--hue-primary';
-const defaultHue = 266;
-const defaultLightness = 0.5719;
-const defaultChroma = 0.1898;
+import { hueCssVariable, defaultHue, defaultLightness, defaultChroma } from '#constants/color.constants.js';
 
 const getRootColorStyle = (hue: number) => {
   return { [hueCssVariable]: `${hue}deg` };

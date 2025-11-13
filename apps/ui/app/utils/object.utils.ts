@@ -1,4 +1,4 @@
-import type { MergeDeep, OmitDeep, Get } from 'type-fest';
+import type { MergeDeep, OmitDeep, Get, PartialDeep } from 'type-fest';
 
 /**
  * Checks if a string is a numeric string (e.g., "0", "1", "42")
@@ -127,7 +127,7 @@ export function getValueAtPath<T extends Record<string, unknown>, Path extends r
 }
 
 /**
- * Deletes a value from a nested object using a path array
+ * Deletes a value from a nested object using a path array without mutating the original object.
  * @param object - The object to modify
  * @param path - Array of property keys to follow
  * @returns A new object with the value deleted at the specified path
@@ -190,6 +190,18 @@ export function deleteValueAtPath<T extends Record<string, unknown>, const Path 
 
     // Then assign the remaining properties
     Object.assign(current, rest);
+
+    // If the parent object is now empty and we're not at the root level, remove it too
+    if (path.length > 1 && Object.keys(current).length === 0) {
+      const parentPath = path.slice(0, -1);
+      const parentKey = parentPath.at(-1);
+      if (parentKey !== undefined && parentPath.length === 1) {
+        // Parent is at root level, delete it
+        const { [parentKey]: _, ...rootRest } = result;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return -- Generic type constraint requires cast
+        return rootRest as any;
+      }
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return -- Generic type constraint requires cast
@@ -198,12 +210,15 @@ export function deleteValueAtPath<T extends Record<string, unknown>, const Path 
 
 /**
  * Checks if a field has a custom value (different from its default)
+ * Performs deep comparison for objects and arrays.
  * @param formData - The current form data for this field
- * @param defaultValue - The default value from the schema
+ * @param defaultValue - The default value from the schema (for array items, this is the default item value)
+ * @param fieldPath - Optional field path array (used for debugging/logging)
  * @returns true if the field has been modified from its default
  */
-export function hasCustomValue(formData: unknown, defaultValue: unknown): boolean {
-  // Handle undefined/null cases
+export function hasCustomValue(formData: unknown, defaultValue: unknown, _fieldPath?: readonly string[]): boolean {
+  // Handle top-level undefined/null: if formData is undefined/null, no custom value was provided
+  // This is the original behavior for the form use case
   if (formData === undefined || formData === null) {
     return false;
   }
@@ -213,14 +228,113 @@ export function hasCustomValue(formData: unknown, defaultValue: unknown): boolea
     return formData !== defaultValue;
   }
 
-  // For objects and arrays, check if they're not empty
+  // For arrays, compare the entire array deeply
   if (Array.isArray(formData)) {
-    return formData.length > 0;
+    if (!Array.isArray(defaultValue)) {
+      return true; // Array vs non-array means it's custom
+    }
+
+    // Deep comparison of arrays
+    if (formData.length !== defaultValue.length) {
+      return true;
+    }
+
+    // For nested values, we need to compare undefined/null normally
+    return formData.some((item, index) => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- array index access
+      const defaultItem = defaultValue[index];
+
+      // Handle nested undefined/null comparison
+      if ((item === undefined || item === null) && (defaultItem === undefined || defaultItem === null)) {
+        return false; // Both undefined/null means same
+      }
+
+      if (item === undefined || item === null || defaultItem === undefined || defaultItem === null) {
+        return item !== defaultItem; // One is undefined/null, other isn't
+      }
+
+      return hasCustomValue(item, defaultItem);
+    });
   }
 
-  if (typeof formData === 'object') {
-    return Object.keys(formData).length > 0;
+  // For objects, compare keys and values deeply
+  if (typeof formData === 'object' && typeof defaultValue === 'object' && defaultValue !== null) {
+    const formKeys = Object.keys(formData);
+    const defaultKeys = Object.keys(defaultValue);
+
+    // If keys differ, it's custom
+    if (formKeys.length !== defaultKeys.length) {
+      return true;
+    }
+
+    // Check if any values differ (deep comparison)
+    return formKeys.some((key) => {
+      const formValue = (formData as Record<string, unknown>)[key];
+      const defaultValueForKey = (defaultValue as Record<string, unknown>)[key];
+
+      // Handle nested undefined/null comparison
+      if (
+        (formValue === undefined || formValue === null) &&
+        (defaultValueForKey === undefined || defaultValueForKey === null)
+      ) {
+        return false; // Both undefined/null means same
+      }
+
+      if (
+        formValue === undefined ||
+        formValue === null ||
+        defaultValueForKey === undefined ||
+        defaultValueForKey === null
+      ) {
+        return formValue !== defaultValueForKey; // One is undefined/null, other isn't
+      }
+
+      return hasCustomValue(formValue, defaultValueForKey);
+    });
   }
 
   return formData !== defaultValue;
+}
+
+/**
+ * Extracts only modified properties (those that differ from defaults) from form data.
+ * Recursively handles nested objects to filter out unchanged properties at all levels.
+ *
+ * @param formData - The complete form data
+ * @param defaultProperties - The default properties to compare against
+ * @returns An object containing only the properties that differ from their defaults
+ */
+export function extractModifiedProperties<T extends Record<string, unknown>>(
+  formData: PartialDeep<T>,
+  defaultProperties: T,
+): PartialDeep<T> {
+  const modifiedProperties: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(formData)) {
+    const defaultValue = defaultProperties[key];
+
+    // Handle nested objects recursively
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      typeof defaultValue === 'object' &&
+      defaultValue !== null &&
+      !Array.isArray(defaultValue)
+    ) {
+      const modifiedNested = extractModifiedProperties(
+        value as Record<string, unknown>,
+        defaultValue as Record<string, unknown>,
+      );
+      // Only include nested object if it has modified properties
+      if (Object.keys(modifiedNested).length > 0) {
+        modifiedProperties[key] = modifiedNested;
+      }
+    } else if (JSON.stringify(value) !== JSON.stringify(defaultValue)) {
+      // Compare primitive values or arrays
+      modifiedProperties[key] = value;
+    }
+  }
+
+  return modifiedProperties as PartialDeep<T>;
 }

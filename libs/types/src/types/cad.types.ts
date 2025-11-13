@@ -9,8 +9,7 @@ export type CodeError = {
   endColumn: number;
 };
 
-export type Geometry2D = {
-  type: '2d';
+export type GeometrySvg = {
   color?: string;
   format: 'svg';
   paths: string[];
@@ -21,11 +20,11 @@ export type Geometry2D = {
 };
 
 export type GeometryGltf = {
-  type: 'gltf';
+  format: 'gltf';
   gltfBlob: Blob;
 };
 
-export type Geometry = Geometry2D | GeometryGltf;
+export type Geometry = GeometrySvg | GeometryGltf;
 
 export type EngineeringDiscipline = keyof typeof engineeringDisciplines;
 

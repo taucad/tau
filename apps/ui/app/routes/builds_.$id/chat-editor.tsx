@@ -1,106 +1,94 @@
-import { memo, useCallback, useEffect, useRef } from 'react';
+import { memo, useCallback, useEffect, useState, useMemo } from 'react';
 import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
-import type { Build, KernelProvider } from '@taucad/types';
-import { FileExplorerContext } from '#routes/builds_.$id/graphics-actor.js';
+import { FileCode } from 'lucide-react';
 import { CodeEditor } from '#components/code/code-editor.js';
 import { cn } from '#utils/ui.utils.js';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { registerMonaco } from '#routes/builds_.$id/chat-editor-config.js';
 import { ChatEditorBreadcrumbs } from '#routes/builds_.$id/chat-editor-breadcrumbs.js';
 import { useBuild } from '#hooks/use-build.js';
-import type { FileItem } from '#machines/file-explorer.machine.js';
-
-const languageFromKernel = {
-  replicad: 'typescript',
-  openscad: 'openscad',
-  zoo: 'kcl',
-} as const satisfies Record<KernelProvider, string>;
-
-const getFileTree = (build: Build): FileItem[] => {
-  if (!build.assets.mechanical) {
-    return [];
-  }
-
-  const mechanicalAsset = build.assets.mechanical;
-  const { files } = mechanicalAsset;
-
-  return Object.entries(files).map(([filename, file]) => ({
-    id: filename,
-    name: filename,
-    path: filename,
-    content: file.content,
-    language: languageFromKernel[mechanicalAsset.language],
-    isDirectory: false,
-  }));
-};
+import { ChatEditorTabs } from '#routes/builds_.$id/chat-editor-tabs.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
+import { EmptyItems } from '#components/ui/empty-items.js';
+import { getFileExtension, isBinaryFile, decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
+import { iconFromExtension } from '#components/icons/file-extension-icon.js';
+import { ChatEditorBinaryWarning } from '#routes/builds_.$id/chat-editor-binary-warning.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }): React.JSX.Element {
   const monaco = useMonaco();
-  const { build } = useBuild();
-  const activeBuildId = useRef<string | undefined>(build?.id);
-  const code = useSelector(cadActor, (state) => state.context.code);
-  const activeFile = FileExplorerContext.useSelector((state) =>
-    state.context.openFiles.find((file) => file.id === state.context.activeFileId),
+  const { fileExplorerRef: fileExplorerActor, cadRef: cadActor, buildRef } = useBuild();
+  const [forceOpenBinary, setForceOpenBinary] = useState(false);
+  // Get active file path from file explorer
+  const activeFilePath = useSelector(fileExplorerActor, (state) => {
+    return state.context.activeFilePath;
+  });
+
+  // Get active file content from build machine (source of truth)
+  const activeFile = useSelector(buildRef, (state) => {
+    if (!activeFilePath) {
+      return undefined;
+    }
+
+    const files = state.context.build?.assets.mechanical?.files;
+    const fileContent = files?.[activeFilePath];
+    if (!fileContent) {
+      return undefined;
+    }
+
+    return {
+      path: activeFilePath,
+      name: activeFilePath.split('/').pop() ?? activeFilePath,
+      content: fileContent.content,
+      language: iconFromExtension[getFileExtension(activeFilePath)]?.id,
+    };
+  });
+
+  // Detect if the active file is binary
+  const isBinary = useMemo(
+    () => (activeFile ? isBinaryFile(activeFile.name, activeFile.content) : false),
+    [activeFile],
   );
-  const fileExplorerActorRef = FileExplorerContext.useActorRef();
 
-  // Set file tree when build changes
+  // Reset force open when file changes
   useEffect(() => {
-    if (build?.id !== activeBuildId.current) {
-      activeBuildId.current = build?.id;
+    setForceOpenBinary(false);
+  }, [activeFile?.path]);
 
-      // Clear tree if no build or no mechanical assets
-      if (!build?.assets.mechanical) {
-        fileExplorerActorRef.send({ type: 'setFileTree', tree: [], openFiles: [] });
+  // Sync file preview preference between cookie and build machine
+  const [enableFilePreview] = useCookie<boolean>(cookieName.cadFilePreview, true);
+  const enableFilePreviewInMachine = useSelector(buildRef, (state) => state.context.enableFilePreview);
+
+  // Sync cookie to build machine on mount and when cookie changes
+  useEffect(() => {
+    if (enableFilePreview !== enableFilePreviewInMachine) {
+      buildRef.send({ type: 'setEnableFilePreview', enabled: enableFilePreview });
+    }
+  }, [enableFilePreview, enableFilePreviewInMachine, buildRef]);
+
+  const handleCodeChange = useCallback(
+    (value: ComponentProps<typeof CodeEditor>['value']) => {
+      if (!activeFile) {
         return;
       }
 
-      const mechanicalAsset = build.assets.mechanical;
-      const fileItems = getFileTree(build);
-      const openFiles = mechanicalAsset.main ? [mechanicalAsset.main] : [];
-
-      fileExplorerActorRef.send({
-        type: 'setFileTree',
-        tree: fileItems,
-        openFiles,
+      // Encode string → Uint8Array before sending to machine
+      buildRef.send({
+        type: 'updateFile',
+        path: activeFile.path,
+        content: encodeTextFile(value ?? ''),
       });
-    }
-  }, [fileExplorerActorRef, build]);
+    },
+    [activeFile, buildRef],
+  );
 
-  // Subscribe to CAD actor code changes and propagate to file explorer
-  useEffect(() => {
-    if (!build?.assets.mechanical?.main) {
-      return;
-    }
+  // Decode Uint8Array → string for editor
+  const editorContent = activeFile ? decodeTextFile(activeFile.content) : '';
 
-    const mainFileName = build.assets.mechanical.main;
-
-    const subscription = cadActor.subscribe((state) => {
-      // Update the main file content in file explorer when CAD actor code changes
-      fileExplorerActorRef.send({
-        type: 'updateFileContent',
-        fileId: mainFileName,
-        content: state.context.code,
-      });
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [build?.assets.mechanical?.main, fileExplorerActorRef]);
-
-  // Fallback to build main file if no file explorer file is active
-  const fallbackFilename = build?.assets.mechanical?.main ?? 'main.ts';
-  const fallbackContent = build?.assets.mechanical?.files[fallbackFilename]?.content ?? code;
-
-  const displayCode = activeFile ? activeFile.content : fallbackContent;
-
-  const handleCodeChange = useCallback((value: ComponentProps<typeof CodeEditor>['value']) => {
-    // Update CAD actor as source of truth - subscription will propagate to file explorer
-    cadActor.send({ type: 'setCode', code: value ?? '' });
+  const handleForceOpenBinary = useCallback(() => {
+    setForceOpenBinary(true);
   }, []);
 
   useEffect(() => {
@@ -130,25 +118,33 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       // Clear errors when there are none
       cadActor.send({ type: 'setCodeErrors', errors: [] });
     }
-  }, [monaco]);
-
-  const language = build?.assets.mechanical?.language
-    ? languageFromKernel[build.assets.mechanical.language]
-    : undefined;
+  }, [monaco, cadActor]);
 
   return (
     <div className={cn('flex h-full flex-col bg-background', className)}>
-      {/* <ChatEditorTabs /> */}
+      <ChatEditorTabs />
       <ChatEditorBreadcrumbs />
       <div className="flex-1">
-        <CodeEditor
-          loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
-          className="h-full bg-background"
-          language={language}
-          value={displayCode}
-          onChange={handleCodeChange}
-          onValidate={handleValidate}
-        />
+        {activeFile ? (
+          isBinary && !forceOpenBinary ? (
+            <ChatEditorBinaryWarning onForceOpen={handleForceOpenBinary} />
+          ) : (
+            <CodeEditor
+              loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
+              className="h-full bg-background"
+              language={activeFile.language}
+              value={editorContent}
+              onChange={handleCodeChange}
+              onValidate={handleValidate}
+            />
+          )
+        ) : (
+          <EmptyItems>
+            <FileCode className="mb-4 size-12 stroke-1 text-muted-foreground" />
+            <p className="text-base font-medium">No file selected</p>
+            <p className="mt-1 text-xs text-muted-foreground/70">Select a file from the tree to start editing</p>
+          </EmptyItems>
+        )}
       </div>
     </div>
   );

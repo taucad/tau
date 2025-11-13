@@ -28,6 +28,7 @@ export function HighlightText({ text, searchTerm, className }: HighlightTextProp
             // eslint-disable-next-line react/no-array-index-key -- permitted for this use case as we are not rendering the same text multiple times
             key={`highlight-${text}-${searchTerm}-${index}`}
             data-slot="highlight"
+            aria-label={`Highlighted: ${part}`}
             className={cn('bg-transparent font-bold text-primary', className)}
           >
             {part}

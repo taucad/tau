@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { kernelProviders } from '@taucad/types/constants';
 import { uiMessageSchema } from '#api/chat/message.dto.js';
 
 const codeErrorSchema = z.object({
@@ -32,6 +33,7 @@ export const createChatSchema = z.object({
   id: z.string(),
   messages: z.array(uiMessageSchema),
   code: z.string(),
+  kernel: z.enum(kernelProviders).optional(),
   codeErrors: z.array(codeErrorSchema),
   kernelError: kernelErrorSchema.optional(),
   garbage: z.string(),

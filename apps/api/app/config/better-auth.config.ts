@@ -135,6 +135,8 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       github: {
         clientId: configService.get('GITHUB_CLIENT_ID', { infer: true }),
         clientSecret: configService.get('GITHUB_CLIENT_SECRET', { infer: true }),
+        // Default scopes for initial sign-in (basic profile info)
+        scope: ['read:user', 'user:email'],
       },
       google: {
         clientId: configService.get('GOOGLE_CLIENT_ID', { infer: true }),

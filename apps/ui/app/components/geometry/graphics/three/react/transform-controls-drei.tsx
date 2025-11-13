@@ -34,7 +34,6 @@ export type TransformControlsProps = Omit<ThreeElement<typeof TransformControlsI
     readonly onMouseDown?: (event?: THREE.Event) => void;
     readonly onMouseUp?: (event?: THREE.Event) => void;
     readonly onObjectChange?: (event?: THREE.Event) => void;
-    // eslint-disable-next-line react/boolean-prop-naming -- copied verbatim, keeping the same API intentionally here.
     readonly makeDefault?: boolean;
   };
 

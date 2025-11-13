@@ -1,5 +1,6 @@
 import { mockBuilds } from '@taucad/tau-examples';
 import type { Build, KernelProvider } from '@taucad/types';
+import { encodeTextFile } from '#utils/filesystem.utils.js';
 
 // Sample data
 type Model = {
@@ -15,9 +16,8 @@ const createBuild = (model: Omit<Model, 'language'>, mainFile: string, kernel: K
     id: model.id,
     assets: {
       mechanical: {
-        files: { [mainFile]: { content: model.code } },
+        files: { [mainFile]: { content: encodeTextFile(model.code) } },
         main: mainFile,
-        language: kernel,
         parameters: {},
       },
     },

@@ -1,7 +1,6 @@
 import { memo, useCallback, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { VirtuosoHandle } from 'react-virtuoso';
-import { useSelector } from '@xstate/react';
 import { XIcon, MessageCircle } from 'lucide-react';
 import { messageRole, messageStatus } from '@taucad/types/constants';
 import { ChatMessage } from '#routes/builds_.$id/chat-message.js';
@@ -11,9 +10,8 @@ import { ChatStatus } from '#routes/builds_.$id/chat-status.js';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { createMessage } from '#utils/chat.utils.js';
-import { useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
+import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
 import { ChatSelector } from '#routes/builds_.$id/chat-selector.js';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {
   FloatingPanel,
@@ -72,11 +70,9 @@ export const ChatHistory = memo(function (props: {
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }) {
   const { className, isExpanded = true, setIsExpanded } = props;
-  const kernel = useSelector(cadActor, (state) => state.context.kernelTypeSelected);
   const messageIds = useChatSelector((state) => state.context.messageOrder);
   const { append } = useChatActions();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
-
   const toggleChatHistory = useCallback(() => {
     setIsExpanded?.((current) => !current);
   }, [setIsExpanded]);
@@ -90,13 +86,13 @@ export const ChatHistory = memo(function (props: {
         content,
         role: messageRole.user,
         status: messageStatus.pending,
-        metadata: { kernel, ...metadata },
+        metadata: metadata ?? {},
         model,
         imageUrls,
       });
       append(userMessage);
     },
-    [append, kernel],
+    [append],
   );
 
   // Memoize the item renderer for Virtuoso with stable references
@@ -108,23 +104,24 @@ export const ChatHistory = memo(function (props: {
     },
     [messageIds],
   );
-  // Track scroll state for the scroll button
+
   const [atBottom, setAtBottom] = useState(true);
+  const [isErrorCollapsibleOpen, setIsErrorCollapsibleOpen] = useState(false);
 
   const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
     setAtBottom(atBottom);
   }, []);
 
-  // Scroll to bottom when new messages arrive
+  // Handler to scroll to the bottom of the chat
   const scrollToBottom = useCallback(() => {
-    if (virtuosoRef.current && messageIds.length > 0) {
+    if (virtuosoRef.current) {
       virtuosoRef.current.scrollToIndex({
-        index: messageIds.length - 1,
-        align: 'end',
+        index: 'LAST',
+        align: 'start',
         behavior: 'smooth',
       });
     }
-  }, [messageIds.length]);
+  }, []);
 
   return (
     <FloatingPanel isOpen={isExpanded} side="left" className={className} onOpenChange={setIsExpanded}>
@@ -144,37 +141,33 @@ export const ChatHistory = memo(function (props: {
         </FloatingPanelContentHeader>
 
         {/* Main chat content area */}
-        <div className="-mb-3 flex-1 overflow-hidden">
-          <Virtuoso
-            ref={virtuosoRef}
-            alignToBottom
-            totalCount={messageIds.length}
-            itemContent={renderItem}
-            followOutput="smooth"
-            className="h-full"
-            style={{ height: '100%', paddingBottom: '2.5rem' }}
-            atBottomStateChange={handleAtBottomStateChange}
-            components={{
-              Header: () => null,
-              EmptyPlaceholder: () => <ChatHistoryEmpty className="-mb-7 h-full justify-end" />,
-              Footer: () => (
-                <div className="px-4 pb-12">
-                  <ChatError />
-                </div>
-              ),
-            }}
-          />
-          <ScrollDownButton
-            hasContent={messageIds.length > 0}
-            isVisible={!atBottom}
-            onScrollToBottom={scrollToBottom}
-          />
-        </div>
+        <Virtuoso
+          ref={virtuosoRef}
+          totalCount={messageIds.length}
+          itemContent={renderItem}
+          followOutput="smooth"
+          className="h-full"
+          atBottomStateChange={handleAtBottomStateChange}
+          components={{
+            Header: () => null,
+            EmptyPlaceholder: () => (
+              <div className="-mb-12 h-full p-2">
+                <ChatHistoryEmpty className="m-0 flex-1 justify-end" />
+              </div>
+            ),
+            Footer: () => (
+              <div className="px-4 pb-12">
+                <ChatError isOpen={isErrorCollapsibleOpen} onOpenChange={setIsErrorCollapsibleOpen} />
+              </div>
+            ),
+          }}
+        />
+        <ScrollDownButton hasContent={messageIds.length > 0} isVisible={!atBottom} onScrollToBottom={scrollToBottom} />
 
         {/* Chat input area */}
-        <div className="relative mx-2 mb-2 rounded-2xl">
+        <div className="relative mx-2 mb-2">
           <ChatStatus className="absolute inset-x-0 -top-7" />
-          <ChatTextarea className="rounded-sm" enableAutoFocus={false} onSubmit={onSubmit} />
+          <ChatTextarea mode="main" className="rounded-sm" enableAutoFocus={false} onSubmit={onSubmit} />
         </div>
       </FloatingPanelContent>
     </FloatingPanel>

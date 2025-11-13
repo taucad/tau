@@ -19,6 +19,8 @@ import { TooltipProvider } from '#components/ui/tooltip.js';
 import { ErrorPage } from '#components/error-page.js';
 import { AuthConfigProvider } from '#providers/auth-provider.js';
 import { globalStylesLinks } from '#styles/global.styles.js';
+import type { Handle } from '#types/matches.types.js';
+import { RootCommandPaletteItems } from '#root-command-items.js';
 
 export const links: LinksFunction = () => [...globalStylesLinks, ...webManifestLinks, ...markdownViewerLinks];
 
@@ -34,6 +36,12 @@ export const meta: MetaFunction = () => [
   { rel: 'icon', href: '/favicon.ico', sizes: 'any' },
   { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
 ];
+
+export const handle: Handle = {
+  commandPalette(match) {
+    return <RootCommandPaletteItems match={match} />;
+  },
+};
 
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- loaders require type inference
 export async function loader({ request }: LoaderFunctionArgs) {

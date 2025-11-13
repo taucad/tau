@@ -12,14 +12,12 @@ export function NavFooter(): React.JSX.Element {
         <Button asChild variant="ghost" size="sm">
           <a href={metaConfig.githubUrl} target="_blank" rel="noopener noreferrer">
             <SvgIcon id="github" className="size-3!" />
-            <span className="text-xs">
-              {metaConfig.githubOwner}/{metaConfig.githubRepo}
-            </span>
+            <span className="text-xs">{metaConfig.githubRepo}</span>
             <span className="sr-only">GitHub</span>
           </a>
         </Button>
       </SidebarMenuButton>
-      <div className="flex flex-row items-center gap-2">
+      <div className="flex flex-row items-center -space-x-1">
         <ColorToggle />
         <ThemeToggle />
       </div>

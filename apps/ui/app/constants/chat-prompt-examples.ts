@@ -33,7 +33,7 @@ export const chatExamples: ChatExample[] = [
     kernel: 'openscad',
   },
   {
-    title: 'Lego',
+    title: 'Interlocking Brick',
     prompt: 'Create a custom LEGO-compatible brick',
     kernel: 'openscad',
   },

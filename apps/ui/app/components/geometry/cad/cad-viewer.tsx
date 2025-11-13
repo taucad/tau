@@ -20,17 +20,19 @@ export function CadViewer({
   enableYupRotation = false,
   ...properties
 }: CadViewerProperties): React.JSX.Element {
-  const svgGeometries = geometries.filter((geometry) => geometry.type === '2d');
+  const svgGeometries = geometries.filter((geometry) => geometry.format === 'svg');
 
   // If there are any SVG geometries, we render them in a SVG viewer
   if (svgGeometries.length > 0) {
-    return <SvgViewer geometries={svgGeometries} />;
+    return (
+      <SvgViewer enableGrid={properties.enableGrid} enableAxes={properties.enableAxes} geometries={svgGeometries} />
+    );
   }
 
   return (
     <ThreeProvider {...properties}>
       {geometries.map((geometry, index) => {
-        switch (geometry.type) {
+        switch (geometry.format) {
           case 'gltf': {
             return (
               <GltfMesh
@@ -45,7 +47,7 @@ export function CadViewer({
             );
           }
 
-          case '2d': {
+          case 'svg': {
             throw new Error('2D geometries are not supported');
           }
 

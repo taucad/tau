@@ -1,0 +1,13 @@
+{
+  "name": "kernels",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/kernels",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:lib"],
+  "targets": {
+    "build": {
+      "dependsOn": ["copy-assets"],
+      "outputs": ["{projectRoot}/src/assets/**"]
+    }
+  }
+}

@@ -18,7 +18,7 @@ export function createBuildMutations(queryClient: QueryClient): {
   updateThumbnail: (buildId: string, thumbnail: string) => Promise<void>;
   updateCodeParameters: (
     buildId: string,
-    files: Record<string, { content: string }>,
+    files: Record<string, { content: Uint8Array }>,
     parameters: Record<string, unknown>,
   ) => Promise<void>;
   // New chat-related mutations
@@ -119,7 +119,7 @@ export function createBuildMutations(queryClient: QueryClient): {
      */
     async updateCodeParameters(
       buildId: string,
-      files: Record<string, { content: string }>,
+      files: Record<string, { content: Uint8Array }>,
       parameters: Record<string, unknown>,
     ) {
       const now = Date.now();
@@ -128,7 +128,7 @@ export function createBuildMutations(queryClient: QueryClient): {
         fileUpdates[filename] = {
           content,
           lastModified: now,
-          size: new TextEncoder().encode(content).length,
+          size: content.length,
         };
       }
 

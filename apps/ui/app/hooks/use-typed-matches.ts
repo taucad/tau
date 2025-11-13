@@ -22,6 +22,7 @@ export function useTypedMatches<Selected>(
       noPageWrapper: [],
       enableFloatingSidebar: [],
       enableOverflowY: [],
+      providers: [],
     };
 
     // Get all possible handle properties from all matches

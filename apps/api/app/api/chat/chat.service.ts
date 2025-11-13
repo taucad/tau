@@ -9,7 +9,8 @@ import { ConfigService } from '@nestjs/config';
 import type { KernelProvider, ToolWithSelection } from '@taucad/types';
 import { ModelService } from '#api/models/model.service.js';
 import { ToolService } from '#api/tools/tool.service.js';
-import { nameGenerationSystemPrompt } from '#api/chat/prompts/chat-prompt-name.js';
+import { buildNameGenerationSystemPrompt } from '#api/chat/prompts/chat-prompt-name.js';
+import { commitMessageGenerationSystemPrompt } from '#api/chat/prompts/commit-message-prompt.js';
 import type { LangGraphAdapterCallbacks } from '#api/chat/utils/langgraph-adapter.js';
 import { getCadSystemPrompt } from '#api/chat/prompts/chat-prompt-cad.js';
 import type { Environment } from '#config/environment.config.js';
@@ -24,11 +25,19 @@ export class ChatService {
     private readonly configService: ConfigService<Environment, true>,
   ) {}
 
-  public getNameGenerator(coreMessages: CoreMessage[]): ReturnType<typeof streamText> {
+  public getBuildNameGenerator(coreMessages: CoreMessage[]): ReturnType<typeof streamText> {
     return streamText({
       model: openai('gpt-4o-mini'),
       messages: coreMessages,
-      system: nameGenerationSystemPrompt,
+      system: buildNameGenerationSystemPrompt,
+    });
+  }
+
+  public getCommitMessageGenerator(coreMessages: CoreMessage[]): ReturnType<typeof streamText> {
+    return streamText({
+      model: openai('gpt-4o-mini'),
+      messages: coreMessages,
+      system: commitMessageGenerationSystemPrompt,
     });
   }
 

@@ -1,6 +1,7 @@
 import { useParams } from 'react-router';
 import { useCallback, useEffect } from 'react';
 import { createActor } from 'xstate';
+import { useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 // eslint-disable-next-line no-restricted-imports -- allowed for route types
 import type { Route } from './+types/route.js';
@@ -8,78 +9,50 @@ import { ChatInterface } from '#routes/builds_.$id/chat-interface.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
 import type { Handle } from '#types/matches.types.js';
 import { useChatConstants } from '#utils/chat.utils.js';
-import { AiChatProvider, useChatActions, useChatSelector } from '#components/chat/ai-chat-provider.js';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { ChatProvider, useChatSelector, ChatContext } from '#components/chat/chat-provider.js';
 import { BuildNameEditor } from '#routes/builds_.$id/build-name-editor.js';
-import { FileExplorerContext, graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
 import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
-import { CommandPaletteTrigger } from '#routes/builds_.$id/command-palette.js';
-import { Button } from '#components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { useKeydown } from '#hooks/use-keydown.js';
-import { ChatControls } from '#routes/builds_.$id/chat-controls.js';
+import { BuildCommandPaletteItems } from '#routes/builds_.$id/build-command-items.js';
 import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';
-import { SvgIcon } from '#components/icons/svg-icon.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
+import { BuildGitConnector } from '#routes/builds_.$id/build-git-connector.js';
+import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
+
+// Define provider component at module level for stable reference across HMR
+function RouteProvider({ children }: { readonly children?: React.ReactNode }): React.JSX.Element {
+  const { id } = useParams();
+  return <BuildProvider buildId={id!}>{children}</BuildProvider>;
+}
 
 export const handle: Handle = {
   breadcrumb(match) {
     const { id } = match.params as Route.LoaderArgs['params'];
 
-    return [
-      <BuildProvider key={`${id}-build-name-editor`} buildId={id}>
-        <BuildNameEditor />
-      </BuildProvider>,
-      <ChatModeSelector key={`${id}-chat-mode-selector`} />,
-    ];
+    return [<BuildNameEditor key={`${id}-build-name-editor`} />, <ChatModeSelector key={`${id}-chat-mode-selector`} />];
   },
-  actions(match) {
-    const { id } = match.params as Route.LoaderArgs['params'];
-
-    return (
-      <>
-        <BuildProvider buildId={id}>
-          <ChatControls />
-        </BuildProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon"
-              className="hidden md:flex"
-              onClick={() => {
-                toast.info('Github connection coming soon!');
-              }}
-            >
-              <SvgIcon id="github" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Connect to Github</TooltipContent>
-        </Tooltip>
-      </>
-    );
+  actions() {
+    return <BuildGitConnector />;
   },
   commandPalette(match) {
-    const { id } = match.params as Route.LoaderArgs['params'];
-
-    return (
-      <BuildProvider buildId={id}>
-        <CommandPaletteTrigger />
-      </BuildProvider>
-    );
+    return <BuildCommandPaletteItems match={match} />;
   },
+  providers: () => RouteProvider,
   enableFloatingSidebar: true,
 };
 
 function Chat() {
-  const { id } = useParams();
-  const { build, isLoading, activeChat, activeChatId, setChatMessages, setCodeParameters } = useBuild();
+  const { buildRef, setChatMessages } = useBuild();
+  const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId);
+  const activeChat = useSelector(buildRef, (state) =>
+    state.context.build?.chats.find((chat) => chat.id === activeChatId),
+  );
 
   const messages = useChatSelector((state) => state.context.messages);
   const status = useChatSelector((state) => state.context.status);
-  const { setMessages, reload } = useChatActions();
+  const chatActorRef = ChatContext.useActorRef();
 
   useKeydown(
     {
@@ -91,59 +64,46 @@ function Chat() {
     },
   );
 
-  // Subscribe the build to persist code & parameters changes
+  // Consolidated event-driven coordination
   useEffect(() => {
-    const subscription = cadActor.on('modelUpdated', ({ code, parameters }) => {
-      const mainFile = build?.assets.mechanical?.main;
-      if (!mainFile) {
+    // 1. Build loaded - initialize all chat state atomically
+    const buildLoadedSub = buildRef.on('buildLoaded', ({ build }) => {
+      const activeChat = build.chats.find((c) => c.id === build.lastChatId);
+      if (!activeChat) {
         return;
       }
 
-      setCodeParameters({ [mainFile]: { content: code } }, parameters);
+      chatActorRef.send({ type: 'initializeChat', chat: activeChat });
+    });
+
+    // 2. Chat switched - initialize new chat state atomically
+    const chatChangedSub = buildRef.on('activeChatChanged', ({ chat }) => {
+      chatActorRef.send({ type: 'initializeChat', chat });
+    });
+
+    // 3. Main draft changed - persist
+    const draftChangedSub = chatActorRef.on('draftChanged', ({ chatId, draft }) => {
+      buildRef.send({ type: 'updateChatDraft', chatId, draft });
+    });
+
+    // 4. Edit draft changed - persist
+    const editDraftChangedSub = chatActorRef.on('editDraftChanged', ({ chatId, messageId, draft }) => {
+      buildRef.send({ type: 'updateMessageEdit', chatId, messageId, draft });
+    });
+
+    // 5. Edit cleared (on submit) - remove from build
+    const editClearedSub = chatActorRef.on('messageEditCleared', ({ chatId, messageId }) => {
+      buildRef.send({ type: 'clearMessageEdit', chatId, messageId });
     });
 
     return () => {
-      subscription.unsubscribe();
+      buildLoadedSub.unsubscribe();
+      chatChangedSub.unsubscribe();
+      draftChangedSub.unsubscribe();
+      editDraftChangedSub.unsubscribe();
+      editClearedSub.unsubscribe();
     };
-  }, [build?.assets.mechanical?.main, setCodeParameters]);
-
-  useEffect(() => {
-    // On init, set the code and parameters
-    if (!build || isLoading) {
-      return;
-    }
-
-    const mechanicalAsset = build.assets.mechanical;
-    if (!mechanicalAsset) {
-      throw new Error('Mechanical asset not found');
-    }
-
-    // Initialize model
-    cadActor.send({
-      type: 'initializeModel',
-      code: mechanicalAsset.files[mechanicalAsset.main]!.content,
-      parameters: mechanicalAsset.parameters,
-      kernelType: mechanicalAsset.language,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on init
-  }, [id, isLoading]);
-
-  useEffect(() => {
-    if (!build || isLoading) {
-      return;
-    }
-
-    // Set initial messages based on active chat or legacy messages
-    if (activeChat) {
-      setMessages(activeChat.messages);
-
-      // Reload when the last message is not an assistant message
-      if (activeChat.messages.length > 0 && activeChat.messages.at(-1)?.role !== 'assistant') {
-        reload();
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run when build, activeChat, or loading state changes
-  }, [id, isLoading, activeChatId]);
+  }, [buildRef, chatActorRef]);
 
   // Persist message changes to the active build chat
   useEffect(() => {
@@ -171,134 +131,150 @@ function Chat() {
 
 // Wrapper component that has access to build context and can configure AiChatProvider
 function ChatWithProvider() {
-  const { activeChatId, build } = useBuild();
-  const { id: buildId } = useParams();
+  const { cadRef: cadActor, graphicsRef: graphicsActor, buildId, buildRef } = useBuild();
+  const name = useSelector(buildRef, (state) => state.context.build?.name);
+  const description = useSelector(buildRef, (state) => state.context.build?.description);
+  const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId);
 
   // Tool call handler that integrates with the new architecture
-  const onToolCall = useCallback(async ({ toolCall }: { toolCall: { toolName: string; args: unknown } }) => {
-    console.log('Tool call received:', toolCall);
+  const onToolCall = useCallback(
+    async ({ toolCall }: { toolCall: { toolName: string; args: unknown } }) => {
+      console.log('Tool call received:', toolCall);
 
-    if (toolCall.toolName === 'edit_file') {
-      const toolCallArgs = toolCall.args as { targetFile: string; codeEdit: string };
+      if (toolCall.toolName === 'edit_file') {
+        const toolCallArgs = toolCall.args as { targetFile: string; codeEdit: string };
 
-      // Get current code from CAD actor
-      const currentCode = cadActor.getSnapshot().context.code;
+        // Get current code from build machine
+        const buildSnapshot = buildRef.getSnapshot();
+        const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
+        const fileContent = mainFilePath
+          ? buildSnapshot.context.build?.assets.mechanical?.files[mainFilePath]?.content
+          : undefined;
 
-      // Create file edit actor to process the edit through Morph
-      const fileEditActor = createActor(fileEditMachine).start();
+        if (!fileContent) {
+          throw new Error('No file content found');
+        }
 
-      return new Promise<FileEditToolResult['result']>((resolve, reject) => {
-        // Subscribe to file edit actor state changes
-        const subscription = fileEditActor.subscribe((state) => {
-          if (state.matches('success') || state.matches('error')) {
-            const { result } = state.context;
-            if (result?.editedContent) {
-              // Set the processed code from Morph to the CAD actor
-              // On error, this will be the original content as fallback
-              cadActor.send({ type: 'setCode', code: result.editedContent });
+        const currentCode = decodeTextFile(fileContent);
 
-              // Wait for CAD processing to complete
-              const cadSubscription = cadActor.subscribe((cadState) => {
-                if (cadState.value === 'ready' || cadState.value === 'error') {
-                  const toolResult = {
-                    codeErrors: cadState.context.codeErrors,
-                    kernelError: cadState.context.kernelError,
-                  } satisfies FileEditToolResult['result'];
+        // Create file edit actor to process the edit through Morph
+        const fileEditActor = createActor(fileEditMachine).start();
 
-                  cadSubscription.unsubscribe();
-                  subscription.unsubscribe();
-                  fileEditActor.stop();
-                  resolve(toolResult);
+        return new Promise<FileEditToolResult['result']>((resolve, reject) => {
+          // Subscribe to file edit actor state changes
+          const subscription = fileEditActor.subscribe((state) => {
+            if (state.matches('success') || state.matches('error')) {
+              const { result } = state.context;
+              if (result?.editedContent) {
+                // Get the active file path from build machine
+                const buildSnapshot = buildRef.getSnapshot();
+                const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
+
+                if (!mainFilePath) {
+                  reject(new Error('No main file path found'));
+                  return;
                 }
-              });
-            } else {
-              subscription.unsubscribe();
-              fileEditActor.stop();
-              reject(new Error('No content received from file edit service'));
+
+                // Update file through build machine, which handles CAD forwarding
+                // On error, this will be the original content as fallback
+                buildRef.send({
+                  type: 'updateFile',
+                  path: mainFilePath,
+                  content: encodeTextFile(result.editedContent),
+                });
+
+                // Wait for CAD processing to complete
+                const cadSubscription = cadActor.subscribe((cadState) => {
+                  if (cadState.value === 'ready' || cadState.value === 'error') {
+                    const toolResult = {
+                      codeErrors: cadState.context.codeErrors,
+                      kernelError: cadState.context.kernelError,
+                    } satisfies FileEditToolResult['result'];
+
+                    cadSubscription.unsubscribe();
+                    subscription.unsubscribe();
+                    fileEditActor.stop();
+                    resolve(toolResult);
+                  }
+                });
+              } else {
+                subscription.unsubscribe();
+                fileEditActor.stop();
+                reject(new Error('No content received from file edit service'));
+              }
             }
-          }
-        });
+          });
 
-        // Send the edit request to Morph
-        fileEditActor.send({
-          type: 'applyEdit',
-          request: {
-            targetFile: toolCallArgs.targetFile,
-            originalContent: currentCode,
-            codeEdit: toolCallArgs.codeEdit,
-          },
-        });
-      });
-    }
-
-    if (toolCall.toolName === 'analyze_image') {
-      return new Promise<{ screenshot: string }>((resolve, reject) => {
-        // Create screenshot request machine instance
-        const screenshotActor = createActor(screenshotRequestMachine, {
-          input: { graphicsRef: graphicsActor },
-        }).start();
-
-        // Request screenshot capture - backend will handle the Vision API call
-        screenshotActor.send({
-          type: 'requestScreenshot',
-          options: {
-            output: {
-              format: 'image/webp',
-              quality: 0.5, // Lower quality for smaller filesize -> less LLM inference token usage.
+          // Send the edit request to Morph
+          fileEditActor.send({
+            type: 'applyEdit',
+            request: {
+              targetFile: toolCallArgs.targetFile,
+              originalContent: currentCode,
+              codeEdit: toolCallArgs.codeEdit,
             },
-            aspectRatio: 16 / 9,
-            maxResolution: 1200,
-            zoomLevel: 1.4,
-          },
-          onSuccess(dataUrls) {
-            const screenshot = dataUrls[0];
-            if (!screenshot) {
-              screenshotActor.stop();
-              reject(new Error('No screenshot data received'));
-              return;
-            }
-
-            screenshotActor.stop();
-            resolve({ screenshot });
-          },
-          onError(error) {
-            screenshotActor.stop();
-            reject(new Error(`Screenshot capture failed: ${error}`));
-          },
+          });
         });
-      });
-    }
+      }
 
-    return undefined;
-  }, []);
+      if (toolCall.toolName === 'analyze_image') {
+        return new Promise<{ screenshot: string }>((resolve, reject) => {
+          // Create screenshot request machine instance
+          const screenshotActor = createActor(screenshotRequestMachine, {
+            input: { graphicsRef: graphicsActor },
+          }).start();
+
+          // Request screenshot capture - backend will handle the Vision API call
+          screenshotActor.send({
+            type: 'requestScreenshot',
+            options: {
+              output: {
+                format: 'image/webp',
+                quality: 0.5, // Lower quality for smaller filesize -> less LLM inference token usage.
+              },
+              aspectRatio: 16 / 9,
+              maxResolution: 1200,
+              zoomLevel: 1.4,
+            },
+            onSuccess(dataUrls) {
+              const screenshot = dataUrls[0];
+              if (!screenshot) {
+                screenshotActor.stop();
+                reject(new Error('No screenshot data received'));
+                return;
+              }
+
+              screenshotActor.stop();
+              resolve({ screenshot });
+            },
+            onError(error) {
+              screenshotActor.stop();
+              reject(new Error(`Screenshot capture failed: ${error}`));
+            },
+          });
+        });
+      }
+
+      return undefined;
+    },
+    [buildRef, cadActor, graphicsActor],
+  );
 
   // Use chat ID when available, fallback to build ID
   // Backend can distinguish: chat IDs start with "chat_", build IDs start with "bld_"
-  const threadId = activeChatId ?? buildId!;
+  const threadId = activeChatId ?? buildId;
 
   return (
-    <AiChatProvider value={{ ...useChatConstants, id: threadId, onToolCall }}>
+    <ChatProvider value={{ ...useChatConstants, id: threadId, onToolCall }} chatId={activeChatId}>
       <ViewContextProvider>
-        <FileExplorerContext.Provider>
-          {build?.name ? <title>{build.name}</title> : null}
-          {build?.description ? <meta name="description" content={build.description} /> : null}
-          <Chat />
-        </FileExplorerContext.Provider>
+        {name ? <title>{name}</title> : null}
+        {description ? <meta name="description" content={description} /> : null}
+        <Chat />
       </ViewContextProvider>
-    </AiChatProvider>
+    </ChatProvider>
   );
 }
 
 export default function ChatRoute(): React.JSX.Element {
-  const { id } = useParams();
-
-  if (!id) {
-    throw new Error('No build id provided');
-  }
-
-  return (
-    <BuildProvider buildId={id}>
-      <ChatWithProvider />
-    </BuildProvider>
-  );
+  return <ChatWithProvider />;
 }

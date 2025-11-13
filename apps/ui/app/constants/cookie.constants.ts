@@ -51,6 +51,8 @@ export const cookieName = {
   cadKernel: 'cad-kernel',
   // The last selected grid unit.
   cadUnit: 'cad-unit',
+  // Whether to enable file preview (send file content to CAD when switching files).
+  cadFilePreview: 'cad-file-preview',
 
   /* Chat */
   // Whether to enable web search in the chat.

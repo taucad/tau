@@ -5,6 +5,7 @@ import type {
   ExportGeometryResult,
   ExtractParametersResult,
   GeometryGltf,
+  GeometryFile,
 } from '@taucad/types';
 import { createKernelError, createKernelSuccess } from '#components/geometry/kernel/utils/kernel-helpers.js';
 import { KclUtils } from '#components/geometry/kernel/zoo/kcl-utils.js';
@@ -22,7 +23,13 @@ class ZooWorker extends KernelWorker<ZooOptions> {
   private gltfDataMemory: Record<string, Uint8Array> = {};
   private kclUtils: KclUtils | undefined;
 
-  public override async extractParameters(code: string): Promise<ExtractParametersResult> {
+  public override async canHandle(file: GeometryFile): Promise<boolean> {
+    const extension = KernelWorker.getFileExtension(file.filename);
+    return extension === 'kcl';
+  }
+
+  public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {
+    const code = KernelWorker.extractCodeFromFile(file);
     try {
       const utils = await this.getKclUtils();
       const parseResult = await utils.parseKcl(code);
@@ -65,10 +72,11 @@ class ZooWorker extends KernelWorker<ZooOptions> {
   }
 
   public override async computeGeometry(
-    code: string,
+    file: GeometryFile,
     parameters?: Record<string, unknown>,
     geometryId = 'defaultGeometry',
   ): Promise<ComputeGeometryResult> {
+    const code = KernelWorker.extractCodeFromFile(file);
     try {
       const trimmedCode = code.trim();
       if (trimmedCode === '') {
@@ -126,7 +134,7 @@ class ZooWorker extends KernelWorker<ZooOptions> {
         const view = new Uint8Array(arrayBuffer);
         view.set(gltf.contents);
         const geometry: GeometryGltf = {
-          type: 'gltf',
+          format: 'gltf',
           gltfBlob: new Blob([gltf.contents]),
         };
         return createKernelSuccess([geometry]);

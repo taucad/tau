@@ -1,12 +1,5 @@
 {
   "mcpServers": {
-    "nx-mcp": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "nx-mcp@latest"
-      ]
-    },
     "langgraph-docs-mcp": {
       "command": "uvx",
       "args": [

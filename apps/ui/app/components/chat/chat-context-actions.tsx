@@ -3,11 +3,11 @@ import { AtSign, Image, Code, AlertTriangle, AlertCircle, Camera } from 'lucide-
 import { useSelector, useActorRef } from '@xstate/react';
 import { TooltipTrigger, TooltipContent, Tooltip } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import { toast } from '#components/ui/sonner.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { orthographicViews, screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
+import { decodeTextFile } from '#utils/filesystem.utils.js';
 
 type ChatContextActionsProperties = {
   readonly addImage: (image: string) => void;
@@ -40,9 +40,14 @@ export function ChatContextActions({
   onSelectItem,
   ...properties
 }: ChatContextActionsProperties): React.JSX.Element {
+  const { cadRef: cadActor, graphicsRef: graphicsActor, buildRef: buildActor } = useBuild();
   const kernelError = useSelector(cadActor, (state) => state.context.kernelError);
   const codeErrors = useSelector(cadActor, (state) => state.context.codeErrors);
-  const code = useSelector(cadActor, (state) => state.context.code);
+  const code = useSelector(buildActor, (state) => {
+    const mainFilePath = state.context.build?.assets.mechanical?.main;
+    const fileContent = mainFilePath ? state.context.build?.assets.mechanical?.files[mainFilePath]?.content : undefined;
+    return fileContent ? decodeTextFile(fileContent) : '';
+  });
   const isScreenshotReady = useSelector(graphicsActor, (state) => state.context.isScreenshotReady);
 
   // Create screenshot request machine instance
@@ -393,6 +398,8 @@ ${kernelError.stack ? `\n\`\`\`\n${kernelError.stack}\n\`\`\`` : ''}
         }}
         searchPlaceHolder="Search context..."
         placeholder="Add context"
+        title="Add chat context"
+        description="Provide additional context for the chat. This will be used to generate a response."
         onSelect={(itemId) => {
           const selectedItem = contextItems.find((item) => item.id === itemId);
           selectedItem?.action();
@@ -403,9 +410,9 @@ ${kernelError.stack ? `\n\`\`\`\n${kernelError.stack}\n\`\`\`` : ''}
           <Button
             variant="outline"
             size="icon"
-            className="size-6 bg-background text-muted-foreground hover:text-foreground"
+            className="size-7 rounded-full text-muted-foreground hover:text-foreground"
           >
-            <AtSign className="size-3" />
+            <AtSign className="size-3.5" />
           </Button>
         </TooltipTrigger>
       </ComboBoxResponsive>

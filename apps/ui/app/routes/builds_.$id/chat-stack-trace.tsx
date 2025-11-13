@@ -1,6 +1,6 @@
 import { useSelector } from '@xstate/react';
 import type { KernelStackFrame } from '@taucad/types';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import { cn } from '#utils/ui.utils.js';
 
 function StackFrame({ frame, index }: { readonly frame: KernelStackFrame; readonly index: number }): React.JSX.Element {
@@ -66,6 +66,7 @@ function ErrorStackTrace({
 }
 
 export function ChatStackTrace({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.ReactNode {
+  const { cadRef: cadActor } = useBuild();
   const error = useSelector(cadActor, (state) => state.context.kernelError);
 
   if (!error) {

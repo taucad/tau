@@ -1,0 +1,52 @@
+{
+  "name": "@taucad/kernels",
+  "version": "0.1.0",
+  "description": "Tau CAD kernels",
+  "type": "module",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/kernels"
+  },
+  "main": "./dist/cjs/index.cjs",
+  "types": "./dist/cjs/index.d.cts",
+  "module": "./dist/esm/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "replicad",
+    "zoo",
+    "openscad",
+    "jscad"
+  ],
+  "author": "Richard Fontein",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "require": {
+          "types": "./dist/cjs/index.d.cts",
+          "default": "./dist/cjs/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/index.d.ts",
+          "default": "./dist/esm/index.js"
+        }
+      }
+    }
+  },
+  "imports": {
+    "#*": [
+      "./src/*"
+    ]
+  },
+  "dependencies": {}
+}

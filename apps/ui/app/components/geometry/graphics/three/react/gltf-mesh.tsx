@@ -75,7 +75,9 @@ export function GltfMesh({
         );
 
         // Apply line segments from mesh edges if no LineSegments exist
-        applyLineSegments(gltf);
+        if (enableLines) {
+          applyLineSegments(gltf);
+        }
 
         if (enableMatcap) {
           await applyMatcap(gltf);
@@ -103,7 +105,7 @@ export function GltfMesh({
     return () => {
       cancelled = true;
     };
-  }, [gltfBlob, enableMatcap, enableYupRotation]);
+  }, [gltfBlob, enableMatcap, enableYupRotation, enableLines]);
 
   // Toggle visibility of surfaces and lines based on props
   useEffect(() => {

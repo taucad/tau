@@ -10,11 +10,12 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.
 import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
-import { cadActor } from '#routes/builds_.$id/cad-actor.js';
-import { useChatSelector } from '#components/chat/ai-chat-provider.js';
+import { useBuild } from '#hooks/use-build.js';
+import { useChatSelector } from '#components/chat/chat-provider.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
+import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
 
 export type FileEditToolResult = ToolResult<
   'edit_file',
@@ -132,19 +133,27 @@ function Filename({
 // eslint-disable-next-line complexity -- refactor later
 export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocationUIPart }): React.JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
+  const { buildRef } = useBuild();
   const status = useChatSelector((state) => state.context.status);
 
   // Create file edit machine
   const [fileEditState, fileEditSend] = useActor(fileEditMachine);
 
-  const setCode = useCallback((code: string) => {
-    cadActor.send({ type: 'setCode', code });
-  }, []);
-
   const handleApplyEdit = useCallback(
     (targetFile: string, editInstructions: string) => {
-      // Get the current code from the CAD actor as the original codeEdit
-      const currentCode = cadActor.getSnapshot().context.code;
+      // Get the current code from the build machine
+      const buildSnapshot = buildRef.getSnapshot();
+      const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
+      const fileContent = mainFilePath
+        ? buildSnapshot.context.build?.assets.mechanical?.files[mainFilePath]?.content
+        : undefined;
+
+      if (!fileContent) {
+        console.error('No file content found');
+        return;
+      }
+
+      const currentCode = decodeTextFile(fileContent);
 
       fileEditSend({
         type: 'applyEdit',
@@ -155,19 +164,30 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
         },
       });
     },
-    [fileEditSend],
+    [buildRef, fileEditSend],
   );
 
-  // When file edit is successful or failed with fallback content, set the code in the CAD actor
+  // When file edit is successful or failed with fallback content, update the file through build machine
   useEffect(() => {
     if (fileEditState.matches('success') || fileEditState.matches('error')) {
       const { result } = fileEditState.context;
       if (result?.editedContent) {
-        // Set the edited content (which will be original content on error as fallback)
-        setCode(result.editedContent);
+        // Get the main file path
+        const buildSnapshot = buildRef.getSnapshot();
+        const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
+
+        if (mainFilePath) {
+          // Update file through build machine, which handles CAD forwarding
+          // On error, this will be the original content as fallback
+          buildRef.send({
+            type: 'updateFile',
+            path: mainFilePath,
+            content: encodeTextFile(result.editedContent),
+          });
+        }
       }
     }
-  }, [fileEditState, setCode]);
+  }, [fileEditState, buildRef]);
 
   switch (part.toolInvocation.state) {
     case 'partial-call':

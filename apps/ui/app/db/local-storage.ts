@@ -41,22 +41,34 @@ export class LocalStorageProvider implements StorageProvider {
       return undefined;
     }
 
-    // Custom merge function that doesn't merge leaf nodes for 'files' and 'parameters'
-    const mergeIgnoreKeys = new Set(options?.ignoreKeys ?? []);
+    // If update contains an 'id' field matching buildId, treat it as a full build replacement
+    // This is the new pattern from the parallel state machine refactor
+    const isBuild = 'id' in update && update.id === buildId;
 
-    const updatedBuild = deepmerge(
-      builds[index]!,
-      { ...update, updatedAt: Date.now() },
-      {
-        customMerge(key) {
-          if (mergeIgnoreKeys.has(key)) {
-            return (_source: unknown, target: unknown) => target;
-          }
+    let updatedBuild: Build;
 
-          return undefined;
+    if (isBuild) {
+      // Full build replacement - no merging needed
+      updatedBuild = update as Build;
+    } else {
+      // Partial update - use deepmerge for backward compatibility
+      const mergeIgnoreKeys = new Set(options?.ignoreKeys ?? []);
+
+      updatedBuild = deepmerge(
+        builds[index]!,
+        { ...update, updatedAt: Date.now() },
+        {
+          customMerge(key) {
+            if (mergeIgnoreKeys.has(key)) {
+              return (_source: unknown, target: unknown) => target;
+            }
+
+            return undefined;
+          },
         },
-      },
-    ) as Build;
+      ) as Build;
+    }
+
     builds[index] = updatedBuild;
     this.saveBuilds(builds);
     return updatedBuild;

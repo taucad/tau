@@ -1,9 +1,8 @@
 import type { Message } from '@ai-sdk/react';
 import type { EngineeringDiscipline } from '#types/cad.types.js';
-import type { KernelProvider } from '#types/kernel.types.js';
 
 export type File = {
-  content: string;
+  content: Uint8Array;
   // Could add metadata in the future
   lastModified?: number;
   size?: number;
@@ -13,6 +12,8 @@ export type Chat = {
   id: string;
   name: string;
   messages: Message[];
+  draft?: Message; // Main draft
+  messageEdits?: Record<string, Message>; // Edit drafts by messageId
   createdAt: number;
   updatedAt: number;
 };
@@ -21,7 +22,6 @@ export type Chat = {
 export type Asset = {
   files: Record<string, File>;
   main: string; // Points to the main entry file
-  language: KernelProvider;
   parameters: Record<string, unknown>;
   // Could add additional metadata
   version?: string;

@@ -1,6 +1,13 @@
+export type KernelLanguage = 'openscad' | 'typescript' | 'kcl';
+
+/** The number of dimensions the kernel supports. */
+export type KernelDimensions = 2 | 3;
+
 export type KernelConfiguration = {
   id: string;
   name: string;
+  language: KernelLanguage;
+  dimensions: KernelDimensions[];
   description: string;
   mainFile: string;
   backendProvider: string;
@@ -15,6 +22,8 @@ export const kernelConfigurations = [
   {
     id: 'openscad',
     name: 'OpenSCAD',
+    dimensions: [3],
+    language: 'openscad',
     description: 'Constructive Solid Geometry for 3D printing',
     mainFile: 'main.scad',
     backendProvider: 'manifold',
@@ -28,6 +37,8 @@ export const kernelConfigurations = [
   {
     id: 'replicad',
     name: 'Replicad',
+    dimensions: [2, 3],
+    language: 'typescript',
     description: 'TypeScript-based CAD for precise engineering',
     mainFile: 'main.ts',
     backendProvider: 'opencascade',
@@ -46,6 +57,8 @@ export default function main(p = defaultParams) {}
   {
     id: 'zoo',
     name: 'Zoo (KCL)',
+    dimensions: [3],
+    language: 'kcl',
     description: 'Cloud-native CAD modeling',
     mainFile: 'main.kcl',
     backendProvider: 'zoo',
@@ -59,10 +72,19 @@ export default function main(p = defaultParams) {}
   },
 ] as const satisfies KernelConfiguration[];
 
-export const kernelProviders = kernelConfigurations.map((option) => option.id) as [
-  (typeof kernelConfigurations)[number]['id'],
-];
+export type KernelId = (typeof kernelConfigurations)[number]['id'];
 
-export const backendProviders = kernelConfigurations.map((option) => option.backendProvider) as [
-  (typeof kernelConfigurations)[number]['backendProvider'],
-];
+export type KernelBackendProvider = (typeof kernelConfigurations)[number]['backendProvider'];
+
+export const kernelProviders = kernelConfigurations.map((option) => option.id) as [KernelId];
+
+export const backendProviders = kernelConfigurations.map((option) => option.backendProvider) as [KernelBackendProvider];
+
+// eslint-disable-next-line unicorn/no-array-reduce -- we know the keys are unique
+export const languageFromKernel = kernelConfigurations.reduce(
+  (acc, option: KernelConfiguration) => {
+    acc[option.id as KernelId] = option.language;
+    return acc;
+  },
+  {} as Record<KernelId, KernelLanguage>,
+);

@@ -27,9 +27,8 @@ export const ScrollDownButton = memo(function ({
       size="icon"
       variant="overlay"
       className={cn(
-        'sticky bottom-14 left-1/2 flex -translate-x-1/2 justify-center rounded-full',
+        'absolute bottom-28 left-1/2 flex -translate-x-1/2 justify-center rounded-full',
         !isVisible && 'pointer-events-none opacity-0 select-none',
-        isVisible && 'animate-bounce-subtle',
       )}
       aria-label="Scroll to bottom"
       onClick={handleScrollToBottom}

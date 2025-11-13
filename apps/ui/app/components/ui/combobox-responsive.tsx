@@ -3,7 +3,7 @@ import React from 'react';
 import type { ClassValue } from 'clsx';
 import { useIsMobile } from '#hooks/use-mobile.js';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '#components/ui/command.js';
-import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from '#components/ui/drawer.js';
+import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '#components/ui/drawer.js';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
 import { cn } from '#utils/ui.utils.js';
 
@@ -32,6 +32,8 @@ type ComboBoxResponsiveProperties<T> = Omit<React.HTMLAttributes<HTMLDivElement>
   readonly labelClassName?: string;
   readonly isDisabled?: (item: T) => boolean;
   readonly emptyListMessage?: ReactNode;
+  readonly title: string;
+  readonly description: string;
 };
 
 export function ComboBoxResponsive<T>({
@@ -51,6 +53,8 @@ export function ComboBoxResponsive<T>({
   labelClassName,
   isDisabled,
   emptyListMessage = 'No results found.',
+  title,
+  description,
   ...properties
 }: ComboBoxResponsiveProperties<T>): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
@@ -84,15 +88,19 @@ export function ComboBoxResponsive<T>({
       <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerTrigger asChild>{children}</DrawerTrigger>
         <DrawerContent
-          aria-describedby="drawer-title"
+          aria-labelledby="drawer-title"
+          aria-describedby="drawer-description"
           {...properties}
           {...drawerProperties}
           className={cn(className, drawerProperties?.className)}
         >
           <DrawerTitle className="sr-only" id="drawer-title">
-            {placeholder}
+            {title}
           </DrawerTitle>
-          <div className="mt-4 border-t">
+          <DrawerDescription className="sr-only" id="drawer-description">
+            {description}
+          </DrawerDescription>
+          <div className="mt-1">
             <ItemList
               groupedItems={groupedItems}
               setSelectedItem={handleSelect}

@@ -1,6 +1,7 @@
-import { assign, assertEvent, setup, sendTo, emit, enqueueActions } from 'xstate';
+import { assign, assertEvent, setup, sendTo, enqueueActions } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import type { CodeError, Geometry, ExportFormat, KernelError, KernelProvider } from '@taucad/types';
+import type { CodeError, Geometry, ExportFormat, KernelError, GeometryFile } from '@taucad/types';
+import type { JSONSchema7 } from 'json-schema';
 import { kernelMachine } from '#machines/kernel.machine.js';
 import type { KernelEventExternal } from '#machines/kernel.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
@@ -8,7 +9,7 @@ import type { logMachine } from '#machines/logs.machine.js';
 
 // Interface defining the context for the CAD machine
 export type CadContext = {
-  code: string;
+  file: GeometryFile | undefined;
   screenshot: string | undefined;
   parameters: Record<string, unknown>;
   defaultParameters: Record<string, unknown>;
@@ -22,22 +23,20 @@ export type CadContext = {
   isKernelInitialized: boolean;
   graphicsRef?: ActorRefFrom<typeof graphicsMachine>;
   logActorRef?: ActorRefFrom<typeof logMachine>;
-  jsonSchema?: unknown;
-  kernelTypeSelected: KernelProvider;
+  jsonSchema?: JSONSchema7;
 };
 
 // Define the types of events the machine can receive
 type CadEvent =
   | { type: 'initializeKernel' }
-  | { type: 'initializeModel'; code: string; parameters: Record<string, unknown>; kernelType: KernelProvider }
-  | { type: 'setCode'; code: string; screenshot?: string }
+  | { type: 'initializeModel'; file: GeometryFile; parameters: Record<string, unknown> }
+  | { type: 'setFile'; file: GeometryFile }
   | { type: 'setParameters'; parameters: Record<string, unknown> }
   | { type: 'setCodeErrors'; errors: CadContext['codeErrors'] }
   | { type: 'exportGeometry'; format: ExportFormat }
   | KernelEventExternal;
 
 type CadEmitted =
-  | { type: 'modelUpdated'; code: string; parameters: Record<string, unknown> }
   | { type: 'geometryEvaluated'; geometries: Geometry[] }
   | { type: 'geometryExported'; blob: Blob; format: ExportFormat }
   | { type: 'exportFailed'; error: KernelError };
@@ -45,11 +44,11 @@ type CadEmitted =
 type CadInput = {
   shouldInitializeKernelOnStart: boolean;
   graphicsRef?: ActorRefFrom<typeof graphicsMachine>;
-  logActorRef?: ActorRefFrom<typeof logMachine>;
+  logRef?: ActorRefFrom<typeof logMachine>;
 };
 
 // Debounce delay for code changes in milliseconds
-const debounceDelay = 500;
+const debounceDelay = 200;
 
 /**
  * CAD Machine
@@ -76,22 +75,24 @@ export const cadMachine = setup({
     computeGeometry: sendTo(
       ({ context }) => context.kernelRef,
       ({ context }) => {
+        if (!context.file) {
+          throw new Error('Cannot compute geometry without a file');
+        }
+
         return {
           type: 'computeGeometry',
-          code: context.code,
+          file: context.file,
           parameters: context.parameters,
-          kernelType: context.kernelTypeSelected,
         };
       },
     ),
     exportGeometry: sendTo(
       ({ context }) => context.kernelRef,
-      ({ context, event }) => {
+      ({ event }) => {
         assertEvent(event, 'exportGeometry');
         return {
           type: 'exportGeometry',
           format: event.format,
-          kernelType: context.kernelTypeSelected,
         };
       },
     ),
@@ -109,14 +110,10 @@ export const cadMachine = setup({
         });
       }
     }),
-    setCode: assign({
-      code({ event }) {
-        assertEvent(event, 'setCode');
-        return event.code;
-      },
-      screenshot({ event }) {
-        assertEvent(event, 'setCode');
-        return event.screenshot;
+    setFile: assign({
+      file({ event }) {
+        assertEvent(event, 'setFile');
+        return event.file;
       },
     }),
     setParameters: assign({
@@ -125,11 +122,6 @@ export const cadMachine = setup({
         return event.parameters;
       },
     }),
-    modelUpdated: emit(({ context }) => ({
-      type: 'modelUpdated' as const,
-      code: context.code,
-      parameters: context.parameters,
-    })),
     setGeometries: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'geometryComputed');
       enqueue.assign({
@@ -207,14 +199,13 @@ export const cadMachine = setup({
       }
 
       enqueue.assign({
-        code: event.code,
+        file: event.file,
         parameters: event.parameters,
         codeErrors: [],
         kernelError: undefined,
         geometries: [],
         exportedBlob: undefined,
         jsonSchema: undefined,
-        kernelTypeSelected: event.kernelType,
       });
     }),
   },
@@ -222,7 +213,7 @@ export const cadMachine = setup({
     isKernelInitialized: ({ context }) => context.isKernelInitialized,
     isKernelNotInitialized: ({ context }) => !context.isKernelInitialized,
     isKernelInitializing: ({ context }) => context.isKernelInitializing,
-    hasModel: ({ context }) => context.code !== '',
+    hasModel: ({ context }) => context.file !== undefined,
   },
 }).createMachine({
   id: 'cad',
@@ -232,7 +223,7 @@ export const cadMachine = setup({
     }
   }),
   context: ({ input, spawn }) => ({
-    code: '',
+    file: undefined,
     screenshot: undefined,
     parameters: {},
     defaultParameters: {},
@@ -245,9 +236,8 @@ export const cadMachine = setup({
     isKernelInitializing: false,
     isKernelInitialized: false,
     graphicsRef: input.graphicsRef,
-    logActorRef: input.logActorRef,
+    logActorRef: input.logRef,
     jsonSchema: undefined,
-    kernelTypeSelected: 'openscad',
   }),
   initial: 'booting',
   states: {
@@ -282,7 +272,8 @@ export const cadMachine = setup({
             actions: assign({ isKernelInitialized: true, isKernelInitializing: false }),
           },
           {
-            // Otherwise just set the kernel to initialized.
+            // Otherwise transition to ready (kernel ready, waiting for code)
+            target: 'ready',
             actions: assign({ isKernelInitialized: true, isKernelInitializing: false }),
           },
         ],
@@ -327,9 +318,9 @@ export const cadMachine = setup({
           target: 'initializing',
           actions: 'initializeModel',
         },
-        setCode: {
+        setFile: {
           target: 'buffering',
-          actions: 'setCode',
+          actions: 'setFile',
         },
         setParameters: {
           target: 'buffering',
@@ -365,7 +356,6 @@ export const cadMachine = setup({
       after: {
         [debounceDelay]: {
           target: 'rendering',
-          actions: 'modelUpdated',
         },
       },
       on: {
@@ -373,10 +363,10 @@ export const cadMachine = setup({
           target: 'initializing',
           actions: 'initializeModel',
         },
-        setCode: {
+        setFile: {
           target: 'buffering',
-          actions: 'setCode',
-          reenter: true, // Reset debounce timer when new code comes in
+          actions: 'setFile',
+          reenter: true, // Reset debounce timer when new file comes in
         },
         setParameters: {
           target: 'buffering',
@@ -406,8 +396,8 @@ export const cadMachine = setup({
           target: 'error',
           actions: 'setKernelError',
         },
-        setCode: {
-          actions: 'setCode',
+        setFile: {
+          actions: 'setFile',
           target: 'buffering',
         },
         setParameters: {
@@ -434,9 +424,9 @@ export const cadMachine = setup({
           target: 'initializing',
           actions: 'initializeModel',
         },
-        setCode: {
+        setFile: {
           target: 'buffering',
-          actions: 'setCode',
+          actions: 'setFile',
         },
         setParameters: {
           target: 'buffering',

@@ -2,10 +2,10 @@ import { OrbitControls } from '@react-three/drei';
 import React from 'react';
 import type * as THREE from 'three';
 import { useSelector } from '@xstate/react';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { ViewportGizmoCube } from '#components/geometry/graphics/three/controls/viewport-gizmo-cube.js';
 import { SectionViewControls } from '#components/geometry/graphics/three/react/section-view-controls.js';
 import { MeasureTool } from '#components/geometry/graphics/three/react/measure-tool.js';
+import { useBuild } from '#hooks/use-build.js';
 
 type ControlsProperties = {
   /**
@@ -37,6 +37,7 @@ export const Controls = React.memo(function ({
   enablePan,
   zoomSpeed,
 }: ControlsProperties) {
+  const { graphicsRef: graphicsActor } = useBuild();
   const isActive = useSelector(graphicsActor, (state) => state.context.isSectionViewActive);
   const selectedPlaneId = useSelector(graphicsActor, (state) => state.context.selectedSectionViewId);
   const rotation = useSelector(graphicsActor, (state) => state.context.sectionViewRotation);

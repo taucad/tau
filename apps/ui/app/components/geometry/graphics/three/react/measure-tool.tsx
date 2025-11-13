@@ -13,8 +13,8 @@ import {
 } from '#components/geometry/graphics/three/utils/snap-detection.utils.js';
 import type { SnapPoint } from '#components/geometry/graphics/three/utils/snap-detection.utils.js';
 import { computeAxisRotationForCamera } from '#components/geometry/graphics/three/utils/rotation.utils.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
+import { useBuild } from '#hooks/use-build.js';
 
 function calculateScaleFromCamera(position: THREE.Vector3, camera: THREE.Camera): number {
   const distanceToCamera = camera.position.distanceTo(position);
@@ -37,7 +37,7 @@ function calculateScaleFromCamera(position: THREE.Vector3, camera: THREE.Camera)
 
 export function MeasureTool(): React.JSX.Element {
   const { camera, gl, scene } = useThree();
-
+  const { graphicsRef: graphicsActor } = useBuild();
   const measurements = useSelector(graphicsActor, (state) => state.context.measurements);
   const currentStart = useSelector(graphicsActor, (state) => state.context.currentMeasurementStart);
   const snapDistance = useSelector(graphicsActor, (state) => state.context.measureSnapDistance);
@@ -264,7 +264,7 @@ export function MeasureTool(): React.JSX.Element {
       gl.domElement.removeEventListener('mouseup', handleMouseUp);
       gl.domElement.removeEventListener('contextmenu', handleContextMenu);
     };
-  }, [camera, gl, scene, snapDistance, currentStart, activeSnapPoint, mousePosition, isMeasureActive]);
+  }, [camera, gl, scene, snapDistance, currentStart, activeSnapPoint, mousePosition, isMeasureActive, graphicsActor]);
 
   // Choose which measurements to display: all during measure mode, otherwise only pinned
   const visibleMeasurements = isMeasureActive ? measurements : measurements.filter((m) => m.isPinned);
@@ -458,6 +458,7 @@ function MeasurementLine({
   const endConeMeshRef = useRef<THREE.Mesh>(null);
   const [isLabelHovered, setIsLabelHovered] = useState(false);
   const isHovered = isLabelHovered || isExternallyHovered;
+  const { graphicsRef: graphicsActor } = useBuild();
 
   // Create matcap materials following transform-controls pattern
   const derivedMaterials = useMemo(() => {

@@ -1,81 +1,23 @@
-import { InputData, quicktype, jsonInputForTargetLanguage } from 'quicktype-core';
-
-const targetLanguage: Parameters<typeof quicktype>[0]['lang'] = 'json-schema';
-
-type JsonSchemaProperty = {
-  type?: string;
-  $ref?: string;
-  default?: unknown;
-  properties?: Record<string, JsonSchemaProperty>;
-  items?: JsonSchemaProperty;
-};
-
-type JsonSchema = {
-  [key: string]: unknown;
-  $schema?: string;
-  $ref?: string;
-  definitions?: Record<string, JsonSchemaProperty>;
-};
+import type { JSONSchema7, JSONSchema7Type } from 'json-schema';
+import { toJsonSchema } from '@taucad/json-schema';
 
 /**
- * Recursively adds default values to a JSON schema based on the original JSON object
- * @param schema - The schema object or property to process
- * @param jsonValue - The corresponding value from the original JSON
- * @param definitions - The definitions object from the root schema for resolving $ref
- * @returns The schema with default values added
+ * Capitalizes the first letter of a string
  */
-function addDefaultValues(
-  schema: JsonSchemaProperty,
-  jsonValue: unknown,
-  definitions: Record<string, JsonSchemaProperty> = {},
-): JsonSchemaProperty {
-  // Handle $ref by looking up the definition
-  if (schema.$ref) {
-    const refName = schema.$ref.replace('#/definitions/', '');
-    const referencedSchema = definitions[refName];
-    if (referencedSchema && typeof jsonValue === 'object' && jsonValue !== null) {
-      const updatedReferencedSchema = addDefaultValues(referencedSchema, jsonValue, definitions);
-      // Update the definition in place
-      definitions[refName] = updatedReferencedSchema;
-    }
-
-    return schema;
+function capitalize(string_: string): string {
+  if (!string_) {
+    return string_;
   }
 
-  // Handle primitive types - add default values
-  if (schema.type && ['string', 'number', 'integer', 'boolean'].includes(schema.type)) {
-    return {
-      ...schema,
-      default: jsonValue,
-    };
-  }
+  return string_.charAt(0).toUpperCase() + string_.slice(1);
+}
 
-  // Handle objects with properties
-  if (schema.type === 'object' && schema.properties && typeof jsonValue === 'object' && jsonValue !== null) {
-    const jsonObject = jsonValue as Record<string, unknown>;
-    const updatedProperties: Record<string, JsonSchemaProperty> = {};
-
-    for (const [propertyName, propertySchema] of Object.entries(schema.properties)) {
-      const propertyValue = jsonObject[propertyName];
-      updatedProperties[propertyName] = addDefaultValues(propertySchema, propertyValue, definitions);
-    }
-
-    return {
-      ...schema,
-      properties: updatedProperties,
-    };
-  }
-
-  // Handle arrays
-  if (schema.type === 'array' && schema.items && Array.isArray(jsonValue) && jsonValue.length > 0) {
-    const updatedItems = addDefaultValues(schema.items, jsonValue[0], definitions);
-    return {
-      ...schema,
-      items: updatedItems,
-    };
-  }
-
-  return schema;
+/**
+ * Generates a title from a property name by capitalizing it
+ * e.g., "test1" -> "Test1", "deep" -> "Deep"
+ */
+function getTitleFromPropertyName(propertyName: string): string {
+  return capitalize(propertyName);
 }
 
 /**
@@ -83,66 +25,167 @@ function addDefaultValues(
  * @param json - The JSON object to convert to a JSON Schema.
  * @returns The JSON Schema with default values added.
  */
-export async function jsonSchemaFromJson(json: Record<string, unknown>): Promise<JsonSchema> {
-  const jsonInput = jsonInputForTargetLanguage('json-schema');
-  await jsonInput.addSource({
-    name: 'root',
-    samples: [JSON.stringify(json)],
+export async function jsonSchemaFromJson(json: Record<string, unknown>): Promise<JSONSchema7> {
+  const schema = toJsonSchema(json, {
+    arrays: {
+      // Use the first item's schema for the array schema.
+      // anyOf, oneOf, allOf are not supported.
+      mode: 'first',
+    },
+    objects: {
+      additionalProperties: false,
+      postProcessFnc(generatedSchema, object, defaultFunction) {
+        const processedSchema = defaultFunction(generatedSchema, object);
+
+        return {
+          ...processedSchema,
+          required: Object.keys(object).sort(),
+        };
+      },
+    },
+    postProcessFnc(type, generatedSchema, value, defaultFunction): JSONSchema7 {
+      const processedSchema = defaultFunction(type, generatedSchema, value);
+
+      // Add default values for primitive types
+      if (type === 'string' || type === 'number' || type === 'integer' || type === 'boolean') {
+        return {
+          ...processedSchema,
+          default: value as JSONSchema7Type,
+        };
+      }
+
+      // Add titles for nested objects based on their property names
+      if (type === 'object' && processedSchema.properties) {
+        const properties: Record<string, JSONSchema7> = {};
+
+        for (const [propertyName, propertySchema] of Object.entries(processedSchema.properties)) {
+          if (!propertySchema || typeof propertySchema !== 'object') {
+            continue;
+          }
+
+          // Add title to nested objects
+          if (propertySchema.type === 'object') {
+            properties[propertyName] = {
+              ...propertySchema,
+              title: getTitleFromPropertyName(propertyName),
+            };
+          } else {
+            properties[propertyName] = propertySchema;
+          }
+        }
+
+        return {
+          ...processedSchema,
+          properties,
+        };
+      }
+
+      return processedSchema;
+    },
   });
 
-  const inputData = new InputData();
-  inputData.addInput(jsonInput);
-
-  const serializedData = await quicktype({
-    inputData,
-    lang: targetLanguage,
-
-    // This flag should prevent quicktype from combining objects with the same type into a
-    // single ref, but currently it doesn't work. This failure results in schemas that
-    // share types but have different property names to share the same title.
-    // See: https://github.com/glideapps/quicktype/issues/1678
-    combineClasses: false,
-  });
-
-  const joinedSchema = serializedData.lines.join('');
-  const parsedSchema = JSON.parse(joinedSchema) as JsonSchema;
-
-  // Add default values to the schema
-  const schemaWithDefaults = addDefaultValuesToSchema(parsedSchema, json);
-
-  return schemaWithDefaults;
+  // Add $schema field and root title
+  return {
+    $schema: 'http://json-schema.org/draft-06/schema#',
+    ...schema,
+    title: 'Root',
+  };
 }
 
 /**
- * Adds default values to the entire schema structure
- * @param schema - The complete JSON schema
- * @param originalJson - The original JSON object
- * @returns The schema with default values added
+ * Helper function to check if a schema or its combinators contain array or object types.
  */
-function addDefaultValuesToSchema(schema: JsonSchema, originalJson: Record<string, unknown>): JsonSchema {
-  const updatedSchema = { ...schema };
+function hasArrayOrObjectInCombinators(schema: JSONSchema7): boolean {
+  const combinators = [schema.oneOf, schema.anyOf, schema.allOf].filter(Boolean);
 
-  // Process definitions if they exist
-  if (updatedSchema.definitions) {
-    const updatedDefinitions = { ...updatedSchema.definitions };
-
-    // Find the root definition (usually referenced by $ref)
-    let rootDefinitionName = '';
-    if (updatedSchema.$ref) {
-      rootDefinitionName = updatedSchema.$ref.replace('#/definitions/', '');
+  for (const combinator of combinators) {
+    if (!Array.isArray(combinator)) {
+      continue;
     }
 
-    // Process the root definition with the original JSON
-    if (rootDefinitionName && updatedDefinitions[rootDefinitionName]) {
-      updatedDefinitions[rootDefinitionName] = addDefaultValues(
-        updatedDefinitions[rootDefinitionName]!,
-        originalJson,
-        updatedDefinitions,
-      );
-    }
+    for (const subSchema of combinator) {
+      if (typeof subSchema !== 'object') {
+        continue;
+      }
 
-    updatedSchema.definitions = updatedDefinitions;
+      if (subSchema.type === 'array' || subSchema.type === 'object') {
+        return true;
+      }
+
+      if (hasJsonSchemaObjectProperties(subSchema)) {
+        return true;
+      }
+    }
   }
 
-  return updatedSchema;
+  return false;
 }
+
+/**
+ * Returns true if the JSON Schema has any array or object properties at any nesting level.
+ * Recursively checks through nested objects, arrays, and schema combinators.
+ *
+ * @param jsonSchema - The JSON Schema to check.
+ * @returns `true` if the JSON Schema has any array or object properties, `false` otherwise.
+ */
+export const hasJsonSchemaObjectProperties = (jsonSchema: JSONSchema7): boolean => {
+  // Check direct properties
+  if (jsonSchema.properties) {
+    for (const property of Object.values(jsonSchema.properties)) {
+      if (!property || typeof property !== 'object') {
+        continue;
+      }
+
+      // Found an array or object type property
+      if (property.type === 'array' || property.type === 'object') {
+        return true;
+      }
+
+      // Check combinators within this property
+      if (hasArrayOrObjectInCombinators(property)) {
+        return true;
+      }
+
+      // Recursively check this property for nested arrays/objects
+      if (hasJsonSchemaObjectProperties(property)) {
+        return true;
+      }
+    }
+  }
+
+  // Check array items (arrays can contain objects or nested arrays)
+  if (jsonSchema.items) {
+    const itemSchemas = Array.isArray(jsonSchema.items) ? jsonSchema.items : [jsonSchema.items];
+
+    for (const itemSchema of itemSchemas) {
+      if (typeof itemSchema !== 'object') {
+        continue;
+      }
+
+      // Array items with object or array type indicate nested complexity
+      if (itemSchema.type === 'array' || itemSchema.type === 'object') {
+        return true;
+      }
+
+      if (hasJsonSchemaObjectProperties(itemSchema)) {
+        return true;
+      }
+    }
+  }
+
+  // Check additionalProperties
+  if (
+    jsonSchema.additionalProperties &&
+    typeof jsonSchema.additionalProperties === 'object' &&
+    hasJsonSchemaObjectProperties(jsonSchema.additionalProperties)
+  ) {
+    return true;
+  }
+
+  // Check schema combinators at root level
+  if (hasArrayOrObjectInCombinators(jsonSchema)) {
+    return true;
+  }
+
+  return false;
+};

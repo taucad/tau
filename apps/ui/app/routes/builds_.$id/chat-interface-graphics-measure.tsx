@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import type { StateFrom } from 'xstate';
 import { Pin, PinOff, Trash } from 'lucide-react';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
-import { graphicsActor } from '#routes/builds_.$id/graphics-actor.js';
+import { useBuild } from '#hooks/use-build.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
@@ -14,6 +14,7 @@ type Properties = {
 };
 
 export function ChatInterfaceGraphicsMeasure({ state }: Properties): React.JSX.Element {
+  const { graphicsRef: graphicsActor } = useBuild();
   const { measurements, gridUnit, gridUnitFactor, hoveredMeasurementId } = state.context as unknown as {
     measurements: Array<{ id: string; distance: number; name?: string; isPinned?: boolean }>;
     gridUnit: string;

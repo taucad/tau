@@ -1,7 +1,6 @@
 import { ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { NavLink, useMatch, useNavigate } from 'react-router';
-import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { NavLink } from 'react-router';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import {
   SidebarGroup,
@@ -13,9 +12,6 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from '#components/ui/sidebar.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
-import { useKeydown } from '#hooks/use-keydown.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 export function NavMain({
@@ -30,7 +26,6 @@ export function NavMain({
       title: string;
       url: string;
     }>;
-    keyCombination?: KeyCombination;
   }>;
 }): React.JSX.Element {
   return (
@@ -45,35 +40,11 @@ export function NavMain({
                 <NavLink to={item.url} tabIndex={-1}>
                   {({ isActive, isPending }) => (
                     <CollapsibleTrigger asChild>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        tooltip={
-                          item.keyCombination
-                            ? {
-                                children: (
-                                  <>
-                                    {item.title}
-                                    {` `}
-                                    <KeyShortcut variant="tooltip" className="ml-1">
-                                      {formatKeyCombination(item.keyCombination)}
-                                    </KeyShortcut>
-                                  </>
-                                ),
-                              }
-                            : undefined
-                        }
-                      >
+                      <SidebarMenuButton isActive={isActive}>
                         {isPending ? <LoadingSpinner /> : item.icon ? <item.icon className="size-4 shrink-0" /> : null}
                         <span className="flex-1 truncate">{item.title}</span>
                         {hasItems ? (
                           <ChevronRight className="ml-2 shrink-0 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                        ) : null}
-                        {item.keyCombination ? (
-                          <NavKeyboardShortcut
-                            className="ml-2 shrink-0"
-                            keyCombination={item.keyCombination}
-                            url={item.url}
-                          />
                         ) : null}
                       </SidebarMenuButton>
                     </CollapsibleTrigger>
@@ -104,25 +75,4 @@ export function NavMain({
       </SidebarMenu>
     </SidebarGroup>
   );
-}
-
-function NavKeyboardShortcut({
-  keyCombination,
-  url,
-  className,
-}: {
-  readonly keyCombination: KeyCombination;
-  readonly url: string;
-  readonly className: string;
-}) {
-  const isMatch = useMatch(url);
-  const navigate = useNavigate();
-  const { formattedKeyCombination } = useKeydown(keyCombination, () => {
-    if (isMatch) {
-      return;
-    }
-
-    void navigate(url);
-  });
-  return <KeyShortcut className={className}>{formattedKeyCombination}</KeyShortcut>;
 }

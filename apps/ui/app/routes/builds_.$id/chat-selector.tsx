@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
 import type { Chat } from '@taucad/types';
+import { useSelector } from '@xstate/react';
 import { Button } from '#components/ui/button.js';
 import { useBuild } from '#hooks/use-build.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
@@ -25,7 +26,12 @@ const newChatKeyCombination = {
 } satisfies KeyCombination;
 
 export function ChatSelector(): ReactNode {
-  const { build, isLoading, activeChat, activeChatId, addChat, setActiveChat, updateChatName, deleteChat } = useBuild();
+  const { buildRef, isLoading, addChat, setActiveChat, updateChatName, deleteChat } = useBuild();
+  const build = useSelector(buildRef, (state) => state.context.build);
+  const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId) ?? '';
+  const activeChat = useSelector(buildRef, (state) =>
+    state.context.build?.chats.find((chat) => chat.id === activeChatId),
+  );
   const [isGeneratingName, setIsGeneratingName] = useState(false);
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [chatToRename, setChatToRename] = useState<string | undefined>(undefined);
@@ -33,7 +39,7 @@ export function ChatSelector(): ReactNode {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleAddChat = async () => {
-    await addChat();
+    addChat();
   };
 
   const { formattedKeyCombination } = useKeydown(newChatKeyCombination, handleAddChat);
@@ -97,7 +103,7 @@ export function ChatSelector(): ReactNode {
 
   const handleDeleteChat = useCallback(
     async (chatId: string) => {
-      await deleteChat(chatId);
+      deleteChat(chatId);
     },
     [deleteChat],
   );
@@ -114,7 +120,15 @@ export function ChatSelector(): ReactNode {
       return (
         <div className="group flex w-full items-start justify-between">
           <div className="flex flex-col">
-            <div className={cn('font-medium', isActive && 'text-primary')}>{chatName}</div>
+            <div
+              className={cn(
+                'font-medium',
+                chat.messages.length === 0 && 'text-muted-foreground',
+                isActive && 'text-primary',
+              )}
+            >
+              {chatName}
+            </div>
             <div className="text-xs text-muted-foreground">
               {chat.messages.length} {chat.messages.length === 1 ? 'message' : 'messages'} ·{' '}
               {formatRelativeTime(chat.updatedAt)}
@@ -163,8 +177,10 @@ export function ChatSelector(): ReactNode {
               renderLabel={renderChatLabel}
               getValue={getChatValue}
               defaultValue={activeChat}
-              placeholder="Search chats"
+              placeholder="Select a chat"
               searchPlaceHolder="Search chats..."
+              title="Chats"
+              description="Select a chat to continue the conversation."
               popoverProperties={{
                 align: 'start',
                 className: 'w-[300px]',

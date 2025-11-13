@@ -1,18 +1,42 @@
 import type { ReactNode } from 'react';
 import { Fragment } from 'react/jsx-runtime';
-import { ChevronRight, Download } from 'lucide-react';
-import { FileExplorerContext } from '#routes/builds_.$id/graphics-actor.js';
+import { ChevronRight, Download, Eye, EyeOff } from 'lucide-react';
+import { useSelector } from '@xstate/react';
 import { CopyButton } from '#components/copy-button.js';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { toast } from '#components/ui/sonner.js';
 import { downloadBlob } from '#utils/file.utils.js';
-import { FloatingPanelContentHeader, FloatingPanelContentTitle } from '#components/ui/floating-panel.js';
+import { useBuild } from '#hooks/use-build.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { decodeTextFile } from '#utils/filesystem.utils.js';
 
 export function ChatEditorBreadcrumbs(): ReactNode {
-  const activeFile = FileExplorerContext.useSelector((state) =>
-    state.context.openFiles.find((file) => file.id === state.context.activeFileId),
-  );
+  const { fileExplorerRef, buildRef } = useBuild();
+
+  // Get active file path from file explorer
+  const activeFilePath = useSelector(fileExplorerRef, (state) => state.context.activeFilePath);
+
+  // Get active file content from build machine (source of truth)
+  const activeFile = useSelector(buildRef, (state) => {
+    if (!activeFilePath) {
+      return undefined;
+    }
+
+    const files = state.context.build?.assets.mechanical?.files;
+    const fileContent = files?.[activeFilePath];
+    if (!fileContent) {
+      return undefined;
+    }
+
+    return {
+      path: activeFilePath,
+      name: activeFilePath.split('/').pop() ?? activeFilePath,
+      content: fileContent.content,
+    };
+  });
+
+  const [enableFilePreview, setEnableFilePreview] = useCookie<boolean>('cad-file-preview', true);
 
   // Keep empty string initially to avoid flickering
   const displayPath = String(activeFile?.path ?? '');
@@ -36,13 +60,17 @@ export function ChatEditorBreadcrumbs(): ReactNode {
     );
   };
 
+  const handleToggleFilePreview = () => {
+    setEnableFilePreview(!enableFilePreview);
+  };
+
   return (
-    <FloatingPanelContentHeader>
-      <FloatingPanelContentTitle className="flex flex-row items-center gap-0.5">
+    <div className="flex flex-row items-center justify-between py-0.25 pr-0.25 pl-3 text-muted-foreground">
+      <div className="flex flex-row items-center gap-0.5">
         {displayPath ? (
           parts.map((part, index) => (
             <Fragment key={part}>
-              <span className="font-medium">{part}</span>
+              <span className="text-sm font-medium">{part}</span>
               {index < parts.length - 1 && <ChevronRight className="size-4" />}
             </Fragment>
           ))
@@ -50,27 +78,38 @@ export function ChatEditorBreadcrumbs(): ReactNode {
           // Maintain height with invisible content when empty
           <span className="opacity-0">placeholder</span>
         )}
-      </FloatingPanelContentTitle>
+      </div>
 
-      {Boolean(activeFile) && (
-        <div className="flex flex-row items-center gap-1">
-          <CopyButton
-            size="icon"
-            variant="ghost"
-            className="size-7 rounded-sm"
-            getText={() => activeFile!.content}
-            tooltip="Copy"
-          />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button size="icon" variant="ghost" className="size-7 rounded-sm" onClick={handleDownloadCode}>
-                <Download className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Download</TooltipContent>
-          </Tooltip>
-        </div>
-      )}
-    </FloatingPanelContentHeader>
+      <div className="flex flex-row items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7 rounded-sm"
+              aria-label={enableFilePreview ? 'Disable file preview' : 'Enable file preview'}
+              onClick={handleToggleFilePreview}
+            >
+              {enableFilePreview ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{enableFilePreview ? 'Disable file preview' : 'Enable file preview'}</TooltipContent>
+        </Tooltip>
+        {Boolean(activeFile) && (
+          <>
+            <CopyButton
+              size="icon"
+              variant="ghost"
+              className="size-7 rounded-sm"
+              getText={() => decodeTextFile(activeFile!.content)}
+              tooltip="Copy code"
+            />
+            <Button size="icon" variant="ghost" className="size-7 rounded-sm" onClick={handleDownloadCode}>
+              <Download className="size-4" />
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
   );
 }

@@ -165,12 +165,11 @@ function CommandPaletteTrigger({ items }: CommandPaletteTriggerProperties): Reac
     <>
       <Button
         variant="outline"
-        className="relative h-8 w-full max-w-sm justify-start rounded-md bg-sidebar text-sm font-normal text-muted-foreground shadow-none max-md:hidden sm:pr-12 md:w-40 dark:bg-sidebar"
+        className="relative h-8 w-full max-w-sm justify-start rounded-md bg-sidebar pl-3 text-sm font-normal text-muted-foreground shadow-none max-md:hidden sm:pr-12 md:w-32 dark:bg-sidebar"
         onClick={() => {
           setOpen(true);
         }}
       >
-        <Terminal />
         <span className="inline-flex">Search...</span>
         <KeyShortcut className="absolute top-1/2 right-2 -translate-y-1/2">{formattedKeyCombination}</KeyShortcut>
       </Button>

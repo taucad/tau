@@ -29,8 +29,13 @@ export async function writeBuildToLightningFs(buildId: string, files: Record<str
   const buildDir = getBuildDirectory(buildId);
   try {
     await fs.promises.mkdir(buildDir);
-  } catch {
-    // Directory might already exist, ignore
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
+      // If the error code is EEXIST, directory already exists, so just continue
+      // (do nothing, fall through)
+    } else {
+      throw error;
+    }
   }
 
   // Write all files to LightningFS

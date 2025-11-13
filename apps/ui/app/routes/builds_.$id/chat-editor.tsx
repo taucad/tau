@@ -6,7 +6,7 @@ import { FileCode } from 'lucide-react';
 import { CodeEditor } from '#components/code/code-editor.js';
 import { cn } from '#utils/ui.utils.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
-import { registerMonaco } from '#routes/builds_.$id/chat-editor-config.js';
+import { registerMonaco } from '#lib/monaco.js';
 import { ChatEditorBreadcrumbs } from '#routes/builds_.$id/chat-editor-breadcrumbs.js';
 import { useBuild } from '#hooks/use-build.js';
 import { ChatEditorTabs } from '#routes/builds_.$id/chat-editor-tabs.js';

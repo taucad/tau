@@ -104,6 +104,75 @@ function SvgGrid({ viewbox, transform }: SvgGridProps): React.ReactElement {
   );
 }
 
+type SvgAxesProps = {
+  /**
+   * Viewbox of the SVG.
+   */
+  readonly viewbox: Viewbox;
+  /**
+   * Stroke width of the axes.
+   * @default 8
+   */
+  readonly strokeWidth?: number;
+  /**
+   * Opacity of the axes.
+   * @default 1
+   */
+  readonly opacity?: number;
+};
+
+/**
+ * Simple 2D axes drawn from the origin (0,0) towards positive X and positive Y directions.
+ * Uses the same axis colors as the 3D AxesHelper component.
+ */
+function SvgAxes({
+  className,
+  viewbox,
+  strokeWidth = 2,
+  opacity = 1,
+}: SvgAxesProps & React.ComponentProps<'g'>): React.ReactElement {
+  const xAxisColor = 'oklch(0.85 0.06 22.5)'; // Another 30% lighter, soft red (X axis)
+  const yAxisColor = 'oklch(0.85 0.06 135)'; // Another 30% lighter, soft green (Y axis)
+
+  // Make axes effectively infinite relative to current viewbox.
+  // Use a very large extension based on the largest viewbox dimension.
+  const baseSize = Math.max(viewbox.width, viewbox.height, 1);
+  const extension = baseSize * 1000;
+
+  // Only draw in positive directions:
+  //  - X axis: from 0 to +extension (positive X)
+  //  - Y axis: from 0 to -extension (SVG Y grows down, so negative is "up")
+  const xEnd = extension;
+  const yEnd = -extension;
+
+  return (
+    <g data-slot="axes" id="axes-2d" pointerEvents="none" strokeLinecap="round" className={className}>
+      <line
+        data-slot="axes-x"
+        x1={0}
+        y1={0}
+        x2={xEnd}
+        y2={0}
+        stroke={xAxisColor}
+        opacity={opacity}
+        strokeWidth={strokeWidth}
+        vectorEffect="non-scaling-stroke"
+      />
+      <line
+        data-slot="axes-y"
+        x1={0}
+        y1={0}
+        x2={0}
+        y2={yEnd}
+        stroke={yAxisColor}
+        opacity={opacity}
+        strokeWidth={strokeWidth}
+        vectorEffect="non-scaling-stroke"
+      />
+    </g>
+  );
+}
+
 function parseViewbox(viewbox?: string): Viewbox {
   if (!viewbox) {
     return { xMin: 0, yMin: 0, xMax: 0, yMax: 0, width: 0, height: 0 };
@@ -168,6 +237,8 @@ type GeometryPathProps = {
 function GeometryPath({ geometry }: GeometryPathProps): React.ReactElement {
   return (
     <path
+      data-slot="geometry"
+      data-geometry-name={geometry.name}
       d={geometry.paths.flat(Infinity).join(' ')}
       strokeDasharray={dashArray(geometry.strokeType)}
       vectorEffect="non-scaling-stroke"
@@ -191,11 +262,12 @@ const addMarginToViewbox = (viewbox: Viewbox, margin: number): Viewbox => {
 type SvgWindowProps = {
   readonly viewbox: Viewbox;
   readonly enableGrid?: boolean;
+  readonly enableAxes?: boolean;
   readonly defaultColor?: string;
   readonly children?: ReactNode;
 };
 
-function SvgWindow({ viewbox, enableGrid, defaultColor, children }: SvgWindowProps): React.ReactElement {
+function SvgWindow({ viewbox, enableGrid, enableAxes, defaultColor, children }: SvgWindowProps): React.ReactElement {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [clientRect, setClientRect] = useState<DOMRect | undefined>(undefined);
   const [adaptedViewbox, setAdaptedViewbox] = useState<Viewbox>(viewbox);
@@ -245,9 +317,6 @@ function SvgWindow({ viewbox, enableGrid, defaultColor, children }: SvgWindowPro
 
     const rectRatio = rectWidth / rectHeight;
     const boxRatio = boxWidth / boxHeight;
-
-    // We change the viewbox to fill the canvas while keeping the
-    // coordinate system
 
     // First we decide which side we need to add padding to
     const paddingSide = rectRatio > boxRatio ? 'width' : 'height';
@@ -405,7 +474,13 @@ function SvgWindow({ viewbox, enableGrid, defaultColor, children }: SvgWindowPro
 
   return (
     <div ref={canvasRef} className="flex h-full w-full flex-1 touch-none overflow-hidden bg-background">
-      <RawCanvas viewbox={adaptedViewbox} enableGrid={enableGrid} defaultColor={defaultColor} transform={transform}>
+      <RawCanvas
+        viewbox={adaptedViewbox}
+        enableGrid={enableGrid}
+        enableAxes={enableAxes}
+        defaultColor={defaultColor}
+        transform={transform}
+      >
         {children}
       </RawCanvas>
     </div>
@@ -415,13 +490,22 @@ function SvgWindow({ viewbox, enableGrid, defaultColor, children }: SvgWindowPro
 type RawCanvasProps = {
   readonly viewbox: Viewbox;
   readonly enableGrid?: boolean;
+  readonly enableAxes?: boolean;
   readonly defaultColor?: string;
   readonly children?: ReactNode;
   readonly transform?: { scale: number; x: number; y: number };
 };
 
-function RawCanvas({ viewbox, enableGrid, defaultColor, transform, children }: RawCanvasProps): React.ReactElement {
+function RawCanvas({
+  viewbox,
+  enableGrid,
+  enableAxes,
+  defaultColor,
+  transform,
+  children,
+}: RawCanvasProps): React.ReactElement {
   const safeTransform = transform ?? { scale: 1, x: 0, y: 0 };
+
   return (
     <svg
       viewBox={stringifyViewbox(viewbox)}
@@ -433,6 +517,7 @@ function RawCanvas({ viewbox, enableGrid, defaultColor, transform, children }: R
     >
       <g id="panzoom-root">
         {enableGrid ? <SvgGrid viewbox={viewbox} transform={safeTransform} /> : null}
+        {enableAxes ? <SvgAxes viewbox={viewbox} /> : null}
         <g
           stroke={defaultColor}
           id="raw-canvas"
@@ -448,9 +533,29 @@ function RawCanvas({ viewbox, enableGrid, defaultColor, transform, children }: R
 }
 
 type SvgViewerProps = {
+  /**
+   * The geometries to display.
+   */
   readonly geometries: GeometrySvg[];
+  /**
+   * Whether to display the grid.
+   * @default true
+   */
   readonly enableGrid?: boolean;
+  /**
+   * Whether to display the axes.
+   * @default true
+   */
+  readonly enableAxes?: boolean;
+  /**
+   * Whether to render without a pan/zoom window.
+   * @default false
+   */
   readonly enableRawWindow?: boolean;
+  /**
+   * The default color to use for the geometries.
+   * @default '#000000'
+   */
   readonly defaultColor?: string;
 };
 
@@ -458,13 +563,14 @@ export function SvgViewer({
   geometries,
   enableGrid = true,
   enableRawWindow = false,
+  enableAxes = true,
   defaultColor,
 }: SvgViewerProps): ReactNode {
   const Viewer2D = enableRawWindow ? RawCanvas : SvgWindow;
-
   const viewbox = mergeViewboxes(geometries.map((s) => s.viewbox));
+
   return (
-    <Viewer2D viewbox={viewbox} enableGrid={enableGrid} defaultColor={defaultColor}>
+    <Viewer2D viewbox={viewbox} enableGrid={enableGrid} enableAxes={enableAxes} defaultColor={defaultColor}>
       {geometries.map((s) => {
         return <GeometryPath key={s.name} geometry={s} />;
       })}

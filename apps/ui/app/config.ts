@@ -62,8 +62,7 @@ export const metaConfig = {
   /**
    * The description of the app. Used for SEO and other metadata such as PWA and app store descriptions.
    */
-  description:
-    'Your AI-powered workshop companion - a free, open-source CAD platform that works offline. Design anything from 3D prints to woodworking projects with intelligent assistance, right in your browser.',
+  description: 'Tau: The multi-kernel CAD framework for the web.',
   /**
    * The directory of the docs relative to the root of the repository.
    */

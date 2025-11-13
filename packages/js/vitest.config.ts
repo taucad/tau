@@ -13,7 +13,6 @@ export default defineConfig({
       ignoreSourceErrors: true,
     },
     reporters: ['verbose'],
-    setupFiles: ['vitest.setup.ts'],
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../coverage/packages/converter',

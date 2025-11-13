@@ -1,6 +1,6 @@
+import { GitBranch } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { SvgIcon } from '#components/icons/svg-icon.js';
 
 type GitTriggerProperties = {
   readonly onClick: () => void;
@@ -12,7 +12,7 @@ export function GitTrigger({ onClick, className }: GitTriggerProperties): React.
     <Tooltip>
       <TooltipTrigger asChild>
         <Button variant="outline" size="icon" className={className} onClick={onClick}>
-          <SvgIcon id="github" />
+          <GitBranch className="size-4" />
         </Button>
       </TooltipTrigger>
       <TooltipContent>Connect to Git</TooltipContent>

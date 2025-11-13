@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useBuild } from '#hooks/use-build.js';
+import { cn } from '#utils/ui.utils.js';
 
 type SectionViewSettings = {
   stripeColor: string;
@@ -22,6 +23,9 @@ const defaultSectionViewSettings: SectionViewSettings = {
 export function SectionViewControl(): React.JSX.Element {
   const { graphicsRef: graphicsActor } = useBuild();
   const isSectionViewActive = useSelector(graphicsActor, (state) => state.context.isSectionViewActive);
+  const is2dGeometry = useSelector(graphicsActor, (state) =>
+    state.context.geometries.some((geometry) => geometry.format === 'svg'),
+  );
 
   const [sectionViewSettings] = useCookie<SectionViewSettings>(
     cookieName.sectionViewSettings,
@@ -50,7 +54,7 @@ export function SectionViewControl(): React.JSX.Element {
           variant="overlay"
           size="icon"
           data-active={isSectionViewActive ? 'true' : 'false'}
-          className="data-[active=true]:bg-accent data-[active=true]:text-primary"
+          className={cn('data-[active=true]:bg-accent data-[active=true]:text-primary', is2dGeometry && 'hidden')}
           onClick={handleClick}
         >
           <FlipHorizontal className="size-4" />

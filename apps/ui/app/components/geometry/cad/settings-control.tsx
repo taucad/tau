@@ -1,6 +1,7 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import type { ClassValue } from 'clsx';
 import { Axis3D, Box, Grid3X3, Rotate3D, Settings, PenLine, Sparkles } from 'lucide-react';
+import { useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
 import { useBuild } from '#hooks/use-build.js';
@@ -50,6 +51,9 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
   const { graphicsRef: graphicsActor } = useBuild();
   const [viewSettings, setViewSettings] = useCookie<ViewSettings>(cookieName.viewSettings, defaultSettings);
   const [isOpen, setIsOpen] = useState(false);
+  const is2dGeometry = useSelector(graphicsActor, (state) =>
+    state.context.geometries.some((geometry) => geometry.format === 'svg'),
+  );
 
   // Synchronize each setting to the Graphics context when settings change
   useEffect(() => {
@@ -138,52 +142,56 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
           event.preventDefault();
         }}
       >
-        <DropdownMenuLabel>Model</DropdownMenuLabel>
-        <DropdownMenuSwitchItem
-          className="flex w-full justify-between"
-          isChecked={viewSettings.surface}
-          onIsCheckedChange={handleMeshToggle}
-        >
-          <span className="flex items-center gap-2">
-            <Box />
-            Surfaces
-          </span>
-        </DropdownMenuSwitchItem>
-        <DropdownMenuSwitchItem
-          className="flex w-full justify-between"
-          isChecked={viewSettings.lines}
-          onIsCheckedChange={handleLinesToggle}
-        >
-          <span className="flex items-center gap-2">
-            <PenLine />
-            Lines
-          </span>
-        </DropdownMenuSwitchItem>
-        <DropdownMenuSwitchItem
-          className="flex h-10 w-full justify-between"
-          isChecked={viewSettings.matcap}
-          onIsCheckedChange={handleMatcapToggle}
-        >
-          <span className="flex items-center gap-2">
-            <Sparkles />
-            <div className="flex flex-col">
-              <span className="flex items-center gap-1">
-                Matcap{' '}
-                <InfoTooltip>
-                  A material that gives models a consistent appearance independent of scene lighting.
-                  <br /> Rendering performance is improved with this enabled.
-                </InfoTooltip>
+        {!is2dGeometry && (
+          <>
+            <DropdownMenuLabel>Model</DropdownMenuLabel>
+            <DropdownMenuSwitchItem
+              className="flex w-full justify-between"
+              isChecked={viewSettings.surface}
+              onIsCheckedChange={handleMeshToggle}
+            >
+              <span className="flex items-center gap-2">
+                <Box />
+                Surfaces
               </span>
-              <span className="text-xs font-medium text-muted-foreground/80">
-                Lighting effects are {viewSettings.matcap ? 'inactive' : 'active'}
+            </DropdownMenuSwitchItem>
+            <DropdownMenuSwitchItem
+              className="flex w-full justify-between"
+              isChecked={viewSettings.lines}
+              onIsCheckedChange={handleLinesToggle}
+            >
+              <span className="flex items-center gap-2">
+                <PenLine />
+                Lines
               </span>
-            </div>
-          </span>
-        </DropdownMenuSwitchItem>
-        <DropdownMenuSeparator />
+            </DropdownMenuSwitchItem>
+            <DropdownMenuSwitchItem
+              className="flex h-10 w-full justify-between"
+              isChecked={viewSettings.matcap}
+              onIsCheckedChange={handleMatcapToggle}
+            >
+              <span className="flex items-center gap-2">
+                <Sparkles />
+                <div className="flex flex-col">
+                  <span className="flex items-center gap-1">
+                    Matcap{' '}
+                    <InfoTooltip>
+                      A material that gives models a consistent appearance independent of scene lighting.
+                      <br /> Rendering performance is improved with this enabled.
+                    </InfoTooltip>
+                  </span>
+                  <span className="text-xs font-medium text-muted-foreground/80">
+                    Lighting effects are {viewSettings.matcap ? 'inactive' : 'active'}
+                  </span>
+                </div>
+              </span>
+            </DropdownMenuSwitchItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
         <DropdownMenuLabel>Viewport</DropdownMenuLabel>
         <DropdownMenuSwitchItem
-          className="flex w-full justify-between"
+          className={cn('flex w-full justify-between', is2dGeometry && 'hidden')}
           isChecked={viewSettings.gizmo}
           onIsCheckedChange={handleGizmoToggle}
         >

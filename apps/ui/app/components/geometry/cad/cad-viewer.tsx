@@ -24,7 +24,7 @@ export function CadViewer({
 
   // If there are any SVG geometries, we render them in a SVG viewer
   if (svgGeometries.length > 0) {
-    return <SvgViewer geometries={svgGeometries} />;
+    return <SvgViewer enableGrid={properties.enableGrid} geometries={svgGeometries} />;
   }
 
   return (

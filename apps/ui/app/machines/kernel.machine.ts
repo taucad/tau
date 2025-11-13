@@ -19,16 +19,18 @@ import type { ZooBuilderInterface as ZooWorker } from '#components/geometry/kern
 import ZooBuilderWorker from '#components/geometry/kernel/zoo/zoo.worker.js?worker';
 import type { TauWorkerInterface as TauWorker } from '#components/geometry/kernel/tau/tau.worker.types.js';
 import TauBuilderWorker from '#components/geometry/kernel/tau/tau.worker.js?worker';
+import type { JscadWorkerInterface as JscadWorker } from '#components/geometry/kernel/jscad/jscad.worker.types.js';
+import JscadBuilderWorker from '#components/geometry/kernel/jscad/jscad.worker.js?worker';
 import { assertActorDoneEvent } from '#lib/xstate.js';
 import type { LogLevel, LogOrigin, OnWorkerLog } from '#types/console.types.js';
 
-type KernelProvider = CadKernelProvider | 'tau';
+type KernelProvider = CadKernelProvider | 'tau' | 'jscad';
 
 // Module-level cache for worker selection
 const workerSelectionCache = new Map<string, KernelProvider>();
 
 // Worker priority order for canHandle queries
-const workerPriority: KernelProvider[] = ['openscad', 'zoo', 'replicad', 'tau'];
+const workerPriority: KernelProvider[] = ['openscad', 'zoo', 'replicad', 'jscad', 'tau'];
 
 function getCacheKey(file: GeometryFile): string {
   return file.filename;
@@ -39,6 +41,7 @@ const workers = {
   openscad: OpenScadBuilderWorker,
   zoo: ZooBuilderWorker,
   tau: TauBuilderWorker,
+  jscad: JscadBuilderWorker,
 } as const satisfies Partial<Record<KernelProvider, new () => Worker>>;
 
 const determineWorkerActor = fromPromise<
@@ -110,6 +113,10 @@ const createWorkersActor = fromPromise<
     context.workers.tau.terminate();
   }
 
+  if (context.workers.jscad) {
+    context.workers.jscad.terminate();
+  }
+
   try {
     // Create all workers
     // eslint-disable-next-line new-cap -- following type definitions
@@ -120,12 +127,15 @@ const createWorkersActor = fromPromise<
     const zooWorker = new workers.zoo();
     // eslint-disable-next-line new-cap -- following type definitions
     const tauWorker = new workers.tau();
+    // eslint-disable-next-line new-cap -- following type definitions
+    const jscadWorker = new workers.jscad();
 
     // Wrap all workers with comlink
     const wrappedReplicadWorker = wrap<ReplicadWorker>(replicadWorker);
     const wrappedOpenscadWorker = wrap<OpenScadWorker>(openscadWorker);
     const wrappedZooWorker = wrap<ZooWorker>(zooWorker);
     const wrappedTauWorker = wrap<TauWorker>(tauWorker);
+    const wrappedJscadWorker = wrap<JscadWorker>(jscadWorker);
 
     const onLog: OnWorkerLog = (log) => {
       if (context.parentRef) {
@@ -145,6 +155,7 @@ const createWorkersActor = fromPromise<
       wrappedOpenscadWorker.initialize(proxy(onLog), {}),
       wrappedZooWorker.initialize(proxy(onLog), { apiKey: '123' }),
       wrappedTauWorker.initialize(proxy(onLog), {}),
+      wrappedJscadWorker.initialize(proxy(onLog), {}),
     ]);
 
     // Store references to all workers
@@ -152,10 +163,12 @@ const createWorkersActor = fromPromise<
     context.workers.openscad = openscadWorker;
     context.workers.zoo = zooWorker;
     context.workers.tau = tauWorker;
+    context.workers.jscad = jscadWorker;
     context.wrappedWorkers.replicad = wrappedReplicadWorker;
     context.wrappedWorkers.openscad = wrappedOpenscadWorker;
     context.wrappedWorkers.zoo = wrappedZooWorker;
     context.wrappedWorkers.tau = wrappedTauWorker;
+    context.wrappedWorkers.jscad = wrappedJscadWorker;
 
     // Return success result
     return { type: 'kernelInitialized' };
@@ -454,7 +467,10 @@ type KernelEvent = KernelEventExternalDone | KernelEventInternal;
 // Interface defining the context for the Kernel machine
 type KernelContext = {
   workers: Record<KernelProvider, Worker | undefined>;
-  wrappedWorkers: Record<KernelProvider, Remote<ReplicadWorker | OpenScadWorker | ZooWorker | TauWorker> | undefined>;
+  wrappedWorkers: Record<
+    KernelProvider,
+    Remote<ReplicadWorker | OpenScadWorker | ZooWorker | TauWorker | JscadWorker> | undefined
+  >;
   parentRef?: CadActor;
   selectedWorker?: KernelProvider;
 };
@@ -525,6 +541,13 @@ export const kernelMachine = setup({
         context.workers.tau = undefined;
         context.wrappedWorkers.tau = undefined;
       }
+
+      if (context.workers.jscad) {
+        await context.wrappedWorkers.jscad?.cleanup();
+        context.workers.jscad.terminate();
+        context.workers.jscad = undefined;
+        context.wrappedWorkers.jscad = undefined;
+      }
     },
   },
   guards: {
@@ -542,12 +565,14 @@ export const kernelMachine = setup({
       openscad: undefined,
       zoo: undefined,
       tau: undefined,
+      jscad: undefined,
     },
     wrappedWorkers: {
       replicad: undefined,
       openscad: undefined,
       zoo: undefined,
       tau: undefined,
+      jscad: undefined,
     },
     parentRef: undefined,
     selectedWorker: undefined,

@@ -41,6 +41,7 @@
     "@headless-tree/react": "^1.5.1",
     "@hookform/resolvers": "^5.1.1",
     "@isomorphic-git/lightning-fs": "^4.6.2",
+    "@jscad/modeling": "^2.12.6",
     "@kittycad/lib": "^2.0.42",
     "@langchain/anthropic": "^0.3.33",
     "@langchain/cerebras": "^0.0.2",

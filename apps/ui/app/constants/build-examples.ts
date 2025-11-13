@@ -1,4 +1,4 @@
-import { mockBuilds } from '@taucad/tau-examples';
+import { mockBuilds, jscadExamples } from '@taucad/tau-examples';
 import type { Build, KernelProvider } from '@taucad/types';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 
@@ -66,7 +66,13 @@ export const openscadBuilds: Build[] = openScadModels.map((model) => {
   return createBuild(model, mainFile, language);
 });
 
-export const sampleBuilds: Build[] = [...replicadBuilds, ...openscadBuilds];
+const jscadBuilds: Build[] = jscadExamples.map((model) => {
+  const mainFile = 'main.ts';
+  const language: KernelProvider = 'jscad';
+  return createBuild(model, mainFile, language);
+});
+
+export const sampleBuilds: Build[] = [...replicadBuilds, ...openscadBuilds, ...jscadBuilds];
 
 // Export const mockBuilds: Build[] = [
 //   {

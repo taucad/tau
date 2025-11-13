@@ -13,12 +13,8 @@ import {
   ChevronsDown,
   Eye,
   EyeOff,
-  ChevronRight,
-  ChevronDown,
-  File,
   Folder,
   FolderOpen,
-  Circle,
 } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { minimatch } from 'minimatch';
@@ -32,10 +28,9 @@ import {
   searchFeature,
   expandAllFeature,
   propMemoizationFeature,
-  createOnDropHandler,
 } from '@headless-tree/core';
 import { useTree, AssistiveTreeDescription } from '@headless-tree/react';
-import { languageFromKernel, kernelConfigurations } from '@taucad/types/constants';
+import { kernelConfigurations } from '@taucad/types/constants';
 import type { KernelConfiguration } from '@taucad/types/constants';
 import type { FileItem } from '#machines/file-explorer.machine.js';
 import { cn } from '#utils/ui.utils.js';
@@ -65,12 +60,14 @@ import {
 import { useBuild } from '#hooks/use-build.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { HighlightText } from '#components/highlight-text.js';
+import { FileExtensionIcon, iconFromExtension } from '#components/icons/file-extension-icon.js';
+import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 
 type TreeItemData = {
   path: string;
   name: string;
   isFolder: boolean;
-  content?: string;
+  content?: Uint8Array;
   gitStatus?: FileItem['gitStatus'];
 };
 
@@ -105,7 +102,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
         name: path.split('/').pop() ?? path,
         path,
         content: item.content,
-        language: languageFromKernel[mechanicalAsset.language],
+        language: iconFromExtension[getFileExtension(path)]?.id,
         isDirectory: false,
         gitStatus: fileStatuses.get(path)?.status,
       }));
@@ -261,10 +258,80 @@ export function ChatEditorFileTree(): React.JSX.Element {
     },
     canReorder: true,
     indent: 16,
-    onDrop: createOnDropHandler(() => {
-      // Handle reordering - not applicable for our flat structure
-      // This would be used if we allowed reordering siblings
-    }),
+    async onDrop(draggedItems, target) {
+      // Handle drag-and-drop by renaming files to new paths
+      const targetPath = target.item.getId();
+
+      // Determine target folder based on drop type
+      let targetFolder = '';
+      if (targetPath === rootId) {
+        // Dropping on root folder
+        targetFolder = '';
+      } else if (target.item.isFolder()) {
+        targetFolder = targetPath;
+      } else {
+        // Dropped on a file, use its parent folder
+        const parts = targetPath.split('/');
+        parts.pop();
+        targetFolder = parts.join('/');
+      }
+
+      // Track which files were open before rename
+      const wasOpenMap = new Map<string, boolean>();
+      for (const item of draggedItems) {
+        wasOpenMap.set(
+          item.getId(),
+          openFiles.some((f) => f.path === item.getId()),
+        );
+      }
+
+      // Move each dragged item
+      for (const item of draggedItems) {
+        const oldPath = item.getId();
+        const fileName = oldPath.split('/').pop() ?? oldPath;
+        const newPath = targetFolder ? `${targetFolder}/${fileName}` : fileName;
+
+        if (oldPath === newPath) {
+          continue;
+        }
+
+        if (item.isFolder()) {
+          // Move folder: rename all files inside it
+          const nested = fileTree.filter((f) => f.path.startsWith(`${oldPath}/`));
+          for (const file of nested) {
+            const relativePath = file.path.slice(oldPath.length + 1);
+            const newFilePath = `${newPath}/${relativePath}`;
+
+            buildRef.send({
+              type: 'renameFile',
+              oldPath: file.path,
+              newPath: newFilePath,
+            });
+
+            // Update file explorer if file was open
+            if (openFiles.some((f) => f.path === file.path)) {
+              fileExplorerRef.send({ type: 'closeFile', path: file.path });
+              fileExplorerRef.send({ type: 'openFile', path: newFilePath });
+            }
+          }
+        } else {
+          // Move file
+          buildRef.send({
+            type: 'renameFile',
+            oldPath,
+            newPath,
+          });
+
+          // Update file explorer if file was open
+          if (wasOpenMap.get(oldPath)) {
+            fileExplorerRef.send({ type: 'closeFile', path: oldPath });
+            fileExplorerRef.send({ type: 'openFile', path: newPath });
+          }
+        }
+      }
+
+      toast.success(`Moved ${draggedItems.length} item${draggedItems.length > 1 ? 's' : ''}`);
+    },
     onRename(item, newName) {
       const oldPath = item.getId();
       if (oldPath === rootId) {
@@ -276,18 +343,45 @@ export function ChatEditorFileTree(): React.JSX.Element {
       const newPath = parts.join('/');
 
       if (item.isFolder()) {
+        // Remember if folder was expanded
+        const wasExpanded = item.isExpanded();
+
         // Rename all nested files
         const nested = fileTree.filter((f) => f.path.startsWith(`${oldPath}/`));
         for (const file of nested) {
           const relativePath = file.path.slice(oldPath.length + 1);
+          const newFilePath = `${newPath}/${relativePath}`;
+
           buildRef.send({
             type: 'renameFile',
             oldPath: file.path,
-            newPath: `${newPath}/${relativePath}`,
+            newPath: newFilePath,
           });
+
+          // Update file explorer if file was open
+          if (openFiles.some((f) => f.path === file.path)) {
+            fileExplorerRef.send({ type: 'closeFile', path: file.path });
+            fileExplorerRef.send({ type: 'openFile', path: newFilePath });
+          }
+        }
+
+        // Keep folder expanded after rename
+        if (wasExpanded) {
+          setTimeout(() => {
+            setExpandedItems((previous) => {
+              const withoutOld = previous.filter((p) => p !== oldPath);
+              return [...withoutOld, newPath];
+            });
+          }, 100);
         }
       } else {
         buildRef.send({ type: 'renameFile', oldPath, newPath });
+
+        // Update file explorer if file was open
+        if (openFiles.some((f) => f.path === oldPath)) {
+          fileExplorerRef.send({ type: 'closeFile', path: oldPath });
+          fileExplorerRef.send({ type: 'openFile', path: newPath });
+        }
       }
     },
     onPrimaryAction(item) {
@@ -306,6 +400,18 @@ export function ChatEditorFileTree(): React.JSX.Element {
           if (selected.length > 0) {
             handleDelete(selected);
           }
+        },
+      },
+      // Override submitSearch to prevent closing search on Enter
+      submitSearch: {
+        hotkey: 'Enter',
+        handler(_event, treeInstance) {
+          const matches = treeInstance.getSearchMatchingItems();
+          if (matches.length > 0) {
+            matches[0]?.setFocused();
+            treeInstance.updateDomFocus();
+          }
+          // Don't close search - user must press Escape or click X
         },
       },
     },
@@ -351,7 +457,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
         buildRef.send({
           type: 'createFile',
           path: newFilePath,
-          content,
+          content: encodeTextFile(content),
         });
 
         // Auto-expand root and select new file
@@ -386,7 +492,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
       buildRef.send({
         type: 'createFile',
         path: gitkeepPath,
-        content: '',
+        content: encodeTextFile(''),
       });
 
       setTimeout(() => {
@@ -451,7 +557,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
           newPath = `${basePath}-copy-${counter}${extension}`;
         }
 
-        const content = currentItem.getItemData().content ?? '';
+        const content = currentItem.getItemData().content ?? new Uint8Array();
         buildRef.send({
           type: 'createFile',
           path: newPath,
@@ -483,13 +589,14 @@ export function ChatEditorFileTree(): React.JSX.Element {
       for (const file of files) {
         try {
           // eslint-disable-next-line no-await-in-loop -- Files need to be read sequentially
-          const content = await file.text();
+          const arrayBuffer = await file.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
           const filePath = directory ? `${directory}/${file.name}` : file.name;
 
           buildRef.send({
             type: 'createFile',
             path: filePath,
-            content,
+            content: uint8Array,
           });
 
           successCount++;
@@ -547,7 +654,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
 
       <FloatingPanelContentHeader className="flex items-center justify-between pr-1">
         <FloatingPanelContentTitle>Files</FloatingPanelContentTitle>
-        <div className="flex items-center -space-x-0.5 text-muted-foreground/50">
+        <div className="flex items-center -space-x-0.5 text-muted-foreground/50 [&_[data-slot=button]]:rounded-xs">
           <Button
             aria-label={allFoldersExpanded ? 'Collapse all folders' : 'Expand all folders'}
             className="size-6"
@@ -580,11 +687,11 @@ export function ChatEditorFileTree(): React.JSX.Element {
             <Search className="size-4" />
           </Button>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button aria-label="Create new file" className="size-6" size="icon" variant="ghost">
+            <Button asChild aria-label="Create new file" className="size-6" size="icon" variant="ghost">
+              <DropdownMenuTrigger>
                 <FilePlus className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
+              </DropdownMenuTrigger>
+            </Button>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>New File</DropdownMenuLabel>
               <DropdownMenuItem
@@ -627,6 +734,17 @@ export function ChatEditorFileTree(): React.JSX.Element {
               className="h-7 flex-1 text-sm"
             />
             <span className="text-xs text-muted-foreground">{tree.getSearchMatchingItems().length}</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              aria-label="Close search"
+              onClick={() => {
+                tree.closeSearch();
+              }}
+            >
+              <span className="text-sm">×</span>
+            </Button>
           </div>
         )}
 
@@ -718,22 +836,21 @@ function TreeItem({
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger>
+      <ContextMenuTrigger asChild>
         {isRenaming ? (
           <div
             className="flex h-7 items-center rounded-md border border-primary py-1 pr-1 pl-2"
             style={{ paddingLeft: `${paddingLeft}px` }}
           >
-            <Input
-              {...item.getRenameInputProps()}
+            <input
               ref={renameInputRef}
-              className="h-full flex-1 border-none bg-transparent px-0 text-sm shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0"
+              className="h-full flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus:ring-0 focus:ring-offset-0"
+              {...item.getRenameInputProps()}
             />
           </div>
         ) : (
-          <button
+          <div
             {...item.getProps()}
-            type="button"
             className={cn(
               'group/file relative flex h-7 w-full cursor-pointer items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
               isActive && !isSelected && 'bg-sidebar-accent',
@@ -787,7 +904,7 @@ function TreeItem({
                       item.startRenaming();
                     }}
                   >
-                    <FileEdit className="mr-2 size-4" />
+                    <FileEdit className="size-4" />
                     Rename
                   </DropdownMenuItem>
                   <DropdownMenuItem
@@ -796,7 +913,7 @@ function TreeItem({
                       onUpload(item.getId());
                     }}
                   >
-                    <Upload className="mr-2 size-4" />
+                    <Upload className="size-4" />
                     Upload Files
                   </DropdownMenuItem>
                   <DropdownMenuItem
@@ -805,7 +922,7 @@ function TreeItem({
                       onDuplicate([item]);
                     }}
                   >
-                    <Copy className="mr-2 size-4" />
+                    <Copy className="size-4" />
                     Duplicate
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
@@ -816,13 +933,13 @@ function TreeItem({
                       onDelete([item]);
                     }}
                   >
-                    <Trash2 className="mr-2 size-4" />
+                    <Trash2 className="size-4" />
                     Delete
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
-          </button>
+          </div>
         )}
       </ContextMenuTrigger>
       <ContextMenuContent>
@@ -831,7 +948,7 @@ function TreeItem({
             item.startRenaming();
           }}
         >
-          <FileEdit className="mr-2 size-4" />
+          <FileEdit className="size-4" />
           Rename
         </ContextMenuItem>
         {isFolder ? (
@@ -840,7 +957,7 @@ function TreeItem({
               onUpload(item.getId());
             }}
           >
-            <Upload className="mr-2 size-4" />
+            <Upload className="size-4" />
             Upload Files
           </ContextMenuItem>
         ) : (
@@ -850,7 +967,7 @@ function TreeItem({
                 onUpload(item.getId());
               }}
             >
-              <Upload className="mr-2 size-4" />
+              <Upload className="size-4" />
               Upload Files
             </ContextMenuItem>
             <ContextMenuItem
@@ -858,7 +975,7 @@ function TreeItem({
                 onDuplicate([item]);
               }}
             >
-              <Copy className="mr-2 size-4" />
+              <Copy className="size-4" />
               Duplicate
             </ContextMenuItem>
           </>
@@ -870,7 +987,7 @@ function TreeItem({
             onDelete([item]);
           }}
         >
-          <Trash2 className="mr-2 size-4" />
+          <Trash2 className="size-4" />
           Delete
         </ContextMenuItem>
       </ContextMenuContent>

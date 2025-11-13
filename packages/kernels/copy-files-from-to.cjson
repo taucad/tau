@@ -1,0 +1,5 @@
+{
+  "copyFiles": [],
+  // Always overwrite files
+  "whenFileExists": "overwrite"
+}

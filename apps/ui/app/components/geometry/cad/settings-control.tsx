@@ -137,7 +137,7 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
       <DropdownMenuContent
         align="end"
         side="right"
-        className="w-72"
+        className="w-64"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
         }}

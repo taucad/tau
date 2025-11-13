@@ -18,7 +18,7 @@ export function KernelSelector({
   onClose,
 }: KernelSelectorProperties): React.JSX.Element {
   return (
-    <div className="grid grid-cols-3 gap-3 lg:grid-cols-3">
+    <div className="flex flex-wrap gap-3">
       {kernelConfigurations.map((option) => (
         <HoverCard key={option.id}>
           <HoverCardTrigger asChild>

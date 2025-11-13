@@ -51,7 +51,7 @@ const significantRadiusChangeRatio = 0.1;
 // Default configuration constants
 export const defaultStageOptions = {
   offsetRatio: 3,
-  nearPlane: 1e-6,
+  nearPlane: 1e-3,
   minimumFarPlane: 10_000_000_000,
   farPlaneRadiusMultiplier: 5,
   zoomLevel: 1,

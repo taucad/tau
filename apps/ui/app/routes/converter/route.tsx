@@ -11,7 +11,8 @@ import {
 import type { InputFormat, OutputFormat } from '@taucad/converter';
 import { Download, Upload, RotateCcw, Package, Code2 } from 'lucide-react';
 import { useSelector } from '@xstate/react';
-import type { Geometry } from '@taucad/types';
+import { fromPromise } from 'xstate';
+import type { Geometry, Build } from '@taucad/types';
 import { Button } from '#components/ui/button.js';
 import { toast } from '#components/ui/sonner.js';
 import { Checkbox } from '#components/ui/checkbox.js';
@@ -52,7 +53,7 @@ import { SettingsControl } from '#components/geometry/cad/settings-control.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '#utils/ui.utils.js';
-import { useBuild } from '#hooks/use-build.js';
+import { BuildProvider, useBuild } from '#hooks/use-build.js';
 
 const yUpFormats = new Set<InputFormat>(['gltf', 'glb', 'ifc']);
 
@@ -74,7 +75,7 @@ type UploadedFileInfo = {
   size: number;
 };
 
-export default function ConverterRoute(): React.JSX.Element {
+function ConverterContent(): React.JSX.Element {
   const { graphicsRef: graphicsActor } = useBuild();
   const [uploadedFile, setUploadedFile] = useState<UploadedFileInfo | undefined>(undefined);
   const [glbData, setGlbData] = useState<Uint8Array | undefined>(undefined);
@@ -83,24 +84,12 @@ export default function ConverterRoute(): React.JSX.Element {
   const [isConverting, setIsConverting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
-  const graphicsState = useSelector(
-    graphicsActor,
-    (state) => ({
-      enableSurfaces: state.context.enableSurfaces,
-      enableLines: state.context.enableLines,
-      enableGizmo: state.context.enableGizmo,
-      enableGrid: state.context.enableGrid,
-      enableAxes: state.context.enableAxes,
-      enableMatcap: state.context.enableMatcap,
-    }),
-    (a, b) =>
-      a.enableSurfaces === b.enableSurfaces &&
-      a.enableLines === b.enableLines &&
-      a.enableGizmo === b.enableGizmo &&
-      a.enableGrid === b.enableGrid &&
-      a.enableAxes === b.enableAxes &&
-      a.enableMatcap === b.enableMatcap,
-  );
+  const enableSurfaces = useSelector(graphicsActor, (state) => state.context.enableSurfaces);
+  const enableLines = useSelector(graphicsActor, (state) => state.context.enableLines);
+  const enableGizmo = useSelector(graphicsActor, (state) => state.context.enableGizmo);
+  const enableGrid = useSelector(graphicsActor, (state) => state.context.enableGrid);
+  const enableAxes = useSelector(graphicsActor, (state) => state.context.enableAxes);
+  const enableMatcap = useSelector(graphicsActor, (state) => state.context.enableMatcap);
 
   const handleFileSelect = useCallback(async (file: File) => {
     setIsConverting(true);
@@ -338,12 +327,12 @@ export default function ConverterRoute(): React.JSX.Element {
                 enableZoom
                 enablePan
                 enableYupRotation={uploadedFile ? yUpFormats.has(uploadedFile.format) : false}
-                enableMatcap={graphicsState.enableMatcap}
-                enableLines={graphicsState.enableLines}
-                enableAxes={graphicsState.enableAxes}
-                enableGrid={graphicsState.enableGrid}
-                enableGizmo={graphicsState.enableGizmo}
-                enableSurfaces={graphicsState.enableSurfaces}
+                enableMatcap={enableMatcap}
+                enableLines={enableLines}
+                enableAxes={enableAxes}
+                enableGrid={enableGrid}
+                enableGizmo={enableGizmo}
+                enableSurfaces={enableSurfaces}
                 geometries={geometries}
               />
             </div>
@@ -581,5 +570,41 @@ export default function ConverterRoute(): React.JSX.Element {
         </div>
       ) : undefined}
     </div>
+  );
+}
+
+export default function ConverterRoute(): React.JSX.Element {
+  // Provide a minimal build context so downstream components can use graphics/cad state
+  const now = Date.now();
+  const converterBuild: Build = {
+    id: 'converter',
+    name: 'Converter',
+    description: 'Transient build context for the converter page',
+    stars: 0,
+    forks: 0,
+    author: {
+      name: 'Tau',
+      avatar: '',
+    },
+    tags: [],
+    thumbnail: '',
+    chats: [],
+    createdAt: now,
+    updatedAt: now,
+    assets: {},
+  };
+
+  return (
+    <BuildProvider
+      buildId={converterBuild.id}
+      input={{ shouldLoadModelOnStart: false }}
+      provide={{
+        actors: {
+          loadBuildActor: fromPromise<Build, { buildId: string }>(async () => converterBuild),
+        },
+      }}
+    >
+      <ConverterContent />
+    </BuildProvider>
   );
 }

@@ -12,9 +12,7 @@ export function NavFooter(): React.JSX.Element {
         <Button asChild variant="ghost" size="sm">
           <a href={metaConfig.githubUrl} target="_blank" rel="noopener noreferrer">
             <SvgIcon id="github" className="size-3!" />
-            <span className="text-xs">
-              {metaConfig.githubOwner}/{metaConfig.githubRepo}
-            </span>
+            <span className="text-xs">{metaConfig.githubRepo}</span>
             <span className="sr-only">GitHub</span>
           </a>
         </Button>

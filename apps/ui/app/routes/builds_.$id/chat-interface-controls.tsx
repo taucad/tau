@@ -11,6 +11,8 @@ type ViewContextType = {
   setIsEditorOpen: (value: boolean | ((current: boolean) => boolean)) => void;
   isExplorerOpen: boolean;
   setIsExplorerOpen: (value: boolean | ((current: boolean) => boolean)) => void;
+  isConverterOpen: boolean;
+  setIsConverterOpen: (value: boolean | ((current: boolean) => boolean)) => void;
   isDetailsOpen: boolean;
   setIsDetailsOpen: (value: boolean | ((current: boolean) => boolean)) => void;
 };
@@ -31,6 +33,7 @@ export function ViewContextProvider({ children }: { readonly children: React.Rea
   const [isParametersOpen, setIsParametersOpen] = useCookie(cookieName.chatOpParameters, true);
   const [isEditorOpen, setIsEditorOpen] = useCookie(cookieName.chatOpEditor, false);
   const [isExplorerOpen, setIsExplorerOpen] = useCookie(cookieName.chatOpModelExplorer, false);
+  const [isConverterOpen, setIsConverterOpen] = useCookie(cookieName.chatOpConverter, false);
   const [isDetailsOpen, setIsDetailsOpen] = useCookie(cookieName.chatOpDetails, false);
 
   const value = useMemo(
@@ -43,6 +46,8 @@ export function ViewContextProvider({ children }: { readonly children: React.Rea
       setIsEditorOpen,
       isExplorerOpen,
       setIsExplorerOpen,
+      isConverterOpen,
+      setIsConverterOpen,
       isDetailsOpen,
       setIsDetailsOpen,
     }),
@@ -55,6 +60,8 @@ export function ViewContextProvider({ children }: { readonly children: React.Rea
       setIsEditorOpen,
       isExplorerOpen,
       setIsExplorerOpen,
+      isConverterOpen,
+      setIsConverterOpen,
       isDetailsOpen,
       setIsDetailsOpen,
     ],

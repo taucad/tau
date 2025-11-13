@@ -5,7 +5,7 @@ import type { InputFormat, OutputFormat } from '@taucad/converter';
 import { Badge } from '#components/ui/badge.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { SearchInput } from '#components/search-input.js';
-import { formatDisplayName } from '#routes/converter/converter-utils.js';
+import { formatDisplayName } from '#components/geometry/converter/converter-utils.js';
 
 type FormatsListProps = {
   readonly icon: LucideIcon;

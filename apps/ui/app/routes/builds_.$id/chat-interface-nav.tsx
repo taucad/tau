@@ -1,4 +1,4 @@
-import { Box, Code2, Info, MessageCircleIcon, SlidersHorizontal } from 'lucide-react';
+import { Box, Code2, Info, MessageCircleIcon, SlidersHorizontal, Download } from 'lucide-react';
 import { TabsList, TabsTrigger } from '#components/ui/tabs.js';
 import { cn } from '#utils/ui.utils.js';
 
@@ -27,6 +27,11 @@ export const chatTabs = [
     id: 'details',
     label: 'Details',
     icon: <Info />,
+  },
+  {
+    id: 'converter',
+    label: 'Export',
+    icon: <Download />,
   },
 ] as const;
 

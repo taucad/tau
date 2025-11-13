@@ -46,3 +46,4 @@ export function formatFileSize(bytes: number): string {
 export function getFileExtension(format: OutputFormat): string {
   return format;
 }
+

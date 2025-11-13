@@ -1,13 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Link } from 'react-router';
-import JSZip from 'jszip';
-import {
-  importToGlb,
-  exportFromGlb,
-  supportedImportFormats,
-  supportedExportFormats,
-  formatConfigurations,
-} from '@taucad/converter';
+import { importToGlb, supportedImportFormats, supportedExportFormats, formatConfigurations } from '@taucad/converter';
 import type { InputFormat, OutputFormat } from '@taucad/converter';
 import { Download, Upload, RotateCcw, Package, Code2 } from 'lucide-react';
 import { useSelector } from '@xstate/react';
@@ -15,11 +8,8 @@ import { fromPromise } from 'xstate';
 import type { Geometry, Build } from '@taucad/types';
 import { Button } from '#components/ui/button.js';
 import { toast } from '#components/ui/sonner.js';
-import { Checkbox } from '#components/ui/checkbox.js';
-import { Label } from '#components/ui/label.js';
 import type { Handle } from '#types/matches.types.js';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
-import { downloadBlob } from '#utils/file.utils.js';
 import {
   FloatingPanel,
   FloatingPanelContent,
@@ -28,8 +18,6 @@ import {
   FloatingPanelContentBody,
 } from '#components/ui/floating-panel.js';
 import { Dropzone, DropzoneEmptyState } from '#components/ui/dropzone.js';
-import { FormatSelector } from '#routes/converter/format-selector.js';
-import { ConverterFileTree } from '#routes/converter/converter-file-tree.js';
 import { FormatsList } from '#routes/converter/formats-list.js';
 import { FormatsListMobile } from '#routes/converter/formats-list-mobile.js';
 import {
@@ -47,9 +35,9 @@ import {
   getFormatFromFilename,
   formatDisplayName,
   formatFileSize,
-  getFileExtension,
-} from '#routes/converter/converter-utils.js';
+} from '#components/geometry/converter/converter-utils.js';
 import { SettingsControl } from '#components/geometry/cad/settings-control.js';
+import { Converter } from '#components/geometry/converter/converter.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '#utils/ui.utils.js';
@@ -82,7 +70,6 @@ function ConverterContent(): React.JSX.Element {
   const [selectedFormats, setSelectedFormats] = useCookie<OutputFormat[]>(cookieName.converterOutputFormats, []);
   const [useZipForMultiple, setUseZipForMultiple] = useCookie<boolean>(cookieName.converterMultifileZip, true);
   const [isConverting, setIsConverting] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
 
   const enableSurfaces = useSelector(graphicsActor, (state) => state.context.enableSurfaces);
   const enableLines = useSelector(graphicsActor, (state) => state.context.enableLines);
@@ -153,134 +140,6 @@ function ConverterContent(): React.JSX.Element {
     [setSelectedFormats],
   );
 
-  const handleDownload = useCallback(async () => {
-    if (!glbData || selectedFormats.length === 0) {
-      return;
-    }
-
-    setIsExporting(true);
-
-    try {
-      if (selectedFormats.length === 1) {
-        // Single file download
-        const format = selectedFormats[0];
-        if (!format) {
-          return;
-        }
-
-        toast.promise(
-          (async () => {
-            const files = await exportFromGlb(glbData, format);
-            const file = files[0];
-            if (!file) {
-              throw new Error('No file returned from export');
-            }
-
-            const extension = getFileExtension(format);
-            const filename = uploadedFile
-              ? uploadedFile.name.replace(/\.[^.]+$/, `.${extension}`)
-              : `model.${extension}`;
-            downloadBlob(new Blob([file.data]), filename);
-          })(),
-          {
-            loading: `Exporting to ${formatDisplayName(format)}...`,
-            success: `Downloaded ${formatDisplayName(format)} file`,
-            error(error: unknown) {
-              let message = `Failed to export to ${formatDisplayName(format)}`;
-              if (error instanceof Error) {
-                message = `${message}: ${error.message}`;
-              }
-
-              return message;
-            },
-          },
-        );
-      } else if (useZipForMultiple) {
-        // Multiple files - create zip
-        toast.promise(
-          (async () => {
-            const zip = new JSZip();
-
-            // Export all formats in parallel
-            const results = await Promise.all(
-              selectedFormats.map(async (format) => {
-                const files = await exportFromGlb(glbData, format);
-                return { format, files };
-              }),
-            );
-
-            // Add all files to zip
-            for (const { format, files } of results) {
-              for (const file of files) {
-                const extension = getFileExtension(format);
-                const filename = uploadedFile
-                  ? uploadedFile.name.replace(/\.[^.]+$/, `.${extension}`)
-                  : `model.${extension}`;
-                zip.file(filename, file.data);
-              }
-            }
-
-            const zipBlob = await zip.generateAsync({ type: 'blob' });
-            const zipFilename = uploadedFile
-              ? uploadedFile.name.replace(/\.[^.]+$/, '-converted.zip')
-              : 'converted-models.zip';
-            downloadBlob(zipBlob, zipFilename);
-          })(),
-          {
-            loading: `Exporting ${selectedFormats.length} formats...`,
-            success: `Downloaded ${selectedFormats.length} files in zip`,
-            error(error: unknown) {
-              let message = 'Failed to export files';
-              if (error instanceof Error) {
-                message = `${message}: ${error.message}`;
-              }
-
-              return message;
-            },
-          },
-        );
-      } else {
-        // Multiple files - download individually
-        toast.promise(
-          (async () => {
-            // Export all formats in parallel
-            const results = await Promise.all(
-              selectedFormats.map(async (format) => {
-                const files = await exportFromGlb(glbData, format);
-                return { format, files };
-              }),
-            );
-
-            // Download each file individually
-            for (const { format, files } of results) {
-              for (const file of files) {
-                const extension = getFileExtension(format);
-                const filename = uploadedFile
-                  ? uploadedFile.name.replace(/\.[^.]+$/, `.${extension}`)
-                  : `model.${extension}`;
-                downloadBlob(new Blob([file.data]), filename);
-              }
-            }
-          })(),
-          {
-            loading: `Exporting ${selectedFormats.length} formats...`,
-            success: `Downloaded ${selectedFormats.length} files`,
-            error(error: unknown) {
-              let message = 'Failed to export files';
-              if (error instanceof Error) {
-                message = `${message}: ${error.message}`;
-              }
-
-              return message;
-            },
-          },
-        );
-      }
-    } finally {
-      setIsExporting(false);
-    }
-  }, [glbData, selectedFormats, uploadedFile, useZipForMultiple]);
-
   const handleReset = useCallback(() => {
     setUploadedFile(undefined);
     setGlbData(undefined);
@@ -289,6 +148,13 @@ function ConverterContent(): React.JSX.Element {
   const handleClearFormats = useCallback(() => {
     setSelectedFormats([]);
   }, [setSelectedFormats]);
+
+  const handleZipToggle = useCallback(
+    (useZip: boolean) => {
+      setUseZipForMultiple(useZip);
+    },
+    [setUseZipForMultiple],
+  );
 
   const handleFileDrop = useCallback(
     (acceptedFiles: File[]) => {
@@ -361,56 +227,15 @@ function ConverterContent(): React.JSX.Element {
                     <FloatingPanelContentTitle>Export Options</FloatingPanelContentTitle>
                   </FloatingPanelContentHeader>
                   <FloatingPanelContentBody className="flex h-full flex-col justify-between gap-4 p-4">
-                    <div className="flex flex-col gap-6">
-                      <FormatSelector
-                        selectedFormats={selectedFormats}
-                        onFormatToggle={handleFormatToggle}
-                        onClearSelection={handleClearFormats}
-                      />
-
-                      <div className="flex flex-col gap-2">
-                        <Button
-                          disabled={selectedFormats.length === 0 || isExporting}
-                          size="lg"
-                          className="w-full"
-                          onClick={handleDownload}
-                        >
-                          <Download className="size-4" />
-                          {selectedFormats.length === 0
-                            ? 'Select formats to download'
-                            : selectedFormats.length === 1
-                              ? 'Download'
-                              : useZipForMultiple
-                                ? `Download ${selectedFormats.length} formats as ZIP`
-                                : `Download ${selectedFormats.length} formats`}
-                        </Button>
-
-                        {selectedFormats.length > 1 ? (
-                          <div className="flex items-center space-x-2">
-                            <Checkbox
-                              id="use-zip"
-                              checked={useZipForMultiple}
-                              onCheckedChange={(checked) => {
-                                setUseZipForMultiple(checked === true);
-                              }}
-                            />
-                            <Label
-                              htmlFor="use-zip"
-                              className="cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                            >
-                              Download as ZIP file
-                            </Label>
-                          </div>
-                        ) : undefined}
-
-                        {/* File tree preview */}
-                        <ConverterFileTree
-                          selectedFormats={selectedFormats}
-                          fileName={uploadedFile?.name}
-                          asZip={useZipForMultiple}
-                        />
-                      </div>
-                    </div>
+                    <Converter
+                      getGlbData={async () => glbData}
+                      selectedFormats={selectedFormats}
+                      shouldUseZipForMultiple={useZipForMultiple}
+                      uploadedFile={uploadedFile}
+                      onFormatToggle={handleFormatToggle}
+                      onClearSelection={handleClearFormats}
+                      onZipToggle={handleZipToggle}
+                    />
 
                     <div className="flex flex-col space-y-4">
                       {/* Drop area for uploading new file */}

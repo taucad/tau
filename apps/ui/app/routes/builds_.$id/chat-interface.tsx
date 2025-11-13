@@ -13,6 +13,7 @@ import { ChatViewerControls } from '#routes/builds_.$id/chat-viewer-controls.js'
 import { ChatStackTrace } from '#routes/builds_.$id/chat-stack-trace.js';
 import { ChatExplorerTree, ChatExplorerTrigger } from '#routes/builds_.$id/chat-editor-explorer.js';
 import { ChatEditorDetails, ChatEditorDetailsTrigger } from '#routes/builds_.$id/chat-editor-details.js';
+import { ChatConverter, ChatConverterTrigger } from '#routes/builds_.$id/chat-converter.js';
 import { cn } from '#utils/ui.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useResizeObserver } from '#hooks/use-resize-observer.js';
@@ -38,11 +39,13 @@ export const ChatInterface = memo(function (): React.JSX.Element {
     setIsEditorOpen,
     isExplorerOpen,
     setIsExplorerOpen,
+    isConverterOpen,
+    setIsConverterOpen,
     isDetailsOpen,
     setIsDetailsOpen,
   } = useViewContext();
   const [chatResizeLeft, setChatResizeLeft] = useCookie(cookieName.chatRsLeft, [30, 20, 50]);
-  const [chatResizeRight, setChatResizeRight] = useCookie(cookieName.chatRsRight, [50, 20, 30, 0]);
+  const [chatResizeRight, setChatResizeRight] = useCookie(cookieName.chatRsRight, [50, 20, 25, 0, 0]);
   const [activeTab, setActiveTab] = useCookie<(typeof chatTabs)[number]['id']>(cookieName.chatInterfaceTab, 'chat');
   const isMobile = useIsMobile();
 
@@ -51,6 +54,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
   const explorerPanelRef = useRef<HTMLDivElement>(null);
   const parametersPanelRef = useRef<HTMLDivElement>(null);
   const editorPanelRef = useRef<HTMLDivElement>(null);
+  const converterPanelRef = useRef<HTMLDivElement>(null);
   const detailsPanelRef = useRef<HTMLDivElement>(null);
 
   // Track width of each panel
@@ -58,6 +62,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
   const explorerSize = useResizeObserver({ ref: explorerPanelRef as React.RefObject<HTMLElement> });
   const parametersSize = useResizeObserver({ ref: parametersPanelRef as React.RefObject<HTMLElement> });
   const editorSize = useResizeObserver({ ref: editorPanelRef as React.RefObject<HTMLElement> });
+  const converterSize = useResizeObserver({ ref: converterPanelRef as React.RefObject<HTMLElement> });
   const detailsSize = useResizeObserver({ ref: detailsPanelRef as React.RefObject<HTMLElement> });
 
   // Calculate total widths for each side
@@ -70,9 +75,19 @@ export const ChatInterface = memo(function (): React.JSX.Element {
   const rightPanelWidth = useMemo(() => {
     const parametersWidth = isParametersOpen ? (parametersSize.width ?? 0) + spacing : 0;
     const editorWidth = isEditorOpen ? (editorSize.width ?? 0) + spacing : 0;
+    const converterWidth = isConverterOpen ? (converterSize.width ?? 0) + spacing : 0;
     const detailsWidth = isDetailsOpen ? (detailsSize.width ?? 0) + spacing : 0;
-    return parametersWidth + editorWidth + detailsWidth;
-  }, [parametersSize.width, editorSize.width, detailsSize.width, isParametersOpen, isEditorOpen, isDetailsOpen]);
+    return parametersWidth + editorWidth + converterWidth + detailsWidth;
+  }, [
+    parametersSize.width,
+    editorSize.width,
+    converterSize.width,
+    detailsSize.width,
+    isParametersOpen,
+    isEditorOpen,
+    isConverterOpen,
+    isDetailsOpen,
+  ]);
 
   const handleTabChange = (value: string) => {
     setActiveTab(value as (typeof chatTabs)[number]['id']);
@@ -202,6 +217,9 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           <TabsContent enableAnimation={false} value="details">
             <ChatEditorDetails />
           </TabsContent>
+          <TabsContent enableAnimation={false} value="converter">
+            <ChatConverter />
+          </TabsContent>
         </TabsContents>
       </Tabs>
     );
@@ -220,6 +238,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
       data-explorer-open={isExplorerOpen}
       data-parameters-open={isParametersOpen}
       data-editor-open={isEditorOpen}
+      data-converter-open={isConverterOpen}
       data-details-open={isDetailsOpen}
     >
       {/* Viewer - inset completely to occupy the background fully */}
@@ -358,6 +377,12 @@ export const ChatInterface = memo(function (): React.JSX.Element {
                 setIsEditorOpen((previous) => !previous);
               }}
             />
+            <ChatConverterTrigger
+              isOpen={isConverterOpen}
+              onToggle={() => {
+                setIsConverterOpen((previous) => !previous);
+              }}
+            />
             <ChatEditorDetailsTrigger
               isOpen={isDetailsOpen}
               onToggle={() => {
@@ -403,14 +428,31 @@ export const ChatInterface = memo(function (): React.JSX.Element {
 
         <ResizableHandle
           variant="floating"
-          className="group-data-[details-open=false]/chat-layout:hidden hover:after:opacity-100"
+          className="group-data-[converter-open=false]/chat-layout:hidden hover:after:opacity-100"
         />
         <ResizablePanel
           order={4}
-          id="details"
+          id="converter"
           minSize={20}
           maxSize={35}
           defaultSize={chatResizeRight[3]}
+          className="pointer-events-auto overflow-visible! group-data-[converter-open=false]/chat-layout:hidden"
+        >
+          <div ref={converterPanelRef} className="size-full">
+            <ChatConverter isExpanded={isConverterOpen} setIsExpanded={setIsConverterOpen} />
+          </div>
+        </ResizablePanel>
+
+        <ResizableHandle
+          variant="floating"
+          className="group-data-[details-open=false]/chat-layout:hidden hover:after:opacity-100"
+        />
+        <ResizablePanel
+          order={5}
+          id="details"
+          minSize={20}
+          maxSize={35}
+          defaultSize={chatResizeRight[4]}
           className="pointer-events-auto overflow-visible! group-data-[details-open=false]/chat-layout:hidden"
         >
           <div ref={detailsPanelRef} className="size-full">

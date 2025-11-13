@@ -1,9 +1,13 @@
 export type KernelLanguage = 'openscad' | 'typescript' | 'kcl';
 
+/** The number of dimensions the kernel supports. */
+export type KernelDimensions = 2 | 3;
+
 export type KernelConfiguration = {
   id: string;
   name: string;
   language: KernelLanguage;
+  dimensions: KernelDimensions[];
   description: string;
   mainFile: string;
   backendProvider: string;
@@ -18,6 +22,7 @@ export const kernelConfigurations = [
   {
     id: 'openscad',
     name: 'OpenSCAD',
+    dimensions: [3],
     language: 'openscad',
     description: 'Constructive Solid Geometry for 3D printing',
     mainFile: 'main.scad',
@@ -32,6 +37,7 @@ export const kernelConfigurations = [
   {
     id: 'replicad',
     name: 'Replicad',
+    dimensions: [2, 3],
     language: 'typescript',
     description: 'TypeScript-based CAD for precise engineering',
     mainFile: 'main.ts',
@@ -51,6 +57,7 @@ export default function main(p = defaultParams) {}
   {
     id: 'zoo',
     name: 'Zoo (KCL)',
+    dimensions: [3],
     language: 'kcl',
     description: 'Cloud-native CAD modeling',
     mainFile: 'main.kcl',

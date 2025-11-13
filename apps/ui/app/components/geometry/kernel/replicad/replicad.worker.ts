@@ -106,7 +106,11 @@ class ReplicadWorker extends KernelWorker<ReplicadOptions> {
 
     // Extract code and check for replicad imports
     const code = KernelWorker.extractCodeFromFile(file);
-    return /import.*from\s+['"]replicad['"]/.test(code) || /require\s*\(['"]replicad['"]\)/.test(code);
+    // Also support: "const {...} = replicad;" pattern (see user image)
+    const hasImportStatement = (() => /import.*from\s+['"]replicad['"]/.test(code))();
+    const hasRequireStatement = (() => /require\s*\(['"]replicad['"]\)/.test(code))();
+    const hasDestructuredAssignment = (() => /\bconst\s*{\s*[\w\s,]*}\s*=\s*replicad\s*;/.test(code))();
+    return hasImportStatement || hasRequireStatement || hasDestructuredAssignment;
   }
 
   public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {

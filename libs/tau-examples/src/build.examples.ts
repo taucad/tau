@@ -5,7 +5,7 @@ type Model = {
   name: string;
   code: string;
   description: string;
-  thumbnail?: string;
+  thumbnail: string;
 };
 
 // --- JSCAD Examples (exported separately) ---
@@ -24,6 +24,7 @@ export default function main(p = defaultParams) {
   return cube({ size: p.size });
 }
 `,
+    thumbnail: '/placeholder.svg',
   },
   {
     id: 'jscad_cylinder',
@@ -39,10 +40,11 @@ export default function main(p = defaultParams) {
   return cylinder({ height: p.height, radius: p.radius, segments: p.segments });
 }
 `,
+    thumbnail: '/placeholder.svg',
   },
   {
     id: 'jscad_gear',
-    name: 'JSCAD Gear (CommonJS)',
+    name: 'Involute Gear',
     description:
       'Design precision mechanical gears with mathematically accurate involute profiles. This advanced example showcases complex parametric modeling with customizable tooth count, pitch, pressure angle, and thickness. Perfect for creating functional gear systems, educational demonstrations, or replacement parts. Features optional center hole for shaft mounting and professional-grade gear geometry calculations.',
     code: `"use strict"
@@ -144,6 +146,7 @@ const involuteGear = (numTeeth, circularPitch, pressureAngle, clearance, thickne
 
 module.exports = { main, getParameterDefinitions }
 `,
+    thumbnail: '/placeholder.svg',
   },
 ] as const;
 

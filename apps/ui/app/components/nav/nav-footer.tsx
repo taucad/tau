@@ -19,7 +19,7 @@ export function NavFooter(): React.JSX.Element {
           </a>
         </Button>
       </SidebarMenuButton>
-      <div className="flex flex-row items-center gap-2">
+      <div className="flex flex-row items-center -space-x-1">
         <ColorToggle />
         <ThemeToggle />
       </div>

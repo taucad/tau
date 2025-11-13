@@ -1,4 +1,4 @@
-import { Terminal, Menu } from 'lucide-react';
+import { Menu } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, createContext, useContext } from 'react';
 import { Fragment } from 'react/jsx-runtime';
 import { Link, useNavigate } from 'react-router';

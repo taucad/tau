@@ -346,8 +346,7 @@ export function Converter({
       <div className="flex flex-col gap-2">
         <Button
           disabled={selectedFormats.length === 0 || isExporting}
-          size="lg"
-          className="h-auto w-full py-3 whitespace-normal"
+          className="w-full py-3 whitespace-normal"
           onClick={handleDownload}
         >
           <Download className="size-4 shrink-0" />

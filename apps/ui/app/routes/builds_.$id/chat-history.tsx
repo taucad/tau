@@ -11,7 +11,7 @@ import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { createMessage } from '#utils/chat.utils.js';
 import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
-import { ChatSelector } from '#routes/builds_.$id/chat-selector.js';
+import { ChatHistorySelector } from '#routes/builds_.$id/chat-history-selector.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {
   FloatingPanel,
@@ -137,7 +137,7 @@ export const ChatHistory = memo(function (props: {
       <FloatingPanelContent className={cn(!isExpanded && 'hidden')}>
         {/* Header with search */}
         <FloatingPanelContentHeader>
-          <ChatSelector />
+          <ChatHistorySelector />
         </FloatingPanelContentHeader>
 
         {/* Main chat content area */}

@@ -97,7 +97,7 @@ export function ChatDetails({
   const [isCalculatingVolume, setIsCalculatingVolume] = useState(false);
   const [isCalculatingSurface, setIsCalculatingSurface] = useState(false);
 
-  const toggleEditor = (): void => {
+  const toggleDetails = (): void => {
     setIsExpanded?.((current) => !current);
   };
 
@@ -130,7 +130,7 @@ export function ChatDetails({
     setIsCalculatingSurface(false);
   }, []);
 
-  const { formattedKeyCombination: formattedEditorKeyCombination } = useKeydown(keyCombinationEditor, toggleEditor);
+  const { formattedKeyCombination: formattedEditorKeyCombination } = useKeydown(keyCombinationEditor, toggleDetails);
 
   return (
     <FloatingPanel isOpen={isExpanded} side="right" onOpenChange={setIsExpanded}>

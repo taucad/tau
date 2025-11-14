@@ -20,6 +20,12 @@ type UploadedFileInfo = {
   readonly size: number;
 };
 
+export type ExportedFile = {
+  readonly filename: string;
+  readonly content: Uint8Array;
+  readonly format: OutputFormat;
+};
+
 type ConverterProperties = {
   readonly getGlbData: () => Promise<Uint8Array>;
   readonly selectedFormats: OutputFormat[];
@@ -28,6 +34,7 @@ type ConverterProperties = {
   readonly onFormatToggle: (format: OutputFormat) => void;
   readonly onClearSelection: () => void;
   readonly onZipToggle: (useZip: boolean) => void;
+  readonly onExport?: (files: ExportedFile[]) => void;
   readonly formatSelectorProperties?: Omit<
     React.ComponentProps<typeof FormatSelector>,
     'selectedFormats' | 'onFormatToggle' | 'onClearSelection'
@@ -43,11 +50,13 @@ export function Converter({
   onFormatToggle,
   onClearSelection,
   onZipToggle,
+  onExport,
   formatSelectorProperties,
   className,
 }: ConverterProperties): React.JSX.Element {
   const [isExporting, setIsExporting] = useState(false);
   const [shouldChooseLocation, setShouldChooseLocation] = useState(false);
+  const [shouldSaveToProject, setShouldSaveToProject] = useState(false);
 
   // Create zip machine instance
   const zipFilename = uploadedFile ? uploadedFile.name.replace(/\.[^.]+$/, '-converted.zip') : 'converted-models.zip';
@@ -133,6 +142,11 @@ export function Converter({
             } else {
               downloadBlob(blob, filename);
             }
+
+            // Call onExport callback if provided and enabled
+            if (onExport && shouldSaveToProject) {
+              onExport([{ filename, content: file.data, format }]);
+            }
           })(),
           {
             loading: `Exporting to ${formatDisplayName(format)}...`,
@@ -171,6 +185,7 @@ export function Converter({
 
             // Add all files to zip machine
             const filesToZip: Array<{ filename: string; content: Uint8Array }> = [];
+            const exportedFiles: ExportedFile[] = [];
             for (const { format, files } of results) {
               for (const file of files) {
                 const extension = getFileExtension(format);
@@ -181,6 +196,11 @@ export function Converter({
                   filename,
                   content: file.data,
                 });
+                exportedFiles.push({
+                  filename,
+                  content: file.data,
+                  format,
+                });
               }
             }
 
@@ -188,7 +208,7 @@ export function Converter({
             zipActorRef.send({ type: 'generate' });
 
             // Wait for the zip to be ready
-            return new Promise<Blob>((resolve, reject) => {
+            const blob = await new Promise<Blob>((resolve, reject) => {
               const subscription = zipActorRef.subscribe((state) => {
                 if (state.matches('ready') && state.context.zipBlob) {
                   subscription.unsubscribe();
@@ -199,6 +219,13 @@ export function Converter({
                 }
               });
             });
+
+            // Call onExport callback if provided and enabled
+            if (onExport && shouldSaveToProject) {
+              onExport(exportedFiles);
+            }
+
+            return blob;
           })(),
           {
             loading: `Exporting ${selectedFormats.length} formats...`,
@@ -241,6 +268,7 @@ export function Converter({
             );
 
             // Download each file individually
+            const exportedFiles: ExportedFile[] = [];
             for (const { format, files } of results) {
               for (const file of files) {
                 const extension = getFileExtension(format);
@@ -255,7 +283,18 @@ export function Converter({
                 } else {
                   downloadBlob(blob, filename);
                 }
+
+                exportedFiles.push({
+                  filename,
+                  content: file.data,
+                  format,
+                });
               }
+            }
+
+            // Call onExport callback if provided and enabled
+            if (onExport && shouldSaveToProject) {
+              onExport(exportedFiles);
             }
           })(),
           {
@@ -291,6 +330,8 @@ export function Converter({
     zipFilename,
     shouldChooseLocation,
     saveFileWithPicker,
+    onExport,
+    shouldSaveToProject,
   ]);
 
   return (
@@ -320,6 +361,25 @@ export function Converter({
                   : `Download ${selectedFormats.length} formats`}
           </span>
         </Button>
+
+        {/* Save to project toggle */}
+        {onExport ? (
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="save-to-project"
+              checked={shouldSaveToProject}
+              onCheckedChange={(checked) => {
+                setShouldSaveToProject(checked === true);
+              }}
+            />
+            <Label
+              htmlFor="save-to-project"
+              className="cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+            >
+              Save exported files to project
+            </Label>
+          </div>
+        ) : undefined}
 
         {selectedFormats.length > 1 ? (
           <div className="flex items-center space-x-2">

@@ -16,6 +16,7 @@ import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import { useBuild } from '#hooks/use-build.js';
+import type { ExportedFile } from '#components/geometry/converter/converter.js';
 import { Converter } from '#components/geometry/converter/converter.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
@@ -131,6 +132,22 @@ export const ChatConverter = memo(function (properties: {
     [setUseZipForMultiple],
   );
 
+  const handleExport = useCallback(
+    (files: ExportedFile[]) => {
+      // Save each exported file to the build's file system
+      for (const file of files) {
+        buildRef.send({
+          type: 'createFile',
+          path: file.filename,
+          content: file.content,
+        });
+      }
+
+      toast.success(`Saved ${files.length} ${files.length === 1 ? 'file' : 'files'} to project`);
+    },
+    [buildRef],
+  );
+
   const toggleConverterOpen = useCallback(() => {
     setIsExpanded?.((current) => !current);
   }, [setIsExpanded]);
@@ -178,6 +195,7 @@ export const ChatConverter = memo(function (properties: {
               onFormatToggle={handleFormatToggle}
               onClearSelection={handleClearFormats}
               onZipToggle={handleZipToggle}
+              onExport={handleExport}
             />
           )}
         </FloatingPanelContentBody>

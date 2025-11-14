@@ -1,7 +1,8 @@
-import { memo, useRef, useMemo } from 'react';
+import { memo, useRef } from 'react';
 import { Eye, EyeClosed } from 'lucide-react';
+import { Allotment } from 'allotment';
+import 'allotment/dist/style.css';
 import { ChatHistory, ChatHistoryTrigger } from '#routes/builds_.$id/chat-history.js';
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '#components/ui/resizable.js';
 import { ChatParameters, ChatParametersTrigger } from '#routes/builds_.$id/chat-parameters.js';
 import { useViewContext } from '#routes/builds_.$id/chat-interface-controls.js';
 import { cookieName } from '#constants/cookie.constants.js';
@@ -17,18 +18,13 @@ import { ChatConverter, ChatConverterTrigger } from '#routes/builds_.$id/chat-co
 import { ChatGit, ChatGitTrigger } from '#routes/builds_.$id/chat-git.js';
 import { cn } from '#utils/ui.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import type { chatTabs } from '#routes/builds_.$id/chat-interface-nav.js';
 import { ChatInterfaceNav } from '#routes/builds_.$id/chat-interface-nav.js';
 import { Tabs, TabsContents, TabsContent } from '#components/ui/tabs.js';
 import { Button } from '#components/ui/button.js';
 import { ChatInterfaceStatus } from '#routes/builds_.$id/chat-interface-status.js';
 import { ChatInterfaceGraphics } from '#routes/builds_.$id/chat-interface-graphics.js';
-
-/**
- * The spacing/gap between the panels in pixels.
- */
-const spacing = 8;
+import { isBrowser } from '#constants/browser.constants.js';
 
 export const ChatInterface = memo(function (): React.JSX.Element {
   const {
@@ -48,7 +44,6 @@ export const ChatInterface = memo(function (): React.JSX.Element {
     setIsDetailsOpen,
   } = useViewContext();
   const [chatResizeLeft, setChatResizeLeft] = useCookie(cookieName.chatRsLeft, [30, 20, 50]);
-  const [chatResizeRight, setChatResizeRight] = useCookie(cookieName.chatRsRight, [50, 20, 25, 0, 0, 0]);
   const [activeTab, setActiveTab] = useCookie<(typeof chatTabs)[number]['id']>(cookieName.chatInterfaceTab, 'chat');
   const isMobile = useIsMobile();
 
@@ -60,42 +55,6 @@ export const ChatInterface = memo(function (): React.JSX.Element {
   const converterPanelRef = useRef<HTMLDivElement>(null);
   const gitPanelRef = useRef<HTMLDivElement>(null);
   const detailsPanelRef = useRef<HTMLDivElement>(null);
-
-  // Track width of each panel
-  const historySize = useResizeObserver({ ref: historyPanelRef as React.RefObject<HTMLElement> });
-  const explorerSize = useResizeObserver({ ref: explorerPanelRef as React.RefObject<HTMLElement> });
-  const parametersSize = useResizeObserver({ ref: parametersPanelRef as React.RefObject<HTMLElement> });
-  const editorSize = useResizeObserver({ ref: editorPanelRef as React.RefObject<HTMLElement> });
-  const converterSize = useResizeObserver({ ref: converterPanelRef as React.RefObject<HTMLElement> });
-  const gitSize = useResizeObserver({ ref: gitPanelRef as React.RefObject<HTMLElement> });
-  const detailsSize = useResizeObserver({ ref: detailsPanelRef as React.RefObject<HTMLElement> });
-
-  // Calculate total widths for each side
-  const leftPanelWidth = useMemo(() => {
-    const historyWidth = isChatOpen ? (historySize.width ?? 0) + spacing : 0;
-    const explorerWidth = isExplorerOpen ? (explorerSize.width ?? 0) + spacing : 0;
-    return historyWidth + explorerWidth;
-  }, [historySize.width, explorerSize.width, isChatOpen, isExplorerOpen]);
-
-  const rightPanelWidth = useMemo(() => {
-    const parametersWidth = isParametersOpen ? (parametersSize.width ?? 0) + spacing : 0;
-    const editorWidth = isEditorOpen ? (editorSize.width ?? 0) + spacing : 0;
-    const converterWidth = isConverterOpen ? (converterSize.width ?? 0) + spacing : 0;
-    const gitWidth = isGitOpen ? (gitSize.width ?? 0) + spacing : 0;
-    const detailsWidth = isDetailsOpen ? (detailsSize.width ?? 0) + spacing : 0;
-    return parametersWidth + editorWidth + converterWidth + gitWidth + detailsWidth;
-  }, [
-    parametersSize.width,
-    editorSize.width,
-    converterSize.width,
-    gitSize.width,
-    detailsSize.width,
-    isParametersOpen,
-    isEditorOpen,
-    isConverterOpen,
-    isGitOpen,
-    isDetailsOpen,
-  ]);
 
   const handleTabChange = (value: string) => {
     setActiveTab(value as (typeof chatTabs)[number]['id']);
@@ -233,26 +192,15 @@ export const ChatInterface = memo(function (): React.JSX.Element {
     );
   }
 
+  if (!isBrowser) {
+    return <div className="hidden size-full md:flex" />;
+  }
+
   return (
-    <div
-      className={cn('group/chat-layout relative hidden size-full flex-col md:flex')}
-      style={
-        {
-          '--left-panel-size': `${leftPanelWidth}px`,
-          '--right-panel-size': `${rightPanelWidth}px`,
-        } as React.CSSProperties
-      }
-      data-chat-open={isChatOpen}
-      data-explorer-open={isExplorerOpen}
-      data-parameters-open={isParametersOpen}
-      data-editor-open={isEditorOpen}
-      data-converter-open={isConverterOpen}
-      data-git-open={isGitOpen}
-      data-details-open={isDetailsOpen}
-    >
+    <div className={cn('group/chat-layout relative hidden size-full flex-col md:flex')}>
       {/* Viewer - inset completely to occupy the background fully */}
       {/* The calculation is to center the viewer within the container */}
-      <div
+      {/* <div
         className={cn(
           'absolute inset-0 left-1/2 h-full w-[200dvw]',
 
@@ -265,245 +213,160 @@ export const ChatInterface = memo(function (): React.JSX.Element {
         )}
       >
         <ChatViewer />
-      </div>
+      </div> */}
 
-      {/* Left-side ResizablePanelGroup */}
-      <ResizablePanelGroup
-        direction="horizontal"
-        autoSaveId={cookieName.chatRsLeft}
-        className={cn(
-          'absolute gap-1',
-          'top-(--header-height)',
-          'left-(--sidebar-width-current)',
-          'h-[calc(100dvh-(--spacing(14)))]!',
-          'w-[calc(50dvw-0.25rem)]!',
-          'transition-all duration-200 ease-linear',
-          'pointer-events-none overflow-visible!',
-        )}
-        onLayout={setChatResizeLeft}
-      >
-        <ResizablePanel
-          order={1}
-          id="history"
-          minSize={25}
-          defaultSize={chatResizeLeft[0]}
-          className="pointer-events-auto overflow-visible! group-data-[chat-open=false]/chat-layout:hidden"
-        >
-          <div ref={historyPanelRef} className="size-full">
-            <ChatHistory isExpanded={isChatOpen} setIsExpanded={setIsChatOpen} />
-          </div>
-        </ResizablePanel>
-
-        <ResizableHandle
-          variant="floating"
-          className="group-data-[chat-open=false]/chat-layout:hidden hover:after:opacity-100"
-        />
-
-        <ResizablePanel
-          order={2}
-          id="object-tree"
-          minSize={20}
-          maxSize={30}
-          defaultSize={chatResizeLeft[1]}
-          className="pointer-events-auto overflow-visible! group-data-[explorer-open=false]/chat-layout:hidden"
-        >
-          <div ref={explorerPanelRef} className="size-full">
-            <ChatExplorerTree isExpanded={isExplorerOpen} setIsExpanded={setIsExplorerOpen} />
-          </div>
-        </ResizablePanel>
-
-        <ResizableHandle
-          variant="floating"
-          className="group-data-[explorer-open=false]/chat-layout:hidden hover:after:opacity-100"
-        />
-
-        <ResizablePanel
-          order={3}
-          id="spacer"
-          defaultSize={chatResizeLeft[2]}
-          minSize={0}
-          className="relative mr-2 overflow-visible!"
-        >
-          {/* Top-left Content */}
-          <div className="pointer-events-auto absolute top-0 left-0 flex flex-col gap-2">
-            <ChatHistoryTrigger
-              isOpen={isChatOpen}
-              onToggle={() => {
-                setIsChatOpen((previous) => !previous);
-              }}
-            />
-            <ChatExplorerTrigger
-              isOpen={isExplorerOpen}
-              onToggle={() => {
-                setIsExplorerOpen((previous) => !previous);
-              }}
-            />
-          </div>
-
-          {/* Bottom-left Content */}
-          <div className="pointer-events-auto absolute right-8 bottom-0 left-0 flex w-100 shrink-0 flex-col gap-2">
-            <ChatInterfaceGraphics />
-            <ChatStackTrace />
-            <ChatViewerControls />
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-
-      {/* Right-side ResizablePanelGroup */}
-      <ResizablePanelGroup
-        direction="horizontal"
-        autoSaveId={cookieName.chatRsRight}
-        className={cn(
-          'absolute gap-1',
-          'top-(--header-height)',
-          'right-2',
-          'h-[calc(100dvh-(--spacing(14)))]!',
-          'w-[calc(50dvw-0.25rem)]!',
-          'transition-all duration-200 ease-linear',
-          'pointer-events-none overflow-visible!',
-        )}
-        onLayout={setChatResizeRight}
-      >
-        {/* Spacer panel for open buttons */}
-        <ResizablePanel
-          order={1}
-          id="spacer-right"
-          defaultSize={chatResizeRight[0]}
-          minSize={0}
-          className="relative ml-2 overflow-visible!"
-        >
-          {/* Top-right Content */}
-          <div className="pointer-events-auto absolute top-0 right-0 flex flex-col gap-2">
-            <ChatParametersTrigger
-              isOpen={isParametersOpen}
-              onToggle={() => {
-                setIsParametersOpen((previous) => !previous);
-              }}
-            />
-            <ChatEditorLayoutTrigger
-              isOpen={isEditorOpen}
-              onToggle={() => {
-                setIsEditorOpen((previous) => !previous);
-              }}
-            />
-            <ChatConverterTrigger
-              isOpen={isConverterOpen}
-              onToggle={() => {
-                setIsConverterOpen((previous) => !previous);
-              }}
-            />
-            <ChatGitTrigger
-              isOpen={isGitOpen}
-              onToggle={() => {
-                setIsGitOpen((previous) => !previous);
-              }}
-            />
-            <ChatEditorDetailsTrigger
-              isOpen={isDetailsOpen}
-              onToggle={() => {
-                setIsDetailsOpen((previous) => !previous);
-              }}
-            />
-          </div>
-        </ResizablePanel>
-
-        <ResizableHandle
-          variant="floating"
-          className="group-data-[parameters-open=false]/chat-layout:hidden hover:after:opacity-100"
-        />
-        <ResizablePanel
-          order={2}
-          id="parameters"
-          minSize={20}
-          maxSize={40}
-          defaultSize={chatResizeRight[1]}
-          className="pointer-events-auto overflow-visible! group-data-[parameters-open=false]/chat-layout:hidden"
-        >
-          <div ref={parametersPanelRef} className="size-full">
-            <ChatParameters isExpanded={isParametersOpen} setIsExpanded={setIsParametersOpen} />
-          </div>
-        </ResizablePanel>
-
-        <ResizableHandle
-          variant="floating"
-          className="group-data-[editor-open=false]/chat-layout:hidden hover:after:opacity-100"
-        />
-        <ResizablePanel
-          order={3}
-          id="editor-layout"
-          minSize={25}
-          maxSize={50}
-          defaultSize={chatResizeRight[2]}
-          className="pointer-events-auto overflow-visible! group-data-[editor-open=false]/chat-layout:hidden"
-        >
-          <div ref={editorPanelRef} className="size-full">
-            <ChatEditorLayout isExpanded={isEditorOpen} setIsExpanded={setIsEditorOpen} />
-          </div>
-        </ResizablePanel>
-
-        <ResizableHandle
-          variant="floating"
-          className="group-data-[converter-open=false]/chat-layout:hidden hover:after:opacity-100"
-        />
-        <ResizablePanel
-          order={4}
-          id="converter"
-          minSize={20}
-          maxSize={35}
-          defaultSize={chatResizeRight[3]}
-          className="pointer-events-auto overflow-visible! group-data-[converter-open=false]/chat-layout:hidden"
-        >
-          <div ref={converterPanelRef} className="size-full">
-            <ChatConverter isExpanded={isConverterOpen} setIsExpanded={setIsConverterOpen} />
-          </div>
-        </ResizablePanel>
-
-        <ResizableHandle
-          variant="floating"
-          className="group-data-[git-open=false]/chat-layout:hidden hover:after:opacity-100"
-        />
-        <ResizablePanel
-          order={5}
-          id="git"
-          minSize={20}
-          maxSize={35}
-          defaultSize={chatResizeRight[4]}
-          className="pointer-events-auto overflow-visible! group-data-[git-open=false]/chat-layout:hidden"
-        >
-          <div ref={gitPanelRef} className="size-full">
-            <ChatGit isExpanded={isGitOpen} setIsExpanded={setIsGitOpen} />
-          </div>
-        </ResizablePanel>
-
-        <ResizableHandle
-          variant="floating"
-          className="group-data-[details-open=false]/chat-layout:hidden hover:after:opacity-100"
-        />
-        <ResizablePanel
-          order={6}
-          id="details"
-          minSize={20}
-          maxSize={35}
-          defaultSize={chatResizeRight[5]}
-          className="pointer-events-auto overflow-visible! group-data-[details-open=false]/chat-layout:hidden"
-        >
-          <div ref={detailsPanelRef} className="size-full">
-            <ChatEditorDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-
-      {/* Centered Content */}
+      {/* Left-side Allotment */}
       <div
         className={cn(
-          'absolute top-[10%]',
-          'left-1/2',
-          'flex flex-col gap-2',
-          '-translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)]',
+          'absolute',
+          'top-(--header-height)',
+          'h-[calc(100dvh-(--spacing(14)))]',
+          'w-full',
+          '[&_[data-slot=floating-panel]:first-child]:rounded-l-md',
+          '[&_[data-slot=floating-panel]:last-child]:rounded-r-md',
+          '[&_[data-slot=floating-panel]:first]:pl-2',
+          '[&_[data-slot=floating-panel]:last]:pr-2',
         )}
       >
-        <ChatInterfaceStatus />
-        <ChatViewerStatus />
+        <Allotment
+          defaultSizes={chatResizeLeft}
+          onChange={(sizes) => {
+            if (sizes.length === 3) {
+              setChatResizeLeft(sizes);
+            }
+          }}
+        >
+          <Allotment.Pane minSize={200} visible={isChatOpen}>
+            <div ref={historyPanelRef} className="size-full">
+              <ChatHistory isExpanded={isChatOpen} setIsExpanded={setIsChatOpen} />
+            </div>
+          </Allotment.Pane>
+
+          <Allotment.Pane minSize={100} visible={isExplorerOpen}>
+            <div ref={explorerPanelRef} className="size-full">
+              <ChatExplorerTree isExpanded={isExplorerOpen} setIsExpanded={setIsExplorerOpen} />
+            </div>
+          </Allotment.Pane>
+
+          <Allotment.Pane className="px-2" minSize={200}>
+            <div className="relative size-full px-2">
+              {/* Top-left Content */}
+              <div className="pointer-events-auto absolute top-0 left-0 z-10 flex flex-col gap-2">
+                <ChatHistoryTrigger
+                  isOpen={isChatOpen}
+                  onToggle={() => {
+                    setIsChatOpen((previous) => !previous);
+                  }}
+                />
+                <ChatExplorerTrigger
+                  isOpen={isExplorerOpen}
+                  onToggle={() => {
+                    setIsExplorerOpen((previous) => !previous);
+                  }}
+                />
+              </div>
+
+              {/* Top-right Content */}
+              <div className="pointer-events-auto absolute top-0 right-0 z-10 flex flex-col gap-2">
+                <ChatParametersTrigger
+                  isOpen={isParametersOpen}
+                  onToggle={() => {
+                    setIsParametersOpen((previous) => !previous);
+                  }}
+                />
+                <ChatEditorLayoutTrigger
+                  isOpen={isEditorOpen}
+                  onToggle={() => {
+                    setIsEditorOpen((previous) => !previous);
+                  }}
+                />
+                <ChatConverterTrigger
+                  isOpen={isConverterOpen}
+                  onToggle={() => {
+                    setIsConverterOpen((previous) => !previous);
+                  }}
+                />
+                <ChatGitTrigger
+                  isOpen={isGitOpen}
+                  onToggle={() => {
+                    setIsGitOpen((previous) => !previous);
+                  }}
+                />
+                <ChatEditorDetailsTrigger
+                  isOpen={isDetailsOpen}
+                  onToggle={() => {
+                    setIsDetailsOpen((previous) => !previous);
+                  }}
+                />
+              </div>
+
+              {/* Centered Content */}
+              <div
+                className={cn(
+                  'absolute top-[10%]',
+                  'left-1/2',
+                  'flex flex-col gap-2',
+                  '-translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)]',
+                )}
+              >
+                <ChatInterfaceStatus />
+                <ChatViewerStatus />
+              </div>
+
+              <div
+                className={cn(
+                  'absolute inset-0 left-1/2 h-full w-[200dvw]',
+
+                  // Center the viewer based on the size of the left and right panels.
+                  '-translate-x-1/2',
+                  'transition-all duration-200 ease-in-out',
+
+                  // Position the gizmo cube.
+                  '[&_.viewport-gizmo-cube]:right-[calc((var(--sidebar-width-current)+var(--right-panel-size)+var(--left-panel-size)+100dvw)/2)]!',
+                )}
+              >
+                <ChatViewer />
+              </div>
+
+              {/* Bottom-left Content */}
+              <div className="pointer-events-auto absolute right-8 bottom-0 left-0 z-10 flex w-100 shrink-0 flex-col gap-2">
+                <ChatInterfaceGraphics />
+                <ChatStackTrace />
+                <ChatViewerControls />
+              </div>
+            </div>
+          </Allotment.Pane>
+
+          <Allotment.Pane minSize={200} visible={isParametersOpen}>
+            <div ref={parametersPanelRef} className="size-full">
+              <ChatParameters isExpanded={isParametersOpen} setIsExpanded={setIsParametersOpen} />
+            </div>
+          </Allotment.Pane>
+
+          <Allotment.Pane minSize={200} visible={isEditorOpen}>
+            <div ref={editorPanelRef} className="size-full">
+              <ChatEditorLayout isExpanded={isEditorOpen} setIsExpanded={setIsEditorOpen} />
+            </div>
+          </Allotment.Pane>
+
+          <Allotment.Pane minSize={200} visible={isConverterOpen}>
+            <div ref={converterPanelRef} className="size-full">
+              <ChatConverter isExpanded={isConverterOpen} setIsExpanded={setIsConverterOpen} />
+            </div>
+          </Allotment.Pane>
+
+          <Allotment.Pane minSize={200} visible={isGitOpen}>
+            <div ref={gitPanelRef} className="size-full">
+              <ChatGit isExpanded={isGitOpen} setIsExpanded={setIsGitOpen} />
+            </div>
+          </Allotment.Pane>
+
+          <Allotment.Pane minSize={200} visible={isDetailsOpen}>
+            <div ref={detailsPanelRef} className="size-full">
+              <ChatEditorDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
+            </div>
+          </Allotment.Pane>
+        </Allotment>
       </div>
     </div>
   );

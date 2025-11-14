@@ -12,7 +12,7 @@ type Align = 'start' | 'center' | 'end';
 
 const floatingPanelVariants = cva(
   cn(
-    'group relative h-full overflow-hidden rounded-md border bg-background',
+    'group relative h-full overflow-hidden border bg-background',
     'transition-all duration-300 ease-in-out',
     // Size and shape transitions
     'size-8',

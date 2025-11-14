@@ -58,7 +58,7 @@ function formatInteger(value: number): string {
 }
 
 // Details Trigger Component
-export function ChatEditorDetailsTrigger({
+export function ChatDetailsTrigger({
   isOpen,
   onToggle,
 }: {
@@ -80,7 +80,7 @@ export function ChatEditorDetailsTrigger({
   );
 }
 
-export function ChatEditorDetails({
+export function ChatDetails({
   isExpanded = true,
   setIsExpanded,
 }: {

@@ -4,7 +4,7 @@ import { Allotment } from 'allotment';
 import 'allotment/dist/style.css';
 import { ChatHistory, ChatHistoryTrigger } from '#routes/builds_.$id/chat-history.js';
 import { ChatParameters, ChatParametersTrigger } from '#routes/builds_.$id/chat-parameters.js';
-import { useViewContext } from '#routes/builds_.$id/chat-interface-controls.js';
+import { useViewContext } from '#routes/builds_.$id/chat-interface-view-context.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { ChatViewer } from '#routes/builds_.$id/chat-viewer.js';
 import { useIsMobile } from '#hooks/use-mobile.js';
@@ -12,8 +12,8 @@ import { ChatEditorLayout, ChatEditorLayoutTrigger } from '#routes/builds_.$id/c
 import { ChatViewerStatus } from '#routes/builds_.$id/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/builds_.$id/chat-viewer-controls.js';
 import { ChatStackTrace } from '#routes/builds_.$id/chat-stack-trace.js';
-import { ChatExplorerTree, ChatExplorerTrigger } from '#routes/builds_.$id/chat-editor-explorer.js';
-import { ChatEditorDetails, ChatEditorDetailsTrigger } from '#routes/builds_.$id/chat-editor-details.js';
+import { ChatExplorerTree, ChatExplorerTrigger } from '#routes/builds_.$id/chat-explorer.js';
+import { ChatDetails, ChatDetailsTrigger } from '#routes/builds_.$id/chat-details.js';
 import { ChatConverter, ChatConverterTrigger } from '#routes/builds_.$id/chat-converter.js';
 import { ChatGit, ChatGitTrigger } from '#routes/builds_.$id/chat-git.js';
 import { cn } from '#utils/ui.utils.js';
@@ -173,7 +173,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
             <ChatEditorLayout />
           </TabsContent>
           <TabsContent enableAnimation={false} value="details">
-            <ChatEditorDetails />
+            <ChatDetails />
           </TabsContent>
           <TabsContent enableAnimation={false} value="converter">
             <ChatConverter />
@@ -261,7 +261,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
                     setIsGitOpen((previous) => !previous);
                   }}
                 />
-                <ChatEditorDetailsTrigger
+                <ChatDetailsTrigger
                   isOpen={isDetailsOpen}
                   onToggle={() => {
                     setIsDetailsOpen((previous) => !previous);
@@ -313,7 +313,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           </Allotment.Pane>
 
           <Allotment.Pane minSize={200} visible={isDetailsOpen}>
-            <ChatEditorDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
+            <ChatDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
           </Allotment.Pane>
         </Allotment>
       </div>

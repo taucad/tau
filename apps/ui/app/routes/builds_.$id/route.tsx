@@ -13,7 +13,7 @@ import { ChatProvider, useChatSelector, ChatContext } from '#components/chat/cha
 import { BuildNameEditor } from '#routes/builds_.$id/build-name-editor.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
-import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
+import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-view-context.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { BuildCommandPaletteItems } from '#routes/builds_.$id/build-command-items.js';
 import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';

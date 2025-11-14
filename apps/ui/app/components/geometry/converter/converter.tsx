@@ -360,7 +360,7 @@ export function Converter({
             <p className="pl-6 text-xs text-muted-foreground">
               {shouldChooseLocation
                 ? 'You will be prompted to choose where to save each file'
-                : 'Downloads to your default Downloads folder'}
+                : 'Downloads to your default downloads folder'}
             </p>
           </div>
         ) : undefined}

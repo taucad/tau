@@ -147,7 +147,7 @@ export function ChatEditorDetails({
         <FloatingPanelContentHeader>
           <FloatingPanelContentTitle>Details</FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
-        <FloatingPanelContentBody className="p-2">
+        <FloatingPanelContentBody className="px-3 py-2">
           <div className="space-y-4">
             {/* Project Information */}
             <div className="space-y-3">

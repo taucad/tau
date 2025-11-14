@@ -14,6 +14,7 @@ import { ChatStackTrace } from '#routes/builds_.$id/chat-stack-trace.js';
 import { ChatExplorerTree, ChatExplorerTrigger } from '#routes/builds_.$id/chat-editor-explorer.js';
 import { ChatEditorDetails, ChatEditorDetailsTrigger } from '#routes/builds_.$id/chat-editor-details.js';
 import { ChatConverter, ChatConverterTrigger } from '#routes/builds_.$id/chat-converter.js';
+import { ChatGit, ChatGitTrigger } from '#routes/builds_.$id/chat-git.js';
 import { cn } from '#utils/ui.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useResizeObserver } from '#hooks/use-resize-observer.js';
@@ -41,11 +42,13 @@ export const ChatInterface = memo(function (): React.JSX.Element {
     setIsExplorerOpen,
     isConverterOpen,
     setIsConverterOpen,
+    isGitOpen,
+    setIsGitOpen,
     isDetailsOpen,
     setIsDetailsOpen,
   } = useViewContext();
   const [chatResizeLeft, setChatResizeLeft] = useCookie(cookieName.chatRsLeft, [30, 20, 50]);
-  const [chatResizeRight, setChatResizeRight] = useCookie(cookieName.chatRsRight, [50, 20, 25, 0, 0]);
+  const [chatResizeRight, setChatResizeRight] = useCookie(cookieName.chatRsRight, [50, 20, 25, 0, 0, 0]);
   const [activeTab, setActiveTab] = useCookie<(typeof chatTabs)[number]['id']>(cookieName.chatInterfaceTab, 'chat');
   const isMobile = useIsMobile();
 
@@ -55,6 +58,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
   const parametersPanelRef = useRef<HTMLDivElement>(null);
   const editorPanelRef = useRef<HTMLDivElement>(null);
   const converterPanelRef = useRef<HTMLDivElement>(null);
+  const gitPanelRef = useRef<HTMLDivElement>(null);
   const detailsPanelRef = useRef<HTMLDivElement>(null);
 
   // Track width of each panel
@@ -63,6 +67,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
   const parametersSize = useResizeObserver({ ref: parametersPanelRef as React.RefObject<HTMLElement> });
   const editorSize = useResizeObserver({ ref: editorPanelRef as React.RefObject<HTMLElement> });
   const converterSize = useResizeObserver({ ref: converterPanelRef as React.RefObject<HTMLElement> });
+  const gitSize = useResizeObserver({ ref: gitPanelRef as React.RefObject<HTMLElement> });
   const detailsSize = useResizeObserver({ ref: detailsPanelRef as React.RefObject<HTMLElement> });
 
   // Calculate total widths for each side
@@ -76,16 +81,19 @@ export const ChatInterface = memo(function (): React.JSX.Element {
     const parametersWidth = isParametersOpen ? (parametersSize.width ?? 0) + spacing : 0;
     const editorWidth = isEditorOpen ? (editorSize.width ?? 0) + spacing : 0;
     const converterWidth = isConverterOpen ? (converterSize.width ?? 0) + spacing : 0;
+    const gitWidth = isGitOpen ? (gitSize.width ?? 0) + spacing : 0;
     const detailsWidth = isDetailsOpen ? (detailsSize.width ?? 0) + spacing : 0;
-    return parametersWidth + editorWidth + converterWidth + detailsWidth;
+    return parametersWidth + editorWidth + converterWidth + gitWidth + detailsWidth;
   }, [
     parametersSize.width,
     editorSize.width,
     converterSize.width,
+    gitSize.width,
     detailsSize.width,
     isParametersOpen,
     isEditorOpen,
     isConverterOpen,
+    isGitOpen,
     isDetailsOpen,
   ]);
 
@@ -239,6 +247,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
       data-parameters-open={isParametersOpen}
       data-editor-open={isEditorOpen}
       data-converter-open={isConverterOpen}
+      data-git-open={isGitOpen}
       data-details-open={isDetailsOpen}
     >
       {/* Viewer - inset completely to occupy the background fully */}
@@ -383,6 +392,12 @@ export const ChatInterface = memo(function (): React.JSX.Element {
                 setIsConverterOpen((previous) => !previous);
               }}
             />
+            <ChatGitTrigger
+              isOpen={isGitOpen}
+              onToggle={() => {
+                setIsGitOpen((previous) => !previous);
+              }}
+            />
             <ChatEditorDetailsTrigger
               isOpen={isDetailsOpen}
               onToggle={() => {
@@ -445,14 +460,31 @@ export const ChatInterface = memo(function (): React.JSX.Element {
 
         <ResizableHandle
           variant="floating"
-          className="group-data-[details-open=false]/chat-layout:hidden hover:after:opacity-100"
+          className="group-data-[git-open=false]/chat-layout:hidden hover:after:opacity-100"
         />
         <ResizablePanel
           order={5}
-          id="details"
+          id="git"
           minSize={20}
           maxSize={35}
           defaultSize={chatResizeRight[4]}
+          className="pointer-events-auto overflow-visible! group-data-[git-open=false]/chat-layout:hidden"
+        >
+          <div ref={gitPanelRef} className="size-full">
+            <ChatGit isExpanded={isGitOpen} setIsExpanded={setIsGitOpen} />
+          </div>
+        </ResizablePanel>
+
+        <ResizableHandle
+          variant="floating"
+          className="group-data-[details-open=false]/chat-layout:hidden hover:after:opacity-100"
+        />
+        <ResizablePanel
+          order={6}
+          id="details"
+          minSize={20}
+          maxSize={35}
+          defaultSize={chatResizeRight[5]}
           className="pointer-events-auto overflow-visible! group-data-[details-open=false]/chat-layout:hidden"
         >
           <div ref={detailsPanelRef} className="size-full">

@@ -18,7 +18,6 @@ import { useKeydown } from '#hooks/use-keydown.js';
 import { BuildCommandPaletteItems } from '#routes/builds_.$id/build-command-items.js';
 import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
-import { BuildGitConnector } from '#routes/builds_.$id/build-git-connector.js';
 import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
 
 // Define provider component at module level for stable reference across HMR
@@ -32,9 +31,6 @@ export const handle: Handle = {
     const { id } = match.params as Route.LoaderArgs['params'];
 
     return [<BuildNameEditor key={`${id}-build-name-editor`} />, <ChatModeSelector key={`${id}-chat-mode-selector`} />];
-  },
-  actions() {
-    return <BuildGitConnector />;
   },
   commandPalette(match) {
     return <BuildCommandPaletteItems match={match} />;

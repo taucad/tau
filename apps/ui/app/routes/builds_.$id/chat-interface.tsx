@@ -270,7 +270,8 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           'pt-(--header-height)',
           'pb-2',
 
-          '[&_.sash-container]:h-[calc(100dvh-var(--header-height)-var(--spacing)*2)]',
+          // Set the height of the sash to the height of the content.
+          '[&_.sash.sash-vertical:before]:h-[calc(100dvh-var(--header-height)-var(--spacing)*2)]!',
 
           // Apply top+bottom border to the floating panels.
           '[&_[data-slot=floating-panel]]:border-y',

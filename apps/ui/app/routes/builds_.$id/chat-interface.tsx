@@ -1,4 +1,4 @@
-import { memo, useRef } from 'react';
+import { memo } from 'react';
 import { Eye, EyeClosed } from 'lucide-react';
 import { Allotment } from 'allotment';
 import 'allotment/dist/style.css';
@@ -43,18 +43,9 @@ export const ChatInterface = memo(function (): React.JSX.Element {
     isDetailsOpen,
     setIsDetailsOpen,
   } = useViewContext();
-  const [chatResizeLeft, setChatResizeLeft] = useCookie(cookieName.chatRsLeft, [30, 20, 50]);
+  const [chatResize, setChatResize] = useCookie(cookieName.chatRsInterface, [200, 200, 420, 200, 200, 200, 200, 200]);
   const [activeTab, setActiveTab] = useCookie<(typeof chatTabs)[number]['id']>(cookieName.chatInterfaceTab, 'chat');
   const isMobile = useIsMobile();
-
-  // Refs for each individual panel
-  const historyPanelRef = useRef<HTMLDivElement>(null);
-  const explorerPanelRef = useRef<HTMLDivElement>(null);
-  const parametersPanelRef = useRef<HTMLDivElement>(null);
-  const editorPanelRef = useRef<HTMLDivElement>(null);
-  const converterPanelRef = useRef<HTMLDivElement>(null);
-  const gitPanelRef = useRef<HTMLDivElement>(null);
-  const detailsPanelRef = useRef<HTMLDivElement>(null);
 
   const handleTabChange = (value: string) => {
     setActiveTab(value as (typeof chatTabs)[number]['id']);
@@ -198,30 +189,14 @@ export const ChatInterface = memo(function (): React.JSX.Element {
 
   return (
     <div className={cn('group/chat-layout relative hidden size-full flex-col md:flex')}>
-      {/* Viewer - inset completely to occupy the background fully */}
-      {/* The calculation is to center the viewer within the container */}
-      {/* <div
-        className={cn(
-          'absolute inset-0 left-1/2 h-full w-[200dvw]',
-
-          // Center the viewer based on the size of the left and right panels.
-          '-translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)]',
-          'transition-all duration-200 ease-in-out',
-
-          // Position the gizmo cube.
-          '[&_.viewport-gizmo-cube]:right-[calc((var(--sidebar-width-current)+var(--right-panel-size)+var(--left-panel-size)+100dvw)/2)]!',
-        )}
-      >
-        <ChatViewer />
-      </div> */}
-
-      {/* Left-side Allotment */}
       <div
         className={cn(
           'absolute',
           'top-(--header-height)',
           'h-[calc(100dvh-(--spacing(14)))]',
           'w-full',
+          'pl-[calc(var(--sidebar-width-current)-var(--spacing)*2)]',
+          'transition-[padding-left] duration-200 ease-linear',
           '[&_[data-slot=floating-panel]:first-child]:rounded-l-md',
           '[&_[data-slot=floating-panel]:last-child]:rounded-r-md',
           '[&_[data-slot=floating-panel]:first]:pl-2',
@@ -229,26 +204,20 @@ export const ChatInterface = memo(function (): React.JSX.Element {
         )}
       >
         <Allotment
-          defaultSizes={chatResizeLeft}
+          defaultSizes={chatResize}
           onChange={(sizes) => {
-            if (sizes.length === 3) {
-              setChatResizeLeft(sizes);
-            }
+            setChatResize(sizes);
           }}
         >
           <Allotment.Pane minSize={200} visible={isChatOpen}>
-            <div ref={historyPanelRef} className="size-full">
-              <ChatHistory isExpanded={isChatOpen} setIsExpanded={setIsChatOpen} />
-            </div>
+            <ChatHistory isExpanded={isChatOpen} setIsExpanded={setIsChatOpen} />
           </Allotment.Pane>
 
-          <Allotment.Pane minSize={100} visible={isExplorerOpen}>
-            <div ref={explorerPanelRef} className="size-full">
-              <ChatExplorerTree isExpanded={isExplorerOpen} setIsExpanded={setIsExplorerOpen} />
-            </div>
+          <Allotment.Pane minSize={200} visible={isExplorerOpen}>
+            <ChatExplorerTree isExpanded={isExplorerOpen} setIsExpanded={setIsExplorerOpen} />
           </Allotment.Pane>
 
-          <Allotment.Pane className="px-2" minSize={200}>
+          <Allotment.Pane className="px-2" minSize={420}>
             <div className="relative size-full px-2">
               {/* Top-left Content */}
               <div className="pointer-events-auto absolute top-0 left-0 z-10 flex flex-col gap-2">
@@ -301,14 +270,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
               </div>
 
               {/* Centered Content */}
-              <div
-                className={cn(
-                  'absolute top-[10%]',
-                  'left-1/2',
-                  'flex flex-col gap-2',
-                  '-translate-x-[calc((100%-var(--sidebar-width-current)+var(--right-panel-size)-var(--left-panel-size))/2)]',
-                )}
-              >
+              <div className={cn('absolute top-[10%]', 'left-1/2', 'flex flex-col gap-2', '-translate-x-1/2')}>
                 <ChatInterfaceStatus />
                 <ChatViewerStatus />
               </div>
@@ -316,13 +278,10 @@ export const ChatInterface = memo(function (): React.JSX.Element {
               <div
                 className={cn(
                   'absolute inset-0 left-1/2 h-full w-[200dvw]',
-
-                  // Center the viewer based on the size of the left and right panels.
                   '-translate-x-1/2',
-                  'transition-all duration-200 ease-in-out',
 
                   // Position the gizmo cube.
-                  '[&_.viewport-gizmo-cube]:right-[calc((var(--sidebar-width-current)+var(--right-panel-size)+var(--left-panel-size)+100dvw)/2)]!',
+                  '[&_.viewport-gizmo-cube]:right-[50%]',
                 )}
               >
                 <ChatViewer />
@@ -338,33 +297,23 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           </Allotment.Pane>
 
           <Allotment.Pane minSize={200} visible={isParametersOpen}>
-            <div ref={parametersPanelRef} className="size-full">
-              <ChatParameters isExpanded={isParametersOpen} setIsExpanded={setIsParametersOpen} />
-            </div>
+            <ChatParameters isExpanded={isParametersOpen} setIsExpanded={setIsParametersOpen} />
           </Allotment.Pane>
 
           <Allotment.Pane minSize={200} visible={isEditorOpen}>
-            <div ref={editorPanelRef} className="size-full">
-              <ChatEditorLayout isExpanded={isEditorOpen} setIsExpanded={setIsEditorOpen} />
-            </div>
+            <ChatEditorLayout isExpanded={isEditorOpen} setIsExpanded={setIsEditorOpen} />
           </Allotment.Pane>
 
           <Allotment.Pane minSize={200} visible={isConverterOpen}>
-            <div ref={converterPanelRef} className="size-full">
-              <ChatConverter isExpanded={isConverterOpen} setIsExpanded={setIsConverterOpen} />
-            </div>
+            <ChatConverter isExpanded={isConverterOpen} setIsExpanded={setIsConverterOpen} />
           </Allotment.Pane>
 
           <Allotment.Pane minSize={200} visible={isGitOpen}>
-            <div ref={gitPanelRef} className="size-full">
-              <ChatGit isExpanded={isGitOpen} setIsExpanded={setIsGitOpen} />
-            </div>
+            <ChatGit isExpanded={isGitOpen} setIsExpanded={setIsGitOpen} />
           </Allotment.Pane>
 
           <Allotment.Pane minSize={200} visible={isDetailsOpen}>
-            <div ref={detailsPanelRef} className="size-full">
-              <ChatEditorDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
-            </div>
+            <ChatEditorDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
           </Allotment.Pane>
         </Allotment>
       </div>

@@ -12,12 +12,8 @@ type Align = 'start' | 'center' | 'end';
 
 const floatingPanelVariants = cva(
   cn(
-    'group relative h-full overflow-hidden border bg-background',
-    'transition-all duration-300 ease-in-out',
+    'group relative size-full overflow-hidden border bg-background',
     // Size and shape transitions
-    'size-8',
-    'data-[state=open]:h-[calc(100dvh-(--spacing(14)))]',
-    'data-[state=open]:w-full',
   ),
   {
     variants: {
@@ -162,12 +158,7 @@ const floatingPanelTriggerButtonVariants = cva(
 );
 
 const floatingPanelContentVariants = cva(
-  cn(
-    'flex h-full w-full flex-col bg-sidebar/50',
-    'transition-opacity duration-300',
-    'pointer-events-none opacity-0',
-    'group-data-[state=open]/floating-panel:pointer-events-auto group-data-[state=open]/floating-panel:opacity-100 group-data-[state=open]/floating-panel:delay-200',
-  ),
+  cn('flex h-full w-full flex-col bg-sidebar/50', 'transition-opacity duration-300'),
 );
 
 const floatingPanelContentHeaderVariants = cva(

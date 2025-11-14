@@ -40,9 +40,7 @@ export const cookieName = {
   // The last selected chat console size.
   chatRsEditor: 'chat-rs-editor',
   // The last selected chat console size.
-  chatRsLeft: 'chat-rs-left',
-  // The last selected chat right panel size.
-  chatRsRight: 'chat-rs-right',
+  chatRsInterface: 'chat-rs-interface',
   // The last selected chat interface tab.
   chatInterfaceTab: 'chat-interface-tab',
   // Whether the chat interface is full height.

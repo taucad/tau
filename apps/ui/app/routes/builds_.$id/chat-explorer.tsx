@@ -14,11 +14,11 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
-import { ChatEditorExplorerFiles } from '#routes/builds_.$id/chat-editor-explorer-files.js';
-import { ChatEditorExplorerMaterials } from '#routes/builds_.$id/chat-editor-explorer-materials.js';
-import { ChatEditorExplorerMeshes } from '#routes/builds_.$id/chat-editor-explorer-meshes.js';
-import { ChatEditorExplorerObjects } from '#routes/builds_.$id/chat-editor-explorer-objects.js';
-import { ChatEditorExplorerAnimations } from '#routes/builds_.$id/chat-editor-explorer-animations.js';
+import { ChatEditorExplorerFiles } from '#routes/builds_.$id/chat-explorer-files.js';
+import { ChatEditorExplorerMaterials } from '#routes/builds_.$id/chat-explorer-materials.js';
+import { ChatEditorExplorerMeshes } from '#routes/builds_.$id/chat-explorer-meshes.js';
+import { ChatEditorExplorerObjects } from '#routes/builds_.$id/chat-explorer-objects.js';
+import { ChatEditorExplorerAnimations } from '#routes/builds_.$id/chat-explorer-animations.js';
 
 const keyCombinationEditor = {
   key: 'a',

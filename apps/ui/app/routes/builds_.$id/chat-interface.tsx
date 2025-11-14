@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import { Eye, EyeClosed } from 'lucide-react';
 import { Allotment } from 'allotment';
 import 'allotment/dist/style.css';
@@ -55,6 +55,76 @@ export const ChatInterface = memo(function (): React.JSX.Element {
   const toggleFullHeightPanel = () => {
     setIsFullHeightPanel((previous) => !previous);
   };
+
+  const allotmentRef = useRef<HTMLDivElement>(null);
+
+  // Update position attributes on visible panes for performant CSS selectors
+  useEffect(() => {
+    if (!allotmentRef.current) {
+      return;
+    }
+
+    const updatePanePositions = (): void => {
+      const leftPanes = allotmentRef.current?.querySelectorAll('.rs-left.split-view-view-visible');
+      const rightPanes = allotmentRef.current?.querySelectorAll('.rs-right.split-view-view-visible');
+
+      // Update left panes
+      if (leftPanes) {
+        for (const [index, pane] of [...leftPanes].entries()) {
+          const element = pane as HTMLElement;
+          const isFirst = index === 0;
+          const isLast = index === leftPanes.length - 1;
+
+          if (isFirst) {
+            element.dataset['first'] = '';
+          } else {
+            delete element.dataset['first'];
+          }
+
+          if (isLast) {
+            element.dataset['last'] = '';
+          } else {
+            delete element.dataset['last'];
+          }
+        }
+      }
+
+      // Update right panes
+      if (rightPanes) {
+        for (const [index, pane] of [...rightPanes].entries()) {
+          const element = pane as HTMLElement;
+          const isFirst = index === 0;
+          const isLast = index === rightPanes.length - 1;
+
+          if (isFirst) {
+            element.dataset['first'] = '';
+          } else {
+            delete element.dataset['first'];
+          }
+
+          if (isLast) {
+            element.dataset['last'] = '';
+          } else {
+            delete element.dataset['last'];
+          }
+        }
+      }
+    };
+
+    updatePanePositions();
+
+    // Use MutationObserver to detect when visibility changes
+    const observer = new MutationObserver(updatePanePositions);
+    observer.observe(allotmentRef.current, {
+      attributes: true,
+      attributeFilter: ['class'],
+      subtree: true,
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [isChatOpen, isParametersOpen, isEditorOpen, isExplorerOpen, isConverterOpen, isGitOpen, isDetailsOpen]);
 
   if (isMobile) {
     return (
@@ -188,135 +258,167 @@ export const ChatInterface = memo(function (): React.JSX.Element {
   }
 
   return (
-    <div className={cn('group/chat-layout relative hidden size-full flex-col md:flex')}>
-      <div
+    <div ref={allotmentRef} className="size-full">
+      <Allotment
+        defaultSizes={chatResize}
+        separator={false}
         className={cn(
-          'absolute',
-          'top-(--header-height)',
-          'h-[calc(100dvh-(--spacing(14)))]',
-          'w-full',
+          'size-full',
           'pl-[calc(var(--sidebar-width-current)-var(--spacing)*2)]',
           'transition-[padding-left] duration-200 ease-linear',
-          '[&_[data-slot=floating-panel]:first-child]:rounded-l-md',
-          '[&_[data-slot=floating-panel]:last-child]:rounded-r-md',
-          '[&_[data-slot=floating-panel]:first]:pl-2',
-          '[&_[data-slot=floating-panel]:last]:pr-2',
+
+          // Pad the sash container to the top of the header height.
+          'pt-(--header-height)',
+          'pb-2',
+
+          '[&_.sash-container]:h-[calc(100dvh-var(--header-height)-var(--spacing)*2)]',
+
+          // Apply top+bottom border to the floating panels.
+          '[&_[data-slot=floating-panel]]:border-y',
+
+          // Left side: First pane styling
+          '[&_.rs-left.split-view-view-visible[data-first]]:pl-2',
+          '[&_.rs-left.split-view-view-visible[data-first]_[data-slot=floating-panel]]:rounded-l-md',
+
+          // Left side: Last pane styling
+          '[&_.rs-left.split-view-view-visible[data-last]_[data-slot=floating-panel]]:rounded-r-md',
+          '[&_.rs-left.split-view-view-visible[data-last]_[data-slot=floating-panel]]:border-r',
+
+          // Left side: All visible panes get left border
+          '[&_.rs-left.split-view-view-visible_[data-slot=floating-panel]]:border-l',
+
+          // Right side: First pane styling (leftmost visually)
+          '[&_.rs-right.split-view-view-visible[data-first]_[data-slot=floating-panel]]:rounded-l-md',
+          '[&_.rs-right.split-view-view-visible[data-first]_[data-slot=floating-panel]]:border-l',
+
+          // Right side: Last pane styling (rightmost visually, needs right padding)
+          '[&_.rs-right.split-view-view-visible[data-last]]:pr-2',
+          '[&_.rs-right.split-view-view-visible[data-last]_[data-slot=floating-panel]]:rounded-r-md',
+
+          // Right side: All visible panes get right border
+          '[&_.rs-right.split-view-view-visible_[data-slot=floating-panel]]:border-r',
+
+          // Allow the viewer to appear behind the floating panels.
+          '[&_.split-view-view]:overflow-visible!',
         )}
+        onChange={(sizes) => {
+          setChatResize(sizes);
+        }}
       >
-        <Allotment
-          defaultSizes={chatResize}
-          onChange={(sizes) => {
-            setChatResize(sizes);
-          }}
-        >
-          <Allotment.Pane minSize={200} visible={isChatOpen}>
-            <ChatHistory isExpanded={isChatOpen} setIsExpanded={setIsChatOpen} />
-          </Allotment.Pane>
+        <Allotment.Pane className="rs-left rs-chat z-10" minSize={200} visible={isChatOpen}>
+          <ChatHistory isExpanded={isChatOpen} setIsExpanded={setIsChatOpen} />
+        </Allotment.Pane>
 
-          <Allotment.Pane minSize={200} visible={isExplorerOpen}>
-            <ChatExplorerTree isExpanded={isExplorerOpen} setIsExpanded={setIsExplorerOpen} />
-          </Allotment.Pane>
+        <Allotment.Pane className="rs-left rs-chat z-10" minSize={200} visible={isExplorerOpen}>
+          <ChatExplorerTree isExpanded={isExplorerOpen} setIsExpanded={setIsExplorerOpen} />
+        </Allotment.Pane>
 
-          <Allotment.Pane className="px-2" minSize={420}>
-            <div className="relative size-full px-2">
-              {/* Top-left Content */}
-              <div className="pointer-events-auto absolute top-0 left-0 z-10 flex flex-col gap-2">
-                <ChatHistoryTrigger
-                  isOpen={isChatOpen}
-                  onToggle={() => {
-                    setIsChatOpen((previous) => !previous);
-                  }}
-                />
-                <ChatExplorerTrigger
-                  isOpen={isExplorerOpen}
-                  onToggle={() => {
-                    setIsExplorerOpen((previous) => !previous);
-                  }}
-                />
-              </div>
+        <Allotment.Pane className="rs-center rs-chat px-2" minSize={416}>
+          {/* Top-left Content */}
+          <div className="absolute top-0 left-2 z-10 flex flex-col gap-2 [&>*]:pointer-events-auto">
+            <ChatHistoryTrigger
+              isOpen={isChatOpen}
+              onToggle={() => {
+                setIsChatOpen((previous) => !previous);
+              }}
+            />
+            <ChatExplorerTrigger
+              isOpen={isExplorerOpen}
+              onToggle={() => {
+                setIsExplorerOpen((previous) => !previous);
+              }}
+            />
+          </div>
 
-              {/* Top-right Content */}
-              <div className="pointer-events-auto absolute top-0 right-0 z-10 flex flex-col gap-2">
-                <ChatParametersTrigger
-                  isOpen={isParametersOpen}
-                  onToggle={() => {
-                    setIsParametersOpen((previous) => !previous);
-                  }}
-                />
-                <ChatEditorLayoutTrigger
-                  isOpen={isEditorOpen}
-                  onToggle={() => {
-                    setIsEditorOpen((previous) => !previous);
-                  }}
-                />
-                <ChatConverterTrigger
-                  isOpen={isConverterOpen}
-                  onToggle={() => {
-                    setIsConverterOpen((previous) => !previous);
-                  }}
-                />
-                <ChatGitTrigger
-                  isOpen={isGitOpen}
-                  onToggle={() => {
-                    setIsGitOpen((previous) => !previous);
-                  }}
-                />
-                <ChatDetailsTrigger
-                  isOpen={isDetailsOpen}
-                  onToggle={() => {
-                    setIsDetailsOpen((previous) => !previous);
-                  }}
-                />
-              </div>
+          {/* Top-right Content */}
+          <div className="absolute top-0 right-2 z-10 flex flex-col gap-2 [&>*]:pointer-events-auto">
+            <ChatParametersTrigger
+              isOpen={isParametersOpen}
+              onToggle={() => {
+                setIsParametersOpen((previous) => !previous);
+              }}
+            />
+            <ChatEditorLayoutTrigger
+              isOpen={isEditorOpen}
+              onToggle={() => {
+                setIsEditorOpen((previous) => !previous);
+              }}
+            />
+            <ChatConverterTrigger
+              isOpen={isConverterOpen}
+              onToggle={() => {
+                setIsConverterOpen((previous) => !previous);
+              }}
+            />
+            <ChatGitTrigger
+              isOpen={isGitOpen}
+              onToggle={() => {
+                setIsGitOpen((previous) => !previous);
+              }}
+            />
+            <ChatDetailsTrigger
+              isOpen={isDetailsOpen}
+              onToggle={() => {
+                setIsDetailsOpen((previous) => !previous);
+              }}
+            />
+          </div>
 
-              {/* Centered Content */}
-              <div className={cn('absolute top-[10%]', 'left-1/2', 'flex flex-col gap-2', '-translate-x-1/2')}>
-                <ChatInterfaceStatus />
-                <ChatViewerStatus />
-              </div>
+          {/* Centered Content */}
+          <div
+            className={cn(
+              'absolute top-[10%] z-10',
+              'left-1/2',
+              'flex flex-col gap-2',
+              '-translate-x-1/2',
+              '[&>*]:pointer-events-auto',
+            )}
+          >
+            <ChatInterfaceStatus />
+            <ChatViewerStatus />
+          </div>
 
-              <div
-                className={cn(
-                  'absolute inset-0 left-1/2 h-full w-[200dvw]',
-                  '-translate-x-1/2',
+          {/* Viewer */}
+          <div
+            className={cn(
+              'absolute inset-0 left-1/2 -mt-(--header-height) h-dvh w-[200dvw]',
+              '-translate-x-1/2',
 
-                  // Position the gizmo cube.
-                  '[&_.viewport-gizmo-cube]:right-[50%]',
-                )}
-              >
-                <ChatViewer />
-              </div>
+              // Position the gizmo cube.
+              '[&_.viewport-gizmo-cube]:right-1/2',
+            )}
+          >
+            <ChatViewer />
+          </div>
 
-              {/* Bottom-left Content */}
-              <div className="pointer-events-auto absolute right-8 bottom-0 left-0 z-10 flex w-100 shrink-0 flex-col gap-2">
-                <ChatInterfaceGraphics />
-                <ChatStackTrace />
-                <ChatViewerControls />
-              </div>
-            </div>
-          </Allotment.Pane>
+          {/* Bottom-left Content */}
+          <div className="absolute right-8 bottom-0 left-2 z-10 flex w-100 shrink-0 flex-col gap-2 [&>*]:pointer-events-auto">
+            <ChatInterfaceGraphics />
+            <ChatStackTrace />
+            <ChatViewerControls />
+          </div>
+        </Allotment.Pane>
 
-          <Allotment.Pane minSize={200} visible={isParametersOpen}>
-            <ChatParameters isExpanded={isParametersOpen} setIsExpanded={setIsParametersOpen} />
-          </Allotment.Pane>
+        <Allotment.Pane className="rs-right rs-chat" minSize={200} visible={isParametersOpen}>
+          <ChatParameters isExpanded={isParametersOpen} setIsExpanded={setIsParametersOpen} />
+        </Allotment.Pane>
 
-          <Allotment.Pane minSize={200} visible={isEditorOpen}>
-            <ChatEditorLayout isExpanded={isEditorOpen} setIsExpanded={setIsEditorOpen} />
-          </Allotment.Pane>
+        <Allotment.Pane className="rs-right rs-chat" minSize={400} visible={isEditorOpen}>
+          <ChatEditorLayout isExpanded={isEditorOpen} setIsExpanded={setIsEditorOpen} />
+        </Allotment.Pane>
 
-          <Allotment.Pane minSize={200} visible={isConverterOpen}>
-            <ChatConverter isExpanded={isConverterOpen} setIsExpanded={setIsConverterOpen} />
-          </Allotment.Pane>
+        <Allotment.Pane className="rs-right rs-chat" minSize={200} visible={isConverterOpen}>
+          <ChatConverter isExpanded={isConverterOpen} setIsExpanded={setIsConverterOpen} />
+        </Allotment.Pane>
 
-          <Allotment.Pane minSize={200} visible={isGitOpen}>
-            <ChatGit isExpanded={isGitOpen} setIsExpanded={setIsGitOpen} />
-          </Allotment.Pane>
+        <Allotment.Pane className="rs-right rs-chat" minSize={200} visible={isGitOpen}>
+          <ChatGit isExpanded={isGitOpen} setIsExpanded={setIsGitOpen} />
+        </Allotment.Pane>
 
-          <Allotment.Pane minSize={200} visible={isDetailsOpen}>
-            <ChatDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
-          </Allotment.Pane>
-        </Allotment>
-      </div>
+        <Allotment.Pane className="rs-right rs-chat" minSize={200} visible={isDetailsOpen}>
+          <ChatDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
+        </Allotment.Pane>
+      </Allotment>
     </div>
   );
 });

@@ -12,7 +12,7 @@ type Align = 'start' | 'center' | 'end';
 
 const floatingPanelVariants = cva(
   cn(
-    'group relative size-full overflow-hidden border bg-background',
+    'group relative size-full overflow-hidden bg-background',
     // Size and shape transitions
   ),
   {
@@ -157,9 +157,7 @@ const floatingPanelTriggerButtonVariants = cva(
   },
 );
 
-const floatingPanelContentVariants = cva(
-  cn('flex h-full w-full flex-col bg-sidebar/50', 'transition-opacity duration-300'),
-);
+const floatingPanelContentVariants = cva(cn('flex h-full w-full flex-col bg-sidebar/50 rounded-t-lg'));
 
 const floatingPanelContentHeaderVariants = cva(
   cn(

@@ -28,7 +28,7 @@ export function KernelSelector({
               className={cn(
                 'flex h-auto flex-col items-center justify-center gap-2 rounded-lg border-border p-2 transition-all hover:border-ring/50 hover:bg-primary/20',
                 selectedKernel === option.id &&
-                  'border-ring bg-primary/5 text-primary hover:border-ring hover:bg-primary/10',
+                  'border-ring bg-primary/5 text-primary hover:border-ring hover:bg-primary/10 dark:border-ring',
               )}
               onClick={() => {
                 onKernelChange(option.id);

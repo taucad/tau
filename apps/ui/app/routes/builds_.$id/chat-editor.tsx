@@ -124,28 +124,26 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
     <div className={cn('flex h-full flex-col bg-background', className)}>
       <ChatEditorTabs />
       <ChatEditorBreadcrumbs />
-      <div className="flex-1">
-        {activeFile ? (
-          isBinary && !forceOpenBinary ? (
-            <ChatEditorBinaryWarning onForceOpen={handleForceOpenBinary} />
-          ) : (
-            <CodeEditor
-              loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
-              className="h-full bg-background"
-              language={activeFile.language}
-              value={editorContent}
-              onChange={handleCodeChange}
-              onValidate={handleValidate}
-            />
-          )
+      {activeFile ? (
+        isBinary && !forceOpenBinary ? (
+          <ChatEditorBinaryWarning onForceOpen={handleForceOpenBinary} />
         ) : (
-          <EmptyItems>
-            <FileCode className="mb-4 size-12 stroke-1 text-muted-foreground" />
-            <p className="text-base font-medium">No file selected</p>
-            <p className="mt-1 text-xs text-muted-foreground/70">Select a file from the tree to start editing</p>
-          </EmptyItems>
-        )}
-      </div>
+          <CodeEditor
+            loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
+            className="h-full bg-background"
+            language={activeFile.language}
+            value={editorContent}
+            onChange={handleCodeChange}
+            onValidate={handleValidate}
+          />
+        )
+      ) : (
+        <EmptyItems>
+          <FileCode className="mb-4 size-12 stroke-1 text-muted-foreground" />
+          <p className="text-base font-medium">No file selected</p>
+          <p className="mt-1 text-xs text-muted-foreground/70">Select a file from the tree to start editing</p>
+        </EmptyItems>
+      )}
     </div>
   );
 });

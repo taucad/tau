@@ -12,6 +12,7 @@ import { FormatSelector } from '#components/geometry/converter/format-selector.j
 import { ConverterFileTree } from '#components/geometry/converter/converter-file-tree.js';
 import { formatDisplayName, getFileExtension } from '#components/geometry/converter/converter-utils.js';
 import { zipMachine } from '#machines/zip.machine.js';
+import { cn } from '#utils/ui.utils.js';
 
 type UploadedFileInfo = {
   readonly name: string;
@@ -31,6 +32,7 @@ type ConverterProperties = {
     React.ComponentProps<typeof FormatSelector>,
     'selectedFormats' | 'onFormatToggle' | 'onClearSelection'
   >;
+  readonly className?: string;
 };
 
 export function Converter({
@@ -42,6 +44,7 @@ export function Converter({
   onClearSelection,
   onZipToggle,
   formatSelectorProperties,
+  className,
 }: ConverterProperties): React.JSX.Element {
   const [isExporting, setIsExporting] = useState(false);
   const [shouldChooseLocation, setShouldChooseLocation] = useState(false);
@@ -291,7 +294,7 @@ export function Converter({
   ]);
 
   return (
-    <div data-slot="converter" className="@container/converter flex flex-col gap-6">
+    <div data-slot="converter" className={cn('@container/converter flex flex-col gap-6', className)}>
       <FormatSelector
         selectedFormats={selectedFormats}
         onFormatToggle={onFormatToggle}
@@ -303,17 +306,19 @@ export function Converter({
         <Button
           disabled={selectedFormats.length === 0 || isExporting}
           size="lg"
-          className="w-full"
+          className="h-auto w-full py-3 whitespace-normal"
           onClick={handleDownload}
         >
-          <Download className="size-4" />
-          {selectedFormats.length === 0
-            ? 'Select formats to download'
-            : selectedFormats.length === 1
-              ? 'Download'
-              : shouldUseZipForMultiple
-                ? `Download ${selectedFormats.length} formats as ZIP`
-                : `Download ${selectedFormats.length} formats`}
+          <Download className="size-4 shrink-0" />
+          <span className="min-w-0 break-words">
+            {selectedFormats.length === 0
+              ? 'Select formats to download'
+              : selectedFormats.length === 1
+                ? 'Download'
+                : shouldUseZipForMultiple
+                  ? `Download ${selectedFormats.length} formats as ZIP`
+                  : `Download ${selectedFormats.length} formats`}
+          </span>
         </Button>
 
         {selectedFormats.length > 1 ? (

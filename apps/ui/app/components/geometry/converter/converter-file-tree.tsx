@@ -32,8 +32,8 @@ export function ConverterFileTree({
     return (
       <div className="rounded-md border bg-muted/30 p-3">
         <div className="flex items-center gap-2 text-sm">
-          <FileIcon className="size-4 text-muted-foreground" />
-          <span className="text-xs">{outputFileName}</span>
+          <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 text-xs break-all">{outputFileName}</span>
         </div>
       </div>
     );
@@ -52,19 +52,34 @@ export function ConverterFileTree({
     return (
       <div className="rounded-md border bg-muted/30 p-3">
         <div className="flex items-start gap-2">
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <FileArchive className="size-4 shrink-0 text-muted-foreground" />
-              <div className="text-xs font-medium">{zipFileName}</div>
+              <div className="min-w-0 text-xs font-medium break-all">{zipFileName}</div>
             </div>
-            <div className="mt-1 ml-2 space-y-1 border-l border-border pl-2">
-              {files.map((file, index) => (
-                <div key={file} className="flex items-center gap-1.5 text-xs">
-                  <div className={`-ml-2 h-px w-2 bg-border ${index === files.length - 1 ? 'rounded-r' : ''}`} />
-                  <FileIcon className="size-3 shrink-0 text-muted-foreground" />
-                  <span>{file}</span>
-                </div>
-              ))}
+            <div className="mt-1 ml-2">
+              {files.map((file, index) => {
+                const isLastItem = index === files.length - 1;
+                return (
+                  <div key={file} className="relative flex items-start gap-1.5 py-0.5 text-xs">
+                    {/* Vertical line - extends to horizontal line for last item, full height for others */}
+                    <div
+                      className="absolute top-0 left-0 w-px bg-border"
+                      style={{
+                        height: isLastItem ? 'calc(0.125rem + 0.125rem + 0.375rem)' : '100%',
+                      }}
+                    />
+                    {/* Horizontal line - aligns with icon center (padding + margin + half icon height) */}
+                    <div
+                      className="absolute left-0 h-px w-3 bg-border"
+                      style={{ top: 'calc(0.125rem + 0.125rem + 0.375rem)' }}
+                    />
+                    <div className="w-3 shrink-0" />
+                    <FileIcon className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 break-all">{file}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -78,8 +93,8 @@ export function ConverterFileTree({
       <div className="space-y-1.5">
         {files.map((file) => (
           <div key={file} className="flex items-center gap-2 text-sm">
-            <FileIcon className="size-4 text-muted-foreground" />
-            <span className="text-xs">{file}</span>
+            <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 text-xs break-all">{file}</span>
           </div>
         ))}
       </div>

@@ -1,5 +1,5 @@
 import { XIcon, Download, Info } from 'lucide-react';
-import { useCallback, memo, useState } from 'react';
+import { useCallback, memo, useState, useMemo } from 'react';
 import { useSelector } from '@xstate/react';
 import type { OutputFormat } from '@taucad/converter';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -68,7 +68,16 @@ export const ChatConverter = memo(function (properties: {
 
   // State for GLB data (lazy-loaded)
   const [glbData, setGlbData] = useState<Uint8Array | undefined>(undefined);
-  const [uploadedFile, setUploadedFile] = useState<UploadedFileInfo | undefined>(undefined);
+
+  // Derive uploadedFile from buildName so it updates reactively
+  const uploadedFile = useMemo<UploadedFileInfo>(
+    () => ({
+      name: `${buildName}.glb`,
+      format: 'glb',
+      size: 0, // Size is not critical for display purposes
+    }),
+    [buildName],
+  );
 
   // Converter state
   const [selectedFormats, setSelectedFormats] = useCookie<OutputFormat[]>(cookieName.converterOutputFormats, []);
@@ -90,18 +99,13 @@ export const ChatConverter = memo(function (properties: {
       const buffer = await blob.arrayBuffer();
       const data = new Uint8Array(buffer);
       setGlbData(data);
-      setUploadedFile({
-        name: `${buildName}.glb`,
-        format: 'glb',
-        size: blob.size,
-      });
       return data;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to read GLB data from CAD state';
       toast.error(message);
       throw error instanceof Error ? error : new Error(message);
     }
-  }, [glbData, geometries, buildName]);
+  }, [glbData, geometries]);
 
   const handleFormatToggle = useCallback(
     (format: OutputFormat) => {
@@ -163,6 +167,7 @@ export const ChatConverter = memo(function (properties: {
             </EmptyItems>
           ) : (
             <Converter
+              className="px-1"
               getGlbData={getGlbData}
               selectedFormats={selectedFormats}
               shouldUseZipForMultiple={useZipForMultiple}

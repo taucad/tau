@@ -135,6 +135,11 @@ export function Converter({
             loading: `Exporting to ${formatDisplayName(format)}...`,
             success: `Downloaded ${formatDisplayName(format)} file`,
             error(error: unknown) {
+              // Check if user cancelled the save dialog
+              if (error instanceof Error && error.name === 'AbortError') {
+                return 'Export cancelled';
+              }
+
               let message = `Failed to export to ${formatDisplayName(format)}`;
               if (error instanceof Error) {
                 message = `${message}: ${error.message}`;
@@ -204,6 +209,11 @@ export function Converter({
               return `Downloaded ${selectedFormats.length} files in zip`;
             },
             error(error: unknown) {
+              // Check if user cancelled the save dialog
+              if (error instanceof Error && error.name === 'AbortError') {
+                return 'Export cancelled';
+              }
+
               let message = 'Failed to export files';
               if (error instanceof Error) {
                 message = `${message}: ${error.message}`;
@@ -249,6 +259,11 @@ export function Converter({
             loading: `Exporting ${selectedFormats.length} formats...`,
             success: `Downloaded ${selectedFormats.length} files`,
             error(error: unknown) {
+              // Check if user cancelled the save dialog
+              if (error instanceof Error && error.name === 'AbortError') {
+                return 'Export cancelled';
+              }
+
               let message = 'Failed to export files';
               if (error instanceof Error) {
                 message = `${message}: ${error.message}`;

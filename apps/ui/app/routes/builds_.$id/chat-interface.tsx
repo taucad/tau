@@ -1,7 +1,6 @@
 import { memo, useEffect, useRef } from 'react';
 import { Eye, EyeClosed } from 'lucide-react';
 import { Allotment } from 'allotment';
-import 'allotment/dist/style.css';
 import { ChatHistory, ChatHistoryTrigger } from '#routes/builds_.$id/chat-history.js';
 import { ChatParameters, ChatParametersTrigger } from '#routes/builds_.$id/chat-parameters.js';
 import { useViewContext } from '#routes/builds_.$id/chat-interface-view-context.js';
@@ -305,15 +304,15 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           setChatResize(sizes);
         }}
       >
-        <Allotment.Pane className="rs-left rs-chat z-10" minSize={200} visible={isChatOpen}>
+        <Allotment.Pane className="rs-left z-10" minSize={200} visible={isChatOpen}>
           <ChatHistory isExpanded={isChatOpen} setIsExpanded={setIsChatOpen} />
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-left rs-chat z-10" minSize={200} visible={isExplorerOpen}>
+        <Allotment.Pane className="rs-left z-10" minSize={200} visible={isExplorerOpen}>
           <ChatExplorerTree isExpanded={isExplorerOpen} setIsExpanded={setIsExplorerOpen} />
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-center rs-chat px-2" minSize={416}>
+        <Allotment.Pane className="rs-center px-2" minSize={416}>
           {/* Top-left Content */}
           <div className="absolute top-0 left-2 z-10 flex flex-col gap-2 [&>*]:pointer-events-auto">
             <ChatHistoryTrigger
@@ -399,23 +398,23 @@ export const ChatInterface = memo(function (): React.JSX.Element {
           </div>
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-right rs-chat" minSize={200} visible={isParametersOpen}>
+        <Allotment.Pane className="rs-right" minSize={200} visible={isParametersOpen}>
           <ChatParameters isExpanded={isParametersOpen} setIsExpanded={setIsParametersOpen} />
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-right rs-chat" minSize={400} visible={isEditorOpen}>
+        <Allotment.Pane className="rs-right" minSize={400} visible={isEditorOpen}>
           <ChatEditorLayout isExpanded={isEditorOpen} setIsExpanded={setIsEditorOpen} />
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-right rs-chat" minSize={200} visible={isConverterOpen}>
+        <Allotment.Pane className="rs-right" minSize={200} visible={isConverterOpen}>
           <ChatConverter isExpanded={isConverterOpen} setIsExpanded={setIsConverterOpen} />
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-right rs-chat" minSize={200} visible={isGitOpen}>
+        <Allotment.Pane className="rs-right" minSize={200} visible={isGitOpen}>
           <ChatGit isExpanded={isGitOpen} setIsExpanded={setIsGitOpen} />
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-right rs-chat" minSize={200} visible={isDetailsOpen}>
+        <Allotment.Pane className="rs-right" minSize={200} visible={isDetailsOpen}>
           <ChatDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
         </Allotment.Pane>
       </Allotment>

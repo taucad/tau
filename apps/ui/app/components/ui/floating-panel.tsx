@@ -8,156 +8,62 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.
 
 type Side = 'left' | 'right';
 type TooltipSide = 'left' | 'right' | 'top' | 'bottom';
-type Align = 'start' | 'center' | 'end';
+type Align = 'start' | 'end';
 
-const floatingPanelVariants = cva(
-  cn(
-    'group relative size-full overflow-hidden bg-background',
-    // Size and shape transitions
-  ),
-  {
-    variants: {
-      side: {
-        left: '',
-        right: '',
-      },
-      align: {
-        start: '',
-        center: '',
-        end: '',
-      },
+const floatingPanelTriggerButtonVariants = cva(cn('text-muted-foreground hover:text-foreground'), {
+  variants: {
+    variant: {
+      absolute: cn(
+        'absolute group-data-[state=open]/floating-panel:z-10',
+        'rounded-md group-data-[state=open]/floating-panel:rounded-sm',
+        'size-8 group-data-[state=open]/floating-panel:size-7',
+      ),
+      static: '',
     },
-    compoundVariants: [
-      // Left side origins
-      { side: 'left', align: 'start', class: 'origin-top-left' },
-      { side: 'left', align: 'center', class: 'origin-center-left' },
-      { side: 'left', align: 'end', class: 'origin-bottom-left' },
-      // Right side origins
-      { side: 'right', align: 'start', class: 'origin-top-right' },
-      { side: 'right', align: 'center', class: 'origin-center-right' },
-      { side: 'right', align: 'end', class: 'origin-bottom-right' },
-    ],
-    defaultVariants: {
-      side: 'right',
-      align: 'start',
+    side: {
+      left: '',
+      right: '',
+    },
+    align: {
+      start: '',
+      center: '',
+      end: '',
     },
   },
-);
-
-const floatingPanelTriggerButtonVariants = cva(
-  cn('text-muted-foreground hover:text-foreground', 'transition-all duration-300 ease-in-out'),
-  {
-    variants: {
-      variant: {
-        absolute: cn(
-          'absolute group-data-[state=open]/floating-panel:z-10',
-          'rounded-md group-data-[state=open]/floating-panel:rounded-sm',
-          'size-8 group-data-[state=open]/floating-panel:size-7',
-        ),
-        action: cn(
-          'absolute group-data-[state=open]/floating-panel:z-10',
-          'rounded-md group-data-[state=open]/floating-panel:rounded-sm',
-          'size-8 group-data-[state=open]/floating-panel:size-7',
-        ),
-        static: '',
-      },
-      side: {
-        left: '',
-        right: '',
-      },
-      align: {
-        start: '',
-        center: '',
-        end: '',
-      },
+  compoundVariants: [
+    // Left side positions
+    {
+      variant: 'absolute',
+      side: 'left',
+      align: 'start',
+      class: 'top-0 ml-0.25 mt-0.25 left-0 ',
     },
-    compoundVariants: [
-      // Left side positions
-      {
-        variant: 'absolute',
-        side: 'left',
-        align: 'start',
-        class: '-top-0.25 -left-0.25 group-data-[state=open]:top-0.25 group-data-[state=open]:left-0.25',
-      },
-      {
-        variant: 'absolute',
-        side: 'left',
-        align: 'center',
-        class: 'top-1/2 -translate-y-1/2 -left-0.25 group-data-[state=open]:left-0.25',
-      },
-      {
-        variant: 'absolute',
-        side: 'left',
-        align: 'end',
-        class: '-bottom-0.25 -left-0.25 group-data-[state=open]:bottom-0.25 group-data-[state=open]:left-0.25',
-      },
-      // Right side positions
-      {
-        variant: 'absolute',
-        side: 'right',
-        align: 'start',
-        class: '-top-0.25 -right-0.25 group-data-[state=open]:top-0.25 group-data-[state=open]:right-0.25',
-      },
-      {
-        variant: 'absolute',
-        side: 'right',
-        align: 'center',
-        class: 'top-1/2 -translate-y-1/2 -right-0.25 group-data-[state=open]:right-0.25',
-      },
-      {
-        variant: 'absolute',
-        side: 'right',
-        align: 'end',
-        class: '-bottom-0.25 -right-0.25 group-data-[state=open]:bottom-0.25 group-data-[state=open]:right-0.25',
-      },
-      // Left side positions
-      {
-        variant: 'action',
-        side: 'left',
-        align: 'start',
-        class: '-top-0.25 -right-0.25 group-data-[state=open]:top-0.25 group-data-[state=open]:right-0.25',
-      },
-      {
-        variant: 'action',
-        side: 'left',
-        align: 'center',
-        class: 'top-1/2 -translate-y-1/2 -right-0.25 group-data-[state=open]:right-0.25',
-      },
-      {
-        variant: 'action',
-        side: 'left',
-        align: 'end',
-        class: '-bottom-0.25 -right-0.25 group-data-[state=open]:bottom-0.25 group-data-[state=open]:right-0.25',
-      },
-      // Right side positions
-      {
-        variant: 'action',
-        side: 'right',
-        align: 'start',
-        class: '-top-0.25 -left-0.25 group-data-[state=open]:top-0.25 group-data-[state=open]:left-0.25',
-      },
-      {
-        variant: 'action',
-        side: 'right',
-        align: 'center',
-        class: 'top-1/2 -translate-y-1/2 -left-0.25 group-data-[state=open]:left-0.25',
-      },
-      {
-        variant: 'action',
-        side: 'right',
-        align: 'end',
-        class: '-bottom-0.25 -left-0.25 group-data-[state=open]:bottom-0.25 group-data-[state=open]:left-0.25',
-      },
-    ],
-    defaultVariants: {
+    {
+      variant: 'absolute',
+      side: 'left',
+      align: 'end',
+      class: 'bottom-0 ml-0.25 mb-0.25 left-0  ',
+    },
+    // Right side positions
+    {
       variant: 'absolute',
       side: 'right',
       align: 'start',
+      class: 'top-0 mr-0.25 mt-0.25 right-0',
     },
+    {
+      variant: 'absolute',
+      side: 'right',
+      align: 'end',
+      class: 'bottom-0 mr-0.25 mb-0.25 right-0 ',
+    },
+  ],
+  defaultVariants: {
+    variant: 'absolute',
+    side: 'right',
+    align: 'start',
   },
-);
-
-const floatingPanelContentVariants = cva(cn('flex h-full w-full flex-col bg-sidebar/50 rounded-t-lg'));
+});
 
 const floatingPanelContentHeaderVariants = cva(
   cn(
@@ -268,7 +174,7 @@ function FloatingPanel({
   return (
     <FloatingPanelContext.Provider value={contextValue}>
       <div
-        className={cn('group/floating-panel', floatingPanelVariants({ side, align }), className)}
+        className={cn('group/floating-panel relative size-full overflow-hidden bg-background', className)}
         data-slot="floating-panel"
         data-state={isOpen ? 'open' : 'closed'}
       >
@@ -457,7 +363,7 @@ type FloatingPanelContentBodyProps = {
 
 function FloatingPanelContent({ children, className }: FloatingPanelContentProps): React.JSX.Element {
   return (
-    <div className={cn(floatingPanelContentVariants(), className)} data-slot="floating-panel-content">
+    <div className={cn('flex size-full flex-col bg-sidebar/50', className)} data-slot="floating-panel-content">
       {children}
     </div>
   );

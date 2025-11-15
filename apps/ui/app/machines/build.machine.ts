@@ -117,7 +117,7 @@ type BuildEventInternal =
   | { type: 'setEnableFilePreview'; enabled: boolean }
   | { type: 'loadModel' }
   | { type: 'createFile'; path: string; content: Uint8Array }
-  | { type: 'updateFile'; path: string; content: Uint8Array }
+  | { type: 'updateFile'; path: string; content: Uint8Array; source: 'user' | 'external' }
   | { type: 'renameFile'; oldPath: string; newPath: string }
   | { type: 'deleteFile'; path: string }
   | { type: 'fileOpened'; path: string };
@@ -135,7 +135,7 @@ type BuildEmitted =
   | { type: 'error'; error: Error }
   | { type: 'buildUpdated'; build: Build }
   | { type: 'fileCreated'; path: string; content: Uint8Array }
-  | { type: 'fileUpdated'; path: string; content: Uint8Array }
+  | { type: 'fileUpdated'; path: string; content: Uint8Array; source: 'user' | 'external' }
   | { type: 'fileDeleted'; path: string }
   | { type: 'activeChatChanged'; chat: Chat };
 
@@ -518,6 +518,14 @@ export const buildMachine = setup({
           }
         }),
       );
+
+      // Emit fileUpdated event with source for external listeners
+      enqueue.emit({
+        type: 'fileUpdated' as const,
+        path: event.path,
+        content: event.content,
+        source: event.source,
+      });
 
       // Determine which file to send to CAD based on enableFilePreview
       const { enableFilePreview } = context;

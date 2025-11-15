@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState, useMemo } from 'react';
+import { memo, useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
@@ -52,7 +52,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
     [activeFile],
   );
 
-  // Reset force open when file changes
+  // Reset force open when file path changes (switching files)
   useEffect(() => {
     setForceOpenBinary(false);
   }, [activeFile?.path]);
@@ -79,6 +79,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
         type: 'updateFile',
         path: activeFile.path,
         content: encodeTextFile(value ?? ''),
+        source: 'user',
       });
     },
     [activeFile, buildRef],
@@ -96,6 +97,53 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       void registerMonaco(monaco);
     }
   }, [monaco]);
+
+  // Listen to external file changes from build machine and update Monaco models
+  useEffect(() => {
+    if (!monaco) {
+      return undefined;
+    }
+
+    // Subscribe to fileUpdated events emitted from build machine
+    const subscription = buildRef.on('fileUpdated', ({ path, content, source }) => {
+      // Only handle external updates (AI edits, not user typing)
+      if (source !== 'external') {
+        return;
+      }
+
+      // Create URI for the file path
+      const uri = monaco.Uri.parse(path);
+      const model = monaco.editor.getModel(uri);
+
+      // Only update if a Monaco model exists for this file (it's open in a tab)
+      if (!model) {
+        return;
+      }
+
+      // Decode the content
+      const newContent = decodeTextFile(content);
+      const currentModelContent = model.getValue();
+
+      // Only update if Monaco's content is different from the external update
+      if (currentModelContent !== newContent) {
+        // Update the model content while preserving undo/redo
+        model.pushEditOperations(
+          [],
+          [
+            {
+              range: model.getFullModelRange(),
+              text: newContent,
+            },
+          ],
+          () => null,
+        );
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [monaco, buildRef]);
 
   const handleValidate = useCallback(() => {
     const errors = monaco?.editor.getModelMarkers({});
@@ -131,8 +179,9 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
           <CodeEditor
             loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
             className="h-full bg-background"
-            language={activeFile.language}
-            value={editorContent}
+            defaultLanguage={activeFile.language}
+            defaultValue={editorContent}
+            path={activeFile.path}
             onChange={handleCodeChange}
             onValidate={handleValidate}
           />

@@ -183,6 +183,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
             type: 'updateFile',
             path: mainFilePath,
             content: encodeTextFile(result.editedContent),
+            source: 'external',
           });
         }
       }

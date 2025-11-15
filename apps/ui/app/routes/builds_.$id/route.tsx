@@ -177,6 +177,7 @@ function ChatWithProvider() {
                   type: 'updateFile',
                   path: mainFilePath,
                   content: encodeTextFile(result.editedContent),
+                  source: 'external',
                 });
 
                 // Wait for CAD processing to complete

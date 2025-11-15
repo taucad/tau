@@ -198,13 +198,13 @@ export function ChatParametersNumber({
   ...properties
 }: ChatParametersNumberProps): React.JSX.Element {
   // Local state to track slider value during dragging for visual feedback
-  const [sliderValue, setSliderValue] = React.useState<number>(value);
+  const [localValue, setLocalValue] = React.useState<number>(value);
   const [isDragging, setIsDragging] = React.useState<boolean>(false);
 
   // Sync local state when external value changes, but avoid clobbering while dragging
   React.useEffect(() => {
     if (!isDragging) {
-      setSliderValue(value);
+      setLocalValue(value);
     }
   }, [value, isDragging]);
 
@@ -228,7 +228,7 @@ export function ChatParametersNumber({
     <div className="flex w-full flex-row items-center gap-2">
       <Slider
         variant="inset"
-        value={[sliderValue]}
+        value={[localValue]}
         min={min ?? calculateSliderMin(defaultValue)}
         max={max ?? calculateSliderMax(defaultValue)}
         step={effectiveStep}
@@ -236,7 +236,7 @@ export function ChatParametersNumber({
         className="[&_[data-slot=slider-track]]:h-7 md:[&_[data-slot=slider-track]]:h-4.5"
         onValueChange={([newValue]) => {
           // Update local state for visual feedback during dragging
-          setSliderValue(Number(newValue));
+          setLocalValue(Number(newValue));
           setIsDragging(true);
         }}
         onValueCommit={([newValue]) => {
@@ -246,7 +246,7 @@ export function ChatParametersNumber({
         }}
       />
       <ChatParametersInputNumber
-        value={value}
+        value={localValue}
         descriptor={descriptor}
         className="h-7 w-24 bg-background"
         disabled={disabled}

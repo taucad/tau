@@ -1,6 +1,5 @@
 import { supportedExportFormats } from '@taucad/converter';
 import type { OutputFormat } from '@taucad/converter';
-import { X } from 'lucide-react';
 import { Checkbox } from '#components/ui/checkbox.js';
 import { Label } from '#components/ui/label.js';
 import { Button } from '#components/ui/button.js';

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState, useMemo, useRef } from 'react';
+import { memo, useCallback, useEffect, useState, useMemo } from 'react';
 import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
@@ -190,7 +190,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
         <EmptyItems>
           <FileCode className="mb-4 size-12 stroke-1 text-muted-foreground" />
           <p className="text-base font-medium">No file selected</p>
-          <p className="mt-1 text-xs text-muted-foreground/70">Select a file from the tree to start editing</p>
+          <p className="mt-1 text-xs text-muted-foreground/70">Select a file to start editing</p>
         </EmptyItems>
       )}
     </div>

@@ -15,6 +15,9 @@ jobs:
   review_app_ui:
     name: Deploy UI Review App
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
     outputs:
       url: ${{ steps.deploy.outputs.url }}
     # Only run one deployment at a time per PR for UI.
@@ -48,6 +51,9 @@ jobs:
   review_app_api:
     name: Deploy API Review App
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
     outputs:
       url: ${{ steps.deploy.outputs.url }}
     # Only run one deployment at a time per PR for API.

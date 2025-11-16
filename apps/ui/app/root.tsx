@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import type { Model } from '@taucad/types';
-import allotmentStylesUrl from 'allotment/dist/style.css?url';
 import { getEnvironment, metaConfig } from '#config.js';
 import { Page } from '#components/layout/page.js';
 import { themeSessionResolver } from '#sessions.server.js';
@@ -23,12 +22,7 @@ import { globalStylesLinks } from '#styles/global.styles.js';
 import type { Handle } from '#types/matches.types.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
 
-export const links: LinksFunction = () => [
-  ...globalStylesLinks,
-  ...webManifestLinks,
-  ...markdownViewerLinks,
-  { rel: 'stylesheet', href: allotmentStylesUrl },
-];
+export const links: LinksFunction = () => [...globalStylesLinks, ...webManifestLinks, ...markdownViewerLinks];
 
 export const meta: MetaFunction = () => [
   { title: metaConfig.name },

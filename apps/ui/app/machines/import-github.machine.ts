@@ -91,7 +91,8 @@ const downloadZipActor = fromPromise<
     throw new Error(`GitHub download failed: ${response.status} ${response.statusText}`);
   }
 
-  const contentLength = Number(response.headers.get('content-length') ?? 0);
+  const contentLengthHeader = response.headers.get('content-length');
+  const contentLength = contentLengthHeader ? Number(contentLengthHeader) : undefined;
   const reader = response.body?.getReader();
 
   if (!reader) {
@@ -107,12 +108,13 @@ const downloadZipActor = fromPromise<
     receivedLength += result.value.length;
 
     // Send progress update - throttling handled by state machine
-    const total = contentLength > 0 ? contentLength : receivedLength;
+    // Use -1 to indicate unknown total size (for indeterminate progress UI)
+    const total = contentLength ?? -1;
     input.onProgress(receivedLength, total);
   }
 
   // Send final progress update
-  const finalTotal = contentLength > 0 ? contentLength : receivedLength;
+  const finalTotal = contentLength ?? receivedLength;
   input.onProgress(receivedLength, finalTotal);
 
   // Combine chunks into a single Uint8Array

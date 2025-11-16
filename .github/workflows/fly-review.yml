@@ -38,6 +38,13 @@ jobs:
           region: syd
           config: apps/ui/fly.toml
 
+      - name: Comment on Pull Request
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          GITHUB_TOKEN: ${{ env.GH_TOKEN }} # Required for commenting on pull requests for private repos
+          message: |
+            Fly Preview UI URL :balloon: : ${{ steps.deploy.outputs.url }}
+
   review_app_api:
     name: Deploy API Review App
     runs-on: ubuntu-latest
@@ -61,3 +68,10 @@ jobs:
         with:
           region: syd
           config: apps/api/fly.toml
+
+      - name: Comment on Pull Request
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          GITHUB_TOKEN: ${{ env.GH_TOKEN }} # Required for commenting on pull requests for private repos
+          message: |
+            Fly Preview API URL :octopus: : ${{ steps.deploy.outputs.url }}

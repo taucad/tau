@@ -24,7 +24,35 @@ export type JscadParameterDefinition = {
 /**
  * Convert JSCAD parameter definitions to default parameters object
  *
- * Extracts the initial/default values from parameter definitions
+ * Extracts the initial/default values from JSCAD parameter definitions
+ * and converts them to a simple key-value object. This is essential for
+ * establishing baseline parameters when executing JSCAD scripts.
+ *
+ * JSCAD parameter definitions follow a specific structure where each parameter
+ * can have an `initial` or `default` field specifying its default value.
+ * This function prioritizes `initial` over `default` if both are present.
+ *
+ * @param definitions - Array of JSCAD parameter definitions from getParameterDefinitions()
+ * @returns Object mapping parameter names to their default values
+ *
+ * @example
+ * ```typescript
+ * const definitions = [
+ *   { name: 'width', caption: 'Width:', type: 'float', initial: 10 },
+ *   { name: 'height', caption: 'Height:', type: 'int', initial: 20 },
+ *   { name: 'color', caption: 'Color:', type: 'text', default: 'red' }
+ * ];
+ *
+ * const defaults = convertParameterDefinitionsToDefaults(definitions);
+ * // Returns:
+ * // {
+ * //   width: 10,
+ * //   height: 20,
+ * //   color: 'red'
+ * // }
+ * ```
+ *
+ * @see https://openjscad.xyz/docs/tutorial-10_parameters.html
  */
 export function convertParameterDefinitionsToDefaults(
   definitions: JscadParameterDefinition[],
@@ -43,6 +71,23 @@ export function convertParameterDefinitionsToDefaults(
 
 /**
  * Convert a single JSCAD parameter definition to JSON Schema property
+ *
+ * Maps JSCAD parameter types to JSON Schema equivalents, handling type conversions
+ * and constraint mapping (min, max, step). Supports all JSCAD parameter types:
+ * - Numeric types: int, float, number, slider
+ * - Text types: text
+ * - Choice types: choice, checkbox
+ * - Organizational types: group (skipped)
+ *
+ * For choice parameters, this uses the `enum` keyword which is standard JSON Schema.
+ * The `captions` field (for choice labels) is not included as it's not part of
+ * standard JSON Schema, but would be handled by schema-aware UI libraries.
+ *
+ * @param definition - Single JSCAD parameter definition
+ * @returns JSON Schema7 property object for the parameter
+ *
+ * @internal This is a helper function used by convertParameterDefinitionsToJsonSchema.
+ *           Type inference is used as a fallback when no explicit type is specified.
  */
 // eslint-disable-next-line complexity -- JSCAD has many parameter types to handle
 function convertParameterDefinitionToJsonSchemaProperty(definition: JscadParameterDefinition): JSONSchema7 {

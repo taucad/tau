@@ -4,6 +4,37 @@ import { Document, NodeIO } from '@gltf-transform/core';
 
 /**
  * Extract triangulated mesh data from JSCAD shapes
+ *
+ * Processes JSCAD geometries (geom3 objects) and converts them into WebGL-compatible
+ * mesh data with vertex positions, surface normals, and triangle indices. This function
+ * handles multiple shapes and performs polygon extraction and triangulation.
+ *
+ * Key operations:
+ * 1. Extracts polygons from each JSCAD geom3 object using geometries.geom3.toPolygons()
+ * 2. Calculates smooth surface normals using cross products of polygon edges
+ * 3. Triangulates polygons using fan triangulation (simple and fast method)
+ * 4. Flattens data into Float32Array-compatible formats for GPU rendering
+ *
+ * The function is robust to invalid shapes (skips them with try-catch and warning).
+ * Polygons with fewer than 3 vertices are skipped as they cannot form triangles.
+ * All three vertices of each triangle share the same normal (flat shading).
+ *
+ * @param shapes - Array of JSCAD geometry objects (typically geom3 type)
+ * @returns Object containing flattened mesh data:
+ *          - vertices: Flat array of x,y,z coordinates [x1,y1,z1,x2,y2,z2,...]
+ *          - normals: Flat array of normal vectors (one per vertex) [nx1,ny1,nz1,...]
+ *          - indices: Triangle indices pointing into vertex array [v0,v1,v2,v3,v4,v5,...]
+ *
+ * @internal This is a helper function. For public API, see jscadToGltf().
+ *
+ * @example
+ * ```typescript
+ * // JSCAD shapes from user code execution
+ * const { vertices, normals, indices } = extractMeshDataFromJscadShapes([sphere, cube]);
+ * // vertices: [0, 0, 0, 1, 0, 0, 1, 1, 0, ...]  (flat XYZ coordinates)
+ * // normals: [0, 0, 1, 0, 0, 1, 0.707, 0.707, 0, ...]  (normalized direction vectors)
+ * // indices: [0, 1, 2, 3, 4, 5, ...]  (triangle vertex indices)
+ * ```
  */
 function extractMeshDataFromJscadShapes(shapes: unknown[]): {
   vertices: number[];
@@ -12,12 +43,30 @@ function extractMeshDataFromJscadShapes(shapes: unknown[]): {
 } {
   // Collect all polygons from all shapes
   const allPolygons: Array<{ vertices: maths.vec3.Vec3[] }> = [];
-  for (const singleShape of shapes) {
+  for (const [index, singleShape] of shapes.entries()) {
     try {
       const polygons = geometries.geom3.toPolygons(singleShape as geometries.geom3.Geom3);
       allPolygons.push(...polygons);
-    } catch {
-      // Skip if not a valid geom3
+    } catch (error) {
+      // Log warning when a shape fails to convert
+      let shapeType: string;
+      if (singleShape === null) {
+        shapeType = 'null';
+      } else if (singleShape === undefined) {
+        shapeType = 'undefined';
+      } else if (typeof singleShape === 'object') {
+        // Handle objects (including arrays, typed arrays, etc.)
+        const ctorName = (singleShape as Record<string, unknown>).constructor.name;
+        shapeType = ctorName ? String(ctorName) : 'Object';
+      } else {
+        shapeType = typeof singleShape;
+      }
+
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      console.warn(
+        `Failed to convert shape at index ${index} to geom3 polygons. Shape type: ${shapeType}. ${errorMessage}`,
+      );
       continue;
     }
   }
@@ -83,6 +132,25 @@ function extractMeshDataFromJscadShapes(shapes: unknown[]): {
 
 /**
  * Create a glTF primitive from JSCAD mesh data
+ *
+ * Constructs a complete glTF primitive (mesh component) from pre-processed vertex data.
+ * This includes geometry attributes (positions, normals), indices, and material properties.
+ *
+ * Material setup:
+ * - Double-sided rendering enabled for robustness (handles reversed normals)
+ * - Metallic: 0.1 (slightly reflective, mostly matte)
+ * - Roughness: 0.7 (matte surface)
+ * - Base color: Light gray [0.8, 0.8, 0.8, 1.0] for neutral appearance
+ *
+ * Primitive mode 4 specifies TRIANGLES (each 3 indices = 1 triangle).
+ *
+ * @param document - glTF Document to create mesh components within
+ * @param vertices - Flat array of vertex positions [x1,y1,z1,x2,y2,z2,...]
+ * @param normals - Flat array of normals [nx1,ny1,nz1,nx2,ny2,nz2,...]
+ * @param indices - Flat array of triangle indices [v0,v1,v2,v3,v4,v5,...]
+ * @returns Configured glTF Primitive ready to be added to a Mesh
+ *
+ * @internal This is a helper function. For public API, see jscadToGltf().
  */
 function createPrimitiveFromJscadMesh(
   document: Document,
@@ -117,6 +185,21 @@ function createPrimitiveFromJscadMesh(
 
 /**
  * Create a GLTF document from JSCAD shapes
+ *
+ * Orchestrates the complete conversion pipeline from JSCAD geometries to a glTF document.
+ * This function:
+ * 1. Creates a new glTF Document with a buffer
+ * 2. Creates a scene and extracts mesh data from all shapes
+ * 3. Creates a mesh with a primitive containing the geometry
+ * 4. Adds the mesh to the scene
+ *
+ * If no valid geometry is extracted (empty vertices or indices), the scene contains no mesh
+ * but the document is still valid (which jscadToGltf handles by checking for empty geometry).
+ *
+ * @param shapes - Array of JSCAD geometry objects to convert
+ * @returns Complete glTF Document ready for serialization to GLB format
+ *
+ * @internal This is a helper function. For public API, see jscadToGltf().
  */
 function createGltfDocumentFromJscadShapes(shapes: unknown[]): Document {
   const document = new Document();
@@ -143,8 +226,40 @@ function createGltfDocumentFromJscadShapes(shapes: unknown[]): Document {
 /**
  * Convert JSCAD geometry to GLTF Blob for rendering
  *
- * @param shape - JSCAD geom2, geom3 object, or array of geometries
- * @returns GLTF blob
+ * Public API for converting JSCAD geometries into renderable glTF format (GLB binary).
+ * This is the primary integration point between the JSCAD CAD engine and the 3D viewer.
+ *
+ * Conversion pipeline:
+ * 1. Normalizes input to array format (single shape -> [shape])
+ * 2. Creates glTF document with mesh data extraction, triangulation, and normals
+ * 3. Serializes to GLB (binary glTF) format for efficient transmission and storage
+ *
+ * The function is robust to:
+ * - Single shapes or arrays of shapes
+ * - Invalid or degenerate geometry (silently skipped with warnings)
+ * - Empty geometry (returns valid GLB with empty scene)
+ *
+ * Material properties are set to sensible defaults (light gray, matte, double-sided)
+ * suitable for preview visualization. For production export, use specialized exporters.
+ *
+ * @param shape - JSCAD geometry object(s):
+ *               - Single geom3/geom2 object
+ *               - Array of geometry objects
+ *               - Any shape produced by @jscad/modeling functions
+ * @returns Promise resolving to GLB Blob (binary glTF format)
+ *          Type: 'model/gltf-binary'
+ *
+ * @throws May reject if glTF serialization fails (rare, typically only for memory issues)
+ *
+ * @example
+ * ```typescript
+ * import { box } from '@jscad/modeling/primitives';
+ * import { jscadToGltf } from '#components/geometry/kernel/jscad/jscad-to-gltf.js';
+ *
+ * const shape = box({ size: 10 });
+ * const gltfBlob = await jscadToGltf(shape);
+ * // Use gltfBlob with Three.js or other WebGL viewers
+ * ```
  */
 export async function jscadToGltf(shape: unknown): Promise<Blob> {
   // Handle array of geometries

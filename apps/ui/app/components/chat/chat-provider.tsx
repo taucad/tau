@@ -1141,7 +1141,7 @@ function ChatSyncWrapper({
         ...feedback,
       };
     },
-    onFinish(...args) {
+    onFinish(..._args) {
       // Queue sync instead of immediate sync - XState will debounce
       queueSyncChatState();
     },
@@ -1149,7 +1149,7 @@ function ChatSyncWrapper({
       console.error('Chat error:', args);
       queueSyncChatState();
     },
-    onResponse(...args) {
+    onResponse(..._args) {
       queueSyncChatState();
     },
   });

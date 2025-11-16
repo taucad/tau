@@ -37,7 +37,6 @@ jobs:
         with:
           region: syd
           config: apps/ui/fly.toml
-          dockerfile: apps/ui/Dockerfile
 
   review_app_api:
     name: Deploy API Review App
@@ -62,4 +61,3 @@ jobs:
         with:
           region: syd
           config: apps/api/fly.toml
-          dockerfile: apps/api/Dockerfile

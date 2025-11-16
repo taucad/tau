@@ -70,8 +70,6 @@ function createPrimitiveFromReplicadShape(
       console.warn('Failed to parse color:', geometry.color, error);
       throw new Error('Failed to parse color', { cause: error });
     }
-  } else {
-    console.log('No color specified for shape, using default light gray');
   }
 
   // Create material

@@ -43,7 +43,6 @@ export const cameraCapabilityMachine = setup({
 
       try {
         reset?.(options);
-        console.log('Camera reset completed');
         sendBack({ type: 'cameraResetCompleted' });
       } catch (error) {
         console.error('Camera reset failed:', error);

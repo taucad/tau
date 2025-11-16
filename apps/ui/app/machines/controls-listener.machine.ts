@@ -118,7 +118,6 @@ const controlsListenerLogic = fromCallback<ControlsListenerEvent, ControlsListen
     // Listen for commands from parent machine
     receive((event) => {
       if (event.type === 'stopListening') {
-        console.log('Controls listener stopping');
         isListening = false;
         removeListeners();
       }

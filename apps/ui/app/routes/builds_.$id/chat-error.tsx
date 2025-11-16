@@ -24,7 +24,6 @@ export const ChatError = memo(function ({
   }
 
   let errorMessage: string;
-  console.log(error);
 
   try {
     errorMessage = JSON.stringify(JSON.parse(error.message), null, 2);

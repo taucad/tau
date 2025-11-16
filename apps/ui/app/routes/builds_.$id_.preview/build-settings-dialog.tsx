@@ -45,7 +45,6 @@ export function BuildSettingsDialog(): React.JSX.Element {
 
   const handleDeleteConfirm = useCallback(() => {
     // TODO: Implement delete build functionality
-    console.log('Delete build');
     setIsDeleteDialogOpen(false);
     setIsOpen(false);
   }, []);

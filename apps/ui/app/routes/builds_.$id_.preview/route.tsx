@@ -125,7 +125,7 @@ function BuildPreviewContent(): React.JSX.Element {
     [exportActorRef, build?.name],
   );
 
-  const handleDownloadZip = useCallback(async () => {
+  const handleDownloadZip = useCallback(async (): Promise<void> => {
     if (!build) {
       return;
     }

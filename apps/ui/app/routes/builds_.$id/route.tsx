@@ -135,8 +135,6 @@ function ChatWithProvider() {
   // Tool call handler that integrates with the new architecture
   const onToolCall = useCallback(
     async ({ toolCall }: { toolCall: { toolName: string; args: unknown } }) => {
-      console.log('Tool call received:', toolCall);
-
       if (toolCall.toolName === 'edit_file') {
         const toolCallArgs = toolCall.args as { targetFile: string; codeEdit: string };
 

@@ -32,9 +32,6 @@ export function binaryToUuid(binaryData: Uint8Array | BSONBinary | string): stri
 
   // Ensure we have exactly 16 bytes (128 bits) for a UUID
   if (buffer.length !== 16) {
-    // For debugging
-    console.log('Buffer length:', buffer.length);
-    console.log('Buffer content:', [...buffer]);
     console.error('UUID must be exactly 16 bytes');
     return '';
   }

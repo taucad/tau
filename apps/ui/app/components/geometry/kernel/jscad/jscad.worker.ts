@@ -136,7 +136,7 @@ function createJscadKernelError(error: unknown, fallbackMessage: string): Kernel
  * - Supports parameter extraction from getParameterDefinitions()
  */
 class JscadWorker extends KernelWorker {
-  protected static override readonly supportedExportFormats: ExportFormat[] = ['stl', 'stl-binary', 'glb', 'gltf'];
+  protected static override readonly supportedExportFormats: ExportFormat[] = ['glb', 'gltf'];
   private shapesMemory: Record<string, unknown[]> = {};
   private geometryAccessOrder: string[] = [];
   private get maxStoredGeometries() {
@@ -368,15 +368,57 @@ class JscadWorker extends KernelWorker {
     }
   }
 
-  public override async exportGeometry(_fileType: ExportFormat): Promise<ExportGeometryResult> {
-    // With no computed geometry in memory, exporting cannot proceed.
-    return createKernelError({
-      message: 'No geometry available to export. Compute geometry first.',
-      startLineNumber: 0,
-      startColumn: 0,
-      stack: undefined,
-      type: 'runtime',
-    });
+  public override async exportGeometry(
+    fileType: ExportFormat,
+    geometryId = 'defaultGeometry',
+  ): Promise<ExportGeometryResult> {
+    try {
+      // Check if geometry exists in memory
+      const shapes = this.shapesMemory[geometryId];
+      if (!shapes || shapes.length === 0) {
+        return createKernelError({
+          message: `Geometry ${geometryId} not computed yet. Please compute geometry before exporting.`,
+          startLineNumber: 0,
+          startColumn: 0,
+          type: 'runtime',
+        });
+      }
+
+      // Handle GLTF/GLB export by converting shapes to GLTF
+      if (fileType === 'glb' || fileType === 'gltf') {
+        const gltfBlobs = await Promise.all(shapes.map(async (shape) => jscadToGltf(shape)));
+
+        // Merge all GLTF blobs into one (for simplicity, just return the first one)
+        // In a more sophisticated implementation, you could merge multiple geometries
+        const blob = gltfBlobs[0];
+        if (!blob) {
+          return createKernelError({
+            message: 'Failed to generate GLTF from computed geometry',
+            startLineNumber: 0,
+            startColumn: 0,
+            type: 'runtime',
+          });
+        }
+
+        return createKernelSuccess([
+          {
+            blob,
+            name: fileType === 'glb' ? 'model.glb' : 'model.gltf',
+          },
+        ]);
+      }
+
+      // STL and STL-binary formats are not yet implemented for JSCAD
+      // This would require installing and using @jscad/stl-serializer
+      return createKernelError({
+        message: `Export format '${fileType}' is not yet implemented for JSCAD. Only 'glb' and 'gltf' formats are currently supported.`,
+        startLineNumber: 0,
+        startColumn: 0,
+        type: 'runtime',
+      });
+    } catch (error) {
+      return createJscadKernelError(error, 'Failed to export JSCAD geometry');
+    }
   }
 
   /**

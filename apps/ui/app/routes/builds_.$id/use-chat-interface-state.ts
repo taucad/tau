@@ -5,21 +5,38 @@ import type { chatTabs } from '#routes/builds_.$id/chat-interface-nav.js';
 import { useViewContext } from '#routes/builds_.$id/chat-interface-view-context.js';
 
 /**
+ * Minimum panel size constants for the chat interface layout (in pixels)
+ * Used for both default sizes and minimum constraints on panes
+ */
+
+/** Minimum width for standard side panels (Chat History, Explorer, Parameters, Converter, Git, Details) */
+export const panelMinSizeStandard = 200;
+
+/** Minimum width for the Editor panel (larger due to KCL code editing requirements) */
+export const panelMinSizeEditor = 400;
+
+/** Minimum width for the Viewer/center panel (main 3D CAD visualization area) */
+export const panelMinSizeViewer = 416;
+
+/** Default width for the Viewer/center panel (main 3D CAD visualization area) */
+export const panelSizeViewer = 420;
+
+/**
  * Default panel sizes for the chat interface layout (in pixels)
  * Maps to the pane order: [ChatHistory, Explorer, Viewer, Parameters, Editor, Converter, Git, Details]
  */
 const defaultChatInterfaceSizes = [
   // Left-side panels
-  200, // Chat History panel: displays conversation history and file navigation
-  200, // Explorer panel: shows project file structure and navigation tree
+  panelMinSizeStandard, // Chat History panel: displays conversation history and file navigation
+  panelMinSizeStandard, // Explorer panel: shows project file structure and navigation tree
   // Center panel
-  420, // Viewer panel: main 3D CAD visualization and content area
+  panelSizeViewer, // Viewer panel: main 3D CAD visualization and content area
   // Right-side panels
-  200, // Parameters panel: LLM and generation parameters configuration
-  200, // Editor panel: KCL code editor for design modifications (uses minSize={400} in layout)
-  200, // Converter panel: file format conversion utilities
-  200, // Git panel: version control and git operations
-  200, // Details panel: additional object details and metadata
+  panelMinSizeStandard, // Parameters panel: LLM and generation parameters configuration
+  panelMinSizeStandard, // Editor panel: KCL code editor for design modifications
+  panelMinSizeStandard, // Converter panel: file format conversion utilities
+  panelMinSizeStandard, // Git panel: version control and git operations
+  panelMinSizeStandard, // Details panel: additional object details and metadata
 ];
 
 export type ChatInterfaceState = {

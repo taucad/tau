@@ -12,7 +12,13 @@ import { ChatDetails, ChatDetailsTrigger } from '#routes/builds_.$id/chat-detail
 import { ChatConverter, ChatConverterTrigger } from '#routes/builds_.$id/chat-converter.js';
 import { ChatGit, ChatGitTrigger } from '#routes/builds_.$id/chat-git.js';
 import { cn } from '#utils/ui.utils.js';
-import { useChatInterfaceState, usePanePositionObserver } from '#routes/builds_.$id/use-chat-interface-state.js';
+import {
+  useChatInterfaceState,
+  usePanePositionObserver,
+  panelMinSizeStandard,
+  panelMinSizeEditor,
+  panelMinSizeViewer,
+} from '#routes/builds_.$id/use-chat-interface-state.js';
 import { ChatInterfaceStatus } from '#routes/builds_.$id/chat-interface-status.js';
 import { ChatInterfaceGraphics } from '#routes/builds_.$id/chat-interface-graphics.js';
 import { isBrowser } from '#constants/browser.constants.js';
@@ -103,15 +109,15 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
           setChatResize(sizes);
         }}
       >
-        <Allotment.Pane className="rs-left z-10" minSize={200} visible={isChatOpen}>
+        <Allotment.Pane className="rs-left z-10" minSize={panelMinSizeStandard} visible={isChatOpen}>
           <ChatHistory isExpanded={isChatOpen} setIsExpanded={setIsChatOpen} />
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-left z-10" minSize={200} visible={isExplorerOpen}>
+        <Allotment.Pane className="rs-left z-10" minSize={panelMinSizeStandard} visible={isExplorerOpen}>
           <ChatExplorerTree isExpanded={isExplorerOpen} setIsExpanded={setIsExplorerOpen} />
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-center px-2" minSize={416}>
+        <Allotment.Pane className="rs-center px-2" minSize={panelMinSizeViewer}>
           {/* Top-left Content */}
           <div className="absolute top-0 left-2 z-10 flex flex-col gap-2 [&>*]:pointer-events-auto">
             <ChatHistoryTrigger
@@ -197,23 +203,23 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
           </div>
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-right" minSize={200} visible={isParametersOpen}>
+        <Allotment.Pane className="rs-right" minSize={panelMinSizeStandard} visible={isParametersOpen}>
           <ChatParameters isExpanded={isParametersOpen} setIsExpanded={setIsParametersOpen} />
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-right" minSize={400} visible={isEditorOpen}>
+        <Allotment.Pane className="rs-right" minSize={panelMinSizeEditor} visible={isEditorOpen}>
           <ChatEditorLayout isExpanded={isEditorOpen} setIsExpanded={setIsEditorOpen} />
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-right" minSize={200} visible={isConverterOpen}>
+        <Allotment.Pane className="rs-right" minSize={panelMinSizeStandard} visible={isConverterOpen}>
           <ChatConverter isExpanded={isConverterOpen} setIsExpanded={setIsConverterOpen} />
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-right" minSize={200} visible={isGitOpen}>
+        <Allotment.Pane className="rs-right" minSize={panelMinSizeStandard} visible={isGitOpen}>
           <ChatGit isExpanded={isGitOpen} setIsExpanded={setIsGitOpen} />
         </Allotment.Pane>
 
-        <Allotment.Pane className="rs-right" minSize={200} visible={isDetailsOpen}>
+        <Allotment.Pane className="rs-right" minSize={panelMinSizeStandard} visible={isDetailsOpen}>
           <ChatDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
         </Allotment.Pane>
       </Allotment>

@@ -31,7 +31,6 @@ export function ChatInterfaceGraphicsMeasure(): React.JSX.Element {
       hoveredMeasurementId: hoveredId,
     };
   });
-  console.log(measurements);
 
   const sorted = useMemo(() => {
     // Pinned first, then newest first (by id timestamp suffix)

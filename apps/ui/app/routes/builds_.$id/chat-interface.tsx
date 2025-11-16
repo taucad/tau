@@ -210,10 +210,8 @@ export const ChatInterface = memo(function (): React.JSX.Element {
             'transition-[padding-top] duration-200 ease-in-out',
 
             // Make only the top of the floating panel rounded.
-            '[&_[data-slot=floating-panel]]:rounded-none',
             '[&_[data-slot=floating-panel]]:rounded-t-lg',
-            '[&_[data-slot=floating-panel]]:border-b-0',
-            '[&_[data-slot=floating-panel]]:h-full',
+            '[&_[data-slot=floating-panel]]:border-t',
             '[&_[data-slot=floating-panel]]:pointer-events-auto',
 
             // Make sure the content is padded to the bottom of the floating panel.

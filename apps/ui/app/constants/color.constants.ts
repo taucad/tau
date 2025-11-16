@@ -12,3 +12,9 @@ export const hueCssVariable = '--hue-primary';
 export const defaultHue = 180;
 export const defaultLightness = 0.5719;
 export const defaultChroma = 0.1898;
+
+export const axesColors = {
+  x: 'oklch(0.7 0.12 22.5)',
+  y: 'oklch(0.7 0.12 135)',
+  z: 'oklch(0.7 0.12 255)',
+};

@@ -12,20 +12,74 @@
 import { init, parse } from 'es-module-lexer';
 import type { ImportSpecifier } from 'es-module-lexer';
 import type { CadModuleExports } from '@taucad/types';
+import * as jscadModeling from '@jscad/modeling';
+import * as replicad from 'replicad';
+import * as zod from 'zod/v4';
 import { hashCode } from '#utils/crypto.utils.js';
 
-// Module cache
+// Module cache - keyed by both code hash and active modules to prevent cross-kernel contamination
 const moduleCache = new Map<string, CadModuleExports>();
 
-// Module registry (singleton modules pre-loaded in worker scope)
-const moduleRegistry: Record<string, unknown> = {
-  // These are instantiated in the worker scope
-  // @ts-expect-error - globalThis is not typed
-  replicad: globalThis.replicad,
-  // @ts-expect-error - globalThis is not typed
-  zod: globalThis.zod,
-  // Add more modules here
+/**
+ * Register kernel modules in globalThis in an idempotent way.
+ * This avoids cross-kernel race conditions when switching kernels.
+ */
+export function registerKernelModules(): void {
+  const g = globalThis as unknown as {
+    replicad?: unknown;
+    zod?: unknown;
+    jscadModeling?: unknown;
+  };
+
+  g.replicad ??= replicad;
+  g.zod ??= zod;
+  g.jscadModeling ??= jscadModeling;
+}
+
+// Module registry getter function (lazy evaluation to support runtime injection)
+// This allows workers to inject modules into globalThis after the VM module loads
+const getModuleRegistry = (): Record<string, unknown> => {
+  const g = globalThis as unknown as {
+    replicad?: unknown;
+    zod?: unknown;
+    jscadModeling?: unknown;
+  };
+
+  return {
+    // These are instantiated in the worker scope
+    replicad: g.replicad,
+    zod: g.zod,
+    // Allow JSCAD worker to reuse the VM and inject @jscad/modeling at runtime
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- scoped module name
+    '@jscad/modeling': g.jscadModeling,
+    // Add more modules here
+  };
 };
+
+/**
+ * Get active kernel identifier based on which globals are defined
+ * This ensures cache isolation between different kernels
+ */
+function getActiveKernelIdentifier(): string {
+  const registry = getModuleRegistry();
+  const activeModules: string[] = [];
+
+  for (const [moduleName, moduleValue] of Object.entries(registry)) {
+    if (moduleValue !== undefined) {
+      activeModules.push(moduleName);
+    }
+  }
+
+  // Sort to ensure consistent cache keys
+  return activeModules.sort().join('+');
+}
+
+const moduleGlobalFromModuleName = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- scoped module name.
+  '@jscad/modeling': 'jscadModeling',
+  replicad: 'replicad',
+  zod: 'zod',
+} as const;
 
 // Utility for detecting bare imports
 function isBareSpecifier(specifier: string): boolean {
@@ -118,6 +172,7 @@ async function rewriteImports(code: string): Promise<string> {
       continue;
     }
 
+    const moduleRegistry = getModuleRegistry();
     if (!(specifier in moduleRegistry)) {
       throw new Error(`Unknown module "${specifier}". Allowed modules: ${Object.keys(moduleRegistry).join(', ')}`);
     }
@@ -126,23 +181,24 @@ async function rewriteImports(code: string): Promise<string> {
     const importInfo = extractImportInfo(code, imp);
 
     let declaration = '';
+    const moduleGlobal = moduleGlobalFromModuleName[importInfo.module as keyof typeof moduleGlobalFromModuleName];
 
     switch (importInfo.type) {
       case 'named': {
         // Import {draw, something} from 'replicad' -> const {draw, something} = globalThis.replicad;
-        declaration = `const {${importInfo.imports.join(', ')}} = globalThis.${importInfo.module};`;
+        declaration = `const {${importInfo.imports.join(', ')}} = globalThis.${moduleGlobal};`;
         break;
       }
 
       case 'default': {
         // Import replicad from 'replicad' -> const replicad = globalThis.replicad;
-        declaration = `const ${importInfo.defaultName} = globalThis.${importInfo.module};`;
+        declaration = `const ${importInfo.defaultName} = globalThis.${moduleGlobal};`;
         break;
       }
 
       case 'namespace': {
         // Import * as replicad from 'replicad' -> const replicad = globalThis.replicad;
-        declaration = `const ${importInfo.namespaceName} = globalThis.${importInfo.module};`;
+        declaration = `const ${importInfo.namespaceName} = globalThis.${moduleGlobal};`;
         break;
       }
 
@@ -190,13 +246,16 @@ export async function buildEsModule(code: string): Promise<CadModuleExports> {
     // First rewrite imports to use global modules
     const rewrittenCode = await rewriteImports(code);
 
-    const cacheKey = hashCode(rewrittenCode);
+    // Include active kernel in cache key to prevent cross-kernel contamination
+    const kernelId = getActiveKernelIdentifier();
+    const cacheKey = `${kernelId}:${hashCode(rewrittenCode)}`;
+
     if (moduleCache.has(cacheKey)) {
-      console.log('Using cached module evaluator');
+      console.log('Using cached module evaluator for kernel:', kernelId);
       return moduleCache.get(cacheKey)!;
     }
 
-    console.log('Building new module evaluator');
+    console.log('Building new module evaluator for kernel:', kernelId);
     const startTime = performance.now();
 
     // Create blob and import the module
@@ -208,7 +267,7 @@ export async function buildEsModule(code: string): Promise<CadModuleExports> {
     // Clean up blob URL
     URL.revokeObjectURL(url);
 
-    // Cache the module
+    // Cache the module with kernel-specific key
     moduleCache.set(cacheKey, module);
 
     const endTime = performance.now();
@@ -230,7 +289,7 @@ export function clearModuleCache(): void {
 /**
  * Run code in a context.
  *
- * This handles execution of CommonJS code.
+ * This handles execution of CommonJS code with full module.exports and require support.
  *
  * @param code - The code to run
  * @param context - The context to run the code in
@@ -240,9 +299,31 @@ export function runInCjsContext<Context extends Record<string, unknown>, Result>
   code: string,
   context: Context,
 ): Result {
+  // Create a module object to capture exports
+  const module: { exports: Record<string, unknown> } = { exports: {} };
+  const { exports } = module;
+
+  // Create a require function that resolves modules from the registry
+  const require = (moduleName: string): unknown => {
+    const moduleRegistry = getModuleRegistry();
+    if (moduleName in moduleRegistry) {
+      return moduleRegistry[moduleName];
+    }
+
+    throw new Error(`Module "${moduleName}" not found. Available modules: ${Object.keys(moduleRegistry).join(', ')}`);
+  };
+
+  // Inject module, exports, and require into the context
+  const enhancedContext = {
+    ...context,
+    module,
+    exports,
+    require,
+  };
+
   // Create context objects for the Function constructor
-  const contextKeys = Object.keys(context);
-  const contextValues = contextKeys.map((key) => context[key]);
+  const contextKeys = Object.keys(enhancedContext);
+  const contextValues = contextKeys.map((key) => enhancedContext[key]);
 
   try {
     // Use Function constructor for faster execution (like original replicad)
@@ -251,7 +332,8 @@ export function runInCjsContext<Context extends Record<string, unknown>, Result>
     const runFunction = new Function(...contextKeys, code) as (...args: unknown[]) => unknown;
     const functionResult = runFunction(...contextValues) as Result;
 
-    return functionResult;
+    // Return the function result if present, otherwise return module.exports
+    return (functionResult ?? module.exports) as Result;
   } catch (error) {
     console.error('Error running code in context:', error);
     throw error;

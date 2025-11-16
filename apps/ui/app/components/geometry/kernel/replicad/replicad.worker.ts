@@ -1,6 +1,5 @@
 import { expose } from 'comlink';
 import * as replicad from 'replicad';
-import * as zod from 'zod/v4';
 import ErrorStackParser from 'error-stack-parser';
 import type { OpenCascadeInstance as OpenCascadeInstanceWithExceptions } from 'replicad-opencascadejs/src/replicad_with_exceptions.js';
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
@@ -22,7 +21,7 @@ import {
   initOpenCascade,
   initOpenCascadeWithExceptions,
 } from '#components/geometry/kernel/replicad/init-open-cascade.js';
-import { runInCjsContext, buildEsModule } from '#components/geometry/kernel/replicad/vm.js';
+import { runInCjsContext, buildEsModule, registerKernelModules } from '#components/geometry/kernel/replicad/vm.js';
 import { renderOutput } from '#components/geometry/kernel/replicad/utils/render-output.js';
 import { convertReplicadGeometriesToGltf } from '#components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
 import { jsonSchemaFromJson } from '#utils/schema.utils.js';
@@ -75,8 +74,7 @@ class ReplicadWorker extends KernelWorker<ReplicadOptions> {
 
   public constructor() {
     super();
-    (globalThis as unknown as { replicad: typeof replicad }).replicad = replicad;
-    (globalThis as unknown as { zod: typeof zod }).zod = zod;
+    registerKernelModules();
   }
 
   public override async initialize(
@@ -84,6 +82,7 @@ class ReplicadWorker extends KernelWorker<ReplicadOptions> {
     options: ReplicadOptions = {} as ReplicadOptions,
   ): Promise<void> {
     await super.initialize(onLog, options);
+
     const { withExceptions } = this.options;
     const startTime = performance.now();
     const oc = await this.initializeOpenCascadeInstance(withExceptions);
@@ -104,13 +103,28 @@ class ReplicadWorker extends KernelWorker<ReplicadOptions> {
       return false;
     }
 
-    // Extract code and check for replicad imports
+    // Extract code and check for replicad imports/usage
     const code = KernelWorker.extractCodeFromFile(file);
-    // Also support: "const {...} = replicad;" pattern (see user image)
-    const hasImportStatement = (() => /import.*from\s+['"]replicad['"]/.test(code))();
+
+    // Check for direct replicad imports
+    // Use 's' flag to make '.' match newlines for multiline imports
+    const hasImportStatement = (() => /import.*from\s+['"]replicad['"]/s.test(code))();
     const hasRequireStatement = (() => /require\s*\(['"]replicad['"]\)/.test(code))();
     const hasDestructuredAssignment = (() => /\bconst\s*{\s*[\w\s,]*}\s*=\s*replicad\s*;/.test(code))();
-    return hasImportStatement || hasRequireStatement || hasDestructuredAssignment;
+
+    // Check for JSDoc typedef referencing replicad
+    const hasReplicadTypedef = (() => /@typedef.*import\s*\(\s*['"]replicad['"]\s*\)/.test(code))();
+
+    // Check for replicad-related CDN imports (replicad-decorate, etc.)
+    const hasReplicadCdnImport = (() => /import.*from\s+['"]https?:\/\/[^'"]*replicad[^'"]*['"]/s.test(code))();
+
+    return (
+      hasImportStatement ||
+      hasRequireStatement ||
+      hasDestructuredAssignment ||
+      hasReplicadTypedef ||
+      hasReplicadCdnImport
+    );
   }
 
   public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {

@@ -1,5 +1,4 @@
 import { expose } from 'comlink';
-import * as jscadModeling from '@jscad/modeling';
 import type {
   ComputeGeometryResult,
   ExportFormat,
@@ -10,7 +9,7 @@ import type {
 } from '@taucad/types';
 import { createKernelError, createKernelSuccess } from '#components/geometry/kernel/utils/kernel-helpers.js';
 import { KernelWorker } from '#components/geometry/kernel/utils/kernel-worker.js';
-import { buildEsModule, runInCjsContext } from '#components/geometry/kernel/replicad/vm.js';
+import { buildEsModule, runInCjsContext, registerKernelModules } from '#components/geometry/kernel/replicad/vm.js';
 import { jscadToGltf } from '#components/geometry/kernel/jscad/jscad-to-gltf.js';
 import { jsonSchemaFromJson } from '#utils/schema.utils.js';
 import type { JscadParameterDefinition } from '#components/geometry/kernel/jscad/jscad.schema.js';
@@ -34,8 +33,7 @@ class JscadWorker extends KernelWorker {
 
   public constructor() {
     super();
-    // Inject @jscad/modeling into global scope for VM access
-    (globalThis as unknown as { jscadModeling: typeof jscadModeling }).jscadModeling = jscadModeling;
+    registerKernelModules();
   }
 
   public override async initialize(onLog: Parameters<KernelWorker['initialize']>[0], options: Record<string, never>) {

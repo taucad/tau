@@ -95,7 +95,6 @@ export function Converter({
     }
 
     let data: Uint8Array;
-    setIsExporting(true);
 
     try {
       // Lazily fetch GLB data when download is triggered

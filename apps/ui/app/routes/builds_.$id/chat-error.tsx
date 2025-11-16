@@ -59,12 +59,8 @@ export const ChatError = memo(function ({
           </div>
         </div>
       </CollapsibleTrigger>
-      <CollapsibleContent>
-        <CodeViewer
-          text={errorMessage}
-          language="json"
-          className="overflow-x-scroll pb-2 text-xs whitespace-pre-wrap"
-        />
+      <CollapsibleContent className="px-2">
+        <CodeViewer text={errorMessage} language="json" className="overflow-x-scroll text-xs whitespace-pre-wrap" />
       </CollapsibleContent>
     </Collapsible>
   );

@@ -11,7 +11,7 @@
 import { useChat } from '@ai-sdk/react';
 import { createActorContext } from '@xstate/react';
 import { setup, assign, enqueueActions } from 'xstate';
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import type { Message } from '@ai-sdk/react';
 import { messageStatus } from '@taucad/types/constants';
 import type { Chat, KernelProvider } from '@taucad/types';
@@ -1141,8 +1141,7 @@ function ChatSyncWrapper({
         ...feedback,
       };
     },
-    onFinish(...args) {
-      console.log('Chat finished:', args);
+    onFinish(..._args) {
       // Queue sync instead of immediate sync - XState will debounce
       queueSyncChatState();
     },
@@ -1150,14 +1149,13 @@ function ChatSyncWrapper({
       console.error('Chat error:', args);
       queueSyncChatState();
     },
-    onResponse(...args) {
-      console.log('Chat response:', args);
+    onResponse(..._args) {
       queueSyncChatState();
     },
   });
 
   // Function to queue chat state sync (will be debounced by XState)
-  const queueSyncChatState = () => {
+  const queueSyncChatState = useCallback(() => {
     actorRef.send({
       type: 'queueSync',
       payload: {
@@ -1169,7 +1167,7 @@ function ChatSyncWrapper({
         status: chat.status,
       },
     });
-  };
+  }, [actorRef, chat.messages, chat.input, chat.status, chat.error, chat.data]);
 
   // Register useChat actions with XState on mount and when chat changes
   useEffect(() => {
@@ -1190,7 +1188,8 @@ function ChatSyncWrapper({
   // Queue sync on key changes (XState will handle debouncing)
   useEffect(() => {
     queueSyncChatState();
-  }, [chat.messages, chat.input, chat.status, chat.error, chat.data, queueSyncChatState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- queueSyncChatState is stable and captures latest values
+  }, [chat.messages, chat.input, chat.status, chat.error, chat.data]);
 
   return children as React.JSX.Element;
 }

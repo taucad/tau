@@ -1,0 +1,85 @@
+name: Deploy Review Apps
+
+on:
+  # Run this workflow on every PR event. Existing review apps will be updated when the PR is updated.
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+  # Match the region with production apps
+  FLY_REGION: syd
+  FLY_ORG: personal
+
+jobs:
+  review_app_ui:
+    name: Deploy UI Review App
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    # Only run one deployment at a time per PR for UI.
+    concurrency:
+      group: pr-${{ github.event.number }}-ui
+
+    # Deploying apps with this "review" environment allows the URL for the app to be displayed in the PR UI.
+    environment:
+      name: review-ui
+      # The script in the `deploy` sets the URL output for each review app.
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - name: Get code
+        uses: actions/checkout@v5
+
+      - name: Deploy UI PR app to Fly.io
+        id: deploy
+        uses: superfly/fly-pr-review-apps@1.2.1
+        with:
+          name: tau-ui-pr-${{ github.event.number }}
+          region: syd
+          config: apps/ui/fly.toml
+
+      - name: Comment on Pull Request
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Required for commenting on pull requests for private repos
+          message: |
+            Fly Preview UI URL :balloon: : ${{ steps.deploy.outputs.url }}
+
+  review_app_api:
+    name: Deploy API Review App
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    # Only run one deployment at a time per PR for API.
+    concurrency:
+      group: pr-${{ github.event.number }}-api
+
+    environment:
+      name: review-api
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - name: Get code
+        uses: actions/checkout@v5
+
+      - name: Deploy API PR app to Fly.io
+        id: deploy
+        uses: superfly/fly-pr-review-apps@1.2.1
+        with:
+          name: tau-api-pr-${{ github.event.number }}
+          region: syd
+          config: apps/api/fly.toml
+
+      - name: Comment on Pull Request
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Required for commenting on pull requests for private repos
+          message: |
+            Fly Preview API URL :octopus: : ${{ steps.deploy.outputs.url }}

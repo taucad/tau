@@ -30,13 +30,18 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
           </Link>
         </SidebarMenuButton>
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="gap-0">
         <div className="sticky top-0 z-10">
           <NavChat />
         </div>
         <div className="flex-1 overflow-y-auto">
-          <NavHistory />
-          <NavMain items={navRoutes.navMain} />
+          <div className="flex flex-col justify-between">
+            <NavHistory />
+            <NavMain items={navRoutes.navMain} groupLabel="Platform" />
+          </div>
+        </div>
+        <div className="sticky bottom-0 z-10">
+          <NavMain items={navRoutes.navSecondary} />
         </div>
       </SidebarContent>
       <SidebarFooter className="flex flex-row items-center justify-between border-t">

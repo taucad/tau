@@ -1,10 +1,12 @@
 import { ArrowLeft, Home, Search, MapPin } from 'lucide-react';
-import { useNavigate, Link } from 'react-router';
+import { useNavigate, Link, useLocation } from 'react-router';
 import { Button, buttonVariants } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
+import { InlineCode } from '#components/code/code-block.js';
 
 export default function NotFoundPage(): React.JSX.Element {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const goBack = (): void => {
     void navigate(-1);
@@ -32,7 +34,8 @@ export default function NotFoundPage(): React.JSX.Element {
           </div>
 
           <p className="mb-4 text-muted-foreground">
-            The page you&apos;re looking for doesn&apos;t exist or has been moved to a different location.
+            The <InlineCode>{location.pathname}</InlineCode> page you&apos;re looking for doesn&apos;t exist or has been
+            moved to a different location.
           </p>
 
           <div className="space-y-2">

@@ -13,12 +13,11 @@ import { ChatProvider, useChatSelector, ChatContext } from '#components/chat/cha
 import { BuildNameEditor } from '#routes/builds_.$id/build-name-editor.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
-import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-controls.js';
+import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-view-context.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { BuildCommandPaletteItems } from '#routes/builds_.$id/build-command-items.js';
 import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
-import { BuildGitConnector } from '#routes/builds_.$id/build-git-connector.js';
 import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
 
 // Define provider component at module level for stable reference across HMR
@@ -32,9 +31,6 @@ export const handle: Handle = {
     const { id } = match.params as Route.LoaderArgs['params'];
 
     return [<BuildNameEditor key={`${id}-build-name-editor`} />, <ChatModeSelector key={`${id}-chat-mode-selector`} />];
-  },
-  actions() {
-    return <BuildGitConnector />;
   },
   commandPalette(match) {
     return <BuildCommandPaletteItems match={match} />;
@@ -139,8 +135,6 @@ function ChatWithProvider() {
   // Tool call handler that integrates with the new architecture
   const onToolCall = useCallback(
     async ({ toolCall }: { toolCall: { toolName: string; args: unknown } }) => {
-      console.log('Tool call received:', toolCall);
-
       if (toolCall.toolName === 'edit_file') {
         const toolCallArgs = toolCall.args as { targetFile: string; codeEdit: string };
 
@@ -181,6 +175,7 @@ function ChatWithProvider() {
                   type: 'updateFile',
                   path: mainFilePath,
                   content: encodeTextFile(result.editedContent),
+                  source: 'external',
                 });
 
                 // Wait for CAD processing to complete

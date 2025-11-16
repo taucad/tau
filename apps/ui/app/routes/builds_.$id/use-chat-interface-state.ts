@@ -1,0 +1,202 @@
+import { useEffect } from 'react';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
+import type { chatTabs } from '#routes/builds_.$id/chat-interface-nav.js';
+import { useViewContext } from '#routes/builds_.$id/chat-interface-view-context.js';
+
+/**
+ * Minimum panel size constants for the chat interface layout (in pixels)
+ * Used for both default sizes and minimum constraints on panes
+ */
+
+/** Minimum width for standard side panels (Chat History, Explorer, Parameters, Converter, Git, Details) */
+export const panelMinSizeStandard = 200;
+
+/** Minimum width for the Editor panel (larger due to KCL code editing requirements) */
+export const panelMinSizeEditor = 400;
+
+/** Minimum width for the Viewer/center panel (main 3D CAD visualization area) */
+export const panelMinSizeViewer = 416;
+
+/** Default width for the Viewer/center panel (main 3D CAD visualization area) */
+export const panelSizeViewer = 420;
+
+/**
+ * Default panel sizes for the chat interface layout (in pixels)
+ * Maps to the pane order: [ChatHistory, Explorer, Viewer, Parameters, Editor, Converter, Git, Details]
+ */
+const defaultChatInterfaceSizes = [
+  // Left-side panels
+  panelMinSizeStandard, // Chat History panel: displays conversation history and file navigation
+  panelMinSizeStandard, // Explorer panel: shows project file structure and navigation tree
+  // Center panel
+  panelSizeViewer, // Viewer panel: main 3D CAD visualization and content area
+  // Right-side panels
+  panelMinSizeStandard, // Parameters panel: LLM and generation parameters configuration
+  panelMinSizeStandard, // Editor panel: KCL code editor for design modifications
+  panelMinSizeStandard, // Converter panel: file format conversion utilities
+  panelMinSizeStandard, // Git panel: version control and git operations
+  panelMinSizeStandard, // Details panel: additional object details and metadata
+];
+
+export type ChatInterfaceState = {
+  // View context state
+  isChatOpen: boolean;
+  setIsChatOpen: (value: boolean | ((previous: boolean) => boolean)) => void;
+  isParametersOpen: boolean;
+  setIsParametersOpen: (value: boolean | ((previous: boolean) => boolean)) => void;
+  isEditorOpen: boolean;
+  setIsEditorOpen: (value: boolean | ((previous: boolean) => boolean)) => void;
+  isExplorerOpen: boolean;
+  setIsExplorerOpen: (value: boolean | ((previous: boolean) => boolean)) => void;
+  isConverterOpen: boolean;
+  setIsConverterOpen: (value: boolean | ((previous: boolean) => boolean)) => void;
+  isGitOpen: boolean;
+  setIsGitOpen: (value: boolean | ((previous: boolean) => boolean)) => void;
+  isDetailsOpen: boolean;
+  setIsDetailsOpen: (value: boolean | ((previous: boolean) => boolean)) => void;
+
+  // Cookie state
+  chatResize: number[];
+  setChatResize: (value: readonly number[]) => void;
+  activeTab: (typeof chatTabs)[number]['id'];
+  setActiveTab: (value: (typeof chatTabs)[number]['id']) => void;
+  isFullHeightPanel: boolean;
+  setIsFullHeightPanel: (value: boolean | ((previous: boolean) => boolean)) => void;
+
+  // Actions
+  handleTabChange: (value: string) => void;
+  toggleFullHeightPanel: () => void;
+};
+
+/**
+ * Custom hook to manage chat interface state
+ * Extracted from chat-interface.tsx to improve maintainability
+ */
+export function useChatInterfaceState(): ChatInterfaceState {
+  const viewContext = useViewContext();
+  const [chatResize, setChatResize] = useCookie(cookieName.chatRsInterface, defaultChatInterfaceSizes);
+  const [activeTab, setActiveTab] = useCookie<(typeof chatTabs)[number]['id']>(cookieName.chatInterfaceTab, 'chat');
+  const [isFullHeightPanel, setIsFullHeightPanel] = useCookie(cookieName.chatInterfaceFullHeight, false);
+
+  const handleTabChange = (value: string): void => {
+    setActiveTab(value as (typeof chatTabs)[number]['id']);
+  };
+
+  const toggleFullHeightPanel = (): void => {
+    setIsFullHeightPanel((previous) => !previous);
+  };
+
+  return {
+    ...viewContext,
+    chatResize,
+    setChatResize(value) {
+      setChatResize(value as number[]);
+    },
+    activeTab,
+    setActiveTab,
+    isFullHeightPanel,
+    setIsFullHeightPanel,
+    handleTabChange,
+    toggleFullHeightPanel,
+  };
+}
+
+type UsePanePositionObserverOptions = {
+  isChatOpen: boolean;
+  isParametersOpen: boolean;
+  isEditorOpen: boolean;
+  isExplorerOpen: boolean;
+  isConverterOpen: boolean;
+  isGitOpen: boolean;
+  isDetailsOpen: boolean;
+};
+
+/**
+ * Custom hook to observe and update pane positions for desktop layout
+ * Updates position attributes on visible panes for performant CSS selectors
+ */
+export function usePanePositionObserver(
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- allowable for `ref`
+  allotmentRef: React.RefObject<HTMLDivElement | null>,
+  options: UsePanePositionObserverOptions,
+): void {
+  const { isChatOpen, isParametersOpen, isEditorOpen, isExplorerOpen, isConverterOpen, isGitOpen, isDetailsOpen } =
+    options;
+
+  useEffect(() => {
+    if (!allotmentRef.current) {
+      return;
+    }
+
+    const updatePanePositions = (): void => {
+      const leftPanes = allotmentRef.current?.querySelectorAll('.rs-left.split-view-view-visible');
+      const rightPanes = allotmentRef.current?.querySelectorAll('.rs-right.split-view-view-visible');
+
+      // Update left panes
+      if (leftPanes) {
+        for (const [index, pane] of [...leftPanes].entries()) {
+          const element = pane as HTMLElement;
+          const isFirst = index === 0;
+          const isLast = index === leftPanes.length - 1;
+
+          if (isFirst) {
+            element.dataset['first'] = '';
+          } else {
+            delete element.dataset['first'];
+          }
+
+          if (isLast) {
+            element.dataset['last'] = '';
+          } else {
+            delete element.dataset['last'];
+          }
+        }
+      }
+
+      // Update right panes
+      if (rightPanes) {
+        for (const [index, pane] of [...rightPanes].entries()) {
+          const element = pane as HTMLElement;
+          const isFirst = index === 0;
+          const isLast = index === rightPanes.length - 1;
+
+          if (isFirst) {
+            element.dataset['first'] = '';
+          } else {
+            delete element.dataset['first'];
+          }
+
+          if (isLast) {
+            element.dataset['last'] = '';
+          } else {
+            delete element.dataset['last'];
+          }
+        }
+      }
+    };
+
+    updatePanePositions();
+
+    // Use MutationObserver to detect when visibility changes
+    const observer = new MutationObserver(updatePanePositions);
+    observer.observe(allotmentRef.current, {
+      attributes: true,
+      attributeFilter: ['class'],
+      subtree: true,
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [
+    allotmentRef,
+    isChatOpen,
+    isParametersOpen,
+    isEditorOpen,
+    isExplorerOpen,
+    isConverterOpen,
+    isGitOpen,
+    isDetailsOpen,
+  ]);
+}

@@ -1,4 +1,4 @@
-@import 'fumadocs-ui/style.css';
+/* @import 'fumadocs-ui/style.css'; */
 @import 'tailwindcss';
 
 /*
@@ -11,7 +11,7 @@
 @source "../../../../node_modules/@daveyplate/better-auth-ui";
 
 /* Disabled due to conflict with Fumadocs - https://fumadocs.dev/docs/ui/theme#typography */
-/* @plugin '@tailwindcss/typography'; */
+@plugin '@tailwindcss/typography';
 
 :root {
   /* Radius */

@@ -59,7 +59,7 @@ This project uses extremely strict linting via XO + ESLint with the following ke
 
 ### TypeScript Rules
 - Use `import type` for type-only imports
-- All exported functions must have explicit return types (including React components)
+- All exported/public functions must have explicit return types (including React components). Private/internal functions don't require explicit return types.
 - Use `type` instead of `interface`
 - Use `undefined` instead of `null`
 - No `any` type - use `unknown` instead

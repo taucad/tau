@@ -82,7 +82,7 @@ function ErrorSection({
             return (
               <div key={key} className="flex items-start text-xs">
                 <div className="flex flex-row items-center gap-1 text-muted-foreground">
-                  <div className="flex-shrink-0 font-mono">
+                  <div className="shrink-0 font-mono">
                     {error.startLineNumber}:{error.startColumn}
                   </div>
                 </div>
@@ -183,6 +183,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
             type: 'updateFile',
             path: mainFilePath,
             content: encodeTextFile(result.editedContent),
+            source: 'external',
           });
         }
       }
@@ -192,14 +193,27 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
   switch (part.toolInvocation.state) {
     case 'partial-call':
     case 'call': {
-      const { targetFile = '' } = (part.toolInvocation.args ?? {}) as {
+      const { targetFile = '', codeEdit = '' } = (part.toolInvocation.args ?? {}) as {
         codeEdit?: string;
         targetFile?: string;
       };
+
+      // Show last 4 lines during streaming
+      const lines = codeEdit.split('\n');
+      const lastFourLines = lines.slice(-4).join('\n');
+      const hasContent = lastFourLines.trim().length > 0;
+
       return (
-        <div className="@container/code flex h-7 w-full flex-row items-center gap-1 overflow-hidden rounded-md border bg-neutral/10 pr-1 pl-2 text-xs text-muted-foreground">
-          <StatusIcon chatStatus={status} toolStatus={part.toolInvocation.state} />
-          <Filename targetFile={targetFile} chatStatus={status} toolStatus={part.toolInvocation.state} />
+        <div className="@container/code overflow-hidden rounded-md border bg-neutral/10">
+          <div className="flex h-7 w-full flex-row items-center gap-1 pr-1 pl-2 text-xs text-muted-foreground">
+            <StatusIcon chatStatus={status} toolStatus={part.toolInvocation.state} />
+            <Filename targetFile={targetFile} chatStatus={status} toolStatus={part.toolInvocation.state} />
+          </div>
+          {hasContent ? (
+            <div className="h-[100px] overflow-hidden border-t">
+              <CodeViewer language="typescript" text={lastFourLines} className="overflow-x-auto p-3 text-xs" />
+            </div>
+          ) : null}
         </div>
       );
     }
@@ -222,7 +236,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
             <div className="flex flex-row gap-1">
               <CopyButton
                 size="xs"
-                className="[&_[data-slot=label]]:hidden @xs/code:[&_[data-slot=label]]:flex"
+                className="**:data-[slot=label]:hidden @xs/code:**:data-[slot=label]:flex"
                 getText={() => codeEdit}
               />
               <Tooltip>
@@ -272,7 +286,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
             <div className={cn('leading-0')}>
               <CodeViewer
                 language="typescript"
-                text={isExpanded ? codeEdit : codeEdit.split('\n').slice(0, 5).join('\n')}
+                text={isExpanded ? codeEdit : codeEdit.split('\n').slice(0, 4).join('\n')}
                 className="overflow-x-auto p-3 text-xs"
               />
               <Button

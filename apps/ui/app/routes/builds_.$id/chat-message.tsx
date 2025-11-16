@@ -101,7 +101,8 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
           <div
             className={cn(
               'flex flex-col gap-2',
-              isUser && 'cursor-pointer rounded-sm border bg-background px-3 py-2 hover:border-primary',
+              isUser &&
+                'max-h-58.5 cursor-pointer overflow-hidden rounded-sm border bg-background px-3 py-2 hover:border-primary',
             )}
             onClick={handleEditClick}
           >

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Box } from 'lucide-react';
 import { Tree, Folder } from '#components/magicui/file-tree.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
-import { ExplorerFile } from '#routes/builds_.$id/chat-editor-explorer-file.js';
+import { ExplorerFile } from '#routes/builds_.$id/chat-explorer-file.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 
 export type CadComponent = {

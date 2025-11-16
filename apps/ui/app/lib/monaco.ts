@@ -4,6 +4,8 @@ import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 import { registerCompletion } from 'monacopilot';
 import type { CompletionRegistration, Monaco, StandaloneCodeEditor, CompletionCopilot } from 'monacopilot';
+import type { Monaco as MonacoEditor } from '@monaco-editor/react';
+import { replicadTypesOriginal } from '@taucad/api-extractor';
 import { ENV } from '#config.js';
 import { registerOpenScadLanguage } from '#lib/openscad-language/openscad-register-language.js';
 import { registerKclLanguage } from '#lib/kcl-language/kcl-register-language.js';
@@ -75,4 +77,48 @@ export const registerCompletions = (editor: StandaloneCodeEditor, monaco: Monaco
       return data;
     },
   });
+};
+
+export const registerMonaco = async (monaco: MonacoEditor): Promise<void> => {
+  monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
+    experimentalDecorators: true,
+    allowSyntheticDefaultImports: true,
+    moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+    target: monaco.languages.typescript.ScriptTarget.ESNext,
+    noLib: false,
+    allowNonTsExtensions: true,
+    noEmit: true,
+    baseUrl: './',
+  });
+  monaco.languages.typescript.typescriptDefaults.setEagerModelSync(true);
+  monaco.languages.typescript.typescriptDefaults.setExtraLibs([
+    {
+      content: `declare module 'replicad' { ${replicadTypesOriginal} }`,
+      filePath: 'file:///node_modules/replicad/index.d.ts',
+    },
+    {
+      content: `declare module '@jscad/modeling' { ${replicadTypesOriginal} }`,
+      filePath: 'file:///node_modules/@jscad/modeling/index.d.ts',
+    },
+    {
+      content: `
+    import * as replicadAll from 'replicad';
+    declare global {
+    declare var replicad = replicadAll;
+    }
+  `,
+    },
+    //   {
+    //     content: `declare module 'zod' { ${zodTypes} }`,
+    //     filePath: 'file:///node_modules/zod/index.d.ts',
+    //   },
+    //   {
+    //     content: `
+    //   import {z as zAll} from 'zod';
+    //   declare global {
+    //   declare var z = zAll;
+    //   }
+    // `,
+    //   },
+  ]);
 };

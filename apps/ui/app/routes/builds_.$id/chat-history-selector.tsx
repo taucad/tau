@@ -25,7 +25,7 @@ const newChatKeyCombination = {
   shiftKey: true,
 } satisfies KeyCombination;
 
-export function ChatSelector(): ReactNode {
+export function ChatHistorySelector(): ReactNode {
   const { buildRef, isLoading, addChat, setActiveChat, updateChatName, deleteChat } = useBuild();
   const build = useSelector(buildRef, (state) => state.context.build);
   const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId) ?? '';

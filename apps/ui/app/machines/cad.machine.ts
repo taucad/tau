@@ -47,15 +47,16 @@ type CadInput = {
   logRef?: ActorRefFrom<typeof logMachine>;
 };
 
-// Debounce delay for code changes in milliseconds
-const debounceDelay = 200;
+// Debounce delays in milliseconds
+const parameterDebounceDelay = 50;
+const fileDebounceDelay = 500;
 
 /**
  * CAD Machine
  *
  * This machine manages the state of the CAD editor:
  * - Handles code and parameter changes
- * - Debounces compilation requests
+ * - Debounces compilation requests (500ms for code, 50ms for parameters)
  * - Tracks compilation status
  * - Manages errors
  */
@@ -319,11 +320,11 @@ export const cadMachine = setup({
           actions: 'initializeModel',
         },
         setFile: {
-          target: 'buffering',
+          target: 'bufferingFile',
           actions: 'setFile',
         },
         setParameters: {
-          target: 'buffering',
+          target: 'bufferingParameters',
           actions: 'setParameters',
         },
         setCodeErrors: {
@@ -343,7 +344,7 @@ export const cadMachine = setup({
         },
       },
     },
-    // The buffering state debounces rapid code/parameter changes
+    // The bufferingFile state debounces rapid code file changes (500ms)
     // When transitioning from initializing/rendering to buffering, XState automatically
     // cancels any inflight kernel invocations, ensuring latest changes take precedence.
     // Note: The worker may continue processing cancelled operations in the background,
@@ -352,9 +353,9 @@ export const cadMachine = setup({
     // - A more robust cancellation mechanism that ensures the worker job is properly terminated
     // - A way to track the progress of the worker and display it to the user
     // - A way to cancel the worker job if the user navigates away from the page
-    buffering: {
+    bufferingFile: {
       after: {
-        [debounceDelay]: {
+        [fileDebounceDelay]: {
           target: 'rendering',
         },
       },
@@ -364,12 +365,37 @@ export const cadMachine = setup({
           actions: 'initializeModel',
         },
         setFile: {
-          target: 'buffering',
+          target: 'bufferingFile',
           actions: 'setFile',
           reenter: true, // Reset debounce timer when new file comes in
         },
         setParameters: {
-          target: 'buffering',
+          target: 'bufferingParameters',
+          actions: 'setParameters',
+        },
+        kernelLog: {
+          actions: 'sendKernelLogs',
+        },
+      },
+    },
+    // The bufferingParameters state debounces rapid parameter changes (50ms)
+    bufferingParameters: {
+      after: {
+        [parameterDebounceDelay]: {
+          target: 'rendering',
+        },
+      },
+      on: {
+        initializeModel: {
+          target: 'initializing',
+          actions: 'initializeModel',
+        },
+        setFile: {
+          target: 'bufferingFile',
+          actions: 'setFile',
+        },
+        setParameters: {
+          target: 'bufferingParameters',
           actions: 'setParameters',
           reenter: true, // Reset debounce timer when parameters change
         },
@@ -398,11 +424,11 @@ export const cadMachine = setup({
         },
         setFile: {
           actions: 'setFile',
-          target: 'buffering',
+          target: 'bufferingFile',
         },
         setParameters: {
           actions: 'setParameters',
-          target: 'buffering',
+          target: 'bufferingParameters',
         },
         setCodeErrors: {
           actions: 'setCodeErrors',
@@ -425,11 +451,11 @@ export const cadMachine = setup({
           actions: 'initializeModel',
         },
         setFile: {
-          target: 'buffering',
+          target: 'bufferingFile',
           actions: 'setFile',
         },
         setParameters: {
-          target: 'buffering',
+          target: 'bufferingParameters',
           actions: 'setParameters',
         },
         setCodeErrors: {

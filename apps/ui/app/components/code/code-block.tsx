@@ -132,7 +132,7 @@ export function CodeBlockAction({
  */
 export function CodeBlockContent({ children, className, ...rest }: ComponentProps<'div'>): React.JSX.Element {
   return (
-    <div {...rest} data-slot="codeblock-content" className={cn('', className)}>
+    <div {...rest} data-slot="codeblock-content" className={cn('overflow-x-auto p-2', className)}>
       {children}
     </div>
   );
@@ -148,18 +148,12 @@ export function Pre({ children, language, className, ...rest }: PreProps): React
 
   // Render with syntax highlighting if language is detected
   if (language) {
-    return (
-      <CodeViewer
-        language={language as CodeLanguage}
-        text={text}
-        className={cn('-mx-1 overflow-x-auto py-2', className)}
-      />
-    );
+    return <CodeViewer language={language as CodeLanguage} text={text} className={className} />;
   }
 
   // Fallback to regular pre element
   return (
-    <pre {...rest} className={cn('overflow-x-auto py-2', className)}>
+    <pre {...rest} className={className}>
       {children}
     </pre>
   );

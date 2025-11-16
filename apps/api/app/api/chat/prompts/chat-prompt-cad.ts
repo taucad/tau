@@ -1,8 +1,12 @@
-import { mockBuilds } from '@taucad/tau-examples';
+import { mockBuilds, jscadExamples } from '@taucad/tau-examples';
 import { replicadTypesCleanJsDoc } from '@taucad/api-extractor';
 import type { KernelProvider } from '@taucad/types';
 
 const mockModelsString = mockBuilds
+  .map((model) => `<example>\n${model.name}\n\`\`\`javascript\n${model.code}\`\`\`\n</example>`)
+  .join('\n\n');
+
+const jscadExamplesString = jscadExamples
   .map((model) => `<example>\n${model.name}\n\`\`\`javascript\n${model.code}\`\`\`\n</example>`)
   .join('\n\n');
 
@@ -276,6 +280,118 @@ Your goal is to create models that leverage KCL's modern approach to parametric 
       "Plan the sketch geometry first, then build up 3D operations using KCL's functional approach with clear parameter definitions.",
     mainFunctionDescription:
       'code should use declarations for parameters and return the final geometry using KCL operations',
+  },
+  jscad: {
+    fileExtension: '.js',
+    languageName: 'JSCAD (JavaScript)',
+    roleDescription:
+      'a powerful JavaScript library for creating precise, programmatic 3D CAD models using constructive solid geometry (CSG) operations',
+    technicalContext: `
+<technical_context>
+## Understanding JSCAD's Strengths
+JSCAD (JavaScript Computer-Aided Design) excels at creating precise, parametric 3D models entirely in JavaScript. Unlike mesh-based modeling, it creates solid geometry through constructive solid geometry (CSG) operations, making it ideal for engineering applications, mechanical parts, and parametric designs. JSCAD brings the power of JavaScript's ecosystem to CAD modeling, allowing you to leverage modern programming patterns, npm packages, and functional programming techniques.
+
+The library uses a modular approach where you import only the functions you need from @jscad/modeling, making it lightweight and efficient. JSCAD is particularly well-suited for browser-based CAD applications and programmatic design generation.
+</technical_context>`,
+    codeStandards: `
+<code_standards>
+## JSCAD Code Output Requirements
+Your code output must be written in **plain JavaScript** using **ES modules format**. The code should use modern ES6+ syntax and be executable JavaScript that works directly in the browser environment.
+
+**Required Format:**
+\`\`\`javascript
+import { primitives, booleans } from '@jscad/modeling';
+
+export const defaultParams = { width: 10, height: 20 };
+
+export default function main(params = defaultParams) {
+  const { cube, cylinder } = primitives;
+  const { subtract } = booleans;
+  
+  const box = cube({ size: [params.width, params.height, 5] });
+  const hole = cylinder({ radius: 2, height: 10 });
+  
+  return subtract(box, hole);
+}
+\`\`\`
+
+**Key Requirements:**
+- Use \`import\` statements to bring in JSCAD modules
+- Export \`defaultParams\` as an object containing parameter names and their default values
+- Export a default \`main\` function that accepts a parameters object and returns JSCAD geometry
+- Use modern JavaScript features (destructuring, arrow functions, const/let)
+- Keep code clean and readable with proper indentation
+
+**Parameter Definition:**
+Define parameters using \`defaultParams\` object:
+\`\`\`javascript
+export const defaultParams = {
+  width: 10,      // Number parameters
+  height: 20,
+  name: "Part",   // String parameters
+  enabled: true   // Boolean parameters
+};
+\`\`\`
+</code_standards>`,
+    modelingStrategy: `
+<modeling_strategy>
+## JSCAD Design Philosophy: Modular CSG Approach
+Your modeling approach should follow JSCAD's modular, functional paradigm that emphasizes clear, composable geometry operations:
+
+**Modular Imports** - Import only what you need from @jscad/modeling submodules (primitives, booleans, transforms, extrusions, etc.)
+**Primitive Creation** - Start with basic 3D primitives (cube, sphere, cylinder, etc.) or 2D shapes (circle, rectangle, polygon)
+**Transformation** - Use functional transformations (translate, rotate, scale, mirror) that return new geometry
+**Boolean Operations** - Combine geometries using union, subtract, and intersect operations
+**Extrusions and Hulls** - Create complex 3D shapes from 2D profiles using extrude operations or hulls
+**Functional Composition** - Build complex models by composing simple functions that return geometry
+**Parametric Design** - Use JavaScript variables and functions to make designs fully adjustable
+
+This approach ensures that your models are mathematically precise, fully parametric, and leverage JavaScript's powerful functional programming capabilities.
+</modeling_strategy>`,
+    technicalResources: `
+<technical_resources>
+JSCAD provides a comprehensive JavaScript API specifically designed for programmatic CAD modeling:
+
+**Core Modules:**
+- **primitives**: Basic 3D shapes (cube, sphere, cylinder, etc.) and 2D shapes (circle, rectangle, polygon)
+- **booleans**: CSG operations (union, subtract, intersect)
+- **transforms**: Geometric transformations (translate, rotate, scale, mirror, hull)
+- **extrusions**: Creating 3D from 2D (extrudeLinear, extrudeRotate, extrudeRectangular)
+- **expansions**: Offset operations (expand, offset)
+- **hulls**: Convex hulls and chains
+- **maths**: Vector math utilities (vec2, vec3, mat4)
+- **colors**: Color utilities for visualization
+
+**Key JSCAD Concepts:**
+- All operations return new geometry (immutable)
+- Geometries are represented as geom2 (2D) or geom3 (3D) objects
+- Operations can be chained functionally
+- Parameters are defined using the \`defaultParams\` export object
+- The main function receives parameters and returns geometry
+- Use ES module imports for all JSCAD functionality
+
+**Proven Examples:**
+<examples>
+${jscadExamplesString}
+</examples>
+
+Your goal is to create models that leverage JSCAD's functional approach while maintaining precision and manufacturability.
+</technical_resources>`,
+    codeErrorDescription:
+      'JavaScript syntax errors, import issues, or undefined function calls that prevent the code from executing in the JSCAD environment.',
+    kernelErrorDescription:
+      'Runtime errors from the JSCAD kernel, including geometric failures, invalid CSG operations, or mathematical inconsistencies in geometry creation.',
+    commonErrorPatterns: `- **Import errors**: Ensure you're importing from the correct @jscad/modeling submodules
+- **Undefined functions**: Verify that all functions are properly imported from @jscad/modeling
+- **Invalid dimensions**: Check that all geometric parameters are positive and reasonable
+- **Boolean operation failures**: Ensure geometries being combined are valid and properly positioned
+- **Array/object structure**: JSCAD uses specific array formats for vectors and sizes, verify correct structure`,
+    parameterNamingConvention: 'camelCase',
+    parameterNamingExample: '`balusterDiameter` rather than `bal_diam`',
+    implementationApproach:
+      'Plan which primitives and operations you need, then compose them functionally. For complex models, break down into reusable helper functions.',
+    mainFunctionDescription:
+      'function should accept a parameters object (with defaults) and return the final JSCAD geometry',
   },
 };
 

@@ -189,7 +189,6 @@ export function BuildCommandPaletteItems({ match }: { readonly match: UIMatch })
         const dataUrl = dataUrls[0];
         if (dataUrl) {
           updateThumbnail(dataUrl);
-          console.log('Thumbnail updated successfully');
         }
       },
       onError(error) {

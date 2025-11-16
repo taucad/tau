@@ -7,6 +7,7 @@ import type { GeometrySvg } from '@taucad/types';
 import panzoom from '@panzoom/panzoom/dist/panzoom.es.js';
 import type { PanzoomObject } from '@panzoom/panzoom';
 import { useBuild } from '#hooks/use-build.js';
+import { axesColors } from '#constants/color.constants.js';
 
 type Viewbox = {
   xMin: number;
@@ -34,7 +35,7 @@ function SvgGrid({ viewbox, transform }: SvgGridProps): React.ReactElement {
   const id = useId();
 
   // Calculate theme-aware grid color
-  const gridColor = React.useMemo(() => (theme === Theme.LIGHT ? 'lightgrey' : 'grey'), [theme]);
+  const gridColor = React.useMemo(() => (theme === Theme.LIGHT ? 'lightgrey' : 'rgba(128, 128, 128, 0.1)'), [theme]);
 
   // Grid sizes come from graphics machine (kept in-sync via controlsChanged)
   const { smallSize, largeSize } = gridSizes;
@@ -131,9 +132,6 @@ function SvgAxes({
   strokeWidth = 2,
   opacity = 1,
 }: SvgAxesProps & React.ComponentProps<'g'>): React.ReactElement {
-  const xAxisColor = 'oklch(0.85 0.06 22.5)'; // Another 30% lighter, soft red (X axis)
-  const yAxisColor = 'oklch(0.85 0.06 135)'; // Another 30% lighter, soft green (Y axis)
-
   // Make axes effectively infinite relative to current viewbox.
   // Use a very large extension based on the largest viewbox dimension.
   const baseSize = Math.max(viewbox.width, viewbox.height, 1);
@@ -153,7 +151,7 @@ function SvgAxes({
         y1={0}
         x2={xEnd}
         y2={0}
-        stroke={xAxisColor}
+        stroke={axesColors.x}
         opacity={opacity}
         strokeWidth={strokeWidth}
         vectorEffect="non-scaling-stroke"
@@ -164,7 +162,7 @@ function SvgAxes({
         y1={0}
         x2={0}
         y2={yEnd}
-        stroke={yAxisColor}
+        stroke={axesColors.y}
         opacity={opacity}
         strokeWidth={strokeWidth}
         vectorEffect="non-scaling-stroke"

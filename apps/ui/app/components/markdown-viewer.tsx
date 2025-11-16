@@ -24,6 +24,7 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
     <div
       className={cn(
         'prose w-full max-w-full text-sm text-foreground',
+        'overflow-wrap-anywhere wrap-break-word hyphens-auto',
         '[--tw-prose-headings:text-foreground]',
         '[--tw-prose-bullets:text-foreground]',
         '[--tw-prose-bold:text-foreground]',
@@ -33,6 +34,7 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
         '[--tw-prose-quote-borders:text-foreground]',
         '[--tw-prose-kbd:text-foreground]',
         '[--tw-prose-links:text-foreground]',
+        '[--tw-prose-pre-bg:text-neutral/10]',
       )}
     >
       <Markdown
@@ -57,7 +59,7 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
             if (match) {
               const language = match[1];
               return (
-                <CodeBlock variant="standard">
+                <CodeBlock className="-mx-3" variant="standard">
                   <CodeBlockHeader variant="standard">
                     <CodeBlockTitle variant="standard">{language}</CodeBlockTitle>
                     <CodeBlockAction variant="standard">

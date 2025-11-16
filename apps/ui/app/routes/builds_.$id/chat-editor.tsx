@@ -6,7 +6,7 @@ import { FileCode } from 'lucide-react';
 import { CodeEditor } from '#components/code/code-editor.js';
 import { cn } from '#utils/ui.utils.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
-import { registerMonaco } from '#routes/builds_.$id/chat-editor-config.js';
+import { registerMonaco } from '#lib/monaco.js';
 import { ChatEditorBreadcrumbs } from '#routes/builds_.$id/chat-editor-breadcrumbs.js';
 import { useBuild } from '#hooks/use-build.js';
 import { ChatEditorTabs } from '#routes/builds_.$id/chat-editor-tabs.js';
@@ -52,7 +52,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
     [activeFile],
   );
 
-  // Reset force open when file changes
+  // Reset force open when file path changes (switching files)
   useEffect(() => {
     setForceOpenBinary(false);
   }, [activeFile?.path]);
@@ -79,6 +79,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
         type: 'updateFile',
         path: activeFile.path,
         content: encodeTextFile(value ?? ''),
+        source: 'user',
       });
     },
     [activeFile, buildRef],
@@ -96,6 +97,53 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       void registerMonaco(monaco);
     }
   }, [monaco]);
+
+  // Listen to external file changes from build machine and update Monaco models
+  useEffect(() => {
+    if (!monaco) {
+      return undefined;
+    }
+
+    // Subscribe to fileUpdated events emitted from build machine
+    const subscription = buildRef.on('fileUpdated', ({ path, content, source }) => {
+      // Only handle external updates (AI edits, not user typing)
+      if (source !== 'external') {
+        return;
+      }
+
+      // Create URI for the file path
+      const uri = monaco.Uri.parse(path);
+      const model = monaco.editor.getModel(uri);
+
+      // Only update if a Monaco model exists for this file (it's open in a tab)
+      if (!model) {
+        return;
+      }
+
+      // Decode the content
+      const newContent = decodeTextFile(content);
+      const currentModelContent = model.getValue();
+
+      // Only update if Monaco's content is different from the external update
+      if (currentModelContent !== newContent) {
+        // Update the model content while preserving undo/redo
+        model.pushEditOperations(
+          [],
+          [
+            {
+              range: model.getFullModelRange(),
+              text: newContent,
+            },
+          ],
+          () => null,
+        );
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [monaco, buildRef]);
 
   const handleValidate = useCallback(() => {
     const errors = monaco?.editor.getModelMarkers({});
@@ -124,28 +172,27 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
     <div className={cn('flex h-full flex-col bg-background', className)}>
       <ChatEditorTabs />
       <ChatEditorBreadcrumbs />
-      <div className="flex-1">
-        {activeFile ? (
-          isBinary && !forceOpenBinary ? (
-            <ChatEditorBinaryWarning onForceOpen={handleForceOpenBinary} />
-          ) : (
-            <CodeEditor
-              loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
-              className="h-full bg-background"
-              language={activeFile.language}
-              value={editorContent}
-              onChange={handleCodeChange}
-              onValidate={handleValidate}
-            />
-          )
+      {activeFile ? (
+        isBinary && !forceOpenBinary ? (
+          <ChatEditorBinaryWarning onForceOpen={handleForceOpenBinary} />
         ) : (
-          <EmptyItems>
-            <FileCode className="mb-4 size-12 stroke-1 text-muted-foreground" />
-            <p className="text-base font-medium">No file selected</p>
-            <p className="mt-1 text-xs text-muted-foreground/70">Select a file from the tree to start editing</p>
-          </EmptyItems>
-        )}
-      </div>
+          <CodeEditor
+            loading={<HammerAnimation className="size-20 animate-spin stroke-1 text-primary ease-in-out" />}
+            className="h-full bg-background"
+            defaultLanguage={activeFile.language}
+            defaultValue={editorContent}
+            path={activeFile.path}
+            onChange={handleCodeChange}
+            onValidate={handleValidate}
+          />
+        )
+      ) : (
+        <EmptyItems>
+          <FileCode className="mb-4 size-12 stroke-1 text-muted-foreground" />
+          <p className="text-base font-medium">No file selected</p>
+          <p className="mt-1 text-xs text-muted-foreground/70">Select a file to start editing</p>
+        </EmptyItems>
+      )}
     </div>
   );
 });

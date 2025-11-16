@@ -121,7 +121,7 @@ export function ChatInterfaceStatus({ className, ...props }: React.HTMLAttribute
           </div>
         </div>
       </CollapsibleTrigger>
-      <CollapsibleContent className="flex flex-col gap-2 overflow-hidden p-2 pt-0 text-balance">
+      <CollapsibleContent className="flex flex-col gap-2 overflow-hidden p-3 pt-0 text-balance">
         <div className="text-sm text-muted-foreground">{description}</div>
         {tips !== undefined && tips.length > 0 ? (
           <div>

@@ -1,7 +1,18 @@
 import { useSelector } from '@xstate/react';
-import type { KernelStackFrame } from '@taucad/types';
+import { useCallback } from 'react';
+import { Sparkles } from 'lucide-react';
+import type { KernelProvider, KernelStackFrame } from '@taucad/types';
+import { messageRole, messageStatus, languageFromKernel } from '@taucad/types/constants';
+import { Button } from '#components/ui/button.js';
+import { useChatActions } from '#components/chat/chat-provider.js';
+import { cookieName } from '#constants/cookie.constants.js';
 import { useBuild } from '#hooks/use-build.js';
+import { useCookie } from '#hooks/use-cookie.js';
 import { cn } from '#utils/ui.utils.js';
+import { createMessage } from '#utils/chat.utils.js';
+import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { useModels } from '#hooks/use-models.js';
+import { defaultChatModel } from '#constants/chat.constants.js';
 
 function StackFrame({ frame, index }: { readonly frame: KernelStackFrame; readonly index: number }): React.JSX.Element {
   const fileName = frame.fileName ?? '<unknown>';
@@ -32,21 +43,36 @@ function ErrorStackTrace({
   startLineNumber,
   startColumn,
   stackFrames,
+  onFixWithAi,
 }: {
   readonly message: string;
   readonly startLineNumber?: number;
   readonly startColumn?: number;
   readonly stackFrames?: KernelStackFrame[];
+  readonly onFixWithAi?: () => void;
 }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-2 rounded-md border border-destructive/20 bg-destructive/5 p-3 text-xs">
       {/* Error message */}
-      <div className="font-medium text-destructive">
-        {message}
-        {startLineNumber ? (
-          <span className="ml-1 font-normal text-muted-foreground">
-            (Line {startLineNumber}:{startColumn})
-          </span>
+      <div className="flex items-start justify-between gap-2">
+        <div className="font-medium text-destructive">
+          {message}
+          {startLineNumber ? (
+            <span className="ml-1 font-normal text-muted-foreground">
+              (Line {startLineNumber}:{startColumn})
+            </span>
+          ) : null}
+        </div>
+        {onFixWithAi ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 gap-1.5 border-destructive/30 bg-background/50 text-[0.6875rem] hover:border-destructive/50 hover:bg-background/80"
+            onClick={onFixWithAi}
+          >
+            <Sparkles className="size-3" />
+            Fix with AI
+          </Button>
         ) : null}
       </div>
 
@@ -66,8 +92,101 @@ function ErrorStackTrace({
 }
 
 export function ChatStackTrace({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.ReactNode {
-  const { cadRef: cadActor } = useBuild();
+  const { cadRef: cadActor, buildRef } = useBuild();
   const error = useSelector(cadActor, (state) => state.context.kernelError);
+  const { append } = useChatActions();
+  const { selectedModel } = useModels();
+  const [, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
+  const [kernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
+
+  const handleFixWithAi = useCallback(() => {
+    if (!error) {
+      return;
+    }
+
+    // Get the current code and build context
+    const buildSnapshot = buildRef.getSnapshot();
+    const { build } = buildSnapshot.context;
+    const mainFilePath = build?.assets.mechanical?.main;
+    const fileContent = mainFilePath ? build.assets.mechanical?.files[mainFilePath]?.content : undefined;
+
+    const code = fileContent ? decodeTextFile(fileContent) : undefined;
+
+    // Get the code around the error line for context
+    let codeContext = '';
+    if (code && error.startLineNumber) {
+      const lines = code.split('\n');
+      const startLine = Math.max(0, error.startLineNumber - 3);
+      const endLine = Math.min(lines.length, error.startLineNumber + 3);
+      const contextLines = lines.slice(startLine, endLine);
+      codeContext = contextLines
+        .map((line, index) => {
+          const lineNumber = startLine + index + 1;
+          const marker = lineNumber === error.startLineNumber ? '> ' : '  ';
+          return `${marker}${lineNumber} | ${line}`;
+        })
+        .join('\n');
+    }
+
+    // Build comprehensive error prompt following best practices
+    // Include: error type, location, stack trace, code context, and specific request
+    const stackTraceText = error.stackFrames
+      ?.map(
+        (frame, index) =>
+          `  ${index + 1}. ${frame.functionName ?? '<anonymous>'} (${frame.fileName ?? '<unknown>'}:${frame.lineNumber}:${frame.columnNumber})`,
+      )
+      .join('\n');
+
+    const errorPrompt = `I'm getting an error in my ${kernel} code and need help fixing it.
+
+**Error Details:**
+- **Message:** ${error.message}
+- **Location:** Line ${error.startLineNumber}, Column ${error.startColumn}
+- **File:** ${mainFilePath ?? 'main file'}
+
+${stackTraceText ? `**Stack Trace:**\n${stackTraceText}\n` : ''}
+${
+  codeContext
+    ? `**Code Context:**
+\`\`\`
+${codeContext}
+\`\`\`
+`
+    : ''
+}
+${
+  code
+    ? `**Full Code:**
+\`\`\`${languageFromKernel[kernel]}
+${code}
+\`\`\`
+`
+    : ''
+}
+
+Please analyze the error and fix the code. Focus on:
+1. Identifying the root cause of the error
+2. Providing a corrected version of the code
+3. Explaining what was wrong and why the fix works
+
+Please update the code to resolve this error.`;
+
+    // Open the chat panel
+    setIsChatOpen(true);
+
+    // Append the error fixing message to the current chat
+    const message = createMessage({
+      content: errorPrompt,
+      role: messageRole.user,
+      model: selectedModel?.id ?? defaultChatModel,
+      status: messageStatus.pending,
+      metadata: {
+        kernel,
+      },
+    });
+
+    append(message);
+  }, [error, buildRef, kernel, setIsChatOpen, selectedModel?.id, append]);
 
   if (!error) {
     return null;
@@ -80,6 +199,7 @@ export function ChatStackTrace({ className, ...props }: React.HTMLAttributes<HTM
         startLineNumber={error.startLineNumber}
         startColumn={error.startColumn}
         stackFrames={error.stackFrames}
+        onFixWithAi={handleFixWithAi}
       />
     </div>
   );

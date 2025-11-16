@@ -38,6 +38,7 @@ import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
 import { toast } from '#components/ui/sonner.js';
 import {
+  FloatingPanelContent,
   FloatingPanelContentBody,
   FloatingPanelContentHeader,
   FloatingPanelContentTitle,
@@ -652,133 +653,137 @@ export function ChatEditorFileTree(): React.JSX.Element {
         onChange={handleFileUpload}
       />
 
-      <FloatingPanelContentHeader className="flex items-center justify-between pr-1">
-        <FloatingPanelContentTitle>Files</FloatingPanelContentTitle>
-        <div className="flex items-center -space-x-0.5 text-muted-foreground/50 [&_[data-slot=button]]:rounded-xs">
-          <Button
-            aria-label={allFoldersExpanded ? 'Collapse all folders' : 'Expand all folders'}
-            className="size-6"
-            size="icon"
-            variant="ghost"
-            onClick={handleToggleExpandAll}
-          >
-            {allFoldersExpanded ? <ChevronsDown className="size-4" /> : <ChevronsRight className="size-4" />}
-          </Button>
-          <Button
-            aria-label={showHiddenFiles ? 'Hide hidden files' : 'Show hidden files'}
-            className="size-6"
-            size="icon"
-            variant="ghost"
-            onClick={() => {
-              setShowHiddenFiles(!showHiddenFiles);
-            }}
-          >
-            {showHiddenFiles ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
-          </Button>
-          <Button
-            aria-label="Search files"
-            className="size-6"
-            size="icon"
-            variant="ghost"
-            onClick={() => {
-              tree.openSearch();
-            }}
-          >
-            <Search className="size-4" />
-          </Button>
-          <DropdownMenu>
-            <Button asChild aria-label="Create new file" className="size-6" size="icon" variant="ghost">
-              <DropdownMenuTrigger>
-                <FilePlus className="size-4" />
-              </DropdownMenuTrigger>
-            </Button>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>New File</DropdownMenuLabel>
-              <DropdownMenuItem
-                onClick={() => {
-                  handleCreateFile(undefined);
-                }}
-              >
-                Blank
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {kernelConfigurations.map((kernel) => (
-                <DropdownMenuItem
-                  key={kernel.id}
-                  onClick={() => {
-                    handleCreateFile(kernel);
-                  }}
-                >
-                  {kernel.name} ({kernel.mainFile})
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button
-            aria-label="Create new folder"
-            className="size-6"
-            size="icon"
-            variant="ghost"
-            onClick={handleCreateFolder}
-          >
-            <FolderPlus className="mt-0.5 size-4" />
-          </Button>
-        </div>
-      </FloatingPanelContentHeader>
-      <FloatingPanelContentBody className="p-1">
-        {tree.isSearchOpen() && (
-          <div className="mb-1 flex items-center gap-2 px-1">
-            <Input
-              {...tree.getSearchInputElementProps()}
-              placeholder="Search files..."
-              className="h-7 flex-1 text-sm"
-            />
-            <span className="text-xs text-muted-foreground">{tree.getSearchMatchingItems().length}</span>
+      <FloatingPanelContent>
+        <FloatingPanelContentHeader className="flex items-center justify-between pr-1">
+          <FloatingPanelContentTitle>Files</FloatingPanelContentTitle>
+          <div className="flex items-center -space-x-0.5 text-muted-foreground/50 [&_[data-slot=button]]:rounded-xs">
             <Button
-              variant="ghost"
+              aria-label={allFoldersExpanded ? 'Collapse all folders' : 'Expand all folders'}
+              className="size-6"
               size="icon"
-              className="size-7"
-              aria-label="Close search"
+              variant="ghost"
+              onClick={handleToggleExpandAll}
+            >
+              {allFoldersExpanded ? <ChevronsDown className="size-4" /> : <ChevronsRight className="size-4" />}
+            </Button>
+            <Button
+              aria-label={showHiddenFiles ? 'Hide hidden files' : 'Show hidden files'}
+              className="size-6"
+              size="icon"
+              variant="ghost"
               onClick={() => {
-                tree.closeSearch();
+                setShowHiddenFiles(!showHiddenFiles);
               }}
             >
-              <span className="text-sm">×</span>
+              {showHiddenFiles ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+            </Button>
+            <Button
+              aria-label="Search files"
+              className="size-6"
+              size="icon"
+              variant="ghost"
+              onClick={() => {
+                tree.openSearch();
+              }}
+            >
+              <Search className="size-4" />
+            </Button>
+            <DropdownMenu>
+              <Button asChild aria-label="Create new file" className="size-6" size="icon" variant="ghost">
+                <DropdownMenuTrigger>
+                  <FilePlus className="size-4" />
+                </DropdownMenuTrigger>
+              </Button>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>New File</DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={() => {
+                    handleCreateFile(undefined);
+                  }}
+                >
+                  Blank
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {kernelConfigurations.map((kernel) => (
+                  <DropdownMenuItem
+                    key={kernel.id}
+                    onClick={() => {
+                      handleCreateFile(kernel);
+                    }}
+                  >
+                    {kernel.name} ({kernel.mainFile})
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              aria-label="Create new folder"
+              className="size-6"
+              size="icon"
+              variant="ghost"
+              onClick={handleCreateFolder}
+            >
+              <FolderPlus className="mt-0.5 size-4" />
             </Button>
           </div>
-        )}
+        </FloatingPanelContentHeader>
+        <FloatingPanelContentBody className="flex min-h-0 flex-col p-1">
+          {tree.isSearchOpen() && (
+            <div className="mb-1 flex shrink-0 items-center gap-2 px-1">
+              <Input
+                {...tree.getSearchInputElementProps()}
+                placeholder="Search files..."
+                className="h-7 flex-1 text-sm"
+              />
+              <span className="text-xs text-muted-foreground">{tree.getSearchMatchingItems().length}</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                aria-label="Close search"
+                onClick={() => {
+                  tree.closeSearch();
+                }}
+              >
+                <span className="text-sm">×</span>
+              </Button>
+            </div>
+          )}
 
-        {selectedItems.length > 1 && (
-          <div className="mb-1 px-1 text-xs text-muted-foreground">{selectedItems.length} items selected</div>
-        )}
+          {selectedItems.length > 1 && (
+            <div className="mb-1 shrink-0 px-1 text-xs text-muted-foreground">
+              {selectedItems.length} items selected
+            </div>
+          )}
 
-        {tree.getItems().length > 1 ? (
-          <div {...tree.getContainerProps()} className="flex flex-col gap-0.5 outline-none">
-            <AssistiveTreeDescription tree={tree} />
-            {tree.getItems().map((item) => {
-              if (item.getId() === rootId) {
-                return null;
-              }
+          {tree.getItems().length > 1 ? (
+            <div {...tree.getContainerProps()} className="flex min-h-0 flex-col gap-0.5 outline-none">
+              <AssistiveTreeDescription tree={tree} />
+              {tree.getItems().map((item) => {
+                if (item.getId() === rootId) {
+                  return null;
+                }
 
-              return (
-                <TreeItem
-                  key={item.getId()}
-                  item={item}
-                  isActive={activeFilePath === item.getId()}
-                  isOpen={openFiles.some((f) => f.path === item.getId())}
-                  searchQuery={tree.getState().search ?? ''}
-                  onDelete={handleDelete}
-                  onDuplicate={handleDuplicate}
-                  onUpload={handleUploadClick}
-                />
-              );
-            })}
-            <div style={tree.getDragLineStyle()} className="h-0.5 rounded-full bg-primary" />
-          </div>
-        ) : (
-          <EmptyItems className="m-1">No files available</EmptyItems>
-        )}
-      </FloatingPanelContentBody>
+                return (
+                  <TreeItem
+                    key={item.getId()}
+                    item={item}
+                    isActive={activeFilePath === item.getId()}
+                    isOpen={openFiles.some((f) => f.path === item.getId())}
+                    searchQuery={tree.getState().search ?? ''}
+                    onDelete={handleDelete}
+                    onDuplicate={handleDuplicate}
+                    onUpload={handleUploadClick}
+                  />
+                );
+              })}
+              <div style={tree.getDragLineStyle()} className="h-0.5 rounded-full bg-primary" />
+            </div>
+          ) : (
+            <EmptyItems className="m-1">No files available</EmptyItems>
+          )}
+        </FloatingPanelContentBody>
+      </FloatingPanelContent>
     </>
   );
 }
@@ -870,7 +875,7 @@ function TreeItem({
                   <Folder className="size-4 shrink-0 text-muted-foreground" />
                 )
               ) : (
-                <FileExtensionIcon filename={item.getItemName()} className="size-3 shrink-0 text-muted-foreground" />
+                <FileExtensionIcon filename={item.getItemName()} className="size-3.5 shrink-0 text-muted-foreground" />
               )}
               <span className={cn('truncate', isOpen && 'font-medium', isActive && 'text-primary')}>
                 <HighlightText text={item.getItemName()} searchTerm={searchQuery} />
@@ -887,9 +892,9 @@ function TreeItem({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
-                    variant="ghost"
+                    variant="secondary"
                     size="icon"
-                    className="size-5 opacity-0 group-hover/file:opacity-100"
+                    className="absolute top-1/2 right-1 size-5 -translate-y-1/2 opacity-0 group-hover/file:opacity-100"
                     onClick={(event) => {
                       event.stopPropagation();
                     }}
@@ -897,7 +902,7 @@ function TreeItem({
                     <MoreHorizontal className="size-3.5" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="start">
                   <DropdownMenuItem
                     onClick={(event) => {
                       event.stopPropagation();

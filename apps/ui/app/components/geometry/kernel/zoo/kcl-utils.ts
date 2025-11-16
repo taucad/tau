@@ -454,7 +454,6 @@ export class KclUtils {
       // Check for the "Nothing to export" pattern in various forms
       if (errorMessage.includes('Nothing to export') || errorMessage.includes('internal_engine: Nothing to export')) {
         // This is a valid case - return empty array instead of throwing
-        console.log('No geometry to export - returning empty result');
         return [];
       }
 
@@ -494,8 +493,6 @@ export class KclUtils {
 
       // Reset execution state
       this.hasExecutedProgram = false;
-
-      console.log('Memory cleared successfully');
     } catch (error) {
       console.warn('Failed to clear memory:', error);
     }

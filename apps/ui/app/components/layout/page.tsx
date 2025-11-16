@@ -139,7 +139,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
               'h-dvh',
               enableOverflowY && 'overflow-y-auto',
               !enableFloatingSidebar &&
-                'mt-[var(--header-height)] h-[calc(100dvh-var(--header-height)-1px)] md:ml-(--sidebar-width-current)',
+                'mt-[var(--header-height)] h-[calc(100dvh-var(--header-height)-1px)] transition-[margin] duration-200 ease-linear md:ml-(--sidebar-width-current)',
             )}
           >
             {error === undefined ? <Outlet /> : error}

@@ -16,6 +16,8 @@ import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 export function NavMain({
   items,
+  groupLabel,
+  className,
 }: {
   readonly items: Array<{
     title: string;
@@ -27,10 +29,12 @@ export function NavMain({
       url: string;
     }>;
   }>;
+  readonly groupLabel?: string;
+  readonly className?: string;
 }): React.JSX.Element {
   return (
-    <SidebarGroup>
-      <SidebarGroupLabel>Platform</SidebarGroupLabel>
+    <SidebarGroup className={className}>
+      {groupLabel ? <SidebarGroupLabel>{groupLabel}</SidebarGroupLabel> : null}
       <SidebarMenu>
         {items.map((item) => {
           const hasItems = item.items !== undefined && item.items.length > 0;

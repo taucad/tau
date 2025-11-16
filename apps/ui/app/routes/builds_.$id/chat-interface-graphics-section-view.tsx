@@ -19,8 +19,6 @@ function toRadians(degrees: number): number {
 
 export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
   const { graphicsRef: graphicsActor } = useBuild();
-  const state = useSelector(graphicsActor, (s) => s);
-
   const {
     selectedSectionViewId,
     sectionViewTranslation,
@@ -31,17 +29,17 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
     enableClippingMesh,
     geometryRadius,
     sceneRadius,
-  } = state.context as unknown as {
-    selectedSectionViewId: 'xy' | 'xz' | 'yz' | undefined;
-    sectionViewTranslation: number;
-    sectionViewRotation: [number, number, number];
-    sectionViewDirection: 1 | -1;
-    planeName: 'cartesian' | 'face';
-    enableClippingLines: boolean;
-    enableClippingMesh: boolean;
-    geometryRadius: number;
-    sceneRadius: number | undefined;
-  };
+  } = useSelector(graphicsActor, (s) => ({
+    selectedSectionViewId: s.context.selectedSectionViewId,
+    sectionViewTranslation: s.context.sectionViewTranslation,
+    sectionViewRotation: s.context.sectionViewRotation,
+    sectionViewDirection: s.context.sectionViewDirection,
+    planeName: s.context.planeName,
+    enableClippingLines: s.context.enableClippingLines,
+    enableClippingMesh: s.context.enableClippingMesh,
+    geometryRadius: s.context.geometryRadius,
+    sceneRadius: s.context.sceneRadius,
+  }));
 
   const maxDistance = useMemo(() => {
     const sr = sceneRadius ?? 0;

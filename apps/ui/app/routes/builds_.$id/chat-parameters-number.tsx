@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { Slider } from '#components/ui/slider.js';
 import { ChatParametersInputNumber } from '#routes/builds_.$id/chat-parameters-input-number.js';
 import { useKeydown } from '#hooks/use-keydown.js';
@@ -196,6 +197,17 @@ export function ChatParametersNumber({
   disabled,
   ...properties
 }: ChatParametersNumberProps): React.JSX.Element {
+  // Local state to track slider value during dragging for visual feedback
+  const [localValue, setLocalValue] = React.useState<number>(value);
+  const [isDragging, setIsDragging] = React.useState<boolean>(false);
+
+  // Sync local state when external value changes, but avoid clobbering while dragging
+  React.useEffect(() => {
+    if (!isDragging) {
+      setLocalValue(value);
+    }
+  }, [value, isDragging]);
+
   // Track Shift key state for adjusting slider step
   const { isKeyPressed: isShiftHeld } = useKeydown(
     { key: 'Shift' },
@@ -216,18 +228,25 @@ export function ChatParametersNumber({
     <div className="flex w-full flex-row items-center gap-2">
       <Slider
         variant="inset"
-        value={[value]}
+        value={[localValue]}
         min={min ?? calculateSliderMin(defaultValue)}
         max={max ?? calculateSliderMax(defaultValue)}
         step={effectiveStep}
         disabled={disabled}
         className="[&_[data-slot=slider-track]]:h-7 md:[&_[data-slot=slider-track]]:h-4.5"
         onValueChange={([newValue]) => {
+          // Update local state for visual feedback during dragging
+          setLocalValue(Number(newValue));
+          setIsDragging(true);
+        }}
+        onValueCommit={([newValue]) => {
+          // Fire onChange callback only when user releases the mouse (mouseup)
+          setIsDragging(false);
           onChange(Number(newValue));
         }}
       />
       <ChatParametersInputNumber
-        value={value}
+        value={localValue}
         descriptor={descriptor}
         className="h-7 w-24 bg-background"
         disabled={disabled}

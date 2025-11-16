@@ -4,6 +4,7 @@ import { useSelector } from '@xstate/react';
 import { useBuild } from '#hooks/use-build.js';
 import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
+import { FloatingPanelContentHeader } from '#components/ui/floating-panel.js';
 
 export function ChatEditorTabs(): React.JSX.Element {
   const { fileExplorerRef, gitRef } = useBuild();
@@ -51,10 +52,10 @@ export function ChatEditorTabs(): React.JSX.Element {
   }, []);
 
   return (
-    <div className="border-b bg-muted/20">
+    <FloatingPanelContentHeader className="pl-0">
       <div
         ref={scrollContainerRef}
-        className="mr-7.5 -mb-px h-7.75 overflow-x-auto overflow-y-hidden overscroll-x-none [scrollbar-width:none]"
+        className="-mb-px h-7.75 overflow-x-auto overflow-y-hidden overscroll-x-none [scrollbar-width:none]"
       >
         <div className="flex h-full w-max">
           {openFiles.map((file) => {
@@ -66,10 +67,10 @@ export function ChatEditorTabs(): React.JSX.Element {
                 <div
                   className={cn(
                     'group/editor-tab flex h-full min-w-0 cursor-pointer items-center gap-1 border-y border-y-transparent pr-2 pl-4 text-sm transition-colors',
-                    'hover:bg-muted/40',
+                    'hover:bg-accent/40',
                     isActive
-                      ? 'border-b-[1.5px] border-b-primary bg-background text-foreground'
-                      : 'bg-muted/20 text-muted-foreground',
+                      ? 'border-b-[1.5px] border-b-primary bg-accent/50 text-foreground'
+                      : 'text-muted-foreground',
                   )}
                   role="tab"
                   tabIndex={0}
@@ -114,6 +115,6 @@ export function ChatEditorTabs(): React.JSX.Element {
           })}
         </div>
       </div>
-    </div>
+    </FloatingPanelContentHeader>
   );
 }

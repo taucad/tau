@@ -31,14 +31,16 @@ export const cookieName = {
   chatOpModelExplorer: 'chat-op-model-explorer',
   // Whether the chat editor details are open.
   chatOpDetails: 'chat-op-details',
+  // Whether the chat converter is open.
+  chatOpConverter: 'chat-op-converter',
+  // Whether the chat git panel is open.
+  chatOpGit: 'chat-op-git',
   // The last selected chat explorer size.
   chatRsFileExplorer: 'chat-rs-file-explorer',
   // The last selected chat console size.
   chatRsEditor: 'chat-rs-editor',
   // The last selected chat console size.
-  chatRsLeft: 'chat-rs-left',
-  // The last selected chat right panel size.
-  chatRsRight: 'chat-rs-right',
+  chatRsInterface: 'chat-rs-interface',
   // The last selected chat interface tab.
   chatInterfaceTab: 'chat-interface-tab',
   // Whether the chat interface is full height.

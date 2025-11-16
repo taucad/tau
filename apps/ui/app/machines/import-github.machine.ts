@@ -16,7 +16,9 @@ export type ImportGitHubContext = {
   requestedMainFile: string;
   selectedMainFile: string | undefined;
   downloadProgress: { loaded: number; total: number };
+  pendingDownloadProgress: { loaded: number; total: number } | undefined;
   extractProgress: { processed: number; total: number };
+  pendingExtractProgress: { processed: number; total: number } | undefined;
   unzipRef: ActorRefFrom<UnzipMachineActor> | undefined;
   unzipSubscription: { unsubscribe: () => void } | undefined;
   files: Map<string, { filename: string; content: Uint8Array }>;
@@ -103,8 +105,15 @@ const downloadZipActor = fromPromise<
   for (let result = await reader.read(); !result.done; result = await reader.read()) {
     chunks.push(result.value);
     receivedLength += result.value.length;
-    input.onProgress(receivedLength, contentLength);
+
+    // Send progress update - throttling handled by state machine
+    const total = contentLength > 0 ? contentLength : receivedLength;
+    input.onProgress(receivedLength, total);
   }
+
+  // Send final progress update
+  const finalTotal = contentLength > 0 ? contentLength : receivedLength;
+  input.onProgress(receivedLength, finalTotal);
 
   // Combine chunks into a single Uint8Array
   const zipData = new Uint8Array(receivedLength);
@@ -180,13 +189,26 @@ type ImportGitHubEventExternalDone = DoneActorEvent<ImportGitHubEventExternal, I
  * Manages importing a GitHub repository as a build.
  *
  * States:
- * - idle: Waiting to start
- * - downloading: Downloading ZIP from GitHub
- * - extracting: Extracting files from ZIP
+ * - downloading: Downloading ZIP from GitHub (parallel state with throttled progress updates)
+ *   - download.fetching: Actively fetching the ZIP file
+ *   - download.done: Download completed
+ *   - progressThrottle.idle: Ready to accept progress updates
+ *   - progressThrottle.throttling: Throttling progress updates (100ms delay)
+ * - extracting: Extracting files from ZIP (parallel state with throttled progress updates)
+ *   - extraction.processing: Actively extracting files
+ *   - extraction.done: Extraction completed
+ *   - progressThrottle.idle: Ready to accept progress updates
+ *   - progressThrottle.throttling: Throttling progress updates (100ms delay)
  * - selectingMainFile: User reviews files and selects main file
  * - creating: Creating the build with selected main file
  * - success: Import completed successfully
  * - error: An error occurred during import
+ *
+ * Throttling Pattern:
+ * - Progress updates are throttled to max once per 100ms using state machine transitions
+ * - When an update arrives in 'idle', it's applied immediately and transitions to 'throttling'
+ * - While in 'throttling', updates are buffered as 'pending' and applied after 100ms delay
+ * - This prevents blocking the main thread with excessive UI updates during streaming
  */
 export const importGitHubMachine = setup({
   types: {
@@ -214,17 +236,43 @@ export const importGitHubMachine = setup({
     clearError: assign({
       error: undefined,
     }),
-    setDownloadProgress: assign({
-      downloadProgress({ event }) {
+    setPendingDownloadProgress: assign({
+      pendingDownloadProgress({ event }) {
         assertEvent(event, 'updateDownloadProgress');
         return { loaded: event.loaded, total: event.total };
       },
     }),
-    setExtractProgress: assign({
-      extractProgress({ event }) {
+    applyPendingDownloadProgress: assign({
+      downloadProgress({ context }) {
+        return context.pendingDownloadProgress ?? context.downloadProgress;
+      },
+      pendingDownloadProgress: undefined,
+    }),
+    applyDownloadProgressImmediately: enqueueActions(({ enqueue, event }) => {
+      assertEvent(event, 'updateDownloadProgress');
+      enqueue.assign({
+        downloadProgress: { loaded: event.loaded, total: event.total },
+        pendingDownloadProgress: { loaded: event.loaded, total: event.total },
+      });
+    }),
+    setPendingExtractProgress: assign({
+      pendingExtractProgress({ event }) {
         assertEvent(event, 'updateExtractProgress');
         return { processed: event.processed, total: event.total };
       },
+    }),
+    applyPendingExtractProgress: assign({
+      extractProgress({ context }) {
+        return context.pendingExtractProgress ?? context.extractProgress;
+      },
+      pendingExtractProgress: undefined,
+    }),
+    applyExtractProgressImmediately: enqueueActions(({ enqueue, event }) => {
+      assertEvent(event, 'updateExtractProgress');
+      enqueue.assign({
+        extractProgress: { processed: event.processed, total: event.total },
+        pendingExtractProgress: { processed: event.processed, total: event.total },
+      });
     }),
     setFiles: assign({
       files({ event }) {
@@ -292,7 +340,9 @@ export const importGitHubMachine = setup({
     requestedMainFile: input.mainFile,
     selectedMainFile: undefined,
     downloadProgress: { loaded: 0, total: 0 },
+    pendingDownloadProgress: undefined,
     extractProgress: { processed: 0, total: 0 },
+    pendingExtractProgress: undefined,
     unzipRef: undefined,
     unzipSubscription: undefined,
     files: new Map(),
@@ -303,29 +353,67 @@ export const importGitHubMachine = setup({
   states: {
     downloading: {
       entry: ['clearError', 'spawnUnzipMachine'],
-      invoke: {
-        src: 'downloadZipActor',
-        input: ({ context, self }) => ({
-          owner: context.owner,
-          repo: context.repo,
-          ref: context.ref,
-          onProgress(loaded: number, total: number) {
-            self.send({ type: 'updateDownloadProgress', loaded, total });
+      type: 'parallel',
+      states: {
+        download: {
+          initial: 'fetching',
+          states: {
+            fetching: {
+              invoke: {
+                src: 'downloadZipActor',
+                input: ({ context, self }) => ({
+                  owner: context.owner,
+                  repo: context.repo,
+                  ref: context.ref,
+                  onProgress(loaded: number, total: number) {
+                    self.send({ type: 'updateDownloadProgress', loaded, total });
+                  },
+                }),
+                onDone: {
+                  target: 'done',
+                  actions: 'sendExtractToUnzip',
+                },
+                onError: {
+                  target: '#importGitHub.error',
+                  actions: 'setError',
+                },
+              },
+            },
+            done: {
+              type: 'final',
+            },
           },
-        }),
-        onDone: {
-          target: 'extracting',
-          actions: 'sendExtractToUnzip',
         },
-        onError: {
-          target: 'error',
-          actions: 'setError',
+        progressThrottle: {
+          initial: 'idle',
+          states: {
+            idle: {
+              on: {
+                updateDownloadProgress: {
+                  target: 'throttling',
+                  actions: 'applyDownloadProgressImmediately',
+                },
+              },
+            },
+            throttling: {
+              after: {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- XState delayed transition syntax
+                100: {
+                  target: 'idle',
+                  actions: 'applyPendingDownloadProgress',
+                },
+              },
+              on: {
+                updateDownloadProgress: {
+                  actions: 'setPendingDownloadProgress',
+                },
+              },
+            },
+          },
         },
       },
-      on: {
-        updateDownloadProgress: {
-          actions: 'setDownloadProgress',
-        },
+      onDone: {
+        target: 'extracting',
       },
     },
     extracting: {
@@ -378,10 +466,52 @@ export const importGitHubMachine = setup({
           context.unzipSubscription.unsubscribe();
         }
       },
-      on: {
-        updateExtractProgress: {
-          actions: 'setExtractProgress',
+      type: 'parallel',
+      states: {
+        extraction: {
+          initial: 'processing',
+          states: {
+            processing: {
+              on: {
+                extractionComplete: {
+                  target: 'done',
+                },
+              },
+            },
+            done: {
+              type: 'final',
+            },
+          },
         },
+        progressThrottle: {
+          initial: 'idle',
+          states: {
+            idle: {
+              on: {
+                updateExtractProgress: {
+                  target: 'throttling',
+                  actions: 'applyExtractProgressImmediately',
+                },
+              },
+            },
+            throttling: {
+              after: {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- XState delayed transition syntax
+                100: {
+                  target: 'idle',
+                  actions: 'applyPendingExtractProgress',
+                },
+              },
+              on: {
+                updateExtractProgress: {
+                  actions: 'setPendingExtractProgress',
+                },
+              },
+            },
+          },
+        },
+      },
+      on: {
         extractionComplete: {
           target: 'selectingMainFile',
           actions: [

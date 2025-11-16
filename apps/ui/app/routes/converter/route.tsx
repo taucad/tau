@@ -36,8 +36,14 @@ import {
   formatDisplayName,
   formatFileSize,
 } from '#components/geometry/converter/converter-utils.js';
-import { SettingsControl } from '#components/geometry/cad/settings-control.js';
 import { Converter } from '#components/geometry/converter/converter.js';
+import { FovControl } from '#components/geometry/cad/fov-control.js';
+import { GridSizeIndicator } from '#components/geometry/cad/grid-control.js';
+import { SectionViewControl } from '#components/geometry/cad/section-view-control.js';
+import { MeasureControl } from '#components/geometry/cad/measure-control.js';
+import { ResetCameraControl } from '#components/geometry/cad/reset-camera-control.js';
+import { SettingsControl } from '#components/geometry/cad/settings-control.js';
+import { ChatInterfaceGraphics } from '#routes/builds_.$id/chat-interface-graphics.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '#utils/ui.utils.js';
@@ -204,10 +210,11 @@ function ConverterContent(): React.JSX.Element {
               />
             </div>
 
-            {/* File info overlay */}
-            {uploadedFile ? (
-              <div className="absolute bottom-2 left-2 flex flex-col gap-2 transition-[left] duration-200 ease-linear md:left-(--sidebar-width-current)">
-                <div className="rounded-md border bg-sidebar/95 p-3 shadow-md backdrop-blur-sm">
+            {/* Bottom-left viewer controls */}
+            <div className="pointer-events-none absolute bottom-2 left-2 z-10 flex w-90 shrink-0 flex-col gap-2 transition-[left] duration-200 ease-linear md:left-(--sidebar-width-current)">
+              {/* File info overlay */}
+              {uploadedFile ? (
+                <div className="pointer-events-auto rounded-md border bg-sidebar p-3">
                   <div className="flex items-center gap-1">
                     <div className="text-sm font-medium">{uploadedFile.name}</div>
                     <InfoTooltip>{formatConfigurations[uploadedFile.format].description}</InfoTooltip>
@@ -216,18 +223,26 @@ function ConverterContent(): React.JSX.Element {
                     {formatDisplayName(uploadedFile.format)} · {formatFileSize(uploadedFile.size)}
                   </div>
                 </div>
+              ) : undefined}
+              <ChatInterfaceGraphics className="w-90" />
+              <div className="pointer-events-auto flex items-center gap-2">
+                <FovControl defaultAngle={60} className="w-60" />
+                <GridSizeIndicator />
+                <SectionViewControl />
+                <MeasureControl />
+                <ResetCameraControl />
               </div>
-            ) : undefined}
+            </div>
 
             {/* Export panel trigger */}
             <div className="absolute top-(--header-height) right-2 z-10 flex gap-2">
               <SettingsControl />
-              <FloatingPanel isOpen side="right">
+              <FloatingPanel isOpen side="right" className="rounded-md border">
                 <FloatingPanelContent className="w-80">
                   <FloatingPanelContentHeader>
                     <FloatingPanelContentTitle>Export Options</FloatingPanelContentTitle>
                   </FloatingPanelContentHeader>
-                  <FloatingPanelContentBody className="flex h-full flex-col justify-between gap-4 p-4">
+                  <FloatingPanelContentBody className="flex h-full flex-col justify-between gap-4 p-3 pt-2">
                     <Converter
                       getGlbData={async () => glbData}
                       selectedFormats={selectedFormats}

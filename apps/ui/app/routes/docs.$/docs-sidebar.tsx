@@ -167,7 +167,7 @@ function DocsSidebarSearch(): React.JSX.Element | undefined {
         </div>
       }
       tooltipSide="right"
-      variant="action"
+      variant="static"
       onClick={() => {
         setOpenSearch(true);
       }}

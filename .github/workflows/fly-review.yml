@@ -38,6 +38,7 @@ jobs:
         id: deploy
         uses: superfly/fly-pr-review-apps@1.2.1
         with:
+          name: tau-ui-pr-${{ github.event.number }}
           region: syd
           config: apps/ui/fly.toml
 
@@ -72,6 +73,7 @@ jobs:
         id: deploy
         uses: superfly/fly-pr-review-apps@1.2.1
         with:
+          name: tau-api-pr-${{ github.event.number }}
           region: syd
           config: apps/api/fly.toml
 

@@ -82,7 +82,7 @@ const determineWorkerActor = fromPromise<
   return {
     type: 'kernelError',
     error: {
-      message: `No worker can handle file: ${event.file.filename}`,
+      message: `No kernel can handle file: ${event.file.filename}`,
       startLineNumber: 0,
       startColumn: 0,
       type: 'runtime',

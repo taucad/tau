@@ -38,7 +38,6 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: fly-review-ui
-          recreate: true
           message: |
             ### UI Preview :balloon:
             **Status:** 🔄 Deploying...
@@ -58,7 +57,6 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: fly-review-ui
-          recreate: true
           message: |
             ### UI Preview :balloon:
             **Status:** ✅ Deployed
@@ -69,7 +67,6 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: fly-review-ui
-          recreate: true
           message: |
             ### UI Preview :balloon:
             **Status:** ❌ Deployment Failed
@@ -99,7 +96,6 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: fly-review-api
-          recreate: true
           message: |
             ### API Preview :octopus:
             **Status:** 🔄 Deploying...
@@ -119,7 +115,6 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: fly-review-api
-          recreate: true
           message: |
             ### API Preview :octopus:
             **Status:** ✅ Deployed
@@ -130,7 +125,6 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: fly-review-api
-          recreate: true
           message: |
             ### API Preview :octopus:
             **Status:** ❌ Deployment Failed

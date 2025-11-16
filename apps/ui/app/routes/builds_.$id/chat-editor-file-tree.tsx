@@ -875,7 +875,7 @@ function TreeItem({
                   <Folder className="size-4 shrink-0 text-muted-foreground" />
                 )
               ) : (
-                <FileExtensionIcon filename={item.getItemName()} className="size-3 shrink-0 text-muted-foreground" />
+                <FileExtensionIcon filename={item.getItemName()} className="size-3.5 shrink-0 text-muted-foreground" />
               )}
               <span className={cn('truncate', isOpen && 'font-medium', isActive && 'text-primary')}>
                 <HighlightText text={item.getItemName()} searchTerm={searchQuery} />

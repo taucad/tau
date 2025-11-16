@@ -173,228 +173,232 @@ export default function ImportRoute(): React.JSX.Element {
   });
 
   // Select state from machine
-  const currentState = useSelector(importActorRef, (state) => state.value as string);
+  const state = useSelector(importActorRef, (snapshot) => snapshot);
   const downloadProgress = useSelector(
     importActorRef,
-    (state) => state.context.downloadProgress as { loaded: number; total: number },
+    (snapshot) => snapshot.context.downloadProgress as { loaded: number; total: number },
   );
   const extractProgress = useSelector(
     importActorRef,
-    (state) => state.context.extractProgress as { processed: number; total: number },
+    (snapshot) => snapshot.context.extractProgress as { processed: number; total: number },
   );
-  const error = useSelector(importActorRef, (state) => state.context.error);
-  const buildId = useSelector(importActorRef, (state) => state.context.buildId);
-  const files = useSelector(importActorRef, (state) => state.context.files);
-  const selectedMainFile = useSelector(importActorRef, (state) => state.context.selectedMainFile);
-  const requestedMainFile = useSelector(importActorRef, (state) => state.context.requestedMainFile);
+  const error = useSelector(importActorRef, (snapshot) => snapshot.context.error);
+  const buildId = useSelector(importActorRef, (snapshot) => snapshot.context.buildId);
+  const files = useSelector(importActorRef, (snapshot) => snapshot.context.files);
+  const selectedMainFile = useSelector(importActorRef, (snapshot) => snapshot.context.selectedMainFile);
+  const requestedMainFile = useSelector(importActorRef, (snapshot) => snapshot.context.requestedMainFile);
 
   // Navigate when build is created
   useEffect(() => {
-    if (currentState === 'success' && buildId) {
+    if (state.matches('success') && buildId) {
       void navigate(`/builds/${buildId}`);
     }
-  }, [currentState, buildId, navigate]);
+  }, [state, buildId, navigate]);
 
   const fileTree = useMemo(() => buildFileTree(files), [files]);
 
-  if (currentState === 'selectingMainFile') {
-    const fileNames = [...files.keys()];
+  switch (true) {
+    case state.matches('selectingMainFile'): {
+      const fileNames = [...files.keys()];
 
-    return (
-      <div className="flex h-full items-center justify-center px-4 pt-8 pb-16">
-        <div className="w-full max-w-3xl space-y-6">
-          <div className="flex flex-col items-center gap-4">
-            <div className="flex size-16 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10">
-              <SvgIcon id="github" className="size-8 text-primary" />
-            </div>
+      return (
+        <div className="flex h-full items-center justify-center px-4 pt-8 pb-16">
+          <div className="w-full max-w-3xl space-y-6">
+            <div className="flex flex-col items-center gap-4">
+              <div className="flex size-16 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10">
+                <SvgIcon id="github" className="size-8 text-primary" />
+              </div>
 
-            <div className="text-center">
-              <h1 className="text-2xl font-semibold">Review Import</h1>
-              <p className="text-sm text-muted-foreground">
-                {owner}/{repo}
-                {ref === 'main' ? '' : ` @ ${ref}`}
-              </p>
-              {requestedMainFile.length > 0 && !fileNames.includes(requestedMainFile) ? (
-                <p className="mt-2 text-sm text-warning">
-                  Requested file &quot;{requestedMainFile}&quot; not found. Please select a main file.
+              <div className="text-center">
+                <h1 className="text-2xl font-semibold">Review Import</h1>
+                <p className="text-sm text-muted-foreground">
+                  {owner}/{repo}
+                  {ref === 'main' ? '' : ` @ ${ref}`}
                 </p>
-              ) : undefined}
-            </div>
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-2">
-            {/* Left: File Tree */}
-            <div className="space-y-3">
-              <h2 className="text-sm font-medium">Repository Files ({fileNames.length})</h2>
-              <div className="max-h-96 overflow-auto rounded-md border bg-sidebar p-2">
-                <Tree elements={fileTree} className="h-full">
-                  {renderFileTree(fileTree)}
-                </Tree>
+                {requestedMainFile.length > 0 && !fileNames.includes(requestedMainFile) ? (
+                  <p className="mt-2 text-sm text-warning">
+                    Requested file &quot;{requestedMainFile}&quot; not found. Please select a main file.
+                  </p>
+                ) : undefined}
               </div>
             </div>
 
-            {/* Right: Main File Selection */}
-            <div className="space-y-3">
-              <h2 className="text-sm font-medium">Main File</h2>
-              <div className="space-y-4 rounded-md border bg-sidebar p-4">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" className="w-full justify-between">
-                      {selectedMainFile ? (
-                        <span className="truncate">{selectedMainFile}</span>
+            <div className="grid gap-6 md:grid-cols-2">
+              {/* Left: File Tree */}
+              <div className="space-y-3">
+                <h2 className="text-sm font-medium">Repository Files ({fileNames.length})</h2>
+                <div className="max-h-96 overflow-auto rounded-md border bg-sidebar p-2">
+                  <Tree elements={fileTree} className="h-full">
+                    {renderFileTree(fileTree)}
+                  </Tree>
+                </div>
+              </div>
+
+              {/* Right: Main File Selection */}
+              <div className="space-y-3">
+                <h2 className="text-sm font-medium">Main File</h2>
+                <div className="space-y-4 rounded-md border bg-sidebar p-4">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between">
+                        {selectedMainFile ? (
+                          <span className="truncate">{selectedMainFile}</span>
+                        ) : (
+                          <span className="text-muted-foreground">Select main file...</span>
+                        )}
+                        <ChevronDown className="size-4 shrink-0" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="max-h-64 w-[--radix-dropdown-menu-trigger-width] overflow-y-auto">
+                      {fileNames.length === 0 ? (
+                        <DropdownMenuItem disabled>No files available</DropdownMenuItem>
                       ) : (
-                        <span className="text-muted-foreground">Select main file...</span>
+                        fileNames.map((filename) => (
+                          <DropdownMenuItem
+                            key={filename}
+                            onSelect={() => {
+                              importActorRef.send({ type: 'selectMainFile', filename });
+                            }}
+                          >
+                            <FileCode className="mr-2 size-4" />
+                            <span className="truncate">{filename}</span>
+                          </DropdownMenuItem>
+                        ))
                       )}
-                      <ChevronDown className="size-4 shrink-0" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent className="max-h-64 w-[--radix-dropdown-menu-trigger-width] overflow-y-auto">
-                    {fileNames.length === 0 ? (
-                      <DropdownMenuItem disabled>No files available</DropdownMenuItem>
-                    ) : (
-                      fileNames.map((filename) => (
-                        <DropdownMenuItem
-                          key={filename}
-                          onSelect={() => {
-                            importActorRef.send({ type: 'selectMainFile', filename });
-                          }}
-                        >
-                          <FileCode className="mr-2 size-4" />
-                          <span className="truncate">{filename}</span>
-                        </DropdownMenuItem>
-                      ))
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
 
-                {selectedMainFile ? (
-                  <div className="rounded-md bg-muted/50 p-3 text-xs">
-                    <div className="font-medium">Selected:</div>
-                    <div className="mt-1 break-all text-muted-foreground">{selectedMainFile}</div>
-                  </div>
-                ) : undefined}
+                  {selectedMainFile ? (
+                    <div className="rounded-md bg-muted/50 p-3 text-xs">
+                      <div className="font-medium">Selected:</div>
+                      <div className="mt-1 break-all text-muted-foreground">{selectedMainFile}</div>
+                    </div>
+                  ) : undefined}
 
-                <Button
-                  className="w-full"
-                  disabled={!selectedMainFile}
-                  onClick={() => {
-                    importActorRef.send({ type: 'confirmImport' });
-                  }}
-                >
-                  Import Project
-                </Button>
+                  <Button
+                    className="w-full"
+                    disabled={!selectedMainFile}
+                    onClick={() => {
+                      importActorRef.send({ type: 'confirmImport' });
+                    }}
+                  >
+                    Import Project
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  if (currentState === 'error') {
-    return (
-      <div className="flex h-full items-center justify-center px-4">
-        <div className="w-full max-w-md space-y-4">
-          <div className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-            <AlertCircle className="size-5 shrink-0" />
-            <div className="flex flex-col gap-1">
-              <div className="font-semibold">Import Failed</div>
-              <div className="text-sm">{error?.message ?? 'Unknown error occurred'}</div>
+    case state.matches('error'): {
+      return (
+        <div className="flex h-full items-center justify-center px-4">
+          <div className="w-full max-w-md space-y-4">
+            <div className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+              <AlertCircle className="size-5 shrink-0" />
+              <div className="flex flex-col gap-1">
+                <div className="font-semibold">Import Failed</div>
+                <div className="text-sm">{error?.message ?? 'Unknown error occurred'}</div>
+              </div>
             </div>
-          </div>
 
-          <Button asChild variant="outline" className="w-full">
-            <a href="/">Back to Home</a>
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex h-full items-center justify-center px-4">
-      <div className="w-full max-w-md space-y-6">
-        <div className="flex flex-col items-center gap-4">
-          <div className="flex size-16 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10">
-            <SvgIcon id="github" className="size-8 text-primary" />
-          </div>
-
-          <div className="text-center">
-            <h1 className="text-2xl font-semibold">Importing Repository</h1>
-            <p className="text-sm text-muted-foreground">
-              {owner}/{repo}
-              {ref === 'main' ? '' : ` @ ${ref}`}
-            </p>
+            <Button asChild variant="outline" className="w-full">
+              <a href="/">Back to Home</a>
+            </Button>
           </div>
         </div>
+      );
+    }
 
-        <div className="space-y-4">
-          {/* Downloading */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="flex items-center gap-2 font-medium">
-                {currentState === 'downloading' ? (
-                  <>
-                    <LoadingSpinner />
-                    <span>Downloading...</span>
-                  </>
-                ) : (
-                  '✓ Downloaded'
-                )}
-              </span>
-              {downloadProgress.total > 0 ? (
-                <span className="text-muted-foreground">
-                  {formatFileSize(downloadProgress.loaded)} / {formatFileSize(downloadProgress.total)}
-                </span>
+    default: {
+      return (
+        <div className="flex h-full items-center justify-center px-4">
+          <div className="w-full max-w-md space-y-6">
+            <div className="flex flex-col items-center gap-4">
+              <div className="flex size-16 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10">
+                <SvgIcon id="github" className="size-8 text-primary" />
+              </div>
+
+              <div className="text-center">
+                <h1 className="text-2xl font-semibold">Importing Repository</h1>
+                <p className="text-sm text-muted-foreground">
+                  {owner}/{repo}
+                  {ref === 'main' ? '' : ` @ ${ref}`}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {/* Downloading */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2 font-medium">
+                    {state.matches('downloading') ? (
+                      <>
+                        <LoadingSpinner />
+                        <span>Downloading...</span>
+                      </>
+                    ) : (
+                      '✓ Downloaded'
+                    )}
+                  </span>
+                  {downloadProgress.total > 0 ? (
+                    <span className="text-muted-foreground">
+                      {formatFileSize(downloadProgress.loaded)} / {formatFileSize(downloadProgress.total)}
+                    </span>
+                  ) : undefined}
+                </div>
+                <Progress
+                  value={downloadProgress.total > 0 ? (downloadProgress.loaded / downloadProgress.total) * 100 : 0}
+                  className="h-2"
+                />
+              </div>
+
+              {/* Extracting */}
+              {(state.matches('extracting') || state.matches('creating')) && downloadProgress.loaded > 0 ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="flex items-center gap-2 font-medium">
+                      {state.matches('extracting') ? (
+                        <>
+                          <LoadingSpinner />
+                          <span>Extracting files...</span>
+                        </>
+                      ) : (
+                        '✓ Extracted'
+                      )}
+                    </span>
+                    {extractProgress.total > 0 ? (
+                      <span className="text-muted-foreground">
+                        {extractProgress.processed} / {extractProgress.total} files
+                      </span>
+                    ) : undefined}
+                  </div>
+                  <Progress
+                    value={extractProgress.total > 0 ? (extractProgress.processed / extractProgress.total) * 100 : 0}
+                    className="h-2"
+                  />
+                </div>
+              ) : undefined}
+
+              {/* Creating */}
+              {state.matches('creating') ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="flex items-center gap-2 font-medium">
+                      <LoadingSpinner />
+                      <span>Creating build...</span>
+                    </span>
+                  </div>
+                  <Progress value={100} className="h-2" />
+                </div>
               ) : undefined}
             </div>
-            <Progress
-              value={downloadProgress.total > 0 ? (downloadProgress.loaded / downloadProgress.total) * 100 : 0}
-              className="h-2"
-            />
           </div>
-
-          {/* Extracting */}
-          {(currentState === 'extracting' || currentState === 'creating') && downloadProgress.loaded > 0 ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2 font-medium">
-                  {currentState === 'extracting' ? (
-                    <>
-                      <LoadingSpinner />
-                      <span>Extracting files...</span>
-                    </>
-                  ) : (
-                    '✓ Extracted'
-                  )}
-                </span>
-                {extractProgress.total > 0 ? (
-                  <span className="text-muted-foreground">
-                    {extractProgress.processed} / {extractProgress.total} files
-                  </span>
-                ) : undefined}
-              </div>
-              <Progress
-                value={extractProgress.total > 0 ? (extractProgress.processed / extractProgress.total) * 100 : 0}
-                className="h-2"
-              />
-            </div>
-          ) : undefined}
-
-          {/* Creating */}
-          {currentState === 'creating' ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2 font-medium">
-                  <LoadingSpinner />
-                  <span>Creating build...</span>
-                </span>
-              </div>
-              <Progress value={100} className="h-2" />
-            </div>
-          ) : undefined}
         </div>
-      </div>
-    </div>
-  );
+      );
+    }
+  }
 }

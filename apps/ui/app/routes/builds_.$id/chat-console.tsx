@@ -58,7 +58,7 @@ const getComponentColor = (component: string | undefined): string => {
 };
 
 // Component badge renderer
-function ComponentBadge({ origin }: { readonly origin?: LogOrigin }) {
+function ComponentBadge({ origin, searchTerm }: { readonly origin?: LogOrigin; readonly searchTerm?: string }) {
   if (!origin?.component) {
     return;
   }
@@ -67,12 +67,16 @@ function ComponentBadge({ origin }: { readonly origin?: LogOrigin }) {
 
   return (
     <Badge
-      className="rounded-sm border-none px-0.5 py-0 text-xs font-normal"
+      className="rounded-sm rounded-xs px-0.5 py-0 text-xs font-normal"
+      variant="outline"
       style={{
+        borderColor: bgColor,
         backgroundColor: bgColor,
       }}
     >
-      <span className="inline-block whitespace-nowrap">{origin.component}</span>
+      <span className="inline-block whitespace-nowrap">
+        <HighlightText text={origin.component} searchTerm={searchTerm} />
+      </span>
     </Badge>
   );
 }
@@ -155,9 +159,23 @@ export const ChatConsole = memo(function ({
         return false;
       }
 
-      // If there's a text filter, check if the message contains it
-      if (filter && !log.message.toLowerCase().includes(filter.toLowerCase())) {
-        return false;
+      // If there's a text filter, check if any searchable field contains it
+      if (filter) {
+        const filterLower = filter.toLowerCase();
+        const timestampString = formatTimestamp(log.timestamp).toLowerCase();
+        const componentString = log.origin?.component?.toLowerCase() ?? '';
+        const messageString = log.message.toLowerCase();
+        const dataString = log.data === undefined ? '' : JSON.stringify(log.data).toLowerCase();
+
+        const matches =
+          timestampString.includes(filterLower) ||
+          componentString.includes(filterLower) ||
+          messageString.includes(filterLower) ||
+          dataString.includes(filterLower);
+
+        if (!matches) {
+          return false;
+        }
       }
 
       return true;
@@ -165,10 +183,12 @@ export const ChatConsole = memo(function ({
 
     let infoCount = 0;
 
-    return filtered.map((log) => ({
-      ...log,
-      infoIndex: infoCount++,
-    }));
+    return filtered
+      .map((log) => ({
+        ...log,
+        infoIndex: infoCount++,
+      }))
+      .reverse();
   });
 
   // Handle filter changes
@@ -342,38 +362,44 @@ export const ChatConsole = memo(function ({
           </Tooltip>
         </div>
       </div>
-      <div className="flex min-h-0 flex-grow flex-col-reverse gap-0.25 overflow-x-hidden overflow-y-auto bg-background p-2">
-        {/* Display console logs */}
-        {filteredLogs.length > 0 ? (
-          filteredLogs.map((log) => (
-            <pre
-              key={log.id}
-              className={cn('rounded p-1 font-mono text-xs', 'group/log cursor-default', 'flex-shrink-0 text-wrap', {
-                'bg-destructive/10 text-destructive hover:bg-destructive/20': log.level === logLevels.error,
-                'bg-warning/10 text-warning hover:bg-warning/20': log.level === logLevels.warn,
-                'hover:bg-neutral/20': log.level === logLevels.info,
-                'bg-neutral/10': log.level === logLevels.info && log.infoIndex % 2 !== 0,
-                'bg-stable/10 text-stable hover:bg-stable/20': log.level === logLevels.debug,
-                'bg-feature/10 text-feature hover:bg-feature/20': log.level === logLevels.trace,
-              })}
-            >
-              <div className="flex flex-wrap items-baseline gap-2">
-                {displayConfig.showTimestamp ? (
-                  <span className="shrink-0 opacity-60">[{formatTimestamp(log.timestamp)}]</span>
-                ) : null}
-                {displayConfig.showComponent ? <ComponentBadge origin={log.origin} /> : null}
-                <span className="mr-auto">
-                  <HighlightText text={log.message} searchTerm={filter} />
+      <div className="flex min-h-0 grow flex-col justify-end overflow-hidden bg-background">
+        <div className="flex flex-col gap-0.25 overflow-x-hidden overflow-y-auto p-2">
+          {/* Display console logs */}
+          {filteredLogs.length > 0 ? (
+            filteredLogs.map((log) => (
+              <pre
+                key={log.id}
+                className={cn('rounded p-1 font-mono text-xs', 'group/log shrink-0 cursor-text text-wrap', {
+                  'bg-destructive/10 text-destructive hover:bg-destructive/20': log.level === logLevels.error,
+                  'bg-warning/10 text-warning hover:bg-warning/20': log.level === logLevels.warn,
+                  'hover:bg-neutral/20': log.level === logLevels.info,
+                  'bg-neutral/10': log.level === logLevels.info && log.infoIndex % 2 !== 0,
+                  'bg-stable/10 text-stable hover:bg-stable/20': log.level === logLevels.debug,
+                  'bg-feature/10 text-feature hover:bg-feature/20': log.level === logLevels.trace,
+                })}
+              >
+                <span className="flex flex-wrap items-baseline gap-2">
+                  {displayConfig.showTimestamp ? (
+                    <span className="shrink-0 opacity-60">
+                      [<HighlightText text={formatTimestamp(log.timestamp)} searchTerm={filter} />]
+                    </span>
+                  ) : null}
+                  {displayConfig.showComponent ? <ComponentBadge origin={log.origin} searchTerm={filter} /> : null}
+                  <span className="mr-auto">
+                    <HighlightText text={log.message} searchTerm={filter} />
+                  </span>
                 </span>
-              </div>
-              {log.data !== undefined && displayConfig.showData ? (
-                <div>{JSON.stringify(log.data, undefined, 2)}</div>
-              ) : null}
-            </pre>
-          ))
-        ) : (
-          <EmptyItems className="m-0">No logs to display</EmptyItems>
-        )}
+                {log.data !== undefined && displayConfig.showData ? (
+                  <span>
+                    <HighlightText text={JSON.stringify(log.data, undefined, 2)} searchTerm={filter} />
+                  </span>
+                ) : null}
+              </pre>
+            ))
+          ) : (
+            <EmptyItems className="m-0">No logs to display</EmptyItems>
+          )}
+        </div>
       </div>
     </div>
   );

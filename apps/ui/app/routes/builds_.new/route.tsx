@@ -30,6 +30,7 @@ export const handle: Handle = {
       </Button>
     );
   },
+  enableOverflowY: true,
 };
 
 // Reusable component for kernel details content

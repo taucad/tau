@@ -120,7 +120,8 @@ type BuildEventInternal =
   | { type: 'updateFile'; path: string; content: Uint8Array; source: 'user' | 'external' }
   | { type: 'renameFile'; oldPath: string; newPath: string }
   | { type: 'deleteFile'; path: string }
-  | { type: 'fileOpened'; path: string };
+  | { type: 'fileOpened'; path: string }
+  | { type: 'setMainFile'; path: string };
 
 export type BuildEventExternal = OutputFrom<(typeof buildActors)[BuildActorNames]>;
 type BuildEventExternalDone = DoneActorEvent<BuildEventExternal, BuildActorNames>;
@@ -616,6 +617,35 @@ export const buildMachine = setup({
         path: event.path,
       });
     }),
+    setMainFileInContext: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'setMainFile');
+      if (!context.build?.assets.mechanical) {
+        return;
+      }
+
+      // Validate that the file exists
+      if (!context.build.assets.mechanical.files[event.path]) {
+        return;
+      }
+
+      enqueue.assign(
+        produce(context, (draft) => {
+          if (draft.build?.assets.mechanical) {
+            draft.build.assets.mechanical.main = event.path;
+            draft.build.updatedAt = Date.now();
+          }
+        }),
+      );
+
+      // Send the new main file to CAD if file preview is disabled
+      if (!context.enableFilePreview) {
+        const file = createGeometryFile(context.build.assets.mechanical.files[event.path]!.content, event.path);
+        enqueue.sendTo(context.cadRef, {
+          type: 'setFile',
+          file,
+        });
+      }
+    }),
     stopStatefulActors: enqueueActions(({ enqueue, context }) => {
       // Stop the old stateful actors (they'll be garbage collected)
       enqueue.stopChild(context.gitRef);
@@ -1086,6 +1116,9 @@ export const buildMachine = setup({
             fileOpened: {
               actions: 'handleFileOpened',
             },
+            setMainFile: {
+              actions: 'setMainFileInContext',
+            },
           },
         },
         storing: {
@@ -1145,6 +1178,9 @@ export const buildMachine = setup({
                   target: 'pending',
                 },
                 deleteFile: {
+                  target: 'pending',
+                },
+                setMainFile: {
                   target: 'pending',
                 },
               },
@@ -1224,6 +1260,10 @@ export const buildMachine = setup({
                   reenter: true,
                 },
                 deleteFile: {
+                  target: 'pending',
+                  reenter: true,
+                },
+                setMainFile: {
                   target: 'pending',
                   reenter: true,
                 },

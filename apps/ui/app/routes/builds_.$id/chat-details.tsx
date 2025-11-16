@@ -1,4 +1,4 @@
-import { XIcon, Info } from 'lucide-react';
+import { XIcon, Info, ChevronDown, FileCode } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -15,6 +15,12 @@ import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
 import { Textarea } from '#components/ui/textarea.js';
 import { Tags, TagsTrigger } from '#components/ui/input-tags.js';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '#components/ui/dropdown-menu.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { useBuild } from '#hooks/use-build.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
@@ -92,6 +98,10 @@ export function ChatDetails({
   const buildName = useSelector(buildRef, (state) => state.context.build?.name ?? '');
   const buildDescription = useSelector(buildRef, (state) => state.context.build?.description ?? '');
   const buildTags = useSelector(buildRef, (state) => state.context.build?.tags ?? []);
+  const mainFile = useSelector(buildRef, (state) => state.context.build?.assets.mechanical?.main ?? '');
+  const availableFiles = useSelector(buildRef, (state) =>
+    Object.keys(state.context.build?.assets.mechanical?.files ?? {}).sort(),
+  );
 
   const [geometryDetails, setGeometryDetails] = useState<GeometryDetails>(mockGeometryDetails);
   const [isCalculatingVolume, setIsCalculatingVolume] = useState(false);
@@ -108,6 +118,13 @@ export function ChatDetails({
       updateTags(uniqueTags);
     },
     [updateTags],
+  );
+
+  const handleMainFileChange = useCallback(
+    (path: string) => {
+      buildRef.send({ type: 'setMainFile', path });
+    },
+    [buildRef],
   );
 
   const handleCalculateVolume = useCallback(async () => {
@@ -185,6 +202,39 @@ export function ChatDetails({
                 <Tags tags={buildTags} onTagsChange={handleTagsChange}>
                   <TagsTrigger placeholder="Add tags..." />
                 </Tags>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Main File:</label>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="w-full justify-between font-normal">
+                      {mainFile ? (
+                        <span className="truncate text-left">{mainFile}</span>
+                      ) : (
+                        <span className="text-muted-foreground">Select main file...</span>
+                      )}
+                      <ChevronDown className="size-4 shrink-0" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="max-h-64 w-[--radix-dropdown-menu-trigger-width] overflow-y-auto">
+                    {availableFiles.length === 0 ? (
+                      <DropdownMenuItem disabled>No files available</DropdownMenuItem>
+                    ) : (
+                      availableFiles.map((filename) => (
+                        <DropdownMenuItem
+                          key={filename}
+                          onSelect={() => {
+                            handleMainFileChange(filename);
+                          }}
+                        >
+                          <FileCode className="size-4" />
+                          <span className="truncate">{filename}</span>
+                        </DropdownMenuItem>
+                      ))
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
 

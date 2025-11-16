@@ -74,7 +74,7 @@ export const ChatGit = memo(function (props: {
           <FloatingPanelContentTitle>Git</FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
 
-        <FloatingPanelContentBody className="py-2">
+        <FloatingPanelContentBody className="px-3 py-2">
           <GitConnectorContent gitRef={gitRef} />
         </FloatingPanelContentBody>
       </FloatingPanelContent>

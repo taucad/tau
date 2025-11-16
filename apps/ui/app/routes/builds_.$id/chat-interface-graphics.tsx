@@ -6,6 +6,7 @@ import { useBuild } from '#hooks/use-build.js';
 import { ChatInterfaceGraphicsSectionView } from '#routes/builds_.$id/chat-interface-graphics-section-view.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { Button } from '#components/ui/button.js';
+import { cn } from '#utils/ui.utils.js';
 
 const titleFromState = (state: StateFrom<typeof graphicsMachine>): string => {
   switch (true) {
@@ -21,7 +22,7 @@ const titleFromState = (state: StateFrom<typeof graphicsMachine>): string => {
   return 'Unknown';
 };
 
-export function ChatInterfaceGraphics(): React.ReactNode {
+export function ChatInterfaceGraphics({ className }: { readonly className?: string }): React.ReactNode {
   const { graphicsRef: graphicsActor } = useBuild();
   const graphicsState = useSelector(graphicsActor, (state) => state);
   if (graphicsState.matches({ operational: 'ready' })) {
@@ -31,7 +32,9 @@ export function ChatInterfaceGraphics(): React.ReactNode {
   const title = titleFromState(graphicsState);
 
   return (
-    <div className="pointer-events-auto flex h-1/2 w-80 flex-col gap-2 rounded-md border bg-sidebar p-2">
+    <div
+      className={cn('pointer-events-auto flex h-1/2 w-80 flex-col gap-2 rounded-md border bg-sidebar p-2', className)}
+    >
       <div className="flex items-center justify-between px-1">
         <div className="text-sm font-medium">{title}</div>
         <Button
@@ -70,7 +73,7 @@ function ChatInterfaceGraphicsInner(): React.JSX.Element {
     }
 
     case graphicsState.matches({ operational: 'measure' }): {
-      return <ChatInterfaceGraphicsMeasure state={graphicsState} />;
+      return <ChatInterfaceGraphicsMeasure />;
     }
 
     default: {

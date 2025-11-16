@@ -262,7 +262,7 @@ function ConverterContent(): React.JSX.Element {
         </>
       ) : (
         // Landing state - no model loaded
-        <div className="container mt-(--header-height) grid h-full items-start gap-8 transition-[padding] duration-200 ease-linear md:pt-8 md:pl-(--sidebar-width-current) lg:grid-cols-[300px_1fr_300px] xl:grid-cols-[350px_1fr_350px]">
+        <div className="container mx-auto mt-(--header-height) grid h-full items-start gap-8 px-4 transition-[padding-left] duration-200 ease-linear md:pt-8 md:pl-[calc(var(--sidebar-width-current)-var(--spacing)*2)] lg:grid-cols-[300px_1fr_300px] xl:grid-cols-[350px_1fr_350px]">
           {/* Import Formats - Left */}
           <FormatsList
             icon={Upload}
@@ -295,7 +295,7 @@ function ConverterContent(): React.JSX.Element {
             <Dropzone className="w-full max-w-2xl" maxFiles={1} onDrop={handleFileDrop}>
               <DropzoneEmptyState>
                 <div className="flex flex-col items-center gap-6 py-4">
-                  <div className="flex size-20 items-center justify-center rounded-full bg-gradient-to-br from-primary/20 to-primary/10">
+                  <div className="flex size-20 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10">
                     <Upload className="size-10 text-primary" />
                   </div>
                   <div className="flex flex-col items-center gap-2 text-center">

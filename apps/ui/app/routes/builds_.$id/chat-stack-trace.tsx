@@ -2,7 +2,7 @@ import { useSelector } from '@xstate/react';
 import { useCallback } from 'react';
 import { Sparkles } from 'lucide-react';
 import type { KernelProvider, KernelStackFrame } from '@taucad/types';
-import { messageRole, messageStatus } from '@taucad/types/constants';
+import { messageRole, messageStatus, languageFromKernel } from '@taucad/types/constants';
 import { Button } from '#components/ui/button.js';
 import { useChatActions } from '#components/chat/chat-provider.js';
 import { cookieName } from '#constants/cookie.constants.js';
@@ -11,6 +11,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cn } from '#utils/ui.utils.js';
 import { createMessage } from '#utils/chat.utils.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { useModels } from '#hooks/use-models.js';
 import { defaultChatModel } from '#constants/chat.constants.js';
 
 function StackFrame({ frame, index }: { readonly frame: KernelStackFrame; readonly index: number }): React.JSX.Element {
@@ -94,6 +95,7 @@ export function ChatStackTrace({ className, ...props }: React.HTMLAttributes<HTM
   const { cadRef: cadActor, buildRef } = useBuild();
   const error = useSelector(cadActor, (state) => state.context.kernelError);
   const { append } = useChatActions();
+  const { selectedModel } = useModels();
   const [, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
   const [kernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
 
@@ -155,7 +157,7 @@ ${codeContext}
 ${
   code
     ? `**Full Code:**
-\`\`\`${kernel}
+\`\`\`${languageFromKernel[kernel]}
 ${code}
 \`\`\`
 `
@@ -176,7 +178,7 @@ Please update the code to resolve this error.`;
     const message = createMessage({
       content: errorPrompt,
       role: messageRole.user,
-      model: defaultChatModel,
+      model: selectedModel?.id ?? defaultChatModel,
       status: messageStatus.pending,
       metadata: {
         kernel,
@@ -184,7 +186,7 @@ Please update the code to resolve this error.`;
     });
 
     append(message);
-  }, [error, buildRef, kernel, append, setIsChatOpen]);
+  }, [error, buildRef, kernel, setIsChatOpen, selectedModel?.id, append]);
 
   if (!error) {
     return null;

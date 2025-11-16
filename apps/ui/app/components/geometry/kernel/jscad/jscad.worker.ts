@@ -24,7 +24,7 @@ import {
 
 type JscadModuleExports = {
   getParameterDefinitions?: () => JscadParameterDefinition[];
-  defaultParams?: unknown;
+  defaultParams?: () => Record<string, unknown>;
 };
 
 /**
@@ -219,7 +219,7 @@ class JscadWorker extends KernelWorker {
 
       if (/^\s*export\s+/m.test(code)) {
         // ES Module format
-        const module = await buildEsModule<JscadModuleExports>(code);
+        const module = await buildEsModule(code);
 
         // Check for getParameterDefinitions function (ES module export)
         if (isModuleWithParameters(module)) {

@@ -265,9 +265,7 @@ async function rewriteImports(code: string): Promise<string> {
  * @param additionalModuleExports - Additional module exports to add to the module
  * @returns The module
  */
-export async function buildEsModule<AdditionalModuleExports extends Record<string, unknown>>(
-  code: string,
-): Promise<CadModuleExports & AdditionalModuleExports> {
+export async function buildEsModule(code: string): Promise<CadModuleExports> {
   try {
     // First rewrite imports to use global modules
     const rewrittenCode = await rewriteImports(code);
@@ -277,14 +275,14 @@ export async function buildEsModule<AdditionalModuleExports extends Record<strin
     const cacheKey = `${kernelId}:${hashCode(rewrittenCode)}`;
 
     if (moduleCache.has(cacheKey)) {
-      return moduleCache.get(cacheKey)! as CadModuleExports & AdditionalModuleExports;
+      return moduleCache.get(cacheKey)!;
     }
 
     // Create blob and import the module
     const blob = new Blob([rewrittenCode], { type: 'application/javascript' });
     const url = URL.createObjectURL(blob);
 
-    const module = (await import(/* @vite-ignore */ url)) as CadModuleExports & AdditionalModuleExports;
+    const module = (await import(/* @vite-ignore */ url)) as CadModuleExports;
 
     // Clean up blob URL
     URL.revokeObjectURL(url);

@@ -42,6 +42,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '#utils/ui.utils.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
+import { metaConfig } from '#config.js';
 
 const yUpFormats = new Set<InputFormat>(['gltf', 'glb', 'ifc']);
 
@@ -275,10 +276,19 @@ function ConverterContent(): React.JSX.Element {
           <div className="flex flex-col items-center gap-8 pt-4">
             <div className="flex flex-col items-center gap-3 text-center">
               <h1 className="text-6xl font-bold tracking-tight">3D Model Converter</h1>
-              <p className="max-w-2xl text-lg text-muted-foreground">
-                Convert 3D models between formats instantly. Free, secure, and fully offline.
-              </p>
-              <p className="text-md max-w-2xl text-muted-foreground italic">Your data never leaves your browser.</p>
+              <div className="flex flex-col items-center gap-0">
+                <p className="mb-8 max-w-2xl text-lg text-muted-foreground">
+                  Convert 3D models between formats instantly. Free, secure, and fully offline.
+                </p>
+                <div className="text-md max-w-2xl text-muted-foreground italic">
+                  Your data never leaves your browser{' '}
+                </div>
+                <Button asChild variant="link" className="text-sm underline">
+                  <a href={metaConfig.githubUrl} target="_blank" rel="noopener noreferrer">
+                    View source code
+                  </a>
+                </Button>
+              </div>
             </div>
 
             {/* Upload Area */}

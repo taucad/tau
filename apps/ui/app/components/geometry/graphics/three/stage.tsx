@@ -90,6 +90,7 @@ export function Stage({
   const availableSectionViews = useSelector(graphicsActor, (state) => state.context.availableSectionViews);
   const enableClippingLines = useSelector(graphicsActor, (state) => state.context.enableClippingLines);
   const enableClippingMesh = useSelector(graphicsActor, (state) => state.context.enableClippingMesh);
+  const gridSizesComputed = useSelector(graphicsActor, (state) => state.context.gridSizesComputed);
 
   // Build THREE.Plane for the SectionView component
   const sectionView = useMemo(() => {
@@ -125,7 +126,17 @@ export function Stage({
   }, [selectedSectionViewId, sectionViewPivot, sectionViewRotation, sectionViewDirection, availableSectionViews]);
 
   // Create striped material for capping surface
-  const cappingMaterial = useMemo(() => createStripedMaterial(), []);
+  const cappingMaterial = useMemo(() => {
+    // Use a larger multiplier (5x largeSize) to reduce visual noise from dense stripes
+    const stripeSpacing = gridSizesComputed.largeSize * 0.1;
+    // Width should be proportional to spacing for good visibility (10% of spacing)
+    const stripeWidth = stripeSpacing * 0.2;
+
+    return createStripedMaterial({
+      stripeFrequency: stripeSpacing,
+      stripeWidth,
+    });
+  }, [gridSizesComputed.largeSize]);
 
   // State for camera reset functionality
   const originalDistanceReference = React.useRef<number | undefined>(undefined);

@@ -20,20 +20,43 @@ import { hashCode } from '#utils/crypto.utils.js';
 // Module cache - keyed by both code hash and active modules to prevent cross-kernel contamination
 const moduleCache = new Map<string, CadModuleExports>();
 
+// Track registration state to prevent race conditions in worker contexts
+let modulesRegistered = false;
+
 /**
- * Register kernel modules in globalThis in an idempotent way.
- * This avoids cross-kernel race conditions when switching kernels.
+ * Register kernel modules in globalThis in a thread-safe way.
+ * This avoids race conditions when multiple workers initialize simultaneously.
+ *
+ * While Web Workers run in separate threads, we use an explicit flag to ensure
+ * idempotent registration and prevent redundant assignments to globalThis.
  */
 export function registerKernelModules(): void {
+  // Early exit if already registered
+  if (modulesRegistered) {
+    return;
+  }
+
   const g = globalThis as unknown as {
     replicad?: unknown;
     zod?: unknown;
     jscadModeling?: unknown;
   };
 
-  g.replicad ??= replicad;
-  g.zod ??= zod;
-  g.jscadModeling ??= jscadModeling;
+  // Register modules explicitly (only if not already present)
+  if (g.replicad === undefined) {
+    g.replicad = replicad;
+  }
+
+  if (g.zod === undefined) {
+    g.zod = zod;
+  }
+
+  if (g.jscadModeling === undefined) {
+    g.jscadModeling = jscadModeling;
+  }
+
+  // Mark as registered to prevent future redundant registrations
+  modulesRegistered = true;
 }
 
 // Module registry getter function (lazy evaluation to support runtime injection)
@@ -239,9 +262,12 @@ async function rewriteImports(code: string): Promise<string> {
  * This is used to evaluate ESM code in a sandboxed environment.
  *
  * @param code - The code to build the module evaluator for
+ * @param additionalModuleExports - Additional module exports to add to the module
  * @returns The module
  */
-export async function buildEsModule(code: string): Promise<CadModuleExports> {
+export async function buildEsModule<AdditionalModuleExports extends Record<string, unknown>>(
+  code: string,
+): Promise<CadModuleExports & AdditionalModuleExports> {
   try {
     // First rewrite imports to use global modules
     const rewrittenCode = await rewriteImports(code);
@@ -251,27 +277,20 @@ export async function buildEsModule(code: string): Promise<CadModuleExports> {
     const cacheKey = `${kernelId}:${hashCode(rewrittenCode)}`;
 
     if (moduleCache.has(cacheKey)) {
-      console.log('Using cached module evaluator for kernel:', kernelId);
-      return moduleCache.get(cacheKey)!;
+      return moduleCache.get(cacheKey)! as CadModuleExports & AdditionalModuleExports;
     }
-
-    console.log('Building new module evaluator for kernel:', kernelId);
-    const startTime = performance.now();
 
     // Create blob and import the module
     const blob = new Blob([rewrittenCode], { type: 'application/javascript' });
     const url = URL.createObjectURL(blob);
 
-    const module = (await import(/* @vite-ignore */ url)) as CadModuleExports;
+    const module = (await import(/* @vite-ignore */ url)) as CadModuleExports & AdditionalModuleExports;
 
     // Clean up blob URL
     URL.revokeObjectURL(url);
 
     // Cache the module with kernel-specific key
     moduleCache.set(cacheKey, module);
-
-    const endTime = performance.now();
-    console.log(`Module evaluator built in ${endTime - startTime}ms`);
 
     return module;
   } catch (error) {

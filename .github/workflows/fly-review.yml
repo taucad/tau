@@ -82,6 +82,10 @@ jobs:
             **Status:** ⚠️ Deployment Cancelled
             **URL:** _Deployment was cancelled_
 
+      - name: Fail job if deployment failed
+        if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled'
+        run: exit 1
+
   review_app_api:
     name: Deploy API Review App
     runs-on: ubuntu-latest
@@ -149,3 +153,7 @@ jobs:
             ### API Preview :octopus:
             **Status:** ⚠️ Deployment Cancelled
             **URL:** _Deployment was cancelled_
+
+      - name: Fail job if deployment failed
+        if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled'
+        run: exit 1

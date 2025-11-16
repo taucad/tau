@@ -68,7 +68,7 @@ export function Converter({
   const isFileSystemAccessSupported =
     'showSaveFilePicker' in globalThis.window && typeof globalThis.window.showSaveFilePicker === 'function';
 
-  const saveFileWithPicker = useCallback(async (blob: Blob, filename: string) => {
+  const saveFileWithPicker = useCallback(async (blob: Blob, filename: string): Promise<void> => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call -- File System Access API is not yet in TypeScript lib
       const handle = (await (globalThis as any).showSaveFilePicker({
@@ -89,7 +89,7 @@ export function Converter({
     }
   }, []);
 
-  const handleDownload = useCallback(async () => {
+  const handleDownload = useCallback(async (): Promise<void> => {
     if (selectedFormats.length === 0) {
       console.warn('Cannot export: no formats selected');
       return;
@@ -121,9 +121,7 @@ export function Converter({
 
         toast.promise(
           (async () => {
-            console.log('Starting single file export', { format });
             const files = await exportFromGlb(data, format);
-            console.log('Export completed', { filesCount: files.length });
             const file = files[0];
             if (!file) {
               throw new Error('No file returned from export');
@@ -133,7 +131,6 @@ export function Converter({
             const filename = uploadedFile
               ? uploadedFile.name.replace(/\.[^.]+$/, `.${extension}`)
               : `model.${extension}`;
-            console.log('Downloading file', { filename, size: file.data.length });
 
             const blob = new Blob([file.data]);
 

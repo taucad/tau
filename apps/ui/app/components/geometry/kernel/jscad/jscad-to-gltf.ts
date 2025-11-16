@@ -15,7 +15,7 @@ import { Document, NodeIO } from '@gltf-transform/core';
  * 3. Triangulates polygons using fan triangulation (simple and fast method)
  * 4. Flattens data into Float32Array-compatible formats for GPU rendering
  *
- * The function is robust to invalid shapes (skips them with try-catch and warning).
+ * The function throws an error if any shape cannot be converted to a geom3 polygon.
  * Polygons with fewer than 3 vertices are skipped as they cannot form triangles.
  * All three vertices of each triangle share the same normal (flat shading).
  *
@@ -48,7 +48,7 @@ function extractMeshDataFromJscadShapes(shapes: unknown[]): {
       const polygons = geometries.geom3.toPolygons(singleShape as geometries.geom3.Geom3);
       allPolygons.push(...polygons);
     } catch (error) {
-      // Log warning when a shape fails to convert
+      // Determine shape type for error message
       let shapeType: string;
       if (singleShape === null) {
         shapeType = 'null';
@@ -64,10 +64,9 @@ function extractMeshDataFromJscadShapes(shapes: unknown[]): {
 
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      console.warn(
-        `Failed to convert shape at index ${index} to geom3 polygons. Shape type: ${shapeType}. ${errorMessage}`,
+      throw new Error(
+        `Failed to convert shape at index ${index} to GLTF polygon. Shape type: ${shapeType}. ${errorMessage}`,
       );
-      continue;
     }
   }
 
@@ -234,10 +233,10 @@ function createGltfDocumentFromJscadShapes(shapes: unknown[]): Document {
  * 2. Creates glTF document with mesh data extraction, triangulation, and normals
  * 3. Serializes to GLB (binary glTF) format for efficient transmission and storage
  *
- * The function is robust to:
+ * The function handles:
  * - Single shapes or arrays of shapes
- * - Invalid or degenerate geometry (silently skipped with warnings)
  * - Empty geometry (returns valid GLB with empty scene)
+ * - Throws error for invalid or unconvertible shapes
  *
  * Material properties are set to sensible defaults (light gray, matte, double-sided)
  * suitable for preview visualization. For production export, use specialized exporters.
@@ -249,6 +248,7 @@ function createGltfDocumentFromJscadShapes(shapes: unknown[]): Document {
  * @returns Promise resolving to GLB Blob (binary glTF format)
  *          Type: 'model/gltf-binary'
  *
+ * @throws {Error} If any shape cannot be converted to GLTF polygon
  * @throws May reject if glTF serialization fails (rare, typically only for memory issues)
  *
  * @example

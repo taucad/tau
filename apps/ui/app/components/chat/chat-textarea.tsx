@@ -538,7 +538,7 @@ export const ChatTextarea = memo(function ({
           className={cn(
             'mb-10 size-full max-h-48 min-h-6 resize-none border-none bg-transparent dark:bg-transparent',
             'px-3 pb-3',
-            'ring-0 shadow-none focus-visible:ring-0 focus-visible:outline-none',
+            'shadow-none ring-0 focus-visible:ring-0 focus-visible:outline-none',
             images.length > 0 ? 'pt-10' : 'pt-2',
           )}
           rows={3}
@@ -580,7 +580,7 @@ export const ChatTextarea = memo(function ({
                   removeImage(index);
                 }}
               >
-                <X className="!size-3 stroke-2" />
+                <X className="size-3! stroke-2" />
               </Button>
             </div>
           ))}

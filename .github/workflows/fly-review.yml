@@ -72,6 +72,16 @@ jobs:
             **Status:** ❌ Deployment Failed
             **URL:** _Failed to deploy_
 
+      - name: Update UI status - cancelled
+        if: steps.deploy.outcome == 'cancelled'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: fly-review-ui
+          message: |
+            ### UI Preview :balloon:
+            **Status:** ⚠️ Deployment Cancelled
+            **URL:** _Deployment was cancelled_
+
   review_app_api:
     name: Deploy API Review App
     runs-on: ubuntu-latest
@@ -129,3 +139,13 @@ jobs:
             ### API Preview :octopus:
             **Status:** ❌ Deployment Failed
             **URL:** _Failed to deploy_
+
+      - name: Update API status - cancelled
+        if: steps.deploy.outcome == 'cancelled'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: fly-review-api
+          message: |
+            ### API Preview :octopus:
+            **Status:** ⚠️ Deployment Cancelled
+            **URL:** _Deployment was cancelled_

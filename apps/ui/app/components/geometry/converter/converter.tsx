@@ -84,14 +84,13 @@ export function Converter({
         throw error;
       }
 
-      console.error('Failed to save file:', error);
       throw new Error('Failed to save file');
     }
   }, []);
 
   const handleDownload = useCallback(async (): Promise<void> => {
     if (selectedFormats.length === 0) {
-      console.warn('Cannot export: no formats selected');
+      toast.warning('Cannot export: no formats selected');
       return;
     }
 
@@ -101,8 +100,7 @@ export function Converter({
     try {
       // Lazily fetch GLB data when download is triggered
       data = await getGlbData();
-    } catch (error) {
-      console.error('Failed to get GLB data:', error);
+    } catch {
       toast.error('Failed to get GLB data');
       return;
     } finally {
@@ -347,7 +345,7 @@ export function Converter({
           onClick={handleDownload}
         >
           <Download className="size-4 shrink-0" />
-          <span className="min-w-0 break-words">
+          <span className="min-w-0 wrap-break-word">
             {selectedFormats.length === 0
               ? 'Select formats to download'
               : selectedFormats.length === 1

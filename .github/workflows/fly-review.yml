@@ -41,7 +41,7 @@ jobs:
       - name: Comment on Pull Request
         uses: thollander/actions-comment-pull-request@v2
         with:
-          GITHUB_TOKEN: ${{ env.GH_TOKEN }} # Required for commenting on pull requests for private repos
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Required for commenting on pull requests for private repos
           message: |
             Fly Preview UI URL :balloon: : ${{ steps.deploy.outputs.url }}
 
@@ -72,6 +72,6 @@ jobs:
       - name: Comment on Pull Request
         uses: thollander/actions-comment-pull-request@v2
         with:
-          GITHUB_TOKEN: ${{ env.GH_TOKEN }} # Required for commenting on pull requests for private repos
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Required for commenting on pull requests for private repos
           message: |
             Fly Preview API URL :octopus: : ${{ steps.deploy.outputs.url }}

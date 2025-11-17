@@ -158,6 +158,7 @@ export type GraphicsEvent =
 // Emitted events
 export type GraphicsEmitted =
   | { type: 'gridUpdated'; sizes: GridSizes }
+  | { type: 'unitChanged'; unit: string; factor: number; system: 'metric' | 'imperial' }
   | { type: 'screenshotCompleted'; dataUrls: string[]; requestId: string }
   | { type: 'screenshotFailed'; error: string; requestId: string }
   | { type: 'cameraResetCompleted' }
@@ -392,6 +393,14 @@ export const graphicsMachine = setup({
         gridUnit: event.payload.unit,
         gridUnitFactor: event.payload.factor,
         gridUnitSystem: event.payload.system,
+      });
+
+      // Emit unit changed event for external listeners
+      enqueue.emit({
+        type: 'unitChanged' as const,
+        unit: event.payload.unit,
+        factor: event.payload.factor,
+        system: event.payload.system,
       });
 
       // Only recalculate grid spacing when:

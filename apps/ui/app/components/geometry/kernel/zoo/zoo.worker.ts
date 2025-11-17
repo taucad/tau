@@ -7,6 +7,7 @@ import type {
   GeometryGltf,
   GeometryFile,
 } from '@taucad/types';
+import type { CompilationError } from '@taucad/kcl-wasm-lib/bindings/CompilationError';
 import { createKernelError, createKernelSuccess } from '#components/geometry/kernel/utils/kernel-helpers.js';
 import { KclUtils } from '#components/geometry/kernel/zoo/kcl-utils.js';
 import { isKclError, extractExecutionError } from '#components/geometry/kernel/zoo/kcl-errors.js';
@@ -34,9 +35,10 @@ class ZooWorker extends KernelWorker<ZooOptions> {
     try {
       const utils = await this.getKclUtils();
       const parseResult = await utils.parseKcl(code);
-      if (parseResult.errors.length > 0) {
-        this.warn('KCL parsing errors during parameter extraction', { data: parseResult.errors });
-        const firstError = parseResult.errors[0]!;
+      const criticalErrors = this.filterNonWarningErrors(parseResult.errors);
+      if (criticalErrors.length > 0) {
+        this.warn('KCL parsing errors during parameter extraction', { data: criticalErrors });
+        const firstError = criticalErrors[0]!;
         const errorPosition = getErrorPosition(firstError, code);
         return createKernelError({
           message: firstError.message,
@@ -45,11 +47,18 @@ class ZooWorker extends KernelWorker<ZooOptions> {
         });
       }
 
+      // Log warnings separately for diagnostics
+      const warnings = parseResult.errors.filter((error) => error.severity === 'Warning');
+      if (warnings.length > 0) {
+        this.warn('KCL parsing warnings during parameter extraction', { data: warnings });
+      }
+
       const executionResult = await utils.executeMockKcl(parseResult.program, 'main.kcl');
-      if (executionResult.errors.length > 0) {
-        this.warn('KCL execution errors during parameter extraction', { data: executionResult.errors });
+      const criticalExecutionErrors = this.filterNonWarningErrors(executionResult.errors);
+      if (criticalExecutionErrors.length > 0) {
+        this.warn('KCL execution errors during parameter extraction', { data: criticalExecutionErrors });
         const errorInfo = extractExecutionError(
-          executionResult.errors,
+          criticalExecutionErrors,
           code,
           'KCL execution errors during parameter extraction',
         );
@@ -58,6 +67,12 @@ class ZooWorker extends KernelWorker<ZooOptions> {
           startColumn: errorInfo.startColumn,
           startLineNumber: errorInfo.startLineNumber,
         });
+      }
+
+      // Log warnings separately for diagnostics
+      const executionWarnings = executionResult.errors.filter((error) => error.severity === 'Warning');
+      if (executionWarnings.length > 0) {
+        this.warn('KCL execution warnings during parameter extraction', { data: executionWarnings });
       }
 
       const { defaultParameters, jsonSchema } = KclUtils.convertKclVariablesToJsonSchema(executionResult.variables);
@@ -88,11 +103,12 @@ class ZooWorker extends KernelWorker<ZooOptions> {
         const utils = await this.getKclUtilsWithEngine();
         await utils.clearProgram();
         const parseResult = await utils.parseKcl(trimmedCode);
-        if (parseResult.errors.length > 0) {
-          this.warn('KCL parsing errors', { data: parseResult.errors });
-          const firstError = parseResult.errors[0]!;
+        const criticalParseErrors = this.filterNonWarningErrors(parseResult.errors);
+        if (criticalParseErrors.length > 0) {
+          this.warn('KCL parsing errors', { data: criticalParseErrors });
+          const firstError = criticalParseErrors[0]!;
           const errorPosition = getErrorPosition(firstError, trimmedCode);
-          const errorMessages = parseResult.errors.map((error) => error.message);
+          const errorMessages = criticalParseErrors.map((error) => error.message);
           return createKernelError({
             message: `KCL parsing failed: ${errorMessages.join(', ')}`,
             startColumn: errorPosition.column,
@@ -100,16 +116,29 @@ class ZooWorker extends KernelWorker<ZooOptions> {
           });
         }
 
+        // Log warnings separately for diagnostics
+        const parseWarnings = parseResult.errors.filter((error) => error.severity === 'Warning');
+        if (parseWarnings.length > 0) {
+          this.warn('KCL parsing warnings', { data: parseWarnings });
+        }
+
         const modifiedProgram = KclUtils.injectParametersIntoProgram(parseResult.program, parameters ?? {});
         const executionResult = await utils.executeProgram(modifiedProgram, 'main.kcl');
-        if (executionResult.errors.length > 0) {
-          this.warn('KCL execution errors', { data: executionResult.errors });
-          const errorInfo = extractExecutionError(executionResult.errors, trimmedCode, 'KCL execution failed');
+        const criticalExecutionErrors = this.filterNonWarningErrors(executionResult.errors);
+        if (criticalExecutionErrors.length > 0) {
+          this.warn('KCL execution errors', { data: criticalExecutionErrors });
+          const errorInfo = extractExecutionError(criticalExecutionErrors, trimmedCode, 'KCL execution failed');
           return createKernelError({
             message: errorInfo.message,
             startColumn: errorInfo.startColumn,
             startLineNumber: errorInfo.startLineNumber,
           });
+        }
+
+        // Log warnings separately for diagnostics
+        const executionWarnings = executionResult.errors.filter((error) => error.severity === 'Warning');
+        if (executionWarnings.length > 0) {
+          this.warn('KCL execution warnings', { data: executionWarnings });
         }
 
         const exportResult = await utils.exportFromMemory({
@@ -284,6 +313,13 @@ class ZooWorker extends KernelWorker<ZooOptions> {
     await this.kclUtils?.cleanup();
     this.kclUtils = undefined;
     this.gltfDataMemory = {};
+  }
+
+  /**
+   * Filters errors to only include Error and Fatal severities, excluding Warnings
+   */
+  private filterNonWarningErrors(errors: CompilationError[]): CompilationError[] {
+    return errors.filter((error) => error.severity === 'Error' || error.severity === 'Fatal');
   }
 
   private handleError(error: unknown, code?: string): ReturnType<typeof createKernelError> {

@@ -20,6 +20,7 @@ type ZooOptions = {
 
 class ZooWorker extends KernelWorker<ZooOptions> {
   protected static override readonly supportedExportFormats: ExportFormat[] = ['stl', 'stl-binary', 'step', 'gltf'];
+  protected override readonly name: string = 'ZooWorker';
   private gltfDataMemory: Record<string, Uint8Array> = {};
   private kclUtils: KclUtils | undefined;
 

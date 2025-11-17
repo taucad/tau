@@ -52,6 +52,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   protected options!: Options;
 
   /**
+   * The name of the worker.
+   *
+   * @example ReplicadWorker, TauWorker, ZooWorker.
+   */
+  protected abstract readonly name: string;
+
+  /**
    * The constructor for the worker.
    */
   public constructor() {

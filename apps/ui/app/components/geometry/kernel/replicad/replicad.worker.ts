@@ -57,6 +57,8 @@ class ReplicadWorker extends KernelWorker<ReplicadOptions> {
     'gltf',
   ];
 
+  protected override readonly name: string = 'ReplicadWorker';
+
   private replicadHasOc = false;
   private shapesMemory: Record<string, InputShape[]> = {};
   private readonly ocVersions: {

@@ -33,6 +33,8 @@ class OpenScadWorker extends KernelWorker {
     '3mf',
   ];
 
+  protected override readonly name: string = 'OpenScadWorker';
+
   private offDataMemory: Record<string, string> = {};
 
   public override async canHandle(file: GeometryFile): Promise<boolean> {

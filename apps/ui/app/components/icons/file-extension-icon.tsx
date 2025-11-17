@@ -1,6 +1,6 @@
 import { File as FileIcon } from 'lucide-react';
-import type { InputFormat } from '@taucad/converter';
-import { supportedInputFormats, supportedOutputFormats } from '@taucad/converter';
+import type { Format } from '@taucad/converter';
+import { supportedImportFormats, supportedExportFormats } from '@taucad/converter';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { Format3D } from '#components/icons/format-3d.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
@@ -13,7 +13,7 @@ type IconConfig =
     }
   | {
       type: 'format-3d';
-      id: InputFormat;
+      id: Format;
     };
 
 // Only lib types and renamed format-3d types (where extension doesn't match format name)
@@ -88,8 +88,8 @@ export const iconFromExtension = iconConfigMap;
 
 // Create sets for fast lookup
 const supportedFormatsSet = new Set<string>([
-  ...(supportedInputFormats as readonly string[]),
-  ...(supportedOutputFormats as readonly string[]),
+  ...(supportedImportFormats as readonly string[]),
+  ...(supportedExportFormats as readonly string[]),
 ]);
 
 // Map kernel mainFile extensions to kernel configs
@@ -132,7 +132,7 @@ function getIconConfig(extension: string): IconConfig | undefined {
   if (supportedFormatsSet.has(extension)) {
     return {
       type: 'format-3d',
-      id: extension as InputFormat,
+      id: extension as Format,
     };
   }
 

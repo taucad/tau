@@ -100,7 +100,7 @@
     "@swc/helpers": "~0.5.17",
     "@tanstack/react-query": "4",
     "@tanstack/react-table": "^8.21.3",
-    "@taucad/kcl-wasm-lib": "0.1.85-beta.2",
+    "@taucad/kcl-wasm-lib": "0.1.109",
     "@types/pg": "^8.15.4",
     "@types/pluralize": "^0.0.33",
     "@xstate/react": "^5.0.4",

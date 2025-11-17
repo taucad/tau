@@ -233,8 +233,8 @@ importers:
         specifier: ^8.21.3
         version: 8.21.3(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       '@taucad/kcl-wasm-lib':
-        specifier: 0.1.85-beta.2
-        version: 0.1.85-beta.2
+        specifier: 0.1.109
+        version: 0.1.109
       '@types/pg':
         specifier: ^8.15.4
         version: 8.15.4
@@ -6425,8 +6425,8 @@ packages:
     resolution: {integrity: sha512-ldZXEhOBb8Is7xLs01fR3YEc3DERiz5silj8tnGkFZytt1abEvl/GhUmCE0PMLaMPTa3Jk4HbKmRlHmu+gCftg==}
     engines: {node: '>=12'}
 
-  '@taucad/kcl-wasm-lib@0.1.85-beta.2':
-    resolution: {integrity: sha512-1it01MK7OCgyifpQr3FDuHi/Ys9jzPcWrXKKVsCMh7V4YQamSHUJGqVOd8vgcapAqxDVTRGjfGcyY//nHh4PYw==}
+  '@taucad/kcl-wasm-lib@0.1.109':
+    resolution: {integrity: sha512-Ql9V50o3Nl7W+0cxu3pZc0NbYYqM7SF7Wp+Pg+PJyWjoQdgDrzNXe54xaYVME7FIhWak0AfFylUNoowQxKxs2A==}
 
   '@testing-library/dom@10.4.0':
     resolution: {integrity: sha512-pemlzrSESWbdAloYml3bAJMEfNh1Z7EduzqPKprCH5S341frlpYnUEW0H72dLxa6IsYr+mPno20GiSm+h9dEdQ==}
@@ -21739,7 +21739,7 @@ snapshots:
 
   '@tanstack/table-core@8.21.3': {}
 
-  '@taucad/kcl-wasm-lib@0.1.85-beta.2': {}
+  '@taucad/kcl-wasm-lib@0.1.109': {}
 
   '@testing-library/dom@10.4.0':
     dependencies:

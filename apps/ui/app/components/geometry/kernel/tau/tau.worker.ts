@@ -14,6 +14,7 @@ import { KernelWorker } from '#components/geometry/kernel/utils/kernel-worker.js
 
 class TauWorker extends KernelWorker {
   protected static override readonly supportedExportFormats: ExportFormat[] = supportedExportFormats as ExportFormat[];
+  protected override readonly name: string = 'TauWorker';
   private glbDataMemory: Record<string, Uint8Array> = {};
 
   public override async canHandle(file: GeometryFile): Promise<boolean> {

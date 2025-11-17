@@ -1,0 +1,27 @@
+---
+title: Overview
+description: Tau supports multiple CAD kernels for different modeling approaches and workflows.
+# icon: LayoutDashboard
+---
+
+# CAD Kernels Overview
+
+Tau supports multiple CAD kernels. Specify the kernel when initializing the CAD machine or by loading an example that is tagged with the corresponding language.
+
+| Kernel      | `kernelType` | Language flag | Notes |
+|-------------|--------------|---------------|-------|
+| Replicad    | `"replicad"` | `replicad` (default) | Parametric TS/JS API backed by OpenCascade.js. |
+| OpenSCAD    | `"openscad"` | `openscad`           | WebAssembly build of OpenSCAD. Accepts standard `.scad` syntax. |
+| Zoo (KCL)   | `"zoo"`      | `zoo`                | KittyCAD Language for cloud-native CAD with AI integration. |
+
+## Current Limitations
+
+### OpenSCAD
+- Only STL generation is wired; STEP export is a TODO.
+- Error messages are raw stderr text.
+
+### Zoo (KCL)
+- Requires internet connection for Zoo API access.
+- API token required for full functionality.
+
+Contributions welcome!

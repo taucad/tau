@@ -1,4 +1,4 @@
-export type KernelLanguage = 'openscad' | 'typescript' | 'kcl';
+import type { CodeLanguage } from '#types/code.types.js';
 
 /** The number of dimensions the kernel supports. */
 export type KernelDimensions = 2 | 3;
@@ -8,7 +8,7 @@ export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad';
 export type KernelConfiguration = {
   id: string;
   name: string;
-  language: KernelLanguage;
+  language: CodeLanguage;
   dimensions: KernelDimensions[];
   description: string;
   mainFile: string;
@@ -119,5 +119,5 @@ export const languageFromKernel = kernelConfigurations.reduce(
     acc[option.id as KernelId] = option.language;
     return acc;
   },
-  {} as Record<KernelId, KernelLanguage>,
+  {} as Record<KernelId, CodeLanguage>,
 );

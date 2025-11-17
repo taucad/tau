@@ -1,3 +1,4 @@
+import { codeLanguages } from '@taucad/types/constants';
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
 
 /**
@@ -11,14 +12,14 @@ import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
  */
 export function registerKclLanguage(monaco: typeof Monaco): void {
   monaco.languages.register({
-    id: 'kcl',
+    id: codeLanguages.kcl,
     extensions: ['.kcl'],
     aliases: ['KCL', 'kcl'],
     mimetypes: ['text/x-kcl'],
   });
 
   // Basic language configuration
-  monaco.languages.setLanguageConfiguration('kcl', {
+  monaco.languages.setLanguageConfiguration(codeLanguages.kcl, {
     comments: {
       lineComment: '//',
       blockComment: ['/*', '*/'],

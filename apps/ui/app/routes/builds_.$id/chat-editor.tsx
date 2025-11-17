@@ -14,7 +14,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { getFileExtension, isBinaryFile, decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
-import { iconFromExtension } from '#components/icons/file-extension-icon.js';
+import { getIconIdFromExtension } from '#components/icons/file-extension-icon.js';
 import { ChatEditorBinaryWarning } from '#routes/builds_.$id/chat-editor-binary-warning.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }): React.JSX.Element {
@@ -42,7 +42,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       path: activeFilePath,
       name: activeFilePath.split('/').pop() ?? activeFilePath,
       content: fileContent.content,
-      language: iconFromExtension[getFileExtension(activeFilePath)]?.id,
+      language: getIconIdFromExtension(getFileExtension(activeFilePath)),
     };
   });
 

@@ -61,7 +61,7 @@ import {
 import { useBuild } from '#hooks/use-build.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { HighlightText } from '#components/highlight-text.js';
-import { FileExtensionIcon, iconFromExtension } from '#components/icons/file-extension-icon.js';
+import { FileExtensionIcon, getIconIdFromExtension } from '#components/icons/file-extension-icon.js';
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 
 type TreeItemData = {
@@ -103,7 +103,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
         name: path.split('/').pop() ?? path,
         path,
         content: item.content,
-        language: iconFromExtension[getFileExtension(path)]?.id,
+        language: getIconIdFromExtension(getFileExtension(path)),
         isDirectory: false,
         gitStatus: fileStatuses.get(path)?.status,
       }));

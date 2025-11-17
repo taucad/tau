@@ -22,4 +22,4 @@ export { exportFiles, supportedExportFormats } from '#export.js';
 export { formatConfigurations } from '#constants/format-names.constants.js';
 
 // Types
-export type { InputFormat, OutputFormat, File } from '#types.js';
+export type { InputFormat, OutputFormat, File, Format } from '#types.js';

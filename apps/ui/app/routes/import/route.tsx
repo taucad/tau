@@ -1,4 +1,5 @@
 import { useLoaderData, useNavigate } from 'react-router';
+import type { MetaDescriptor } from 'react-router';
 import { useEffect, useMemo } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { AlertCircle, ChevronDown, FileCode } from 'lucide-react';
@@ -130,11 +131,22 @@ function renderFileTree(elements: TreeViewElement[]): React.ReactNode {
   });
 }
 
+export function meta({ loaderData }: Route.MetaArgs): MetaDescriptor[] {
+  const repo = `${loaderData.owner}/${loaderData.repo} ${loaderData.ref === 'main' ? '' : `@ ${loaderData.ref}`}`;
+  const description = `Import ${repo} into Tau`;
+  return [
+    {
+      title: repo,
+      description,
+    },
+  ];
+}
+
 /**
  * Client loader that validates GitHub URL
  */
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- inferred type
-export function clientLoader({ request }: Route.ClientLoaderArgs) {
+export function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const repoUrl = url.searchParams.get('repo');
   const ref = url.searchParams.get('ref') ?? 'main';
@@ -159,7 +171,7 @@ export function clientLoader({ request }: Route.ClientLoaderArgs) {
 
 // eslint-disable-next-line complexity -- TODO: consider refactoring.
 export default function ImportRoute(): React.JSX.Element {
-  const { owner, repo, ref, mainFile } = useLoaderData<typeof clientLoader>();
+  const { owner, repo, ref, mainFile } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
   // Create import machine actor

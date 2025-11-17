@@ -450,7 +450,7 @@ export default function ConverterRoute(): React.JSX.Element {
       input={{ shouldLoadModelOnStart: false }}
       provide={{
         actors: {
-          loadBuildActor: fromPromise<Build, { buildId: string }>(async () => converterBuild),
+          loadBuildActor: fromPromise(async () => converterBuild),
         },
       }}
     >

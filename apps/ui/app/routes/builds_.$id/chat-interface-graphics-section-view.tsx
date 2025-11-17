@@ -151,6 +151,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 descriptor="length"
                 min={-maxDistance}
                 max={maxDistance}
+                enableCommitOnChange={false}
                 onChange={(value) => {
                   graphicsActor.send({ type: 'setSectionViewTranslation', payload: value });
                 }}
@@ -172,6 +173,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                   max={180}
                   step={1}
                   disabled={rotationDisabled.x}
+                  enableCommitOnChange={false}
                   onChange={(value) => {
                     const [, ry, rz] = sectionViewRotation;
                     graphicsActor.send({ type: 'setSectionViewRotation', payload: [toRadians(value), ry, rz] });
@@ -190,6 +192,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                   max={180}
                   step={1}
                   disabled={rotationDisabled.y}
+                  enableCommitOnChange={false}
                   onChange={(value) => {
                     const [rx, , rz] = sectionViewRotation;
                     graphicsActor.send({ type: 'setSectionViewRotation', payload: [rx, toRadians(value), rz] });
@@ -208,6 +211,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                   max={180}
                   step={1}
                   disabled={rotationDisabled.z}
+                  enableCommitOnChange={false}
                   onChange={(value) => {
                     const [rx, ry] = sectionViewRotation;
                     graphicsActor.send({ type: 'setSectionViewRotation', payload: [rx, ry, toRadians(value)] });

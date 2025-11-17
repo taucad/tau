@@ -33,6 +33,7 @@ export function ChatParameterWidget(props: WidgetProps): React.JSX.Element {
 
       return (
         <ChatParametersNumber
+          className="w-26"
           value={numericValue}
           defaultValue={defaultNumericValue}
           descriptor={descriptor}

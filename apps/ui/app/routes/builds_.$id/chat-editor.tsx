@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
 import { FileCode } from 'lucide-react';
-import { extensionFromLanguage } from '@taucad/types/constants';
+import { languageFromExtension } from '@taucad/types/constants';
 import { CodeEditor } from '#components/code/code-editor.js';
 import { cn } from '#utils/ui.utils.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
@@ -42,7 +42,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       path: activeFilePath,
       name: activeFilePath.split('/').pop() ?? activeFilePath,
       content: fileContent.content,
-      language: extensionFromLanguage[getFileExtension(activeFilePath) as keyof typeof extensionFromLanguage],
+      language: languageFromExtension[getFileExtension(activeFilePath) as keyof typeof languageFromExtension],
     };
   });
 

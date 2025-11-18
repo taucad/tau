@@ -9,13 +9,14 @@ export const codeLanguages = {
   json: 'json',
 } as const;
 
-export const extensionFromLanguage = {
-  typescript: 'ts',
+export const languageFromExtension = {
   kcl: 'kcl',
+  scad: 'openscad',
   openscad: 'scad',
-  javascript: 'js',
+  js: 'javascript',
   jsx: 'jsx',
+  ts: 'typescript',
   tsx: 'tsx',
-  bash: 'sh',
+  sh: 'bash',
   json: 'json',
 } as const;

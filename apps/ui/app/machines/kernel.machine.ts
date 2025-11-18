@@ -154,7 +154,7 @@ const createWorkersActor = fromPromise<
     await Promise.all([
       wrappedReplicadWorker.initialize(proxy(onLog), { withExceptions: false }),
       wrappedOpenscadWorker.initialize(proxy(onLog), {}),
-      wrappedZooWorker.initialize(proxy(onLog), { apiKey: ENV.ZOO_API_KEY }),
+      wrappedZooWorker.initialize(proxy(onLog), { apiKey: ENV.ZOO_API_KEY ?? '' }),
       wrappedTauWorker.initialize(proxy(onLog), {}),
       wrappedJscadWorker.initialize(proxy(onLog), {}),
     ]);

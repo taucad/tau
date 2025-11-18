@@ -20,7 +20,14 @@ type ZooOptions = {
 };
 
 class ZooWorker extends KernelWorker<ZooOptions> {
-  protected static override readonly supportedExportFormats: ExportFormat[] = ['stl', 'stl-binary', 'step', 'gltf'];
+  protected static override readonly supportedExportFormats: ExportFormat[] = [
+    'stl',
+    'stl-binary',
+    'step',
+    'gltf',
+    'glb',
+  ];
+
   protected override readonly name: string = 'ZooWorker';
   private gltfDataMemory: Record<string, Uint8Array> = {};
   private kclUtils: KclUtils | undefined;
@@ -180,6 +187,7 @@ class ZooWorker extends KernelWorker<ZooOptions> {
     }
   }
 
+  // eslint-disable-next-line complexity -- refactor to remove common boilerplate.
   public override async exportGeometry(
     fileType: ExportFormat,
     geometryId = 'defaultGeometry',
@@ -267,6 +275,47 @@ class ZooWorker extends KernelWorker<ZooOptions> {
               {
                 blob,
                 name: 'model.step',
+              },
+            ]);
+          } catch (error) {
+            const kclError = this.handleError(error);
+            this.error(kclError.error.message, { operation: 'exportGeometry' });
+            return kclError;
+          }
+        }
+
+        case 'glb': {
+          try {
+            const utils = await this.getKclUtilsWithEngine();
+            const glbResult = await utils.exportFromMemory({
+              type: 'gltf',
+              storage: 'embedded',
+              presentation: 'pretty',
+            });
+            if (glbResult.length === 0) {
+              return createKernelError({
+                message: 'No GLB data received from KCL export',
+                startColumn: 0,
+                startLineNumber: 0,
+              });
+            }
+
+            const glbFile = glbResult[0];
+            if (!glbFile) {
+              return createKernelError({
+                message: 'No GLB file in export result',
+                startColumn: 0,
+                startLineNumber: 0,
+              });
+            }
+
+            const blob = new Blob([glbFile.contents], {
+              type: 'model/gltf-binary',
+            });
+            return createKernelSuccess([
+              {
+                blob,
+                name: 'model.glb',
               },
             ]);
           } catch (error) {

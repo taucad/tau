@@ -12,7 +12,7 @@ const environmentSchema = z.object({
   TAU_API_URL: z.url(),
   TAU_FRONTEND_URL: z.url(),
   NODE_ENV: z.enum(['development', 'production', 'test']),
-  ZOO_API_KEY: z.string(),
+  ZOO_API_KEY: z.string().optional(),
   /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
 });
 

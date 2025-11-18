@@ -116,8 +116,8 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
 
   // Events
   private readonly changeEvent = { type: 'change' };
-  private readonly mouseDownEvent = { type: 'mouseDown', mode: this.mode };
-  private readonly mouseUpEvent = { type: 'mouseUp', mode: this.mode };
+  private readonly pointerDownEvent = { type: 'pointerDown', mode: this.mode };
+  private readonly pointerUpEvent = { type: 'pointerUp', mode: this.mode };
   private readonly objectChangeEvent = { type: 'objectChange' };
 
   public constructor(camera: TCamera, domElement: HTMLElement | undefined) {
@@ -397,9 +397,9 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
       }
 
       this.dragging = true;
-      this.mouseDownEvent.mode = this.mode;
+      this.pointerDownEvent.mode = this.mode;
       // @ts-expect-error -- custom controls event, needs augmentation
-      this.dispatchEvent(this.mouseDownEvent);
+      this.dispatchEvent(this.pointerDownEvent);
     }
   };
 
@@ -652,9 +652,9 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
     }
 
     if (this.dragging && this.axis !== undefined) {
-      this.mouseUpEvent.mode = this.mode;
+      this.pointerUpEvent.mode = this.mode;
       // @ts-expect-error -- custom controls event, needs augmentation
-      this.dispatchEvent(this.mouseUpEvent);
+      this.dispatchEvent(this.pointerUpEvent);
     }
 
     this.dragging = false;

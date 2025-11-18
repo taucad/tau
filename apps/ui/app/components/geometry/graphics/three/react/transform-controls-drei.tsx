@@ -31,8 +31,8 @@ export type TransformControlsProps = Omit<ThreeElement<typeof TransformControlsI
     readonly children?: React.ReactElement<THREE.Object3D>;
     readonly camera?: THREE.Camera;
     readonly onChange?: (event?: THREE.Event) => void;
-    readonly onMouseDown?: (event?: THREE.Event) => void;
-    readonly onMouseUp?: (event?: THREE.Event) => void;
+    readonly onPointerDown?: (event?: THREE.Event) => void;
+    readonly onPointerUp?: (event?: THREE.Event) => void;
     readonly onObjectChange?: (event?: THREE.Event) => void;
     readonly makeDefault?: boolean;
   };
@@ -44,8 +44,8 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
         children,
         domElement,
         onChange,
-        onMouseDown,
-        onMouseUp,
+        onPointerDown,
+        onPointerUp,
         onObjectChange,
         object,
         makeDefault,
@@ -113,19 +113,19 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
       }, [controls, defaultControls]);
 
       const onChangeRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
-      const onMouseDownRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
-      const onMouseUpRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
+      const onPointerDownRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
+      const onPointerUpRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
       const onObjectChangeRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
 
       React.useLayoutEffect(() => {
         onChangeRef.current = onChange;
       }, [onChange]);
       React.useLayoutEffect(() => {
-        onMouseDownRef.current = onMouseDown;
-      }, [onMouseDown]);
+        onPointerDownRef.current = onPointerDown;
+      }, [onPointerDown]);
       React.useLayoutEffect(() => {
-        onMouseUpRef.current = onMouseUp;
-      }, [onMouseUp]);
+        onPointerUpRef.current = onPointerUp;
+      }, [onPointerUp]);
       React.useLayoutEffect(() => {
         onObjectChangeRef.current = onObjectChange;
       }, [onObjectChange]);
@@ -136,16 +136,16 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
           onChangeRef.current?.(event);
         };
 
-        const onMouseDown = (event: THREE.Event) => onMouseDownRef.current?.(event);
-        const onMouseUp = (event: THREE.Event) => onMouseUpRef.current?.(event);
+        const onPointerDown = (event: THREE.Event) => onPointerDownRef.current?.(event);
+        const onPointerUp = (event: THREE.Event) => onPointerUpRef.current?.(event);
         const onObjectChange = (event: THREE.Event) => onObjectChangeRef.current?.(event);
 
         // @ts-expect-error -- newly added events
         controls.addEventListener('change', onChange);
         // @ts-expect-error -- newly added events
-        controls.addEventListener('mouseDown', onMouseDown);
+        controls.addEventListener('pointerDown', onPointerDown);
         // @ts-expect-error -- newly added events
-        controls.addEventListener('mouseUp', onMouseUp);
+        controls.addEventListener('pointerUp', onPointerUp);
         // @ts-expect-error -- newly added events
         controls.addEventListener('objectChange', onObjectChange);
 
@@ -153,9 +153,9 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
           // @ts-expect-error -- newly added events
           controls.removeEventListener('change', onChange);
           // @ts-expect-error -- newly added events
-          controls.removeEventListener('mouseDown', onMouseDown);
+          controls.removeEventListener('pointerDown', onPointerDown);
           // @ts-expect-error -- newly added events
-          controls.removeEventListener('mouseUp', onMouseUp);
+          controls.removeEventListener('pointerUp', onPointerUp);
           // @ts-expect-error -- newly added events
           controls.removeEventListener('objectChange', onObjectChange);
         };

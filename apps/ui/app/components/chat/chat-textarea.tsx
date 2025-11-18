@@ -468,15 +468,15 @@ export const ChatTextarea = memo(function ({
     };
 
     if (showContextMenu) {
-      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('pointerdown', handleClickOutside);
     }
 
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('pointerdown', handleClickOutside);
     };
   }, [showContextMenu]);
 
-  const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+  const handlePointerDown = (event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
   };
 
@@ -530,7 +530,7 @@ export const ChatTextarea = memo(function ({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        onMouseDown={handleMouseDown}
+        onPointerDown={handlePointerDown}
       >
         {/* Input */}
         <Textarea

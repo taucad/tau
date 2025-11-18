@@ -442,11 +442,11 @@ export function SectionViewControls({
             }
           }
         }}
-        onMouseDown={() => {
+        onPointerDown={() => {
           // Keep current anchor so the gizmo does not snap to the plane projection
           isTranslatingRef.current = true;
         }}
-        onMouseUp={() => {
+        onPointerUp={() => {
           isTranslatingRef.current = false;
           // Persist the final world position as the new anchor to avoid any post-drag snapping
           if (transformControlsRef.current) {
@@ -477,7 +477,7 @@ export function SectionViewControls({
             // Do not change translation here; machine derives display value from pivot
           }
         }}
-        onMouseDown={() => {
+        onPointerDown={() => {
           isRotatingRef.current = true;
           if (transformControlsRef.current) {
             // Capture current gizmo world position as the rotation pivot
@@ -486,7 +486,7 @@ export function SectionViewControls({
             anchorPositionRef.current = pivotPointRef.current.clone();
           }
         }}
-        onMouseUp={() => {
+        onPointerUp={() => {
           isRotatingRef.current = false;
           // Keep anchor until the next manipulation (or translation drag)
         }}

@@ -28,7 +28,7 @@ export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputPropert
   { value = '', containerClassName, className, placeholder = 'Search...', onClear, keyboardShortcut, ...properties },
   reference,
 ) {
-  const handleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+  const handlePointerDown = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
   };
 
@@ -60,7 +60,7 @@ export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputPropert
         type="button"
         aria-label="Clear search"
         onClick={onClear}
-        onMouseDown={handleMouseDown}
+        onPointerDown={handlePointerDown}
       >
         <X className="size-3.5" />
       </Button>

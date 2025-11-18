@@ -16,7 +16,6 @@ import { EngineConnection, MockEngineConnection } from '#components/geometry/ker
 import type { WasmModule } from '#components/geometry/kernel/zoo/engine-connection.js';
 import {
   KclError,
-  KclAuthError,
   KclExportError,
   KclWasmError,
   extractWasmKclError,

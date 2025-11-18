@@ -23,6 +23,7 @@ import type { JscadWorkerInterface as JscadWorker } from '#components/geometry/k
 import JscadBuilderWorker from '#components/geometry/kernel/jscad/jscad.worker.js?worker';
 import { assertActorDoneEvent } from '#lib/xstate.js';
 import type { LogLevel, LogOrigin, OnWorkerLog } from '#types/console.types.js';
+import { ENV } from '#config.js';
 
 type KernelProvider = CadKernelProvider | 'tau' | 'jscad';
 
@@ -153,7 +154,7 @@ const createWorkersActor = fromPromise<
     await Promise.all([
       wrappedReplicadWorker.initialize(proxy(onLog), { withExceptions: false }),
       wrappedOpenscadWorker.initialize(proxy(onLog), {}),
-      wrappedZooWorker.initialize(proxy(onLog), { apiKey: '123' }),
+      wrappedZooWorker.initialize(proxy(onLog), { apiKey: ENV.ZOO_API_KEY }),
       wrappedTauWorker.initialize(proxy(onLog), {}),
       wrappedJscadWorker.initialize(proxy(onLog), {}),
     ]);
@@ -410,8 +411,6 @@ const exportGeometryActor = fromPromise<
         },
       };
     }
-
-    console.log('Got Export Error', result);
 
     return {
       type: 'geometryExportFailed',

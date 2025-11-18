@@ -218,10 +218,6 @@ export class KclUtils {
   private hasExecutedProgram = false;
 
   public constructor(options: KclUtilsOptions) {
-    if (!options.apiKey) {
-      throw new KclAuthError('API key is required');
-    }
-
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl ?? 'wss://api.zoo.dev';
   }

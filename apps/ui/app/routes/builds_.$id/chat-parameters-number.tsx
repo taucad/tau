@@ -17,7 +17,12 @@ type ChatParametersNumberProps = {
   readonly step?: number;
   // eslint-disable-next-line react/boolean-prop-naming -- disabled is standard HTML/React prop
   readonly disabled?: boolean;
-  readonly enableCommitOnChange?: boolean;
+  /**
+   * Whether to commit value changes continually on every slider movement.
+   * When false (default), commits are deferred until slider release for better performance.
+   * Text input always commits immediately regardless of this setting.
+   */
+  readonly enableContinualOnChange?: boolean;
   readonly className?: string;
 };
 
@@ -30,7 +35,7 @@ export function ChatParametersNumber({
   max,
   step,
   disabled,
-  enableCommitOnChange = true,
+  enableContinualOnChange = false,
   ...properties
 }: ChatParametersNumberProps): React.JSX.Element {
   const { graphicsRef } = useBuild();
@@ -48,7 +53,7 @@ export function ChatParametersNumber({
       initialValue: value,
       defaultValue,
       descriptor,
-      enableCommitOnChange,
+      enableContinualOnChange,
       graphicsRef,
       initialUnitFactor: initialGridUnitFactor,
       initialUnit: initialGridUnit,
@@ -80,9 +85,10 @@ export function ChatParametersNumber({
   const localValue = useSelector(parameterRef, (state) => state.context.localValue);
   const formattedValue = useSelector(parameterRef, (state) => state.context.formattedValue);
   const isApproximation = useSelector(parameterRef, (state) => state.context.isApproximation);
-  const sliderMin = useSelector(parameterRef, (state) => state.context.sliderMin);
-  const sliderMax = useSelector(parameterRef, (state) => state.context.sliderMax);
-  const effectiveStep = useSelector(parameterRef, (state) => state.context.effectiveStep);
+  const rangeMin = useSelector(parameterRef, (state) => state.context.rangeMin);
+  const rangeMax = useSelector(parameterRef, (state) => state.context.rangeMax);
+  const baseStep = useSelector(parameterRef, (state) => state.context.baseStep);
+  const currentStep = useSelector(parameterRef, (state) => state.context.step);
 
   const gridUnit = useSelector(graphicsRef, (state) => state.context.gridUnit);
   const gridUnitFactor = useSelector(graphicsRef, (state) => state.context.gridUnitFactor);
@@ -97,9 +103,9 @@ export function ChatParametersNumber({
       <Slider
         variant="inset"
         value={[localValue]}
-        min={sliderMin}
-        max={sliderMax}
-        step={effectiveStep}
+        min={rangeMin}
+        max={rangeMax}
+        step={currentStep}
         disabled={disabled}
         className="[&_[data-slot=slider-track]]:h-7 md:[&_[data-slot=slider-track]]:h-4.5"
         onValueChange={([newValue]) => {
@@ -118,7 +124,7 @@ export function ChatParametersNumber({
         isApproximation={isApproximation}
         unit={displayUnit}
         unitFactor={unitFactor}
-        step={effectiveStep}
+        step={baseStep}
         descriptor={descriptor}
         disabled={disabled}
         onValueChange={(newValue) => {

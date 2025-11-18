@@ -5,7 +5,7 @@ import { fromCallback } from 'xstate';
  * Listens to arrow key presses on a specific element and sends back arrow key events.
  */
 export const arrowKeyListener = fromCallback<
-  { type: 'arrowKeyPressed'; direction: 'up' | 'down'; isShiftHeld: boolean },
+  { type: 'arrowKeyPressed'; direction: 'up' | 'down' },
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- ref can be null.
   { elementRef: React.RefObject<HTMLElement | null> }
 >(({ sendBack, input }) => {
@@ -19,7 +19,6 @@ export const arrowKeyListener = fromCallback<
       sendBack({
         type: 'arrowKeyPressed',
         direction: event.key === 'ArrowUp' ? 'up' : 'down',
-        isShiftHeld: event.shiftKey,
       });
     }
   };

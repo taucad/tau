@@ -68,13 +68,6 @@ function calculateSliderStep(defaultValue: number): number {
 }
 
 /**
- * Get the shift step multiplier (constant 5x for all values)
- */
-function getShiftStepMultiplier(): number {
-  return shiftStepMultiplier;
-}
-
-/**
  * Calculate appropriate minimum value for slider based on the default parameter value
  * Uses tier-based scaling: if default*2 exceeds its tier boundary, expand the range
  */
@@ -119,44 +112,42 @@ export type ParameterContext = {
   committedValue: number;
   /** The local value in display units (used during interaction) */
   localValue: number;
-  /** Whether user is actively interacting with the slider */
-  isInteracting: boolean;
   /** Whether the input field is currently focused */
   isFocused: boolean;
+  /** Whether user is actively dragging the slider */
+  isDragging: boolean;
   /** The measurement descriptor (length, angle, count, unitless) */
   descriptor: MeasurementDescriptor;
-  /** Whether to commit on every change or defer until release */
-  enableCommitOnChange: boolean;
+  /** Whether to commit continually on every slider change (vs. only on release) */
+  enableContinualOnChange: boolean;
   /** Reference to graphics machine for unit conversion */
   graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   /** Current unit factor (cached for comparison) */
   currentUnitFactor: number;
   /** Current unit string (for parsing) */
   currentUnit: string;
-  /** Default value in baseline units (for slider calculations) */
+  /** Default value in baseline units (for range calculations) */
   defaultValue: number;
   /** Optional minimum value in baseline units */
   min: number | undefined;
   /** Optional maximum value in baseline units */
   max: number | undefined;
-  /** Optional step value in baseline units */
-  step: number | undefined;
+  /** Optional original step value from input (in baseline units) */
+  originalStep: number | undefined;
   /** Formatted value string (only when conversion occurred) */
   formattedValue: string | undefined;
   /** Whether the displayed value is an approximation */
   isApproximation: boolean;
-  /** Calculated slider minimum in display units */
-  sliderMin: number;
-  /** Calculated slider maximum in display units */
-  sliderMax: number;
-  /** Calculated slider step in display units */
-  sliderStep: number;
-  /** Shift step multiplier for finer control */
-  shiftMultiplier: number;
-  /** Whether the Shift key is currently held */
+  /** Calculated minimum value in display units */
+  rangeMin: number;
+  /** Calculated maximum value in display units */
+  rangeMax: number;
+  /** Base step in display units (without shift multiplier) */
+  baseStep: number;
+  /** Current step (baseStep with shift multiplier applied if shift is held) */
+  step: number;
+  /** Whether Shift key is currently held */
   isShiftHeld: boolean;
-  /** Effective step (base step or with shift multiplier applied) */
-  effectiveStep: number;
   /** Last emitted value (to prevent duplicate emissions) */
   lastEmittedValue: number | undefined;
   /** Ref to the input element for focus/arrow key listeners */
@@ -174,8 +165,8 @@ export type ParameterInput = {
   defaultValue: number;
   /** Measurement descriptor */
   descriptor: MeasurementDescriptor;
-  /** Whether to commit on every change */
-  enableCommitOnChange: boolean;
+  /** Whether to commit continually on every slider change (vs. only on release) */
+  enableContinualOnChange: boolean;
   /** Graphics machine reference for unit conversion */
   graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   /** Initial unit factor (from graphics machine context) */
@@ -194,9 +185,9 @@ export type ParameterInput = {
 };
 
 /**
- * Calculate all slider properties based on default value and unit conversion
+ * Calculate parameter range (min, max, step) based on default value and unit conversion
  */
-function calculateSliderProperties(parameters: {
+function calculateParameterRange(parameters: {
   defaultValue: number;
   unitFactor: number;
   isLength: boolean;
@@ -204,10 +195,9 @@ function calculateSliderProperties(parameters: {
   max: number | undefined;
   step: number | undefined;
 }): {
-  sliderMin: number;
-  sliderMax: number;
-  sliderStep: number;
-  shiftMultiplier: number;
+  rangeMin: number;
+  rangeMax: number;
+  baseStep: number;
 } {
   const { defaultValue, unitFactor, isLength, min, max, step } = parameters;
   // Convert default value to display units
@@ -222,18 +212,14 @@ function calculateSliderProperties(parameters: {
   // Calculate or convert step
   const baseStep = step === undefined ? calculateSliderStep(defaultValueForCalculations) : step / unitFactor;
 
-  // Get shift multiplier (constant 5x)
-  const shiftMultiplier = getShiftStepMultiplier();
-
   // Calculate or convert min/max
-  const sliderMin = min === undefined ? calculateSliderMin(defaultValueForCalculations) : min / unitFactor;
-  const sliderMax = max === undefined ? calculateSliderMax(defaultValueForCalculations) : max / unitFactor;
+  const rangeMin = min === undefined ? calculateSliderMin(defaultValueForCalculations) : min / unitFactor;
+  const rangeMax = max === undefined ? calculateSliderMax(defaultValueForCalculations) : max / unitFactor;
 
   return {
-    sliderMin,
-    sliderMax,
-    sliderStep: baseStep,
-    shiftMultiplier,
+    rangeMin,
+    rangeMax,
+    baseStep,
   };
 }
 
@@ -274,13 +260,6 @@ function calculateFormatting(
 }
 
 /**
- * Calculate effective step based on shift key state
- */
-function calculateEffectiveStep(baseStep: number, shiftMultiplier: number, isShiftHeld: boolean): number {
-  return isShiftHeld ? baseStep * shiftMultiplier : baseStep;
-}
-
-/**
  * Parameter Machine Events
  */
 type ParameterEventInternal =
@@ -292,7 +271,7 @@ type ParameterEventInternal =
   | { type: 'unitChanged'; unitFactor: number; unit: string }
   | { type: 'keyStateChanged'; key: string; isPressed: boolean }
   | { type: 'focusStateChanged'; isFocused: boolean }
-  | { type: 'arrowKeyPressed'; direction: 'up' | 'down'; isShiftHeld: boolean };
+  | { type: 'arrowKeyPressed'; direction: 'up' | 'down' };
 
 /**
  * Parameter Machine Emitted Events
@@ -356,7 +335,18 @@ export const parameterMachine = setup({
     arrowKeyListener,
   },
   guards: {
-    shouldCommitOnChange: ({ context }) => !context.enableCommitOnChange,
+    /**
+     * Check if we should commit continually during slider drag.
+     * Returns false by default to defer commits until slider release for better performance.
+     * When enableContinualOnChange is true, commits happen on every slider movement.
+     */
+    shouldCommitContinually: ({ context }) => context.enableContinualOnChange,
+    /**
+     * Check if we should accept external value changes.
+     * When actively editing (focused input or dragging slider), ignore external changes
+     * to prevent feedback loops that cause value drift and incorrect arrow key behavior.
+     */
+    shouldAcceptExternalChange: ({ context }) => !context.isFocused && !context.isDragging,
   },
   actions: {
     updateExternalValue: assign(({ event, context }) => {
@@ -372,8 +362,9 @@ export const parameterMachine = setup({
       const hasConversion = isLength && unitFactor !== 1;
       const localValue = hasConversion ? roundToSignificantFigures(displayValue, 4) : displayValue;
 
-      // Recalculate formatting
-      const formatting = calculateFormatting(event.value, unitFactor, isLength, context.isInteracting);
+      // Recalculate formatting (preserve precision if actively editing)
+      const isEditing = context.isFocused || context.isDragging;
+      const formatting = calculateFormatting(event.value, unitFactor, isLength, isEditing);
 
       return {
         committedValue: event.value,
@@ -405,7 +396,8 @@ export const parameterMachine = setup({
       // Check if this value is different from the last emitted value
       if (context.lastEmittedValue !== undefined && Math.abs(baselineValue - context.lastEmittedValue) < 1e-10) {
         // Value hasn't changed, don't emit (but still update local state for UI)
-        const formatting = calculateFormatting(baselineValue, unitFactor, isLength, context.isInteracting);
+        const isEditing = context.isFocused || context.isDragging;
+        const formatting = calculateFormatting(baselineValue, unitFactor, isLength, isEditing);
         enqueue.assign({
           committedValue: baselineValue,
           ...formatting,
@@ -414,7 +406,8 @@ export const parameterMachine = setup({
       }
 
       // Recalculate formatting with new committed value
-      const formatting = calculateFormatting(baselineValue, unitFactor, isLength, context.isInteracting);
+      const isEditing = context.isFocused || context.isDragging;
+      const formatting = calculateFormatting(baselineValue, unitFactor, isLength, isEditing);
 
       enqueue.assign({
         committedValue: baselineValue,
@@ -428,30 +421,12 @@ export const parameterMachine = setup({
       });
     }),
 
-    startInteraction: assign(({ context }) => {
-      const isLength = context.descriptor === 'length';
-      const unitFactor = isLength ? context.currentUnitFactor : 1;
-
-      // Clear formatting while interacting
-      const formatting = calculateFormatting(context.committedValue, unitFactor, isLength, true);
-
-      return {
-        isInteracting: true,
-        ...formatting,
-      };
+    startDragging: assign({
+      isDragging: true,
     }),
 
-    endInteraction: assign(({ context }) => {
-      const isLength = context.descriptor === 'length';
-      const unitFactor = isLength ? context.currentUnitFactor : 1;
-
-      // Restore formatting after interaction
-      const formatting = calculateFormatting(context.committedValue, unitFactor, isLength, false);
-
-      return {
-        isInteracting: false,
-        ...formatting,
-      };
+    stopDragging: assign({
+      isDragging: false,
     }),
 
     handleUnitChange: assign(({ event, context }) => {
@@ -469,33 +444,26 @@ export const parameterMachine = setup({
       const hasConversion = isLength && newUnitFactor !== 1;
       const localValue = hasConversion ? roundToSignificantFigures(displayValue, 4) : displayValue;
 
-      // Recalculate slider properties with new unit factor
-      const sliderProperties = calculateSliderProperties({
+      // Recalculate range with new unit factor
+      const range = calculateParameterRange({
         defaultValue: context.defaultValue,
         unitFactor: newUnitFactor,
         isLength,
         min: context.min,
         max: context.max,
-        step: context.step,
+        step: context.originalStep,
       });
 
-      // Recalculate formatting with new unit factor
-      const formatting = calculateFormatting(context.committedValue, newUnitFactor, isLength, context.isInteracting);
-
-      // Recalculate effective step with new slider step
-      const effectiveStep = calculateEffectiveStep(
-        sliderProperties.sliderStep,
-        sliderProperties.shiftMultiplier,
-        context.isShiftHeld,
-      );
+      // Recalculate formatting with new unit factor (preserve precision if actively editing)
+      const isEditing = context.isFocused || context.isDragging;
+      const formatting = calculateFormatting(context.committedValue, newUnitFactor, isLength, isEditing);
 
       return {
         localValue,
         currentUnitFactor: newUnitFactor,
         currentUnit: newUnit,
-        ...sliderProperties,
+        ...range,
         ...formatting,
-        effectiveStep,
       };
     }),
 
@@ -504,11 +472,12 @@ export const parameterMachine = setup({
         return {};
       }
 
-      const effectiveStep = calculateEffectiveStep(context.sliderStep, context.shiftMultiplier, event.isPressed);
+      // Apply shift multiplier to step when shift is held
+      const step = event.isPressed ? context.baseStep * shiftStepMultiplier : context.baseStep;
 
       return {
         isShiftHeld: event.isPressed,
-        effectiveStep,
+        step,
       };
     }),
 
@@ -527,17 +496,18 @@ export const parameterMachine = setup({
         return;
       }
 
-      const { direction, isShiftHeld } = event;
+      const { direction } = event;
 
-      // Calculate step size (use shift multiplier if shift is held)
-      const stepSize = isShiftHeld ? context.sliderStep * context.shiftMultiplier : context.sliderStep;
+      // Use current step (already accounts for shift multiplier)
+      const delta = direction === 'up' ? context.step : -context.step;
+      const rawValue = context.localValue + delta;
 
-      // Calculate new value
-      const delta = direction === 'up' ? stepSize : -stepSize;
-      const newValue = context.localValue + delta;
+      // Round to step precision to avoid floating-point errors
+      const decimalPlaces = Math.max(0, -Math.floor(Math.log10(context.baseStep)));
+      const roundedValue = Number(rawValue.toFixed(decimalPlaces));
 
-      // Clamp to slider min/max
-      const clampedValue = Math.max(context.sliderMin, Math.min(context.sliderMax, newValue));
+      // Clamp to range min/max
+      const clampedValue = Math.max(context.rangeMin, Math.min(context.rangeMax, roundedValue));
 
       // Convert to baseline units
       const isLength = context.descriptor === 'length';
@@ -547,7 +517,8 @@ export const parameterMachine = setup({
       // Check if this value is different from the last emitted value
       if (context.lastEmittedValue !== undefined && Math.abs(baselineValue - context.lastEmittedValue) < 1e-10) {
         // Value hasn't changed, don't emit (but still update local state for UI)
-        const formatting = calculateFormatting(baselineValue, unitFactor, isLength, context.isInteracting);
+        // Use editing mode for formatting to preserve precision during arrow key interaction
+        const formatting = calculateFormatting(baselineValue, unitFactor, isLength, true);
         enqueue.assign({
           localValue: clampedValue,
           committedValue: baselineValue,
@@ -557,7 +528,8 @@ export const parameterMachine = setup({
       }
 
       // Recalculate formatting with new committed value
-      const formatting = calculateFormatting(baselineValue, unitFactor, isLength, context.isInteracting);
+      // Use editing mode for formatting to preserve precision during arrow key interaction
+      const formatting = calculateFormatting(baselineValue, unitFactor, isLength, true);
 
       enqueue.assign({
         localValue: clampedValue,
@@ -628,8 +600,9 @@ export const parameterMachine = setup({
       const hasConversion = isLength && unitFactor !== 1;
       const localValue = hasConversion ? roundToSignificantFigures(valueInDisplayUnit, 4) : valueInDisplayUnit;
 
-      // Recalculate formatting with new committed value
-      const formatting = calculateFormatting(baselineValue, unitFactor, isLength, context.isInteracting);
+      // Recalculate formatting with new committed value (preserve precision if actively editing)
+      const isEditing = context.isFocused || context.isDragging;
+      const formatting = calculateFormatting(baselineValue, unitFactor, isLength, isEditing);
 
       enqueue.assign({
         committedValue: baselineValue,
@@ -654,8 +627,8 @@ export const parameterMachine = setup({
     const hasConversion = isLength && unitFactor !== 1;
     const localValue = hasConversion ? roundToSignificantFigures(displayValue, 4) : displayValue;
 
-    // Calculate slider properties
-    const sliderProperties = calculateSliderProperties({
+    // Calculate parameter range (min, max, step)
+    const range = calculateParameterRange({
       defaultValue: input.defaultValue,
       unitFactor,
       isLength,
@@ -667,27 +640,24 @@ export const parameterMachine = setup({
     // Calculate formatting
     const formatting = calculateFormatting(input.initialValue, unitFactor, isLength, false);
 
-    // Calculate initial effective step (shift not held initially)
-    const effectiveStep = calculateEffectiveStep(sliderProperties.sliderStep, sliderProperties.shiftMultiplier, false);
-
     return {
       committedValue: input.initialValue,
       localValue,
-      isInteracting: false,
       isFocused: false,
+      isDragging: false,
       descriptor: input.descriptor,
-      enableCommitOnChange: input.enableCommitOnChange,
+      enableContinualOnChange: input.enableContinualOnChange,
       graphicsRef: input.graphicsRef,
       currentUnitFactor: unitFactor,
       currentUnit: unit,
       defaultValue: input.defaultValue,
       min: input.min,
       max: input.max,
-      step: input.step,
-      ...sliderProperties,
+      originalStep: input.step,
+      ...range,
       ...formatting,
+      step: range.baseStep, // Initialize with baseStep (no shift multiplier)
       isShiftHeld: false,
-      effectiveStep,
       lastEmittedValue: undefined,
       inputRef: input.inputRef,
     };
@@ -728,6 +698,7 @@ export const parameterMachine = setup({
     idle: {
       on: {
         externalValueChanged: {
+          guard: 'shouldAcceptExternalChange',
           actions: 'updateExternalValue',
         },
         unitChanged: {
@@ -744,61 +715,21 @@ export const parameterMachine = setup({
         },
         sliderChanged: [
           {
-            guard: 'shouldCommitOnChange',
-            target: 'interacting',
-            actions: ['updateLocalValue', 'commitValue'],
+            guard: 'shouldCommitContinually',
+            actions: ['startDragging', 'updateLocalValue', 'commitValue'],
           },
           {
-            target: 'interacting',
-            actions: 'updateLocalValue',
+            actions: ['startDragging', 'updateLocalValue'],
           },
         ],
+        sliderReleased: {
+          actions: ['stopDragging', 'commitValue'],
+        },
         inputChanged: {
           actions: ['updateLocalValue', 'commitValue'],
         },
         textInputChanged: {
           actions: 'parseAndCommitText',
-        },
-      },
-    },
-    interacting: {
-      entry: 'startInteraction',
-      on: {
-        externalValueChanged: {
-          actions: 'updateExternalValue',
-        },
-        unitChanged: {
-          actions: 'handleUnitChange',
-        },
-        keyStateChanged: {
-          actions: 'handleShiftKeyChange',
-        },
-        focusStateChanged: {
-          actions: 'handleFocusChange',
-        },
-        arrowKeyPressed: {
-          actions: 'handleArrowKey',
-        },
-        sliderChanged: [
-          {
-            guard: 'shouldCommitOnChange',
-            actions: ['updateLocalValue', 'commitValue'],
-          },
-          {
-            actions: 'updateLocalValue',
-          },
-        ],
-        sliderReleased: {
-          target: 'idle',
-          actions: ['commitValue', 'endInteraction'],
-        },
-        inputChanged: {
-          target: 'idle',
-          actions: ['updateLocalValue', 'commitValue', 'endInteraction'],
-        },
-        textInputChanged: {
-          target: 'idle',
-          actions: ['parseAndCommitText', 'endInteraction'],
         },
       },
     },

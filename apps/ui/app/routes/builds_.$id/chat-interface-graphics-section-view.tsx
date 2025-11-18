@@ -146,12 +146,13 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 <Ruler className="size-4 -rotate-45" />
               </div>
               <ChatParametersNumber
+                enableContinualOnChange
                 value={sectionViewTranslation}
                 defaultValue={0}
                 descriptor="length"
+                step={1}
                 min={-maxDistance}
                 max={maxDistance}
-                enableCommitOnChange={false}
                 onChange={(value) => {
                   graphicsActor.send({ type: 'setSectionViewTranslation', payload: value });
                 }}
@@ -166,6 +167,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                   X
                 </div>
                 <ChatParametersNumber
+                  enableContinualOnChange
                   value={rotationDegrees.x}
                   defaultValue={0}
                   descriptor="angle"
@@ -173,7 +175,6 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                   max={180}
                   step={1}
                   disabled={rotationDisabled.x}
-                  enableCommitOnChange={false}
                   onChange={(value) => {
                     const [, ry, rz] = sectionViewRotation;
                     graphicsActor.send({ type: 'setSectionViewRotation', payload: [toRadians(value), ry, rz] });
@@ -185,6 +186,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                   Y
                 </div>
                 <ChatParametersNumber
+                  enableContinualOnChange
                   value={rotationDegrees.y}
                   defaultValue={0}
                   descriptor="angle"
@@ -192,7 +194,6 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                   max={180}
                   step={1}
                   disabled={rotationDisabled.y}
-                  enableCommitOnChange={false}
                   onChange={(value) => {
                     const [rx, , rz] = sectionViewRotation;
                     graphicsActor.send({ type: 'setSectionViewRotation', payload: [rx, toRadians(value), rz] });
@@ -204,6 +205,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                   Z
                 </div>
                 <ChatParametersNumber
+                  enableContinualOnChange
                   value={rotationDegrees.z}
                   defaultValue={0}
                   descriptor="angle"
@@ -211,7 +213,6 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                   max={180}
                   step={1}
                   disabled={rotationDisabled.z}
-                  enableCommitOnChange={false}
                   onChange={(value) => {
                     const [rx, ry] = sectionViewRotation;
                     graphicsActor.send({ type: 'setSectionViewRotation', payload: [rx, ry, toRadians(value)] });

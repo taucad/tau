@@ -40,7 +40,7 @@ jobs:
           header: fly-review-ui
           message: |
             ### UI Preview :balloon:
-            **Status:** 🔄 Deploying...
+            **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || '🔄 Deploying...' }}
             **URL:** _Pending..._
 
       - name: Deploy UI PR app to Fly.io
@@ -59,8 +59,8 @@ jobs:
           header: fly-review-ui
           message: |
             ### UI Preview :balloon:
-            **Status:** ✅ Deployed
-            **URL:** ${{ steps.deploy.outputs.url }}
+            **Status:** ${{ github.event.action == 'closed' && '✅ Destroyed' || '✅ Deployed' }}
+            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || steps.deploy.outputs.url }}
 
       - name: Update UI status - failure
         if: steps.deploy.outcome == 'failure'
@@ -112,7 +112,7 @@ jobs:
           header: fly-review-api
           message: |
             ### API Preview :octopus:
-            **Status:** 🔄 Deploying...
+            **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || '🔄 Deploying...' }}
             **URL:** _Pending..._
 
       - name: Deploy API PR app to Fly.io
@@ -131,8 +131,8 @@ jobs:
           header: fly-review-api
           message: |
             ### API Preview :octopus:
-            **Status:** ✅ Deployed
-            **URL:** ${{ steps.deploy.outputs.url }}
+            **Status:** ${{ github.event.action == 'closed' && '✅ Destroyed' || '✅ Deployed' }}
+            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || steps.deploy.outputs.url }}
 
       - name: Update API status - failure
         if: steps.deploy.outcome == 'failure'

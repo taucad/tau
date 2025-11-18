@@ -7,6 +7,7 @@ import type { GeometrySvg } from '@taucad/types';
 import panzoom from '@panzoom/panzoom/dist/panzoom.es.js';
 import type { PanzoomObject } from '@panzoom/panzoom';
 import { useBuild } from '#hooks/use-build.js';
+import { usePanzoomReset } from '#components/geometry/graphics/svg/use-panzoom-reset.js';
 import { axesColors } from '#constants/color.constants.js';
 
 type Viewbox = {
@@ -269,7 +270,7 @@ function SvgWindow({ viewbox, enableGrid, enableAxes, defaultColor, children }: 
   const canvasRef = useRef<HTMLDivElement>(null);
   const [clientRect, setClientRect] = useState<DOMRect | undefined>(undefined);
   const [adaptedViewbox, setAdaptedViewbox] = useState<Viewbox>(viewbox);
-  const panzoomRef = useRef<PanzoomObject | undefined>(undefined);
+  const panzoomRef = useRef<PanzoomObject>(null);
   const { graphicsRef: graphicsActor } = useBuild();
   const [transform, setTransform] = useState<{ scale: number; x: number; y: number }>({ scale: 1, x: 0, y: 0 });
 
@@ -359,6 +360,9 @@ function SvgWindow({ viewbox, enableGrid, enableAxes, defaultColor, children }: 
     [graphicsActor],
   );
 
+  // Register SVG reset capability
+  usePanzoomReset({ panzoomRef, containerRef: canvasRef });
+
   // Create onWheel handler as useCallback with explicit dependencies
   const onWheel = useCallback(
     (event: WheelEvent, instance: PanzoomObject, container: HTMLDivElement, currentAdaptedViewbox: Viewbox): void => {
@@ -433,7 +437,7 @@ function SvgWindow({ viewbox, enableGrid, enableAxes, defaultColor, children }: 
 
     return () => {
       instance.destroy();
-      panzoomRef.current = undefined;
+      panzoomRef.current = null;
     };
   }, []);
 

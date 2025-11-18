@@ -382,12 +382,12 @@ export const ChatConsole = memo(function ({
                   </span>
                 ) : null}
                 {displayConfig.showComponent ? <ComponentBadge origin={log.origin} searchTerm={filter} /> : null}
-                <span className="mr-auto">
+                <span className="mr-auto break-all">
                   <HighlightText text={log.message} searchTerm={filter} />
                 </span>
               </span>
               {log.data !== undefined && displayConfig.showData ? (
-                <span>
+                <span className="block break-all">
                   <HighlightText text={JSON.stringify(log.data, undefined, 2)} searchTerm={filter} />
                 </span>
               ) : null}

@@ -24,7 +24,7 @@ import { toast } from '#components/ui/sonner.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 
 const toggleConverterKeyCombination = {
-  key: 'e',
+  key: 'd',
   ctrlKey: true,
 } satisfies KeyCombination;
 

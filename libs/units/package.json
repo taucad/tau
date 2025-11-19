@@ -1,7 +1,7 @@
 {
-  "name": "@taucad/types",
+  "name": "@taucad/units",
   "version": "0.1.0",
-  "description": "Tau types",
+  "description": "A library for working with units of measurement and conversions",
   "type": "module",
   "private": true,
   "exports": {
@@ -15,16 +15,18 @@
       "import": "./src/constants/index.ts",
       "default": "./src/constants/index.ts"
     },
-    "./guards": {
-      "types": "./src/guards/index.ts",
-      "import": "./src/guards/index.ts",
-      "default": "./src/guards/index.ts"
+    "./converter": {
+      "types": "./src/converter/index.ts",
+      "import": "./src/converter/index.ts",
+      "default": "./src/converter/index.ts"
+    },
+    "./parser": {
+      "types": "./src/parser/index.ts",
+      "import": "./src/parser/index.ts",
+      "default": "./src/parser/index.ts"
     }
   },
   "imports": {
     "#*": "./src/*"
-  },
-  "dependencies": {
-    "@taucad/units": "workspace:*"
   }
 }

@@ -11,9 +11,4 @@
     }
   },
   "include": ["src/**/*.ts"],
-  "references": [
-    {
-      "path": "../units/tsconfig.lib.json"
-    }
-  ]
 }

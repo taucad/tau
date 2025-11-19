@@ -718,7 +718,11 @@ importers:
 
   libs/tau-examples: {}
 
-  libs/types: {}
+  libs/types:
+    dependencies:
+      '@taucad/units':
+        specifier: workspace:*
+        version: link:../units
 
   libs/units: {}
 

@@ -23,5 +23,8 @@
   },
   "imports": {
     "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/units": "workspace:*"
   }
 }

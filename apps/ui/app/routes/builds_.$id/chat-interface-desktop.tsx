@@ -1,4 +1,4 @@
-import { memo, useRef } from 'react';
+import { memo, useRef, useState, useEffect } from 'react';
 import { Allotment } from 'allotment';
 import { ChatHistory, ChatHistoryTrigger } from '#routes/builds_.$id/chat-history.js';
 import { ChatParameters, ChatParametersTrigger } from '#routes/builds_.$id/chat-parameters.js';
@@ -21,7 +21,6 @@ import {
 } from '#routes/builds_.$id/use-chat-interface-state.js';
 import { ChatInterfaceStatus } from '#routes/builds_.$id/chat-interface-status.js';
 import { ChatInterfaceGraphics } from '#routes/builds_.$id/chat-interface-graphics.js';
-import { isBrowser } from '#constants/browser.constants.js';
 
 export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   const {
@@ -44,9 +43,16 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   } = useChatInterfaceState();
 
   const allotmentRef = useRef<HTMLDivElement>(null);
+  const [isClient, setIsClient] = useState(false);
+
+  // Set isClient to true after hydration to avoid SSR mismatch
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   // Update position attributes on visible panes for performant CSS selectors
-  usePanePositionObserver(allotmentRef, {
+  // Only run when the actual Allotment is rendered (client-side)
+  usePanePositionObserver(isClient ? allotmentRef : { current: null }, {
     isChatOpen,
     isParametersOpen,
     isEditorOpen,
@@ -56,7 +62,8 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     isDetailsOpen,
   });
 
-  if (!isBrowser) {
+  // Return placeholder during SSR to avoid hydration mismatch
+  if (!isClient) {
     return <div className="hidden size-full md:flex" />;
   }
 
@@ -119,7 +126,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
 
         <Allotment.Pane className="rs-center px-2" minSize={panelMinSizeViewer}>
           {/* Top-left Content */}
-          <div className="absolute top-0 left-2 z-10 flex flex-col gap-2 [&>*]:pointer-events-auto">
+          <div className="absolute top-0 left-2 z-10 flex flex-col gap-2">
             <ChatHistoryTrigger
               isOpen={isChatOpen}
               onToggle={() => {
@@ -135,7 +142,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
           </div>
 
           {/* Top-right Content */}
-          <div className="absolute top-0 right-2 z-10 flex flex-col gap-2 [&>*]:pointer-events-auto">
+          <div className="absolute top-0 right-2 z-10 flex flex-col gap-2">
             <ChatParametersTrigger
               isOpen={isParametersOpen}
               onToggle={() => {
@@ -169,34 +176,21 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
           </div>
 
           {/* Centered Content */}
-          <div
-            className={cn(
-              'absolute top-[10%] z-10',
-              'left-1/2',
-              'flex flex-col gap-2',
-              '-translate-x-1/2',
-              '[&>*]:pointer-events-auto',
-            )}
-          >
+          <div className={cn('absolute top-[10%] z-10', 'left-1/2', 'flex flex-col gap-2', '-translate-x-1/2')}>
             <ChatInterfaceStatus />
             <ChatViewerStatus />
           </div>
 
-          {/* Viewer */}
-          <div
-            className={cn(
-              'absolute inset-0 left-1/2 -mt-(--header-height) h-dvh w-[200dvw]',
-              '-translate-x-1/2',
+          {/* Gizmo Container - Static container for the gizmo to ensure it shares the same containing block as the anchor */}
+          <div id="viewport-gizmo-container" className="absolute right-0 -bottom-2" />
 
-              // Position the gizmo cube.
-              '[&_.viewport-gizmo-cube]:right-1/2',
-            )}
-          >
+          {/* Viewer */}
+          <div className={cn('absolute inset-0 left-1/2 -mt-(--header-height) h-dvh w-dvw', '-translate-x-1/2')}>
             <ChatViewer />
           </div>
 
           {/* Bottom-left Content */}
-          <div className="absolute right-8 bottom-0 left-2 z-10 flex w-100 shrink-0 flex-col gap-2 [&>*]:pointer-events-auto">
+          <div className="absolute bottom-0 left-2 z-10 flex w-100 shrink-0 flex-col gap-2">
             <ChatInterfaceGraphics />
             <ChatStackTrace />
             <ChatViewerControls />

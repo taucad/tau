@@ -7,7 +7,9 @@ import type { GeometrySvg } from '@taucad/types';
 import panzoom from '@panzoom/panzoom/dist/panzoom.es.js';
 import type { PanzoomObject } from '@panzoom/panzoom';
 import { useBuild } from '#hooks/use-build.js';
+import { usePanzoomReset } from '#components/geometry/graphics/svg/use-panzoom-reset.js';
 import { axesColors } from '#constants/color.constants.js';
+import { SvgInvalidError } from '#components/geometry/graphics/svg/svg-invalid-error.js';
 
 type Viewbox = {
   xMin: number;
@@ -35,7 +37,10 @@ function SvgGrid({ viewbox, transform }: SvgGridProps): React.ReactElement {
   const id = useId();
 
   // Calculate theme-aware grid color
-  const gridColor = React.useMemo(() => (theme === Theme.LIGHT ? 'lightgrey' : 'rgba(128, 128, 128, 0.1)'), [theme]);
+  const gridColor = React.useMemo(
+    () => (theme === Theme.LIGHT ? 'rgba(128, 128, 128, 0.15)' : 'rgba(128, 128, 128, 0.1)'),
+    [theme],
+  );
 
   // Grid sizes come from graphics machine (kept in-sync via controlsChanged)
   const { smallSize, largeSize } = gridSizes;
@@ -171,7 +176,7 @@ function SvgAxes({
   );
 }
 
-function parseViewbox(viewbox?: string): Viewbox {
+function parseViewbox(viewbox?: string): Viewbox | undefined {
   if (!viewbox) {
     return { xMin: 0, yMin: 0, xMax: 0, yMax: 0, width: 0, height: 0 };
   }
@@ -179,7 +184,8 @@ function parseViewbox(viewbox?: string): Viewbox {
   const split = viewbox.split(' ').map((v) => Number.parseFloat(v));
 
   if (split.length !== 4 || split.some((v) => Number.isNaN(v))) {
-    throw new Error(`Invalid viewbox: ${viewbox}`);
+    console.warn(`Invalid viewbox encountered: ${viewbox}`);
+    return undefined; // Return undefined instead of throwing
   }
 
   const [x, y, width, height] = split as [number, number, number, number];
@@ -188,24 +194,63 @@ function parseViewbox(viewbox?: string): Viewbox {
 }
 
 function mergeViewboxes(viewboxes: string[]): Viewbox {
+  // Handle empty array or no valid viewboxes - return a default centered viewbox
+  if (viewboxes.length === 0) {
+    return { xMin: -10, yMin: -10, xMax: 10, yMax: 10, width: 20, height: 20 };
+  }
+
   let xMin = Infinity;
   let yMin = Infinity;
   let xMax = -Infinity;
   let yMax = -Infinity;
+  let validCount = 0;
 
   for (const box of viewboxes) {
     const parsedBox = parseViewbox(box);
+
+    if (!parsedBox) {
+      continue; // Skip invalid viewboxes
+    }
+
     xMin = Math.min(xMin, parsedBox.xMin);
     yMin = Math.min(yMin, parsedBox.yMin);
     xMax = Math.max(xMax, parsedBox.xMax);
     yMax = Math.max(yMax, parsedBox.yMax);
+    validCount++;
   }
 
-  return { xMin, yMin, xMax, yMax, width: xMax - xMin, height: yMax - yMin };
+  // If no valid viewboxes were found, return default
+  if (validCount === 0) {
+    return { xMin: -10, yMin: -10, xMax: 10, yMax: 10, width: 20, height: 20 };
+  }
+
+  // Check if we got valid finite values
+  if (!Number.isFinite(xMin) || !Number.isFinite(yMin) || !Number.isFinite(xMax) || !Number.isFinite(yMax)) {
+    return { xMin: -10, yMin: -10, xMax: 10, yMax: 10, width: 20, height: 20 };
+  }
+
+  const width = xMax - xMin;
+  const height = yMax - yMin;
+
+  // Handle degenerate cases (zero width/height)
+  if (width === 0 || height === 0) {
+    return { xMin: -10, yMin: -10, xMax: 10, yMax: 10, width: 20, height: 20 };
+  }
+
+  return { xMin, yMin, xMax, yMax, width, height };
 }
 
 const stringifyViewbox = ({ xMin, yMin, xMax, yMax }: Viewbox): string => {
-  return [xMin.toFixed(2), yMin.toFixed(2), (xMax - xMin).toFixed(2), (yMax - yMin).toFixed(2)].join(' ');
+  const width = xMax - xMin;
+  const height = yMax - yMin;
+
+  // Validate all values are finite before stringifying
+  if (!Number.isFinite(xMin) || !Number.isFinite(yMin) || !Number.isFinite(width) || !Number.isFinite(height)) {
+    console.error('Invalid viewbox values:', { xMin, yMin, xMax, yMax, width, height });
+    return '-10 -10 20 20'; // Fallback to default viewbox
+  }
+
+  return [xMin.toFixed(2), yMin.toFixed(2), width.toFixed(2), height.toFixed(2)].join(' ');
 };
 
 const dashArray = (strokeType?: string): string | undefined => {
@@ -269,7 +314,7 @@ function SvgWindow({ viewbox, enableGrid, enableAxes, defaultColor, children }: 
   const canvasRef = useRef<HTMLDivElement>(null);
   const [clientRect, setClientRect] = useState<DOMRect | undefined>(undefined);
   const [adaptedViewbox, setAdaptedViewbox] = useState<Viewbox>(viewbox);
-  const panzoomRef = useRef<PanzoomObject | undefined>(undefined);
+  const panzoomRef = useRef<PanzoomObject>(null);
   const { graphicsRef: graphicsActor } = useBuild();
   const [transform, setTransform] = useState<{ scale: number; x: number; y: number }>({ scale: 1, x: 0, y: 0 });
 
@@ -359,6 +404,9 @@ function SvgWindow({ viewbox, enableGrid, enableAxes, defaultColor, children }: 
     [graphicsActor],
   );
 
+  // Register SVG reset capability
+  usePanzoomReset({ panzoomRef, containerRef: canvasRef });
+
   // Create onWheel handler as useCallback with explicit dependencies
   const onWheel = useCallback(
     (event: WheelEvent, instance: PanzoomObject, container: HTMLDivElement, currentAdaptedViewbox: Viewbox): void => {
@@ -433,7 +481,7 @@ function SvgWindow({ viewbox, enableGrid, enableAxes, defaultColor, children }: 
 
     return () => {
       instance.destroy();
-      panzoomRef.current = undefined;
+      panzoomRef.current = null;
     };
   }, []);
 
@@ -565,13 +613,26 @@ export function SvgViewer({
   defaultColor,
 }: SvgViewerProps): ReactNode {
   const Viewer2D = enableRawWindow ? RawCanvas : SvgWindow;
+
+  // Check for invalid geometries
+  const invalidGeometries = geometries.filter((geometry) => {
+    const parsedViewbox = parseViewbox(geometry.viewbox);
+    return !parsedViewbox || geometry.viewbox.includes('NaN');
+  });
+
+  const hasInvalidGeometries = invalidGeometries.length > 0;
   const viewbox = mergeViewboxes(geometries.map((s) => s.viewbox));
 
   return (
-    <Viewer2D viewbox={viewbox} enableGrid={enableGrid} enableAxes={enableAxes} defaultColor={defaultColor}>
-      {geometries.map((s) => {
-        return <GeometryPath key={s.name} geometry={s} />;
-      })}
-    </Viewer2D>
+    <div className="relative h-full w-full">
+      <Viewer2D viewbox={viewbox} enableGrid={enableGrid} enableAxes={enableAxes} defaultColor={defaultColor}>
+        {geometries.map((s) => {
+          return <GeometryPath key={s.name} geometry={s} />;
+        })}
+      </Viewer2D>
+      {hasInvalidGeometries ? (
+        <SvgInvalidError invalidGeometries={invalidGeometries} totalGeometries={geometries.length} />
+      ) : null}
+    </div>
   );
 }

@@ -5,11 +5,20 @@ import userEvent from '@testing-library/user-event';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
 import { TooltipProvider } from '#components/ui/tooltip.js';
+import type { Units } from '#components/geometry/parameters/rjsf-context.js';
 
 // Test wrapper component that provides necessary providers
 function TestWrapper({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   return <TooltipProvider>{children}</TooltipProvider>;
 }
+
+// Default units (mm)
+const defaultUnits: Units = {
+  length: {
+    factor: 1,
+    symbol: 'mm',
+  },
+};
 
 // Create mock data for consistent testing
 const mockDefaultParameters = {
@@ -51,6 +60,7 @@ describe('Parameters - Core Search Functionality', () => {
           parameters={{}}
           defaultParameters={mockDefaultParameters}
           jsonSchema={mockJsonSchema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -67,6 +77,7 @@ describe('Parameters - Core Search Functionality', () => {
           parameters={{}}
           defaultParameters={mockDefaultParameters}
           jsonSchema={mockJsonSchema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -151,6 +162,7 @@ describe('Parameters - Core Search Functionality', () => {
           parameters={{}}
           defaultParameters={parametersWithMixedTypes}
           jsonSchema={schemaWithMixedArray}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -242,6 +254,7 @@ describe('Parameters - Search Functionality', () => {
           parameters={{}}
           defaultParameters={searchMockDefaultParameters}
           jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -267,6 +280,7 @@ describe('Parameters - Search Functionality', () => {
           parameters={{}}
           defaultParameters={searchMockDefaultParameters}
           jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -292,6 +306,7 @@ describe('Parameters - Search Functionality', () => {
           parameters={{}}
           defaultParameters={searchMockDefaultParameters}
           jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -315,6 +330,7 @@ describe('Parameters - Search Functionality', () => {
           parameters={{}}
           defaultParameters={searchMockDefaultParameters}
           jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -337,6 +353,7 @@ describe('Parameters - Search Functionality', () => {
           parameters={{}}
           defaultParameters={searchMockDefaultParameters}
           jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -364,6 +381,7 @@ describe('Parameters - Search Functionality', () => {
           parameters={{}}
           defaultParameters={searchMockDefaultParameters}
           jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -388,6 +406,7 @@ describe('Parameters - Search Functionality', () => {
           parameters={{}}
           defaultParameters={searchMockDefaultParameters}
           jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -413,6 +432,7 @@ describe('Parameters - Search Functionality', () => {
           parameters={{}}
           defaultParameters={searchMockDefaultParameters}
           jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -444,6 +464,7 @@ describe('Parameters - Search Functionality', () => {
           parameters={{}}
           defaultParameters={searchMockDefaultParameters}
           jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -492,6 +513,7 @@ describe('Parameters - Reset Button Visibility', () => {
             parameters={{}}
             defaultParameters={defaultParameters}
             jsonSchema={schema}
+            units={defaultUnits}
             onParametersChange={mockOnParametersChange}
           />
         </TestWrapper>,
@@ -526,6 +548,7 @@ describe('Parameters - Reset Button Visibility', () => {
             parameters={editedParameters}
             defaultParameters={defaultParameters}
             jsonSchema={schema}
+            units={defaultUnits}
             onParametersChange={mockOnParametersChange}
           />
         </TestWrapper>,
@@ -560,6 +583,7 @@ describe('Parameters - Reset Button Visibility', () => {
             parameters={{}}
             defaultParameters={defaultParameters}
             jsonSchema={schema}
+            units={defaultUnits}
             onParametersChange={mockOnParametersChange}
           />
         </TestWrapper>,
@@ -595,6 +619,7 @@ describe('Parameters - Reset Button Visibility', () => {
             parameters={editedParameters}
             defaultParameters={defaultParameters}
             jsonSchema={schema}
+            units={defaultUnits}
             onParametersChange={mockOnParametersChange}
           />
         </TestWrapper>,
@@ -635,6 +660,7 @@ describe('Parameters - Reset Button Visibility', () => {
             parameters={{}}
             defaultParameters={defaultParameters}
             jsonSchema={schema}
+            units={defaultUnits}
             onParametersChange={mockOnParametersChange}
           />
         </TestWrapper>,
@@ -678,6 +704,7 @@ describe('Parameters - Reset Button Visibility', () => {
             parameters={editedParameters}
             defaultParameters={defaultParameters}
             jsonSchema={schema}
+            units={defaultUnits}
             onParametersChange={mockOnParametersChange}
           />
         </TestWrapper>,
@@ -715,6 +742,7 @@ describe('Parameters - Reset Button Visibility', () => {
             parameters={{}}
             defaultParameters={defaultParameters}
             jsonSchema={schema}
+            units={defaultUnits}
             onParametersChange={mockOnParametersChange}
           />
         </TestWrapper>,
@@ -759,6 +787,7 @@ describe('Parameters - Reset Button Visibility', () => {
             parameters={editedParameters}
             defaultParameters={defaultParameters}
             jsonSchema={schema}
+            units={defaultUnits}
             onParametersChange={mockOnParametersChange}
           />
         </TestWrapper>,
@@ -805,6 +834,7 @@ describe('Parameters - Collapse All Button Visibility', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -841,6 +871,7 @@ describe('Parameters - Collapse All Button Visibility', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -877,6 +908,7 @@ describe('Parameters - Collapse All Button Visibility', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -924,6 +956,7 @@ describe('Parameters - Collapse All Button Visibility', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -967,6 +1000,7 @@ describe('Parameters - Array and Object Count Display', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1002,6 +1036,7 @@ describe('Parameters - Array and Object Count Display', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1042,6 +1077,7 @@ describe('Parameters - Array and Object Count Display', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1084,6 +1120,7 @@ describe('Parameters - Array and Object Count Display', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1139,6 +1176,7 @@ describe('Parameters - Search Highlighting', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1182,6 +1220,7 @@ describe('Parameters - Search Highlighting', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1234,6 +1273,7 @@ describe('Parameters - Search Highlighting', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1293,6 +1333,7 @@ describe('Parameters - Force Open on Search', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1335,6 +1376,7 @@ describe('Parameters - Force Open on Search', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1380,6 +1422,7 @@ describe('Parameters - Force Open on Search', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1439,6 +1482,7 @@ describe('Parameters - Filtered Count Display', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1487,6 +1531,7 @@ describe('Parameters - Filtered Count Display', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1528,6 +1573,7 @@ describe('Parameters - Filtered Count Display', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1572,6 +1618,7 @@ describe('Parameters - Filtered Count Display', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1624,6 +1671,7 @@ describe('Parameters - Reset Functionality', () => {
           parameters={editedParameters}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1673,6 +1721,7 @@ describe('Parameters - Reset Functionality', () => {
           parameters={editedParameters}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1720,6 +1769,7 @@ describe('Parameters - Reset Functionality', () => {
           parameters={editedParameters}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1767,6 +1817,7 @@ describe('Parameters - Reset Functionality', () => {
           parameters={editedParameters}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1833,6 +1884,7 @@ describe('Parameters - Reset Single Parameter Bug', () => {
           parameters={currentParameters}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1859,6 +1911,7 @@ describe('Parameters - Reset Single Parameter Bug', () => {
           parameters={currentParameters}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1887,6 +1940,7 @@ describe('Parameters - Reset Single Parameter Bug', () => {
           parameters={currentParameters}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1909,6 +1963,7 @@ describe('Parameters - Reset Single Parameter Bug', () => {
           parameters={currentParameters}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -1921,7 +1976,7 @@ describe('Parameters - Reset Single Parameter Bug', () => {
 
     // Second param (port) should still have the updated value
     const portInputAfterReset = screen.getByLabelText('Input for Port');
-    expect(portInputAfterReset).toHaveValue(9000);
+    expect(portInputAfterReset).toHaveValue('9000');
 
     // Verify parameters object: config1 should be removed/reset, config2 should remain
     expect(currentParameters).not.toHaveProperty('config1');
@@ -1958,6 +2013,7 @@ describe('Parameters - Required Field Indicator', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2002,6 +2058,7 @@ describe('Parameters - Required Field Indicator', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2032,6 +2089,7 @@ describe('Parameters - Empty State', () => {
         <Parameters
           parameters={{}}
           defaultParameters={{}}
+          units={defaultUnits}
           jsonSchema={undefined}
           onParametersChange={mockOnParametersChange}
         />
@@ -2057,6 +2115,7 @@ describe('Parameters - Empty State', () => {
           parameters={{}}
           defaultParameters={{}}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2072,6 +2131,7 @@ describe('Parameters - Empty State', () => {
       <TestWrapper>
         <Parameters
           parameters={{}}
+          units={defaultUnits}
           defaultParameters={{}}
           jsonSchema={undefined}
           emptyMessage="Custom empty message"
@@ -2088,6 +2148,7 @@ describe('Parameters - Empty State', () => {
     render(
       <TestWrapper>
         <Parameters
+          units={defaultUnits}
           parameters={{}}
           defaultParameters={{}}
           jsonSchema={undefined}
@@ -2105,6 +2166,7 @@ describe('Parameters - Empty State', () => {
     render(
       <TestWrapper>
         <Parameters
+          units={defaultUnits}
           parameters={{}}
           defaultParameters={{}}
           jsonSchema={undefined}
@@ -2142,6 +2204,7 @@ describe('Parameters - Feature Flags', () => {
     render(
       <TestWrapper>
         <Parameters
+          units={defaultUnits}
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
@@ -2173,6 +2236,7 @@ describe('Parameters - Feature Flags', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2197,6 +2261,7 @@ describe('Parameters - Feature Flags', () => {
     render(
       <TestWrapper>
         <Parameters
+          units={defaultUnits}
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
@@ -2233,6 +2298,7 @@ describe('Parameters - Feature Flags', () => {
     render(
       <TestWrapper>
         <Parameters
+          units={defaultUnits}
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
@@ -2262,6 +2328,7 @@ describe('Parameters - Feature Flags', () => {
     render(
       <TestWrapper>
         <Parameters
+          units={defaultUnits}
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
@@ -2322,6 +2389,7 @@ describe('Parameters - Collapse/Expand Functionality', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2382,6 +2450,7 @@ describe('Parameters - Collapse/Expand Functionality', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2438,6 +2507,7 @@ describe('Parameters - Edge Cases', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2472,6 +2542,7 @@ describe('Parameters - Edge Cases', () => {
           parameters={editedParameters}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2483,7 +2554,7 @@ describe('Parameters - Edge Cases', () => {
 
     // Should show default value for count
     const countInput = screen.getByLabelText('Input for Count');
-    expect(countInput).toHaveValue(5);
+    expect(countInput).toHaveValue('5');
   });
 
   it('should handle schema with no properties', () => {
@@ -2498,6 +2569,7 @@ describe('Parameters - Edge Cases', () => {
           parameters={{}}
           defaultParameters={{}}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2522,6 +2594,7 @@ describe('Parameters - Edge Cases', () => {
     const { container } = render(
       <TestWrapper>
         <Parameters
+          units={defaultUnits}
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
@@ -2569,6 +2642,7 @@ describe('Parameters - onChange Only Modified Values', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2618,6 +2692,7 @@ describe('Parameters - onChange Only Modified Values', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2668,6 +2743,7 @@ describe('Parameters - onChange Only Modified Values', () => {
           parameters={editedParameters}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2711,6 +2787,7 @@ describe('Parameters - onChange Only Modified Values', () => {
           parameters={{}}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2771,6 +2848,7 @@ describe('Parameters - onChange Only Modified Values', () => {
           parameters={currentParameters}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2800,6 +2878,7 @@ describe('Parameters - onChange Only Modified Values', () => {
           parameters={currentParameters}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,
@@ -2829,6 +2908,7 @@ describe('Parameters - onChange Only Modified Values', () => {
           parameters={currentParameters}
           defaultParameters={defaultParameters}
           jsonSchema={schema}
+          units={defaultUnits}
           onParametersChange={mockOnParametersChange}
         />
       </TestWrapper>,

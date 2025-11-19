@@ -149,7 +149,7 @@ export function TagsValue({
     }
   };
 
-  const handleMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
+  const handlePointerDown: MouseEventHandler<HTMLDivElement> = (event) => {
     event.preventDefault();
     event.stopPropagation();
   };
@@ -166,7 +166,7 @@ export function TagsValue({
           data-tag-remove
           className="size-auto cursor-pointer rounded-full hover:bg-primary-foreground/30"
           onClick={handleRemove}
-          onMouseDown={handleMouseDown}
+          onPointerDown={handlePointerDown}
         >
           <XIcon className="size-4" />
         </div>

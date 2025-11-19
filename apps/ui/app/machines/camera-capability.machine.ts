@@ -83,6 +83,11 @@ export const cameraCapabilityMachine = setup({
     },
     registered: {
       on: {
+        registerReset: {
+          target: 'registered',
+          actions: 'registerWithGraphics',
+          reenter: true,
+        },
         reset: {
           target: 'resetting',
         },

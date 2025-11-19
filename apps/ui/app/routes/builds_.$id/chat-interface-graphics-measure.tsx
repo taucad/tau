@@ -10,14 +10,16 @@ import { axesColors } from '#constants/color.constants.js';
 export function ChatInterfaceGraphicsMeasure(): React.JSX.Element {
   const { graphicsRef: graphicsActor } = useBuild();
 
-  const { measurements, gridUnit, gridUnitFactor, hoveredMeasurementId } = useSelector(graphicsActor, (state) => {
-    const { measurements: ms, gridUnit: unit, gridUnitFactor: factor, hoveredMeasurementId: hoveredId } = state.context;
+  const lengthSymbol = useSelector(graphicsActor, (state) => state.context.units.length.symbol);
+  const { measurements, lengthFactor, hoveredMeasurementId } = useSelector(graphicsActor, (state) => {
+    const lengthFactor = state.context.units.length.factor;
+    const { measurements: ms, hoveredMeasurementId: hoveredId } = state.context;
 
     return {
       measurements: ms.map((m) => {
-        const deltaX = Math.abs((m.endPoint[0] - m.startPoint[0]) / factor).toFixed(1);
-        const deltaY = Math.abs((m.endPoint[1] - m.startPoint[1]) / factor).toFixed(1);
-        const deltaZ = Math.abs((m.endPoint[2] - m.startPoint[2]) / factor).toFixed(1);
+        const deltaX = Math.abs((m.endPoint[0] - m.startPoint[0]) / lengthFactor).toFixed(1);
+        const deltaY = Math.abs((m.endPoint[1] - m.startPoint[1]) / lengthFactor).toFixed(1);
+        const deltaZ = Math.abs((m.endPoint[2] - m.startPoint[2]) / lengthFactor).toFixed(1);
 
         return {
           ...m,
@@ -26,8 +28,7 @@ export function ChatInterfaceGraphicsMeasure(): React.JSX.Element {
           deltaZ,
         };
       }),
-      gridUnit: unit,
-      gridUnitFactor: factor,
+      lengthFactor,
       hoveredMeasurementId: hoveredId,
     };
   });
@@ -56,8 +57,8 @@ export function ChatInterfaceGraphicsMeasure(): React.JSX.Element {
         {sorted.length === 0 ? <EmptyItems className="mx-1 -mt-1">No measurements</EmptyItems> : null}
 
         {sorted.map((m) => {
-          const value = (m.distance / gridUnitFactor).toFixed(1);
-          const label = m.name?.trim() ? m.name : `${value} ${gridUnit}`;
+          const value = (m.distance / lengthFactor).toFixed(1);
+          const label = m.name?.trim() ? m.name : `${value} ${lengthSymbol}`;
           const isExternallyHovered = hoveredMeasurementId === m.id;
 
           return (

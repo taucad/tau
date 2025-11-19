@@ -137,6 +137,8 @@ function createJscadKernelError(error: unknown, fallbackMessage: string): Kernel
  */
 class JscadWorker extends KernelWorker {
   protected static override readonly supportedExportFormats: ExportFormat[] = ['glb', 'gltf'];
+  protected override readonly name: string = 'JscadWorker';
+
   private shapesMemory: Record<string, unknown[]> = {};
   private geometryAccessOrder: string[] = [];
   private get maxStoredGeometries() {

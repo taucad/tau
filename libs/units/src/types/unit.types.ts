@@ -1,22 +1,74 @@
 import type { standardInternationalBaseUnits, standardInternationalDerivedUnits } from '#constants/unit.constants.js';
 
-export type ExtractAllUnits<T extends Record<string, unknown>> =
-  | T['baseUnit']
-  | Extract<keyof T['unitVariants'], string>;
+export type UnitSystem =
+  (typeof standardInternationalBaseUnits)[keyof typeof standardInternationalBaseUnits]['variants'][number]['system'];
+
+/**
+ * Quantity names for the 7 SI base units.
+ */
+export type UnitQuantity = keyof typeof standardInternationalBaseUnits;
+
+export type ExtractAllUnits<
+  T extends {
+    unit: string;
+    variants: Array<{ unit: string }>;
+  },
+> = T['unit'] | T['variants'][number]['unit'];
+
+export type ExtractAllSymbols<
+  T extends {
+    symbol: string;
+    variants: Array<{ symbol: string }>;
+  },
+> = T['symbol'] | T['variants'][number]['symbol'];
 
 // SI Base Units
 export type LengthUnit = ExtractAllUnits<(typeof standardInternationalBaseUnits)['length']>;
+export type LengthSymbol = ExtractAllSymbols<(typeof standardInternationalBaseUnits)['length']>;
+
 export type MassUnit = ExtractAllUnits<(typeof standardInternationalBaseUnits)['mass']>;
+export type MassSymbol = ExtractAllSymbols<(typeof standardInternationalBaseUnits)['mass']>;
+
 export type TimeUnit = ExtractAllUnits<(typeof standardInternationalBaseUnits)['time']>;
+export type TimeSymbol = ExtractAllSymbols<(typeof standardInternationalBaseUnits)['time']>;
+
 export type ElectricCurrentUnit = ExtractAllUnits<(typeof standardInternationalBaseUnits)['electricCurrent']>;
+export type ElectricCurrentSymbol = ExtractAllSymbols<(typeof standardInternationalBaseUnits)['electricCurrent']>;
+
 export type ThermodynamicTemperatureUnit = ExtractAllUnits<
   (typeof standardInternationalBaseUnits)['thermodynamicTemperature']
 >;
+export type ThermodynamicTemperatureSymbol = ExtractAllSymbols<
+  (typeof standardInternationalBaseUnits)['thermodynamicTemperature']
+>;
+
 export type AmountOfSubstanceUnit = ExtractAllUnits<(typeof standardInternationalBaseUnits)['amountOfSubstance']>;
+export type AmountOfSubstanceSymbol = ExtractAllSymbols<(typeof standardInternationalBaseUnits)['amountOfSubstance']>;
+
 export type LuminousIntensityUnit = ExtractAllUnits<(typeof standardInternationalBaseUnits)['luminousIntensity']>;
+export type LuminousIntensitySymbol = ExtractAllSymbols<(typeof standardInternationalBaseUnits)['luminousIntensity']>;
+
+/**
+ * Maps each quantity key to its corresponding unit symbol type
+ * using mapped types derived from the SI base unit constants.
+ * This enables type-safe unit parsing and conversion.
+ */
+export type QuantitySymbolMap = {
+  [Q in keyof typeof standardInternationalBaseUnits]: ExtractAllSymbols<(typeof standardInternationalBaseUnits)[Q]>;
+};
+
+/**
+ * Maps each quantity key to its corresponding unit symbol type
+ * using mapped types derived from the SI base unit constants.
+ * This enables type-safe unit parsing and conversion.
+ */
+export type QuantityUnitMap = {
+  [Q in keyof typeof standardInternationalBaseUnits]: ExtractAllUnits<(typeof standardInternationalBaseUnits)[Q]>;
+};
 
 // SI Derived Units with Special Names
 export type AngleUnit = ExtractAllUnits<(typeof standardInternationalDerivedUnits)['planeAngle']>;
+export type AngleSymbol = ExtractAllSymbols<(typeof standardInternationalDerivedUnits)['planeAngle']>;
 export type SolidAngleUnit = ExtractAllUnits<(typeof standardInternationalDerivedUnits)['solidAngle']>;
 export type FrequencyUnit = ExtractAllUnits<(typeof standardInternationalDerivedUnits)['frequency']>;
 export type ForceUnit = ExtractAllUnits<(typeof standardInternationalDerivedUnits)['force']>;

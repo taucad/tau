@@ -23,6 +23,9 @@
     "graphics/three/infinite-grid",
     "graphics/three/lights",
 
+    "---Units---",
+    "units/index",
+
     "---Architecture---",
     "architecture/index",
     "architecture/rag",

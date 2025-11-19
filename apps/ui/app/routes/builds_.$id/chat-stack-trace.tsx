@@ -54,7 +54,7 @@ function ErrorStackTrace({
   return (
     <div className="flex flex-col gap-2 rounded-md border border-destructive/20 bg-destructive/5 p-3 text-xs">
       {/* Error message */}
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-center justify-between gap-2">
         <div className="font-medium text-destructive">
           {message}
           {startLineNumber ? (

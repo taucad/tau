@@ -14,6 +14,7 @@ type SceneProperties = {
   readonly stageOptions?: StageOptions;
   readonly enableCentering?: boolean;
   readonly zoomSpeed: number;
+  readonly gizmoContainer?: HTMLElement | string;
 };
 
 export function Scene({
@@ -27,6 +28,7 @@ export function Scene({
   stageOptions,
   enableCentering = true,
   zoomSpeed,
+  gizmoContainer,
 }: SceneProperties): React.JSX.Element {
   return (
     <>
@@ -36,6 +38,7 @@ export function Scene({
         enableZoom={enableZoom}
         enablePan={enablePan}
         zoomSpeed={zoomSpeed}
+        gizmoContainer={gizmoContainer}
       />
       <Stage
         stageOptions={stageOptions}

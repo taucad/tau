@@ -36,7 +36,7 @@ export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBui
             input={{ shouldLoadModelOnStart: false }}
             provide={{
               actors: {
-                loadBuildActor: fromPromise<Build, { buildId: string }>(async () => {
+                loadBuildActor: fromPromise(async () => {
                   return build;
                 }),
               },

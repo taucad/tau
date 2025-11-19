@@ -4,10 +4,10 @@
   "include": [],
   "references": [
     {
-      "path": "../../packages/converter"
+      "path": "../../packages/json-schema"
     },
     {
-      "path": "../../libs/types"
+      "path": "../../libs/units"
     },
     {
       "path": "../../libs/api-extractor"
@@ -16,7 +16,10 @@
       "path": "../../libs/tau-examples"
     },
     {
-      "path": "../../packages/json-schema"
+      "path": "../../packages/converter"
+    },
+    {
+      "path": "../../libs/types"
     },
     {
       "path": "./tsconfig.app.json"

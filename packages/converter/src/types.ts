@@ -58,6 +58,8 @@ export const supportedOutputFormats = [
 export type InputFormat = (typeof supportedInputFormats)[number];
 export type OutputFormat = (typeof supportedOutputFormats)[number];
 
+export type Format = InputFormat | OutputFormat;
+
 export type File = {
   name: string;
   data: Uint8Array;

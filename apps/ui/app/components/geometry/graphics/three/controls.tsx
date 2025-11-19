@@ -28,6 +28,10 @@ type ControlsProperties = {
    * @description The speed of the camera zoom.
    */
   readonly zoomSpeed: number;
+  /**
+   * A container element or selector to append the gizmo to.
+   */
+  readonly gizmoContainer?: HTMLElement | string;
 };
 
 export const Controls = React.memo(function ({
@@ -36,6 +40,7 @@ export const Controls = React.memo(function ({
   enableZoom,
   enablePan,
   zoomSpeed,
+  gizmoContainer,
 }: ControlsProperties) {
   const { graphicsRef: graphicsActor } = useBuild();
   const isActive = useSelector(graphicsActor, (state) => state.context.isSectionViewActive);
@@ -104,7 +109,7 @@ export const Controls = React.memo(function ({
         onSetRotation={handleSetRotation}
         onSetPivot={handleSetPivot}
       />
-      {enableGizmo ? <ViewportGizmoCube /> : null}
+      {enableGizmo ? <ViewportGizmoCube container={gizmoContainer} /> : null}
     </>
   );
 });

@@ -23,7 +23,7 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store pnpm fetch -
 COPY package.json ./
 COPY . .
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile
-RUN pnpm nx build ui
+RUN pnpm nx build ui --verbose
 
 FROM build AS pruned
 

@@ -11,8 +11,9 @@ const sliderVariants = cva(
       variant: {
         default: '',
         inset: [
-          // The slider thumb is hidden via opacity, but still active for accessibility.
+          // The slider thumb is hidden via opacity and size, but still active for accessibility.
           '[&_[data-slot=slider-thumb]]:opacity-0',
+          '[&_[data-slot=slider-thumb]]:size-0',
 
           // Then, apply the focus styles to the slider track instead
           '[&_[data-slot=slider-track]]:transition-[box-shadow]',

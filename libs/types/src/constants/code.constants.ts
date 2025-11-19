@@ -8,3 +8,15 @@ export const codeLanguages = {
   bash: 'bash',
   json: 'json',
 } as const;
+
+export const languageFromExtension = {
+  kcl: 'kcl',
+  scad: 'openscad',
+  openscad: 'scad',
+  js: 'javascript',
+  jsx: 'jsx',
+  ts: 'typescript',
+  tsx: 'tsx',
+  sh: 'bash',
+  json: 'json',
+} as const;

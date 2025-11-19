@@ -69,11 +69,12 @@ export const handle: Handle = {
 function BuildPreviewContent(): React.JSX.Element {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { buildRef, cadRef, gitRef } = useBuild();
+  const { buildRef, cadRef, gitRef, graphicsRef } = useBuild();
   const build = useSelector(buildRef, (state) => state.context.build);
   const geometries = useSelector(cadRef, (state) => state.context.geometries);
   const parameters = useSelector(cadRef, (state) => state.context.parameters);
   const defaultParameters = useSelector(cadRef, (state) => state.context.defaultParameters);
+  const units = useSelector(graphicsRef, (state) => state.context.units);
   const jsonSchema = useSelector(cadRef, (state) => state.context.jsonSchema);
   const hasParameters = useSelector(cadRef, (state) => Boolean(state.context.jsonSchema));
 
@@ -328,6 +329,7 @@ function BuildPreviewContent(): React.JSX.Element {
                             parameters={parameters}
                             defaultParameters={defaultParameters}
                             jsonSchema={jsonSchema}
+                            units={units}
                             onParametersChange={handleParametersChange}
                           />
                         </div>

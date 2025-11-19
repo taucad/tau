@@ -34,20 +34,57 @@ jobs:
       - name: Get code
         uses: actions/checkout@v5
 
+      - name: Post initial UI status
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: fly-review-ui
+          message: |
+            ### UI Preview :balloon:
+            **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || '🔄 Deploying...' }}
+            **URL:** _Pending..._
+
       - name: Deploy UI PR app to Fly.io
         id: deploy
+        continue-on-error: true
         uses: superfly/fly-pr-review-apps@1.2.1
         with:
           name: tau-ui-pr-${{ github.event.number }}
           region: syd
           config: apps/ui/fly.toml
 
-      - name: Comment on Pull Request
-        uses: thollander/actions-comment-pull-request@v2
+      - name: Update UI status - success
+        if: steps.deploy.outcome == 'success'
+        uses: marocchino/sticky-pull-request-comment@v2
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Required for commenting on pull requests for private repos
+          header: fly-review-ui
           message: |
-            Fly Preview UI URL :balloon: : ${{ steps.deploy.outputs.url }}
+            ### UI Preview :balloon:
+            **Status:** ${{ github.event.action == 'closed' && '✅ Destroyed' || '✅ Deployed' }}
+            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || steps.deploy.outputs.url }}
+
+      - name: Update UI status - failure
+        if: steps.deploy.outcome == 'failure'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: fly-review-ui
+          message: |
+            ### UI Preview :balloon:
+            **Status:** ❌ Deployment Failed
+            **URL:** _Failed to deploy_
+
+      - name: Update UI status - cancelled
+        if: steps.deploy.outcome == 'cancelled'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: fly-review-ui
+          message: |
+            ### UI Preview :balloon:
+            **Status:** ⚠️ Deployment Cancelled
+            **URL:** _Deployment was cancelled_
+
+      - name: Fail job if deployment failed
+        if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled'
+        run: exit 1
 
   review_app_api:
     name: Deploy API Review App
@@ -69,17 +106,54 @@ jobs:
       - name: Get code
         uses: actions/checkout@v5
 
+      - name: Post initial API status
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: fly-review-api
+          message: |
+            ### API Preview :octopus:
+            **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || '🔄 Deploying...' }}
+            **URL:** _Pending..._
+
       - name: Deploy API PR app to Fly.io
         id: deploy
+        continue-on-error: true
         uses: superfly/fly-pr-review-apps@1.2.1
         with:
           name: tau-api-pr-${{ github.event.number }}
           region: syd
           config: apps/api/fly.toml
 
-      - name: Comment on Pull Request
-        uses: thollander/actions-comment-pull-request@v2
+      - name: Update API status - success
+        if: steps.deploy.outcome == 'success'
+        uses: marocchino/sticky-pull-request-comment@v2
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Required for commenting on pull requests for private repos
+          header: fly-review-api
           message: |
-            Fly Preview API URL :octopus: : ${{ steps.deploy.outputs.url }}
+            ### API Preview :octopus:
+            **Status:** ${{ github.event.action == 'closed' && '✅ Destroyed' || '✅ Deployed' }}
+            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || steps.deploy.outputs.url }}
+
+      - name: Update API status - failure
+        if: steps.deploy.outcome == 'failure'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: fly-review-api
+          message: |
+            ### API Preview :octopus:
+            **Status:** ❌ Deployment Failed
+            **URL:** _Failed to deploy_
+
+      - name: Update API status - cancelled
+        if: steps.deploy.outcome == 'cancelled'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: fly-review-api
+          message: |
+            ### API Preview :octopus:
+            **Status:** ⚠️ Deployment Cancelled
+            **URL:** _Deployment was cancelled_
+
+      - name: Fail job if deployment failed
+        if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled'
+        run: exit 1

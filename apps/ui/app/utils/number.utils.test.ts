@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { clamp, formatNumberEngineeringNotation } from '#utils/number.utils.js';
+import {
+  clamp,
+  formatNumberEngineeringNotation,
+  formatUnitDisplay,
+  roundToSignificantFigures,
+} from '#utils/number.utils.js';
 
 describe('formatNumberEngineeringNotation', () => {
   describe('edge cases', () => {
@@ -345,6 +350,91 @@ describe('clamp', () => {
 
     it('should handle same min and max', () => {
       expect(clamp(5, 10, 10)).toBe(10);
+    });
+  });
+});
+
+describe('roundToSignificantFigures', () => {
+  it('should handle zero', () => {
+    expect(roundToSignificantFigures(0, 3)).toBe(0);
+  });
+
+  it('should handle infinity and NaN', () => {
+    expect(roundToSignificantFigures(Number.POSITIVE_INFINITY, 3)).toBe(Number.POSITIVE_INFINITY);
+    expect(roundToSignificantFigures(Number.NEGATIVE_INFINITY, 3)).toBe(Number.NEGATIVE_INFINITY);
+    expect(roundToSignificantFigures(Number.NaN, 3)).toBe(Number.NaN);
+  });
+
+  it('should round to specified significant figures', () => {
+    expect(roundToSignificantFigures(1.2345, 3)).toBeCloseTo(1.23, 10);
+    expect(roundToSignificantFigures(12.345, 3)).toBeCloseTo(12.3, 10);
+    expect(roundToSignificantFigures(123.45, 3)).toBeCloseTo(123, 10);
+    expect(roundToSignificantFigures(0.012_345, 3)).toBeCloseTo(0.0123, 10);
+  });
+
+  it('should handle negative values', () => {
+    expect(roundToSignificantFigures(-1.2345, 3)).toBeCloseTo(-1.23, 10);
+    expect(roundToSignificantFigures(-0.012_345, 3)).toBeCloseTo(-0.0123, 10);
+  });
+
+  it('should handle 4 significant figures', () => {
+    expect(roundToSignificantFigures(1.234_56, 4)).toBeCloseTo(1.235, 10);
+    expect(roundToSignificantFigures(0.123_456, 4)).toBeCloseTo(0.1235, 10);
+    expect(roundToSignificantFigures(12.3456, 4)).toBeCloseTo(12.35, 10);
+  });
+});
+
+describe('formatUnitDisplay', () => {
+  describe('with default options', () => {
+    it('should format zero', () => {
+      expect(formatUnitDisplay(0)).toBe('0');
+    });
+
+    it('should format simple values', () => {
+      expect(formatUnitDisplay(1.5)).toBe('1.5');
+      expect(formatUnitDisplay(12.5)).toBe('12.5');
+      expect(formatUnitDisplay(125)).toBe('125');
+    });
+
+    it('should format with 4 significant figures', () => {
+      expect(formatUnitDisplay(1.234_567)).toBe('1.235');
+      expect(formatUnitDisplay(12.345_67)).toBe('12.35');
+      expect(formatUnitDisplay(123.4567)).toBe('123.5');
+    });
+
+    it('should remove trailing zeros by default', () => {
+      expect(formatUnitDisplay(1.5)).toBe('1.5');
+      expect(formatUnitDisplay(12)).toBe('12');
+      expect(formatUnitDisplay(0.125)).toBe('0.125');
+    });
+
+    it('should handle small values', () => {
+      expect(formatUnitDisplay(0.001_234)).toBe('0.001234');
+      expect(formatUnitDisplay(0.000_123_45)).toBe('0.0001235'); // Stays fixed format above 1e-4
+    });
+
+    it('should handle large values', () => {
+      expect(formatUnitDisplay(999_999)).toBe('1e+6'); // Rounds to 1e6, uses scientific notation
+      expect(formatUnitDisplay(1_234_567)).toBe('1.235e+6'); // Scientific notation at 1e6 and above
+    });
+  });
+
+  describe('with preserveTrailingZeros', () => {
+    it('should preserve trailing zeros', () => {
+      expect(formatUnitDisplay(1.5, { preserveTrailingZeros: true })).toBe('1.500');
+      expect(formatUnitDisplay(12, { preserveTrailingZeros: true })).toBe('12.00');
+      expect(formatUnitDisplay(0.125, { preserveTrailingZeros: true })).toBe('0.1250');
+    });
+  });
+
+  describe('with custom significant figures', () => {
+    it('should format with 2 significant figures', () => {
+      expect(formatUnitDisplay(1.2345, { significantFigures: 2 })).toBe('1.2');
+      expect(formatUnitDisplay(12.345, { significantFigures: 2 })).toBe('12');
+    });
+
+    it('should format with 6 significant figures', () => {
+      expect(formatUnitDisplay(1.234_567_89, { significantFigures: 6 })).toBe('1.23457');
     });
   });
 });

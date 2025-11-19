@@ -18,6 +18,7 @@ export type ThreeViewerProperties = {
   readonly enableCentering?: boolean;
   readonly stageOptions?: StageOptions;
   readonly zoomSpeed?: number;
+  readonly gizmoContainer?: HTMLElement | string;
 };
 
 export type ThreeContextProperties = CanvasProps & ThreeViewerProperties;
@@ -34,6 +35,7 @@ export function ThreeProvider({
   className,
   stageOptions,
   zoomSpeed = 2,
+  gizmoContainer,
   ...properties
 }: ThreeContextProperties): React.JSX.Element {
   const dpr = Math.min(globalThis.devicePixelRatio, 2);
@@ -71,6 +73,7 @@ export function ThreeProvider({
         enableAxes={enableAxes}
         stageOptions={stageOptions}
         zoomSpeed={zoomSpeed}
+        gizmoContainer={gizmoContainer}
       >
         {children}
       </Scene>

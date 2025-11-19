@@ -2,10 +2,43 @@ import { assign, assertEvent, setup, sendTo, emit, enqueueActions } from 'xstate
 import type { AnyActorRef } from 'xstate';
 import type { GridSizes, ScreenshotOptions, Geometry } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
+import type { LengthSymbol, UnitSystem } from '@taucad/units';
+import { standardInternationalBaseUnits } from '@taucad/units/constants';
 import { generatePrefixedId } from '#utils/id.utils.js';
 
 // Context type definition
 export type GraphicsContext = {
+  /**
+   * The units that are currently being used for the graphics.
+   */
+  graphicsUnits: {
+    length: {
+      symbol: LengthSymbol;
+      factor: number;
+      system: UnitSystem;
+    };
+  };
+  /**
+   * The units that are currently being used for the CAD system.
+   */
+  cadUnits: {
+    length: {
+      symbol: LengthSymbol;
+      factor: number;
+    };
+  };
+  /**
+   * Relative units for display (computed from graphicsUnits / cadUnits)
+   * This represents the conversion factor from CAD coordinate space to display units
+   */
+  units: {
+    length: {
+      symbol: LengthSymbol;
+      factor: number;
+      system: UnitSystem;
+    };
+  };
+
   // Grid state
   /** The grid size that should be set based on the current camera position and fov */
   gridSizes: GridSizes;
@@ -13,9 +46,6 @@ export type GraphicsContext = {
   gridSizesComputed: GridSizes;
   /** Whether the grid size should be locked to the computed value */
   isGridSizeLocked: boolean;
-  gridUnit: string;
-  gridUnitFactor: number;
-  gridUnitSystem: 'metric' | 'imperial';
 
   // Camera state (library-agnostic)
   cameraFovAngle: number; // The FOV set by the user
@@ -95,7 +125,7 @@ export type GraphicsEvent =
   // Grid events
   | { type: 'updateGridSize'; payload: GridSizes }
   | { type: 'setGridSizeLocked'; payload: boolean }
-  | { type: 'setGridUnit'; payload: { unit: string; factor: number; system: 'metric' | 'imperial' } }
+  | { type: 'setGridUnit'; payload: { unit: LengthSymbol } }
   // Camera events
   | { type: 'setFovAngle'; payload: number }
   | { type: 'resetCamera'; options?: { enableConfiguredAngles?: boolean } }
@@ -153,7 +183,7 @@ export type GraphicsEvent =
   | { type: 'unregisterScreenshotCapability' }
   | { type: 'unregisterCameraCapability' }
   // Geometry updates from CAD
-  | { type: 'updateGeometries'; geometries: Geometry[] };
+  | { type: 'updateGeometries'; geometries: Geometry[]; units: { length: LengthSymbol } };
 
 // Emitted events
 export type GraphicsEmitted =
@@ -169,13 +199,57 @@ export type GraphicsInput = {
   measureSnapDistance?: number; // Default 20px
 };
 
+type LengthUnitData = {
+  unit: string;
+  symbol: LengthSymbol;
+  factor: number;
+  system: UnitSystem;
+};
+
+const lengthUnitCache = new Map<LengthSymbol, LengthUnitData>();
+const lengthDef = standardInternationalBaseUnits.length;
+
+function getLengthUnitData(symbol: LengthSymbol): LengthUnitData {
+  const cached = lengthUnitCache.get(symbol);
+  if (cached) {
+    return cached;
+  }
+
+  // Check base unit
+  if (symbol === lengthDef.symbol) {
+    const data: LengthUnitData = {
+      unit: lengthDef.unit,
+      symbol: lengthDef.symbol as LengthSymbol,
+      factor: 1,
+      system: 'si',
+    };
+    lengthUnitCache.set(symbol, data);
+    return data;
+  }
+
+  // Search variants
+  const variant = lengthDef.variants.find((v) => v.symbol === symbol);
+  if (!variant) {
+    throw new Error(`Unknown length symbol: ${symbol}`);
+  }
+
+  const data: LengthUnitData = {
+    unit: variant.unit,
+    symbol: variant.symbol as LengthSymbol,
+    factor: variant.factor,
+    system: variant.system,
+  };
+  lengthUnitCache.set(symbol, data);
+  return data;
+}
+
 /**
  * Grid size calculation logic with unit system handling
  *
  * Metric Units (mm, cm, m, etc.):
  * - Visual grid spacing is ALWAYS the same baseline calculation regardless of unit
  * - Returned GridSizes values are in base metric units (no factor applied)
- * - Display layer must apply gridUnitFactor when showing grid labels to user
+ * - Display layer must apply units.length.factor when showing grid labels to user
  * - Grid recalculation only happens on camera/controls changes, not unit factor changes
  *
  * Imperial Units (inches, feet):
@@ -189,8 +263,8 @@ export type GraphicsInput = {
 function calculateGridSizes(
   cameraPosition: number,
   cameraFov: number,
-  gridUnitSystem: 'metric' | 'imperial',
-  gridUnitFactor: number,
+  gridUnitSystem: 'si' | 'imperial',
+  unitFactor: number,
 ): GridSizes {
   const visibleWidthAtDistance = 2 * cameraPosition * Math.tan((cameraFov * Math.PI) / 360);
   let baseGridSize = visibleWidthAtDistance / 5; // BaseGridSizeCoefficient
@@ -198,8 +272,8 @@ function calculateGridSizes(
   let scalingFactor;
   if (gridUnitSystem === 'imperial') {
     // For imperial: convert to imperial units AND scale appropriately
-    baseGridSize /= gridUnitFactor;
-    scalingFactor = gridUnitFactor;
+    baseGridSize /= unitFactor;
+    scalingFactor = unitFactor;
   } else {
     // For metric: calculate grid spacing normally, then apply factor only to display values
     scalingFactor = 1;
@@ -384,26 +458,45 @@ export const graphicsMachine = setup({
     setGridUnit: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'setGridUnit');
 
-      const isSystemChange = context.gridUnitSystem !== event.payload.system;
+      const unitData = getLengthUnitData(event.payload.unit);
+      const previousUnitData = getLengthUnitData(context.graphicsUnits.length.symbol);
+
+      const isSystemChange = previousUnitData.system !== unitData.system;
       const isImperialFactorChange =
-        event.payload.system === 'imperial' && context.gridUnitFactor !== event.payload.factor;
+        unitData.system === 'imperial' && context.graphicsUnits.length.factor !== unitData.factor;
+
+      // Calculate relative factor for display (displayFactor / cadFactor)
+      const relativeFactor = unitData.factor / context.cadUnits.length.factor;
 
       enqueue.assign({
-        gridUnit: event.payload.unit,
-        gridUnitFactor: event.payload.factor,
-        gridUnitSystem: event.payload.system,
+        graphicsUnits: {
+          length: {
+            symbol: unitData.symbol,
+            factor: unitData.factor,
+            system: unitData.system,
+          },
+        },
+        units: {
+          length: {
+            symbol: unitData.symbol,
+            factor: relativeFactor,
+            system: unitData.system,
+          },
+        },
       });
 
       // Only recalculate grid spacing when:
-      // 1. Switching between metric/imperial systems (visual spacing changes)
+      // 1. Switching between si/imperial systems (visual spacing changes)
       // 2. Changing factor in imperial units (affects visual spacing)
-      // For metric units, factor changes only affect display numbers, not visual spacing
+      // For si units, factor changes only affect display numbers, not visual spacing
       if (isSystemChange || isImperialFactorChange) {
+        // Use relative factor × 1000 for grid calculations
+        const gridUnitFactor = relativeFactor * 1000;
         const newGridSizes = calculateGridSizes(
           context.cameraPosition,
           context.cameraFovAngleComputed,
-          event.payload.system,
-          event.payload.factor,
+          unitData.system,
+          gridUnitFactor,
         );
 
         enqueue.sendTo(({ self }) => self, {
@@ -430,12 +523,9 @@ export const graphicsMachine = setup({
       });
 
       // Recalculate grid sizes based on new controls state
-      const newGridSizes = calculateGridSizes(
-        event.position,
-        event.fov,
-        context.gridUnitSystem,
-        context.gridUnitFactor,
-      );
+      // Use relative factor × 1000 for grid calculations
+      const gridUnitFactor = context.units.length.factor * 1000;
+      const newGridSizes = calculateGridSizes(event.position, event.fov, context.units.length.system, gridUnitFactor);
 
       enqueue.sendTo(({ self }) => self, {
         type: 'updateGridSize',
@@ -451,14 +541,31 @@ export const graphicsMachine = setup({
       // Could emit completion events or re-enable actions after interaction
     },
 
-    updateGeometries: enqueueActions(({ enqueue, event }) => {
+    updateGeometries: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'updateGeometries');
 
       const geometryRadius = calculateGeometryRadius(event.geometries);
+      const cadUnitData = getLengthUnitData(event.units.length);
+
+      // Calculate relative factor for display (displayFactor / cadFactor)
+      const relativeFactor = context.graphicsUnits.length.factor / cadUnitData.factor;
 
       enqueue.assign({
         geometries: event.geometries,
         geometryRadius,
+        cadUnits: {
+          length: {
+            symbol: event.units.length,
+            factor: cadUnitData.factor,
+          },
+        },
+        units: {
+          length: {
+            symbol: context.graphicsUnits.length.symbol,
+            factor: relativeFactor,
+            system: context.graphicsUnits.length.system,
+          },
+        },
       });
 
       enqueue.emit({
@@ -675,7 +782,8 @@ export const graphicsMachine = setup({
       // translation as the rounded requested value.
       sectionViewPivot({ event, context }): [number, number, number] {
         assertEvent(event, 'setSectionViewTranslation');
-        const desired = roundTranslationToUnitDecimals(event.payload, context.gridUnitFactor, 2);
+        // Convert from display units to CAD coordinate space using relative factor
+        const desired = roundTranslationToUnitDecimals(event.payload, context.units.length.factor, 2);
 
         const a = getBaseAxis(context.selectedSectionViewId); // Base axis
         const r = normalize(rotateVectorByEuler(a, context.sectionViewRotation)); // Rotated normal
@@ -693,7 +801,8 @@ export const graphicsMachine = setup({
       sectionViewTranslation({ context }) {
         const axis = getBaseAxis(context.selectedSectionViewId);
         const projected = dot(axis, context.sectionViewPivot);
-        return roundTranslationToUnitDecimals(projected, context.gridUnitFactor, 2);
+        // Convert from CAD coordinate space to display units using relative factor
+        return roundTranslationToUnitDecimals(projected, context.units.length.factor, 2);
       },
     }),
 
@@ -708,7 +817,8 @@ export const graphicsMachine = setup({
       sectionViewTranslation({ context }) {
         const axis = getBaseAxis(context.selectedSectionViewId);
         const projected = dot(axis, context.sectionViewPivot);
-        return roundTranslationToUnitDecimals(projected, context.gridUnitFactor, 2);
+        // Convert from CAD coordinate space to display units using relative factor
+        return roundTranslationToUnitDecimals(projected, context.units.length.factor, 2);
       },
     }),
 
@@ -727,7 +837,8 @@ export const graphicsMachine = setup({
         assertEvent(event, 'setSectionViewPivot');
         const axis = getBaseAxis(context.selectedSectionViewId);
         const projected = dot(axis, event.payload);
-        return roundTranslationToUnitDecimals(projected, context.gridUnitFactor, 2);
+        // Convert from CAD coordinate space to display units using relative factor
+        return roundTranslationToUnitDecimals(projected, context.units.length.factor, 2);
       },
     }),
 
@@ -908,9 +1019,28 @@ export const graphicsMachine = setup({
     gridSizes: { smallSize: 1, largeSize: 10 },
     gridSizesComputed: { smallSize: 1, largeSize: 10 },
     isGridSizeLocked: false,
-    gridUnit: 'mm',
-    gridUnitFactor: 1,
-    gridUnitSystem: 'metric' as const,
+    graphicsUnits: {
+      length: {
+        symbol: 'mm' as const,
+        factor: 1e-3,
+        system: 'si',
+      },
+    },
+    cadUnits: {
+      length: {
+        symbol: 'mm' as const, // Default to mm
+        factor: 1e-3,
+      },
+    },
+    // Relative units = display units / CAD units
+    // When both are mm: 1 / 1 = 1
+    units: {
+      length: {
+        symbol: 'mm' as const,
+        factor: 1, // 1 / 1 = 1
+        system: 'si',
+      },
+    },
 
     // Camera state
     cameraFovAngle: input.defaultCameraFovAngle ?? 60,

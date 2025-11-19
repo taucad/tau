@@ -1,3 +1,4 @@
+import type { LengthSymbol } from '@taucad/units';
 import type { StandardSchemaV1 } from '#types/schema.types.js';
 import type { engineeringDisciplines } from '#constants/cad.constants.js';
 
@@ -43,6 +44,14 @@ export type CadMainFunction = (
   parameters: Record<string, unknown>,
 ) => Array<{ shape: unknown; color?: string }> | { shape: unknown; color?: string };
 
+export type CadUnits = {
+  length: LengthSymbol;
+};
+
+export type CadConfig = {
+  units: CadUnits;
+};
+
 /**
  * Modern CAD module exports with schema-based parameters
  */
@@ -53,6 +62,8 @@ export type CadModuleExports = {
   defaultParams?: Record<string, unknown>;
   /** Optional default name */
   defaultName?: string;
+  /** Config for the module */
+  config?: CadConfig;
   /** Main function */
   main?: CadMainFunctionLegacy;
   /** Default export function */
@@ -73,6 +84,8 @@ export type ParsedCadModule = {
   defaultName?: string;
   /** Main execution function */
   mainFunction: CadMainFunction;
+  /** Config for the model */
+  config?: CadConfig;
   /** Original parameter schema (if modern module) */
   schema?: StandardSchemaV1;
   /** Raw module exports for debugging */

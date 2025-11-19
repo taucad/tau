@@ -2,6 +2,7 @@ import { assign, assertEvent, setup, sendTo, enqueueActions } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { CodeError, Geometry, ExportFormat, KernelError, GeometryFile } from '@taucad/types';
 import type { JSONSchema7 } from 'json-schema';
+import type { LengthSymbol } from '@taucad/units';
 import { kernelMachine } from '#machines/kernel.machine.js';
 import type { KernelEventExternal } from '#machines/kernel.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
@@ -12,6 +13,9 @@ export type CadContext = {
   file: GeometryFile | undefined;
   screenshot: string | undefined;
   parameters: Record<string, unknown>;
+  units: {
+    length: LengthSymbol;
+  };
   defaultParameters: Record<string, unknown>;
   geometries: Geometry[];
   kernelError: KernelError | undefined;
@@ -133,11 +137,14 @@ export const cadMachine = setup({
         type: 'geometryEvaluated' as const,
         geometries: event.geometries,
       });
-      // Send geometries to graphics machine
+      // Send geometries to graphics machine with units
       if (context.graphicsRef) {
         enqueue.sendTo(context.graphicsRef, {
           type: 'updateGeometries',
           geometries: event.geometries,
+          units: {
+            length: context.units.length,
+          },
         });
       }
     }),
@@ -226,6 +233,9 @@ export const cadMachine = setup({
   context: ({ input, spawn }) => ({
     file: undefined,
     screenshot: undefined,
+    units: {
+      length: 'mm',
+    },
     parameters: {},
     defaultParameters: {},
     geometries: [],

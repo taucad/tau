@@ -3,6 +3,7 @@ import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
 import { FileCode } from 'lucide-react';
+import { languageFromExtension } from '@taucad/types/constants';
 import { CodeEditor } from '#components/code/code-editor.js';
 import { cn } from '#utils/ui.utils.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
@@ -14,7 +15,6 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { getFileExtension, isBinaryFile, decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
-import { iconFromExtension } from '#components/icons/file-extension-icon.js';
 import { ChatEditorBinaryWarning } from '#routes/builds_.$id/chat-editor-binary-warning.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }): React.JSX.Element {
@@ -42,7 +42,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       path: activeFilePath,
       name: activeFilePath.split('/').pop() ?? activeFilePath,
       content: fileContent.content,
-      language: iconFromExtension[getFileExtension(activeFilePath)]?.id,
+      language: languageFromExtension[getFileExtension(activeFilePath) as keyof typeof languageFromExtension],
     };
   });
 

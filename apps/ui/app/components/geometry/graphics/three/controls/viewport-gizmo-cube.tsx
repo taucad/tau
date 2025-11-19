@@ -12,11 +12,17 @@ import { createViewportGizmoCubeAxes } from '#components/geometry/graphics/three
 
 type ViewportGizmoCubeProps = {
   readonly size?: number;
+  /**
+   * A container element or selector to append the gizmo to.
+   *
+   * When provided, the gizmo will be appended to this container instead of the renderer's parent.
+   */
+  readonly container?: HTMLElement | string;
 };
 
 const className = 'viewport-gizmo-cube';
 
-export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): ReactNode {
+export function ViewportGizmoCube({ size = 128, container }: ViewportGizmoCubeProps): ReactNode {
   const { camera, gl, controls, scene, invalidate } = useThree((state) => ({
     camera: state.camera as THREE.PerspectiveCamera,
     gl: state.gl,
@@ -54,13 +60,18 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
     canvas.style.zIndex = '10';
 
     // Find the parent container to append our canvas
-    const container = gl.domElement.parentElement;
-    if (!container) {
+    // Use the dedicated gizmo container if available (to support CSS anchor positioning),
+    // otherwise fallback to the renderer's parent (legacy behavior).
+    const containerToUse =
+      typeof container === 'string'
+        ? document.querySelector<HTMLElement>(container)
+        : (container ?? gl.domElement.parentElement);
+    if (!containerToUse) {
       return;
     }
 
     // Append the canvas to the container
-    container.append(canvas);
+    containerToUse.append(canvas);
 
     // Create a renderer for the gizmo
     const renderer = new THREE.WebGLRenderer({
@@ -112,7 +123,7 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
       },
       className,
       resolution: 256,
-      container,
+      container: containerToUse,
       corners: cornerConfig,
       edges: edgeConfig,
       right: faceConfig,
@@ -164,7 +175,7 @@ export function ViewportGizmoCube({ size = 128 }: ViewportGizmoCubeProps): React
         renderer.dispose();
       }
     };
-  }, [camera, gl, controls, scene, serialized.hex, theme, size, handleChange]);
+  }, [camera, gl, controls, scene, serialized.hex, theme, size, handleChange, container]);
 
   return null;
 }

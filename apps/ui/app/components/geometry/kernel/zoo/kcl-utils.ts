@@ -16,7 +16,6 @@ import { EngineConnection, MockEngineConnection } from '#components/geometry/ker
 import type { WasmModule } from '#components/geometry/kernel/zoo/engine-connection.js';
 import {
   KclError,
-  KclAuthError,
   KclExportError,
   KclWasmError,
   extractWasmKclError,
@@ -218,10 +217,6 @@ export class KclUtils {
   private hasExecutedProgram = false;
 
   public constructor(options: KclUtilsOptions) {
-    if (!options.apiKey) {
-      throw new KclAuthError('API key is required');
-    }
-
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl ?? 'wss://api.zoo.dev';
   }

@@ -14,6 +14,7 @@ import { KernelWorker } from '#components/geometry/kernel/utils/kernel-worker.js
 
 class TauWorker extends KernelWorker {
   protected static override readonly supportedExportFormats: ExportFormat[] = supportedExportFormats as ExportFormat[];
+  protected override readonly name: string = 'TauWorker';
   private glbDataMemory: Record<string, Uint8Array> = {};
 
   public override async canHandle(file: GeometryFile): Promise<boolean> {
@@ -38,7 +39,8 @@ class TauWorker extends KernelWorker {
   ): Promise<ComputeGeometryResult> {
     try {
       const format = KernelWorker.getFileExtension(file.filename);
-      this.log(`Converting ${format} to GLB`, { operation: 'computeGeometry' });
+      const formattedFormat = String(format).toUpperCase();
+      this.log(`Converting ${formattedFormat} to GLB`, { operation: 'computeGeometry' });
 
       // Extract format from filename
 
@@ -54,7 +56,7 @@ class TauWorker extends KernelWorker {
         gltfBlob: new Blob([glbData], { type: 'model/gltf-binary' }),
       };
 
-      this.log(`Successfully converted ${format} to GLB`, { operation: 'computeGeometry' });
+      this.log(`Successfully converted ${formattedFormat} to GLB`, { operation: 'computeGeometry' });
 
       return createKernelSuccess([geometry]);
     } catch (error) {

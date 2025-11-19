@@ -41,8 +41,8 @@ export function MeasureTool(): React.JSX.Element {
   const measurements = useSelector(graphicsActor, (state) => state.context.measurements);
   const currentStart = useSelector(graphicsActor, (state) => state.context.currentMeasurementStart);
   const snapDistance = useSelector(graphicsActor, (state) => state.context.measureSnapDistance);
-  const gridUnitFactor = useSelector(graphicsActor, (state) => state.context.gridUnitFactor);
-  const gridUnit = useSelector(graphicsActor, (state) => state.context.gridUnit);
+  const lengthFactor = useSelector(graphicsActor, (state) => state.context.units.length.factor);
+  const lengthSymbol = useSelector(graphicsActor, (state) => state.context.units.length.symbol);
   const hoveredMeasurementId = useSelector(graphicsActor, (state) => state.context.hoveredMeasurementId);
   const isMeasureActive = useSelector(graphicsActor, (state) => state.context.isMeasureActive);
 
@@ -53,7 +53,7 @@ export function MeasureTool(): React.JSX.Element {
 
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
-  const mouseDownOnMeshRef = useRef(false);
+  const pointerDownOnMeshRef = useRef(false);
   const mouseIsDownRef = useRef(false);
   const startCameraQuatRef = useRef(new THREE.Quaternion());
   const startCameraPosRef = useRef(new THREE.Vector3());
@@ -118,7 +118,7 @@ export function MeasureTool(): React.JSX.Element {
       }
     };
 
-    const handleMouseDown = (event: MouseEvent): void => {
+    const handlePointerDown = (event: MouseEvent): void => {
       // Track camera state at mouse down to detect rotations/translations during drag
       if (event.button === 0 || event.button === 2) {
         startCameraQuatRef.current.copy(camera.quaternion);
@@ -131,7 +131,7 @@ export function MeasureTool(): React.JSX.Element {
         return;
       }
 
-      // Track if mousedown happens on a mesh
+      // Track if pointerdown happens on a mesh
       raycasterRef.current.setFromCamera(mouseRef.current, camera);
 
       // Exclude measurement UI elements to prevent feedback loops
@@ -143,11 +143,11 @@ export function MeasureTool(): React.JSX.Element {
       });
 
       const intersects = raycasterRef.current.intersectObjects(meshes, true);
-      // Consider a valid mousedown when either on a mesh or over a valid snap indicator
-      mouseDownOnMeshRef.current = intersects.length > 0 || Boolean(activeSnapPoint);
+      // Consider a valid pointerdown when either on a mesh or over a valid snap indicator
+      pointerDownOnMeshRef.current = intersects.length > 0 || Boolean(activeSnapPoint);
     };
 
-    const handleMouseUp = (event: MouseEvent): void => {
+    const handlePointerUp = (event: MouseEvent): void => {
       // Handle right click - cancel current measurement only if no camera movement
       if (event.button === 2) {
         if (mouseIsDownRef.current) {
@@ -164,7 +164,7 @@ export function MeasureTool(): React.JSX.Element {
           }
         }
 
-        mouseDownOnMeshRef.current = false;
+        pointerDownOnMeshRef.current = false;
         mouseIsDownRef.current = false;
         return;
       }
@@ -187,19 +187,19 @@ export function MeasureTool(): React.JSX.Element {
         const translated = startCameraPosRef.current.distanceTo(endPos) > 1e-3;
 
         if (rotated || translated) {
-          mouseDownOnMeshRef.current = false;
+          pointerDownOnMeshRef.current = false;
           mouseIsDownRef.current = false;
           return;
         }
       }
 
       // Only process if interaction started on mesh OR we still have a valid snap indicator
-      if (!mouseDownOnMeshRef.current && !activeSnapPoint) {
-        mouseDownOnMeshRef.current = false;
+      if (!pointerDownOnMeshRef.current && !activeSnapPoint) {
+        pointerDownOnMeshRef.current = false;
         return;
       }
 
-      // Verify mouseup is also on a mesh by performing a fresh raycast
+      // Verify pointerup is also on a mesh by performing a fresh raycast
       raycasterRef.current.setFromCamera(mouseRef.current, camera);
 
       // Exclude measurement UI elements to prevent feedback loops
@@ -213,14 +213,14 @@ export function MeasureTool(): React.JSX.Element {
       const intersects = raycasterRef.current.intersectObjects(meshes, true);
       if (intersects.length === 0 && !activeSnapPoint) {
         // No intersection and no active snap target, ignore
-        mouseDownOnMeshRef.current = false;
+        pointerDownOnMeshRef.current = false;
         return;
       }
 
       // Use snap point if available, otherwise use intersection point
       const point = activeSnapPoint?.position ?? intersects[0]?.point;
       if (!point) {
-        mouseDownOnMeshRef.current = false;
+        pointerDownOnMeshRef.current = false;
         return;
       }
 
@@ -233,7 +233,7 @@ export function MeasureTool(): React.JSX.Element {
         const endVec = new THREE.Vector3(...pointArray);
         const zeroLengthEpsilon = 1e-4; // Scene units
         if (startVec.distanceTo(endVec) <= zeroLengthEpsilon) {
-          mouseDownOnMeshRef.current = false;
+          pointerDownOnMeshRef.current = false;
           mouseIsDownRef.current = false;
           return;
         }
@@ -243,8 +243,8 @@ export function MeasureTool(): React.JSX.Element {
         graphicsActor.send({ type: 'startMeasurement', payload: pointArray });
       }
 
-      // Reset the mousedown flag
-      mouseDownOnMeshRef.current = false;
+      // Reset the pointerdown flag
+      pointerDownOnMeshRef.current = false;
       mouseIsDownRef.current = false;
     };
 
@@ -254,14 +254,14 @@ export function MeasureTool(): React.JSX.Element {
     };
 
     gl.domElement.addEventListener('mousemove', handleMouseMove);
-    gl.domElement.addEventListener('mousedown', handleMouseDown);
-    gl.domElement.addEventListener('mouseup', handleMouseUp);
+    gl.domElement.addEventListener('pointerdown', handlePointerDown);
+    gl.domElement.addEventListener('pointerup', handlePointerUp);
     gl.domElement.addEventListener('contextmenu', handleContextMenu);
 
     return () => {
       gl.domElement.removeEventListener('mousemove', handleMouseMove);
-      gl.domElement.removeEventListener('mousedown', handleMouseDown);
-      gl.domElement.removeEventListener('mouseup', handleMouseUp);
+      gl.domElement.removeEventListener('pointerdown', handlePointerDown);
+      gl.domElement.removeEventListener('pointerup', handlePointerUp);
       gl.domElement.removeEventListener('contextmenu', handleContextMenu);
     };
   }, [camera, gl, scene, snapDistance, currentStart, activeSnapPoint, mousePosition, isMeasureActive, graphicsActor]);
@@ -304,8 +304,8 @@ export function MeasureTool(): React.JSX.Element {
           start={new THREE.Vector3(...measurement.startPoint)}
           end={new THREE.Vector3(...measurement.endPoint)}
           distance={measurement.distance}
-          gridUnitFactor={gridUnitFactor}
-          gridUnit={gridUnit}
+          lengthFactor={lengthFactor}
+          lengthSymbol={lengthSymbol}
           isExternallyHovered={hoveredMeasurementId === measurement.id}
           isPinned={Boolean(measurement.isPinned)}
         />
@@ -393,8 +393,8 @@ type MeasurementLineProps = {
   readonly start: THREE.Vector3;
   readonly end: THREE.Vector3;
   readonly distance?: number;
-  readonly gridUnitFactor?: number;
-  readonly gridUnit?: string;
+  readonly lengthFactor?: number;
+  readonly lengthSymbol?: string;
   readonly isPreview?: boolean;
   readonly isExternallyHovered?: boolean;
   readonly isPinned?: boolean;
@@ -431,8 +431,8 @@ function MeasurementLine({
   start,
   end,
   distance,
-  gridUnitFactor = 1,
-  gridUnit = 'mm',
+  lengthFactor = 1,
+  lengthSymbol = 'mm',
   isPreview = false,
   isExternallyHovered = false,
   isPinned = false,
@@ -509,9 +509,9 @@ function MeasurementLine({
 
   // Calculate distance if not provided
   const calculatedDistance = distance ?? start.distanceTo(end);
-  const distanceInMm = calculatedDistance / gridUnitFactor;
+  const distanceInMm = calculatedDistance / lengthFactor;
   const numericText = distanceInMm.toFixed(decimals);
-  const unitsText = enableUnits ? gridUnit : '';
+  const unitsText = enableUnits ? lengthSymbol : '';
   const labelText = `${numericText}${enableUnits ? ` ${unitsText}` : ''}`;
 
   // Keep a constant width box reserved for the units portion of the label background

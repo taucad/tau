@@ -1,64 +1,43 @@
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { createActor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
-import { ChatParametersNumber } from '#routes/builds_.$id/chat-parameters-number.js';
+import type { GraphicsUnits } from '@taucad/types';
+import type { LengthSymbol } from '@taucad/units';
+import { ChatParametersNumber } from '#components/geometry/parameters/chat-parameters-number.js';
 import { TooltipProvider } from '#components/ui/tooltip.js';
-import { graphicsMachine } from '#machines/graphics.machine.js';
-import { useBuild } from '#hooks/use-build.js';
 
-// Mock the useBuild hook
-vi.mock('#hooks/use-build.js', () => ({
-  useBuild: vi.fn(),
-}));
-
-type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
-
-// Test wrapper component that provides necessary providers
-function TestWrapper({
-  children,
-  graphicsRef,
-}: {
-  readonly children: React.ReactNode;
-  readonly graphicsRef: GraphicsActorRef;
-}): React.JSX.Element {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-      },
+// Helper to create units from graphics state
+function createUnits(factor: number, symbol: LengthSymbol): GraphicsUnits {
+  return {
+    length: {
+      factor,
+      symbol,
     },
-  });
+  };
+}
 
-  // Mock useBuild to return our test graphics ref
-  vi.mocked(useBuild).mockReturnValue({
-    graphicsRef,
-  } as ReturnType<typeof useBuild>);
+// Default units (mm)
+const defaultUnits = createUnits(1, 'mm');
 
-  return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>{children}</TooltipProvider>
-    </QueryClientProvider>
-  );
+// Test wrapper component that provides TooltipProvider
+function TestWrapper({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
+  return <TooltipProvider>{children}</TooltipProvider>;
 }
 
 describe('ChatParametersNumber', () => {
-  let graphicsService: GraphicsActorRef;
-
-  beforeEach(() => {
-    graphicsService = createActor(graphicsMachine, { input: {} });
-    graphicsService.start();
-  });
-
   describe('Basic Rendering', () => {
     it('should render with default mm unit for length', () => {
       const mockOnChange = vi.fn();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={10} defaultValue={10} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -72,8 +51,14 @@ describe('ChatParametersNumber', () => {
       const mockOnChange = vi.fn();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={45} defaultValue={45} descriptor="angle" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={45}
+            defaultValue={45}
+            descriptor="angle"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -84,8 +69,14 @@ describe('ChatParametersNumber', () => {
       const mockOnChange = vi.fn();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={5} defaultValue={5} descriptor="count" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={5}
+            defaultValue={5}
+            descriptor="count"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -97,8 +88,14 @@ describe('ChatParametersNumber', () => {
       const mockOnChange = vi.fn();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={1.5} defaultValue={1.5} descriptor="unitless" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={1.5}
+            defaultValue={1.5}
+            descriptor="unitless"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -109,17 +106,17 @@ describe('ChatParametersNumber', () => {
   describe('Unit Conversion', () => {
     it('should convert from mm to inches and back', () => {
       const mockOnChange = vi.fn();
-      // Create a machine with inches as the initial unit
-      const inchesService = createActor(graphicsMachine, { input: {} });
-      inchesService.start();
-      inchesService.send({
-        type: 'setGridUnit',
-        payload: { unit: 'in', factor: 25.4, system: 'imperial' },
-      });
+      const inchUnits = createUnits(25.4, 'in');
 
       render(
-        <TestWrapper graphicsRef={inchesService}>
-          <ChatParametersNumber value={25.4} defaultValue={25.4} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={25.4}
+            defaultValue={25.4}
+            descriptor="length"
+            units={inchUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -128,24 +125,21 @@ describe('ChatParametersNumber', () => {
 
       // Should show 'in' unit
       expect(screen.getByText('in')).toBeTruthy();
-
-      inchesService.stop();
     });
 
     it('should show approximation indicator when conversion results in rounding', () => {
       const mockOnChange = vi.fn();
-      // Create a machine with inches as the initial unit
-      // 10mm / 25.4 = 0.393700787... inches
-      const inchesService = createActor(graphicsMachine, { input: {} });
-      inchesService.start();
-      inchesService.send({
-        type: 'setGridUnit',
-        payload: { unit: 'in', factor: 25.4, system: 'imperial' },
-      });
+      const inchUnits = createUnits(25.4, 'in');
 
       render(
-        <TestWrapper graphicsRef={inchesService}>
-          <ChatParametersNumber value={10} defaultValue={10} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor="length"
+            units={inchUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -154,23 +148,21 @@ describe('ChatParametersNumber', () => {
 
       // Tooltip content testing is complex in unit tests (requires hover/focus simulation)
       // The important part is that the approximation indicator is shown
-      inchesService.stop();
     });
 
     it('should not show approximation indicator for exact conversions', () => {
       const mockOnChange = vi.fn();
-      // Create a machine with inches as the initial unit
-      // 25.4mm = exactly 1 inch, no rounding needed
-      const inchesService = createActor(graphicsMachine, { input: {} });
-      inchesService.start();
-      inchesService.send({
-        type: 'setGridUnit',
-        payload: { unit: 'in', factor: 25.4, system: 'imperial' },
-      });
+      const inchUnits = createUnits(25.4, 'in');
 
       render(
-        <TestWrapper graphicsRef={inchesService}>
-          <ChatParametersNumber value={25.4} defaultValue={25.4} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={25.4}
+            defaultValue={25.4}
+            descriptor="length"
+            units={inchUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -178,24 +170,22 @@ describe('ChatParametersNumber', () => {
 
       // Should NOT show approximation indicator
       expect(screen.queryByText('≈')).toBeNull();
-
-      inchesService.stop();
     });
 
     it('should always call onChange with mm values regardless of display unit', async () => {
       const mockOnChange = vi.fn();
       const user = userEvent.setup();
-      // Create a machine with inches as the initial unit
-      const inchesService = createActor(graphicsMachine, { input: {} });
-      inchesService.start();
-      inchesService.send({
-        type: 'setGridUnit',
-        payload: { unit: 'in', factor: 25.4, system: 'imperial' },
-      });
+      const inchUnits = createUnits(25.4, 'in');
 
       render(
-        <TestWrapper graphicsRef={inchesService}>
-          <ChatParametersNumber value={25.4} defaultValue={25.4} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={25.4}
+            defaultValue={25.4}
+            descriptor="length"
+            units={inchUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -208,31 +198,27 @@ describe('ChatParametersNumber', () => {
 
       // OnChange should be called with value in mm (2 inches = 50.8mm)
       expect(mockOnChange).toHaveBeenCalledWith(50.8);
-
-      inchesService.stop();
     });
 
     it('should format values with 4 significant figures during conversion', () => {
       const mockOnChange = vi.fn();
-      // Create a machine with inches as the initial unit
-      const inchesService = createActor(graphicsMachine, { input: {} });
-      inchesService.start();
-      inchesService.send({
-        type: 'setGridUnit',
-        payload: { unit: 'in', factor: 25.4, system: 'imperial' },
-      });
+      const inchUnits = createUnits(25.4, 'in');
 
       render(
-        <TestWrapper graphicsRef={inchesService}>
-          <ChatParametersNumber value={123.456} defaultValue={123.456} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={123.456}
+            defaultValue={123.456}
+            descriptor="length"
+            units={inchUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
       const input = screen.getByRole<HTMLInputElement>('textbox');
       // 123.456mm / 25.4 ≈ 4.860 inches (4 sig figs)
       expect(input.value).toMatch(/^4\.86/);
-
-      inchesService.stop();
     });
   });
 
@@ -241,8 +227,14 @@ describe('ChatParametersNumber', () => {
       const mockOnChange = vi.fn();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={50} defaultValue={50} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={50}
+            defaultValue={50}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -257,13 +249,14 @@ describe('ChatParametersNumber', () => {
       const mockOnChange = vi.fn();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
+        <TestWrapper>
           <ChatParametersNumber
             value={50}
             defaultValue={50}
             descriptor="length"
             min={10}
             max={100}
+            units={defaultUnits}
             onChange={mockOnChange}
           />
         </TestWrapper>,
@@ -279,8 +272,14 @@ describe('ChatParametersNumber', () => {
       const mockOnChange = vi.fn();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={0} defaultValue={0} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={0}
+            defaultValue={0}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -295,8 +294,14 @@ describe('ChatParametersNumber', () => {
       const mockOnChange = vi.fn();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={-50} defaultValue={-50} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={-50}
+            defaultValue={-50}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -310,17 +315,17 @@ describe('ChatParametersNumber', () => {
 
     it('should convert slider ranges when unit changes', () => {
       const mockOnChange = vi.fn();
-      // Create a machine with inches as the initial unit
-      const inchesService = createActor(graphicsMachine, { input: {} });
-      inchesService.start();
-      inchesService.send({
-        type: 'setGridUnit',
-        payload: { unit: 'in', factor: 25.4, system: 'imperial' },
-      });
+      const inchUnits = createUnits(25.4, 'in');
 
       render(
-        <TestWrapper graphicsRef={inchesService}>
-          <ChatParametersNumber value={254} defaultValue={254} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={254}
+            defaultValue={254}
+            descriptor="length"
+            units={inchUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -329,8 +334,6 @@ describe('ChatParametersNumber', () => {
       // For default of 10, range should be [0, 40]
       const maxValue = Number.parseFloat(slider.getAttribute('aria-valuemax') ?? '0');
       expect(maxValue).toBeGreaterThan(30);
-
-      inchesService.stop();
     });
   });
 
@@ -340,8 +343,14 @@ describe('ChatParametersNumber', () => {
       const user = userEvent.setup();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={10} defaultValue={10} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -358,8 +367,14 @@ describe('ChatParametersNumber', () => {
       const user = userEvent.setup();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={10} defaultValue={10} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -384,18 +399,17 @@ describe('ChatParametersNumber', () => {
     it('should not commit approximated value on blur without edit', async () => {
       const mockOnChange = vi.fn();
       const user = userEvent.setup();
-      // Create a machine with inches to trigger approximation
-      // 10mm / 25.4 = 0.393700787... inches
-      const inchesService = createActor(graphicsMachine, { input: {} });
-      inchesService.start();
-      inchesService.send({
-        type: 'setGridUnit',
-        payload: { unit: 'in', factor: 25.4, system: 'imperial' },
-      });
+      const inchUnits = createUnits(25.4, 'in');
 
       render(
-        <TestWrapper graphicsRef={inchesService}>
-          <ChatParametersNumber value={10} defaultValue={10} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor="length"
+            units={inchUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -412,8 +426,6 @@ describe('ChatParametersNumber', () => {
 
       // OnChange should NOT be called
       expect(mockOnChange).not.toHaveBeenCalled();
-
-      inchesService.stop();
     });
 
     it('should parse length input with units', async () => {
@@ -421,8 +433,14 @@ describe('ChatParametersNumber', () => {
       const user = userEvent.setup();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={25.4} defaultValue={25.4} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={25.4}
+            defaultValue={25.4}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -444,8 +462,14 @@ describe('ChatParametersNumber', () => {
       const user = userEvent.setup();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={25.4} defaultValue={25.4} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={25.4}
+            defaultValue={25.4}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -474,8 +498,14 @@ describe('ChatParametersNumber', () => {
       const user = userEvent.setup();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={12.7} defaultValue={12.7} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={12.7}
+            defaultValue={12.7}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -497,8 +527,14 @@ describe('ChatParametersNumber', () => {
       const user = userEvent.setup();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={304.8} defaultValue={304.8} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={304.8}
+            defaultValue={304.8}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -507,7 +543,7 @@ describe('ChatParametersNumber', () => {
       await user.type(input, "1'");
 
       // Should parse 1 foot and convert to mm (1 foot = 30 inches = 30 * 25.4 = 762mm) live during typing
-      // Note: parseLengthInput converts feet to inches
+      // Note: parseLength converts feet to inches
       expect(mockOnChange).toHaveBeenCalled();
 
       // Tabbing away should not emit again
@@ -521,8 +557,14 @@ describe('ChatParametersNumber', () => {
       const user = userEvent.setup();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={10} defaultValue={10} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -539,8 +581,14 @@ describe('ChatParametersNumber', () => {
       const user = userEvent.setup();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={10} defaultValue={10} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -557,8 +605,14 @@ describe('ChatParametersNumber', () => {
       const user = userEvent.setup();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={10} defaultValue={10} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -593,8 +647,14 @@ describe('ChatParametersNumber', () => {
       const user = userEvent.setup();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={10} defaultValue={10} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -620,8 +680,15 @@ describe('ChatParametersNumber', () => {
       const mockOnChange = vi.fn();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber disabled value={10} defaultValue={10} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            disabled
+            value={10}
+            defaultValue={10}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -638,8 +705,15 @@ describe('ChatParametersNumber', () => {
       const user = userEvent.setup();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber disabled value={10} defaultValue={10} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            disabled
+            value={10}
+            defaultValue={10}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 
@@ -659,8 +733,14 @@ describe('ChatParametersNumber', () => {
       const user = userEvent.setup();
 
       render(
-        <TestWrapper graphicsRef={graphicsService}>
-          <ChatParametersNumber value={0.1} defaultValue={0.1} descriptor="length" onChange={mockOnChange} />
+        <TestWrapper>
+          <ChatParametersNumber
+            value={0.1}
+            defaultValue={0.1}
+            descriptor="length"
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
         </TestWrapper>,
       );
 

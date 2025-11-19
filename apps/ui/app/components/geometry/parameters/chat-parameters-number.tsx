@@ -1,11 +1,11 @@
 import * as React from 'react';
 import { useSelector, useActorRef } from '@xstate/react';
 import { Slider } from '#components/ui/slider.js';
-import { ChatParametersInputNumber } from '#routes/builds_.$id/chat-parameters-input-number.js';
-import { useBuild } from '#hooks/use-build.js';
+import { ChatParametersInputNumber } from '#components/geometry/parameters/chat-parameters-input-number.js';
 import { parameterMachine } from '#machines/parameter.machine.js';
 import type { MeasurementDescriptor } from '#constants/build-parameters.js';
 import { cn } from '#utils/ui.utils.js';
+import type { Units } from '#components/geometry/parameters/rjsf-context.js';
 
 type ChatParametersNumberProps = {
   readonly value: number;
@@ -24,6 +24,7 @@ type ChatParametersNumberProps = {
    */
   readonly enableContinualOnChange?: boolean;
   readonly className?: string;
+  readonly units: Units;
 };
 
 export function ChatParametersNumber({
@@ -35,14 +36,13 @@ export function ChatParametersNumber({
   max,
   step,
   disabled,
+  units,
   enableContinualOnChange = false,
   ...properties
 }: ChatParametersNumberProps): React.JSX.Element {
-  const { graphicsRef } = useBuild();
-
-  // Get initial unit factor and unit string from graphics machine
-  const initialGridUnitFactor = useSelector(graphicsRef, (state) => state.context.gridUnitFactor);
-  const initialGridUnit = useSelector(graphicsRef, (state) => state.context.gridUnit);
+  // Extract unit values from units prop
+  const initialUnitFactor = units.length.factor;
+  const initialSymbol = units.length.symbol;
 
   // Create ref for input element (for focus and arrow key listeners)
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -54,9 +54,8 @@ export function ChatParametersNumber({
       defaultValue,
       descriptor,
       enableContinualOnChange,
-      graphicsRef,
-      initialUnitFactor: initialGridUnitFactor,
-      initialUnit: initialGridUnit,
+      initialUnitFactor,
+      initialSymbol,
       inputRef,
       min,
       max,
@@ -76,10 +75,18 @@ export function ChatParametersNumber({
   }, [parameterRef, onChange]);
 
   // Notify machine of external value changes
-  // Unit changes are now handled internally by the machine via subscription
   React.useEffect(() => {
     parameterRef.send({ type: 'externalValueChanged', value });
   }, [value, parameterRef]);
+
+  // Send unit updates to parameter machine when units change
+  React.useEffect(() => {
+    parameterRef.send({
+      type: 'unitChanged',
+      unitFactor: units.length.factor,
+      unit: units.length.symbol,
+    });
+  }, [units.length.factor, units.length.symbol, parameterRef]);
 
   // Derive all state from machines
   const localValue = useSelector(parameterRef, (state) => state.context.localValue);
@@ -90,13 +97,10 @@ export function ChatParametersNumber({
   const baseStep = useSelector(parameterRef, (state) => state.context.baseStep);
   const currentStep = useSelector(parameterRef, (state) => state.context.step);
 
-  const gridUnit = useSelector(graphicsRef, (state) => state.context.gridUnit);
-  const gridUnitFactor = useSelector(graphicsRef, (state) => state.context.gridUnitFactor);
-
   // Only apply unit conversion for length measurements
   const isLength = descriptor === 'length';
-  const unitFactor = isLength ? gridUnitFactor : 1;
-  const displayUnit = isLength ? gridUnit : 'mm';
+  const unitFactor = isLength ? units.length.factor : 1;
+  const displayUnit = isLength ? units.length.symbol : 'mm';
 
   return (
     <div className="flex w-full flex-row items-center gap-2">

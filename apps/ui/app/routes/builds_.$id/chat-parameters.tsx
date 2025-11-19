@@ -50,11 +50,14 @@ export const ChatParameters = memo(function (props: {
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }) {
-  const { buildRef, cadRef, setParameters } = useBuild();
+  const { buildRef, cadRef, graphicsRef, setParameters } = useBuild();
   const { className, isExpanded = true, setIsExpanded } = props;
   const parameters = useSelector(buildRef, (state) => state.context.build?.assets.mechanical?.parameters ?? {});
   const defaultParameters = useSelector(cadRef, (state) => state.context.defaultParameters);
   const jsonSchema = useSelector(cadRef, (state) => state.context.jsonSchema);
+
+  // Build CadUnits object reactively from graphics state
+  const units = useSelector(graphicsRef, (state) => state.context.units);
 
   const toggleParametersOpen = useCallback(() => {
     setIsExpanded?.((current) => !current);
@@ -86,6 +89,7 @@ export const ChatParameters = memo(function (props: {
             parameters={parameters}
             defaultParameters={defaultParameters}
             jsonSchema={jsonSchema}
+            units={units}
             onParametersChange={setParameters}
           />
         </FloatingPanelContentBody>

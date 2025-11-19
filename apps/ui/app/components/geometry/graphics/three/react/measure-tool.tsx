@@ -41,8 +41,8 @@ export function MeasureTool(): React.JSX.Element {
   const measurements = useSelector(graphicsActor, (state) => state.context.measurements);
   const currentStart = useSelector(graphicsActor, (state) => state.context.currentMeasurementStart);
   const snapDistance = useSelector(graphicsActor, (state) => state.context.measureSnapDistance);
-  const gridUnitFactor = useSelector(graphicsActor, (state) => state.context.gridUnitFactor);
-  const gridUnit = useSelector(graphicsActor, (state) => state.context.gridUnit);
+  const lengthFactor = useSelector(graphicsActor, (state) => state.context.units.length.factor);
+  const lengthSymbol = useSelector(graphicsActor, (state) => state.context.units.length.symbol);
   const hoveredMeasurementId = useSelector(graphicsActor, (state) => state.context.hoveredMeasurementId);
   const isMeasureActive = useSelector(graphicsActor, (state) => state.context.isMeasureActive);
 
@@ -304,8 +304,8 @@ export function MeasureTool(): React.JSX.Element {
           start={new THREE.Vector3(...measurement.startPoint)}
           end={new THREE.Vector3(...measurement.endPoint)}
           distance={measurement.distance}
-          gridUnitFactor={gridUnitFactor}
-          gridUnit={gridUnit}
+          lengthFactor={lengthFactor}
+          lengthSymbol={lengthSymbol}
           isExternallyHovered={hoveredMeasurementId === measurement.id}
           isPinned={Boolean(measurement.isPinned)}
         />
@@ -393,8 +393,8 @@ type MeasurementLineProps = {
   readonly start: THREE.Vector3;
   readonly end: THREE.Vector3;
   readonly distance?: number;
-  readonly gridUnitFactor?: number;
-  readonly gridUnit?: string;
+  readonly lengthFactor?: number;
+  readonly lengthSymbol?: string;
   readonly isPreview?: boolean;
   readonly isExternallyHovered?: boolean;
   readonly isPinned?: boolean;
@@ -431,8 +431,8 @@ function MeasurementLine({
   start,
   end,
   distance,
-  gridUnitFactor = 1,
-  gridUnit = 'mm',
+  lengthFactor = 1,
+  lengthSymbol = 'mm',
   isPreview = false,
   isExternallyHovered = false,
   isPinned = false,
@@ -509,9 +509,9 @@ function MeasurementLine({
 
   // Calculate distance if not provided
   const calculatedDistance = distance ?? start.distanceTo(end);
-  const distanceInMm = calculatedDistance / gridUnitFactor;
+  const distanceInMm = calculatedDistance / lengthFactor;
   const numericText = distanceInMm.toFixed(decimals);
-  const unitsText = enableUnits ? gridUnit : '';
+  const unitsText = enableUnits ? lengthSymbol : '';
   const labelText = `${numericText}${enableUnits ? ` ${unitsText}` : ''}`;
 
   // Keep a constant width box reserved for the units portion of the label background

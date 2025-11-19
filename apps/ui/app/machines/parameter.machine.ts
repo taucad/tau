@@ -1,9 +1,10 @@
-import { assign, setup, enqueueActions, fromCallback } from 'xstate';
+import { assign, setup, enqueueActions } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
+import type { LengthSymbol } from '@taucad/units';
+import { convertLength } from '@taucad/units/converter';
+import { parseLengthInput } from '@taucad/units/parser';
+import { roundToSignificantFigures, formatUnitDisplay } from '#utils/number.utils.js';
 import type { MeasurementDescriptor } from '#constants/build-parameters.js';
-import type { LengthUnit } from '#utils/unit.utils.js';
-import { roundToSignificantFigures, formatLengthDisplay, parseLengthInput, lengthUnitToMm } from '#utils/unit.utils.js';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { keydownListener } from '#machines/keydown.actor.js';
 import { focusListener } from '#machines/focus.actor.js';
 import { arrowKeyListener } from '#machines/arrow-key.actor.js';
@@ -120,12 +121,10 @@ export type ParameterContext = {
   descriptor: MeasurementDescriptor;
   /** Whether to commit continually on every slider change (vs. only on release) */
   enableContinualOnChange: boolean;
-  /** Reference to graphics machine for unit conversion */
-  graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   /** Current unit factor (cached for comparison) */
   currentUnitFactor: number;
-  /** Current unit string (for parsing) */
-  currentUnit: string;
+  /** Current symbol (for parsing) */
+  currentSymbol: LengthSymbol;
   /** Default value in baseline units (for range calculations) */
   defaultValue: number;
   /** Optional minimum value in baseline units */
@@ -167,12 +166,10 @@ export type ParameterInput = {
   descriptor: MeasurementDescriptor;
   /** Whether to commit continually on every slider change (vs. only on release) */
   enableContinualOnChange: boolean;
-  /** Graphics machine reference for unit conversion */
-  graphicsRef: ActorRefFrom<typeof graphicsMachine>;
-  /** Initial unit factor (from graphics machine context) */
+  /** Initial unit factor */
   initialUnitFactor: number;
-  /** Initial unit string (from graphics machine context) */
-  initialUnit: string;
+  /** Initial symbol */
+  initialSymbol: LengthSymbol;
   /** Ref to the input element for focus/arrow key listeners */
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- ref can be null
   inputRef: React.RefObject<HTMLInputElement | null>;
@@ -245,7 +242,7 @@ function calculateFormatting(
   }
 
   const converted = committedValue / unitFactor;
-  const formatted = formatLengthDisplay(converted, {
+  const formatted = formatUnitDisplay(converted, {
     significantFigures: 4,
     preserveTrailingZeros: false,
   });
@@ -282,38 +279,6 @@ export type ParameterEmitted = {
 };
 
 /**
- * Graphics Unit Listener Actor
- * Listens to graphics machine unitChanged events and sends back to parent machine
- */
-const graphicsUnitListener = fromCallback<
-  { type: 'unitChanged'; unitFactor: number; unit: string },
-  {
-    graphicsRef: ActorRefFrom<typeof graphicsMachine>;
-    descriptor: MeasurementDescriptor;
-  }
->(({ sendBack, input }) => {
-  const { descriptor, graphicsRef } = input;
-
-  // Only track units for length measurements
-  if (descriptor !== 'length') {
-    return () => {
-      // No-op cleanup for non-length descriptors
-    };
-  }
-
-  // Listen to unitChanged events from graphics machine
-  const subscription = graphicsRef.on('unitChanged', (event) => {
-    // Forward the event to parent machine with factor and unit string
-    sendBack({ type: 'unitChanged', unitFactor: event.factor, unit: event.unit });
-  });
-
-  // Cleanup function - unsubscribe when actor stops
-  return () => {
-    subscription.unsubscribe();
-  };
-});
-
-/**
  * Parameter State Machine
  * Manages parameter value state with unit conversion and interaction tracking
  */
@@ -329,7 +294,6 @@ export const parameterMachine = setup({
     emitted: {} as ParameterEmitted,
   },
   actors: {
-    graphicsUnitListener,
     keydownListener,
     focusListener,
     arrowKeyListener,
@@ -461,7 +425,7 @@ export const parameterMachine = setup({
       return {
         localValue,
         currentUnitFactor: newUnitFactor,
-        currentUnit: newUnit,
+        currentSymbol: newUnit,
         ...range,
         ...formatting,
       };
@@ -564,12 +528,10 @@ export const parameterMachine = setup({
         const parsed = parseLengthInput(text);
         if (parsed) {
           // If a unit was specified and differs from current unit, convert
-          if (parsed.unit && parsed.unit !== context.currentUnit) {
-            // Convert from parsed unit to mm, then to display unit
-            const sourceFactor = lengthUnitToMm[parsed.unit as LengthUnit] || unitFactor;
-            const targetFactor = lengthUnitToMm[context.currentUnit as LengthUnit] || unitFactor;
-            const valueInMm = parsed.value * sourceFactor;
-            valueInDisplayUnit = valueInMm / targetFactor;
+          // eslint-disable-next-line unicorn/prefer-ternary -- ternary is not as readable as if/else
+          if (parsed.symbol && parsed.symbol !== context.currentSymbol) {
+            // Convert from parsed unit to current display unit
+            valueInDisplayUnit = convertLength(parsed.value, parsed.symbol, context.currentSymbol);
           } else {
             valueInDisplayUnit = parsed.value;
           }
@@ -622,7 +584,7 @@ export const parameterMachine = setup({
   context({ input }) {
     const isLength = input.descriptor === 'length';
     const unitFactor = isLength ? input.initialUnitFactor : 1;
-    const unit = isLength ? input.initialUnit : 'mm';
+    const symbol = isLength ? input.initialSymbol : 'mm';
     const displayValue = input.initialValue / unitFactor;
     const hasConversion = isLength && unitFactor !== 1;
     const localValue = hasConversion ? roundToSignificantFigures(displayValue, 4) : displayValue;
@@ -647,9 +609,8 @@ export const parameterMachine = setup({
       isDragging: false,
       descriptor: input.descriptor,
       enableContinualOnChange: input.enableContinualOnChange,
-      graphicsRef: input.graphicsRef,
       currentUnitFactor: unitFactor,
-      currentUnit: unit,
+      currentSymbol: symbol,
       defaultValue: input.defaultValue,
       min: input.min,
       max: input.max,
@@ -664,14 +625,6 @@ export const parameterMachine = setup({
   },
   initial: 'idle',
   invoke: [
-    {
-      id: 'graphicsUnitListener',
-      src: 'graphicsUnitListener',
-      input: ({ context }) => ({
-        graphicsRef: context.graphicsRef,
-        descriptor: context.descriptor,
-      }),
-    },
     {
       id: 'keydownListener',
       src: 'keydownListener',

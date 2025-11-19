@@ -9,7 +9,7 @@ import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { cn } from '#utils/ui.utils.js';
 import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
-import type { RJSFContext } from '#components/geometry/parameters/rjsf-theme.js';
+import type { RJSFContext, Units } from '#components/geometry/parameters/rjsf-context.js';
 import { rjsfIdPrefix, rjsfIdSeparator } from '#components/geometry/parameters/rjsf-utils.js';
 import { deleteValueAtPath, extractModifiedProperties, getValueAtPath, setValueAtPath } from '#utils/object.utils.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
@@ -26,6 +26,7 @@ type ParametersProperties = {
   readonly enableExpandAll?: boolean;
   readonly emptyMessage?: string;
   readonly emptyDescription?: string;
+  readonly units: Units;
 };
 
 export function Parameters({
@@ -39,6 +40,7 @@ export function Parameters({
   enableExpandAll = true,
   emptyMessage = 'No parameters available',
   emptyDescription = 'Parameters will appear here when they become available for this model',
+  units,
 }: ParametersProperties): React.JSX.Element {
   const [allExpanded, setAllExpanded] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -111,8 +113,9 @@ export function Parameters({
 
         return text.toLowerCase().includes(searchTerm.toLowerCase());
       },
+      units,
     }),
-    [allExpanded, searchTerm, resetSingleParameter, defaultParameters],
+    [allExpanded, searchTerm, resetSingleParameter, defaultParameters, units],
   );
 
   const mergedData = useMemo(() => ({ ...defaultParameters, ...parameters }), [defaultParameters, parameters]);

@@ -15,14 +15,14 @@ import { ChevronRight, RefreshCcwDot } from 'lucide-react';
 import { Fragment, useEffect, useState } from 'react';
 import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
-import { ChatParametersBoolean } from '#routes/builds_.$id/chat-parameters-boolean.js';
+import { ChatParametersBoolean } from '#components/geometry/parameters/chat-parameters-boolean.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { cn } from '#utils/ui.utils.js';
 import { toTitleCase } from '#utils/string.utils.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { HighlightText } from '#components/highlight-text.js';
-import { ChatParameterWidget } from '#routes/builds_.$id/chat-parameter-widget.js';
+import { ChatParameterWidget } from '#components/geometry/parameters/chat-parameter-widget.js';
 import {
   rjsfIdToJsonPath,
   rjsfIdPrefix,
@@ -33,15 +33,7 @@ import {
 import { hasCustomValue } from '#utils/object.utils.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { InlineCode } from '#components/code/code-block.js';
-
-// eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for formContext
-export type RJSFContext = {
-  searchTerm: string;
-  allExpanded: boolean;
-  resetSingleParameter: (fieldPath: string[]) => void;
-  shouldShowField: (prettyLabel: string) => boolean;
-  defaultParameters?: Record<string, unknown>;
-};
+import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 
 // Custom Field Template with Reset Button and Search Filtering
 // eslint-disable-next-line complexity -- consider refactoring.

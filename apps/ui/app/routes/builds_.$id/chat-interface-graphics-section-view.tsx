@@ -4,7 +4,7 @@ import { Box, PenLine, Ruler } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { Tabs, TabsList, TabsTrigger } from '#components/ui/tabs.js';
 import { Switch } from '#components/ui/switch.js';
-import { ChatParametersNumber } from '#routes/builds_.$id/chat-parameters-number.js';
+import { ChatParametersNumber } from '#components/geometry/parameters/chat-parameters-number.js';
 import { useBuild } from '#hooks/use-build.js';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
 
@@ -29,6 +29,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
     enableClippingMesh,
     geometryRadius,
     sceneRadius,
+    units,
   } = useSelector(graphicsActor, (s) => ({
     selectedSectionViewId: s.context.selectedSectionViewId,
     sectionViewTranslation: s.context.sectionViewTranslation,
@@ -39,6 +40,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
     enableClippingMesh: s.context.enableClippingMesh,
     geometryRadius: s.context.geometryRadius,
     sceneRadius: s.context.sceneRadius,
+    units: s.context.units,
   }));
 
   const maxDistance = useMemo(() => {
@@ -147,6 +149,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
               </div>
               <ChatParametersNumber
                 enableContinualOnChange
+                units={units}
                 value={sectionViewTranslation}
                 defaultValue={0}
                 descriptor="length"
@@ -168,6 +171,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 </div>
                 <ChatParametersNumber
                   enableContinualOnChange
+                  units={units}
                   value={rotationDegrees.x}
                   defaultValue={0}
                   descriptor="angle"
@@ -187,6 +191,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 </div>
                 <ChatParametersNumber
                   enableContinualOnChange
+                  units={units}
                   value={rotationDegrees.y}
                   defaultValue={0}
                   descriptor="angle"
@@ -206,6 +211,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 </div>
                 <ChatParametersNumber
                   enableContinualOnChange
+                  units={units}
                   value={rotationDegrees.z}
                   defaultValue={0}
                   descriptor="angle"

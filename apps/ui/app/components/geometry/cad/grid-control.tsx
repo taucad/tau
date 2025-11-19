@@ -2,6 +2,8 @@ import React, { useCallback, useState, useEffect, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
 import { Info, Lock, LockIcon, LockOpen } from 'lucide-react';
 import { useSelector } from '@xstate/react';
+import type { LengthSymbol } from '@taucad/units';
+import { standardInternationalBaseUnits } from '@taucad/units/constants';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -19,6 +21,7 @@ import {
 import { cn } from '#utils/ui.utils.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { formatNumberEngineeringNotation } from '#utils/number.utils.js';
+import { toTitleCase } from '#utils/string.utils.js';
 
 type GridSizeIndicatorProps = {
   /**
@@ -39,16 +42,23 @@ const getTextSizeClass = (sizeText: string) => {
 
 const maxDigits = 3;
 
-const gridUnitOptions = [
-  { label: 'Millimeter', value: 'mm', system: 'metric', factor: 1 },
-  { label: 'Centimeter', value: 'cm', system: 'metric', factor: 10 },
-  { label: 'Meter', value: 'm', system: 'metric', factor: 1000 },
-  { label: 'Inch', value: 'in', system: 'imperial', factor: 25.4 }, // Base unit for imperial
-  { label: 'Foot', value: 'ft', system: 'imperial', factor: 304.8 }, // 1 foot = 12 inches
-  { label: 'Yard', value: 'yd', system: 'imperial', factor: 914.4 }, // 1 yard = 3 feet
-] as const;
+const gridUnitOrder = ['mm', 'cm', 'm', 'in', 'ft', 'yd'] as const;
 
-type GridUnitOption = (typeof gridUnitOptions)[number]['value'];
+const gridUnitOptions = gridUnitOrder.map((symbol) => {
+  if (symbol === standardInternationalBaseUnits.length.symbol) {
+    // Base unit (Meter)
+    return {
+      label: toTitleCase(standardInternationalBaseUnits.length.unit),
+      value: symbol as LengthSymbol,
+    };
+  }
+
+  const variant = standardInternationalBaseUnits.length.variants.find((v) => v.symbol === symbol);
+  return {
+    label: variant ? toTitleCase(variant.unit) : symbol,
+    value: symbol as LengthSymbol,
+  };
+});
 
 /**
  * Component that displays the current grid size from the GraphicsProvider
@@ -57,27 +67,22 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
   const { graphicsRef: graphicsActor } = useBuild();
   const gridSizes = useSelector(graphicsActor, (state) => state.context.gridSizes);
   const isGridSizeLocked = useSelector(graphicsActor, (state) => state.context.isGridSizeLocked);
-  const gridUnitSystem = useSelector(graphicsActor, (state) => state.context.gridUnitSystem);
+  const gridFactor = useSelector(graphicsActor, (state) => state.context.units.length.factor);
+  const gridSystem = useSelector(graphicsActor, (state) => state.context.units.length.system);
 
   const [isOpen, setIsOpen] = useState(false);
 
-  // Use the current gridUnitSystem to select an appropriate default unit
-  const defaultUnit = gridUnitSystem === 'imperial' ? 'in' : 'mm';
-  const [unit, setUnit] = useCookie<GridUnitOption>(cookieName.cadUnit, defaultUnit as GridUnitOption);
+  // Derive system from current gridUnit symbol to determine default
+  const defaultUnit = gridSystem === 'imperial' ? ('in' as const) : ('mm' as const);
+
+  const [unit, setUnit] = useCookie<LengthSymbol>(cookieName.cadUnit, defaultUnit);
 
   // Sync graphics machine with cookie value on change
   useEffect(() => {
-    const currentUnitOption = gridUnitOptions.find((option) => option.value === unit);
-    if (currentUnitOption) {
-      graphicsActor.send({
-        type: 'setGridUnit',
-        payload: {
-          unit: currentUnitOption.value,
-          factor: currentUnitOption.factor,
-          system: currentUnitOption.system,
-        },
-      });
-    }
+    graphicsActor.send({
+      type: 'setGridUnit',
+      payload: { unit },
+    });
   }, [unit, graphicsActor]);
 
   const handleLockToggle = useCallback(
@@ -89,12 +94,7 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
 
   const handleUnitChange = useCallback(
     (selectedUnit: string) => {
-      const selectedOption = gridUnitOptions.find((option) => option.value === selectedUnit);
-      if (!selectedOption) {
-        return;
-      }
-
-      setUnit(selectedUnit as GridUnitOption);
+      setUnit(selectedUnit as LengthSymbol);
     },
     [setUnit],
   );
@@ -103,13 +103,8 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
     event.preventDefault();
   }, []);
 
-  // Find the current unit's conversion factor
-  const currentUnitOption = gridUnitOptions.find((option) => option.value === unit) ?? gridUnitOptions[0];
-
   // Convert the display size based on the unit
-  // For both metric and imperial, we divide by the unit factor
-  // (The comment is kept to explain different scenarios but the calculation is the same)
-  const displaySize = gridSizes.smallSize / currentUnitOption.factor;
+  const displaySize = gridSizes.smallSize / gridFactor;
 
   const localizedSmallGridSize = useMemo(() => formatNumberEngineeringNotation(displaySize, maxDigits), [displaySize]);
 

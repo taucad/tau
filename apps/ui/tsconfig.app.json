@@ -43,19 +43,22 @@
   ],
   "references": [
     {
-      "path": "../../packages/converter/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/types/tsconfig.lib.json"
-    },
-    {
       "path": "../../packages/json-schema/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/units/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api-extractor/tsconfig.lib.json"
     },
     {
       "path": "../../libs/tau-examples/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/converter/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/types/tsconfig.lib.json"
     }
   ]
 }

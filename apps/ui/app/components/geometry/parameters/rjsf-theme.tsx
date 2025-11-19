@@ -15,14 +15,14 @@ import { ChevronRight, RefreshCcwDot } from 'lucide-react';
 import { Fragment, useEffect, useState } from 'react';
 import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
-import { ChatParametersBoolean } from '#components/geometry/parameters/chat-parameters-boolean.js';
+import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { cn } from '#utils/ui.utils.js';
 import { toTitleCase } from '#utils/string.utils.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { HighlightText } from '#components/highlight-text.js';
-import { ChatParameterWidget } from '#components/geometry/parameters/chat-parameter-widget.js';
+import { ParametersWidget } from '#components/geometry/parameters/parameters-widget.js';
 import {
   rjsfIdToJsonPath,
   rjsfIdPrefix,
@@ -397,7 +397,7 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
 function CustomCheckboxWidget(props: WidgetProps): React.ReactNode {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
   const { value, onChange, name } = props;
-  return <ChatParametersBoolean value={Boolean(value)} name={name} onChange={onChange} />;
+  return <ParametersBoolean value={Boolean(value)} name={name} onChange={onChange} />;
 }
 
 function SimpleInputWidget(props: WidgetProps & { readonly inputType: string }): React.ReactNode {
@@ -424,11 +424,10 @@ export const widgets: RegistryWidgetsType = {
   EmailWidget: (props) => <SimpleInputWidget {...props} inputType="email" />,
   HiddenWidget: (props) => <SimpleInputWidget {...props} inputType="hidden" />,
   PasswordWidget: (props) => <SimpleInputWidget {...props} inputType="password" />,
-  RangeWidget: ChatParameterWidget,
+  RangeWidget: ParametersWidget,
   SelectWidget,
-  TextWidget: ChatParameterWidget,
-  UpDownWidget: ChatParameterWidget,
-  ChatParameterWidget,
+  TextWidget: ParametersWidget,
+  UpDownWidget: ParametersWidget,
 };
 
 export const templates: TemplatesType = {
@@ -554,7 +553,7 @@ export const templates: TemplatesType = {
 
 export const uiSchema: UiSchema = {
   // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for ui:globalOptions
-  'ui:widget': 'ChatParameterWidget',
+  'ui:widget': 'ParametersWidget',
   // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for ui:globalOptions
   'ui:globalOptions': {
     addable: true,

@@ -4,7 +4,7 @@ import { Box, PenLine, Ruler } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { Tabs, TabsList, TabsTrigger } from '#components/ui/tabs.js';
 import { Switch } from '#components/ui/switch.js';
-import { ChatParametersNumber } from '#components/geometry/parameters/chat-parameters-number.js';
+import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
 import { useBuild } from '#hooks/use-build.js';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
 
@@ -147,7 +147,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
               <div className="px-1 text-xs text-muted-foreground">
                 <Ruler className="size-4 -rotate-45" />
               </div>
-              <ChatParametersNumber
+              <ParametersNumber
                 enableContinualOnChange
                 units={units}
                 value={sectionViewTranslation}
@@ -169,7 +169,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 <div className="flex h-5 w-5 flex-col items-center justify-center text-sm font-medium text-muted-foreground">
                   X
                 </div>
-                <ChatParametersNumber
+                <ParametersNumber
                   enableContinualOnChange
                   units={units}
                   value={rotationDegrees.x}
@@ -189,7 +189,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 <div className="flex h-5 w-5 items-center justify-center text-sm font-medium text-muted-foreground">
                   Y
                 </div>
-                <ChatParametersNumber
+                <ParametersNumber
                   enableContinualOnChange
                   units={units}
                   value={rotationDegrees.y}
@@ -209,7 +209,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 <div className="flex h-5 w-5 items-center justify-center text-sm font-medium text-muted-foreground">
                   Z
                 </div>
-                <ChatParametersNumber
+                <ParametersNumber
                   enableContinualOnChange
                   units={units}
                   value={rotationDegrees.z}

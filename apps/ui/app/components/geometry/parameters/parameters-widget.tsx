@@ -1,12 +1,12 @@
 import type { RJSFSchema, WidgetProps } from '@rjsf/utils';
-import { ChatParametersBoolean } from '#components/geometry/parameters/chat-parameters-boolean.js';
-import { ChatParametersNumber } from '#components/geometry/parameters/chat-parameters-number.js';
-import { ChatParametersString } from '#components/geometry/parameters/chat-parameters-string.js';
+import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
+import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
+import { ParametersString } from '#components/geometry/parameters/parameters-string.js';
 import { toTitleCase } from '#utils/string.utils.js';
 import { getDescriptor } from '#constants/build-parameters.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 
-export function ChatParameterWidget(
+export function ParametersWidget(
   props: WidgetProps<Record<string, unknown>, RJSFSchema, RJSFContext>,
 ): React.JSX.Element {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- RJSF is untyped
@@ -22,9 +22,7 @@ export function ChatParameterWidget(
     case 'boolean': {
       const booleanValue = Boolean(value);
 
-      return (
-        <ChatParametersBoolean value={booleanValue} aria-label={`Toggle for ${prettyLabel}`} onChange={onChange} />
-      );
+      return <ParametersBoolean value={booleanValue} aria-label={`Toggle for ${prettyLabel}`} onChange={onChange} />;
     }
 
     case 'number':
@@ -37,7 +35,7 @@ export function ChatParameterWidget(
       const descriptor = getDescriptor(name);
 
       return (
-        <ChatParametersNumber
+        <ParametersNumber
           className="w-26"
           value={numericValue}
           defaultValue={defaultNumericValue}
@@ -57,7 +55,7 @@ export function ChatParameterWidget(
       const defaultStringValue = String(defaultValue);
 
       return (
-        <ChatParametersString
+        <ParametersString
           value={stringValue}
           defaultValue={defaultStringValue}
           aria-label={`Input for ${prettyLabel}`}

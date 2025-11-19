@@ -8,7 +8,7 @@ import type { MeasurementDescriptor } from '#constants/build-parameters.js';
 
 const baseIndicatorClass = 'flex h-7 w-7 items-center justify-center border bg-muted text-muted-foreground select-none';
 
-type ChatParametersInputNumberProps = Omit<React.ComponentProps<'input'>, 'type' | 'value' | 'onChange'> & {
+type ParametersInputNumberProps = Omit<React.ComponentProps<'input'>, 'type' | 'value' | 'onChange'> & {
   readonly unit?: string;
   readonly descriptor: MeasurementDescriptor;
   /**
@@ -42,7 +42,7 @@ type ChatParametersInputNumberProps = Omit<React.ComponentProps<'input'>, 'type'
   readonly onTextChange?: (text: string) => void;
 };
 
-export const ChatParametersInputNumber = React.forwardRef<HTMLInputElement, ChatParametersInputNumberProps>(
+export const ParametersInputNumber = React.forwardRef<HTMLInputElement, ParametersInputNumberProps>(
   (
     {
       className,

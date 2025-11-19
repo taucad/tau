@@ -1,13 +1,13 @@
 import { vi, describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { GraphicsUnits } from '@taucad/types';
 import type { LengthSymbol } from '@taucad/units';
-import { ChatParametersNumber } from '#components/geometry/parameters/chat-parameters-number.js';
+import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
 import { TooltipProvider } from '#components/ui/tooltip.js';
+import type { Units } from '#components/geometry/parameters/rjsf-context.js';
 
 // Helper to create units from graphics state
-function createUnits(factor: number, symbol: LengthSymbol): GraphicsUnits {
+function createUnits(factor: number, symbol: LengthSymbol): Units {
   return {
     length: {
       factor,
@@ -24,14 +24,14 @@ function TestWrapper({ children }: { readonly children: React.ReactNode }): Reac
   return <TooltipProvider>{children}</TooltipProvider>;
 }
 
-describe('ChatParametersNumber', () => {
+describe('ParametersNumber', () => {
   describe('Basic Rendering', () => {
     it('should render with default mm unit for length', () => {
       const mockOnChange = vi.fn();
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={10}
             defaultValue={10}
             descriptor="length"
@@ -52,7 +52,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={45}
             defaultValue={45}
             descriptor="angle"
@@ -70,7 +70,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={5}
             defaultValue={5}
             descriptor="count"
@@ -89,7 +89,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={1.5}
             defaultValue={1.5}
             descriptor="unitless"
@@ -110,7 +110,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={25.4}
             defaultValue={25.4}
             descriptor="length"
@@ -133,7 +133,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={10}
             defaultValue={10}
             descriptor="length"
@@ -156,7 +156,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={25.4}
             defaultValue={25.4}
             descriptor="length"
@@ -179,7 +179,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={25.4}
             defaultValue={25.4}
             descriptor="length"
@@ -206,7 +206,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={123.456}
             defaultValue={123.456}
             descriptor="length"
@@ -228,7 +228,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={50}
             defaultValue={50}
             descriptor="length"
@@ -250,7 +250,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={50}
             defaultValue={50}
             descriptor="length"
@@ -273,7 +273,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={0}
             defaultValue={0}
             descriptor="length"
@@ -295,7 +295,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={-50}
             defaultValue={-50}
             descriptor="length"
@@ -319,7 +319,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={254}
             defaultValue={254}
             descriptor="length"
@@ -344,7 +344,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={10}
             defaultValue={10}
             descriptor="length"
@@ -368,7 +368,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={10}
             defaultValue={10}
             descriptor="length"
@@ -403,7 +403,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={10}
             defaultValue={10}
             descriptor="length"
@@ -434,7 +434,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={25.4}
             defaultValue={25.4}
             descriptor="length"
@@ -463,7 +463,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={25.4}
             defaultValue={25.4}
             descriptor="length"
@@ -499,7 +499,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={12.7}
             defaultValue={12.7}
             descriptor="length"
@@ -528,7 +528,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={304.8}
             defaultValue={304.8}
             descriptor="length"
@@ -558,7 +558,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={10}
             defaultValue={10}
             descriptor="length"
@@ -582,7 +582,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={10}
             defaultValue={10}
             descriptor="length"
@@ -606,7 +606,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={10}
             defaultValue={10}
             descriptor="length"
@@ -648,7 +648,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={10}
             defaultValue={10}
             descriptor="length"
@@ -681,7 +681,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             disabled
             value={10}
             defaultValue={10}
@@ -706,7 +706,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             disabled
             value={10}
             defaultValue={10}
@@ -734,7 +734,7 @@ describe('ChatParametersNumber', () => {
 
       render(
         <TestWrapper>
-          <ChatParametersNumber
+          <ParametersNumber
             value={0.1}
             defaultValue={0.1}
             descriptor="length"

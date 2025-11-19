@@ -2,19 +2,19 @@ import { Input } from '#components/ui/input.js';
 import { isValidColor, StringColorPicker } from '#components/ui/string-color-picker.js';
 import { cn } from '#utils/ui.utils.js';
 
-type ChatParametersStringProps = {
+type ParametersStringProps = {
   readonly value: string;
   readonly defaultValue: string;
   readonly onChange: (value: string) => void;
 } & Omit<React.ComponentProps<typeof Input>, 'type' | 'value' | 'onChange'>;
 
-export function ChatParametersString({
+export function ParametersString({
   value,
   defaultValue,
   onChange,
   className,
   ...properties
-}: ChatParametersStringProps): React.JSX.Element {
+}: ParametersStringProps): React.JSX.Element {
   // Check if either the current value or default value is a valid color
   // This ensures we show the color picker even when the value is cleared
   const isColorParameter = isValidColor(defaultValue);

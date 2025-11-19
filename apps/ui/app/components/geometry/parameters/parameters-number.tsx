@@ -1,13 +1,13 @@
 import * as React from 'react';
 import { useSelector, useActorRef } from '@xstate/react';
 import { Slider } from '#components/ui/slider.js';
-import { ChatParametersInputNumber } from '#components/geometry/parameters/chat-parameters-input-number.js';
+import { ParametersInputNumber } from '#components/geometry/parameters/parameters-input-number.js';
 import { parameterMachine } from '#machines/parameter.machine.js';
 import type { MeasurementDescriptor } from '#constants/build-parameters.js';
 import { cn } from '#utils/ui.utils.js';
 import type { Units } from '#components/geometry/parameters/rjsf-context.js';
 
-type ChatParametersNumberProps = {
+type ParametersNumberProps = {
   readonly value: number;
   readonly defaultValue: number;
   readonly descriptor: MeasurementDescriptor;
@@ -27,7 +27,7 @@ type ChatParametersNumberProps = {
   readonly units: Units;
 };
 
-export function ChatParametersNumber({
+export function ParametersNumber({
   value,
   defaultValue,
   descriptor,
@@ -39,7 +39,7 @@ export function ChatParametersNumber({
   units,
   enableContinualOnChange = false,
   ...properties
-}: ChatParametersNumberProps): React.JSX.Element {
+}: ParametersNumberProps): React.JSX.Element {
   // Extract unit values from units prop
   const initialUnitFactor = units.length.factor;
   const initialSymbol = units.length.symbol;
@@ -121,7 +121,7 @@ export function ChatParametersNumber({
           parameterRef.send({ type: 'sliderReleased', value: Number(newValue) });
         }}
       />
-      <ChatParametersInputNumber
+      <ParametersInputNumber
         ref={inputRef}
         value={localValue}
         formattedValue={formattedValue}

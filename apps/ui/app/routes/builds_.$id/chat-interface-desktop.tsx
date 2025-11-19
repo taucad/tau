@@ -185,7 +185,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
           <div id="viewport-gizmo-container" className="absolute right-0 -bottom-2" />
 
           {/* Viewer */}
-          <div className={cn('absolute inset-0 left-1/2 -mt-(--header-height) h-dvh w-dvw', '-translate-x-1/2')}>
+          <div className={cn('absolute inset-0 left-1/2 -mt-(--header-height) h-dvh w-[200dvw]', '-translate-x-1/2')}>
             <ChatViewer />
           </div>
 

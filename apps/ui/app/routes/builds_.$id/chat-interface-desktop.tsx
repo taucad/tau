@@ -141,8 +141,8 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
             />
           </div>
 
-          {/* Top-right Content */}
-          <div className="absolute top-0 right-2 z-10 flex flex-col gap-2">
+          {/* Top-right Content - positioned above gizmo */}
+          <div className="absolute top-0 right-2 z-20 flex flex-col gap-2">
             <ChatParametersTrigger
               isOpen={isParametersOpen}
               onToggle={() => {
@@ -182,7 +182,10 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
           </div>
 
           {/* Gizmo Container - Static container for the gizmo to ensure it shares the same containing block as the anchor */}
-          <div id="viewport-gizmo-container" className="absolute right-0 -bottom-2" />
+          <div
+            id="viewport-gizmo-container"
+            className="absolute top-[calc(var(--header-height)+var(--spacing)*16)] right-8 z-10"
+          />
 
           {/* Viewer */}
           <div className={cn('absolute inset-0 left-1/2 -mt-(--header-height) h-dvh w-[200dvw]', '-translate-x-1/2')}>

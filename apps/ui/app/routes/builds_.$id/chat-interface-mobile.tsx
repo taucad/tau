@@ -39,13 +39,16 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
           'pb-0',
           'group-data-[full-height-panel=true]/chat-tabs:pb-[calc(100dvh-var(--full-panel-collapsed))]',
           'group-data-[active-tab=model]/chat-tabs:pb-0!',
-
-          'group-data-[active-tab=model]/chat-tabs:[&_.viewport-gizmo-cube]:bottom-(--nav-height)!',
-          '[&_.viewport-gizmo-cube]:z-auto!',
         )}
       >
         {/* Main viewer */}
         <ChatViewer />
+
+        {/* Gizmo Container - Static container for the gizmo to ensure it shares the same containing block as the anchor */}
+        <div
+          id="viewport-gizmo-container"
+          className="absolute top-[calc(var(--header-height)+var(--spacing)*26)] right-0"
+        />
 
         {/* Top-left Content */}
         <div className="absolute top-(--header-height) right-12 left-2 hidden group-data-[active-tab=model]/chat-tabs:block group-data-[full-height-panel=true]/chat-tabs:block">

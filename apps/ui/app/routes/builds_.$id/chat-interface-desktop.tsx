@@ -51,7 +51,8 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   }, []);
 
   // Update position attributes on visible panes for performant CSS selectors
-  usePanePositionObserver(allotmentRef, {
+  // Only run when the actual Allotment is rendered (client-side)
+  usePanePositionObserver(isClient ? allotmentRef : { current: null }, {
     isChatOpen,
     isParametersOpen,
     isEditorOpen,

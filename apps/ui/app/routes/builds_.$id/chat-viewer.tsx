@@ -44,6 +44,7 @@ export const ChatViewer = memo(function () {
       enableLines={graphicsState.enableLines}
       enableMatcap={graphicsState.enableMatcap}
       geometries={geometries}
+      gizmoContainer="#viewport-gizmo-container"
     />
   );
 });

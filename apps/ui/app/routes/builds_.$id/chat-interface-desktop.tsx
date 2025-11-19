@@ -1,4 +1,4 @@
-import { memo, useRef } from 'react';
+import { memo, useRef, useState, useEffect } from 'react';
 import { Allotment } from 'allotment';
 import { ChatHistory, ChatHistoryTrigger } from '#routes/builds_.$id/chat-history.js';
 import { ChatParameters, ChatParametersTrigger } from '#routes/builds_.$id/chat-parameters.js';
@@ -21,7 +21,6 @@ import {
 } from '#routes/builds_.$id/use-chat-interface-state.js';
 import { ChatInterfaceStatus } from '#routes/builds_.$id/chat-interface-status.js';
 import { ChatInterfaceGraphics } from '#routes/builds_.$id/chat-interface-graphics.js';
-import { isBrowser } from '#constants/browser.constants.js';
 
 export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   const {
@@ -44,6 +43,12 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   } = useChatInterfaceState();
 
   const allotmentRef = useRef<HTMLDivElement>(null);
+  const [isClient, setIsClient] = useState(false);
+
+  // Set isClient to true after hydration to avoid SSR mismatch
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   // Update position attributes on visible panes for performant CSS selectors
   usePanePositionObserver(allotmentRef, {
@@ -56,7 +61,8 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     isDetailsOpen,
   });
 
-  if (!isBrowser) {
+  // Return placeholder during SSR to avoid hydration mismatch
+  if (!isClient) {
     return <div className="hidden size-full md:flex" />;
   }
 

@@ -1921,7 +1921,7 @@ describe('Parameters - Reset Single Parameter Bug', () => {
 
     // Second param (port) should still have the updated value
     const portInputAfterReset = screen.getByLabelText('Input for Port');
-    expect(portInputAfterReset).toHaveValue(9000);
+    expect(portInputAfterReset).toHaveValue('9000');
 
     // Verify parameters object: config1 should be removed/reset, config2 should remain
     expect(currentParameters).not.toHaveProperty('config1');
@@ -2483,7 +2483,7 @@ describe('Parameters - Edge Cases', () => {
 
     // Should show default value for count
     const countInput = screen.getByLabelText('Input for Count');
-    expect(countInput).toHaveValue(5);
+    expect(countInput).toHaveValue('5');
   });
 
   it('should handle schema with no properties', () => {

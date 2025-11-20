@@ -3,24 +3,20 @@ import { useMemo, useCallback, createContext, useContext, useEffect } from 'reac
 import type { ReactNode } from 'react';
 import { useTreeContext } from 'fumadocs-ui/contexts/tree';
 import { useSearchContext } from 'fumadocs-ui/contexts/search';
-import Link from 'fumadocs-core/link';
-import { usePathname } from 'fumadocs-core/framework';
 import { cva } from 'class-variance-authority';
-import { MenuIcon, XIcon, SearchIcon } from 'lucide-react';
-import { useLocation } from 'react-router';
+import { XIcon, MenuIcon } from 'lucide-react';
+import { useLocation, NavLink } from 'react-router';
 import { cn } from '#utils/ui.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
 import {
   FloatingPanel,
-  FloatingPanelTrigger,
-  FloatingPanelToggle,
   FloatingPanelContent,
   FloatingPanelContentHeader,
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
+  FloatingPanelToggle,
 } from '#components/ui/floating-panel.js';
 import {
   SidebarContent,
@@ -30,10 +26,12 @@ import {
   SidebarMenuButton,
   SidebarGroupLabel,
 } from '#components/ui/sidebar.js';
-import { Separator } from '#components/ui/separator.js';
-import { Tau } from '#components/icons/tau.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
+import { DocsIcon } from '#components/icons/docs-icon.js';
 import { metaConfig } from '#config.js';
 import { useIsMobile } from '#hooks/use-mobile.js';
+import { Button } from '#components/ui/button.js';
+import { useKeydown } from '#hooks/use-keydown.js';
 
 const docsSidebarWidthIcon = 'calc(var(--spacing) * 17)';
 const docsSidebarWidth = 'calc(var(--spacing) * 72)';
@@ -49,6 +47,8 @@ const linkVariants = cva('flex items-center gap-2 w-full py-1.5 rounded-lg text-
 
 type DocsSidebarProps = {
   readonly className?: string;
+  readonly isExpanded?: boolean;
+  readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 };
 
 type DocsSidebarProviderContextType = {
@@ -103,37 +103,27 @@ export function DocsSidebarProvider({ children }: { readonly children: ReactNode
   );
 }
 
-export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element {
-  const [isDocsSidebarOpen, setIsDocsSidebarOpen] = useCookie(cookieName.docsOpSidebar, false);
-
+export function DocsSidebar({ className, isExpanded = true, setIsExpanded }: DocsSidebarProps): React.JSX.Element {
   return (
-    <FloatingPanel
-      isOpen={isDocsSidebarOpen}
-      side="left"
-      className={cn('z-20 w-(--docs-sidebar-width-icon) data-[state=open]:w-full', className)}
-      onOpenChange={setIsDocsSidebarOpen}
-    >
-      <FloatingPanelToggle
-        openIcon={MenuIcon}
-        closeIcon={
-          <span>
-            <Tau className="hidden size-6 text-primary md:block md:group-hover:hidden" />
-            <XIcon className="text-primary md:hidden md:group-hover:block" />
-          </span>
-        }
-        openTooltip="Open Documentation Sidebar"
-        closeTooltip="Close Documentation Sidebar"
-        variant="absolute"
-      />
-      <Separator
-        orientation="vertical"
-        className="absolute left-1/2 z-10 my-2 h-4! -translate-x-1/2 group-data-[state=open]:hidden"
-      />
-      <DocsSidebarSearch />
-
-      <FloatingPanelContent>
+    <FloatingPanel isOpen={isExpanded} side="left" className={className} onOpenChange={setIsExpanded}>
+      <FloatingPanelContent className="overflow-hidden rounded-md border">
         <FloatingPanelContentHeader>
-          <FloatingPanelContentTitle className="flex items-center gap-1">{metaConfig.name}</FloatingPanelContentTitle>
+          <FloatingPanelContentTitle className="flex w-full items-center justify-between gap-1">
+            <FloatingPanelToggle
+              openIcon={MenuIcon}
+              closeIcon={
+                <span>
+                  <MenuIcon className="hidden size-6 text-primary group-hover:hidden" />
+                  <XIcon className="text-primary md:hidden md:group-hover:block" />
+                </span>
+              }
+              openTooltip="Open Documentation Sidebar"
+              closeTooltip="Close Documentation Sidebar"
+              variant="absolute"
+            />
+            {metaConfig.name}
+            <DocsSidebarSearch />
+          </FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
 
         <FloatingPanelContentBody>
@@ -153,25 +143,26 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
 function DocsSidebarSearch(): React.JSX.Element | undefined {
   const { enabled, setOpenSearch } = useSearchContext();
 
+  const { formattedKeyCombination: formattedSearchKeyCombination } = useKeydown({ key: '/' }, () => {
+    // @ts-expect-error -- fumadocs has incorrect typing
+    setOpenSearch((previous) => !previous);
+  });
+
   if (!enabled) {
     return undefined;
   }
 
   return (
-    <FloatingPanelTrigger
-      icon={SearchIcon}
-      tooltipContent={
-        <div className="flex items-center gap-2">
-          Search Documentation
-          <KeyShortcut variant="tooltip">{formatKeyCombination({ key: 'K', metaKey: true })}</KeyShortcut>
-        </div>
-      }
-      tooltipSide="right"
-      variant="static"
+    <Button
+      variant="outline"
+      className="mr-0.5 h-6 w-fit px-2 text-xs font-normal"
       onClick={() => {
         setOpenSearch(true);
       }}
-    />
+    >
+      Search Docs
+      <KeyShortcut>{formattedSearchKeyCombination}</KeyShortcut>
+    </Button>
   );
 }
 
@@ -201,17 +192,29 @@ function DocsSidebarItem({
   readonly item: PageTree.Node;
   readonly children: ReactNode;
 }): React.JSX.Element {
-  const pathname = usePathname();
+  const renderIcon = (icon: ReactNode | string | undefined): ReactNode => {
+    if (!icon) {
+      return null;
+    }
+
+    if (typeof icon === 'string') {
+      return <DocsIcon iconString={icon} />;
+    }
+
+    return icon;
+  };
 
   if (item.type === 'page') {
     return (
       <SidebarMenuItem>
-        <SidebarMenuButton asChild isActive={pathname === item.url}>
-          <Link href={item.url} className={linkVariants({ active: pathname === item.url })}>
-            {item.icon}
-            <span>{item.name}</span>
-          </Link>
-        </SidebarMenuButton>
+        <NavLink end to={item.url} tabIndex={-1}>
+          {({ isActive, isPending }) => (
+            <SidebarMenuButton isActive={isActive} className={linkVariants({ active: isActive })}>
+              {isPending ? <LoadingSpinner /> : renderIcon(item.icon)}
+              <span>{item.name}</span>
+            </SidebarMenuButton>
+          )}
+        </NavLink>
       </SidebarMenuItem>
     );
   }
@@ -221,21 +224,24 @@ function DocsSidebarItem({
   }
 
   // Folder type
+  const folderIndex = item.index;
   return (
     <div>
-      {item.index ? (
+      {folderIndex ? (
         <SidebarMenuItem>
-          <SidebarMenuButton asChild isActive={pathname === item.index.url}>
-            <Link href={item.index.url} className={linkVariants({ active: pathname === item.index.url })}>
-              {item.index.icon}
-              <span>{item.index.name}</span>
-            </Link>
-          </SidebarMenuButton>
+          <NavLink end to={folderIndex.url} tabIndex={-1}>
+            {({ isActive, isPending }) => (
+              <SidebarMenuButton isActive={isActive} className={linkVariants({ active: isActive })}>
+                {isPending ? <LoadingSpinner /> : renderIcon(folderIndex.icon)}
+                <span>{folderIndex.name}</span>
+              </SidebarMenuButton>
+            )}
+          </NavLink>
         </SidebarMenuItem>
       ) : (
         <li className="px-2">
           <div className={cn(linkVariants(), 'justify-start text-start')}>
-            {item.icon}
+            {renderIcon(item.icon)}
             <span>{item.name}</span>
           </div>
         </li>

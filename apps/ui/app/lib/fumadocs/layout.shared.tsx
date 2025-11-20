@@ -21,6 +21,7 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
             'data-[state=closed]:bg-muted',
             // Top
             'top-(--header-height)',
+            'pb-[calc(var(--header-height)+var(--spacing)*2)]',
 
             // Transition
             'transition-[top,left,width] duration-200 ease-linear',
@@ -38,7 +39,7 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
         // Transition
         'transition-[padding] duration-200 ease-linear',
         // Positional CSS vars
-        '[--fd-tocnav-height:calc(var(--header-height)+var(--spacing)*2)]!',
+        // '[--fd-tocnav-height:calc(var(--header-height)+var(--spacing)*2)]!',
         // Set the sidebar width to account for both the app sidebar and the docs sidebar.
         'md:[--fd-sidebar-width:calc(var(--sidebar-width-current)+var(--docs-sidebar-width-current))]!',
         // Always account for the docs sidebar width on desktop to ensure the page doesn't shift on docs sidebar open/close.
@@ -63,11 +64,12 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
         '[&_#nd-toc]:border',
         '[&_#nd-toc]:rounded-md',
         '[&_#nd-toc]:bg-muted',
-        '[&_#nd-toc]:m-2',
+        '[&_#nd-toc]:mx-2',
         '[&_#nd-toc]:p-2',
         '[&_#nd-toc]:w-(--docs-sidebar-width)',
         '[&_#nd-toc]:h-fit',
         '[&_#nd-toc]:ms-2',
+        '[&_#nd-toc]:top-(--header-height)!',
         '[&_#nd-toc]:end-0!',
       ),
     },

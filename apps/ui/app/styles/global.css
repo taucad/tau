@@ -146,10 +146,10 @@
   --neutral: oklch(calc(var(--l-medium) * 0.85) 0 var(--hue-neutral));
   --muted: oklch(calc(var(--l-surface) * 0.85) 0 var(--hue-neutral));
   --input: oklch(calc(var(--l-subtle) * 0.85) 0 var(--hue-neutral));
-  --border: oklch(calc(var(--l-subtle) * 0.85) 0.01 var(--hue-neutral));
+  --border: oklch(calc(var(--l-subtle) * 0.85) 0.005 var(--hue-neutral));
   --accent: oklch(calc(var(--l-subtle) * 0.85) 0.015 var(--hue-neutral));
   --sidebar-background: oklch(calc(var(--l-surface) * 0.85) 0 var(--hue-neutral));
-  --sidebar-border: oklch(var(--l-subtle) 0 var(--hue-neutral));
+  --sidebar-border: oklch(calc(var(--l-subtle) * 0.85) 0.005 var(--hue-neutral));
   --sidebar-accent: oklch(calc(var(--l-subtle) * 0.85) 0.02 var(--hue-neutral));
 
   --primary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));

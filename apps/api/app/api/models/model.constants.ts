@@ -11,7 +11,7 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
         id: 'vertexai',
         name: 'Google',
       },
-      model: 'gemini-2.5-pro-preview-05-06',
+      model: 'gemini-2.5-pro',
       details: {
         family: 'gemini',
         families: ['Gemini'],
@@ -162,18 +162,18 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
     },
   },
   openai: {
-    'gpt-5': {
-      id: 'openai-gpt-5',
-      name: 'GPT-5',
-      slug: 'gpt-5',
+    'gpt-5.1': {
+      id: 'openai-gpt-5.1',
+      name: 'GPT-5.1',
+      slug: 'gpt-5.1',
       provider: {
         id: 'openai',
         name: 'OpenAI',
       },
-      model: 'gpt-5',
+      model: 'gpt-5.1',
       details: {
         family: 'gpt',
-        families: ['GPT-5'],
+        families: ['GPT-5.1'],
         contextWindow: 1_000_000,
         maxTokens: 100_000,
         cost: {

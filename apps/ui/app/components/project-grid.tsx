@@ -244,7 +244,7 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
                   <Button
                     variant="outline"
                     size="sm"
-                    className="flex items-center gap-1 text-sm text-muted-foreground hover:text-blue"
+                    className="flex items-center gap-1 text-sm text-muted-foreground hover:text-primary"
                     disabled={isForking}
                     onClick={handleFork}
                   >

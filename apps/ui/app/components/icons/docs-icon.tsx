@@ -11,24 +11,30 @@ type IconId = string;
 /**
  * Parse icon string in format "namespace:icon-id"
  * Examples: "lucide:ban", "lib:openscad"
+ * @throws Error if icon string format is invalid
  */
-function parseIconString(iconString: string): { namespace: IconNamespace; id: IconId } | undefined {
+function parseIconString(iconString: string): { namespace: IconNamespace; id: IconId } {
   if (!iconString || iconString.trim() === '') {
-    return undefined;
+    throw new Error('Icon string is required. Format: "namespace:icon-id" (e.g., "lucide:file" or "lib:openscad")');
   }
 
   const parts = iconString.split(':');
   if (parts.length !== 2) {
-    return undefined;
+    throw new Error(
+      `Invalid icon format: "${iconString}". Expected "namespace:icon-id" (e.g., "lucide:file" or "lib:openscad")`,
+    );
   }
 
   const [namespace, id] = parts;
+
   if (namespace !== 'lucide' && namespace !== 'lib') {
-    return undefined;
+    throw new Error(
+      `Invalid namespace: "${namespace}". Must be "lucide" or "lib" (e.g., "lucide:file" or "lib:openscad")`,
+    );
   }
 
   if (!id || id.trim() === '') {
-    return undefined;
+    throw new Error(`Icon ID cannot be empty. Format: "${namespace}:icon-id" (e.g., "${namespace}:file")`);
   }
 
   return { namespace, id: id.trim() };
@@ -37,15 +43,24 @@ function parseIconString(iconString: string): { namespace: IconNamespace; id: Ic
 /**
  * Get Lucide icon component from icon name
  * Converts kebab-case to PascalCase (e.g., "ban" -> "Ban", "arrow-right" -> "ArrowRight")
+ * @throws Error if icon is not found
  */
-function getLucideIcon(iconName: string): LucideIcon | undefined {
+function getLucideIcon(iconName: string): LucideIcon {
   // Convert kebab-case to PascalCase
   const pascalCase = iconName
     .split('-')
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join('');
 
-  return icons[pascalCase as keyof typeof icons] as LucideIcon | undefined;
+  const icon = icons[pascalCase as keyof typeof icons] as LucideIcon | undefined;
+
+  if (!icon) {
+    throw new Error(
+      `Lucide icon "${iconName}" not found. Verify the icon exists at https://lucide.dev/icons/${iconName}`,
+    );
+  }
+
+  return icon;
 }
 
 /**
@@ -65,25 +80,15 @@ export function DocsIcon({
 }: {
   readonly iconString: string;
   readonly className?: string;
-}): React.JSX.Element | undefined {
-  const parsed = parseIconString(iconString);
+}): React.JSX.Element {
+  const { namespace, id } = parseIconString(iconString);
 
-  if (!parsed) {
-    return undefined;
-  }
-
-  const { namespace, id } = parsed;
-
-  // Priority 1: Lucide icons
+  // Lucide icons
   if (namespace === 'lucide') {
     const LucideIconComponent = getLucideIcon(id);
-    if (LucideIconComponent) {
-      return createElement(LucideIconComponent, { className });
-    }
-
-    throw new Error(`Icon "${iconString}" not found in Lucide icons`);
+    return createElement(LucideIconComponent, { className });
   }
 
-  // Priority 2: Library icons (SvgIcon sprite)
+  // Library icons (SvgIcon sprite)
   return <SvgIcon id={id as SvgIcons} className={className} />;
 }

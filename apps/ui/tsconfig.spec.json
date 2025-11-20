@@ -8,7 +8,8 @@
     "target": "ES2024",
     "baseUrl": ".",
     "paths": {
-      "#*": ["app/*"]
+      "#*": ["app/*"],
+      "fumadocs-mdx:collections/*": [".source/*"]
     },
     "outDir": "./out-tsc/spec",
     "rootDirs": [".", "./.react-router/types"],
@@ -33,6 +34,7 @@
     "tests/**/*.test.ts",
     "tests/**/*.spec.tsx",
     "tests/**/*.test.tsx",
-    "vite-environment.d.ts"
+    "vite-environment.d.ts",
+    ".source/**/*" // Fumadocs collections
   ]
 }

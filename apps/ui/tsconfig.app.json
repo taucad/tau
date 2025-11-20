@@ -6,7 +6,8 @@
     "app/**/*.js",
     "app/**/*.jsx",
     "vite-environment.d.ts",
-    ".react-router/types/**/*"
+    ".react-router/types/**/*",
+    ".source/**/*" // Fumadocs collections
   ],
   "compilerOptions": {
     "outDir": "./out-tsc/lib",
@@ -19,7 +20,8 @@
     "target": "ES2024",
     "baseUrl": ".",
     "paths": {
-      "#*": ["app/*"]
+      "#*": ["app/*"],
+      "fumadocs-mdx:collections/*": [".source/*"]
     }
   },
   "exclude": [
@@ -38,8 +40,7 @@
     "app/**/*.test.js",
     "app/**/*.spec.js",
     "app/**/*.test.jsx",
-    "app/**/*.spec.jsx",
-    "source.generated.ts"
+    "app/**/*.spec.jsx"
   ],
   "references": [
     {

@@ -36,34 +36,14 @@ jobs:
       - name: Get code
         uses: actions/checkout@v5
 
-      - name: Get previous comment
-        uses: marocchino/sticky-pull-request-comment@v2
-        id: get-comment
-        with:
-          header: fly-review-ui
-          find: true
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract existing URL
-        id: extract-url
-        if: steps.get-comment.outputs.body != ''
-        env:
-          COMMENT_BODY: ${{ steps.get-comment.outputs.body }}
-        run: |
-          if [[ "$COMMENT_BODY" =~ \*\*URL:\*\*[[:space:]]*(https://[^[:space:]]*) ]]; then
-            echo "url=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
-          else
-            echo "url=" >> $GITHUB_OUTPUT
-          fi
-
       - name: Post initial UI status
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: fly-review-ui
           message: |
             ### UI Preview :balloon:
-            **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || (github.event.action == 'synchronize' && '🔄 Redeploying...') || '🔄 Deploying...' }}
-            **URL:** ${{ steps.extract-url.outputs.url || '_Pending..._' }}
+            **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || '🔄 Deploying...' }}
+            **URL:** https://tau-ui-pr-${{ github.event.number }}.fly.dev/
 
       - name: Deploy UI PR app to Fly.io
         id: deploy
@@ -82,7 +62,7 @@ jobs:
           message: |
             ### UI Preview :balloon:
             **Status:** ${{ github.event.action == 'closed' && '✅ Destroyed' || '✅ Deployed' }}
-            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || steps.deploy.outputs.url }}
+            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || format('https://tau-ui-pr-{0}.fly.dev/', github.event.number) }}
 
       - name: Update UI status - failure
         if: steps.deploy.outcome == 'failure'
@@ -92,7 +72,7 @@ jobs:
           message: |
             ### UI Preview :balloon:
             **Status:** ❌ Deployment Failed
-            **URL:** ${{ steps.extract-url.outputs.url && format('{0} _(previous deployment still available)_', steps.extract-url.outputs.url) || '_Failed to deploy_' }}
+            **URL:** https://tau-ui-pr-${{ github.event.number }}.fly.dev/
 
       - name: Update UI status - cancelled
         if: steps.deploy.outcome == 'cancelled'
@@ -102,7 +82,7 @@ jobs:
           message: |
             ### UI Preview :balloon:
             **Status:** ⚠️ Deployment Cancelled
-            **URL:** ${{ steps.extract-url.outputs.url && format('{0} _(previous deployment still available)_', steps.extract-url.outputs.url) || '_Deployment was cancelled_' }}
+            **URL:** https://tau-ui-pr-${{ github.event.number }}.fly.dev/
 
       - name: Fail job if deployment failed
         if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled'
@@ -130,34 +110,14 @@ jobs:
       - name: Get code
         uses: actions/checkout@v5
 
-      - name: Get previous comment
-        uses: marocchino/sticky-pull-request-comment@v2
-        id: get-comment
-        with:
-          header: fly-review-api
-          find: true
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract existing URL
-        id: extract-url
-        if: steps.get-comment.outputs.body != ''
-        env:
-          COMMENT_BODY: ${{ steps.get-comment.outputs.body }}
-        run: |
-          if [[ "$COMMENT_BODY" =~ \*\*URL:\*\*[[:space:]]*(https://[^[:space:]]*) ]]; then
-            echo "url=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
-          else
-            echo "url=" >> $GITHUB_OUTPUT
-          fi
-
       - name: Post initial API status
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: fly-review-api
           message: |
             ### API Preview :octopus:
-            **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || (github.event.action == 'synchronize' && '🔄 Redeploying...') || '🔄 Deploying...' }}
-            **URL:** ${{ steps.extract-url.outputs.url || '_Pending..._' }}
+            **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || '🔄 Deploying...' }}
+            **URL:** https://tau-api-pr-${{ github.event.number }}.fly.dev
 
       - name: Deploy API PR app to Fly.io
         id: deploy
@@ -176,7 +136,7 @@ jobs:
           message: |
             ### API Preview :octopus:
             **Status:** ${{ github.event.action == 'closed' && '✅ Destroyed' || '✅ Deployed' }}
-            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || steps.deploy.outputs.url }}
+            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || format('https://tau-api-pr-{0}.fly.dev', github.event.number) }}
 
       - name: Update API status - failure
         if: steps.deploy.outcome == 'failure'
@@ -186,7 +146,7 @@ jobs:
           message: |
             ### API Preview :octopus:
             **Status:** ❌ Deployment Failed
-            **URL:** ${{ steps.extract-url.outputs.url && format('{0} _(previous deployment still available)_', steps.extract-url.outputs.url) || '_Failed to deploy_' }}
+            **URL:** https://tau-api-pr-${{ github.event.number }}.fly.dev
 
       - name: Update API status - cancelled
         if: steps.deploy.outcome == 'cancelled'
@@ -196,7 +156,7 @@ jobs:
           message: |
             ### API Preview :octopus:
             **Status:** ⚠️ Deployment Cancelled
-            **URL:** ${{ steps.extract-url.outputs.url && format('{0} _(previous deployment still available)_', steps.extract-url.outputs.url) || '_Deployment was cancelled_' }}
+            **URL:** https://tau-api-pr-${{ github.event.number }}.fly.dev
 
       - name: Fail job if deployment failed
         if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled'

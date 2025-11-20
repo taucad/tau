@@ -3,6 +3,7 @@ title: Zoo (KCL) Kernel
 description: KittyCAD Language for cloud-native CAD with AI integration.
 icon: lib:zoo
 ---
+import { Building, Rocket } from 'lucide-react';
 
 ## Setup
 
@@ -68,7 +69,7 @@ return new ResizeObserver(() => {})
 
 <Callout title="Title">Hello World</Callout>
 
-```js title="My Title"
+```js title="My Title" icon={<Building />}
 console.log('Hello World');
 ```
 
@@ -77,4 +78,24 @@ console.log('A');
 ```
 ```ts tab="Tab 2"
 console.log('B');
+```
+
+```ts twoslash lineNumbers
+const a = 'Hello World';
+//    ^?
+console.log(a);
+```
+
+```ts tab="<Building /> Tab 1"
+console.log('A');
+```
+```ts tab="<Rocket /> Tab 2"
+console.log('B');
+```
+
+```js lineNumbers=4
+function main() {
+  console.log('starts from 4');
+  return 0;
+}
 ```

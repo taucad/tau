@@ -132,7 +132,7 @@ export function CodeBlockAction({
  */
 export function CodeBlockContent({ children, className, ...rest }: ComponentProps<'div'>): React.JSX.Element {
   return (
-    <div {...rest} data-slot="codeblock-content" className={cn('overflow-x-auto p-2', className)}>
+    <div {...rest} data-slot="codeblock-content" className={cn('overflow-x-auto py-2', className)}>
       {children}
     </div>
   );

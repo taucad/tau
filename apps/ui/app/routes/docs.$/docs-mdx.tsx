@@ -3,6 +3,7 @@ import defaultMdxComponents from 'fumadocs-ui/mdx';
 import { InlineCode, Pre } from '#components/code/code-block.js';
 import { DocsCodeBlock } from '#routes/docs.$/docs-codeblock.js';
 import { cn } from '#utils/ui.utils.js';
+import { extractTextFromChildren } from '#utils/react.utils.js';
 
 export function getMdxComponents(): MDXComponents {
   return {
@@ -13,7 +14,8 @@ export function getMdxComponents(): MDXComponents {
       const className = props.className ?? '';
       const match = /language-(\w+)/.exec(className as string);
       const language = match ? match[1] : '';
-      const text = String(props.children).replace(/\n$/, '');
+      const text = extractTextFromChildren(props.children).replace(/\n$/, '');
+
       const title = props.title as string | undefined;
 
       return (

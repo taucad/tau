@@ -17,7 +17,7 @@ const floatingPanelTriggerButtonVariants = cva(cn('text-muted-foreground hover:t
         'absolute group-data-[state=open]/floating-panel:z-10',
         'rounded-md group-data-[state=open]/floating-panel:rounded-sm',
         'size-8 group-data-[state=open]/floating-panel:size-7',
-        'opacity-0 group-hover/floating-panel:opacity-100',
+        'md:opacity-0 md:group-hover/floating-panel:opacity-100',
         'transition-opacity duration-200',
       ),
       static: '',

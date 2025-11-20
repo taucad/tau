@@ -16,7 +16,8 @@ import {
   FloatingPanelContentHeader,
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
-  FloatingPanelToggle,
+  FloatingPanelClose,
+  FloatingPanelTrigger,
 } from '#components/ui/floating-panel.js';
 import {
   SidebarContent,
@@ -47,12 +48,11 @@ const linkVariants = cva('flex items-center gap-2 w-full py-1.5 rounded-lg text-
 
 type DocsSidebarProps = {
   readonly className?: string;
-  readonly isExpanded?: boolean;
-  readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 };
 
 type DocsSidebarProviderContextType = {
   readonly isDocsSidebarOpen: boolean;
+  readonly setIsDocsSidebarOpen: (value: boolean | ((current: boolean) => boolean)) => void;
   readonly toggleDocsSidebar: () => void;
 };
 
@@ -83,7 +83,10 @@ export function DocsSidebarProvider({ children }: { readonly children: ReactNode
     }
   }, [location, isMobile, setIsDocsSidebarOpen]);
 
-  const value = useMemo(() => ({ isDocsSidebarOpen, toggleDocsSidebar }), [isDocsSidebarOpen, toggleDocsSidebar]);
+  const value = useMemo(
+    () => ({ isDocsSidebarOpen, setIsDocsSidebarOpen, toggleDocsSidebar }),
+    [isDocsSidebarOpen, setIsDocsSidebarOpen, toggleDocsSidebar],
+  );
 
   return (
     <DocsSidebarProviderContext.Provider value={value}>
@@ -103,24 +106,37 @@ export function DocsSidebarProvider({ children }: { readonly children: ReactNode
   );
 }
 
-export function DocsSidebar({ className, isExpanded = true, setIsExpanded }: DocsSidebarProps): React.JSX.Element {
+// Docs Sidebar Trigger Component
+export function DocsSidebarTrigger({
+  isOpen,
+  onToggle,
+}: {
+  readonly isOpen: boolean;
+  readonly onToggle: () => void;
+}): React.JSX.Element {
   return (
-    <FloatingPanel isOpen={isExpanded} side="left" className={className} onOpenChange={setIsExpanded}>
+    <FloatingPanelTrigger
+      icon={MenuIcon}
+      tooltipContent={`${isOpen ? 'Close' : 'Open'} Documentation Sidebar`}
+      className={isOpen ? 'text-primary' : undefined}
+      onClick={onToggle}
+    />
+  );
+}
+
+export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element {
+  const { isDocsSidebarOpen, setIsDocsSidebarOpen } = useDocsSidebarProvider();
+
+  return (
+    <FloatingPanel isOpen={isDocsSidebarOpen} side="left" className={className} onOpenChange={setIsDocsSidebarOpen}>
+      <FloatingPanelClose
+        icon={XIcon}
+        className="top-0.25 left-0.25"
+        tooltipContent={(isOpen) => `${isOpen ? 'Close' : 'Open'} Documentation Sidebar`}
+      />
       <FloatingPanelContent className="overflow-hidden rounded-md border">
         <FloatingPanelContentHeader>
           <FloatingPanelContentTitle className="flex w-full items-center justify-between gap-1">
-            <FloatingPanelToggle
-              openIcon={MenuIcon}
-              closeIcon={
-                <span>
-                  <MenuIcon className="hidden size-6 text-primary group-hover:hidden" />
-                  <XIcon className="text-primary md:hidden md:group-hover:block" />
-                </span>
-              }
-              openTooltip="Open Documentation Sidebar"
-              closeTooltip="Close Documentation Sidebar"
-              variant="absolute"
-            />
             {metaConfig.name}
             <DocsSidebarSearch />
           </FloatingPanelContentTitle>
@@ -249,6 +265,56 @@ function DocsSidebarItem({
       <div className="ml-2 flex flex-col space-y-1 border-l pl-4">
         <SidebarMenu>{children}</SidebarMenu>
       </div>
+    </div>
+  );
+}
+
+export function DocsSidebarWithTrigger(): React.JSX.Element {
+  const { isDocsSidebarOpen, setIsDocsSidebarOpen } = useDocsSidebarProvider();
+
+  return (
+    <div
+      className={cn(
+        // Left
+        'left-2',
+        'md:left-(--sidebar-width-current)',
+        // Top
+        'top-(--header-height)',
+
+        // Width - collapse when closed, expand when open (no animation)
+        'transition-[top,left] duration-200 ease-linear',
+        'fixed',
+      )}
+    >
+      <DocsSidebar
+        className={cn(
+          // Left
+          'left-2',
+          'md:left-(--sidebar-width-current)',
+          'data-[state=closed]:bg-muted',
+          // Top
+          'top-(--header-height)',
+          'pb-[calc(var(--header-height)+var(--spacing)*2)]',
+
+          // Width - collapse when closed, expand when open (no animation)
+          'w-0',
+          'data-[state=open]:w-full',
+
+          // Transition (excluding width to prevent animation)
+          'transition-[top,left] duration-200 ease-linear',
+
+          // Max width
+          'max-w-[calc(100dvw-var(--spacing)*4)]',
+          'md:max-w-(--docs-sidebar-width)',
+          'fixed',
+        )}
+      />
+      <DocsSidebarTrigger
+        isOpen={isDocsSidebarOpen}
+        onToggle={() => {
+          setIsDocsSidebarOpen((previous) => !previous);
+        }}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import type { DocsLayoutProps } from 'fumadocs-ui/layouts/docs';
 import { cn } from '#utils/ui.utils.js';
-import { DocsSidebar } from '#routes/docs.$/docs-sidebar.js';
+import { DocsSidebarWithTrigger } from '#routes/docs.$/docs-sidebar.js';
 
 export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
   return {
@@ -12,27 +12,7 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
     },
     sidebar: {
       enabled: true,
-      component: (
-        <DocsSidebar
-          className={cn(
-            // Left
-            'left-2',
-            'md:left-(--sidebar-width-current)',
-            'data-[state=closed]:bg-muted',
-            // Top
-            'top-(--header-height)',
-            'pb-[calc(var(--header-height)+var(--spacing)*2)]',
-
-            // Transition
-            'transition-[top,left,width] duration-200 ease-linear',
-
-            // Max width
-            'max-w-[calc(100dvw-var(--spacing)*4)]',
-            'md:max-w-(--docs-sidebar-width)',
-            'fixed', // Following Fumadoc default
-          )}
-        />
-      ),
+      component: <DocsSidebarWithTrigger />,
     },
     containerProps: {
       className: cn(

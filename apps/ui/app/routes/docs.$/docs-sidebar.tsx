@@ -159,10 +159,14 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
 function DocsSidebarSearch(): React.JSX.Element | undefined {
   const { enabled, setOpenSearch } = useSearchContext();
 
-  const { formattedKeyCombination: formattedSearchKeyCombination } = useKeydown({ key: '/' }, () => {
-    // @ts-expect-error -- fumadocs has incorrect typing
-    setOpenSearch((previous) => !previous);
-  });
+  const { formattedKeyCombination: formattedSearchKeyCombination } = useKeydown(
+    { key: '/' },
+    () => {
+      // @ts-expect-error -- fumadocs has incorrect typing
+      setOpenSearch((previous) => !previous);
+    },
+    { ignoreInputs: true },
+  );
 
   if (!enabled) {
     return undefined;

@@ -14,9 +14,10 @@ export function getMdxComponents(): MDXComponents {
       const match = /language-(\w+)/.exec(className as string);
       const language = match ? match[1] : '';
       const text = String(props.children).replace(/\n$/, '');
+      const title = props.title as string | undefined;
 
       return (
-        <DocsCodeBlock className="bg-muted/20" title={language} text={text}>
+        <DocsCodeBlock className="bg-muted/60" title={title} text={text}>
           <Pre {...props} language={language} />
         </DocsCodeBlock>
       );

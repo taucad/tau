@@ -140,6 +140,7 @@ const clientLoader = browserCollections.docs.createClientLoader({
             '[--tw-prose-kbd:text-foreground]',
             '[--tw-prose-links:text-foreground]',
             '[--tw-prose-pre-bg:text-neutral/10]',
+            '[&_a]:no-underline',
           )}
         >
           <Mdx components={getMdxComponents()} />

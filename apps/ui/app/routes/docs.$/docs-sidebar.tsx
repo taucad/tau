@@ -1,11 +1,12 @@
 import type * as PageTree from 'fumadocs-core/page-tree';
-import { useMemo, useCallback, createContext, useContext, useEffect } from 'react';
+import { useMemo, useCallback, createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { cva } from 'class-variance-authority';
+import { XIcon, MenuIcon, Box, Blocks, Layers, Terminal } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { useLocation, NavLink } from 'react-router';
 import { useTreeContext } from 'fumadocs-ui/contexts/tree';
 import { useSearchContext } from 'fumadocs-ui/contexts/search';
-import { cva } from 'class-variance-authority';
-import { XIcon, MenuIcon } from 'lucide-react';
-import { useLocation, NavLink } from 'react-router';
 import { cn } from '#utils/ui.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
@@ -29,10 +30,10 @@ import {
 } from '#components/ui/sidebar.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 import { DocsIcon } from '#components/icons/docs-icon.js';
-import { metaConfig } from '#config.js';
 import { useIsMobile } from '#hooks/use-mobile.js';
 import { Button } from '#components/ui/button.js';
 import { useKeydown } from '#hooks/use-keydown.js';
+import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 
 const docsSidebarWidthIcon = 'calc(var(--spacing) * 17)';
 const docsSidebarWidth = 'calc(var(--spacing) * 72)';
@@ -129,15 +130,15 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
 
   return (
     <FloatingPanel isOpen={isDocsSidebarOpen} side="left" className={className} onOpenChange={setIsDocsSidebarOpen}>
-      <FloatingPanelClose
-        icon={XIcon}
-        className="top-0.25 left-0.25"
-        tooltipContent={(isOpen) => `${isOpen ? 'Close' : 'Open'} Documentation Sidebar`}
-      />
-      <FloatingPanelContent className="overflow-hidden rounded-md border">
-        <FloatingPanelContentHeader>
-          <FloatingPanelContentTitle className="flex w-full items-center justify-between gap-1">
-            {metaConfig.name}
+      <FloatingPanelContent className={cn('overflow-hidden rounded-md border', isDocsSidebarOpen && 'z-100')}>
+        <FloatingPanelContentHeader className="pl-0">
+          <FloatingPanelContentTitle className="flex w-full items-center justify-between pl-0.25">
+            <FloatingPanelClose
+              icon={XIcon}
+              tooltipContent={(isOpen) => `${isOpen ? 'Close' : 'Open'} Documentation Sidebar`}
+              className="peer mt-0.5 ml-0.5 border md:hidden"
+            />
+            <DocsSidebarFrameworkSelector className="max-md:ml-7.25!" />
             <DocsSidebarSearch />
           </FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
@@ -153,6 +154,87 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
         </FloatingPanelContentBody>
       </FloatingPanelContent>
     </FloatingPanel>
+  );
+}
+
+type FrameworkId = 'editor' | 'framework' | 'platform' | 'cli';
+
+type Framework = {
+  readonly id: FrameworkId;
+  readonly label: string;
+  readonly icon: LucideIcon;
+};
+
+const frameworks: Framework[] = [
+  {
+    id: 'editor',
+    label: 'Editor',
+    icon: Box,
+  },
+  {
+    id: 'framework',
+    label: 'Framework',
+    icon: Blocks,
+  },
+  {
+    id: 'platform',
+    label: 'Platform',
+    icon: Layers,
+  },
+  {
+    id: 'cli',
+    label: 'CLI',
+    icon: Terminal,
+  },
+] as const satisfies Framework[];
+
+function DocsSidebarFrameworkSelector({ className }: { readonly className?: string }): React.JSX.Element {
+  const [selectedFramework, setSelectedFramework] = useState<Framework>(frameworks[0]!);
+
+  const groupedItems = [
+    {
+      name: 'Documentation',
+      items: frameworks,
+    },
+  ];
+
+  return (
+    <ComboBoxResponsive<Framework>
+      isSearchEnabled={false}
+      groupedItems={groupedItems}
+      renderLabel={(framework) => {
+        const Icon = framework.icon;
+        return (
+          <div className="flex items-center gap-2">
+            <Icon className="size-4" />
+            <span>{framework.label}</span>
+          </div>
+        );
+      }}
+      popoverProperties={{ align: 'start' }}
+      getValue={(framework) => framework.id}
+      defaultValue={selectedFramework}
+      title="Select Framework"
+      description="Choose which framework documentation to view"
+      className="md:w-[180px]"
+      onSelect={(value) => {
+        const framework = frameworks.find((f) => f.id === value);
+        if (framework) {
+          setSelectedFramework(framework);
+        }
+      }}
+    >
+      <Button
+        variant="ghost"
+        className={cn(
+          'h-7 gap-2 rounded-sm border border-transparent pr-3 pl-2! hover:border-border hover:text-foreground max-md:border-border',
+          className,
+        )}
+      >
+        <selectedFramework.icon data-slot="framework-icon" className="size-4" />
+        {selectedFramework.label}
+      </Button>
+    </ComboBoxResponsive>
   );
 }
 
@@ -313,12 +395,19 @@ export function DocsSidebarWithTrigger(): React.JSX.Element {
           'fixed',
         )}
       />
-      <DocsSidebarTrigger
-        isOpen={isDocsSidebarOpen}
-        onToggle={() => {
-          setIsDocsSidebarOpen((previous) => !previous);
+      <div
+        className="absolute top-0"
+        style={{
+          left: isDocsSidebarOpen ? 'calc(var(--docs-sidebar-width) + var(--spacing)*2)' : 0,
         }}
-      />
+      >
+        <DocsSidebarTrigger
+          isOpen={isDocsSidebarOpen}
+          onToggle={() => {
+            setIsDocsSidebarOpen((previous) => !previous);
+          }}
+        />
+      </div>
     </div>
   );
 }

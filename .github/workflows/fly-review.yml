@@ -36,14 +36,32 @@ jobs:
       - name: Get code
         uses: actions/checkout@v5
 
+      - name: Get previous comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        id: get-comment
+        with:
+          header: fly-review-ui
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract existing URL
+        id: extract-url
+        if: github.event.action == 'synchronize'
+        run: |
+          COMMENT_BODY='${{ steps.get-comment.outputs.body }}'
+          if [[ "$COMMENT_BODY" =~ \*\*URL:\*\*[[:space:]]*(https://[^[:space:]]*) ]]; then
+            echo "url=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+          else
+            echo "url=" >> $GITHUB_OUTPUT
+          fi
+
       - name: Post initial UI status
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: fly-review-ui
           message: |
             ### UI Preview :balloon:
-            **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || '🔄 Deploying...' }}
-            **URL:** _Pending..._
+            **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || (github.event.action == 'synchronize' && '🔄 Redeploying...') || '🔄 Deploying...' }}
+            **URL:** ${{ steps.extract-url.outputs.url || '_Pending..._' }}
 
       - name: Deploy UI PR app to Fly.io
         id: deploy
@@ -110,14 +128,32 @@ jobs:
       - name: Get code
         uses: actions/checkout@v5
 
+      - name: Get previous comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        id: get-comment
+        with:
+          header: fly-review-api
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract existing URL
+        id: extract-url
+        if: github.event.action == 'synchronize'
+        run: |
+          COMMENT_BODY='${{ steps.get-comment.outputs.body }}'
+          if [[ "$COMMENT_BODY" =~ \*\*URL:\*\*[[:space:]]*(https://[^[:space:]]*) ]]; then
+            echo "url=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+          else
+            echo "url=" >> $GITHUB_OUTPUT
+          fi
+
       - name: Post initial API status
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: fly-review-api
           message: |
             ### API Preview :octopus:
-            **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || '🔄 Deploying...' }}
-            **URL:** _Pending..._
+            **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || (github.event.action == 'synchronize' && '🔄 Redeploying...') || '🔄 Deploying...' }}
+            **URL:** ${{ steps.extract-url.outputs.url || '_Pending..._' }}
 
       - name: Deploy API PR app to Fly.io
         id: deploy

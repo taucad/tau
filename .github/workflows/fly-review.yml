@@ -41,11 +41,12 @@ jobs:
         id: get-comment
         with:
           header: fly-review-ui
+          find: true
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract existing URL
         id: extract-url
-        if: github.event.action == 'synchronize'
+        if: steps.get-comment.outputs.body != ''
         env:
           COMMENT_BODY: ${{ steps.get-comment.outputs.body }}
         run: |
@@ -91,7 +92,7 @@ jobs:
           message: |
             ### UI Preview :balloon:
             **Status:** ❌ Deployment Failed
-            **URL:** _Failed to deploy_
+            **URL:** ${{ steps.extract-url.outputs.url && format('{0} _(previous deployment still available)_', steps.extract-url.outputs.url) || '_Failed to deploy_' }}
 
       - name: Update UI status - cancelled
         if: steps.deploy.outcome == 'cancelled'
@@ -101,7 +102,7 @@ jobs:
           message: |
             ### UI Preview :balloon:
             **Status:** ⚠️ Deployment Cancelled
-            **URL:** _Deployment was cancelled_
+            **URL:** ${{ steps.extract-url.outputs.url && format('{0} _(previous deployment still available)_', steps.extract-url.outputs.url) || '_Deployment was cancelled_' }}
 
       - name: Fail job if deployment failed
         if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled'
@@ -134,11 +135,12 @@ jobs:
         id: get-comment
         with:
           header: fly-review-api
+          find: true
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract existing URL
         id: extract-url
-        if: github.event.action == 'synchronize'
+        if: steps.get-comment.outputs.body != ''
         env:
           COMMENT_BODY: ${{ steps.get-comment.outputs.body }}
         run: |
@@ -184,7 +186,7 @@ jobs:
           message: |
             ### API Preview :octopus:
             **Status:** ❌ Deployment Failed
-            **URL:** _Failed to deploy_
+            **URL:** ${{ steps.extract-url.outputs.url && format('{0} _(previous deployment still available)_', steps.extract-url.outputs.url) || '_Failed to deploy_' }}
 
       - name: Update API status - cancelled
         if: steps.deploy.outcome == 'cancelled'
@@ -194,7 +196,7 @@ jobs:
           message: |
             ### API Preview :octopus:
             **Status:** ⚠️ Deployment Cancelled
-            **URL:** _Deployment was cancelled_
+            **URL:** ${{ steps.extract-url.outputs.url && format('{0} _(previous deployment still available)_', steps.extract-url.outputs.url) || '_Deployment was cancelled_' }}
 
       - name: Fail job if deployment failed
         if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled'

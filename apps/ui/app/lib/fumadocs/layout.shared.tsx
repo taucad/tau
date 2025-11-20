@@ -19,7 +19,7 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
         // Transition
         'transition-[padding] duration-200 ease-linear',
         // Positions the search modal below the header.
-        'xl:[--fd-tocnav-height:calc(var(--header-height)+var(--spacing)*2)]!',
+        '[--fd-tocnav-height:calc(var(--header-height))]!',
         // Set the sidebar width to account for both the app sidebar and the docs sidebar.
         'md:[--fd-sidebar-width:calc(var(--sidebar-width-current)+var(--docs-sidebar-width-current))]!',
         // Always account for the docs sidebar width on desktop to ensure the page doesn't shift on docs sidebar open/close.
@@ -33,7 +33,6 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
         // We want to keep the full page width on mobile, but only shrink the tocnav width via margins.
         '[&_#nd-tocnav]:ml-[calc(var(--docs-sidebar-toggle-width-current)+var(--spacing)*4)]',
         'md:[&_#nd-tocnav]:ml-[calc(var(--docs-sidebar-toggle-width-current)+var(--spacing)*2)]',
-        '[&_#nd-tocnav]:mt-(--header-height)!',
         '[&_#nd-tocnav]:transition-[top,left,width] [&_#nd-tocnav]:duration-200 [&_#nd-tocnav]:ease-linear',
         '[&_#nd-tocnav>button]:px-2',
         '[&_#nd-tocnav>button]:h-7.5',

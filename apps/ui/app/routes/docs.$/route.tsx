@@ -16,6 +16,7 @@ import { baseOptions } from '#lib/fumadocs/layout.shared.js';
 import { getLlmText } from '#lib/fumadocs/get-llms-text.js';
 import { DocsSidebarProvider } from '#routes/docs.$/docs-sidebar.js';
 import { getMdxComponents } from '#routes/docs.$/docs-mdx.js';
+import { cn } from '#utils/ui.utils.js';
 
 // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- loaders are inferred types by design.
 export async function loader({ params }: Route.LoaderArgs) {
@@ -125,7 +126,22 @@ const clientLoader = browserCollections.docs.createClientLoader({
         <meta name="description" content={frontmatter.description} />
         <DocsTitle>{frontmatter.title}</DocsTitle>
         <DocsDescription>{frontmatter.description}</DocsDescription>
-        <DocsBody>
+        <DocsBody
+          className={cn(
+            'prose w-full max-w-full text-sm text-foreground',
+            'overflow-wrap-anywhere wrap-break-word hyphens-auto',
+            '[--tw-prose-headings:text-foreground]',
+            '[--tw-prose-bullets:text-foreground]',
+            '[--tw-prose-bold:text-foreground]',
+            '[--tw-prose-counters:text-foreground]',
+            '[--tw-prose-lead:text-foreground]',
+            '[--tw-prose-quotes:text-foreground]',
+            '[--tw-prose-quote-borders:text-foreground]',
+            '[--tw-prose-kbd:text-foreground]',
+            '[--tw-prose-links:text-foreground]',
+            '[--tw-prose-pre-bg:text-neutral/10]',
+          )}
+        >
           <Mdx components={getMdxComponents()} />
         </DocsBody>
       </DocsPage>

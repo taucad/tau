@@ -19,7 +19,7 @@ export function baseOptions(): Omit<DocsLayoutProps, 'tree'> {
         // Transition
         'transition-[padding] duration-200 ease-linear',
         // Positions the search modal below the header.
-        '[--fd-tocnav-height:calc(var(--header-height)+var(--spacing)*2)]!',
+        'xl:[--fd-tocnav-height:calc(var(--header-height)+var(--spacing)*2)]!',
         // Set the sidebar width to account for both the app sidebar and the docs sidebar.
         'md:[--fd-sidebar-width:calc(var(--sidebar-width-current)+var(--docs-sidebar-width-current))]!',
         // Always account for the docs sidebar width on desktop to ensure the page doesn't shift on docs sidebar open/close.

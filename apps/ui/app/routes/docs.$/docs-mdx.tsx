@@ -2,6 +2,7 @@ import type { MDXComponents } from 'mdx/types.js';
 import defaultMdxComponents from 'fumadocs-ui/mdx';
 import { InlineCode, Pre } from '#components/code/code-block.js';
 import { DocsCodeBlock } from '#routes/docs.$/docs-codeblock.js';
+import { cn } from '#utils/ui.utils.js';
 
 export function getMdxComponents(): MDXComponents {
   return {
@@ -15,7 +16,7 @@ export function getMdxComponents(): MDXComponents {
       const text = String(props.children).replace(/\n$/, '');
 
       return (
-        <DocsCodeBlock title={language} text={text}>
+        <DocsCodeBlock className="bg-muted/20" title={language} text={text}>
           <Pre {...props} language={language} />
         </DocsCodeBlock>
       );
@@ -34,7 +35,7 @@ export function getMdxComponents(): MDXComponents {
       }
 
       return (
-        <code {...rest} className={className as string}>
+        <code {...rest} className={cn(className as string, 'flex flex-col')}>
           {children}
         </code>
       );

@@ -21,8 +21,10 @@ jobs:
     outputs:
       url: ${{ steps.deploy.outputs.url }}
     # Only run one deployment at a time per PR for UI.
+    # Cancel in-progress runs when a new commit is pushed to the same PR
     concurrency:
       group: pr-${{ github.event.number }}-ui
+      cancel-in-progress: true
 
     # Deploying apps with this "review" environment allows the URL for the app to be displayed in the PR UI.
     environment:
@@ -95,8 +97,10 @@ jobs:
     outputs:
       url: ${{ steps.deploy.outputs.url }}
     # Only run one deployment at a time per PR for API.
+    # Cancel in-progress runs when a new commit is pushed to the same PR
     concurrency:
       group: pr-${{ github.event.number }}-api
+      cancel-in-progress: true
 
     environment:
       name: review-api

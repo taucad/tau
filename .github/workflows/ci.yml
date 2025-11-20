@@ -11,9 +11,11 @@ env:
 
 # Cancel in-progress runs when a new workflow with the same group name is triggered
 # This can save 10-50% on CI compute costs.
+# For pull requests, include the head ref to allow different PRs to run concurrently
+# while still canceling outdated runs on the same PR
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' }}
 
 jobs:
   main:

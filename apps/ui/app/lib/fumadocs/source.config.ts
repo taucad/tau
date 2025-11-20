@@ -10,4 +10,10 @@ export const docs: DocsCollection<typeof frontmatterSchema, typeof metaSchema> =
   },
 });
 
-export default defineConfig();
+export default defineConfig({
+  mdxOptions: {
+    remarkCodeTabOptions: {
+      parseMdx: true,
+    },
+  },
+});

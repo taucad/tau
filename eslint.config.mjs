@@ -52,7 +52,7 @@ const config = [
       '**/out-tsc',
       '**/generated',
       '**/assets',
-      '**/source/**/*', // Fumadocs source files.
+      '**/.source/**/*', // Fumadocs source files.
     ],
   },
   // First, apply XO's base configuration

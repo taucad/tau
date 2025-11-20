@@ -46,8 +46,9 @@ jobs:
       - name: Extract existing URL
         id: extract-url
         if: github.event.action == 'synchronize'
+        env:
+          COMMENT_BODY: ${{ steps.get-comment.outputs.body }}
         run: |
-          COMMENT_BODY='${{ steps.get-comment.outputs.body }}'
           if [[ "$COMMENT_BODY" =~ \*\*URL:\*\*[[:space:]]*(https://[^[:space:]]*) ]]; then
             echo "url=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
           else
@@ -138,8 +139,9 @@ jobs:
       - name: Extract existing URL
         id: extract-url
         if: github.event.action == 'synchronize'
+        env:
+          COMMENT_BODY: ${{ steps.get-comment.outputs.body }}
         run: |
-          COMMENT_BODY='${{ steps.get-comment.outputs.body }}'
           if [[ "$COMMENT_BODY" =~ \*\*URL:\*\*[[:space:]]*(https://[^[:space:]]*) ]]; then
             echo "url=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
           else

@@ -69,6 +69,9 @@ export const registerCompletions = (editor: StandaloneCodeEditor, monaco: Monaco
     async requestHandler(request) {
       const response = await fetch(`${ENV.TAU_API_URL}/v1/code-completion`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(request.body),
         credentials: 'include',
       });

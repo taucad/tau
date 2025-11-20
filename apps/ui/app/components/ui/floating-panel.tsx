@@ -86,14 +86,6 @@ const floatingPanelContentHeaderVariants = cva(
   },
 );
 
-const floatingPanelIconVariants = cva(
-  cn(
-    'transition-transform duration-300 ease-in-out',
-    '[&_svg]:transition-colors [&_svg]:duration-300',
-    'group-data-[state=open]/floating-panel:[&_svg]:text-primary',
-  ),
-);
-
 type FloatingPanelContextValue = {
   readonly isOpen: boolean;
   readonly toggle: () => void;
@@ -210,14 +202,9 @@ function FloatingPanelTriggerButton({
   const side = context?.side ?? 'right';
   const align = context?.align ?? 'start';
 
-  // Default tooltip side based on panel side
-  const defaultTooltipSide = (): 'left' | 'right' | 'top' | 'bottom' => {
-    const defaults = {
-      left: 'right' as const,
-      right: 'left' as const,
-    };
-    return tooltipSide ?? defaults[side];
-  };
+  const defaultTooltipSide = React.useMemo(() => {
+    return tooltipSide ?? side;
+  }, [tooltipSide, side]);
 
   // Render icon based on whether it's a ReactNode or a LucideIcon component
   const renderIcon = (): React.ReactNode => {
@@ -240,11 +227,19 @@ function FloatingPanelTriggerButton({
           data-slot="floating-panel-trigger"
           onClick={onClick}
         >
-          <span className={floatingPanelIconVariants()}>{renderIcon()}</span>
+          <span
+            className={cn(
+              'transition-transform duration-300 ease-in-out',
+              '[&_svg]:transition-colors [&_svg]:duration-300',
+              'group-data-[state=open]/floating-panel:[&_svg]:text-primary',
+            )}
+          >
+            {renderIcon()}
+          </span>
           {children}
         </Button>
       </TooltipTrigger>
-      <TooltipContent side={defaultTooltipSide()}>{tooltipContent}</TooltipContent>
+      <TooltipContent side={defaultTooltipSide}>{tooltipContent}</TooltipContent>
     </Tooltip>
   );
 }

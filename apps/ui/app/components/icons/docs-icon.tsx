@@ -42,7 +42,10 @@ function parseIconString(iconString: string): { namespace: IconNamespace; id: Ic
 
 /**
  * Get Lucide icon component from icon name
- * Converts kebab-case to PascalCase (e.g., "ban" -> "Ban", "arrow-right" -> "ArrowRight")
+ * Converts kebab-case to PascalCase (e.g., "ban" -> "Ban", "arrow-right" -> "ArrowRight").
+ *
+ * This conversion is done manually due to issues with the DynamicIcon component.
+ *
  * @throws Error if icon is not found
  */
 function getLucideIcon(iconName: string): LucideIcon {

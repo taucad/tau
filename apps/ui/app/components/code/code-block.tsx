@@ -132,7 +132,7 @@ export function CodeBlockAction({
  */
 export function CodeBlockContent({ children, className, ...rest }: ComponentProps<'div'>): React.JSX.Element {
   return (
-    <div {...rest} data-slot="codeblock-content" className={cn('overflow-x-auto p-2', className)}>
+    <div {...rest} data-slot="codeblock-content" className={cn('overflow-x-auto py-2', className)}>
       {children}
     </div>
   );
@@ -166,7 +166,7 @@ export function InlineCode({ children, className, ...rest }: ComponentProps<'cod
       data-slot="inline-code"
       className={cn(
         className,
-        'rounded-sm bg-neutral/20 px-1 py-0.5 font-normal text-foreground/80 before:content-none after:content-none',
+        'rounded-sm border bg-neutral/10 px-1 py-0.5 font-normal text-foreground/80 before:content-none after:content-none',
       )}
     >
       {children}

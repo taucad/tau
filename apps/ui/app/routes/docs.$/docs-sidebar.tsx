@@ -1,26 +1,24 @@
-import type { PageTree } from 'fumadocs-core/server';
-import { useMemo, useCallback, createContext, useContext, useEffect } from 'react';
+import type * as PageTree from 'fumadocs-core/page-tree';
+import { useMemo, useCallback, createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { cva } from 'class-variance-authority';
+import { XIcon, MenuIcon, Box, Blocks, Layers, Terminal } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { useLocation, NavLink } from 'react-router';
 import { useTreeContext } from 'fumadocs-ui/contexts/tree';
 import { useSearchContext } from 'fumadocs-ui/contexts/search';
-import Link from 'fumadocs-core/link';
-import { usePathname } from 'fumadocs-core/framework';
-import { cva } from 'class-variance-authority';
-import { MenuIcon, XIcon, SearchIcon } from 'lucide-react';
-import { useLocation } from 'react-router';
 import { cn } from '#utils/ui.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
 import {
   FloatingPanel,
-  FloatingPanelTrigger,
-  FloatingPanelToggle,
   FloatingPanelContent,
   FloatingPanelContentHeader,
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
+  FloatingPanelClose,
+  FloatingPanelTrigger,
 } from '#components/ui/floating-panel.js';
 import {
   SidebarContent,
@@ -30,10 +28,12 @@ import {
   SidebarMenuButton,
   SidebarGroupLabel,
 } from '#components/ui/sidebar.js';
-import { Separator } from '#components/ui/separator.js';
-import { Tau } from '#components/icons/tau.js';
-import { metaConfig } from '#config.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
+import { DocsIcon } from '#components/icons/docs-icon.js';
 import { useIsMobile } from '#hooks/use-mobile.js';
+import { Button } from '#components/ui/button.js';
+import { useKeydown } from '#hooks/use-keydown.js';
+import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 
 const docsSidebarWidthIcon = 'calc(var(--spacing) * 17)';
 const docsSidebarWidth = 'calc(var(--spacing) * 72)';
@@ -53,6 +53,7 @@ type DocsSidebarProps = {
 
 type DocsSidebarProviderContextType = {
   readonly isDocsSidebarOpen: boolean;
+  readonly setIsDocsSidebarOpen: (value: boolean | ((current: boolean) => boolean)) => void;
   readonly toggleDocsSidebar: () => void;
 };
 
@@ -83,7 +84,10 @@ export function DocsSidebarProvider({ children }: { readonly children: ReactNode
     }
   }, [location, isMobile, setIsDocsSidebarOpen]);
 
-  const value = useMemo(() => ({ isDocsSidebarOpen, toggleDocsSidebar }), [isDocsSidebarOpen, toggleDocsSidebar]);
+  const value = useMemo(
+    () => ({ isDocsSidebarOpen, setIsDocsSidebarOpen, toggleDocsSidebar }),
+    [isDocsSidebarOpen, setIsDocsSidebarOpen, toggleDocsSidebar],
+  );
 
   return (
     <DocsSidebarProviderContext.Provider value={value}>
@@ -103,37 +107,40 @@ export function DocsSidebarProvider({ children }: { readonly children: ReactNode
   );
 }
 
+// Docs Sidebar Trigger Component
+export function DocsSidebarTrigger({
+  isOpen,
+  onToggle,
+}: {
+  readonly isOpen: boolean;
+  readonly onToggle: () => void;
+}): React.JSX.Element {
+  return (
+    <FloatingPanelTrigger
+      icon={MenuIcon}
+      tooltipContent={`${isOpen ? 'Close' : 'Open'} Documentation Sidebar`}
+      className={isOpen ? 'text-primary' : undefined}
+      onClick={onToggle}
+    />
+  );
+}
+
 export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element {
-  const [isDocsSidebarOpen, setIsDocsSidebarOpen] = useCookie(cookieName.docsOpSidebar, false);
+  const { isDocsSidebarOpen, setIsDocsSidebarOpen } = useDocsSidebarProvider();
 
   return (
-    <FloatingPanel
-      isOpen={isDocsSidebarOpen}
-      side="left"
-      className={cn('z-20 w-(--docs-sidebar-width-icon) data-[state=open]:w-full', className)}
-      onOpenChange={setIsDocsSidebarOpen}
-    >
-      <FloatingPanelToggle
-        openIcon={MenuIcon}
-        closeIcon={
-          <span>
-            <Tau className="hidden size-6 text-primary md:block md:group-hover:hidden" />
-            <XIcon className="text-primary md:hidden md:group-hover:block" />
-          </span>
-        }
-        openTooltip="Open Documentation Sidebar"
-        closeTooltip="Close Documentation Sidebar"
-        variant="absolute"
-      />
-      <Separator
-        orientation="vertical"
-        className="absolute left-1/2 z-10 my-2 h-4! -translate-x-1/2 group-data-[state=open]:hidden"
-      />
-      <DocsSidebarSearch />
-
-      <FloatingPanelContent>
-        <FloatingPanelContentHeader>
-          <FloatingPanelContentTitle className="flex items-center gap-1">{metaConfig.name}</FloatingPanelContentTitle>
+    <FloatingPanel isOpen={isDocsSidebarOpen} side="left" className={className} onOpenChange={setIsDocsSidebarOpen}>
+      <FloatingPanelContent className={cn('overflow-hidden rounded-md border', isDocsSidebarOpen && 'z-100')}>
+        <FloatingPanelContentHeader className="pl-0">
+          <FloatingPanelContentTitle className="flex w-full items-center justify-between pl-0.25">
+            <FloatingPanelClose
+              icon={XIcon}
+              tooltipContent={(isOpen) => `${isOpen ? 'Close' : 'Open'} Documentation Sidebar`}
+              className="peer mt-0.5 ml-0.5 border md:hidden"
+            />
+            <DocsSidebarFrameworkSelector className="max-md:ml-7.25!" />
+            <DocsSidebarSearch />
+          </FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
 
         <FloatingPanelContentBody>
@@ -150,28 +157,114 @@ export function DocsSidebar({ className }: DocsSidebarProps): React.JSX.Element 
   );
 }
 
+type FrameworkId = 'editor' | 'framework' | 'platform' | 'cli';
+
+type Framework = {
+  readonly id: FrameworkId;
+  readonly label: string;
+  readonly icon: LucideIcon;
+};
+
+const frameworks: Framework[] = [
+  {
+    id: 'editor',
+    label: 'Editor',
+    icon: Box,
+  },
+  {
+    id: 'framework',
+    label: 'Framework',
+    icon: Blocks,
+  },
+  {
+    id: 'platform',
+    label: 'Platform',
+    icon: Layers,
+  },
+  {
+    id: 'cli',
+    label: 'CLI',
+    icon: Terminal,
+  },
+] as const satisfies Framework[];
+
+function DocsSidebarFrameworkSelector({ className }: { readonly className?: string }): React.JSX.Element {
+  const [selectedFramework, setSelectedFramework] = useState<Framework>(frameworks[0]!);
+
+  const groupedItems = [
+    {
+      name: 'Documentation',
+      items: frameworks,
+    },
+  ];
+
+  return (
+    <ComboBoxResponsive<Framework>
+      isSearchEnabled={false}
+      groupedItems={groupedItems}
+      renderLabel={(framework) => {
+        const Icon = framework.icon;
+        return (
+          <div className="flex items-center gap-2">
+            <Icon className="size-4" />
+            <span>{framework.label}</span>
+          </div>
+        );
+      }}
+      popoverProperties={{ align: 'start' }}
+      getValue={(framework) => framework.id}
+      defaultValue={selectedFramework}
+      title="Select Framework"
+      description="Choose which framework documentation to view"
+      className="md:w-[180px]"
+      onSelect={(value) => {
+        const framework = frameworks.find((f) => f.id === value);
+        if (framework) {
+          setSelectedFramework(framework);
+        }
+      }}
+    >
+      <Button
+        variant="ghost"
+        className={cn(
+          'h-7 gap-2 rounded-sm border border-transparent pr-3 pl-2! hover:border-border hover:text-foreground max-md:border-border',
+          className,
+        )}
+      >
+        <selectedFramework.icon data-slot="framework-icon" className="size-4" />
+        {selectedFramework.label}
+      </Button>
+    </ComboBoxResponsive>
+  );
+}
+
 function DocsSidebarSearch(): React.JSX.Element | undefined {
   const { enabled, setOpenSearch } = useSearchContext();
+
+  const { formattedKeyCombination: formattedSearchKeyCombination } = useKeydown(
+    { key: '/' },
+    () => {
+      // @ts-expect-error -- fumadocs has incorrect typing
+      setOpenSearch((previous) => !previous);
+    },
+    { ignoreInputs: true },
+  );
 
   if (!enabled) {
     return undefined;
   }
 
   return (
-    <FloatingPanelTrigger
-      icon={SearchIcon}
-      tooltipContent={
-        <div className="flex items-center gap-2">
-          Search Documentation
-          <KeyShortcut variant="tooltip">{formatKeyCombination({ key: 'K', metaKey: true })}</KeyShortcut>
-        </div>
-      }
-      tooltipSide="right"
-      variant="static"
+    <Button
+      variant="outline"
+      className="mr-0.5 h-6 w-fit px-2 text-xs font-normal"
       onClick={() => {
         setOpenSearch(true);
       }}
-    />
+    >
+      Search Docs
+      <KeyShortcut>{formattedSearchKeyCombination}</KeyShortcut>
+    </Button>
   );
 }
 
@@ -201,17 +294,31 @@ function DocsSidebarItem({
   readonly item: PageTree.Node;
   readonly children: ReactNode;
 }): React.JSX.Element {
-  const pathname = usePathname();
+  const renderIcon = (icon: ReactNode | string | undefined): ReactNode => {
+    if (!icon) {
+      return null;
+    }
+
+    if (typeof icon === 'string') {
+      return <DocsIcon iconString={icon} />;
+    }
+
+    return icon;
+  };
 
   if (item.type === 'page') {
     return (
       <SidebarMenuItem>
-        <SidebarMenuButton asChild isActive={pathname === item.url}>
-          <Link href={item.url} className={linkVariants({ active: pathname === item.url })}>
-            {item.icon}
-            <span>{item.name}</span>
-          </Link>
-        </SidebarMenuButton>
+        <NavLink end prefetch="viewport" preventScrollReset={false} to={item.url}>
+          {({ isActive, isPending }) => (
+            <SidebarMenuButton asChild isActive={isActive} className={linkVariants({ active: isActive })}>
+              <span>
+                {isPending ? <LoadingSpinner /> : renderIcon(item.icon)}
+                <span>{item.name}</span>
+              </span>
+            </SidebarMenuButton>
+          )}
+        </NavLink>
       </SidebarMenuItem>
     );
   }
@@ -221,27 +328,89 @@ function DocsSidebarItem({
   }
 
   // Folder type
+  const folderIndex = item.index;
   return (
     <div>
-      {item.index ? (
+      {folderIndex ? (
         <SidebarMenuItem>
-          <SidebarMenuButton asChild isActive={pathname === item.index.url}>
-            <Link href={item.index.url} className={linkVariants({ active: pathname === item.index.url })}>
-              {item.index.icon}
-              <span>{item.index.name}</span>
-            </Link>
-          </SidebarMenuButton>
+          <NavLink end prefetch="viewport" preventScrollReset={false} to={folderIndex.url}>
+            {({ isActive, isPending }) => (
+              <SidebarMenuButton asChild isActive={isActive} className={linkVariants({ active: isActive })}>
+                <span>
+                  {isPending ? <LoadingSpinner /> : renderIcon(folderIndex.icon)}
+                  <span>{folderIndex.name}</span>
+                </span>
+              </SidebarMenuButton>
+            )}
+          </NavLink>
         </SidebarMenuItem>
       ) : (
         <li className="px-2">
           <div className={cn(linkVariants(), 'justify-start text-start')}>
-            {item.icon}
+            {renderIcon(item.icon)}
             <span>{item.name}</span>
           </div>
         </li>
       )}
       <div className="ml-2 flex flex-col space-y-1 border-l pl-4">
         <SidebarMenu>{children}</SidebarMenu>
+      </div>
+    </div>
+  );
+}
+
+export function DocsSidebarWithTrigger(): React.JSX.Element {
+  const { isDocsSidebarOpen, setIsDocsSidebarOpen } = useDocsSidebarProvider();
+
+  return (
+    <div
+      className={cn(
+        // Left
+        'left-2',
+        'md:left-(--sidebar-width-current)',
+        // Top
+        'top-(--header-height)',
+
+        // Width - collapse when closed, expand when open (no animation)
+        'transition-[top,left] duration-200 ease-linear',
+        'fixed',
+      )}
+    >
+      <DocsSidebar
+        className={cn(
+          // Left
+          'left-2',
+          'md:left-(--sidebar-width-current)',
+          'data-[state=closed]:bg-muted',
+          // Top
+          'top-(--header-height)',
+          'pb-[calc(var(--header-height)+var(--spacing)*2)]',
+
+          // Width - collapse when closed, expand when open (no animation)
+          'w-0',
+          'data-[state=open]:w-full',
+
+          // Transition (excluding width to prevent animation)
+          'transition-[top,left] duration-200 ease-linear',
+
+          // Max width
+          'max-w-[calc(100dvw-var(--spacing)*4)]',
+          'md:max-w-(--docs-sidebar-width)',
+          'fixed',
+        )}
+      />
+      <div
+        className="absolute top-0"
+        style={{
+          left: isDocsSidebarOpen ? 'calc(var(--docs-sidebar-width) + var(--spacing)*2)' : 0,
+        }}
+      >
+        <DocsSidebarTrigger
+          isOpen={isDocsSidebarOpen}
+          onToggle={() => {
+            setIsDocsSidebarOpen((previous) => !previous);
+          }}
+        />
       </div>
     </div>
   );

@@ -1,16 +1,11 @@
-/* @import 'fumadocs-ui/style.css'; */
 @import 'tailwindcss';
 
-/*
-  These imports are recommended by Fumadocs, but fail.
-  @see https://github.com/fuma-nama/fumadocs/issues/1828
-*/
-/* @import 'fumadocs-ui/css/shadcn.css'; */
-/* @import 'fumadocs-ui/css/preset.css'; */
+/* Fumadocs minimal configuration */
+@import 'fumadocs-ui/css/shiki.css';
+
 @import 'tw-animate-css';
 @source "../../../../node_modules/@daveyplate/better-auth-ui";
 
-/* Disabled due to conflict with Fumadocs - https://fumadocs.dev/docs/ui/theme#typography */
 @plugin '@tailwindcss/typography';
 
 :root {
@@ -147,6 +142,16 @@
   --l-secondary: 0.8;
   --l-highlighter: 0.8;
 
+  --background: oklch(calc(var(--l-base) * 0.85) 0 var(--hue-neutral));
+  --neutral: oklch(calc(var(--l-medium) * 0.85) 0 var(--hue-neutral));
+  --muted: oklch(calc(var(--l-surface) * 0.85) 0 var(--hue-neutral));
+  --input: oklch(calc(var(--l-subtle) * 0.85) 0 var(--hue-neutral));
+  --border: oklch(calc(var(--l-subtle) * 0.85) 0.005 var(--hue-neutral));
+  --accent: oklch(calc(var(--l-subtle) * 0.85) 0.015 var(--hue-neutral));
+  --sidebar-background: oklch(calc(var(--l-surface) * 0.85) 0 var(--hue-neutral));
+  --sidebar-border: oklch(calc(var(--l-subtle) * 0.85) 0.005 var(--hue-neutral));
+  --sidebar-accent: oklch(calc(var(--l-subtle) * 0.85) 0.02 var(--hue-neutral));
+
   --primary-foreground: oklch(var(--l-deepest) 0.01 var(--hue-neutral));
   --secondary-foreground: oklch(var(--l-base) 0.01 var(--hue-neutral));
 
@@ -251,9 +256,8 @@
   /* Fumadocs Docs */
   --color-fd-primary: var(--primary);
   --color-fd-primary-foreground: var(--primary-foreground);
-  /* We use the default secondary color from Fumadocs */
-  /* --color-fd-secondary: var(--secondary);
-  --color-fd-secondary-foreground: var(--secondary-foreground); */
+  --color-fd-secondary: var(--secondary);
+  --color-fd-secondary-foreground: var(--secondary-foreground);
   --color-fd-background: var(--background);
   --color-fd-foreground: var(--foreground);
   --color-fd-muted: var(--muted);
@@ -266,6 +270,15 @@
   --color-fd-ring: var(--ring);
   --color-fd-popover: var(--popover);
   --color-fd-popover-foreground: var(--popover-foreground);
+  
+  --color-fd-info: var(--color-information);
+  --color-fd-warning: var(--color-warning);
+  --color-fd-error: var(--color-error);
+  --color-fd-success: var(--color-success);
+  --color-fd-diff-remove: rgba(200, 10, 100, 0.12);
+  --color-fd-diff-remove-symbol: rgb(230, 10, 100);
+  --color-fd-diff-add: rgba(14, 180, 100, 0.1);
+  --color-fd-diff-add-symbol: rgb(10, 200, 100);
 
   @keyframes gradient {
 

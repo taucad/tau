@@ -133,13 +133,9 @@ function renderFileTree(elements: TreeViewElement[]): React.ReactNode {
 
 export function meta({ loaderData }: Route.MetaArgs): MetaDescriptor[] {
   const repo = `${loaderData.owner}/${loaderData.repo} ${loaderData.ref === 'main' ? '' : `@ ${loaderData.ref}`}`;
-  const description = `Import ${repo} into Tau`;
-  return [
-    {
-      title: repo,
-      description,
-    },
-  ];
+  const title = `Import ${repo} from GitHub into Tau`;
+  const description = `Get started with ${repo} by importing it into Tau.`;
+  return [{ title, description }];
 }
 
 /**

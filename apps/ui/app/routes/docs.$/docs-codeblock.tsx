@@ -19,11 +19,13 @@ type DocsCodeBlockProps = {
  * This is the intermediary component used throughout the documentation
  */
 export function DocsCodeBlock({ title, text, children, className, ...rest }: DocsCodeBlockProps): React.JSX.Element {
+  const hasTitle = title !== undefined && title !== '';
+  const variant = hasTitle ? 'standard' : 'floating';
   return (
-    <CodeBlock variant="floating" className={className} {...rest}>
-      <CodeBlockHeader variant="floating">
-        {title ? <CodeBlockTitle variant="floating">{title}</CodeBlockTitle> : null}
-        <CodeBlockAction variant="floating">
+    <CodeBlock variant={variant} className={className} {...rest}>
+      <CodeBlockHeader className="bg-transparent" variant={variant}>
+        {title ? <CodeBlockTitle className="text-sm">{title}</CodeBlockTitle> : null}
+        <CodeBlockAction variant={variant}>
           <CopyButton size="xs" variant="ghost" className="h-8 [&_[data-slot=label]]:hidden" getText={() => text} />
         </CodeBlockAction>
       </CodeBlockHeader>

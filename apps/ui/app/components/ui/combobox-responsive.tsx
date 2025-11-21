@@ -34,6 +34,7 @@ type ComboBoxResponsiveProperties<T> = Omit<React.HTMLAttributes<HTMLDivElement>
   readonly emptyListMessage?: ReactNode;
   readonly title: string;
   readonly description: string;
+  readonly isSearchEnabled?: boolean;
 };
 
 export function ComboBoxResponsive<T>({
@@ -55,6 +56,7 @@ export function ComboBoxResponsive<T>({
   emptyListMessage = 'No results found.',
   title,
   description,
+  isSearchEnabled = true,
   ...properties
 }: ComboBoxResponsiveProperties<T>): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
@@ -112,6 +114,7 @@ export function ComboBoxResponsive<T>({
               labelClassName={labelClassName}
               isDisabled={isDisabled}
               emptyListMessage={emptyListMessage}
+              isSearchEnabled={isSearchEnabled}
             />
           </div>
         </DrawerContent>
@@ -138,6 +141,7 @@ export function ComboBoxResponsive<T>({
           labelClassName={labelClassName}
           isDisabled={isDisabled}
           emptyListMessage={emptyListMessage}
+          isSearchEnabled={isSearchEnabled}
         />
       </PopoverContent>
     </Popover>
@@ -155,6 +159,7 @@ function ItemList<T>({
   labelClassName,
   isDisabled,
   emptyListMessage,
+  isSearchEnabled = true,
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
   readonly setSelectedItem: (item: T) => void;
@@ -166,10 +171,11 @@ function ItemList<T>({
   readonly labelClassName?: ClassValue;
   readonly isDisabled?: (item: T) => boolean;
   readonly emptyListMessage?: ReactNode;
+  readonly isSearchEnabled?: boolean;
 }) {
   return (
     <Command>
-      <CommandInput placeholder={searchPlaceHolder} />
+      {isSearchEnabled ? <CommandInput placeholder={searchPlaceHolder} /> : null}
       <CommandList>
         <CommandEmpty>{emptyListMessage}</CommandEmpty>
         {groupedItems.map((group) => (

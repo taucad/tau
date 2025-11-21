@@ -43,7 +43,7 @@ jobs:
           message: |
             ### UI Preview :balloon:
             **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || '🔄 Deploying...' }}
-            **URL:** _Pending..._
+            **URL:** https://tau-ui-pr-${{ github.event.number }}.fly.dev/
 
       - name: Deploy UI PR app to Fly.io
         id: deploy
@@ -62,7 +62,7 @@ jobs:
           message: |
             ### UI Preview :balloon:
             **Status:** ${{ github.event.action == 'closed' && '✅ Destroyed' || '✅ Deployed' }}
-            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || steps.deploy.outputs.url }}
+            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || format('https://tau-ui-pr-{0}.fly.dev/', github.event.number) }}
 
       - name: Update UI status - failure
         if: steps.deploy.outcome == 'failure'
@@ -72,7 +72,7 @@ jobs:
           message: |
             ### UI Preview :balloon:
             **Status:** ❌ Deployment Failed
-            **URL:** _Failed to deploy_
+            **URL:** https://tau-ui-pr-${{ github.event.number }}.fly.dev/
 
       - name: Update UI status - cancelled
         if: steps.deploy.outcome == 'cancelled'
@@ -82,7 +82,7 @@ jobs:
           message: |
             ### UI Preview :balloon:
             **Status:** ⚠️ Deployment Cancelled
-            **URL:** _Deployment was cancelled_
+            **URL:** https://tau-ui-pr-${{ github.event.number }}.fly.dev/
 
       - name: Fail job if deployment failed
         if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled'
@@ -117,7 +117,7 @@ jobs:
           message: |
             ### API Preview :octopus:
             **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || '🔄 Deploying...' }}
-            **URL:** _Pending..._
+            **URL:** https://tau-api-pr-${{ github.event.number }}.fly.dev
 
       - name: Deploy API PR app to Fly.io
         id: deploy
@@ -136,7 +136,7 @@ jobs:
           message: |
             ### API Preview :octopus:
             **Status:** ${{ github.event.action == 'closed' && '✅ Destroyed' || '✅ Deployed' }}
-            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || steps.deploy.outputs.url }}
+            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || format('https://tau-api-pr-{0}.fly.dev', github.event.number) }}
 
       - name: Update API status - failure
         if: steps.deploy.outcome == 'failure'
@@ -146,7 +146,7 @@ jobs:
           message: |
             ### API Preview :octopus:
             **Status:** ❌ Deployment Failed
-            **URL:** _Failed to deploy_
+            **URL:** https://tau-api-pr-${{ github.event.number }}.fly.dev
 
       - name: Update API status - cancelled
         if: steps.deploy.outcome == 'cancelled'
@@ -156,7 +156,7 @@ jobs:
           message: |
             ### API Preview :octopus:
             **Status:** ⚠️ Deployment Cancelled
-            **URL:** _Deployment was cancelled_
+            **URL:** https://tau-api-pr-${{ github.event.number }}.fly.dev
 
       - name: Fail job if deployment failed
         if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled'

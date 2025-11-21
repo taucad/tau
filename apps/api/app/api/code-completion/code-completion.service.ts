@@ -14,7 +14,7 @@ export class CodeCompletionService {
         const { text } = await generateText({
           model: openai('gpt-4.1-nano'),
           system: prompt.context,
-          prompt: `${prompt.instruction}\n\n${prompt.fileContent}`,
+          prompt: `<instructions>${prompt.instruction}</instructions><file-content>${prompt.fileContent}</file-content>`,
           temperature: 0.2,
           maxTokens: 256,
         });

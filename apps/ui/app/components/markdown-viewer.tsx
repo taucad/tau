@@ -16,6 +16,7 @@ import {
 } from '#components/code/code-block.js';
 import { CopyButton } from '#components/copy-button.js';
 import { cn } from '#utils/ui.utils.js';
+import { extractTextFromChildren } from '#utils/react.utils.js';
 
 export const markdownViewerLinks: LinkDescriptor[] = [{ rel: 'stylesheet', href: katexUrl }];
 
@@ -53,8 +54,7 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
             const { children, className, ref, node, style, ...rest } = properties;
             // Check if this is a code block (has language class) or inline code
             const match = /language-(\w+)/.exec(className ?? '');
-            // eslint-disable-next-line @typescript-eslint/no-base-to-string -- children is stringifiable.
-            const text = String(children).replace(/\n$/, '');
+            const text = extractTextFromChildren(children).replace(/\n$/, '');
 
             if (match) {
               const language = match[1];

@@ -8,6 +8,10 @@ type KeydownOptions = {
   repeat?: boolean;
   enableKeydownCallback?: boolean;
   enableKeyupCallback?: boolean;
+  /**
+   * If true, the callback will not be triggered when focus is on an input element
+   */
+  ignoreInputs?: boolean;
 };
 
 /**
@@ -37,6 +41,7 @@ export function useKeydown(
     repeat = false,
     enableKeydownCallback = true,
     enableKeyupCallback = false,
+    ignoreInputs = false,
   } = options;
   const [isKeyPressed, setIsKeyPressed] = useState(false);
 
@@ -44,6 +49,20 @@ export function useKeydown(
     (event: KeyboardEvent) => {
       if (!repeat && event.repeat) {
         return;
+      }
+
+      // Check if we should ignore inputs and if the focus is on an input element
+      if (ignoreInputs) {
+        const target = event.target as HTMLElement;
+        const isInput =
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable;
+
+        if (isInput) {
+          return;
+        }
       }
 
       // Check if the main key matches
@@ -84,7 +103,16 @@ export function useKeydown(
         }
       }
     },
-    [callback, keyCombination, preventDefault, stopPropagation, repeat, enableKeydownCallback, enableKeyupCallback],
+    [
+      callback,
+      keyCombination,
+      preventDefault,
+      stopPropagation,
+      repeat,
+      enableKeydownCallback,
+      enableKeyupCallback,
+      ignoreInputs,
+    ],
   );
 
   useEffect(() => {

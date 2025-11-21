@@ -57,7 +57,7 @@ export function ThreeProvider({
       }}
       dpr={dpr}
       frameloop="demand"
-      className={cn('bg-background', className)}
+      className={cn('bg-muted/30', className)}
       onCreated={() => {
         setIsCanvasReady(true);
       }}

@@ -41,15 +41,21 @@ export function NavMain({
           return (
             <Collapsible key={item.title} asChild defaultOpen={item.isActive} className="group/collapsible">
               <SidebarMenuItem>
-                <NavLink to={item.url} tabIndex={-1}>
+                <NavLink to={item.url}>
                   {({ isActive, isPending }) => (
                     <CollapsibleTrigger asChild>
-                      <SidebarMenuButton isActive={isActive}>
-                        {isPending ? <LoadingSpinner /> : item.icon ? <item.icon className="size-4 shrink-0" /> : null}
-                        <span className="flex-1 truncate">{item.title}</span>
-                        {hasItems ? (
-                          <ChevronRight className="ml-2 shrink-0 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                        ) : null}
+                      <SidebarMenuButton asChild isActive={isActive}>
+                        <span>
+                          {isPending ? (
+                            <LoadingSpinner />
+                          ) : item.icon ? (
+                            <item.icon className="size-4 shrink-0" />
+                          ) : null}
+                          <span className="flex-1 truncate">{item.title}</span>
+                          {hasItems ? (
+                            <ChevronRight className="ml-2 shrink-0 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                          ) : null}
+                        </span>
                       </SidebarMenuButton>
                     </CollapsibleTrigger>
                   )}
@@ -62,8 +68,10 @@ export function NavMain({
                           <NavLink to={subItem.url} tabIndex={-1}>
                             {({ isActive, isPending }) => (
                               <SidebarMenuSubButton asChild isActive={isActive}>
-                                <span className="flex-1">{subItem.title}</span>
-                                {isPending ? <LoadingSpinner /> : null}
+                                <span>
+                                  <span className="flex-1">{subItem.title}</span>
+                                  {isPending ? <LoadingSpinner /> : null}
+                                </span>
                               </SidebarMenuSubButton>
                             )}
                           </NavLink>

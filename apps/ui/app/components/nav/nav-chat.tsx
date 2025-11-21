@@ -3,6 +3,7 @@ import { NavLink, useMatch, useNavigate } from 'react-router';
 import { SidebarGroup, SidebarMenuButton } from '#components/ui/sidebar.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { useKeydown } from '#hooks/use-keydown.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 export function NavChat(): React.JSX.Element {
   const navigate = useNavigate();
@@ -21,9 +22,10 @@ export function NavChat(): React.JSX.Element {
   return (
     // Elevate the sidebar group above the other items to ensure the new build button is always clickable
     <SidebarGroup className="z-10">
-      <NavLink to="/" tabIndex={-1}>
-        {({ isActive }) => (
+      <NavLink to="/">
+        {({ isActive, isPending }) => (
           <SidebarMenuButton
+            asChild
             isActive={isActive}
             tooltip={{
               children: (
@@ -37,9 +39,11 @@ export function NavChat(): React.JSX.Element {
             }}
             variant="outline"
           >
-            <PackagePlus className="size-4 shrink-0" />
-            <span className="flex-1 whitespace-nowrap">New Build</span>
-            <KeyShortcut className="ml-2 shrink-0">{formattedKeyCombination}</KeyShortcut>
+            <span>
+              {isPending ? <LoadingSpinner /> : <PackagePlus className="size-4 shrink-0" />}
+              <span className="flex-1 whitespace-nowrap">New Build</span>
+              <KeyShortcut className="ml-2 shrink-0">{formattedKeyCombination}</KeyShortcut>
+            </span>
           </SidebarMenuButton>
         )}
       </NavLink>

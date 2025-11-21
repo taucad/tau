@@ -36,11 +36,13 @@ export function NavProjects({
       <SidebarMenu>
         {projects.map((item) => (
           <SidebarMenuItem key={item.name}>
-            <NavLink to={item.url} tabIndex={-1}>
+            <NavLink to={item.url}>
               {({ isPending, isActive }) => (
-                <SidebarMenuButton isActive={isActive}>
-                  {isPending ? <LoadingSpinner /> : <item.icon />}
-                  <span>{item.name}</span>
+                <SidebarMenuButton asChild isActive={isActive}>
+                  <span>
+                    {isPending ? <LoadingSpinner /> : <item.icon />}
+                    <span>{item.name}</span>
+                  </span>
                 </SidebarMenuButton>
               )}
             </NavLink>

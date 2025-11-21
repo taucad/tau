@@ -263,11 +263,13 @@ function NavHistoryItem({ build, isEditing, onRename, onRenameSubmit, onRenameCa
           />
         </SidebarMenuButton>
       ) : (
-        <NavLink to={`/builds/${build.id}`} tabIndex={-1}>
+        <NavLink to={`/builds/${build.id}`}>
           {({ isActive, isPending }) => (
-            <SidebarMenuButton isActive={isActive}>
-              {isPending ? <LoadingSpinner /> : <History className="size-4 shrink-0" />}
-              <span className="flex-1 truncate">{build.name}</span>
+            <SidebarMenuButton asChild isActive={isActive}>
+              <span>
+                {isPending ? <LoadingSpinner /> : <History className="size-4 shrink-0" />}
+                <span className="flex-1 truncate">{build.name}</span>
+              </span>
             </SidebarMenuButton>
           )}
         </NavLink>

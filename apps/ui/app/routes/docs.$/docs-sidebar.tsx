@@ -309,11 +309,13 @@ function DocsSidebarItem({
   if (item.type === 'page') {
     return (
       <SidebarMenuItem>
-        <NavLink end to={item.url} tabIndex={-1}>
+        <NavLink end prefetch="viewport" preventScrollReset={false} to={item.url}>
           {({ isActive, isPending }) => (
-            <SidebarMenuButton isActive={isActive} className={linkVariants({ active: isActive })}>
-              {isPending ? <LoadingSpinner /> : renderIcon(item.icon)}
-              <span>{item.name}</span>
+            <SidebarMenuButton asChild isActive={isActive} className={linkVariants({ active: isActive })}>
+              <span>
+                {isPending ? <LoadingSpinner /> : renderIcon(item.icon)}
+                <span>{item.name}</span>
+              </span>
             </SidebarMenuButton>
           )}
         </NavLink>
@@ -331,11 +333,13 @@ function DocsSidebarItem({
     <div>
       {folderIndex ? (
         <SidebarMenuItem>
-          <NavLink end to={folderIndex.url} tabIndex={-1}>
+          <NavLink end prefetch="viewport" preventScrollReset={false} to={folderIndex.url}>
             {({ isActive, isPending }) => (
-              <SidebarMenuButton isActive={isActive} className={linkVariants({ active: isActive })}>
-                {isPending ? <LoadingSpinner /> : renderIcon(folderIndex.icon)}
-                <span>{folderIndex.name}</span>
+              <SidebarMenuButton asChild isActive={isActive} className={linkVariants({ active: isActive })}>
+                <span>
+                  {isPending ? <LoadingSpinner /> : renderIcon(folderIndex.icon)}
+                  <span>{folderIndex.name}</span>
+                </span>
               </SidebarMenuButton>
             )}
           </NavLink>

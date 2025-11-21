@@ -8,37 +8,40 @@ import { extractTextFromChildren } from '#utils/react.utils.js';
 export function getMdxComponents(): MDXComponents {
   return {
     ...defaultMdxComponents,
-    pre(props) {
+    pre(properties) {
+      const { className, children, title } = properties as {
+        className: string;
+        children: string;
+        title: string | undefined;
+      };
       // Extract language and title from className if available
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- props is not typed correctly.
-      const className = props.className ?? '';
-      const match = /language-(\w+)/.exec(className as string);
+      const match = /language-(\w+)/.exec(className);
       const language = match ? match[1] : '';
-      const text = extractTextFromChildren(props.children).replace(/\n$/, '');
-
-      const title = props.title as string | undefined;
+      const text = extractTextFromChildren(children).replace(/\n$/, '');
 
       return (
         <DocsCodeBlock className="bg-muted/60" title={title} text={text}>
-          <Pre {...props} language={language} />
+          <Pre {...properties} language={language} />
         </DocsCodeBlock>
       );
     },
     code(properties) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- properties is not typed correctly.
-      const { children, className, ref, node, style, ...rest } = properties;
+      const { children, className } = properties as {
+        children: string;
+        className: string;
+      };
 
       // Only render InlineCode for inline code (strings)
       if (typeof children === 'string') {
         return (
-          <InlineCode {...rest} className={className as string}>
+          <InlineCode {...properties} className={className}>
             {children}
           </InlineCode>
         );
       }
 
       return (
-        <code {...rest} className={cn(className as string, 'flex flex-col')}>
+        <code {...properties} className={cn(className, 'flex flex-col')}>
           {children}
         </code>
       );

@@ -5,18 +5,10 @@ import rehypeKatex from 'rehype-katex';
 import katexUrl from 'katex/dist/katex.min.css?url';
 import type { LinkDescriptor } from 'react-router';
 import { memo } from 'react';
-import {
-  CodeBlock,
-  CodeBlockHeader,
-  CodeBlockTitle,
-  CodeBlockAction,
-  CodeBlockContent,
-  InlineCode,
-  Pre,
-} from '#components/code/code-block.js';
-import { CopyButton } from '#components/copy-button.js';
+import { InlineCode } from '#components/code/code-block.js';
 import { cn } from '#utils/ui.utils.js';
 import { extractTextFromChildren } from '#utils/react.utils.js';
+import { CollapsibleCodeBlock } from '#components/markdown/collapsible-code-block.js';
 
 export const markdownViewerLinks: LinkDescriptor[] = [{ rel: 'stylesheet', href: katexUrl }];
 
@@ -56,26 +48,12 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
             const match = /language-(\w+)/.exec(className ?? '');
             const text = extractTextFromChildren(children).replace(/\n$/, '');
 
-            if (match) {
+            if (match?.[1]) {
               const language = match[1];
               return (
-                <CodeBlock className="-mx-3" variant="standard">
-                  <CodeBlockHeader variant="standard">
-                    <CodeBlockTitle variant="standard">{language}</CodeBlockTitle>
-                    <CodeBlockAction variant="standard">
-                      <CopyButton
-                        size="xs"
-                        className="h-6 [&_[data-slot=label]]:hidden @xs/code:[&_[data-slot=label]]:flex"
-                        getText={() => text}
-                      />
-                    </CodeBlockAction>
-                  </CodeBlockHeader>
-                  <CodeBlockContent>
-                    <Pre {...rest} language={language} className={cn('text-xs', className)}>
-                      {children}
-                    </Pre>
-                  </CodeBlockContent>
-                </CodeBlock>
+                <CollapsibleCodeBlock language={language} text={text} className={className ?? ''}>
+                  {children}
+                </CollapsibleCodeBlock>
               );
             }
 

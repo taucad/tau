@@ -45,13 +45,10 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
         <ChatViewer />
 
         {/* Gizmo Container - Static container for the gizmo to ensure it shares the same containing block as the anchor */}
-        <div
-          id="viewport-gizmo-container"
-          className="absolute top-[calc(var(--header-height)+var(--spacing)*26)] right-0"
-        />
+        <div id="viewport-gizmo-container" className="absolute right-0 bottom-18" />
 
         {/* Top-left Content */}
-        <div className="absolute top-(--header-height) right-12 left-2 hidden group-data-[active-tab=model]/chat-tabs:block group-data-[full-height-panel=true]/chat-tabs:block">
+        <div className="absolute top-(--header-height) right-2 left-2 hidden group-data-[active-tab=model]/chat-tabs:block group-data-[full-height-panel=true]/chat-tabs:block">
           <ChatStackTrace />
         </div>
 

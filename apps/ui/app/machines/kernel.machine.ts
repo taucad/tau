@@ -1,4 +1,5 @@
 import { assign, assertEvent, setup, sendTo, fromPromise } from 'xstate';
+import deepmerge from 'deepmerge';
 import type { Snapshot, ActorRef, OutputFrom, DoneActorEvent } from 'xstate';
 import { proxy, wrap } from 'comlink';
 import type { Remote } from 'comlink';
@@ -324,10 +325,7 @@ const evaluateCodeActor = fromPromise<
   }
 
   // Merge default parameters with provided parameters
-  const mergedParameters = {
-    ...defaultParameters,
-    ...parameters,
-  };
+  const mergedParameters = deepmerge(defaultParameters, parameters);
 
   const result = await wrappedWorker.computeGeometry(file, mergedParameters);
 

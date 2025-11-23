@@ -21,6 +21,8 @@ import { AuthConfigProvider } from '#providers/auth-provider.js';
 import { globalStylesLinks } from '#styles/global.styles.js';
 import type { Handle } from '#types/matches.types.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
+import { BuildManagerProvider } from '#hooks/use-build-manager.js';
+import { FileManagerProvider } from '#hooks/use-file-manager.js';
 
 export const links: LinksFunction = () => [...globalStylesLinks, ...webManifestLinks, ...markdownViewerLinks];
 
@@ -81,15 +83,19 @@ export function Layout({ children }: { readonly children: ReactNode }): React.JS
   return (
     <AuthConfigProvider>
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider specifiedTheme={ssrTheme} themeAction="/action/set-theme">
-          <ColorProvider>
-            <TooltipProvider>
-              <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme}>
-                {children}
-              </LayoutDocument>
-            </TooltipProvider>
-          </ColorProvider>
-        </ThemeProvider>
+        <FileManagerProvider rootDirectory="/">
+          <BuildManagerProvider>
+            <ThemeProvider specifiedTheme={ssrTheme} themeAction="/action/set-theme">
+              <ColorProvider>
+                <TooltipProvider>
+                  <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme}>
+                    {children}
+                  </LayoutDocument>
+                </TooltipProvider>
+              </ColorProvider>
+            </ThemeProvider>
+          </BuildManagerProvider>
+        </FileManagerProvider>
       </QueryClientProvider>
     </AuthConfigProvider>
   );

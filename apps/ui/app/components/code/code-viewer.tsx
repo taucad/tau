@@ -17,7 +17,12 @@ export function CodeViewer({ text, language, className }: CodeViewerProps): Reac
   const highlightedCode = useShikiHighlighter(text, language, `github-${theme}`, { delay: 0, highlighter });
 
   return (
-    <div className={cn('text-sm [&_pre]:my-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:leading-[1.45]', className)}>
+    <div
+      className={cn(
+        'not-fumadocs-codeblock text-sm [&_pre]:m-0 [&_pre]:my-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:leading-[1.45]',
+        className,
+      )}
+    >
       {highlightedCode}
     </div>
   );

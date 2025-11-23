@@ -1,5 +1,5 @@
 import { Copy, Check } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
 
@@ -7,7 +7,7 @@ export type CopyButtonProperties = {
   /**
    * The function to get the text to copy.
    */
-  readonly getText: () => string;
+  readonly getText: () => Promise<string> | string;
   /**
    * The tooltip to display when the button is hovered.
    */
@@ -28,14 +28,14 @@ export function CopyButton({
 }: CopyButtonProperties): React.JSX.Element {
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = () => {
+  const handleCopy = useCallback(async () => {
     setCopied(true);
     if (globalThis.isSecureContext) {
-      void navigator.clipboard.writeText(getText());
+      void navigator.clipboard.writeText(await getText());
     } else {
       console.warn('Clipboard operations are only allowed in secure contexts.');
     }
-  };
+  }, [getText]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout | undefined;

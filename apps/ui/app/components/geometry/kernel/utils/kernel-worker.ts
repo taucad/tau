@@ -155,7 +155,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.onLog({
       level: logLevels.info,
       message,
-      origin: { component: this.constructor.name, operation: options?.operation },
+      origin: { component: this.name, operation: options?.operation },
       data: options?.data,
     });
   }
@@ -177,7 +177,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.onLog({
       level: logLevels.warn,
       message,
-      origin: { component: this.constructor.name, operation: options?.operation },
+      origin: { component: this.name, operation: options?.operation },
       data: options?.data,
     });
   }
@@ -199,7 +199,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.onLog({
       level: logLevels.error,
       message,
-      origin: { component: this.constructor.name, operation: options?.operation },
+      origin: { component: this.name, operation: options?.operation },
       data: options?.data,
     });
   }
@@ -221,7 +221,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.onLog({
       level: logLevels.debug,
       message,
-      origin: { component: this.constructor.name, operation: options?.operation },
+      origin: { component: this.name, operation: options?.operation },
       data: options?.data,
     });
   }
@@ -243,7 +243,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.onLog({
       level: logLevels.trace,
       message,
-      origin: { component: this.constructor.name, operation: options?.operation },
+      origin: { component: this.name, operation: options?.operation },
       data: options?.data,
     });
   }

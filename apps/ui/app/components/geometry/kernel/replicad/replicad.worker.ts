@@ -106,7 +106,7 @@ class ReplicadWorker extends KernelWorker<ReplicadOptions> {
     }
 
     // Extract code and check for replicad imports/usage
-    const code = KernelWorker.extractCodeFromFile(file);
+    const code = await this.extractCodeFromFile(file);
 
     // Check for direct replicad imports
     // Use 's' flag to make '.' match newlines for multiline imports
@@ -131,7 +131,7 @@ class ReplicadWorker extends KernelWorker<ReplicadOptions> {
 
   public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {
     try {
-      const code = KernelWorker.extractCodeFromFile(file);
+      const code = await this.extractCodeFromFile(file);
       let defaultParameters: Record<string, unknown> = {};
 
       if (/^\s*export\s+/m.test(code)) {
@@ -211,7 +211,7 @@ try {
 
     try {
       // Extract code from file
-      const code = KernelWorker.extractCodeFromFile(file);
+      const code = await this.extractCodeFromFile(file);
 
       // Ensure font is loaded
       // TODO: Review font loading
@@ -272,7 +272,7 @@ try {
 
         const shapeGltf: GeometryGltf = {
           format: 'gltf',
-          gltfBlob,
+          content: gltfBlob,
         };
         gltfShapes.push(shapeGltf);
       }
@@ -338,7 +338,7 @@ try {
         const gltfBlob = await convertReplicadGeometriesToGltf(temporaryShapes, fileType);
         return createKernelSuccess([
           {
-            blob: gltfBlob,
+            blob: new Blob([gltfBlob]),
             name: fileType === 'glb' ? 'model.glb' : 'model.gltf',
           },
         ]);

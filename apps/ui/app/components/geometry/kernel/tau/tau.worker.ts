@@ -38,14 +38,14 @@ class TauWorker extends KernelWorker {
     geometryId = 'defaultGeometry',
   ): Promise<ComputeGeometryResult> {
     try {
+      // Extract code from file
+      const data = await this.readFile(file);
       const format = KernelWorker.getFileExtension(file.filename);
       const formattedFormat = String(format).toUpperCase();
       this.log(`Converting ${formattedFormat} to GLB`, { operation: 'computeGeometry' });
 
-      // Extract format from filename
-
       // Convert file to GLB using the converter
-      const glbData = await importToGlb([{ name: file.filename, data: file.data }], format as InputFormat);
+      const glbData = await importToGlb([{ name: file.filename, data }], format as InputFormat);
 
       // Store GLB data for export
       this.glbDataMemory[geometryId] = glbData;
@@ -53,7 +53,7 @@ class TauWorker extends KernelWorker {
       // Create geometry object
       const geometry: GeometryGltf = {
         format: 'gltf',
-        gltfBlob: new Blob([glbData], { type: 'model/gltf-binary' }),
+        content: glbData,
       };
 
       this.log(`Successfully converted ${formattedFormat} to GLB`, { operation: 'computeGeometry' });

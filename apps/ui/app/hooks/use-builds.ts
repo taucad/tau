@@ -7,7 +7,14 @@ import { useBuildManager } from '#hooks/use-build-manager.js';
 export function useBuilds(options?: { includeDeleted?: boolean }) {
   const queryClient = useQueryClient();
   const includeDeleted = options?.includeDeleted ?? false;
-  const { getBuilds, createBuild, updateBuild, getBuild, deleteBuild, isLoading: isWorkerLoading } = useBuildManager();
+  const {
+    getBuilds,
+    updateBuild,
+    getBuild,
+    deleteBuild,
+    isLoading: isWorkerLoading,
+    duplicateBuild,
+  } = useBuildManager();
 
   const {
     data: builds = [],
@@ -16,8 +23,6 @@ export function useBuilds(options?: { includeDeleted?: boolean }) {
   } = useQuery({
     queryKey: ['builds', { includeDeleted }],
     async queryFn() {
-      console.log('fetching all builds');
-      // Return [];
       return getBuilds({ includeDeleted });
     },
     enabled: !isWorkerLoading,
@@ -49,29 +54,12 @@ export function useBuilds(options?: { includeDeleted?: boolean }) {
 
   const handleDuplicateBuild = useCallback(
     async (buildId: string): Promise<Build> => {
-      const sourceBuild = await getBuild(buildId);
-
-      if (!sourceBuild) {
-        throw new Error('Build not found');
-      }
-
-      const newBuild = await createBuild({
-        name: `${sourceBuild.name} (Copy)`,
-        description: sourceBuild.description,
-        thumbnail: sourceBuild.thumbnail,
-        stars: 0,
-        forks: 0,
-        author: sourceBuild.author,
-        tags: sourceBuild.tags,
-        assets: sourceBuild.assets,
-        chats: sourceBuild.chats,
-        lastChatId: sourceBuild.lastChatId,
-      });
+      const newBuild = await duplicateBuild(buildId);
 
       void queryClient.invalidateQueries({ queryKey: ['builds'] });
       return newBuild;
     },
-    [getBuild, createBuild, queryClient],
+    [duplicateBuild, queryClient],
   );
 
   const handleUpdateName = useCallback(

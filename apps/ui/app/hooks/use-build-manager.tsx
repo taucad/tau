@@ -2,18 +2,22 @@ import type { ReactNode } from 'react';
 import type { PartialDeep } from 'type-fest';
 import { createContext, useContext, useMemo, useCallback, useEffect } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
+import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Build } from '@taucad/types';
 import type { Remote } from 'comlink';
 import { buildManagerMachine } from '#hooks/build-manager.machine.js';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
 
 type BuildManagerContextType = {
-  wrappedWorker: Remote<ObjectStoreWorker> | undefined;
   isLoading: boolean;
   error: Error | undefined;
   buildManagerRef: ActorRefFrom<typeof buildManagerMachine>;
-  createBuild: (build: Omit<Build, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Build>;
+  createBuild: (
+    build: Omit<Build, 'id' | 'createdAt' | 'updatedAt'>,
+    files: Record<string, { content: Uint8Array }>,
+  ) => Promise<Build>;
   updateBuild: (
     buildId: string,
     update: PartialDeep<Build>,
@@ -22,6 +26,7 @@ type BuildManagerContextType = {
       noUpdatedAt?: boolean;
     },
   ) => Promise<Build | undefined>;
+  duplicateBuild: (buildId: string) => Promise<Build>;
   getBuilds: (options?: { includeDeleted?: boolean }) => Promise<Build[]>;
   getBuild: (buildId: string) => Promise<Build | undefined>;
   deleteBuild: (buildId: string) => Promise<void>;
@@ -31,10 +36,10 @@ const BuildManagerContext = createContext<BuildManagerContextType | undefined>(u
 
 export function BuildManagerProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const actorRef = useActorRef(buildManagerMachine);
+  const fileManager = useFileManager();
 
   // Select state from the machine
   const error = useSelector(actorRef, (state) => state.context.error);
-  const wrappedWorker = useSelector(actorRef, (state) => state.context.wrappedWorker);
   const isLoading = useSelector(actorRef, (state) => {
     return state.matches('initializing') || state.matches('creatingWorker');
   });
@@ -44,15 +49,38 @@ export function BuildManagerProvider({ children }: { readonly children: ReactNod
     actorRef.send({ type: 'initialize' });
   }, [actorRef]);
 
+  const getReadiedWorker = useCallback(async (): Promise<Remote<ObjectStoreWorker>> => {
+    const snapshot = await waitFor(actorRef, (state) => state.matches('ready') || state.matches('error'));
+    if (snapshot.matches('error')) {
+      throw new Error('Build manager worker failed to initialize');
+    }
+
+    if (!snapshot.context.wrappedWorker) {
+      throw new Error('Build manager worker not initialized');
+    }
+
+    return snapshot.context.wrappedWorker;
+  }, [actorRef]);
+
   const createBuild = useCallback(
-    async (build: Omit<Build, 'id' | 'createdAt' | 'updatedAt'>): Promise<Build> => {
-      if (!wrappedWorker) {
-        throw new Error('Worker not initialized');
+    async (
+      buildData: Omit<Build, 'id' | 'createdAt' | 'updatedAt'>,
+      files: Record<string, { content: Uint8Array }>,
+    ): Promise<Build> => {
+      const worker = await getReadiedWorker();
+
+      const build = await worker.createBuild(buildData);
+
+      const buildFiles: Record<string, { content: Uint8Array }> = {};
+      for (const [path, file] of Object.entries(files)) {
+        buildFiles[`/builds/${build.id}/${path}`] = file;
       }
 
-      return wrappedWorker.createBuild(build);
+      await fileManager.writeFiles(buildFiles);
+
+      return build;
     },
-    [wrappedWorker],
+    [getReadiedWorker, fileManager],
   );
 
   const updateBuild = useCallback(
@@ -64,46 +92,45 @@ export function BuildManagerProvider({ children }: { readonly children: ReactNod
         noUpdatedAt?: boolean;
       },
     ): Promise<Build | undefined> => {
-      if (!wrappedWorker) {
-        throw new Error('Worker not initialized');
-      }
-
-      return wrappedWorker.updateBuild(buildId, update, options);
+      const worker = await getReadiedWorker();
+      return worker.updateBuild(buildId, update, options);
     },
-    [wrappedWorker],
+    [getReadiedWorker],
+  );
+
+  const duplicateBuild = useCallback(
+    async (buildId: string): Promise<Build> => {
+      const worker = await getReadiedWorker();
+      const build = await worker.duplicateBuild(buildId);
+      await fileManager.copyDirectory(`/builds/${buildId}`, `/builds/${build.id}`);
+      return build;
+    },
+    [getReadiedWorker, fileManager],
   );
 
   const getBuilds = useCallback(
     async (options?: { includeDeleted?: boolean }): Promise<Build[]> => {
-      if (!wrappedWorker) {
-        throw new Error('Worker not initialized');
-      }
-
-      return wrappedWorker.getBuilds(options);
+      const worker = await getReadiedWorker();
+      return worker.getBuilds(options);
     },
-    [wrappedWorker],
+    [getReadiedWorker],
   );
 
   const getBuild = useCallback(
     async (buildId: string): Promise<Build | undefined> => {
-      if (!wrappedWorker) {
-        throw new Error('Worker not initialized');
-      }
+      const worker = await getReadiedWorker();
 
-      return wrappedWorker.getBuild(buildId);
+      return worker.getBuild(buildId);
     },
-    [wrappedWorker],
+    [getReadiedWorker],
   );
 
   const deleteBuild = useCallback(
     async (buildId: string): Promise<void> => {
-      if (!wrappedWorker) {
-        throw new Error('Worker not initialized');
-      }
-
-      return wrappedWorker.deleteBuild(buildId);
+      const worker = await getReadiedWorker();
+      return worker.deleteBuild(buildId);
     },
-    [wrappedWorker],
+    [getReadiedWorker],
   );
 
   const value = useMemo<BuildManagerContextType>(() => {
@@ -111,14 +138,14 @@ export function BuildManagerProvider({ children }: { readonly children: ReactNod
       isLoading,
       error,
       buildManagerRef: actorRef,
-      wrappedWorker,
       createBuild,
       updateBuild,
+      duplicateBuild,
       getBuilds,
       getBuild,
       deleteBuild,
     };
-  }, [isLoading, error, actorRef, wrappedWorker, createBuild, updateBuild, getBuilds, getBuild, deleteBuild]);
+  }, [isLoading, error, actorRef, createBuild, updateBuild, duplicateBuild, getBuilds, getBuild, deleteBuild]);
 
   return <BuildManagerContext.Provider value={value}>{children}</BuildManagerContext.Provider>;
 }

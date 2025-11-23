@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { Fragment } from 'react/jsx-runtime';
 import { ChevronRight, Download, Eye, EyeOff } from 'lucide-react';
@@ -10,55 +11,50 @@ import { downloadBlob } from '#utils/file.utils.js';
 import { useBuild } from '#hooks/use-build.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
 
 export function ChatEditorBreadcrumbs(): ReactNode {
-  const { fileExplorerRef, buildRef } = useBuild();
+  const { fileExplorerRef } = useBuild();
 
   // Get active file path from file explorer
-  const activeFilePath = useSelector(fileExplorerRef, (state) => state.context.activeFilePath);
-
-  // Get active file content from build machine (source of truth)
-  const activeFile = useSelector(buildRef, (state) => {
-    if (!activeFilePath) {
-      return undefined;
-    }
-
-    const files = state.context.build?.assets.mechanical?.files;
-    const fileContent = files?.[activeFilePath];
-    if (!fileContent) {
-      return undefined;
-    }
-
-    return {
-      path: activeFilePath,
-      name: activeFilePath.split('/').pop() ?? activeFilePath,
-      content: fileContent.content,
-    };
-  });
+  const activeFile = useSelector(fileExplorerRef, (state) => ({
+    path: state.context.activeFilePath,
+    parts: state.context.activeFilePath?.split('/') ?? [],
+    name: state.context.activeFilePath?.split('/').pop() ?? '',
+  }));
+  const fileManager = useFileManager();
 
   const [enableFilePreview, setEnableFilePreview] = useCookie<boolean>('cad-file-preview', true);
 
-  // Keep empty string initially to avoid flickering
-  const displayPath = String(activeFile?.path ?? '');
-  const parts = displayPath.split('/');
-
-  const handleDownloadCode = () => {
-    if (!activeFile) {
-      return;
-    }
-
+  const handleDownloadCode = useCallback(() => {
     toast.promise(
       async () => {
-        const blob = new Blob([activeFile.content], { type: 'text/plain' });
+        if (!activeFile.path) {
+          throw new Error('Active file path is required for downloading code');
+        }
+
+        const activeFileData = await fileManager.readFile(activeFile.path);
+
+        const blob = new Blob([activeFileData], { type: 'text/plain' });
         downloadBlob(blob, activeFile.name);
       },
       {
         loading: `Downloading ${activeFile.name}...`,
         success: `Downloaded ${activeFile.name}`,
-        error: `Failed to download ${activeFile.name}`,
+        error: `Failed to download ${activeFile.path}`,
       },
     );
-  };
+  }, [activeFile.name, activeFile.path, fileManager]);
+
+  const handleGetCodeText = useCallback(async (): Promise<string> => {
+    if (!activeFile.path) {
+      throw new Error('Active file path is required for copying code');
+    }
+
+    const activeFileData = await fileManager.readFile(activeFile.path);
+
+    return decodeTextFile(activeFileData);
+  }, [activeFile.path, fileManager]);
 
   const handleToggleFilePreview = () => {
     setEnableFilePreview(!enableFilePreview);
@@ -66,12 +62,12 @@ export function ChatEditorBreadcrumbs(): ReactNode {
 
   return (
     <div className="flex flex-row items-center justify-between py-0.25 pr-0.25 pl-3 text-muted-foreground">
-      <div className="flex flex-row items-center gap-0.5">
-        {displayPath ? (
-          parts.map((part, index) => (
+      <div className="flex min-w-0 flex-1 flex-row items-center gap-0.5 overflow-hidden">
+        {activeFile.parts.length > 0 ? (
+          activeFile.parts.map((part, index) => (
             <Fragment key={part}>
-              <span className="text-sm font-medium">{part}</span>
-              {index < parts.length - 1 && <ChevronRight className="size-4" />}
+              <span className="truncate text-sm font-medium">{part}</span>
+              {index < activeFile.parts.length - 1 && <ChevronRight className="size-4 shrink-0" />}
             </Fragment>
           ))
         ) : (
@@ -101,7 +97,7 @@ export function ChatEditorBreadcrumbs(): ReactNode {
               size="icon"
               variant="ghost"
               className="size-7 rounded-sm"
-              getText={() => decodeTextFile(activeFile!.content)}
+              getText={handleGetCodeText}
               tooltip="Copy code"
             />
             <Button size="icon" variant="ghost" className="size-7 rounded-sm" onClick={handleDownloadCode}>

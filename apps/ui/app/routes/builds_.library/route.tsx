@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Grid,
   Layout,
@@ -23,7 +23,6 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Link, NavLink, useNavigate } from 'react-router';
-import { useQueryClient } from '@tanstack/react-query';
 import {
   flexRender,
   getCoreRowModel,
@@ -70,7 +69,6 @@ import {
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { BuildActionDropdown } from '#routes/builds_.library/build-action-dropdown.js';
-import { createBuildMutations } from '#hooks/build-mutations.js';
 import { Checkbox } from '#components/ui/checkbox.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '#components/ui/table.js';
@@ -109,10 +107,8 @@ export default function PersonalCadProjects(): React.JSX.Element {
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.buildViewMode, 'grid');
   const [showDeleted, setShowDeleted] = useState(false);
-  const { builds, deleteBuild, duplicateBuild, restoreBuild } = useBuilds({ includeDeleted: showDeleted });
+  const { builds, deleteBuild, duplicateBuild, restoreBuild, updateName } = useBuilds({ includeDeleted: showDeleted });
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const buildMutations = useMemo(() => createBuildMutations(queryClient), [queryClient]);
 
   const handleToggleDeleted = useCallback((value: boolean) => {
     setShowDeleted(value);
@@ -157,14 +153,14 @@ export default function PersonalCadProjects(): React.JSX.Element {
   const handleRename = useCallback(
     async (buildId: string, newName: string) => {
       try {
-        await buildMutations.updateName(buildId, newName);
+        await updateName(buildId, newName);
         toast.success(`Renamed to ${newName}`);
       } catch (error) {
         toast.error('Failed to rename build');
         console.error('Error renaming build:', error);
       }
     },
-    [buildMutations],
+    [updateName],
   );
 
   const actions: BuildActions = {

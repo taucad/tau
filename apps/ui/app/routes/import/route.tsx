@@ -3,6 +3,7 @@ import type { MetaDescriptor } from 'react-router';
 import { useEffect, useMemo } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { AlertCircle, ChevronDown, FileCode } from 'lucide-react';
+import { fromPromise } from 'xstate';
 // eslint-disable-next-line no-restricted-imports -- allowed for route types
 import type { Route } from './+types/route.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
@@ -20,6 +21,7 @@ import {
 } from '#components/ui/dropdown-menu.js';
 import { Tree, Folder, File } from '#components/magicui/file-tree.js';
 import { formatFileSize } from '#components/geometry/converter/converter-utils.js';
+import { useBuildManager } from '#hooks/use-build-manager.js';
 
 export const handle: Handle = {
   enableOverflowY: true,
@@ -169,16 +171,54 @@ export function loader({ request }: Route.LoaderArgs) {
 export default function ImportRoute(): React.JSX.Element {
   const { owner, repo, ref, mainFile } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
+  const buildManager = useBuildManager();
 
   // Create import machine actor
-  const importActorRef = useActorRef(importGitHubMachine, {
-    input: {
-      owner,
-      repo,
-      ref,
-      mainFile,
+  const importActorRef = useActorRef(
+    importGitHubMachine.provide({
+      actors: {
+        createBuildActor: fromPromise(async ({ input }) => {
+          const buildFiles: Record<string, { content: Uint8Array }> = {};
+          for (const [path, file] of input.files) {
+            buildFiles[path] = { content: file.content };
+          }
+
+          const build = await buildManager.createBuild(
+            {
+              name: `${input.owner}/${input.repo}`,
+              description: `Imported from GitHub: https://github.com/${input.owner}/${input.repo}`,
+              stars: 0,
+              forks: 0,
+              author: {
+                name: 'You',
+                avatar: '/avatar-sample.png',
+              },
+              tags: [],
+              thumbnail: '',
+              chats: [],
+              assets: {
+                mechanical: {
+                  main: input.mainFile,
+                  parameters: {},
+                },
+              },
+            },
+            buildFiles,
+          );
+
+          return { type: 'buildCreated', buildId: build.id };
+        }),
+      },
+    }),
+    {
+      input: {
+        owner,
+        repo,
+        ref,
+        mainFile,
+      },
     },
-  });
+  );
 
   // Select state from machine
   const state = useSelector(importActorRef, (snapshot) => snapshot);

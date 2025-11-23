@@ -20,7 +20,6 @@ export type Chat = {
 
 // Individual asset structure for a specific category
 export type Asset = {
-  files: Record<string, File>;
   main: string; // Points to the main entry file
   parameters: Record<string, unknown>;
   // Could add additional metadata

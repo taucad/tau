@@ -196,16 +196,22 @@ function createGltfDocumentFromReplicadShapes(geometries: GeometryReplicad[], en
 /**
  * Convert replicad geometries to GLB blob format (preserving original triangulation)
  */
-async function createGlbFromReplicadShapes(geometries: GeometryReplicad[], enableTransform: boolean): Promise<Blob> {
+async function createGlbFromReplicadShapes(
+  geometries: GeometryReplicad[],
+  enableTransform: boolean,
+): Promise<Uint8Array> {
   const document = createGltfDocumentFromReplicadShapes(geometries, enableTransform);
   const glbBuffer = await new NodeIO().writeBinary(document);
-  return new Blob([glbBuffer], { type: 'model/gltf-binary' });
+  return glbBuffer;
 }
 
 /**
  * Convert replicad geometries to GLTF blob format (preserving original triangulation)
  */
-async function createGltfFromReplicadShapes(geometries: GeometryReplicad[], enableTransform: boolean): Promise<Blob> {
+async function createGltfFromReplicadShapes(
+  geometries: GeometryReplicad[],
+  enableTransform: boolean,
+): Promise<Uint8Array> {
   const document = createGltfDocumentFromReplicadShapes(geometries, enableTransform);
 
   // Use writeJSON which returns both the JSON and binary data
@@ -238,9 +244,9 @@ async function createGltfFromReplicadShapes(geometries: GeometryReplicad[], enab
   }
 
   // Convert to pretty-printed JSON string
-  const gltfString = JSON.stringify(gltfJson, undefined, 2);
+  const gltfEmbeddedData = new TextEncoder().encode(JSON.stringify(gltfJson, undefined, 2));
 
-  return new Blob([gltfString], { type: 'model/gltf+json' });
+  return gltfEmbeddedData;
 }
 
 /**
@@ -257,7 +263,7 @@ export async function convertReplicadGeometriesToGltf(
   geometries: GeometryReplicad[],
   format: 'glb' | 'gltf' = 'glb',
   enableTransform = true,
-): Promise<Blob> {
+): Promise<Uint8Array> {
   if (format === 'gltf') {
     return createGltfFromReplicadShapes(geometries, enableTransform);
   }

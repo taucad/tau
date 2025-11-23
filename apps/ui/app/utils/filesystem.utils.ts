@@ -1,5 +1,3 @@
-import type { GeometryFile } from '@taucad/types';
-
 /**
  * Extensions that are always binary.
  *
@@ -126,37 +124,4 @@ export function decodeTextFile(data: Uint8Array): string {
 export function encodeTextFile(text: string): Uint8Array {
   const encoder = new TextEncoder();
   return encoder.encode(text);
-}
-
-/**
- * Create a GeometryFile from binary data and filename.
- *
- * @param data - The binary data.
- * @param filename - The filename for the geometry file.
- * @returns A GeometryFile object.
- *
- * @example
- * createGeometryFile(new Uint8Array([...]), 'model.glb')
- */
-export function createGeometryFile(data: Uint8Array, filename: string): GeometryFile {
-  return {
-    filename,
-    data,
-  };
-}
-
-/**
- * Create a GeometryFile from code string and filename.
- * Converts the code to Uint8Array using UTF-8 encoding.
- *
- * @param code - The code string to convert.
- * @param filename - The filename for the geometry file.
- * @returns A GeometryFile object.
- *
- * @example
- * createGeometryFileFromCode('cube([10, 10, 10]);', 'cube.scad')
- * createGeometryFileFromCode('import { Sketch } from "replicad"', 'main.ts')
- */
-export function createGeometryFileFromCode(code: string, filename: string): GeometryFile {
-  return createGeometryFile(encodeTextFile(code), filename);
 }

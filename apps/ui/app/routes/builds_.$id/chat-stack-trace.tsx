@@ -13,26 +13,27 @@ import { createMessage } from '#utils/chat.utils.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useModels } from '#hooks/use-models.js';
 import { defaultChatModel } from '#constants/chat.constants.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
 
 function StackFrame({ frame, index }: { readonly frame: KernelStackFrame; readonly index: number }): React.JSX.Element {
   const fileName = frame.fileName ?? '<unknown>';
 
   return (
     <div className="flex min-w-0 items-center gap-2 font-mono text-[0.625rem]">
-      <span className="w-3 flex-shrink-0 text-right text-muted-foreground">{index + 1}</span>
-      <span className="flex-shrink-0 text-muted-foreground">|</span>
-      <span className="flex-shrink-0 text-foreground">{frame.functionName ?? '<anonymous>'}</span>
+      <span className="w-3 shrink-0 text-right text-muted-foreground">{index + 1}</span>
+      <span className="shrink-0 text-muted-foreground">|</span>
+      <span className="shrink-0 text-foreground">{frame.functionName ?? '<anonymous>'}</span>
       <div className="flex min-w-0">
-        <span className="flex-shrink-0 text-muted-foreground">(</span>
+        <span className="shrink-0 text-muted-foreground">(</span>
         <span className="min-w-0 truncate text-muted-foreground" dir="rtl" title={fileName}>
           {fileName}
         </span>
         {frame.lineNumber !== undefined && frame.columnNumber !== undefined ? (
-          <span className="flex-shrink-0 text-muted-foreground">
+          <span className="shrink-0 text-muted-foreground">
             :{frame.lineNumber}:{frame.columnNumber}
           </span>
         ) : null}
-        <span className="flex-shrink-0 text-muted-foreground">)</span>
+        <span className="shrink-0 text-muted-foreground">)</span>
       </div>
     </div>
   );
@@ -92,25 +93,24 @@ function ErrorStackTrace({
 }
 
 export function ChatStackTrace({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.ReactNode {
-  const { cadRef: cadActor, buildRef } = useBuild();
-  const error = useSelector(cadActor, (state) => state.context.kernelError);
+  const { getMainFilename, cadRef } = useBuild();
+  const fileManager = useFileManager();
+  const error = useSelector(cadRef, (state) => state.context.kernelError);
   const { append } = useChatActions();
   const { selectedModel } = useModels();
   const [, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
   const [kernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
 
-  const handleFixWithAi = useCallback(() => {
+  const handleFixWithAi = useCallback(async () => {
     if (!error) {
       return;
     }
 
     // Get the current code and build context
-    const buildSnapshot = buildRef.getSnapshot();
-    const { build } = buildSnapshot.context;
-    const mainFilePath = build?.assets.mechanical?.main;
-    const fileContent = mainFilePath ? build.assets.mechanical?.files[mainFilePath]?.content : undefined;
+    const mainFilePath = await getMainFilename();
+    const fileContent = await fileManager.readFile(mainFilePath);
 
-    const code = fileContent ? decodeTextFile(fileContent) : undefined;
+    const code = decodeTextFile(fileContent);
 
     // Get the code around the error line for context
     let codeContext = '';
@@ -142,7 +142,7 @@ export function ChatStackTrace({ className, ...props }: React.HTMLAttributes<HTM
 **Error Details:**
 - **Message:** ${error.message}
 - **Location:** Line ${error.startLineNumber}, Column ${error.startColumn}
-- **File:** ${mainFilePath ?? 'main file'}
+- **File:** ${mainFilePath}
 
 ${stackTraceText ? `**Stack Trace:**\n${stackTraceText}\n` : ''}
 ${
@@ -186,7 +186,7 @@ Please update the code to resolve this error.`;
     });
 
     append(message);
-  }, [error, buildRef, kernel, setIsChatOpen, selectedModel?.id, append]);
+  }, [error, getMainFilename, fileManager, kernel, setIsChatOpen, selectedModel?.id, append]);
 
   if (!error) {
     return null;

@@ -169,7 +169,7 @@ class JscadWorker extends KernelWorker {
       return false;
     }
 
-    const code = KernelWorker.extractCodeFromFile(file);
+    const code = await this.extractCodeFromFile(file);
     const hasEsmImport = /import\s+.*from\s+['"]@jscad\/modeling['"]/.test(code);
     const hasRequire = /require\s*\(\s*['"]@jscad\/modeling['"]\s*\)/.test(code);
     const hasNamespaceUsage = /\b@jscad\/modeling\b/.test(code);
@@ -215,7 +215,7 @@ class JscadWorker extends KernelWorker {
    */
   public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {
     try {
-      const code = KernelWorker.extractCodeFromFile(file);
+      const code = await this.extractCodeFromFile(file);
       let defaultParameters: Record<string, unknown> = {};
       let jsonSchema;
 
@@ -301,7 +301,7 @@ class JscadWorker extends KernelWorker {
    * const file = { filename: 'box.js', content: '...' };
    * const params = { width: 10, height: 20 };
    * const result = await worker.computeGeometry(file, params);
-   * // result is array of { format: 'gltf', gltfBlob: Blob }
+   * // result is array of { format: 'gltf', gltfData: Blob }
    * ```
    */
   public override async computeGeometry(
@@ -313,7 +313,7 @@ class JscadWorker extends KernelWorker {
     this.log('Computing JSCAD geometry from code', { operation: 'computeGeometry' });
 
     try {
-      const code = KernelWorker.extractCodeFromFile(file);
+      const code = await this.extractCodeFromFile(file);
 
       // Execute the user code with parameters
       let shapes: unknown;
@@ -351,7 +351,7 @@ class JscadWorker extends KernelWorker {
         if (result.status === 'fulfilled') {
           geometries.push({
             format: 'gltf',
-            gltfBlob: result.value,
+            content: result.value,
           });
         } else {
           this.warn('Failed to convert shape to GLTF', { data: result.reason, operation: 'computeGeometry' });
@@ -404,7 +404,7 @@ class JscadWorker extends KernelWorker {
 
         return createKernelSuccess([
           {
-            blob,
+            blob: new Blob([blob]),
             name: fileType === 'glb' ? 'model.glb' : 'model.gltf',
           },
         ]);

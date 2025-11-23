@@ -6,7 +6,6 @@ import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { KernelSelector } from '#components/chat/kernel-selector.js';
 import { Button } from '#components/ui/button.js';
-import { storage } from '#db/storage.js';
 import { createMessage } from '#utils/chat.utils.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
@@ -22,6 +21,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 import type { Handle } from '#types/matches.types.js';
+import { useBuildManager } from '#hooks/use-build-manager.js';
 
 export const handle: Handle = {
   enableOverflowY: true,
@@ -31,6 +31,7 @@ export default function ChatStart(): React.JSX.Element {
   const navigate = useNavigate();
   const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
   const [, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
+  const buildManager = useBuildManager();
 
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content, model, metadata, imageUrls }) => {
@@ -49,7 +50,9 @@ export default function ChatStart(): React.JSX.Element {
         });
 
         const chatId = generatePrefixedId(idPrefix.chat);
-        const build = await storage.createBuild({
+
+        // Prepare build data without files
+        const buildData = {
           name: defaultBuildName,
           description: '',
           stars: 0,
@@ -72,23 +75,29 @@ export default function ChatStart(): React.JSX.Element {
           lastChatId: chatId,
           assets: {
             mechanical: {
-              files: { [mainFileName]: { content: encodeTextFile(emptyCode) } },
               main: mainFileName,
               parameters: {},
             },
           },
-        });
+        };
+
+        // Prepare files separately
+        const files = {
+          [mainFileName]: { content: encodeTextFile(emptyCode) },
+        };
+
+        const createdBuild = await buildManager.createBuild(buildData, files);
 
         // Ensure chat is open when navigating to the build page
         setIsChatOpen(true);
 
         // Navigate immediately - the build page will handle the streaming
-        await navigate(`/builds/${build.id}`);
+        await navigate(`/builds/${createdBuild.id}`);
       } catch {
         toast.error('Failed to create build');
       }
     },
-    [navigate, selectedKernel, setIsChatOpen],
+    [selectedKernel, buildManager, setIsChatOpen, navigate],
   );
 
   return (

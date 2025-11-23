@@ -5,18 +5,14 @@ import type { Message } from '@ai-sdk/react';
 import type { Build, Chat } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import { isBrowser } from '#constants/browser.constants.js';
-import { storage } from '#db/storage.js';
 import { assertActorDoneEvent } from '#lib/xstate.js';
 import { cameraCapabilityMachine } from '#machines/camera-capability.machine.js';
 import { cadMachine } from '#machines/cad.machine.js';
-import { fileExplorerMachine } from '#machines/file-explorer.machine.js';
 import { gitMachine } from '#machines/git.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
 import { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
-import { writeBuildToLightningFs } from '#lib/lightning-fs.lib.js';
-import { createGeometryFile } from '#utils/filesystem.utils.js';
 
 /**
  * Build Machine Context
@@ -29,7 +25,6 @@ export type BuildContext = {
   enableFilePreview: boolean;
   shouldLoadModelOnStart: boolean;
   gitRef: ActorRefFrom<typeof gitMachine>;
-  fileExplorerRef: ActorRefFrom<typeof fileExplorerMachine>;
   graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   cadRef: ActorRefFrom<typeof cadMachine>;
   screenshotRef: ActorRefFrom<typeof screenshotCapabilityMachine>;
@@ -46,36 +41,18 @@ type BuildInput = {
 };
 
 // Define the actors that the machine can invoke
-const loadBuildActor = fromPromise<Build, { buildId: string }>(async ({ input }) => {
-  const build = await storage.getBuild(input.buildId);
-  if (!build) {
-    throw new Error(`Build not found: ${input.buildId}`);
-  }
-
-  return build;
+const loadBuildActor = fromPromise<Build, { buildId: string }>(async () => {
+  throw new Error('Not implemented. Please supply the `provide.actors.loadBuildActor` option to the build machine.');
 });
 
-const writeBuildActor = fromPromise<Build, { build: Build }>(async ({ input }) => {
-  const updated = await storage.updateBuild(input.build.id, input.build, { noUpdatedAt: false });
-  if (!updated) {
-    throw new Error(`Build not found: ${input.build.id}`);
-  }
-
-  return updated;
+const writeBuildActor = fromPromise<void, { build: Build }>(async () => {
+  throw new Error('Not implemented. Please supply the `provide.actors.writeBuildActor` option to the build machine.');
 });
-
-const writeFilesystemActor = fromPromise<void, { buildId: string; files: Record<string, { content: Uint8Array }> }>(
-  async ({ input }) => {
-    await writeBuildToLightningFs(input.buildId, input.files);
-  },
-);
 
 const buildActors = {
   loadBuildActor,
   writeBuildActor,
-  writeFilesystemActor,
   git: gitMachine,
-  fileExplorer: fileExplorerMachine,
   graphics: graphicsMachine,
   // Having the cadMachine typed results in:
   // `The inferred type of this node exceeds the maximum length the compiler will serialize`.
@@ -116,11 +93,6 @@ type BuildEventInternal =
   | { type: 'setParameters'; parameters: Record<string, unknown> }
   | { type: 'setEnableFilePreview'; enabled: boolean }
   | { type: 'loadModel' }
-  | { type: 'createFile'; path: string; content: Uint8Array }
-  | { type: 'updateFile'; path: string; content: Uint8Array; source: 'user' | 'external' }
-  | { type: 'renameFile'; oldPath: string; newPath: string }
-  | { type: 'deleteFile'; path: string }
-  | { type: 'fileOpened'; path: string }
   | { type: 'setMainFile'; path: string };
 
 export type BuildEventExternal = OutputFrom<(typeof buildActors)[BuildActorNames]>;
@@ -135,9 +107,6 @@ type BuildEmitted =
   | { type: 'buildLoaded'; build: Build }
   | { type: 'error'; error: Error }
   | { type: 'buildUpdated'; build: Build }
-  | { type: 'fileCreated'; path: string; content: Uint8Array }
-  | { type: 'fileUpdated'; path: string; content: Uint8Array; source: 'user' | 'external' }
-  | { type: 'fileDeleted'; path: string }
   | { type: 'activeChatChanged'; chat: Chat };
 
 /**
@@ -460,7 +429,6 @@ export const buildMachine = setup({
       enqueue.assign(({ context: ctx }) =>
         produce(ctx, (draft) => {
           if (draft.build?.assets.mechanical) {
-            draft.build.assets.mechanical.files = event.files;
             draft.build.assets.mechanical.parameters = event.parameters;
             draft.build.updatedAt = Date.now();
           }
@@ -490,178 +458,28 @@ export const buildMachine = setup({
         parameters: event.parameters,
       });
     }),
-    createFileInContext: assign(({ context, event }) => {
-      assertEvent(event, 'createFile');
+    setMainFileInContext: assign(({ context, event }) => {
+      assertEvent(event, 'setMainFile');
       if (!context.build?.assets.mechanical) {
         return {};
       }
 
       return produce(context, (draft) => {
         if (draft.build?.assets.mechanical) {
-          // Content is already Uint8Array
-          draft.build.assets.mechanical.files[event.path] = { content: event.content };
+          draft.build.assets.mechanical.main = event.path;
           draft.build.updatedAt = Date.now();
         }
       });
     }),
-    updateFileInContext: enqueueActions(({ enqueue, context, event }) => {
-      assertEvent(event, 'updateFile');
-      if (!context.build?.assets.mechanical) {
-        return;
-      }
-
-      // Update the file content
-      enqueue.assign(
-        produce(context, (draft) => {
-          if (draft.build?.assets.mechanical) {
-            draft.build.assets.mechanical.files[event.path] = { content: event.content };
-            draft.build.updatedAt = Date.now();
-          }
-        }),
-      );
-
-      // Emit fileUpdated event with source for external listeners
-      enqueue.emit({
-        type: 'fileUpdated' as const,
-        path: event.path,
-        content: event.content,
-        source: event.source,
-      });
-
-      // Determine which file to send to CAD based on enableFilePreview
-      const { enableFilePreview } = context;
-      const mainFilePath = context.build.assets.mechanical.main;
-      const isMainFile = event.path === mainFilePath;
-
-      let dataToSend: Uint8Array | undefined;
-
-      if (enableFilePreview) {
-        dataToSend = event.content;
-      } else {
-        // With preview disabled, always send main file when any file updates
-        dataToSend = isMainFile ? event.content : context.build.assets.mechanical.files[mainFilePath]?.content;
-      }
-
-      if (dataToSend) {
-        const pathToSend = enableFilePreview ? event.path : mainFilePath;
-        const file = createGeometryFile(dataToSend, pathToSend);
-        enqueue.sendTo(context.cadRef, {
-          type: 'setFile',
-          file,
-        });
-      }
-    }),
-    renameFileInContext: enqueueActions(({ enqueue, context, event }) => {
-      assertEvent(event, 'renameFile');
-      if (!context.build?.assets.mechanical) {
-        return;
-      }
-
-      enqueue.assign(
-        produce(context, (draft) => {
-          const files = draft.build?.assets.mechanical?.files;
-          if (files?.[event.oldPath]) {
-            const fileContent = files[event.oldPath];
-            if (!fileContent) {
-              return;
-            }
-
-            // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- need to remove old file path
-            delete files[event.oldPath];
-            files[event.newPath] = fileContent;
-
-            // Update main file path if renaming the main file
-            if (draft.build?.assets.mechanical?.main === event.oldPath) {
-              draft.build.assets.mechanical.main = event.newPath;
-            }
-
-            if (draft.build) {
-              draft.build.updatedAt = Date.now();
-            }
-          }
-        }),
-      );
-
-      // Update file explorer tabs if file was open
-      const wasOpen = context.fileExplorerRef.getSnapshot().context.openFiles.some((f) => f.path === event.oldPath);
-      if (wasOpen) {
-        enqueue.sendTo(context.fileExplorerRef, {
-          type: 'closeFile',
-          path: event.oldPath,
-        });
-        enqueue.sendTo(context.fileExplorerRef, {
-          type: 'openFile',
-          path: event.newPath,
-        });
-      }
-    }),
-    deleteFileFromContext: enqueueActions(({ enqueue, context, event }) => {
-      assertEvent(event, 'deleteFile');
-      if (!context.build?.assets.mechanical) {
-        return;
-      }
-
-      enqueue.assign(
-        produce(context, (draft) => {
-          if (draft.build?.assets.mechanical?.files[event.path]) {
-            // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- need to remove file from record
-            delete draft.build.assets.mechanical.files[event.path];
-            draft.build.updatedAt = Date.now();
-          }
-        }),
-      );
-
-      // Close the file in file explorer if it's open
-      enqueue.sendTo(context.fileExplorerRef, {
-        type: 'closeFile',
-        path: event.path,
-      });
-    }),
-    setMainFileInContext: enqueueActions(({ enqueue, context, event }) => {
-      assertEvent(event, 'setMainFile');
-      if (!context.build?.assets.mechanical) {
-        return;
-      }
-
-      // Validate that the file exists
-      if (!context.build.assets.mechanical.files[event.path]) {
-        return;
-      }
-
-      enqueue.assign(
-        produce(context, (draft) => {
-          if (draft.build?.assets.mechanical) {
-            draft.build.assets.mechanical.main = event.path;
-            draft.build.updatedAt = Date.now();
-          }
-        }),
-      );
-
-      // Send the new main file to CAD if file preview is disabled
-      if (!context.enableFilePreview) {
-        const file = createGeometryFile(context.build.assets.mechanical.files[event.path]!.content, event.path);
-        enqueue.sendTo(context.cadRef, {
-          type: 'setFile',
-          file,
-        });
-      }
-    }),
     stopStatefulActors: enqueueActions(({ enqueue, context }) => {
       // Stop the old stateful actors (they'll be garbage collected)
       enqueue.stopChild(context.gitRef);
-      enqueue.stopChild(context.fileExplorerRef);
     }),
     respawnStatefulActors: assign({
       gitRef({ context, spawn, self }) {
         return spawn('git', {
           id: `git-${context.buildId}`,
           input: { buildId: context.buildId, parentRef: self },
-        });
-      },
-      fileExplorerRef({ context, spawn, self }) {
-        return spawn('fileExplorer', {
-          id: `file-explorer-${context.buildId}`,
-          input: { parentRef: self },
         });
       },
     }),
@@ -680,11 +498,12 @@ export const buildMachine = setup({
       enqueue.sendTo(context.cadRef, { type: 'initializeKernel' });
 
       // Then initialize the model with current build data
-      const file = createGeometryFile(mechanicalAsset.files[mechanicalAsset.main]!.content, mechanicalAsset.main);
-
       enqueue.sendTo(context.cadRef, {
         type: 'initializeModel',
-        file,
+        file: {
+          path: `/builds/${context.buildId}`,
+          filename: mechanicalAsset.main,
+        },
         parameters: mechanicalAsset.parameters,
       });
     }),
@@ -697,12 +516,13 @@ export const buildMachine = setup({
       // Initialize kernel first
       enqueue.sendTo(context.cadRef, { type: 'initializeKernel' });
 
-      // Then initialize the model with current build data
-      const file = createGeometryFile(mechanicalAsset.files[mechanicalAsset.main]!.content, mechanicalAsset.main);
-
+      // Initialize the model with current build data
       enqueue.sendTo(context.cadRef, {
         type: 'initializeModel',
-        file,
+        file: {
+          path: `/builds/${context.buildId}`,
+          filename: mechanicalAsset.main,
+        },
         parameters: mechanicalAsset.parameters,
       });
     }),
@@ -711,57 +531,6 @@ export const buildMachine = setup({
         assertEvent(event, 'setEnableFilePreview');
         return event.enabled;
       },
-    }),
-    handleFileOpened: enqueueActions(({ enqueue, context, event }) => {
-      assertEvent(event, 'fileOpened');
-
-      const { enableFilePreview } = context;
-      const mechanicalAsset = context.build?.assets.mechanical;
-      if (!mechanicalAsset) {
-        return;
-      }
-
-      const mainFilePath = mechanicalAsset.main;
-      const isMainFile = event.path === mainFilePath;
-
-      // Determine which file to show in CAD
-      let dataToSend: Uint8Array | undefined;
-
-      if (enableFilePreview) {
-        // Preview enabled: show the opened file
-        const file = mechanicalAsset.files[event.path];
-        dataToSend = file?.content;
-      } else if (isMainFile) {
-        // Preview disabled: only update CAD if opening the main file
-        const file = mechanicalAsset.files[event.path];
-        dataToSend = file?.content;
-      }
-      // If opening a non-main file with preview disabled, do nothing
-
-      if (dataToSend) {
-        const file = createGeometryFile(dataToSend, event.path);
-        enqueue.sendTo(context.cadRef, {
-          type: 'setFile',
-          file,
-        });
-      }
-    }),
-    openInitialFile: enqueueActions(({ enqueue, context }) => {
-      const mechanicalAsset = context.build?.assets.mechanical;
-      if (!mechanicalAsset?.main) {
-        return;
-      }
-
-      const mainFile = mechanicalAsset.files[mechanicalAsset.main];
-      if (!mainFile) {
-        return;
-      }
-
-      // Open the main file
-      enqueue.sendTo(context.fileExplorerRef, {
-        type: 'openFile',
-        path: mechanicalAsset.main,
-      });
     }),
     emitActiveChatChangedIfExists: enqueueActions(({ enqueue, event }) => {
       assertActorDoneEvent(event);
@@ -782,26 +551,6 @@ export const buildMachine = setup({
         type: 'buildLoaded' as const,
         build: event.output as Build,
       };
-    }),
-    emitFileCreated: emit(({ context }) => {
-      // Get the path and content from the last createFile event
-      const mechanicalFiles = context.build?.assets.mechanical?.files ?? {};
-      const paths = Object.keys(mechanicalFiles);
-      const lastPath = paths.at(-1) ?? '';
-      const lastFile = mechanicalFiles[lastPath];
-      const content: Uint8Array = lastFile?.content ?? new Uint8Array();
-
-      return {
-        type: 'fileCreated' as const,
-        path: lastPath,
-        content,
-      };
-    }),
-    updateBuildFromEvent: assign({
-      build({ event }) {
-        assertActorDoneEvent(event);
-        return event.output as Build;
-      },
     }),
     emitBuildUpdated: emit(({ event }) => {
       assertActorDoneEvent(event);
@@ -831,11 +580,6 @@ export const buildMachine = setup({
     const gitRef = spawn('git', {
       id: `git-${buildId}`,
       input: { buildId, parentRef: self },
-    });
-
-    const fileExplorerRef = spawn('fileExplorer', {
-      id: `file-explorer-${buildId}`,
-      input: { parentRef: self },
     });
 
     const graphicsRef = spawn('graphics', {
@@ -877,7 +621,6 @@ export const buildMachine = setup({
       enableFilePreview: true, // Default to enabled
       shouldLoadModelOnStart,
       gitRef,
-      fileExplorerRef,
       graphicsRef,
       cadRef,
       screenshotRef,
@@ -924,7 +667,6 @@ export const buildMachine = setup({
             'setBuild',
             'clearLoading',
             'initializeKernelIfNeeded',
-            'openInitialFile',
             'emitBuildLoaded',
             'emitActiveChatChangedIfExists',
           ],
@@ -938,104 +680,10 @@ export const buildMachine = setup({
     ready: {
       type: 'parallel',
       states: {
-        filesystem: {
-          initial: 'writingInitial',
-          states: {
-            writingInitial: {
-              invoke: {
-                src: 'writeFilesystemActor',
-                input({ context }) {
-                  return {
-                    buildId: context.buildId,
-                    files: context.build?.assets.mechanical?.files ?? {},
-                  };
-                },
-                onDone: {
-                  target: 'idle',
-                },
-                onError: {
-                  target: 'idle',
-                  // Fail silently
-                },
-              },
-            },
-            idle: {},
-          },
-        },
         operation: {
           initial: 'idle',
           states: {
             idle: {},
-            creatingFile: {
-              invoke: {
-                src: 'writeFilesystemActor',
-                input({ context }) {
-                  return {
-                    buildId: context.buildId,
-                    files: context.build?.assets.mechanical?.files ?? {},
-                  };
-                },
-                onDone: {
-                  target: 'idle',
-                  actions: ['emitFileCreated'],
-                },
-                onError: {
-                  target: 'idle',
-                },
-              },
-            },
-            updatingFile: {
-              invoke: {
-                src: 'writeFilesystemActor',
-                input({ context, event }) {
-                  assertEvent(event, 'updateFile');
-                  return {
-                    buildId: context.buildId,
-                    files: context.build?.assets.mechanical?.files ?? {},
-                  };
-                },
-                onDone: {
-                  target: 'idle',
-                },
-                onError: {
-                  target: 'idle',
-                },
-              },
-            },
-            renamingFile: {
-              invoke: {
-                src: 'writeFilesystemActor',
-                input({ context }) {
-                  return {
-                    buildId: context.buildId,
-                    files: context.build?.assets.mechanical?.files ?? {},
-                  };
-                },
-                onDone: {
-                  target: 'idle',
-                },
-                onError: {
-                  target: 'idle',
-                },
-              },
-            },
-            deletingFile: {
-              invoke: {
-                src: 'writeFilesystemActor',
-                input({ context }) {
-                  return {
-                    buildId: context.buildId,
-                    files: context.build?.assets.mechanical?.files ?? {},
-                  };
-                },
-                onDone: {
-                  target: 'idle',
-                },
-                onError: {
-                  target: 'idle',
-                },
-              },
-            },
           },
           on: {
             loadBuild: [
@@ -1097,25 +745,6 @@ export const buildMachine = setup({
             loadModel: {
               actions: 'loadModel',
             },
-            createFile: {
-              target: '.creatingFile',
-              actions: ['createFileInContext'],
-            },
-            updateFile: {
-              target: '.updatingFile',
-              actions: 'updateFileInContext',
-            },
-            renameFile: {
-              target: '.renamingFile',
-              actions: 'renameFileInContext',
-            },
-            deleteFile: {
-              target: '.deletingFile',
-              actions: ['deleteFileFromContext'],
-            },
-            fileOpened: {
-              actions: 'handleFileOpened',
-            },
             setMainFile: {
               actions: 'setMainFileInContext',
             },
@@ -1166,18 +795,6 @@ export const buildMachine = setup({
                   target: 'pending',
                 },
                 setParameters: {
-                  target: 'pending',
-                },
-                createFile: {
-                  target: 'pending',
-                },
-                updateFile: {
-                  target: 'pending',
-                },
-                renameFile: {
-                  target: 'pending',
-                },
-                deleteFile: {
                   target: 'pending',
                 },
                 setMainFile: {
@@ -1247,22 +864,6 @@ export const buildMachine = setup({
                   target: 'pending',
                   reenter: true,
                 },
-                createFile: {
-                  target: 'pending',
-                  reenter: true,
-                },
-                updateFile: {
-                  target: 'pending',
-                  reenter: true,
-                },
-                renameFile: {
-                  target: 'pending',
-                  reenter: true,
-                },
-                deleteFile: {
-                  target: 'pending',
-                  reenter: true,
-                },
                 setMainFile: {
                   target: 'pending',
                   reenter: true,
@@ -1277,7 +878,7 @@ export const buildMachine = setup({
                 },
                 onDone: {
                   target: 'idle',
-                  actions: ['updateBuildFromEvent', 'emitBuildUpdated'],
+                  actions: ['emitBuildUpdated'],
                 },
                 onError: {
                   target: 'pending',

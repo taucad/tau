@@ -26,8 +26,10 @@ const newChatKeyCombination = {
 } satisfies KeyCombination;
 
 export function ChatHistorySelector(): ReactNode {
-  const { buildRef, isLoading, addChat, setActiveChat, updateChatName, deleteChat } = useBuild();
-  const build = useSelector(buildRef, (state) => state.context.build);
+  const { buildRef, addChat, setActiveChat, updateChatName, deleteChat } = useBuild();
+  const isLoading = useSelector(buildRef, (state) => state.context.isLoading);
+  const chatCount = useSelector(buildRef, (state) => state.context.build?.chats.length ?? 0);
+  const groupedChats = useSelector(buildRef, (state) => groupItemsByTimeHorizon(state.context.build?.chats ?? []));
   const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId) ?? '';
   const activeChat = useSelector(buildRef, (state) =>
     state.context.build?.chats.find((chat) => chat.id === activeChatId),
@@ -107,9 +109,6 @@ export function ChatHistorySelector(): ReactNode {
     },
     [deleteChat],
   );
-
-  // Group chats for the ComboBoxResponsive component
-  const groupedChats = !isLoading && build?.chats ? groupItemsByTimeHorizon(build.chats) : [];
 
   // Render function for each chat item
   const renderChatLabel = useCallback(
@@ -198,11 +197,7 @@ export function ChatHistorySelector(): ReactNode {
                   )}
                 >
                   <span className="truncate">
-                    {isLoading
-                      ? null
-                      : !build?.chats || build.chats.length === 0
-                        ? 'Initial design'
-                        : (activeChat?.name ?? 'Select a chat')}
+                    {isLoading ? null : chatCount === 0 ? 'Initial design' : (activeChat?.name ?? 'Select a chat')}
                   </span>
                   <Search className="size-4 shrink-0 md:opacity-0 md:group-hover:opacity-100" />
                 </Button>

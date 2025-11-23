@@ -4,8 +4,14 @@ import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/web';
 import { lightningFs } from '#db/storage.js';
 import { assertActorDoneEvent } from '#lib/xstate.js';
-import { getBuildDirectory } from '#lib/lightning-fs.lib.js';
 import { gitAttributesTemplate } from '#constants/gitattributes-template.js';
+
+/**
+ * Get the directory path for a build in the virtual filesystem
+ */
+export function getBuildDirectory(buildId: string): string {
+  return `/builds/${buildId}`;
+}
 
 /**
  * Git File Status

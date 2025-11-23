@@ -2,7 +2,6 @@ import { assign, assertEvent, setup, fromPromise, enqueueActions } from 'xstate'
 import type { AnyActorRef, ActorRefFrom, OutputFrom, DoneActorEvent } from 'xstate';
 import { unzipMachine } from '#machines/unzip.machine.js';
 import type { UnzipMachineActor } from '#machines/unzip.machine.js';
-import { storage } from '#db/storage.js';
 import { assertActorDoneEvent } from '#lib/xstate.js';
 
 /**
@@ -126,7 +125,7 @@ const downloadZipActor = fromPromise<
   return { type: 'downloaded', blob: new Blob([zipData], { type: 'application/zip' }) };
 });
 
-// Create build actor
+// This actor should be provided via the `provide` mechanism in the route
 const createBuildActor = fromPromise<
   { type: 'buildCreated'; buildId: string },
   {
@@ -136,40 +135,8 @@ const createBuildActor = fromPromise<
     mainFile: string;
     files: Map<string, { filename: string; content: Uint8Array }>;
   }
->(async ({ input }) => {
-  // Convert files Map to build asset format
-  const buildFiles: Record<string, { content: Uint8Array }> = {};
-  for (const [path, file] of input.files) {
-    buildFiles[path] = { content: file.content };
-  }
-
-  // Validate main file exists
-  if (!buildFiles[input.mainFile]) {
-    throw new Error(`Main file "${input.mainFile}" not found in repository`);
-  }
-
-  const build = await storage.createBuild({
-    name: `${input.owner}/${input.repo}`,
-    description: `Imported from GitHub: https://github.com/${input.owner}/${input.repo}`,
-    stars: 0,
-    forks: 0,
-    author: {
-      name: 'You',
-      avatar: '/avatar-sample.png',
-    },
-    tags: ['imported'],
-    thumbnail: '',
-    chats: [],
-    assets: {
-      mechanical: {
-        files: buildFiles,
-        main: input.mainFile,
-        parameters: {},
-      },
-    },
-  });
-
-  return { type: 'buildCreated', buildId: build.id };
+>(async () => {
+  throw new Error('Not implemented');
 });
 
 const importGitHubActors = {

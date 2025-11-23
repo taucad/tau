@@ -1,9 +1,10 @@
 import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState } from 'react';
 import { File, LoaderCircle, Play, X, ChevronDown, AlertTriangle, Bug, Camera, Check, RotateCcw } from 'lucide-react';
 import type { ToolResult } from 'ai';
-import { useActor } from '@xstate/react';
+import { useActorRef, useSelector } from '@xstate/react';
 import type { CodeError, KernelError } from '@taucad/types';
+import { waitFor } from 'xstate';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { CopyButton } from '#components/copy-button.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
@@ -16,6 +17,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/ho
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
 
 export type FileEditToolResult = ToolResult<
   'edit_file',
@@ -133,62 +135,49 @@ function Filename({
 // eslint-disable-next-line complexity -- refactor later
 export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocationUIPart }): React.JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
-  const { buildRef } = useBuild();
+  const { getMainFilename } = useBuild();
   const status = useChatSelector((state) => state.context.status);
 
   // Create file edit machine
-  const [fileEditState, fileEditSend] = useActor(fileEditMachine);
+  const fileEditRef = useActorRef(fileEditMachine);
+  const fileEditState = useSelector(fileEditRef, (state) => state.value);
+  const fileEditError = useSelector(fileEditRef, (state) => state.context.error);
+  const fileManager = useFileManager();
 
   const handleApplyEdit = useCallback(
-    (targetFile: string, editInstructions: string) => {
-      // Get the current code from the build machine
-      const buildSnapshot = buildRef.getSnapshot();
-      const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
-      const fileContent = mainFilePath
-        ? buildSnapshot.context.build?.assets.mechanical?.files[mainFilePath]?.content
-        : undefined;
+    async (targetFile: string, editInstructions: string) => {
+      const mainFilename = await getMainFilename();
+      const resolvedPath = targetFile || mainFilename;
 
-      if (!fileContent) {
-        console.error('No file content found');
-        return;
-      }
+      const currentCode = await fileManager.readFile(resolvedPath);
 
-      const currentCode = decodeTextFile(fileContent);
-
-      fileEditSend({
+      fileEditRef.start();
+      fileEditRef.send({
         type: 'applyEdit',
         request: {
-          targetFile,
-          originalContent: currentCode,
+          targetFile: resolvedPath,
+          originalContent: decodeTextFile(currentCode),
           codeEdit: editInstructions,
         },
       });
-    },
-    [buildRef, fileEditSend],
-  );
 
-  // When file edit is successful or failed with fallback content, update the file through build machine
-  useEffect(() => {
-    if (fileEditState.matches('success') || fileEditState.matches('error')) {
-      const { result } = fileEditState.context;
-      if (result?.editedContent) {
-        // Get the main file path
-        const buildSnapshot = buildRef.getSnapshot();
-        const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
-
-        if (mainFilePath) {
-          // Update file through build machine, which handles CAD forwarding
-          // On error, this will be the original content as fallback
-          buildRef.send({
-            type: 'updateFile',
-            path: mainFilePath,
-            content: encodeTextFile(result.editedContent),
-            source: 'external',
-          });
+      const snapshot = await waitFor(fileEditRef, (state) => state.matches('success') || state.matches('error'));
+      if (snapshot.matches('success')) {
+        const { result } = snapshot.context;
+        if (!result?.editedContent) {
+          throw new Error('No content received from file edit service');
         }
+
+        fileManager.writeFile(resolvedPath, encodeTextFile(result.editedContent));
       }
-    }
-  }, [fileEditState, buildRef]);
+
+      if (snapshot.matches('error')) {
+        const { error } = snapshot.context;
+        throw new Error(`File edit failed: ${error}`);
+      }
+    },
+    [fileEditRef, fileManager, getMainFilename],
+  );
 
   switch (part.toolInvocation.state) {
     case 'partial-call':
@@ -245,25 +234,25 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
                     size="xs"
                     variant="ghost"
                     className="flex"
-                    disabled={fileEditState.matches('applying')}
+                    disabled={fileEditState === 'applying'}
                     onClick={() => {
-                      handleApplyEdit(targetFile, codeEdit);
+                      void handleApplyEdit(targetFile, codeEdit);
                     }}
                   >
                     <span className="hidden @xs/code:block">
-                      {fileEditState.matches('applying')
+                      {fileEditState === 'applying'
                         ? 'Applying...'
-                        : fileEditState.matches('success')
+                        : fileEditState === 'success'
                           ? 'Applied'
-                          : fileEditState.matches('error')
+                          : fileEditState === 'error'
                             ? 'Retry'
                             : 'Apply'}
                     </span>
-                    {fileEditState.matches('applying') ? (
+                    {fileEditState === 'applying' ? (
                       <LoaderCircle className="size-3 animate-spin" />
-                    ) : fileEditState.matches('success') ? (
+                    ) : fileEditState === 'success' ? (
                       <Check className="size-3" />
-                    ) : fileEditState.matches('error') ? (
+                    ) : fileEditState === 'error' ? (
                       <RotateCcw className="size-3" />
                     ) : (
                       <Play />
@@ -271,12 +260,12 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {fileEditState.matches('applying')
+                  {fileEditState === 'applying'
                     ? 'Applying file edit...'
-                    : fileEditState.matches('success')
+                    : fileEditState === 'success'
                       ? 'File edit applied successfully'
-                      : fileEditState.matches('error')
-                        ? `Edit failed: ${fileEditState.context.error}. Reverted to original content.`
+                      : fileEditState === 'error'
+                        ? `Edit failed: ${fileEditError ?? 'Unknown error'}. Reverted to original content.`
                         : 'Apply edit'}
                 </TooltipContent>
               </Tooltip>

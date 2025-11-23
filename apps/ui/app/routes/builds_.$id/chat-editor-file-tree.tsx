@@ -1,4 +1,4 @@
-import { useCallback, useState, useRef, useMemo, useEffect } from 'react';
+import { useCallback, useState, useRef, useMemo, useEffect, memo } from 'react';
 import type { ItemInstance } from '@headless-tree/core';
 import {
   FilePlus,
@@ -63,6 +63,7 @@ import { EmptyItems } from '#components/ui/empty-items.js';
 import { HighlightText } from '#components/highlight-text.js';
 import { FileExtensionIcon, getIconIdFromExtension } from '#components/icons/file-extension-icon.js';
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
 
 type TreeItemData = {
   path: string;
@@ -79,34 +80,62 @@ function isHiddenFile(path: string, patterns: string[]): boolean {
   return patterns.some((pattern) => minimatch(path, pattern));
 }
 
-export function ChatEditorFileTree(): React.JSX.Element {
-  const { buildRef, fileExplorerRef, gitRef } = useBuild();
-  const mechanicalAsset = useSelector(buildRef, (state) => {
-    return state.context.build?.assets.mechanical;
-  });
+export const ChatEditorFileTree = memo(function (): React.JSX.Element {
+  const { buildRef, fileExplorerRef, gitRef, cadRef } = useBuild();
+  const buildId = useSelector(buildRef, (state) => state.context.buildId);
+  const { fileManagerRef } = useFileManager();
 
-  // Derive file tree from build state (reactive selector)
+  useEffect(() => {
+    // FileExplorer → FileManager → CAD coordination
+    const fileOpenedSub = fileExplorerRef.on('fileOpened', (event) => {
+      fileManagerRef.send({ type: 'readFile', path: event.path });
+      cadRef.send({
+        type: 'setFile',
+        file: { path: `/builds/${buildId}`, filename: event.path },
+      });
+    });
+
+    // Build loaded → Open initial file
+    const buildLoadedSub = buildRef.on('buildLoaded', (event) => {
+      const mainFile = event.build.assets.mechanical?.main;
+      if (mainFile) {
+        fileExplorerRef.send({ type: 'openFile', path: mainFile });
+      }
+    });
+
+    return () => {
+      fileOpenedSub.unsubscribe();
+      buildLoadedSub.unsubscribe();
+    };
+  }, [buildRef, fileExplorerRef, fileManagerRef, cadRef, buildId]);
+
+  // Derive file tree from file-manager (reactive selector)
   // Use custom equality to prevent unnecessary re-renders
   const fileTree = useSelector(
-    buildRef,
+    fileManagerRef,
     (state): FileItem[] => {
-      const files = state.context.build?.assets.mechanical?.files;
-      if (!files || !mechanicalAsset) {
+      const fileTreeMap = state.context.fileTree;
+      if (fileTreeMap.size === 0) {
         return [];
       }
 
       const gitSnapshot = gitRef.getSnapshot();
       const { fileStatuses } = gitSnapshot.context;
 
-      return Object.entries(files).map(([path, item]) => ({
-        id: path,
-        name: path.split('/').pop() ?? path,
-        path,
-        content: item.content,
-        language: getIconIdFromExtension(getFileExtension(path)),
-        isDirectory: false,
-        gitStatus: fileStatuses.get(path)?.status,
-      }));
+      // Convert Map to array and filter for files only (not directories)
+      return (
+        [...fileTreeMap.values()]
+          // .filter((entry) => entry.type === 'file')
+          .map((entry) => ({
+            id: entry.path,
+            name: entry.name,
+            path: entry.path,
+            content: new Uint8Array(), // Placeholder - actual content in openFiles
+            language: getIconIdFromExtension(getFileExtension(entry.path)),
+            isDirectory: false,
+            gitStatus: fileStatuses.get(entry.path)?.status,
+          }))
+      );
     },
     (previous, current) => {
       // Compare file paths and git statuses to determine if tree changed
@@ -135,7 +164,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
   const openFiles = useSelector(fileExplorerRef, (state) => state.context.openFiles);
 
   // Tree state management
-  const [expandedItems, setExpandedItems] = useState<string[]>([]);
+  const [expandedItems, setExpandedItems] = useState<string[]>(() => [rootId]);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [focusedItem, setFocusedItem] = useState<string | undefined>(undefined);
   const [showHiddenFiles, setShowHiddenFiles] = useState(false);
@@ -303,7 +332,8 @@ export function ChatEditorFileTree(): React.JSX.Element {
             const relativePath = file.path.slice(oldPath.length + 1);
             const newFilePath = `${newPath}/${relativePath}`;
 
-            buildRef.send({
+            // Rename file in fileManager
+            fileManagerRef.send({
               type: 'renameFile',
               oldPath: file.path,
               newPath: newFilePath,
@@ -317,7 +347,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
           }
         } else {
           // Move file
-          buildRef.send({
+          fileManagerRef.send({
             type: 'renameFile',
             oldPath,
             newPath,
@@ -353,7 +383,8 @@ export function ChatEditorFileTree(): React.JSX.Element {
           const relativePath = file.path.slice(oldPath.length + 1);
           const newFilePath = `${newPath}/${relativePath}`;
 
-          buildRef.send({
+          // Rename file in fileManager
+          fileManagerRef.send({
             type: 'renameFile',
             oldPath: file.path,
             newPath: newFilePath,
@@ -376,7 +407,8 @@ export function ChatEditorFileTree(): React.JSX.Element {
           }, 100);
         }
       } else {
-        buildRef.send({ type: 'renameFile', oldPath, newPath });
+        // Rename file in fileManager
+        fileManagerRef.send({ type: 'renameFile', oldPath, newPath });
 
         // Update file explorer if file was open
         if (openFiles.some((f) => f.path === oldPath)) {
@@ -455,11 +487,15 @@ export function ChatEditorFileTree(): React.JSX.Element {
           newFilePath = `Untitled ${counter}.${extension}`;
         }
 
-        buildRef.send({
-          type: 'createFile',
+        // Write file to fileManager
+        fileManagerRef.send({
+          type: 'writeFile',
           path: newFilePath,
-          content: encodeTextFile(content),
+          data: encodeTextFile(content),
         });
+
+        // Open file in fileExplorer
+        fileExplorerRef.send({ type: 'openFile', path: newFilePath });
 
         // Auto-expand root and select new file
         setTimeout(() => {
@@ -473,7 +509,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
         toast.error('Failed to create file. Please try again.');
       }
     },
-    [buildRef, allPaths, tree, setSelectedItems],
+    [allPaths, fileManagerRef, fileExplorerRef, tree],
   );
 
   const handleCreateFolder = useCallback(() => {
@@ -490,10 +526,11 @@ export function ChatEditorFileTree(): React.JSX.Element {
 
       const gitkeepPath = `${folderPath}/.gitkeep`;
 
-      buildRef.send({
-        type: 'createFile',
+      // Write folder marker file to fileManager
+      fileManagerRef.send({
+        type: 'writeFile',
         path: gitkeepPath,
-        content: encodeTextFile(''),
+        data: encodeTextFile(''),
       });
 
       setTimeout(() => {
@@ -506,7 +543,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
       console.error('Error creating folder:', error);
       toast.error('Failed to create folder. Please try again.');
     }
-  }, [buildRef, allPaths, tree, setExpandedItems]);
+  }, [allPaths, fileManagerRef, tree]);
 
   const handleDelete = useCallback(
     (items: Array<ItemInstance<TreeItemData>>) => {
@@ -525,51 +562,29 @@ export function ChatEditorFileTree(): React.JSX.Element {
             // Delete all files in folder
             const nested = fileTree.filter((f) => f.path.startsWith(`${path}/`));
             for (const file of nested) {
-              buildRef.send({ type: 'deleteFile', path: file.path });
+              // Delete file from fileManager
+              fileManagerRef.send({ type: 'deleteFile', path: file.path });
+              // Close file in fileExplorer if it's open
+              fileExplorerRef.send({ type: 'closeFile', path: file.path });
             }
           } else {
-            buildRef.send({ type: 'deleteFile', path });
+            // Delete file from fileManager
+            fileManagerRef.send({ type: 'deleteFile', path });
+            // Close file in fileExplorer if it's open
+            fileExplorerRef.send({ type: 'closeFile', path });
           }
         }
 
         toast.success(`Deleted ${count} ${itemWord}`);
       }
     },
-    [buildRef, fileTree],
+    [fileExplorerRef, fileManagerRef, fileTree],
   );
 
-  const handleDuplicate = useCallback(
-    (items: Array<ItemInstance<TreeItemData>>) => {
-      for (const currentItem of items) {
-        if (currentItem.isFolder()) {
-          continue;
-        }
-
-        const path = currentItem.getId();
-        const lastDotIndex = path.lastIndexOf('.');
-        const basePath = lastDotIndex > 0 ? path.slice(0, lastDotIndex) : path;
-        const extension = lastDotIndex > 0 ? path.slice(lastDotIndex) : '';
-
-        let counter = 1;
-        let newPath = `${basePath}-copy${extension}`;
-
-        while (allPaths.has(newPath)) {
-          counter++;
-          newPath = `${basePath}-copy-${counter}${extension}`;
-        }
-
-        const content = currentItem.getItemData().content ?? new Uint8Array();
-        buildRef.send({
-          type: 'createFile',
-          path: newPath,
-          content,
-        });
-      }
-
-      toast.success(`Duplicated ${items.length} file${items.length > 1 ? 's' : ''}`);
-    },
-    [buildRef, allPaths],
-  );
+  const handleDuplicate = useCallback((_items: Array<ItemInstance<TreeItemData>>) => {
+    // Duplication requires file-manager content, which isn't exposed yet
+    toast.info('File duplication is not yet supported');
+  }, []);
 
   const handleUploadClick = useCallback((targetPath: string) => {
     setUploadTargetPath(targetPath);
@@ -594,11 +609,15 @@ export function ChatEditorFileTree(): React.JSX.Element {
           const uint8Array = new Uint8Array(arrayBuffer);
           const filePath = directory ? `${directory}/${file.name}` : file.name;
 
-          buildRef.send({
-            type: 'createFile',
+          // Write file to fileManager
+          fileManagerRef.send({
+            type: 'writeFile',
             path: filePath,
-            content: uint8Array,
+            data: uint8Array,
           });
+
+          // Open file in fileExplorer
+          fileExplorerRef.send({ type: 'openFile', path: filePath });
 
           successCount++;
         } catch (error) {
@@ -616,7 +635,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
 
       setUploadTargetPath(undefined);
     },
-    [buildRef, uploadTargetPath, tree],
+    [uploadTargetPath, tree, fileManagerRef, fileExplorerRef],
   );
 
   const handleToggleExpandAll = useCallback(() => {
@@ -656,7 +675,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
       <FloatingPanelContent>
         <FloatingPanelContentHeader className="flex items-center justify-between pr-1">
           <FloatingPanelContentTitle>Files</FloatingPanelContentTitle>
-          <div className="flex items-center -space-x-0.5 text-muted-foreground/50 [&_[data-slot=button]]:rounded-xs">
+          <div className="flex items-center -space-x-0.5 text-muted-foreground/50 **:data-[slot=button]:rounded-xs">
             <Button
               aria-label={allFoldersExpanded ? 'Collapse all folders' : 'Expand all folders'}
               className="size-6"
@@ -756,7 +775,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
             </div>
           )}
 
-          {tree.getItems().length > 1 ? (
+          {tree.getItems().length > 0 ? (
             <div {...tree.getContainerProps()} className="flex min-h-0 flex-col gap-0.5 outline-none">
               <AssistiveTreeDescription tree={tree} />
               {tree.getItems().map((item) => {
@@ -786,7 +805,7 @@ export function ChatEditorFileTree(): React.JSX.Element {
       </FloatingPanelContent>
     </>
   );
-}
+});
 
 type TreeItemProps = {
   readonly item: ItemInstance<TreeItemData>;

@@ -3,12 +3,12 @@ import { convertReplicadGeometriesToGltf } from '#components/geometry/kernel/rep
 import type { GeometryReplicad } from '#components/geometry/kernel/replicad/replicad.types.js';
 
 describe('convertReplicadShapesToGltf', () => {
-  it('should convert empty geometries array to valid GLTF blob', async () => {
+  it('should convert empty geometries array to valid GLTF data', async () => {
     const result = await convertReplicadGeometriesToGltf([], 'glb');
 
-    expect(result).toBeInstanceOf(Blob);
-    expect(result.type).toBe('model/gltf-binary');
-    expect(result.size).toBeGreaterThan(0);
+    expect(result).toBeDefined();
+    expect(result.constructor.name).toBe('Uint8Array');
+    expect(result.length).toBeGreaterThan(0);
   });
 
   it('should convert a simple cube geometry to GLTF', async () => {
@@ -67,9 +67,9 @@ describe('convertReplicadShapesToGltf', () => {
 
     const result = await convertReplicadGeometriesToGltf([cubeShape], 'glb');
 
-    expect(result).toBeInstanceOf(Blob);
-    expect(result.type).toBe('model/gltf-binary');
-    expect(result.size).toBeGreaterThan(0);
+    expect(result).toBeDefined();
+    expect(result.constructor.name).toBe('Uint8Array');
+    expect(result.length).toBeGreaterThan(0);
   });
 
   it('should handle GLTF JSON format output', async () => {
@@ -90,9 +90,9 @@ describe('convertReplicadShapesToGltf', () => {
 
     const result = await convertReplicadGeometriesToGltf([simpleShape], 'gltf');
 
-    expect(result).toBeInstanceOf(Blob);
-    expect(result.type).toBe('model/gltf+json');
-    expect(result.size).toBeGreaterThan(0);
+    expect(result).toBeDefined();
+    expect(result.constructor.name).toBe('Uint8Array');
+    expect(result.length).toBeGreaterThan(0);
   });
 
   it('should preserve colors from multiple geometries', async () => {
@@ -124,14 +124,15 @@ describe('convertReplicadShapesToGltf', () => {
 
     const result = await convertReplicadGeometriesToGltf([redShape, blueShape], 'glb');
 
-    expect(result).toBeInstanceOf(Blob);
-    expect(result.size).toBeGreaterThan(0);
+    expect(result).toBeDefined();
+    expect(result.constructor.name).toBe('Uint8Array');
+    expect(result.length).toBeGreaterThan(0);
 
     // The GLTF should contain both geometries combined
     // We can't easily test the internal structure without parsing the GLTF,
     // but we can verify it's larger than a single geometry would be
     const singleShapeResult = await convertReplicadGeometriesToGltf([redShape], 'glb');
-    expect(result.size).toBeGreaterThan(singleShapeResult.size);
+    expect(result.length).toBeGreaterThan(singleShapeResult.length);
   });
 
   it('should preserve edge lines from Shape3D in GLTF conversion', async () => {
@@ -173,22 +174,22 @@ describe('convertReplicadShapesToGltf', () => {
     const resultWithLines = await convertReplicadGeometriesToGltf([shapeWithLines], 'glb');
 
     // Verify both conversions succeed
-    expect(resultWithoutLines).toBeInstanceOf(Blob);
-    expect(resultWithoutLines.type).toBe('model/gltf-binary');
-    expect(resultWithoutLines.size).toBeGreaterThan(0);
+    expect(resultWithoutLines).toBeDefined();
+    expect(resultWithoutLines.constructor.name).toBe('Uint8Array');
+    expect(resultWithoutLines.length).toBeGreaterThan(0);
 
-    expect(resultWithLines).toBeInstanceOf(Blob);
-    expect(resultWithLines.type).toBe('model/gltf-binary');
-    expect(resultWithLines.size).toBeGreaterThan(0);
+    expect(resultWithLines).toBeDefined();
+    expect(resultWithLines.constructor.name).toBe('Uint8Array');
+    expect(resultWithLines.length).toBeGreaterThan(0);
 
     // The geometry with lines should produce a larger GLTF file
     // because it includes additional line data
-    expect(resultWithLines.size).toBeGreaterThan(resultWithoutLines.size);
+    expect(resultWithLines.length).toBeGreaterThan(resultWithoutLines.length);
 
     // Also test GLTF format to ensure both formats work
     const gltfResult = await convertReplicadGeometriesToGltf([shapeWithLines], 'gltf');
-    expect(gltfResult).toBeInstanceOf(Blob);
-    expect(gltfResult.type).toBe('model/gltf+json');
-    expect(gltfResult.size).toBeGreaterThan(0);
+    expect(gltfResult).toBeDefined();
+    expect(gltfResult.constructor.name).toBe('Uint8Array');
+    expect(gltfResult.length).toBeGreaterThan(0);
   });
 });

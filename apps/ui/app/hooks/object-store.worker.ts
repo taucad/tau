@@ -13,6 +13,19 @@ const objectStoreWorker = {
     return storage.createBuild(build);
   },
 
+  // Duplicate a build
+  async duplicateBuild(buildId: string): Promise<Build> {
+    const build = await storage.getBuild(buildId);
+    if (!build) {
+      throw new Error(`Build not found: ${buildId}`);
+    }
+
+    return storage.createBuild({
+      ...build,
+      name: `${build.name} (Copy)`,
+    });
+  },
+
   // Update an existing build
   async updateBuild(
     buildId: string,

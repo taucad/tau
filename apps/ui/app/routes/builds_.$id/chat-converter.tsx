@@ -22,6 +22,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { toast } from '#components/ui/sonner.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
 
 const toggleConverterKeyCombination = {
   key: 'd',
@@ -66,6 +67,7 @@ export const ChatConverter = memo(function (properties: {
   const { buildRef, cadRef: cadActor } = useBuild();
   const buildName = useSelector(buildRef, (state) => state.context.build?.name) ?? 'model';
   const geometries = useSelector(cadActor, (state) => state.context.geometries);
+  const fileManager = useFileManager();
 
   // State for GLB data (lazy-loaded)
   const [glbData, setGlbData] = useState<Uint8Array | undefined>(undefined);
@@ -96,11 +98,9 @@ export const ChatConverter = memo(function (properties: {
         throw new Error('No GLB geometry available to export. Compute geometry first.');
       }
 
-      const blob = first.gltfBlob;
-      const buffer = await blob.arrayBuffer();
-      const data = new Uint8Array(buffer);
-      setGlbData(data);
-      return data;
+      const buffer = first.content;
+      setGlbData(buffer);
+      return buffer;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to read GLB data from CAD state';
       toast.error(message);
@@ -133,19 +133,19 @@ export const ChatConverter = memo(function (properties: {
   );
 
   const handleExport = useCallback(
-    (files: ExportedFile[]) => {
+    async (files: ExportedFile[]) => {
       // Save each exported file to the build's file system
+      const exportedFiles: Record<string, { content: Uint8Array }> = {};
+
       for (const file of files) {
-        buildRef.send({
-          type: 'createFile',
-          path: file.filename,
-          content: file.content,
-        });
+        exportedFiles[`/exports/${file.filename}`] = { content: file.content };
       }
+
+      await fileManager.writeFiles(exportedFiles);
 
       toast.success(`Saved ${files.length} ${files.length === 1 ? 'file' : 'files'} to project`);
     },
-    [buildRef],
+    [fileManager],
   );
 
   const toggleConverterOpen = useCallback(() => {

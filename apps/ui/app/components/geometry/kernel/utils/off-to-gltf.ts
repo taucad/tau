@@ -11,7 +11,7 @@ export async function convertOffToGltf(
   offContent: string,
   format: 'glb' | 'gltf' = 'glb',
   enableTransform = true,
-): Promise<Blob> {
+): Promise<Uint8Array> {
   // Parse the OFF file
   const offData = parseOff(offContent);
 

@@ -11,16 +11,17 @@ import { Avatar, AvatarFallback, AvatarImage } from '#components/ui/avatar.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '#components/ui/card.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
-import { storage } from '#db/storage.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
+import { useBuildManager } from '#hooks/use-build-manager.js';
+import type { BuildWithFiles } from '#constants/build-examples.js';
 
-type CommunityBuildCardProperties = Build;
+type CommunityBuildCardProperties = BuildWithFiles;
 
 export type CommunityBuildGridProperties = {
-  readonly builds: Build[];
+  readonly builds: BuildWithFiles[];
   readonly hasMore?: boolean;
   readonly onLoadMore?: () => void;
 };
@@ -37,7 +38,8 @@ export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBui
             provide={{
               actors: {
                 loadBuildActor: fromPromise(async () => {
-                  return build;
+                  const { files, ...rest } = build;
+                  return rest;
                 }),
               },
             }}
@@ -58,7 +60,17 @@ export function CommunityBuildGrid({ builds, hasMore, onLoadMore }: CommunityBui
   );
 }
 
-function ProjectCard({ id, name, description, thumbnail, stars, author, tags, assets }: CommunityBuildCardProperties) {
+function ProjectCard({
+  id,
+  name,
+  description,
+  thumbnail,
+  stars,
+  author,
+  tags,
+  assets,
+  files,
+}: CommunityBuildCardProperties) {
   const [showPreview, setShowPreview] = useState(false);
   const [isForking, setIsForking] = useState(false);
   const [hasLoadedModel, setHasLoadedModel] = useState(false);
@@ -67,6 +79,7 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
   const { cadRef, buildRef } = useBuild();
   const geometries = useSelector(cadRef, (state) => state.context.geometries);
   const status = useSelector(cadRef, (state) => state.value);
+  const buildManager = useBuildManager();
 
   const navigate = useNavigate();
 
@@ -103,7 +116,7 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
       const chatId = generatePrefixedId(idPrefix.chat);
       try {
         // Create a new build with forked data
-        const newBuild: Omit<Build, 'id'> = {
+        const newBuild: Omit<Build, 'id' | 'createdAt' | 'updatedAt'> = {
           name: `${name} (Remixed)`,
           description,
           thumbnail,
@@ -112,8 +125,6 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
           author, // TODO: This should be the current user in a real implementation
           tags,
           assets,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
           forkedFrom: id,
           chats: [
             {
@@ -127,16 +138,17 @@ function ProjectCard({ id, name, description, thumbnail, stars, author, tags, as
           lastChatId: chatId,
         };
 
-        const createdBuild = await storage.createBuild(newBuild);
+        const createdBuild = await buildManager.createBuild(newBuild, files);
+
         // Navigate to the new build
         await navigate(`/builds/${createdBuild.id}`);
-      } catch (error) {
+      } catch (error: unknown) {
         console.error('Failed to remix project:', error);
         // TODO: Show error toast/notification to user
         setIsForking(false);
       }
     },
-    [name, description, thumbnail, author, tags, assets, id, navigate, isForking],
+    [isForking, name, description, thumbnail, author, tags, assets, id, buildManager, files, navigate],
   );
 
   const handlePreviewToggle = useCallback(

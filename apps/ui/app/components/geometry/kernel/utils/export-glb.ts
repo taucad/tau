@@ -366,17 +366,17 @@ function createGltfDocument(meshData: IndexedPolyhedron, enableTransform: boolea
 /**
  * Create a GLB (binary GLTF) blob from mesh data with colors
  */
-export async function createGlb(meshData: IndexedPolyhedron, enableTransform: boolean): Promise<Blob> {
+export async function createGlb(meshData: IndexedPolyhedron, enableTransform: boolean): Promise<Uint8Array> {
   const document = createGltfDocument(meshData, enableTransform);
   const glbBuffer = await new NodeIO().writeBinary(document);
-  return new Blob([glbBuffer], { type: 'model/gltf-binary' });
+  return glbBuffer;
 }
 
 /**
  * Create a GLTF (JSON format) blob from mesh data with colors
  * Note: This creates a self-contained GLTF with embedded binary data
  */
-export async function createGltf(meshData: IndexedPolyhedron, enableTransform: boolean): Promise<Blob> {
+export async function createGltf(meshData: IndexedPolyhedron, enableTransform: boolean): Promise<Uint8Array> {
   const document = createGltfDocument(meshData, enableTransform);
 
   // Use writeJSON which returns both the JSON and binary data
@@ -410,7 +410,7 @@ export async function createGltf(meshData: IndexedPolyhedron, enableTransform: b
   }
 
   // Convert to pretty-printed JSON string
-  const gltfString = JSON.stringify(gltfJson, undefined, 2);
+  const gltfEmbeddedData = new TextEncoder().encode(JSON.stringify(gltfJson, undefined, 2));
 
-  return new Blob([gltfString], { type: 'model/gltf+json' });
+  return gltfEmbeddedData;
 }

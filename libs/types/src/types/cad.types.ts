@@ -22,7 +22,7 @@ export type GeometrySvg = {
 
 export type GeometryGltf = {
   format: 'gltf';
-  gltfBlob: Blob;
+  content: Uint8Array;
 };
 
 export type Geometry = GeometrySvg | GeometryGltf;

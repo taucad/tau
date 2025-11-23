@@ -1,23 +1,24 @@
 import type { ReactNode } from 'react';
 import { createContext, useContext, useMemo, useCallback, useEffect } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
+import { fromPromise, waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Message } from '@ai-sdk/react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useFileManager } from '#hooks/use-file-manager.js';
 import { buildMachine } from '#machines/build.machine.js';
 import type { gitMachine } from '#machines/git.machine.js';
-import type { fileExplorerMachine } from '#machines/file-explorer.machine.js';
+import { fileExplorerMachine } from '#machines/file-explorer.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
 import type { cameraCapabilityMachine } from '#machines/camera-capability.machine.js';
 import type { logMachine } from '#machines/logs.machine.js';
 import { inspect } from '#machines/inspector.js';
+import { useBuildManager } from '#hooks/use-build-manager.js';
 
 type BuildContextType = {
   buildId: string;
-  isLoading: boolean;
-  error: Error | undefined;
   buildRef: ActorRefFrom<typeof buildMachine>;
   gitRef: ActorRefFrom<typeof gitMachine>;
   fileExplorerRef: ActorRefFrom<typeof fileExplorerMachine>;
@@ -33,6 +34,7 @@ type BuildContextType = {
   updateDescription: (description: string) => void;
   updateTags: (tags: string[]) => void;
   updateThumbnail: (thumbnail: string) => void;
+  getMainFilename: () => Promise<string>;
   // Chat related functions
   addChat: (initialMessages?: Message[]) => void;
   setActiveChat: (chatId: string) => void;
@@ -55,16 +57,40 @@ export function BuildProvider({
 }): React.JSX.Element {
   const queryClient = useQueryClient();
   // Create the build machine actor - it will auto-load based on buildId
-  const actorRef = useActorRef(buildMachine.provide({ ...provide }), {
-    input: { buildId, ...input },
-    inspect,
-  });
+  const fileManager = useFileManager();
+  const buildManager = useBuildManager();
+
+  const actorRef = useActorRef(
+    buildMachine.provide({
+      actors: {
+        loadBuildActor: fromPromise(async ({ input }) => {
+          const build = await buildManager.getBuild(input.buildId);
+          if (!build) {
+            throw new Error(`Build not found: ${input.buildId}`);
+          }
+
+          // Ensure the file manager is ready before loading the build
+          await waitFor(fileManager.fileManagerRef, (state) => state.matches('ready'));
+
+          return build;
+        }),
+        writeBuildActor: fromPromise(async ({ input }) => {
+          await buildManager.updateBuild(input.build.id, input.build);
+        }),
+      },
+      ...provide,
+    }),
+    {
+      input: { buildId, ...input },
+      inspect,
+    },
+  );
+
+  // Create fileExplorerRef independently
+  const fileExplorerRef = useActorRef(fileExplorerMachine);
 
   // Select state from the machine
-  const isLoading = useSelector(actorRef, (state) => state.context.isLoading);
-  const error = useSelector(actorRef, (state) => state.context.error);
   const gitRef = useSelector(actorRef, (state) => state.context.gitRef);
-  const fileExplorerRef = useSelector(actorRef, (state) => state.context.fileExplorerRef);
   const graphicsRef = useSelector(actorRef, (state) => state.context.graphicsRef);
   const cadRef = useSelector(actorRef, (state) => state.context.cadRef);
   const screenshotRef = useSelector(actorRef, (state) => state.context.screenshotRef);
@@ -72,9 +98,26 @@ export function BuildProvider({
   const logRef = useSelector(actorRef, (state) => state.context.logRef);
 
   useEffect(() => {
+    // FileManager → CAD coordination
+    const fileWrittenSub = fileManager.fileManagerRef.on('fileWritten', (event) => {
+      cadRef.send({
+        type: 'setFile',
+        file: { path: `/builds/${buildId}`, filename: event.path },
+      });
+    });
+
+    return () => {
+      fileWrittenSub.unsubscribe();
+    };
+  }, [fileManager.fileManagerRef, cadRef, buildId]);
+
+  useEffect(() => {
+    // Close all open files from previous build
+    fileExplorerRef.send({ type: 'closeAll' });
+
     // Load the new build when the buildId changes
     actorRef.send({ type: 'loadBuild', buildId });
-  }, [actorRef, buildId, queryClient]);
+  }, [actorRef, buildId, fileExplorerRef]);
 
   useEffect(() => {
     const subscription = actorRef.on('buildUpdated', () => {
@@ -165,11 +208,19 @@ export function BuildProvider({
     [actorRef],
   );
 
+  const getMainFilename = useCallback(async () => {
+    const snapshot = await waitFor(actorRef, (state) => Boolean(state.context.build?.assets.mechanical?.main));
+
+    if (!snapshot.context.build?.assets.mechanical?.main) {
+      throw new Error('Main file not found');
+    }
+
+    return snapshot.context.build.assets.mechanical.main;
+  }, [actorRef]);
+
   const value = useMemo<BuildContextType>(() => {
     return {
       buildId,
-      isLoading,
-      error,
       buildRef: actorRef,
       gitRef,
       fileExplorerRef,
@@ -189,11 +240,10 @@ export function BuildProvider({
       setActiveChat,
       updateChatName,
       deleteChat,
+      getMainFilename,
     };
   }, [
     buildId,
-    isLoading,
-    error,
     actorRef,
     gitRef,
     fileExplorerRef,
@@ -213,6 +263,7 @@ export function BuildProvider({
     setActiveChat,
     updateChatName,
     deleteChat,
+    getMainFilename,
   ]);
 
   return <BuildContext.Provider value={value}>{children}</BuildContext.Provider>;

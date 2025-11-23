@@ -7,6 +7,8 @@ import type {
 } from '@taucad/types';
 import { logLevels } from '#types/console.types';
 import type { OnWorkerLog } from '#types/console.types';
+import { fileManager } from '#machines/file-manager.js';
+import type { FileManager } from '#machines/file-manager.js';
 
 export abstract class KernelWorker<Options extends Record<string, unknown> = Record<string, never>> {
   /**
@@ -31,17 +33,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Extract code from a GeometryFile as a UTF-8 string.
-   *
-   * @param file - The geometry file to extract code from.
-   * @returns The code as a string.
-   */
-  protected static extractCodeFromFile(file: GeometryFile): string {
-    const decoder = new TextDecoder('utf8');
-    return decoder.decode(file.data);
-  }
-
-  /**
    * The function to call when a log is emitted.
    */
   protected onLog: OnWorkerLog;
@@ -59,9 +50,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   protected abstract readonly name: string;
 
   /**
+   * The file manager instance.
+   */
+  private readonly fileManager: FileManager;
+
+  /**
    * The constructor for the worker.
    */
   public constructor() {
+    this.fileManager = fileManager;
     this.onLog = () => {
       throw new Error('onLog must be initialized before use');
     };
@@ -249,5 +246,33 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       origin: { component: this.constructor.name, operation: options?.operation },
       data: options?.data,
     });
+  }
+
+  /**
+   * Extract code from a GeometryFile as a UTF-8 string.
+   *
+   * @param file - The geometry file to extract code from.
+   * @returns The code as a string.
+   */
+  protected async extractCodeFromFile(file: GeometryFile): Promise<string> {
+    const start = performance.now();
+    this.debug(`Reading ${file.filename}`, { operation: 'readFile' });
+    const code = await this.fileManager.readFile(`${file.path}/${file.filename}`, 'utf8');
+    const duration = performance.now() - start;
+    this.debug(`Read ${file.filename} in ${duration}ms`, {
+      operation: 'readFile',
+    });
+    return code;
+  }
+
+  protected async readFile(file: GeometryFile): Promise<Uint8Array> {
+    const start = performance.now();
+    this.debug(`Reading ${file.filename}`, { operation: 'readFile' });
+    const data = await this.fileManager.readFile(`${file.path}/${file.filename}`);
+    const duration = performance.now() - start;
+    this.debug(`Read ${file.filename} in ${duration}ms`, {
+      operation: 'readFile',
+    });
+    return data;
   }
 }

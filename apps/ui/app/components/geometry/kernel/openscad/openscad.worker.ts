@@ -43,7 +43,7 @@ class OpenScadWorker extends KernelWorker {
   }
 
   public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {
-    const code = KernelWorker.extractCodeFromFile(file);
+    const code = await this.extractCodeFromFile(file);
     try {
       const instance = await this.createInstance();
       const inputFile = '/input.scad';
@@ -85,7 +85,7 @@ class OpenScadWorker extends KernelWorker {
     geometryId = 'defaultGeometry',
   ): Promise<ComputeGeometryResult> {
     try {
-      const code = KernelWorker.extractCodeFromFile(file);
+      const code = await this.extractCodeFromFile(file);
       const trimmedCode = code.trim();
       if (trimmedCode === '') {
         return createKernelSuccess([]);
@@ -115,7 +115,7 @@ class OpenScadWorker extends KernelWorker {
 
       const geometry: GeometryGltf = {
         format: 'gltf',
-        gltfBlob,
+        content: gltfBlob,
       };
 
       return createKernelSuccess([geometry]);
@@ -143,12 +143,12 @@ class OpenScadWorker extends KernelWorker {
       switch (fileType) {
         case 'glb': {
           const gltfBlob = await convertOffToGltf(offData, 'glb');
-          return createKernelSuccess([{ blob: gltfBlob, name: 'model.glb' }]);
+          return createKernelSuccess([{ blob: new Blob([gltfBlob]), name: 'model.glb' }]);
         }
 
         case 'gltf': {
           const gltfBlob = await convertOffToGltf(offData, 'gltf');
-          return createKernelSuccess([{ blob: gltfBlob, name: 'model.gltf' }]);
+          return createKernelSuccess([{ blob: new Blob([gltfBlob]), name: 'model.gltf' }]);
         }
 
         case 'stl': {

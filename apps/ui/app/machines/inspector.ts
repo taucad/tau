@@ -6,11 +6,11 @@ const inspectEnabled = false;
 // Default to console inspector for easy debugging
 const isConsoleInspectorEnabled = true;
 
-const consoleInspector = (args: InspectionEvent) => {
+export function consoleInspector(args: InspectionEvent): void {
   if (args.type === '@xstate.event') {
-    console.debug(args.event);
+    console.info(args.event);
   }
-};
+}
 
 const getBrowserInspector = async () => {
   const m = await import('@statelyai/inspect');

@@ -43,7 +43,7 @@ export function CollapsibleCodeBlock({
         </CodeBlockAction>
       </CodeBlockHeader>
       <div className={cn('relative leading-0', shouldShowToggle && !isExpanded ? 'max-h-32 overflow-y-auto' : '')}>
-        <CodeBlockContent>
+        <CodeBlockContent className="px-3">
           <Pre language={language} className={cn('text-xs', className)}>
             {isExpanded ? children : collapsedText}
           </Pre>

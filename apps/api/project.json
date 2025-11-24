@@ -16,6 +16,7 @@
     },
     "serve": {
       "executor": "@nx/js:node",
+      "continuous": true,
       "defaultConfiguration": "development",
       "options": {
         "buildTarget": "api:build"
@@ -27,7 +28,8 @@
         "production": {
           "buildTarget": "api:build:production"
         }
-      }
+      },
+      "parallelism": true
     },
     "auth-schema-generate": {
       "executor": "nx:run-commands",

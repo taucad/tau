@@ -2,6 +2,7 @@ import { Link, NavLink, useNavigate } from 'react-router';
 import { useCallback } from 'react';
 import { messageRole, messageStatus, idPrefix } from '@taucad/types/constants';
 import type { KernelProvider } from '@taucad/types';
+import { createInitialBuild } from '#constants/build.constants.js';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { KernelSelector } from '#components/chat/kernel-selector.js';
@@ -44,47 +45,21 @@ export default function ChatStart(): React.JSX.Element {
           content,
           role: messageRole.user,
           model,
-          status: messageStatus.pending, // Set as pending
+          status: messageStatus.pending,
           metadata: metadata ?? {},
           imageUrls,
         });
 
         const chatId = generatePrefixedId(idPrefix.chat);
 
-        // Prepare build data without files
-        const buildData = {
-          name: defaultBuildName,
-          description: '',
-          stars: 0,
-          forks: 0,
-          author: {
-            name: 'You',
-            avatar: '/avatar-sample.png',
-          },
-          tags: [],
-          thumbnail: '',
-          chats: [
-            {
-              id: chatId,
-              name: 'Initial design',
-              messages: [userMessage],
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-            },
-          ],
-          lastChatId: chatId,
-          assets: {
-            mechanical: {
-              main: mainFileName,
-              parameters: {},
-            },
-          },
-        };
-
-        // Prepare files separately
-        const files = {
-          [mainFileName]: { content: encodeTextFile(emptyCode) },
-        };
+        // Create initial build using factory function
+        const { buildData, files } = createInitialBuild({
+          buildName: defaultBuildName,
+          chatId,
+          initialMessage: userMessage,
+          mainFileName,
+          emptyCodeContent: encodeTextFile(emptyCode),
+        });
 
         const createdBuild = await buildManager.createBuild(buildData, files);
 

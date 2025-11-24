@@ -19,7 +19,7 @@
       "continuous": true,
       "dependsOn": ["build"],
       "options": {
-        "cwd": "apps/ui",
+        "cwd": "{projectRoot}",
         "command": "react-router-serve build/server/server.js"
       },
       "configurations": {},

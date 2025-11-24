@@ -15,19 +15,8 @@
 # - NODE_ENV: Set below per context
 
 [build]
-  # Base directory is / (root) in Netlify UI
   command = "pnpm nx build ui"
   publish = "apps/ui/build/client"
-
-[build.environment]
-  NODE_VERSION = "24.3.0"
-  NODE_OPTIONS = "--max_old_space_size=4096"
-  # Ensure pnpm uses the workspace store
-  PNPM_HOME = "/opt/buildhome/.pnpm"
-
-# Build optimizations - cache dependencies and build artifacts
-[build.processing]
-  skip_processing = false
 
 # Production context (main branch)
 [context.production]

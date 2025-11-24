@@ -35,8 +35,15 @@ export const getEnvironment = async (): Promise<Environment> => {
     const formattedError = z.treeifyError(result.error).properties;
     const errorMessage = `Invalid environment configuration: ${JSON.stringify(formattedError)}`;
     console.error(errorMessage);
+    console.error('process.env at validation:', process.env);
     throw new Error(errorMessage);
   }
+
+  console.log('[SERVER] Environment loaded successfully:', {
+    TAU_API_URL: result.data.TAU_API_URL,
+    TAU_FRONTEND_URL: result.data.TAU_FRONTEND_URL,
+    NODE_ENV: result.data.NODE_ENV,
+  });
 
   return result.data;
 };

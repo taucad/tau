@@ -4,18 +4,10 @@ import type { Context } from '@taucad/kcl-wasm-lib';
 import { BSON } from 'bson';
 import { binaryToUuid } from '#utils/binary.utils.js';
 import { KclError, KclAuthError } from '#components/geometry/kernel/zoo/kcl-errors.js';
+import { FileSystemManager } from '#components/geometry/kernel/zoo/filesystem-manager.js';
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- required
 export type WasmModule = typeof import('@taucad/kcl-wasm-lib');
-
-export type FileSystemManager = {
-  dir: string;
-  join(path: string, ...paths: string[]): string;
-  exists(path: string): Promise<boolean>;
-  readFile(path: string): Promise<Uint8Array>;
-  writeFile(path: string, data: Uint8Array): Promise<void>;
-  getAllFiles(): Promise<string[]>;
-};
 
 export type WebSocketRequest = Models['WebSocketRequest_type'];
 export type WebSocketResponse = Models['WebSocketResponse_type'];
@@ -125,11 +117,9 @@ export class EngineConnection {
       let authTimeoutId: NodeJS.Timeout;
 
       const initializeAsync = async (): Promise<void> => {
+        const fsManager = new FileSystemManager();
         // eslint-disable-next-line @typescript-eslint/await-thenable -- await is required here.
-        this.context = await new this.wasmModule.Context(
-          this,
-          undefined, // Fs_manager (undefined for now)
-        );
+        this.context = await new this.wasmModule.Context(this, fsManager);
 
         try {
           const url = new URL('/ws/modeling/commands', this.baseUrl);

@@ -14,6 +14,7 @@ import type { Models } from '@kittycad/lib';
 import wasmPath from '@taucad/kcl-wasm-lib/kcl.wasm?url';
 import { EngineConnection, MockEngineConnection } from '#components/geometry/kernel/zoo/engine-connection.js';
 import type { WasmModule } from '#components/geometry/kernel/zoo/engine-connection.js';
+import { FileSystemManager } from '#components/geometry/kernel/zoo/filesystem-manager.js';
 import {
   KclError,
   KclExportError,
@@ -249,11 +250,9 @@ export class KclUtils {
 
     // Create mock context for local operations
     const mockEngine = new MockEngineConnection();
+    const fsManager = new FileSystemManager();
     // eslint-disable-next-line @typescript-eslint/await-thenable -- WASM Context constructor may return thenable
-    this.mockContext = await new this.wasmModule.Context(
-      mockEngine,
-      undefined, // Fs_manager (undefined for now)
-    );
+    this.mockContext = await new this.wasmModule.Context(mockEngine, fsManager);
 
     this.isWasmInitialized = true;
   }

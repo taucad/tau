@@ -131,7 +131,11 @@ function LayoutDocument({
         <script
           // eslint-disable-next-line react/no-danger -- safe for environment injection as recommended by Remix
           dangerouslySetInnerHTML={{
-            __html: `window.ENV = ${JSON.stringify(env)}`,
+            __html: `
+              console.log('[ROOT] Setting window.ENV:', ${JSON.stringify(JSON.stringify(env))});
+              window.ENV = ${JSON.stringify(env)};
+              console.log('[ROOT] window.ENV set to:', window.ENV);
+            `,
           }}
         />
         {children}

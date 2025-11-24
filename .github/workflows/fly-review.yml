@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Get code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Post initial UI status
         uses: marocchino/sticky-pull-request-comment@v2
@@ -108,7 +108,7 @@ jobs:
 
     steps:
       - name: Get code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Post initial API status
         uses: marocchino/sticky-pull-request-comment@v2

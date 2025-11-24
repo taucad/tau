@@ -15,9 +15,9 @@ const environmentSchema = z.preprocess(
     // NETLIFY_AI_GATEWAY_URL format: https://deploy-preview-XX--site.netlify.app/.netlify/ai
     let frontendUrl = rawEnv['TAU_FRONTEND_URL'];
     if (!frontendUrl && rawEnv['NETLIFY_AI_GATEWAY_URL']) {
-      const gatewayUrl = rawEnv['NETLIFY_AI_GATEWAY_URL'];
-      // Remove '/.netlify/ai' suffix to get base deployment URL
-      frontendUrl = gatewayUrl.replace(/\/\.netlify\/ai$/, '');
+      // Use URL constructor to reliably extract origin (protocol + host)
+      const url = new URL(rawEnv['NETLIFY_AI_GATEWAY_URL']);
+      frontendUrl = url.origin;
     }
 
     return {
@@ -43,17 +43,8 @@ export const getEnvironment = async (): Promise<Environment> => {
     const formattedError = z.treeifyError(result.error).properties;
     const errorMessage = `Invalid environment configuration: ${JSON.stringify(formattedError)}`;
     console.error(errorMessage);
-    console.error('process.env at validation:', process.env);
     throw new Error(errorMessage);
   }
-
-  console.log('[SERVER] Environment loaded successfully:', {
-    /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
-    TAU_API_URL: result.data.TAU_API_URL,
-    TAU_FRONTEND_URL: result.data.TAU_FRONTEND_URL,
-    NODE_ENV: result.data.NODE_ENV,
-    /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
-  });
 
   return result.data;
 };

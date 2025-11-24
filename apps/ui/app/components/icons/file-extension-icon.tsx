@@ -33,7 +33,7 @@ const iconConfigMap: Partial<Record<string, IconConfig>> = {
   },
   jsx: {
     type: 'lib',
-    id: 'javascript',
+    id: 'react',
   },
   ts: {
     type: 'lib',
@@ -41,7 +41,7 @@ const iconConfigMap: Partial<Record<string, IconConfig>> = {
   },
   tsx: {
     type: 'lib',
-    id: 'typescript',
+    id: 'react',
   },
 
   // Special lib types for 3D formats

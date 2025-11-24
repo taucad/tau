@@ -4,9 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  use-sync-external-store: 1.5.0
-
 patchedDependencies:
   '@kittycad/lib':
     hash: 1b9189715dfc72da54e8a7cbc9d7e118dd9c52d4504376dc3a2db51ae87954d0
@@ -15980,7 +15977,7 @@ packages:
       '@types/react': '>=18.0.0'
       immer: '>=9.0.6'
       react: '>=18.0.0'
-      use-sync-external-store: 1.5.0
+      use-sync-external-store: '>=1.2.0'
     peerDependenciesMeta:
       '@types/react':
         optional: true

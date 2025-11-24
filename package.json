@@ -259,11 +259,7 @@
   "engines": {
     "node": ">=24.0.0"
   },
-  "#comment": "Override use-sync-external-store to fix react-router issue https://github.com/remix-run/react-router/issues/12841",
   "pnpm": {
-    "overrides": {
-      "use-sync-external-store": "1.5.0"
-    },
     "patchedDependencies": {
       "@kittycad/lib": "patches/@kittycad__lib.patch",
       "replicad": "patches/replicad.patch"

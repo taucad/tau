@@ -12,9 +12,10 @@ const environmentSchema = z.preprocess(
     const rawEnv = env as Record<string, string | undefined>;
     return {
       ...rawEnv,
-      // Use DEPLOY_PRIME_URL (Netlify) as priority for TAU_FRONTEND_URL
+      // Use TAU_FRONTEND_URL if explicitly set
+      // otherwise fall back to DEPLOY_PRIME_URL (Netlify auto-provides at runtime),
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
-      TAU_FRONTEND_URL: rawEnv['DEPLOY_PRIME_URL'] ?? rawEnv['TAU_FRONTEND_URL'],
+      TAU_FRONTEND_URL: rawEnv['TAU_FRONTEND_URL'] ?? rawEnv['DEPLOY_PRIME_URL'],
     };
   },
   z.object({

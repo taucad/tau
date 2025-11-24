@@ -1,0 +1,119 @@
+# Netlify configuration for Tau UI
+# 
+# Environment Variables:
+# Production values are set below in [context.production.environment]
+# - TAU_API_URL: Set to https://api.taucad.dev (production)
+# - TAU_FRONTEND_URL: Set to https://taucad.dev (production)
+#
+# For branch/preview deploys, TAU_FRONTEND_URL will auto-use DEPLOY_PRIME_URL
+# (configured in apps/ui/app/config.ts via z.preprocess)
+#
+# Netlify auto-provides these system variables:
+# - DEPLOY_PRIME_URL: The primary URL for the deploy (branch-specific, auto-set)
+# - CONTEXT: Deploy context (production, deploy-preview, branch-deploy)
+# - NETLIFY: Set to "true" when building on Netlify
+# - NODE_ENV: Set below per context
+
+[build]
+  # Base is already set to apps/ui in Netlify UI
+  command = "cd ../.. && pnpm nx build ui"
+  publish = "build/client"
+
+[build.environment]
+  NODE_VERSION = "24.3.0"
+  NODE_OPTIONS = "--max_old_space_size=4096"
+  # Ensure pnpm uses the workspace store
+  PNPM_HOME = "/opt/buildhome/.pnpm"
+
+# Build optimizations - cache dependencies and build artifacts
+[build.processing]
+  skip_processing = false
+
+# Cache these directories between builds for faster deploys
+# Paths are relative to workspace root since we cd to it
+[[build.cache]]
+  # pnpm store cache (workspace root)
+  paths = ["../../node_modules/.cache", "../../.pnpm-store"]
+
+# Production context (main branch)
+[context.production]
+  command = "pnpm nx build ui"
+  [context.production.environment]
+    NODE_ENV = "production"
+    TAU_API_URL = "https://api.taucad.dev"
+    TAU_FRONTEND_URL = "https://taucad.dev"
+
+# Deploy preview context (pull requests)
+[context.deploy-preview]
+  command = "pnpm nx build ui"
+  [context.deploy-preview.environment]
+    NODE_ENV = "production"
+    TAU_API_URL = "https://api.taucad.dev"
+    # TAU_FRONTEND_URL not set - will use DEPLOY_PRIME_URL via config.ts fallback
+
+# Branch deploy context (non-production branches)
+[context.branch-deploy]
+  command = "pnpm nx build ui"
+  [context.branch-deploy.environment]
+    NODE_ENV = "production"
+    TAU_API_URL = "https://api.taucad.dev"
+    # TAU_FRONTEND_URL not set - will use DEPLOY_PRIME_URL via config.ts fallback
+
+# Local development configuration (for Netlify Dev)
+[dev]
+  command = "pnpm nx dev ui"
+  port = 3000
+  targetPort = 3000
+  autoLaunch = false
+  [dev.environment]
+    NODE_ENV = "development"
+    TAU_API_URL = "http://localhost:4000"
+    TAU_FRONTEND_URL = "http://localhost:3000"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # XSS Protection
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    
+    # Clickjacking Protection
+    X-Frame-Options = "DENY"
+    
+    # HSTS (forces HTTPS)
+    Strict-Transport-Security = '''
+    max-age=63072000;
+    includeSubDomains;
+    preload'''
+    
+    # Referrer Policy
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    
+    # Permissions Policy (Feature Policy)
+    Permissions-Policy = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), interest-cohort=()"
+    
+    # Cross-Origin Policies
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Resource-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "credentialless"
+    
+    # JavaScript Profiling
+    Document-Policy = "js-profiling"
+    
+    # Content Security Policy (CSP) - Start with report-only mode
+    # NOTE: Test thoroughly before switching to enforcing mode
+    # Remove '-Report-Only' suffix to enforce
+    Content-Security-Policy-Report-Only = '''
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:;
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data: blob: https:;
+    font-src 'self' data:;
+    connect-src 'self' https://api.zoo.dev https://api.kittycad.io wss:;
+    worker-src 'self' blob:;
+    child-src 'self' blob:;
+    frame-ancestors 'none';
+    base-uri 'self';
+    form-action 'self';
+    upgrade-insecure-requests;
+    '''

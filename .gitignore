@@ -34,3 +34,6 @@ pruned
 .source/**/*
 apps/ui/.source/**/*
 
+# Local Netlify folder
+.netlify
+

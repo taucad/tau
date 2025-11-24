@@ -5,12 +5,12 @@
 # - TAU_API_URL: Set to https://api.taucad.dev (production)
 # - TAU_FRONTEND_URL: Set to https://taucad.dev (production)
 #
-# For branch/preview deploys, TAU_FRONTEND_URL is set from DEPLOY_PRIME_URL during build
-# (via export in build command). Falls back to URL at runtime (apps/ui/app/config.ts)
+# For branch/preview deploys, TAU_FRONTEND_URL is auto-extracted at runtime from
+# NETLIFY_AI_GATEWAY_URL (apps/ui/app/config.ts removes the /.netlify/ai suffix)
 #
 # Netlify auto-provides these system variables:
-# - DEPLOY_PRIME_URL: Build-time only - primary URL for the deploy (branch-specific)
-# - URL: Runtime - the primary site URL (available in Lambda functions)
+# - NETLIFY_AI_GATEWAY_URL: Runtime - AI gateway URL (contains deployment URL)
+# Build-time variables:
 # - CONTEXT: Deploy context (production, deploy-preview, branch-deploy)
 # - NETLIFY: Set to "true" when building on Netlify
 # - NODE_ENV: Set below per context
@@ -29,14 +29,14 @@
 
 # Deploy preview context (pull requests)
 [context.deploy-preview]
-  command = "export TAU_FRONTEND_URL=$DEPLOY_PRIME_URL && pnpm nx build ui"
+  command = "pnpm nx build ui"
   [context.deploy-preview.environment]
     NODE_ENV = "production"
     TAU_API_URL = "https://api.taucad.dev"
 
 # Branch deploy context (non-production branches)
 [context.branch-deploy]
-  command = "export TAU_FRONTEND_URL=$DEPLOY_PRIME_URL && pnpm nx build ui"
+  command = "pnpm nx build ui"
   [context.branch-deploy.environment]
     NODE_ENV = "production"
     TAU_API_URL = "https://api.taucad.dev"

@@ -129,16 +129,5 @@ export default defineConfig(({ mode }) => {
         exclude: ['app/**/*.{test,spec}.{ts,tsx}', 'app/**/index.ts'],
       },
     },
-
-    resolve: {
-      alias: {
-        // Fumadocs dependencies - for some reason, these CommonJS files are not transpiled by Vite, resulting in errors like:
-        // Error: 'default' is not exported by extend.
-        //
-        // Therefore, we resolve them directly.
-        extend: path.resolve(__dirname, '../../node_modules/.pnpm/extend@3.0.2/node_modules/extend/index.js'),
-        micromark: path.resolve(__dirname, '../../node_modules/.pnpm/micromark@4.0.1/node_modules/micromark/index.js'),
-      },
-    },
   };
 });

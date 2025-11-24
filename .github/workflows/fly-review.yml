@@ -48,7 +48,7 @@ jobs:
       - name: Deploy UI PR app to Fly.io
         id: deploy
         continue-on-error: true
-        uses: superfly/fly-pr-review-apps@1.2.1
+        uses: superfly/fly-pr-review-apps@1.5.0
         with:
           name: tau-ui-pr-${{ github.event.number }}
           region: syd
@@ -122,7 +122,7 @@ jobs:
       - name: Deploy API PR app to Fly.io
         id: deploy
         continue-on-error: true
-        uses: superfly/fly-pr-review-apps@1.2.1
+        uses: superfly/fly-pr-review-apps@1.5.0
         with:
           name: tau-api-pr-${{ github.event.number }}
           region: syd

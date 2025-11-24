@@ -7,14 +7,25 @@ import process from 'node:process';
 import { z } from 'zod/v4';
 
 // Define the schema for environment variables
-const environmentSchema = z.object({
-  /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
-  TAU_API_URL: z.url(),
-  TAU_FRONTEND_URL: z.url(),
-  NODE_ENV: z.enum(['development', 'production', 'test']),
-  ZOO_API_KEY: z.string().optional(),
-  /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
-});
+const environmentSchema = z.preprocess(
+  (env) => {
+    const rawEnv = env as Record<string, string | undefined>;
+    return {
+      ...rawEnv,
+      // Use DEPLOY_PRIME_URL (Netlify) as priority for TAU_FRONTEND_URL
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+      TAU_FRONTEND_URL: rawEnv['DEPLOY_PRIME_URL'] ?? rawEnv['TAU_FRONTEND_URL'],
+    };
+  },
+  z.object({
+    /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
+    TAU_API_URL: z.url(),
+    TAU_FRONTEND_URL: z.url(),
+    NODE_ENV: z.enum(['development', 'production', 'test']),
+    ZOO_API_KEY: z.string().optional(),
+    /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
+  }),
+);
 
 export const getEnvironment = async (): Promise<Environment> => {
   const result = environmentSchema.safeParse(process.env);

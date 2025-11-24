@@ -7,26 +7,14 @@ import process from 'node:process';
 import { z } from 'zod/v4';
 
 // Define the schema for environment variables
-const environmentSchema = z.preprocess(
-  (env) => {
-    const rawEnv = env as Record<string, string | undefined>;
-    return {
-      ...rawEnv,
-      // Use TAU_FRONTEND_URL if explicitly set
-      // otherwise fall back to DEPLOY_PRIME_URL (Netlify auto-provides at runtime),
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
-      TAU_FRONTEND_URL: rawEnv['TAU_FRONTEND_URL'] ?? rawEnv['DEPLOY_PRIME_URL'],
-    };
-  },
-  z.object({
-    /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
-    TAU_API_URL: z.url(),
-    TAU_FRONTEND_URL: z.url(),
-    NODE_ENV: z.enum(['development', 'production', 'test']),
-    ZOO_API_KEY: z.string().optional(),
-    /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
-  }),
-);
+const environmentSchema = z.object({
+  /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
+  TAU_API_URL: z.url(),
+  TAU_FRONTEND_URL: z.url(),
+  NODE_ENV: z.enum(['development', 'production', 'test']),
+  ZOO_API_KEY: z.string().optional().describe('To be removed in favor of integrations.'),
+  /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
+});
 
 export const getEnvironment = async (): Promise<Environment> => {
   const result = environmentSchema.safeParse(process.env);
@@ -40,9 +28,11 @@ export const getEnvironment = async (): Promise<Environment> => {
   }
 
   console.log('[SERVER] Environment loaded successfully:', {
+    /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
     TAU_API_URL: result.data.TAU_API_URL,
     TAU_FRONTEND_URL: result.data.TAU_FRONTEND_URL,
     NODE_ENV: result.data.NODE_ENV,
+    /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
   });
 
   return result.data;

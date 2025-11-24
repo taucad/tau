@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reactRouter } from '@react-router/dev/vite';
-import netlifyPlugin from '@netlify/vite-plugin-react-router';
+import netlifyReactRouter from '@netlify/vite-plugin-react-router';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import devtoolsJson from 'vite-plugin-devtools-json';
 import tsconfigPaths from 'vite-tsconfig-paths';
@@ -54,7 +54,7 @@ export default defineConfig(({ mode }) => {
       ...(isTest
         ? []
         : // In non-test mode, include the React Router plugin and the Netlify plugin
-          [reactRouter(), netlifyPlugin()]),
+          [reactRouter(), netlifyReactRouter()]),
       tailwindcss(),
       // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
 

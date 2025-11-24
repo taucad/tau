@@ -7,13 +7,13 @@
   "targets": {
     "build": {
       "dependsOn": ["copy-assets"],
-      "outputs": ["{projectRoot}/build"],
+      "outputs": ["{projectRoot}/build", "{projectRoot}/.netlify"],
       "options": {
         "env": {
           "NODE_OPTIONS": "--max-old-space-size=4096"
         }
       }
-      },
+    },
     "serve": {
       "executor": "nx:run-commands",
       "continuous": true,

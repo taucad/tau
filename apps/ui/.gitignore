@@ -8,3 +8,6 @@ public/entry.worker.js
 
 # React Router
 .react-router
+
+# Local Netlify folder
+.netlify

@@ -33,6 +33,7 @@
   [context.deploy-preview.environment]
     NODE_ENV = "production"
     TAU_API_URL = "https://api.taucad.dev"
+    # TAU_FRONTEND_URL not set - will use NETLIFY_AI_GATEWAY_URL
 
 # Branch deploy context (non-production branches)
 [context.branch-deploy]
@@ -40,6 +41,7 @@
   [context.branch-deploy.environment]
     NODE_ENV = "production"
     TAU_API_URL = "https://api.taucad.dev"
+    # TAU_FRONTEND_URL not set - will use NETLIFY_AI_GATEWAY_URL
 
 # Local development configuration (for Netlify Dev)
 [dev]

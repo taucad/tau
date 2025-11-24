@@ -4,12 +4,14 @@
   "type": "module",
   "private": true,
   "dependencies": {
+    "@react-router/node": "^7.7.1",
     "@taucad/api-extractor": "workspace:*",
+    "@taucad/converter": "workspace:*",
+    "@taucad/json-schema": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/units": "workspace:*",
-    "@taucad/converter": "workspace:*",
-    "@taucad/json-schema": "workspace:*"
+    "isbot": "^5"
   },
   "imports": {
     "#*": "./app/*"

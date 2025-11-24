@@ -701,6 +701,9 @@ importers:
 
   apps/ui:
     dependencies:
+      '@react-router/node':
+        specifier: ^7.7.1
+        version: 7.9.3(react-router@7.9.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(typescript@5.8.3)
       '@taucad/api-extractor':
         specifier: workspace:*
         version: link:../../libs/api-extractor
@@ -719,6 +722,9 @@ importers:
       '@taucad/units':
         specifier: workspace:*
         version: link:../../libs/units
+      isbot:
+        specifier: ^5
+        version: 5.1.29
 
   libs/api-extractor: {}
 

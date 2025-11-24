@@ -38,7 +38,7 @@ class ZooWorker extends KernelWorker<ZooOptions> {
   }
 
   public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {
-    const code = KernelWorker.extractCodeFromFile(file);
+    const code = await this.extractCodeFromFile(file);
     try {
       const utils = await this.getKclUtils();
       const parseResult = await utils.parseKcl(code);
@@ -99,7 +99,7 @@ class ZooWorker extends KernelWorker<ZooOptions> {
     parameters?: Record<string, unknown>,
     geometryId = 'defaultGeometry',
   ): Promise<ComputeGeometryResult> {
-    const code = KernelWorker.extractCodeFromFile(file);
+    const code = await this.extractCodeFromFile(file);
     try {
       const trimmedCode = code.trim();
       if (trimmedCode === '') {
@@ -160,19 +160,16 @@ class ZooWorker extends KernelWorker<ZooOptions> {
         const gltf = exportResult[0];
         if (!gltf) {
           return createKernelError({
-            message: 'No STL file in export result',
+            message: 'No GLTF file in export result',
             startColumn: 0,
             startLineNumber: 0,
           });
         }
 
         this.gltfDataMemory[geometryId] = gltf.contents;
-        const arrayBuffer = new ArrayBuffer(gltf.contents.byteLength);
-        const view = new Uint8Array(arrayBuffer);
-        view.set(gltf.contents);
         const geometry: GeometryGltf = {
           format: 'gltf',
-          gltfBlob: new Blob([gltf.contents]),
+          content: gltf.contents,
         };
         return createKernelSuccess([geometry]);
       } catch (error) {

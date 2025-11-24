@@ -3,7 +3,7 @@ import deepmerge from 'deepmerge/index.js';
 import type { Build } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import type { StorageProvider } from '#types/storage.types.js';
-import { metaConfig } from '#config.js';
+import { metaConfig } from '#constants/meta.constants.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
 
 export class LocalStorageProvider implements StorageProvider {

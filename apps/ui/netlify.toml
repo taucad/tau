@@ -15,9 +15,9 @@
 # - NODE_ENV: Set below per context
 
 [build]
-  # Base is already set to apps/ui in Netlify UI
-  command = "cd ../.. && pnpm nx build ui"
-  publish = "build/client"
+  # Base directory is / (root) in Netlify UI
+  command = "pnpm nx build ui"
+  publish = "apps/ui/build/client"
 
 [build.environment]
   NODE_VERSION = "24.3.0"
@@ -28,12 +28,6 @@
 # Build optimizations - cache dependencies and build artifacts
 [build.processing]
   skip_processing = false
-
-# Cache these directories between builds for faster deploys
-# Paths are relative to workspace root since we cd to it
-[[build.cache]]
-  # pnpm store cache (workspace root)
-  paths = ["../../node_modules/.cache", "../../.pnpm-store"]
 
 # Production context (main branch)
 [context.production]

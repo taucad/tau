@@ -308,7 +308,6 @@ export const fileManagerMachine = setup({
   actions: {
     setError: assign({
       error({ event }) {
-        console.log('setting error', event);
         assertActorDoneEvent(event);
 
         if (event.output.type === 'workerInitializationFailed') {

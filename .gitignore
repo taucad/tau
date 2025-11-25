@@ -36,6 +36,3 @@ apps/ui/.source/**/*
 
 # Local Netlify folder
 .netlify
-
-jscadui
-xstate-behaviors

@@ -8,7 +8,7 @@ import { metaConfig } from '#constants/meta.constants.js';
 
 export class IndexedDbStorageProvider implements StorageProvider {
   private get dbName() {
-    return `${metaConfig.cookiePrefix}db`;
+    return `${metaConfig.databasePrefix}db`;
   }
 
   private get storeName() {

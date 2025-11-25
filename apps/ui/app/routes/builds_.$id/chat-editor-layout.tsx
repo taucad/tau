@@ -15,6 +15,7 @@ import {
 import { cookieName } from '#constants/cookie.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useKeydown } from '#hooks/use-keydown.js';
+import { ChatEditorFileTree } from '#routes/builds_.$id/chat-editor-file-tree.js';
 import { ChatEditor } from '#routes/builds_.$id/chat-editor.js';
 import { ChatConsole, collapsedConsoleSize } from '#routes/builds_.$id/chat-console.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
@@ -133,6 +134,16 @@ export function ChatEditorLayout({
               className="relative h-full"
               onLayout={setExplorerSize}
             >
+              {/* File Explorer */}
+              {isExplorerOpen ? (
+                <>
+                  <ResizablePanel order={1} defaultSize={explorerSize[0]} minSize={15} id="file-explorer">
+                    <ChatEditorFileTree />
+                  </ResizablePanel>
+                  <ResizableHandle />
+                </>
+              ) : null}
+
               <ResizablePanel order={2} defaultSize={explorerSize[1]} minSize={15} id="file-editor">
                 <ChatEditor />
               </ResizablePanel>

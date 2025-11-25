@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
 import type { KernelProvider } from '@taucad/types';
-import { kernelConfigurations } from '@taucad/types/constants';
+import { idPrefix, kernelConfigurations } from '@taucad/types/constants';
 import { Button } from '#components/ui/button.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '#components/ui/card.js';
 import { Input } from '#components/ui/input.js';
@@ -12,7 +12,6 @@ import { SvgIcon } from '#components/icons/svg-icon.js';
 import { RadioGroup, RadioGroupItem } from '#components/ui/radio-group.js';
 import { Textarea } from '#components/ui/textarea.js';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '#components/ui/accordion.js';
-import { storage } from '#db/storage.js';
 import { getKernelOption } from '#utils/kernel.utils.js';
 import { toast } from '#components/ui/sonner.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
@@ -21,6 +20,8 @@ import { cn } from '#utils/ui.utils.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { useBuildManager } from '#hooks/use-build-manager.js';
+import { generatePrefixedId } from '#utils/id.utils.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -78,6 +79,7 @@ function useBuildCreation() {
   const [isCreating, setIsCreating] = useState(false);
   const { user } = useAuthenticate({ enabled: false });
   const [, setIsEditorOpen] = useCookie(cookieName.chatOpEditor, false);
+  const buildManager = useBuildManager();
 
   const createBuild = useCallback(
     async (buildData: { name: string; description: string; kernel: KernelProvider }) => {
@@ -85,7 +87,10 @@ function useBuildCreation() {
       try {
         const selectedOption = getKernelOption(buildData.kernel);
 
-        const build = await storage.createBuild({
+        // Prepare build data without files
+
+        const chatId = generatePrefixedId(idPrefix.chat);
+        const newBuild = {
           name: buildData.name.trim(),
           description: buildData.description.trim(),
           stars: 0,
@@ -96,24 +101,37 @@ function useBuildCreation() {
           },
           tags: [],
           thumbnail: '',
-          chats: [],
+          chats: [
+            {
+              id: chatId,
+              name: 'Initial design',
+              messages: [],
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+          ],
+          lastChatId: chatId,
           assets: {
             mechanical: {
-              files: {
-                [selectedOption.mainFile]: {
-                  content: encodeTextFile(selectedOption.emptyCode),
-                },
-              },
               main: selectedOption.mainFile,
               parameters: {},
             },
           },
-        });
+        };
+
+        // Prepare files separately
+        const files = {
+          [selectedOption.mainFile]: {
+            content: encodeTextFile(selectedOption.emptyCode),
+          },
+        };
+
+        const createdBuild = await buildManager.createBuild(newBuild, files);
 
         // Ensure editor is open when navigating to the build page
         setIsEditorOpen(true);
 
-        void navigate(`/builds/${build.id}`);
+        void navigate(`/builds/${createdBuild.id}`);
       } catch (error) {
         console.error('Failed to create build:', error);
         throw error;
@@ -121,7 +139,7 @@ function useBuildCreation() {
         setIsCreating(false);
       }
     },
-    [navigate, user?.image, user?.name, setIsEditorOpen],
+    [user?.name, user?.image, buildManager, setIsEditorOpen, navigate],
   );
 
   return { createBuild, isCreating };

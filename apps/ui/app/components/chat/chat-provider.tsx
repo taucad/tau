@@ -17,9 +17,10 @@ import { messageStatus } from '@taucad/types/constants';
 import type { Chat, KernelProvider } from '@taucad/types';
 import { useBuild } from '#hooks/use-build.js';
 import { inspect } from '#machines/inspector.js';
-import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
+import { decodeTextFile } from '#utils/filesystem.utils.js';
 
 type UseChatArgs = NonNullable<Parameters<typeof useChat>[0]>;
 type UseChatReturn = ReturnType<typeof useChat>;
@@ -1087,6 +1088,7 @@ function ChatSyncWrapper({
 }): React.JSX.Element {
   const actorRef = ChatContext.useActorRef();
   const buildContext = useBuild({ enableNoContext: true });
+  const fileManager = useFileManager();
   const [kernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
 
   // Initialize useChat with sync callbacks
@@ -1097,14 +1099,19 @@ function ChatSyncWrapper({
     experimental_prepareRequestBody(requestBody) {
       let feedback = {};
       if (buildContext) {
-        // Get code from build machine (source of truth)
         const buildSnapshot = buildContext.buildRef.getSnapshot();
         const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
-        const fileContent = mainFilePath
-          ? buildSnapshot.context.build?.assets.mechanical?.files[mainFilePath]?.content
-          : undefined;
 
-        const code = fileContent ? decodeTextFile(fileContent) : undefined;
+        // Try to get the current code, but don't fail if it's not available
+        let code: string | undefined;
+        if (mainFilePath) {
+          const fileManagerSnapshot = fileManager.fileManagerRef.getSnapshot();
+          const fileData = fileManagerSnapshot.context.openFiles.get(mainFilePath);
+
+          if (fileData) {
+            code = decodeTextFile(fileData);
+          }
+        }
 
         // Get error state from CAD machine
         const cadActorState = buildContext.cadRef.getSnapshot();
@@ -1135,11 +1142,13 @@ function ChatSyncWrapper({
       // Combine: last user message + [assistant message + tool results] if present
       const newMessages = lastUserMessage ? [lastUserMessage, ...messagesFromAssistant] : [];
 
-      return {
+      const body = {
         ...requestBody,
         messages: newMessages,
         ...feedback,
-      };
+      } as const satisfies typeof requestBody;
+
+      return body;
     },
     onFinish(..._args) {
       // Queue sync instead of immediate sync - XState will debounce

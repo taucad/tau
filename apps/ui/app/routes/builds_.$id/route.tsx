@@ -1,7 +1,7 @@
 import { useParams } from 'react-router';
 import { useCallback, useEffect } from 'react';
-import { createActor } from 'xstate';
-import { useSelector } from '@xstate/react';
+import { createActor, waitFor } from 'xstate';
+import { useActorRef, useSelector } from '@xstate/react';
 import { toast } from 'sonner';
 // eslint-disable-next-line no-restricted-imports -- allowed for route types
 import type { Route } from './+types/route.js';
@@ -19,11 +19,16 @@ import { BuildCommandPaletteItems } from '#routes/builds_.$id/build-command-item
 import { ChatModeSelector } from '#routes/builds_.$id/chat-mode-selector.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
+import { FileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
 
 // Define provider component at module level for stable reference across HMR
 function RouteProvider({ children }: { readonly children?: React.ReactNode }): React.JSX.Element {
   const { id } = useParams();
-  return <BuildProvider buildId={id!}>{children}</BuildProvider>;
+  return (
+    <FileManagerProvider rootDirectory={`/builds/${id}`}>
+      <BuildProvider buildId={id!}>{children}</BuildProvider>
+    </FileManagerProvider>
+  );
 }
 
 export const handle: Handle = {
@@ -127,10 +132,14 @@ function Chat() {
 
 // Wrapper component that has access to build context and can configure AiChatProvider
 function ChatWithProvider() {
-  const { cadRef: cadActor, graphicsRef: graphicsActor, buildId, buildRef } = useBuild();
+  const { cadRef: cadActor, graphicsRef: graphicsActor, buildId, buildRef, getMainFilename } = useBuild();
   const name = useSelector(buildRef, (state) => state.context.build?.name);
   const description = useSelector(buildRef, (state) => state.context.build?.description);
   const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId);
+  const fileManager = useFileManager();
+
+  // Create file edit machine
+  const fileEditRef = useActorRef(fileEditMachine);
 
   // Tool call handler that integrates with the new architecture
   const onToolCall = useCallback(
@@ -139,77 +148,48 @@ function ChatWithProvider() {
         const toolCallArgs = toolCall.args as { targetFile: string; codeEdit: string };
 
         // Get current code from build machine
-        const buildSnapshot = buildRef.getSnapshot();
-        const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
-        const fileContent = mainFilePath
-          ? buildSnapshot.context.build?.assets.mechanical?.files[mainFilePath]?.content
-          : undefined;
+        const mainFilePath = await getMainFilename();
+        // Const resolvedPath = toolCallArgs.targetFile; TODO: use this when the chat server has knowledge of the filesystem.
+        const resolvedPath = mainFilePath;
+        const currentCode = await fileManager.readFile(resolvedPath);
 
-        if (!fileContent) {
-          throw new Error('No file content found');
+        fileEditRef.start();
+        fileEditRef.send({
+          type: 'applyEdit',
+          request: {
+            targetFile: resolvedPath,
+            originalContent: decodeTextFile(currentCode),
+            codeEdit: toolCallArgs.codeEdit,
+          },
+        });
+
+        // Wait for file edit to complete
+        const fileEditSnapshot = await waitFor(
+          fileEditRef,
+          (state) => state.matches('success') || state.matches('error'),
+        );
+
+        if (fileEditSnapshot.matches('error')) {
+          throw new Error(`File edit failed: ${fileEditSnapshot.context.error ?? 'Unknown error'}`);
         }
 
-        const currentCode = decodeTextFile(fileContent);
+        const { result } = fileEditSnapshot.context;
+        if (!result?.editedContent) {
+          throw new Error('No content received from file edit service');
+        }
 
-        // Create file edit actor to process the edit through Morph
-        const fileEditActor = createActor(fileEditMachine).start();
+        // Write the edited content to the file
+        fileManager.writeFile(resolvedPath, encodeTextFile(result.editedContent));
 
-        return new Promise<FileEditToolResult['result']>((resolve, reject) => {
-          // Subscribe to file edit actor state changes
-          const subscription = fileEditActor.subscribe((state) => {
-            if (state.matches('success') || state.matches('error')) {
-              const { result } = state.context;
-              if (result?.editedContent) {
-                // Get the active file path from build machine
-                const buildSnapshot = buildRef.getSnapshot();
-                const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
+        // Wait for CAD processing to complete
+        const cadSnapshot = await waitFor(cadActor, (state) => state.value === 'ready' || state.value === 'error');
 
-                if (!mainFilePath) {
-                  reject(new Error('No main file path found'));
-                  return;
-                }
+        const toolResult = {
+          codeErrors: cadSnapshot.context.codeErrors,
+          kernelError: cadSnapshot.context.kernelError,
+        } satisfies FileEditToolResult['result'];
 
-                // Update file through build machine, which handles CAD forwarding
-                // On error, this will be the original content as fallback
-                buildRef.send({
-                  type: 'updateFile',
-                  path: mainFilePath,
-                  content: encodeTextFile(result.editedContent),
-                  source: 'external',
-                });
-
-                // Wait for CAD processing to complete
-                const cadSubscription = cadActor.subscribe((cadState) => {
-                  if (cadState.value === 'ready' || cadState.value === 'error') {
-                    const toolResult = {
-                      codeErrors: cadState.context.codeErrors,
-                      kernelError: cadState.context.kernelError,
-                    } satisfies FileEditToolResult['result'];
-
-                    cadSubscription.unsubscribe();
-                    subscription.unsubscribe();
-                    fileEditActor.stop();
-                    resolve(toolResult);
-                  }
-                });
-              } else {
-                subscription.unsubscribe();
-                fileEditActor.stop();
-                reject(new Error('No content received from file edit service'));
-              }
-            }
-          });
-
-          // Send the edit request to Morph
-          fileEditActor.send({
-            type: 'applyEdit',
-            request: {
-              targetFile: toolCallArgs.targetFile,
-              originalContent: currentCode,
-              codeEdit: toolCallArgs.codeEdit,
-            },
-          });
-        });
+        return toolResult;
       }
 
       if (toolCall.toolName === 'analyze_image') {
@@ -252,7 +232,7 @@ function ChatWithProvider() {
 
       return undefined;
     },
-    [buildRef, cadActor, graphicsActor],
+    [cadActor, fileEditRef, fileManager, getMainFilename, graphicsActor],
   );
 
   // Use chat ID when available, fallback to build ID

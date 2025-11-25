@@ -25,6 +25,7 @@ import { useKeydown } from '#hooks/use-keydown.js';
 import { useBuild } from '#hooks/use-build.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
 
 const keyCombinationEditor = {
   key: 'i',
@@ -99,9 +100,8 @@ export function ChatDetails({
   const buildDescription = useSelector(buildRef, (state) => state.context.build?.description ?? '');
   const buildTags = useSelector(buildRef, (state) => state.context.build?.tags ?? []);
   const mainFile = useSelector(buildRef, (state) => state.context.build?.assets.mechanical?.main ?? '');
-  const availableFiles = useSelector(buildRef, (state) =>
-    Object.keys(state.context.build?.assets.mechanical?.files ?? {}).sort(),
-  );
+  const { fileManagerRef } = useFileManager();
+  const availableFiles = useSelector(fileManagerRef, (state) => [...state.context.fileTree.entries()].map(([k]) => k));
 
   const [geometryDetails, setGeometryDetails] = useState<GeometryDetails>(mockGeometryDetails);
   const [isCalculatingVolume, setIsCalculatingVolume] = useState(false);

@@ -38,7 +38,7 @@ export function CadViewer({
               <GltfMesh
                 // eslint-disable-next-line react/no-array-index-key -- TODO: add a unique key to the geometry (likely a hash key)
                 key={index}
-                gltfBlob={geometry.gltfBlob}
+                gltfFile={geometry.content}
                 enableMatcap={enableMatcap}
                 enableSurfaces={enableSurfaces}
                 enableLines={enableLines}

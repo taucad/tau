@@ -23,14 +23,18 @@ import {
 import { downloadBlob } from '#utils/file.utils.js';
 import { toast } from '#components/ui/sonner.js';
 import { exportGeometryMachine } from '#machines/export-geometry.machine.js';
-import { zipMachine } from '#machines/zip.machine.js';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
 import { cn } from '#utils/ui.utils.js';
+import { FileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
 
 // Define provider component at module level for stable reference across HMR
 function RouteProvider({ children }: { readonly children?: React.ReactNode }): React.JSX.Element {
   const { id } = useParams();
-  return <BuildProvider buildId={id!}>{children}</BuildProvider>;
+  return (
+    <FileManagerProvider rootDirectory={`/builds/${id}`}>
+      <BuildProvider buildId={id!}>{children}</BuildProvider>
+    </FileManagerProvider>
+  );
 }
 
 function ViewerStatus({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.ReactNode {
@@ -77,6 +81,21 @@ function BuildPreviewContent(): React.JSX.Element {
   const units = useSelector(graphicsRef, (state) => state.context.units);
   const jsonSchema = useSelector(cadRef, (state) => state.context.jsonSchema);
   const hasParameters = useSelector(cadRef, (state) => Boolean(state.context.jsonSchema));
+  const fileManager = useFileManager();
+
+  // Get files from file manager
+  const files = useSelector(fileManager.fileManagerRef, (state) => {
+    const fileTreeMap = state.context.fileTree;
+    if (fileTreeMap.size === 0) {
+      return [];
+    }
+
+    return [...fileTreeMap.values()].map((entry) => ({
+      path: entry.path,
+      name: entry.name,
+      size: entry.size,
+    }));
+  });
 
   const [activeTab, setActiveTab] = useState('3d');
   const [showParameters, setShowParameters] = useState(true);
@@ -84,11 +103,6 @@ function BuildPreviewContent(): React.JSX.Element {
   // Create export geometry machine instance
   const exportActorRef = useActorRef(exportGeometryMachine, {
     input: { cadRef },
-  });
-
-  // Create zip machine instance
-  const zipActorRef = useActorRef(zipMachine, {
-    input: { zipFilename: `${build?.name ?? 'build'}.zip` },
   });
 
   const handleExport = useCallback(
@@ -133,38 +147,8 @@ function BuildPreviewContent(): React.JSX.Element {
 
     toast.promise(
       async () => {
-        // Get mechanical asset files
-        const mechanicalAsset = build.assets.mechanical;
-        if (mechanicalAsset) {
-          const files: Array<{ filename: string; content: Uint8Array }> = [];
-
-          // Add all files from the mechanical asset
-          for (const [filename, file] of Object.entries(mechanicalAsset.files)) {
-            files.push({
-              filename,
-              content: file.content,
-            });
-          }
-
-          // Add files to zip machine
-          zipActorRef.send({ type: 'addFiles', files });
-        }
-
-        // Generate the zip
-        zipActorRef.send({ type: 'generate' });
-
-        // Wait for the zip to be ready
-        return new Promise<Blob>((resolve, reject) => {
-          const subscription = zipActorRef.subscribe((state) => {
-            if (state.matches('ready') && state.context.zipBlob) {
-              subscription.unsubscribe();
-              resolve(state.context.zipBlob);
-            } else if (state.matches('error')) {
-              subscription.unsubscribe();
-              reject(state.context.error ?? new Error('Failed to generate ZIP'));
-            }
-          });
-        });
+        const zipBlob = await fileManager.getZippedDirectory(`/builds/${build.id}`);
+        return zipBlob;
       },
       {
         loading: 'Creating ZIP archive...',
@@ -175,7 +159,7 @@ function BuildPreviewContent(): React.JSX.Element {
         error: 'Failed to create ZIP archive',
       },
     );
-  }, [build, zipActorRef]);
+  }, [build, fileManager]);
 
   const handleEditOnline = useCallback(() => {
     void navigate(`/builds/${id}`);
@@ -282,20 +266,18 @@ function BuildPreviewContent(): React.JSX.Element {
             {/* Main Content */}
             <div className="flex-1 overflow-hidden">
               <TabsContent value="files" className="h-full overflow-auto p-6 data-[state=inactive]:hidden">
-                {build.assets.mechanical?.files ? (
+                {files.length > 0 ? (
                   <div className="rounded-md border text-sm">
-                    {Object.entries(build.assets.mechanical.files).map(([filename, file]) => (
+                    {files.map((file) => (
                       <div
-                        key={filename}
+                        key={file.path}
                         className="flex items-center justify-between border-b px-4 py-3 last:border-b-0"
                       >
                         <div className="flex items-center gap-3">
                           <FileCode className="size-5 text-muted-foreground" />
-                          <span className="font-medium">{filename}</span>
+                          <span className="font-medium">{file.path}</span>
                         </div>
-                        <span className="text-sm text-muted-foreground">
-                          {(file.content.length / 1024).toFixed(2)} KB
-                        </span>
+                        <span className="text-sm text-muted-foreground">{(file.size / 1024).toFixed(2)} KB</span>
                       </div>
                     ))}
                   </div>

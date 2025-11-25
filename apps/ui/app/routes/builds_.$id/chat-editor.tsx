@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState, useMemo } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import type { ComponentProps } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { useSelector } from '@xstate/react';
@@ -16,41 +16,41 @@ import { cookieName } from '#constants/cookie.constants.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { getFileExtension, isBinaryFile, decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
 import { ChatEditorBinaryWarning } from '#routes/builds_.$id/chat-editor-binary-warning.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
 
 export const ChatEditor = memo(function ({ className }: { readonly className?: string }): React.JSX.Element {
   const monaco = useMonaco();
   const { fileExplorerRef: fileExplorerActor, cadRef: cadActor, buildRef } = useBuild();
+  const fileManager = useFileManager();
+  const { fileManagerRef } = useFileManager();
   const [forceOpenBinary, setForceOpenBinary] = useState(false);
   // Get active file path from file explorer
   const activeFilePath = useSelector(fileExplorerActor, (state) => {
     return state.context.activeFilePath;
   });
 
-  // Get active file content from build machine (source of truth)
-  const activeFile = useSelector(buildRef, (state) => {
+  const activeFile = useSelector(fileManagerRef, (state) => {
+    const { openFiles } = state.context;
+
     if (!activeFilePath) {
       return undefined;
     }
 
-    const files = state.context.build?.assets.mechanical?.files;
-    const fileContent = files?.[activeFilePath];
+    const fileContent = openFiles.get(activeFilePath);
     if (!fileContent) {
       return undefined;
     }
 
+    const name = activeFilePath.split('/').pop() ?? activeFilePath;
+
     return {
       path: activeFilePath,
-      name: activeFilePath.split('/').pop() ?? activeFilePath,
-      content: fileContent.content,
-      language: languageFromExtension[getFileExtension(activeFilePath) as keyof typeof languageFromExtension],
+      name,
+      isBinary: isBinaryFile(name, fileContent),
+      content: fileContent,
+      language: languageFromExtension[getFileExtension(name) as keyof typeof languageFromExtension],
     };
   });
-
-  // Detect if the active file is binary
-  const isBinary = useMemo(
-    () => (activeFile ? isBinaryFile(activeFile.name, activeFile.content) : false),
-    [activeFile],
-  );
 
   // Reset force open when file path changes (switching files)
   useEffect(() => {
@@ -74,15 +74,10 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
         return;
       }
 
-      // Encode string → Uint8Array before sending to machine
-      buildRef.send({
-        type: 'updateFile',
-        path: activeFile.path,
-        content: encodeTextFile(value ?? ''),
-        source: 'user',
-      });
+      // Encode string → Uint8Array and write directly to fileManager
+      fileManager.writeFile(activeFile.path, encodeTextFile(value ?? ''));
     },
-    [activeFile, buildRef],
+    [activeFile, fileManager],
   );
 
   // Decode Uint8Array → string for editor
@@ -97,53 +92,6 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       void registerMonaco(monaco);
     }
   }, [monaco]);
-
-  // Listen to external file changes from build machine and update Monaco models
-  useEffect(() => {
-    if (!monaco) {
-      return undefined;
-    }
-
-    // Subscribe to fileUpdated events emitted from build machine
-    const subscription = buildRef.on('fileUpdated', ({ path, content, source }) => {
-      // Only handle external updates (AI edits, not user typing)
-      if (source !== 'external') {
-        return;
-      }
-
-      // Create URI for the file path
-      const uri = monaco.Uri.parse(path);
-      const model = monaco.editor.getModel(uri);
-
-      // Only update if a Monaco model exists for this file (it's open in a tab)
-      if (!model) {
-        return;
-      }
-
-      // Decode the content
-      const newContent = decodeTextFile(content);
-      const currentModelContent = model.getValue();
-
-      // Only update if Monaco's content is different from the external update
-      if (currentModelContent !== newContent) {
-        // Update the model content while preserving undo/redo
-        model.pushEditOperations(
-          [],
-          [
-            {
-              range: model.getFullModelRange(),
-              text: newContent,
-            },
-          ],
-          () => null,
-        );
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [monaco, buildRef]);
 
   const handleValidate = useCallback(() => {
     const errors = monaco?.editor.getModelMarkers({});
@@ -173,7 +121,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       <ChatEditorTabs />
       <ChatEditorBreadcrumbs />
       {activeFile ? (
-        isBinary && !forceOpenBinary ? (
+        activeFile.isBinary && !forceOpenBinary ? (
           <ChatEditorBinaryWarning onForceOpen={handleForceOpenBinary} />
         ) : (
           <CodeEditor

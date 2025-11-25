@@ -5,7 +5,6 @@ import type {
   ExportFormat,
   ExportGeometryResult,
   ExtractParametersResult,
-  GeometryFile,
   Geometry,
   KernelError,
   KernelErrorResult,
@@ -163,13 +162,12 @@ class JscadWorker extends KernelWorker {
     await super.cleanup();
   }
 
-  public override async canHandle(file: GeometryFile): Promise<boolean> {
-    const extension = KernelWorker.getFileExtension(file.filename);
+  protected override async canHandle(filename: string, extension: string): Promise<boolean> {
     if (!['ts', 'js', 'tsx', 'jsx'].includes(extension)) {
       return false;
     }
 
-    const code = KernelWorker.extractCodeFromFile(file);
+    const code = await this.readFile(filename, 'utf8');
     const hasEsmImport = /import\s+.*from\s+['"]@jscad\/modeling['"]/.test(code);
     const hasRequire = /require\s*\(\s*['"]@jscad\/modeling['"]\s*\)/.test(code);
     const hasNamespaceUsage = /\b@jscad\/modeling\b/.test(code);
@@ -213,9 +211,9 @@ class JscadWorker extends KernelWorker {
    * module.exports.defaultParams = { width: 10 };
    * ```
    */
-  public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {
+  protected override async extractParameters(filename: string): Promise<ExtractParametersResult> {
     try {
-      const code = KernelWorker.extractCodeFromFile(file);
+      const code = await this.readFile(filename, 'utf8');
       let defaultParameters: Record<string, unknown> = {};
       let jsonSchema;
 
@@ -301,11 +299,11 @@ class JscadWorker extends KernelWorker {
    * const file = { filename: 'box.js', content: '...' };
    * const params = { width: 10, height: 20 };
    * const result = await worker.computeGeometry(file, params);
-   * // result is array of { format: 'gltf', gltfBlob: Blob }
+   * // result is array of { format: 'gltf', gltfData: Blob }
    * ```
    */
-  public override async computeGeometry(
-    file: GeometryFile,
+  protected override async computeGeometry(
+    filename: string,
     parameters: Record<string, unknown> = {},
     geometryId = 'defaultGeometry',
   ): Promise<ComputeGeometryResult> {
@@ -313,7 +311,7 @@ class JscadWorker extends KernelWorker {
     this.log('Computing JSCAD geometry from code', { operation: 'computeGeometry' });
 
     try {
-      const code = KernelWorker.extractCodeFromFile(file);
+      const code = await this.readFile(filename, 'utf8');
 
       // Execute the user code with parameters
       let shapes: unknown;
@@ -351,7 +349,7 @@ class JscadWorker extends KernelWorker {
         if (result.status === 'fulfilled') {
           geometries.push({
             format: 'gltf',
-            gltfBlob: result.value,
+            content: result.value,
           });
         } else {
           this.warn('Failed to convert shape to GLTF', { data: result.reason, operation: 'computeGeometry' });
@@ -370,7 +368,7 @@ class JscadWorker extends KernelWorker {
     }
   }
 
-  public override async exportGeometry(
+  protected override async exportGeometry(
     fileType: ExportFormat,
     geometryId = 'defaultGeometry',
   ): Promise<ExportGeometryResult> {
@@ -404,7 +402,7 @@ class JscadWorker extends KernelWorker {
 
         return createKernelSuccess([
           {
-            blob,
+            blob: new Blob([blob]),
             name: fileType === 'glb' ? 'model.glb' : 'model.gltf',
           },
         ]);

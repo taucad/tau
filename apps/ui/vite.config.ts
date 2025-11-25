@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reactRouter } from '@react-router/dev/vite';
+import netlifyReactRouter from '@netlify/vite-plugin-react-router';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import devtoolsJson from 'vite-plugin-devtools-json';
 import tsconfigPaths from 'vite-tsconfig-paths';
@@ -50,9 +51,10 @@ export default defineConfig(({ mode }) => {
       // Base64 Loader
       base64Loader,
 
-      // React + Web
-      // Only include React Router plugin for non-test modes
-      ...(isTest ? [] : [reactRouter()]),
+      ...(isTest
+        ? []
+        : // In non-test mode, include the React Router plugin and the Netlify plugin
+          [reactRouter(), netlifyReactRouter()]),
       tailwindcss(),
       // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
 
@@ -125,17 +127,6 @@ export default defineConfig(({ mode }) => {
         provider: 'v8',
         include: ['app/**/*'],
         exclude: ['app/**/*.{test,spec}.{ts,tsx}', 'app/**/index.ts'],
-      },
-    },
-
-    resolve: {
-      alias: {
-        // Fumadocs dependencies - for some reason, these CommonJS files are not transpiled by Vite, resulting in errors like:
-        // Error: 'default' is not exported by extend.
-        //
-        // Therefore, we resolve them directly.
-        extend: path.resolve(__dirname, '../../node_modules/.pnpm/extend@3.0.2/node_modules/extend/index.js'),
-        micromark: path.resolve(__dirname, '../../node_modules/.pnpm/micromark@4.0.1/node_modules/micromark/index.js'),
       },
     },
   };

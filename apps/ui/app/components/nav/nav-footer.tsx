@@ -2,7 +2,7 @@ import { ThemeToggle } from '#components/nav/theme-toggle.js';
 import { ColorToggle } from '#components/nav/color-toggle.js';
 import { SidebarMenuButton } from '#components/ui/sidebar.js';
 import { Button } from '#components/ui/button.js';
-import { metaConfig } from '#config.js';
+import { metaConfig } from '#constants/meta.constants.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 
 export function NavFooter(): React.JSX.Element {

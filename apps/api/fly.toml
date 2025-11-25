@@ -18,6 +18,8 @@ primary_region = 'syd'
   AUTH_URL = 'https://api.taucad.dev'
   LOG_SERVICE = 'fly'
   LOG_LEVEL = 'info'
+  # Additional CORS origins for Netlify preview deployments
+  ADDITIONAL_CORS_ORIGINS = '["https://deploy-preview-*--taucad.netlify.app"]'
 
 [http_service]
   internal_port = 3000

@@ -9,18 +9,20 @@ import { toast } from '#components/ui/sonner.js';
 import { downloadBlob } from '#utils/file.utils.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import { exportGeometryMachine } from '#machines/export-geometry.machine.js';
-import { zipMachine } from '#machines/zip.machine.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { Format3D } from '#components/icons/format-3d.js';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
 
 export function BuildCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
   const { cadRef: cadActor, graphicsRef: graphicsActor, updateThumbnail, buildRef } = useBuild();
+  const fileManager = useFileManager();
   const geometries = useSelector(cadActor, (state) => state.context.geometries);
   const build = useSelector(buildRef, (state) => state.context.build);
   const buildName = useSelector(buildRef, (state) => state.context.build?.name) ?? 'file';
   const isScreenshotReady = useSelector(graphicsActor, (state) => state.context.isScreenshotReady);
+  const fileCount = useSelector(fileManager.fileManagerRef, (state) => state.context.fileTree.size);
 
   // Create screenshot request machine instance
   const screenshotActorRef = useActorRef(screenshotRequestMachine, {
@@ -30,11 +32,6 @@ export function BuildCommandPaletteItems({ match }: { readonly match: UIMatch })
   // Create export geometry machine instance
   const exportActorRef = useActorRef(exportGeometryMachine, {
     input: { cadRef: cadActor },
-  });
-
-  // Create zip machine instance
-  const zipActorRef = useActorRef(zipMachine, {
-    input: { zipFilename: `${buildName}.zip` },
   });
 
   const handleExport = useCallback(
@@ -80,37 +77,8 @@ export function BuildCommandPaletteItems({ match }: { readonly match: UIMatch })
     toast.promise(
       async () => {
         // Get mechanical asset files
-        const mechanicalAsset = build.assets.mechanical;
-        if (mechanicalAsset) {
-          const files: Array<{ filename: string; content: Uint8Array }> = [];
-
-          // Add all files from the mechanical asset
-          for (const [filename, file] of Object.entries(mechanicalAsset.files)) {
-            files.push({
-              filename,
-              content: file.content,
-            });
-          }
-
-          // Add files to zip machine
-          zipActorRef.send({ type: 'addFiles', files });
-        }
-
-        // Generate the zip
-        zipActorRef.send({ type: 'generate' });
-
-        // Wait for the zip to be ready
-        return new Promise<Blob>((resolve, reject) => {
-          const subscription = zipActorRef.subscribe((state) => {
-            if (state.matches('ready') && state.context.zipBlob) {
-              subscription.unsubscribe();
-              resolve(state.context.zipBlob);
-            } else if (state.matches('error')) {
-              subscription.unsubscribe();
-              reject(state.context.error ?? new Error('Failed to generate ZIP'));
-            }
-          });
-        });
+        const zipBlob = await fileManager.getZippedDirectory(`/builds/${build.id}`);
+        return zipBlob;
       },
       {
         loading: 'Creating ZIP archive...',
@@ -121,7 +89,7 @@ export function BuildCommandPaletteItems({ match }: { readonly match: UIMatch })
         error: 'Failed to create ZIP archive',
       },
     );
-  }, [build, buildName, zipActorRef]);
+  }, [build, buildName, fileManager]);
 
   const handleDownloadPng = useCallback(
     async (filename: string) => {
@@ -321,7 +289,7 @@ export function BuildCommandPaletteItems({ match }: { readonly match: UIMatch })
         group: 'Code',
         icon: <Download />,
         action: handleDownloadZip,
-        disabled: !build?.assets.mechanical?.files,
+        disabled: fileCount === 0,
       },
       {
         id: 'update-thumbnail',

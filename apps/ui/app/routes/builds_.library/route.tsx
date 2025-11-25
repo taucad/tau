@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Grid,
   Layout,
@@ -20,10 +20,10 @@ import {
   Brain,
   Wrench,
   Cpu,
+  PackageX,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Link, NavLink, useNavigate } from 'react-router';
-import { useQueryClient } from '@tanstack/react-query';
 import {
   flexRender,
   getCoreRowModel,
@@ -34,8 +34,9 @@ import {
 } from '@tanstack/react-table';
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import { useSelector } from '@xstate/react';
-import type { EngineeringDiscipline, Build } from '@taucad/types';
-import { engineeringDisciplines } from '@taucad/types/constants';
+import type { EngineeringDiscipline, Build, KernelProvider } from '@taucad/types';
+import { engineeringDisciplines, messageRole, messageStatus, idPrefix } from '@taucad/types/constants';
+import { createInitialBuild } from '#constants/build.constants.js';
 import { createColumns } from '#routes/builds_.library/columns.js';
 import { CategoryBadge } from '#components/category-badge.js';
 import { Button, buttonVariants } from '#components/ui/button.js';
@@ -70,7 +71,6 @@ import {
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { BuildActionDropdown } from '#routes/builds_.library/build-action-dropdown.js';
-import { createBuildMutations } from '#hooks/build-mutations.js';
 import { Checkbox } from '#components/ui/checkbox.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '#components/ui/table.js';
@@ -79,6 +79,18 @@ import { HammerAnimation } from '#components/hammer-animation.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
+import { EmptyItems } from '#components/ui/empty-items.js';
+import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
+import { KernelSelector } from '#components/chat/kernel-selector.js';
+import { ChatProvider } from '#components/chat/chat-provider.js';
+import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
+import { createMessage } from '#utils/chat.utils.js';
+import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
+import { encodeTextFile } from '#utils/filesystem.utils.js';
+import { defaultBuildName } from '#constants/build-names.js';
+import { generatePrefixedId } from '#utils/id.utils.js';
+import { useBuildManager } from '#hooks/use-build-manager.js';
 
 const categoryIconsFromEngineeringDiscipline = {
   mechanical: Wrench,
@@ -109,10 +121,11 @@ export default function PersonalCadProjects(): React.JSX.Element {
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.buildViewMode, 'grid');
   const [showDeleted, setShowDeleted] = useState(false);
-  const { builds, deleteBuild, duplicateBuild, restoreBuild } = useBuilds({ includeDeleted: showDeleted });
+  const { builds, deleteBuild, duplicateBuild, restoreBuild, updateName } = useBuilds({ includeDeleted: showDeleted });
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const buildMutations = useMemo(() => createBuildMutations(queryClient), [queryClient]);
+  const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
+  const [, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
+  const buildManager = useBuildManager();
 
   const handleToggleDeleted = useCallback((value: boolean) => {
     setShowDeleted(value);
@@ -157,14 +170,55 @@ export default function PersonalCadProjects(): React.JSX.Element {
   const handleRename = useCallback(
     async (buildId: string, newName: string) => {
       try {
-        await buildMutations.updateName(buildId, newName);
+        await updateName(buildId, newName);
         toast.success(`Renamed to ${newName}`);
       } catch (error) {
         toast.error('Failed to rename build');
         console.error('Error renaming build:', error);
       }
     },
-    [buildMutations],
+    [updateName],
+  );
+
+  const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
+    async ({ content, model, metadata, imageUrls }) => {
+      try {
+        const mainFileName = getMainFile(selectedKernel);
+        const emptyCode = getEmptyCode(selectedKernel);
+
+        // Create the initial message as pending
+        const userMessage = createMessage({
+          content,
+          role: messageRole.user,
+          model,
+          status: messageStatus.pending,
+          metadata: metadata ?? {},
+          imageUrls,
+        });
+
+        const chatId = generatePrefixedId(idPrefix.chat);
+
+        // Create initial build using factory function
+        const { buildData, files } = createInitialBuild({
+          buildName: defaultBuildName,
+          chatId,
+          initialMessage: userMessage,
+          mainFileName,
+          emptyCodeContent: encodeTextFile(emptyCode),
+        });
+
+        const createdBuild = await buildManager.createBuild(buildData, files);
+
+        // Ensure chat is open when navigating to the build page
+        setIsChatOpen(true);
+
+        // Navigate immediately - the build page will handle the streaming
+        await navigate(`/builds/${createdBuild.id}`);
+      } catch {
+        toast.error('Failed to create build');
+      }
+    },
+    [selectedKernel, buildManager, setIsChatOpen, navigate],
   );
 
   const actions: BuildActions = {
@@ -278,13 +332,23 @@ export default function PersonalCadProjects(): React.JSX.Element {
           </div>
         </div>
         <TabsContent enableAnimation={false} value="all">
-          <UnifiedBuildList projects={filteredBuilds} viewMode={viewMode} actions={actions} />
+          <UnifiedBuildList
+            projects={filteredBuilds}
+            viewMode={viewMode}
+            actions={actions}
+            selectedKernel={selectedKernel}
+            onKernelChange={setSelectedKernel}
+            onSubmit={onSubmit}
+          />
         </TabsContent>
         <TabsContent enableAnimation={false} value="mechanical">
           <UnifiedBuildList
             projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('mechanical'))}
             viewMode={viewMode}
             actions={actions}
+            selectedKernel={selectedKernel}
+            onKernelChange={setSelectedKernel}
+            onSubmit={onSubmit}
           />
         </TabsContent>
         <TabsContent enableAnimation={false} value="electrical">
@@ -292,6 +356,9 @@ export default function PersonalCadProjects(): React.JSX.Element {
             projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('electrical'))}
             viewMode={viewMode}
             actions={actions}
+            selectedKernel={selectedKernel}
+            onKernelChange={setSelectedKernel}
+            onSubmit={onSubmit}
           />
         </TabsContent>
         <TabsContent enableAnimation={false} value="firmware">
@@ -299,6 +366,9 @@ export default function PersonalCadProjects(): React.JSX.Element {
             projects={filteredBuilds.filter((p) => Object.keys(p.assets).includes('firmware'))}
             viewMode={viewMode}
             actions={actions}
+            selectedKernel={selectedKernel}
+            onKernelChange={setSelectedKernel}
+            onSubmit={onSubmit}
           />
         </TabsContent>
       </Tabs>
@@ -310,13 +380,23 @@ type UnifiedBuildListProps = {
   readonly projects: Build[];
   readonly viewMode: 'grid' | 'table';
   readonly actions: BuildActions;
+  readonly onSubmit: ChatTextareaProperties['onSubmit'];
+  readonly selectedKernel: KernelProvider;
+  readonly onKernelChange: (kernel: KernelProvider) => void;
 };
 
 // Page size options for different view modes
 const gridPageSizes = [12, 24, 36, 48, 60];
 const tablePageSizes = [10, 20, 30, 40, 50];
 
-function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps) {
+function UnifiedBuildList({
+  projects,
+  viewMode,
+  actions,
+  onSubmit,
+  selectedKernel,
+  onKernelChange,
+}: UnifiedBuildListProps) {
   const [sorting, setSorting] = useState<SortingState>([{ id: 'updatedAt', desc: true }]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = useState({});
@@ -373,6 +453,50 @@ function UnifiedBuildList({ projects, viewMode, actions }: UnifiedBuildListProps
       table.setPageSize(newPageSize);
     }
   }, [viewMode, rowSelection, getAppropriatePageSize, table]);
+
+  // Show empty state if no projects at all
+  if (projects.length === 0) {
+    return (
+      <EmptyItems className="min-h-[60vh]">
+        <ChatProvider value={{}}>
+          <div className="mx-auto max-w-2xl space-y-6">
+            <div className="flex flex-col items-center space-y-4 text-center">
+              <PackageX className="size-16 text-muted-foreground" strokeWidth={1} />
+              <div className="space-y-2">
+                <h2 className="text-xl font-semibold">No builds yet</h2>
+                <p className="text-sm">Start by describing what you want to build, or create from code</p>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div className="flex justify-center">
+                <KernelSelector selectedKernel={selectedKernel} onKernelChange={onKernelChange} />
+              </div>
+              <ChatTextarea
+                enableContextActions={false}
+                enableKernelSelector={false}
+                className="pt-1 shadow-none"
+                onSubmit={onSubmit}
+              />
+            </div>
+            <div className="flex items-center justify-center gap-4 text-sm text-muted-foreground">
+              <div className="h-px flex-1 bg-border" />
+              <span>or</span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+            <div className="flex justify-center">
+              <NavLink to="/builds/new" tabIndex={-1}>
+                {({ isPending }) => (
+                  <InteractiveHoverButton className="flex items-center gap-2 font-light [&_svg]:size-6 [&_svg]:stroke-1">
+                    {isPending ? <LoadingSpinner /> : 'Build from code'}
+                  </InteractiveHoverButton>
+                )}
+              </NavLink>
+            </div>
+          </div>
+        </ChatProvider>
+      </EmptyItems>
+    );
+  }
 
   return (
     <div className="space-y-4">

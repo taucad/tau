@@ -1,4 +1,4 @@
-import { z } from 'zod/v4';
+import { z } from 'zod';
 import { modelFamilySchema, providerIdSchema } from '#api/providers/provider.schema.js';
 
 export const modelSupportSchema = z.object({

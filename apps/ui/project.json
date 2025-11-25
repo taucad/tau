@@ -7,12 +7,23 @@
   "targets": {
     "build": {
       "dependsOn": ["copy-assets"],
-      "outputs": ["{projectRoot}/build"],
+      "outputs": ["{projectRoot}/build", "{projectRoot}/.netlify"],
       "options": {
         "env": {
           "NODE_OPTIONS": "--max-old-space-size=4096"
         }
       }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "dependsOn": ["build"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "react-router-serve build/server/server.js"
+      },
+      "configurations": {},
+      "parallelism": true
     },
     "typegen": {
       "executor": "nx:run-commands",

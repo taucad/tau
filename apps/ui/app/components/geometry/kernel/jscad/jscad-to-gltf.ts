@@ -257,11 +257,11 @@ function createGltfDocumentFromJscadShapes(shapes: unknown[]): Document {
  * import { jscadToGltf } from '#components/geometry/kernel/jscad/jscad-to-gltf.js';
  *
  * const shape = box({ size: 10 });
- * const gltfBlob = await jscadToGltf(shape);
- * // Use gltfBlob with Three.js or other WebGL viewers
+ * const gltfData = await jscadToGltf(shape);
+ * // Use gltfData with Three.js or other WebGL viewers
  * ```
  */
-export async function jscadToGltf(shape: unknown): Promise<Blob> {
+export async function jscadToGltf(shape: unknown): Promise<Uint8Array> {
   // Handle array of geometries
   const shapes = Array.isArray(shape) ? shape : [shape];
 
@@ -270,5 +270,5 @@ export async function jscadToGltf(shape: unknown): Promise<Blob> {
 
   // Write as GLB binary format
   const glbBuffer = await new NodeIO().writeBinary(document);
-  return new Blob([glbBuffer], { type: 'model/gltf-binary' });
+  return glbBuffer;
 }

@@ -5,7 +5,6 @@ import type {
   ExportGeometryResult,
   ExtractParametersResult,
   GeometryGltf,
-  GeometryFile,
 } from '@taucad/types';
 import type { CompilationError } from '@taucad/kcl-wasm-lib/bindings/CompilationError';
 import { createKernelError, createKernelSuccess } from '#components/geometry/kernel/utils/kernel-helpers.js';
@@ -14,6 +13,8 @@ import { isKclError, extractExecutionError } from '#components/geometry/kernel/z
 import { convertKclErrorToKernelError, mapErrorToKclError } from '#components/geometry/kernel/zoo/error-mappers.js';
 import { getErrorPosition } from '#components/geometry/kernel/zoo/source-range-utils.js';
 import { KernelWorker } from '#components/geometry/kernel/utils/kernel-worker.js';
+import { FileSystemManager } from '#components/geometry/kernel/zoo/filesystem-manager.js';
+import type { OnWorkerLog } from '#types/console.types.js';
 
 type ZooOptions = {
   apiKey: string;
@@ -31,14 +32,25 @@ class ZooWorker extends KernelWorker<ZooOptions> {
   protected override readonly name: string = 'ZooWorker';
   private gltfDataMemory: Record<string, Uint8Array> = {};
   private kclUtils: KclUtils | undefined;
+  private fileSystemManager!: FileSystemManager;
 
-  public override async canHandle(file: GeometryFile): Promise<boolean> {
-    const extension = KernelWorker.getFileExtension(file.filename);
+  public override async initialize(onLog: OnWorkerLog, options: ZooOptions): Promise<void> {
+    await super.initialize(onLog, options);
+    this.fileSystemManager = new FileSystemManager(this.fileReader);
+  }
+
+  public override async cleanup(): Promise<void> {
+    await this.kclUtils?.cleanup();
+    this.kclUtils = undefined;
+    this.gltfDataMemory = {};
+  }
+
+  protected override async canHandle(_filename: string, extension: string): Promise<boolean> {
     return extension === 'kcl';
   }
 
-  public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {
-    const code = KernelWorker.extractCodeFromFile(file);
+  protected override async extractParameters(filename: string): Promise<ExtractParametersResult> {
+    const code = await this.readFile(filename, 'utf8');
     try {
       const utils = await this.getKclUtils();
       const parseResult = await utils.parseKcl(code);
@@ -94,12 +106,12 @@ class ZooWorker extends KernelWorker<ZooOptions> {
     }
   }
 
-  public override async computeGeometry(
-    file: GeometryFile,
+  protected override async computeGeometry(
+    filename: string,
     parameters?: Record<string, unknown>,
     geometryId = 'defaultGeometry',
   ): Promise<ComputeGeometryResult> {
-    const code = KernelWorker.extractCodeFromFile(file);
+    const code = await this.readFile(filename, 'utf8');
     try {
       const trimmedCode = code.trim();
       if (trimmedCode === '') {
@@ -160,19 +172,16 @@ class ZooWorker extends KernelWorker<ZooOptions> {
         const gltf = exportResult[0];
         if (!gltf) {
           return createKernelError({
-            message: 'No STL file in export result',
+            message: 'No GLTF file in export result',
             startColumn: 0,
             startLineNumber: 0,
           });
         }
 
         this.gltfDataMemory[geometryId] = gltf.contents;
-        const arrayBuffer = new ArrayBuffer(gltf.contents.byteLength);
-        const view = new Uint8Array(arrayBuffer);
-        view.set(gltf.contents);
         const geometry: GeometryGltf = {
           format: 'gltf',
-          gltfBlob: new Blob([gltf.contents]),
+          content: gltf.contents,
         };
         return createKernelSuccess([geometry]);
       } catch (error) {
@@ -188,7 +197,7 @@ class ZooWorker extends KernelWorker<ZooOptions> {
   }
 
   // eslint-disable-next-line complexity -- refactor to remove common boilerplate.
-  public override async exportGeometry(
+  protected override async exportGeometry(
     fileType: ExportFormat,
     geometryId = 'defaultGeometry',
   ): Promise<ExportGeometryResult> {
@@ -358,12 +367,6 @@ class ZooWorker extends KernelWorker<ZooOptions> {
     }
   }
 
-  public override async cleanup(): Promise<void> {
-    await this.kclUtils?.cleanup();
-    this.kclUtils = undefined;
-    this.gltfDataMemory = {};
-  }
-
   /**
    * Filters errors to only include Error and Fatal severities, excluding Warnings
    */
@@ -381,7 +384,10 @@ class ZooWorker extends KernelWorker<ZooOptions> {
   }
 
   private async getKclUtilsInstance(): Promise<KclUtils> {
-    this.kclUtils ??= new KclUtils({ apiKey: this.options.apiKey });
+    this.kclUtils ??= new KclUtils({
+      apiKey: this.options.apiKey,
+      fileSystemManager: this.fileSystemManager,
+    });
     return this.kclUtils;
   }
 

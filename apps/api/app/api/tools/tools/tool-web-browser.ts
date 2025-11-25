@@ -10,7 +10,7 @@ import { MemoryVectorStore } from 'langchain/vectorstores/memory';
 import { formatDocumentsAsString } from 'langchain/util/document';
 import type { DynamicStructuredTool } from '@langchain/core/tools';
 import { tool } from '@langchain/core/tools';
-import { z } from 'zod/v4';
+import { z } from 'zod';
 
 // Schema for tool input
 const webBrowserSchema = z.object({
@@ -112,7 +112,9 @@ const webBrowserImpl = async (input: WebBrowserInput, options: WebBrowserOptions
  * This version uses the functional API from LangChain.
  */
 export const createWebBrowserTool = (options: WebBrowserOptions): DynamicStructuredTool => {
+  // @ts-expect-error -- TODO: fix during AI-framework upgrade.
   return tool(
+    // @ts-expect-error -- TODO: fix during AI-framework upgrade.
     async (input: WebBrowserInput) => {
       return webBrowserImpl(input, options);
     },

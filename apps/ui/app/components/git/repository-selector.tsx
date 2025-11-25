@@ -130,7 +130,7 @@ export function RepositorySelector({ gitRef, onSelected, onCancel }: RepositoryS
 
   return (
     <div className="flex h-full flex-1 flex-col gap-4">
-      <div className="flex items-center justify-between px-2">
+      <div className="flex items-center justify-between">
         <h4 className="text-sm font-semibold">Select Repository</h4>
         {onCancel ? (
           <Button size="sm" variant="outline" onClick={onCancel}>
@@ -141,7 +141,7 @@ export function RepositorySelector({ gitRef, onSelected, onCancel }: RepositoryS
 
       {/* Git Scope Selector */}
       {scopes.length > 0 && (
-        <div className="flex flex-col gap-2 px-3">
+        <div className="flex flex-col gap-2">
           <label className="text-xs font-medium text-muted-foreground">Git Scope</label>
           <Select value={selectedScope} onValueChange={setSelectedScope}>
             <SelectTrigger className="w-full">

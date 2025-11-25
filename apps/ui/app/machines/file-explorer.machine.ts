@@ -1,5 +1,4 @@
-import { assertEvent, setup, enqueueActions, fromCallback } from 'xstate';
-import type { AnyActorRef } from 'xstate';
+import { assertEvent, setup, enqueueActions } from 'xstate';
 import type { FileStatus } from '@taucad/types';
 
 export type FileItem = {
@@ -20,13 +19,8 @@ export type OpenFile = {
 
 // Interface defining the context for the file explorer machine
 type FileExplorerContext = {
-  parentRef: AnyActorRef;
   openFiles: OpenFile[];
   activeFilePath: string | undefined;
-};
-
-type FileExplorerInput = {
-  parentRef: AnyActorRef;
 };
 
 // Define the types of events the machine can receive
@@ -34,7 +28,9 @@ type FileExplorerEvent =
   | { type: 'openFile'; path: string }
   | { type: 'closeFile'; path: string }
   | { type: 'setActiveFile'; path: string | undefined }
-  | { type: 'fileCreated'; path: string; content: Uint8Array };
+  | { type: 'closeAll' };
+
+type FileExplorerEmitted = { type: 'fileOpened'; path: string };
 
 /**
  * File Explorer Machine
@@ -42,8 +38,7 @@ type FileExplorerEvent =
  * This machine manages the state of the file explorer:
  * - Handles opening and closing files
  * - Tracks active file
- * - Manages file content updates
- * - Maintains file tree structure
+ * - Pure UI state management (no parent coordination)
  */
 export const fileExplorerMachine = setup({
   types: {
@@ -52,22 +47,7 @@ export const fileExplorerMachine = setup({
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
     events: {} as FileExplorerEvent,
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    input: {} as FileExplorerInput,
-  },
-  actors: {
-    buildListener: fromCallback<{ type: 'fileCreated'; path: string; content: Uint8Array }, FileExplorerInput>(
-      ({ input, sendBack }) => {
-        const { parentRef } = input;
-
-        const fileCreatedSub = parentRef.on('fileCreated', (event: { path: string; content: Uint8Array }) => {
-          sendBack({ type: 'fileCreated', path: event.path, content: event.content });
-        });
-
-        return () => {
-          fileCreatedSub.unsubscribe();
-        };
-      },
-    ),
+    emitted: {} as FileExplorerEmitted,
   },
   actions: {
     openFile: enqueueActions(({ enqueue, event, context }) => {
@@ -79,9 +59,8 @@ export const fileExplorerMachine = setup({
         enqueue.assign({
           activeFilePath: event.path,
         });
-        // Send to parent to trigger side effects (CAD update, etc)
-        enqueue.sendTo(context.parentRef, {
-          type: 'fileOpened',
+        enqueue.emit({
+          type: 'fileOpened' as const,
           path: event.path,
         });
         return;
@@ -98,19 +77,8 @@ export const fileExplorerMachine = setup({
         activeFilePath: newFile.path,
       });
 
-      // Send to parent to trigger side effects (CAD update, etc)
-      enqueue.sendTo(context.parentRef, {
-        type: 'fileOpened',
-        path: event.path,
-      });
-    }),
-
-    handleFileCreated: enqueueActions(({ enqueue, event }) => {
-      assertEvent(event, 'fileCreated');
-
-      // Auto-open the newly created file by raising an event to self
-      enqueue.raise({
-        type: 'openFile',
+      enqueue.emit({
+        type: 'fileOpened' as const,
         path: event.path,
       });
     }),
@@ -125,10 +93,10 @@ export const fileExplorerMachine = setup({
       if (context.activeFilePath === event.path) {
         newActiveFilePath = updatedOpenFiles.at(-1)?.path;
 
-        // Send fileOpened to parent for the new active file (if any)
+        // Emit fileOpened for the new active file (if any)
         if (newActiveFilePath) {
-          enqueue.sendTo(context.parentRef, {
-            type: 'fileOpened',
+          enqueue.emit({
+            type: 'fileOpened' as const,
             path: newActiveFilePath,
           });
         }
@@ -140,37 +108,36 @@ export const fileExplorerMachine = setup({
       });
     }),
 
-    setActiveFile: enqueueActions(({ enqueue, event, context }) => {
+    setActiveFile: enqueueActions(({ enqueue, event }) => {
       assertEvent(event, 'setActiveFile');
 
       enqueue.assign({
         activeFilePath: event.path,
       });
 
-      // Send to parent to trigger side effects (CAD update, etc)
+      // Emit fileOpened for the new active file
       if (event.path) {
-        enqueue.sendTo(context.parentRef, {
-          type: 'fileOpened',
+        enqueue.emit({
+          type: 'fileOpened' as const,
           path: event.path,
         });
       }
     }),
+
+    closeAll: enqueueActions(({ enqueue }) => {
+      enqueue.assign({
+        openFiles: [],
+        activeFilePath: undefined,
+      });
+    }),
   },
 }).createMachine({
   id: 'fileExplorer',
-  context({ input }) {
-    return {
-      parentRef: input.parentRef,
-      openFiles: [],
-      activeFilePath: undefined,
-    };
+  context: {
+    openFiles: [],
+    activeFilePath: undefined,
   },
   initial: 'idle',
-  invoke: {
-    id: 'buildListener',
-    src: 'buildListener',
-    input: ({ context }) => ({ parentRef: context.parentRef }),
-  },
   states: {
     idle: {
       on: {
@@ -183,10 +150,12 @@ export const fileExplorerMachine = setup({
         setActiveFile: {
           actions: 'setActiveFile',
         },
-        fileCreated: {
-          actions: 'handleFileCreated',
+        closeAll: {
+          actions: 'closeAll',
         },
       },
     },
   },
 });
+
+export type { FileExplorerEmitted };

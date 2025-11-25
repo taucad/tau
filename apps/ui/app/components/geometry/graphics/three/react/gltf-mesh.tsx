@@ -6,9 +6,9 @@ import { applyMatcap } from '#components/geometry/graphics/three/materials/gltf-
 
 type GltfMeshDisplayProperties = {
   /**
-   * The GLTF blob to load.
+   * The GLTF file to load.
    */
-  readonly gltfBlob: Blob;
+  readonly gltfFile: Uint8Array;
   /**
    * Whether to enable matcap material.
    */
@@ -41,7 +41,7 @@ type GltfMeshDisplayProperties = {
  *   - When vertex colors (COLOR_0 attribute) are present: uses vertex colors exclusively
  *   - When no vertex colors are present: falls back to material colors and opacity
  *
- * @param gltfBlob - The GLTF blob to load
+ * @param gltfFile - The GLTF file to load
  * @param name - The name of the mesh
  * @param enableSurfaces - Whether to enable surfaces
  * @param enableLines - Whether to enable lines
@@ -49,7 +49,7 @@ type GltfMeshDisplayProperties = {
  * @returns A React component with Three.js primitives that renders the GLTF mesh
  */
 export function GltfMesh({
-  gltfBlob,
+  gltfFile,
   enableMatcap = true,
   enableSurfaces = true,
   enableLines = true,
@@ -65,12 +65,14 @@ export function GltfMesh({
       isLoadingRef.current = true;
 
       try {
-        const arrayBuffer = await gltfBlob.arrayBuffer();
-
         const loader = new GLTFLoader();
 
+        if (typeof SharedArrayBuffer === 'function' && gltfFile.buffer instanceof SharedArrayBuffer) {
+          throw new TypeError('SharedArrayBuffer is not supported in <GltfMesh />');
+        }
+
         const gltf = await loader.parseAsync(
-          arrayBuffer,
+          gltfFile.buffer as ArrayBuffer,
           '', // Path (not needed for ArrayBuffer)
         );
 
@@ -105,7 +107,7 @@ export function GltfMesh({
     return () => {
       cancelled = true;
     };
-  }, [gltfBlob, enableMatcap, enableYupRotation, enableLines]);
+  }, [gltfFile, enableMatcap, enableYupRotation, enableLines]);
 
   // Toggle visibility of surfaces and lines based on props
   useEffect(() => {

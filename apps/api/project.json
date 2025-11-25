@@ -16,6 +16,7 @@
     },
     "serve": {
       "executor": "@nx/js:node",
+      "continuous": true,
       "defaultConfiguration": "development",
       "options": {
         "buildTarget": "api:build"
@@ -27,13 +28,14 @@
         "production": {
           "buildTarget": "api:build:production"
         }
-      }
+      },
+      "parallelism": true
     },
     "auth-schema-generate": {
       "executor": "nx:run-commands",
       "options": {
         "command": "npx @better-auth/cli generate --config app/config/auth.ts --output app/database/auth-schema.ts --yes",
-        "cwd": "apps/api"
+        "cwd": "{projectRoot}"
       }
     },
     "launch": {
@@ -46,35 +48,35 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "drizzle-kit generate",
-        "cwd": "apps/api"
+        "cwd": "{projectRoot}"
       }
     },
     "db-generate": {
       "executor": "nx:run-commands",
       "options": {
         "command": "drizzle-kit generate",
-        "cwd": "apps/api"
+        "cwd": "{projectRoot}"
       }
     },
     "db-migrate": {
       "executor": "nx:run-commands",
       "options": {
         "command": "drizzle-kit migrate",
-        "cwd": "apps/api"
+        "cwd": "{projectRoot}"
       }
     },
     "db-studio": {
       "executor": "nx:run-commands",
       "options": {
         "command": "drizzle-kit studio",
-        "cwd": "apps/api"
+        "cwd": "{projectRoot}"
       }
     },
     "db-push": {
       "executor": "nx:run-commands",
       "options": {
         "command": "drizzle-kit push",
-        "cwd": "apps/api"
+        "cwd": "{projectRoot}"
       }
     }
   }

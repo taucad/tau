@@ -12,8 +12,9 @@ import { InlineTextEditor } from '#components/inline-text-editor.js';
 const animationDuration = 2000;
 
 export function BuildNameEditor(): React.JSX.Element {
-  const { buildRef, updateName, isLoading } = useBuild();
+  const { buildRef, updateName } = useBuild();
   const buildName = useSelector(buildRef, (state) => state.context.build?.name) ?? '';
+  const isLoading = useSelector(buildRef, (state) => state.context.isLoading);
   const activeChatFirstMessage = useSelector(buildRef, (state) => {
     const chats = state.context.build?.chats ?? [];
     const activeChat = chats.find((chat) => chat.id === state.context.build?.lastChatId);

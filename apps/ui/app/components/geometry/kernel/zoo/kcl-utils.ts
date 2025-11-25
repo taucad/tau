@@ -14,6 +14,7 @@ import type { Models } from '@kittycad/lib';
 import wasmPath from '@taucad/kcl-wasm-lib/kcl.wasm?url';
 import { EngineConnection, MockEngineConnection } from '#components/geometry/kernel/zoo/engine-connection.js';
 import type { WasmModule } from '#components/geometry/kernel/zoo/engine-connection.js';
+import type { FileSystemManager } from '#components/geometry/kernel/zoo/filesystem-manager.js';
 import {
   KclError,
   KclExportError,
@@ -64,6 +65,8 @@ type KclUtilsOptions = {
     width: number;
     height: number;
   };
+  /** FileSystemManager for resolving file paths */
+  fileSystemManager: FileSystemManager;
 };
 
 const splitErrors = (input: CompilationError[]): { errors: CompilationError[]; warnings: CompilationError[] } => {
@@ -213,12 +216,14 @@ export class KclUtils {
   private mockContext: Context | undefined;
   private readonly apiKey: string;
   private readonly baseUrl: string;
+  private readonly fileSystemManager: FileSystemManager;
   // Add execution state tracking
   private hasExecutedProgram = false;
 
   public constructor(options: KclUtilsOptions) {
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl ?? 'wss://api.zoo.dev';
+    this.fileSystemManager = options.fileSystemManager;
   }
 
   /**
@@ -250,10 +255,7 @@ export class KclUtils {
     // Create mock context for local operations
     const mockEngine = new MockEngineConnection();
     // eslint-disable-next-line @typescript-eslint/await-thenable -- WASM Context constructor may return thenable
-    this.mockContext = await new this.wasmModule.Context(
-      mockEngine,
-      undefined, // Fs_manager (undefined for now)
-    );
+    this.mockContext = await new this.wasmModule.Context(mockEngine, this.fileSystemManager);
 
     this.isWasmInitialized = true;
   }
@@ -501,7 +503,7 @@ export class KclUtils {
       throw KclError.simple('engine', 'WASM module not loaded');
     }
 
-    const engineManager = new EngineConnection(this.apiKey, this.baseUrl, this.wasmModule);
+    const engineManager = new EngineConnection(this.apiKey, this.baseUrl, this.wasmModule, this.fileSystemManager);
     return engineManager;
   }
 

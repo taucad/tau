@@ -3,7 +3,8 @@ import type { loader } from '#routes/docs.$/route.js';
 import { Button } from '#components/ui/button.js';
 import { CopyButton } from '#components/copy-button.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { ENV, metaConfig } from '#config.js';
+import { ENV } from '#config.js';
+import { metaConfig } from '#constants/meta.constants.js';
 import type { SvgIcons } from '#components/icons/generated/svg-icons.js';
 import { MarkdownIcon } from '#components/icons/markdown-icon.js';
 

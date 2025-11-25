@@ -48,7 +48,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '#utils/ui.utils.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
-import { metaConfig } from '#config.js';
+import { metaConfig } from '#constants/meta.constants.js';
 
 const yUpFormats = new Set<InputFormat>(['gltf', 'glb', 'ifc']);
 
@@ -174,9 +174,7 @@ function ConverterContent(): React.JSX.Element {
   );
 
   // Construct geometries array for CadViewer
-  const geometries: Geometry[] = glbData
-    ? [{ format: 'gltf', gltfBlob: new Blob([glbData], { type: 'model/gltf-binary' }) }]
-    : [];
+  const geometries: Geometry[] = glbData ? [{ format: 'gltf', content: glbData }] : [];
 
   const hasModel = glbData !== undefined;
 

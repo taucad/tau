@@ -4,17 +4,37 @@
  * Uses Zod for validation
  */
 import process from 'node:process';
-import { z } from 'zod/v4';
+import { z } from 'zod';
 
 // Define the schema for environment variables
-const environmentSchema = z.object({
-  /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
-  TAU_API_URL: z.url(),
-  TAU_FRONTEND_URL: z.url(),
-  NODE_ENV: z.enum(['development', 'production', 'test']),
-  ZOO_API_KEY: z.string().optional(),
-  /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
-});
+const environmentSchema = z.preprocess(
+  (env) => {
+    const rawEnv = env as Record<string, string | undefined>;
+
+    // Extract base URL from NETLIFY_AI_GATEWAY_URL if TAU_FRONTEND_URL not set
+    // NETLIFY_AI_GATEWAY_URL format: https://deploy-preview-XX--site.netlify.app/.netlify/ai
+    let frontendUrl = rawEnv['TAU_FRONTEND_URL'];
+    if (!frontendUrl && rawEnv['NETLIFY_AI_GATEWAY_URL']) {
+      // Use URL constructor to reliably extract origin (protocol + host)
+      const url = new URL(rawEnv['NETLIFY_AI_GATEWAY_URL']);
+      frontendUrl = url.origin;
+    }
+
+    return {
+      ...rawEnv,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+      TAU_FRONTEND_URL: frontendUrl,
+    };
+  },
+  z.object({
+    /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
+    TAU_API_URL: z.url(),
+    TAU_FRONTEND_URL: z.url(),
+    NODE_ENV: z.enum(['development', 'production', 'test']),
+    ZOO_API_KEY: z.string().optional().describe('To be removed in favor of integrations.'),
+    /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
+  }),
+);
 
 export const getEnvironment = async (): Promise<Environment> => {
   const result = environmentSchema.safeParse(process.env);
@@ -33,39 +53,3 @@ export type Environment = z.infer<typeof environmentSchema>;
 
 // eslint-disable-next-line @typescript-eslint/naming-convention, @typescript-eslint/no-unnecessary-condition -- easier to distinguish this constant with UPPER_CASE.
 export const ENV = globalThis.window ? globalThis.window.ENV : process.env;
-
-/**
- * Meta config. Contains infrequently changing information about the app.
- */
-export const metaConfig = {
-  /**
-   * The name of the app. Used for SEO and other metadata such as PWA and app store naming.
-   */
-  name: 'Tau',
-  /**
-   * The prefix for all cookies.
-   *
-   * WARNING: changing this value will cause existing cookies not to be read and result in poor UX.
-   */
-  cookiePrefix: 'tau-',
-  /**
-   * The owner of the GitHub repository.
-   */
-  githubOwner: 'taucad',
-  /**
-   * The repository of the GitHub repository.
-   */
-  githubRepo: 'tau',
-  /**
-   * The URL to the GitHub repository.
-   */
-  githubUrl: 'https://github.com/taucad/tau',
-  /**
-   * The description of the app. Used for SEO and other metadata such as PWA and app store descriptions.
-   */
-  description: 'Tau: The multi-kernel CAD framework for the web.',
-  /**
-   * The directory of the docs relative to the root of the repository.
-   */
-  docsDir: 'apps/ui/content/docs',
-} as const;

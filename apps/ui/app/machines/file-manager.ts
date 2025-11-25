@@ -1,9 +1,10 @@
 import LightningFS from '@isomorphic-git/lightning-fs';
 import type { MKDirOptions } from '@isomorphic-git/lightning-fs';
 import JSZip from 'jszip';
+import { metaConfig } from '#constants/meta.constants.js';
 
 // Set up LightningFS in the worker (persistent IndexedDB-backed filesystem)
-const fs = new LightningFS('myfs'); // Opens an IndexedDB named "myfs"
+const fs = new LightningFS(`${metaConfig.cookiePrefix}fs`); // Opens an IndexedDB named "myfs"
 const { promises: fsp } = fs; // Use promise-based API for convenience
 
 export type FileStat = {

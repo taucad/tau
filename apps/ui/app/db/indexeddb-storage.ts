@@ -4,10 +4,11 @@ import type { Build } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import type { StorageProvider } from '#types/storage.types.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
+import { metaConfig } from '#constants/meta.constants.js';
 
 export class IndexedDbStorageProvider implements StorageProvider {
   private get dbName() {
-    return 'tau-db';
+    return `${metaConfig.cookiePrefix}db`;
   }
 
   private get storeName() {

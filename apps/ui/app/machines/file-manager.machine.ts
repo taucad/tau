@@ -29,25 +29,6 @@ type FileManagerContext = {
   shouldInitializeOnStart: boolean;
 };
 
-async function ensureDirectoryExists(worker: Remote<FileWorker>, targetPath: string): Promise<void> {
-  const normalizedPath = targetPath.startsWith('/') ? targetPath : `/${targetPath}`;
-  const segments = normalizedPath.split('/').filter(Boolean);
-  let currentPath = '';
-
-  for (const segment of segments) {
-    currentPath += `/${segment}`;
-    try {
-      // eslint-disable-next-line no-await-in-loop -- sequential mkdir to build the tree
-      await worker.mkdir(currentPath);
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (!errorMessage.includes('EEXIST')) {
-        throw error instanceof Error ? error : new Error(errorMessage);
-      }
-    }
-  }
-}
-
 const initializeWorkerActor = fromPromise<
   { type: 'workerInitialized' } | { type: 'workerInitializationFailed'; error: Error },
   { context: FileManagerContext }
@@ -66,13 +47,6 @@ const initializeWorkerActor = fromPromise<
     // Store references
     context.worker = worker;
     context.wrappedWorker = wrappedWorker;
-
-    // Create root directory
-    try {
-      await ensureDirectoryExists(wrappedWorker, context.rootDirectory);
-    } catch (error) {
-      throw error instanceof Error ? error : new Error(String(error));
-    }
 
     return { type: 'workerInitialized' };
   } catch (error) {

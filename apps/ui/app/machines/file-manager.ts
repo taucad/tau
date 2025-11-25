@@ -30,6 +30,9 @@ export type FileManager = {
   rename(oldPath: string, newPath: string): Promise<void>;
   unlink(path: string): Promise<void>;
   rmdir(path: string): Promise<void>;
+  exists(path: string): Promise<boolean>;
+  batchExists(paths: string[]): Promise<Record<string, boolean>>;
+  ensureDirectoryExists(path: string): Promise<void>;
   getDirectoryStat(path: string): Promise<FileStat[]>;
   getDirectoryContents(path: string): Promise<Record<string, Uint8Array>>;
   copyDirectory(sourcePath: string, destinationPath: string): Promise<void>;
@@ -39,42 +42,73 @@ export type FileManager = {
 export const fileManager: FileManager = {
   readFile: fsp.readFile.bind(fsp),
 
+  // Check if a path exists (file or directory)
+  async exists(path: string): Promise<boolean> {
+    try {
+      await fsp.stat(path);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  // Batch check if multiple paths exist - optimized for checking many paths at once
+  async batchExists(paths: string[]): Promise<Record<string, boolean>> {
+    const results = await Promise.all(
+      paths.map(async (path) => ({
+        path,
+        exists: await this.exists(path),
+      })),
+    );
+
+    const existsMap: Record<string, boolean> = {};
+    for (const { path, exists } of results) {
+      existsMap[path] = exists;
+    }
+
+    return existsMap;
+  },
+
+  // Ensure a directory path exists, creating all parent directories as needed
+  async ensureDirectoryExists(targetPath: string): Promise<void> {
+    const normalizedPath = targetPath.startsWith('/') ? targetPath : `/${targetPath}`;
+    const segments = normalizedPath.split('/').filter((segment) => segment.length > 0);
+
+    // Build all directory paths that need to be created
+    const directoryPaths: string[] = [];
+    let currentPath = '';
+
+    for (const segment of segments) {
+      currentPath += `/${segment}`;
+      directoryPaths.push(currentPath);
+    }
+
+    // Batch check which directories already exist
+    const existsMap = await this.batchExists(directoryPaths);
+
+    // Create only the directories that don't exist (in order)
+    for (const directoryPath of directoryPaths) {
+      if (!existsMap[directoryPath]) {
+        try {
+          // eslint-disable-next-line no-await-in-loop -- Need to create directories sequentially
+          await fsp.mkdir(directoryPath);
+        } catch (error: unknown) {
+          // Ignore error if directory was created by another concurrent operation
+          if (error instanceof Error && !error.message.includes('EEXIST')) {
+            throw error;
+          }
+        }
+      }
+    }
+  },
+
   // Write a file from provided binary data
   async writeFile(path: string, content: Uint8Array): Promise<void> {
     // Ensure parent directory exists before writing
     const lastSlashIndex = path.lastIndexOf('/');
     if (lastSlashIndex > 0) {
       const directoryPath = path.slice(0, lastSlashIndex);
-
-      // Check if parent directory already exists
-      let directoryExists = false;
-      try {
-        const stats = await fsp.stat(directoryPath);
-        directoryExists = stats.type === 'dir';
-      } catch {
-        // Directory doesn't exist, we'll create it
-      }
-
-      // Only create directories if parent doesn't exist
-      if (!directoryExists) {
-        // Recursively create each directory in the path
-        const parts = directoryPath.split('/').filter((part) => part.length > 0);
-        let currentPath = '';
-
-        for (const part of parts) {
-          currentPath += `/${part}`;
-          try {
-            // eslint-disable-next-line no-await-in-loop -- Need to create directories sequentially
-            await fsp.mkdir(currentPath);
-          } catch (error: unknown) {
-            // Ignore error if directory already exists
-            // eslint-disable-next-line max-depth -- Need to create directories sequentially
-            if (error instanceof Error && !error.message.includes('EEXIST')) {
-              throw error;
-            }
-          }
-        }
-      }
+      await this.ensureDirectoryExists(directoryPath);
     }
 
     await fsp.writeFile(path, content);
@@ -129,6 +163,12 @@ export const fileManager: FileManager = {
 
   // Get all file stats in a directory recursively as an array of file stat objects
   async getDirectoryStat(path: string): Promise<FileStat[]> {
+    // Check if directory exists first - return empty array if it doesn't
+    const directoryExists = await this.exists(path);
+    if (!directoryExists) {
+      return [];
+    }
+
     const fileStats: FileStat[] = [];
 
     async function collectStatsRecursive(currentPath: string, basePath: string): Promise<void> {

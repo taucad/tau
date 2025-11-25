@@ -32,6 +32,7 @@ const environmentSchema = z.preprocess(
     TAU_FRONTEND_URL: z.url(),
     NODE_ENV: z.enum(['development', 'production', 'test']),
     ZOO_API_KEY: z.string().optional().describe('To be removed in favor of integrations.'),
+    GITHUB_API_TOKEN: z.string().optional().describe('GitHub API token for the GitHub API client.'),
     /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
   }),
 );

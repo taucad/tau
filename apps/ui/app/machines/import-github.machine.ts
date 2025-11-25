@@ -3,17 +3,36 @@ import type { AnyActorRef, ActorRefFrom, OutputFrom, DoneActorEvent } from 'xsta
 import { unzipMachine } from '#machines/unzip.machine.js';
 import type { UnzipMachineActor } from '#machines/unzip.machine.js';
 import { assertActorDoneEvent } from '#lib/xstate.js';
+import { getGitHubClient } from '#lib/github-api.js';
 
 /**
  * Import GitHub Machine Context
  */
 export type ImportGitHubContext = {
   parentRef: AnyActorRef | undefined;
+  repoUrl: string;
   owner: string;
   repo: string;
   ref: string;
   requestedMainFile: string;
   selectedMainFile: string | undefined;
+  repoSize: number | undefined;
+  repoMetadata:
+    | {
+        avatarUrl: string | undefined;
+        description: string | undefined;
+        stars: number | undefined;
+        forks: number | undefined;
+        watchers: number | undefined;
+        license: string | undefined;
+        defaultBranch: string | undefined;
+        isPrivate: boolean | undefined;
+        lastUpdated: string | undefined;
+      }
+    | undefined;
+  branches: Array<{ name: string; sha: string }>;
+  selectedBranch: string;
+  estimatedDownloadTime: number | undefined;
   downloadProgress: { loaded: number; total: number };
   extractProgress: { processed: number; total: number };
   unzipRef: ActorRefFrom<UnzipMachineActor> | undefined;
@@ -21,17 +40,38 @@ export type ImportGitHubContext = {
   files: Map<string, { filename: string; content: Uint8Array }>;
   buildId: string | undefined;
   error: Error | undefined;
+  fetchErrors: {
+    size: Error | undefined;
+    metadata: Error | undefined;
+    branches: Error | undefined;
+  };
 };
+
+function toMetadataFetchError(error: unknown): Error {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+
+  if (errorMessage.includes('404')) {
+    return new Error('Repository not found. Please check the URL and try again.');
+  }
+
+  if (errorMessage.includes('403') || errorMessage.includes('rate limit')) {
+    return new Error(
+      'GitHub API rate limit exceeded. Please add a GITHUB_API_TOKEN to your environment or wait before trying again.',
+    );
+  }
+
+  return new Error(`Failed to fetch repository metadata: ${errorMessage}`);
+}
 
 /**
  * Import GitHub Machine Input
  */
 type ImportGitHubInput = {
   parentRef?: AnyActorRef;
-  owner: string;
-  repo: string;
-  ref: string;
-  mainFile: string;
+  owner?: string;
+  repo?: string;
+  ref?: string;
+  mainFile?: string;
 };
 
 /**
@@ -39,6 +79,10 @@ type ImportGitHubInput = {
  */
 type ImportGitHubEventInternal =
   | { type: 'retry' }
+  | { type: 'updateRepoUrl'; url: string }
+  | { type: 'selectBranch'; branch: string }
+  | { type: 'startImport' }
+  | { type: 'cancelDownload' }
   | {
       type: 'updateDownloadProgress';
       loaded: number;
@@ -67,63 +111,71 @@ type ImportGitHubEvent = ImportGitHubEventExternalDone | ImportGitHubEventIntern
 
 // Actor output types
 type DownloadResult = { type: 'downloaded'; blob: Blob };
+type RepoSizeResult = { type: 'sizeRetrieved'; size: number | undefined };
+type RepoMetadataResult = {
+  type: 'metadataRetrieved';
+  metadata: {
+    avatarUrl: string | undefined;
+    description: string | undefined;
+    stars: number | undefined;
+    forks: number | undefined;
+    watchers: number | undefined;
+    license: string | undefined;
+    defaultBranch: string | undefined;
+    isPrivate: boolean | undefined;
+    lastUpdated: string | undefined;
+  };
+};
+type BranchesResult = {
+  type: 'branchesRetrieved';
+  branches: Array<{ name: string; sha: string }>;
+};
+
+// Get repository size actor
+const getRepoSizeActor = fromPromise<RepoSizeResult, { owner: string; repo: string; ref: string }>(
+  async ({ input }) => {
+    const client = getGitHubClient();
+    const size = await client.getArchiveSize(input.owner, input.repo, input.ref);
+    return { type: 'sizeRetrieved', size };
+  },
+);
+
+// Get repository metadata actor
+const getRepoMetadataActor = fromPromise<RepoMetadataResult, { owner: string; repo: string }>(async ({ input }) => {
+  const client = getGitHubClient();
+  const metadata = await client.getRepository(input.owner, input.repo);
+
+  return {
+    type: 'metadataRetrieved',
+    metadata,
+  };
+});
+
+// Get branches actor
+const getBranchesActor = fromPromise<BranchesResult, { owner: string; repo: string }>(async ({ input }) => {
+  const client = getGitHubClient();
+  const branches = await client.listBranches(input.owner, input.repo);
+
+  return {
+    type: 'branchesRetrieved',
+    branches,
+  };
+});
 
 // Download actor
 const downloadZipActor = fromPromise<
   DownloadResult,
   { owner: string; repo: string; ref: string; onProgress: (loaded: number, total: number) => void }
 >(async ({ input }) => {
-  // Use proxy endpoint to avoid CORS issues
-  const zipUrl = `https://api.github.com/repos/${input.owner}/${input.repo}/zipball/${input.ref}`;
-  const proxyUrl = `/api/import?url=${encodeURIComponent(zipUrl)}`;
+  const client = getGitHubClient();
 
-  // First, try to get the file size with a HEAD request
-  let contentLength: number | undefined;
-  try {
-    const headResponse = await fetch(proxyUrl, {
-      method: 'HEAD',
-      headers: {
-        'User-Agent': 'TauCAD',
-        accept: 'application/vnd.github.v3+json',
-        'Accept-Encoding': 'identity', // Request uncompressed to get accurate size
-      },
-    });
+  // Download the archive and get size from the GET response
+  const { stream, size: contentLength } = await client.downloadArchiveWithSize(input.owner, input.repo, input.ref);
 
-    if (headResponse.ok) {
-      const contentLengthHeader = headResponse.headers.get('content-length');
-      contentLength = contentLengthHeader ? Number(contentLengthHeader) : undefined;
-    }
-  } catch {
-    // HEAD request failed, we'll proceed without knowing the total size
-    contentLength = undefined;
-  }
-
-  // Now download the actual file
-  const response = await fetch(proxyUrl, {
-    headers: {
-      'User-Agent': 'TauCAD',
-      accept: 'application/vnd.github.v3+json',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`GitHub download failed: ${response.status} ${response.statusText}`);
-  }
-
-  // If we didn't get content length from HEAD, try from GET response
-  if (!contentLength) {
-    const contentLengthHeader = response.headers.get('content-length');
-    contentLength = contentLengthHeader ? Number(contentLengthHeader) : undefined;
-  }
-
-  // Send initial progress with total size (now that we have the most accurate value)
+  // Send initial progress with total size
   input.onProgress(0, contentLength ?? 0);
 
-  const reader = response.body?.getReader();
-
-  if (!reader) {
-    throw new Error('Failed to get response reader');
-  }
+  const reader = stream.getReader();
 
   const chunks: Uint8Array[] = [];
   let receivedLength = 0;
@@ -182,6 +234,9 @@ const createBuildActor = fromPromise<
 });
 
 const importGitHubActors = {
+  getRepoSizeActor,
+  getRepoMetadataActor,
+  getBranchesActor,
   downloadZipActor,
   createBuildActor,
 } as const;
@@ -223,6 +278,9 @@ export const importGitHubMachine = setup({
     ...importGitHubActors,
     unzipMachine,
   },
+  delays: {
+    debounceDelay: 500,
+  },
   actions: {
     setError: assign({
       error({ event }) {
@@ -235,6 +293,93 @@ export const importGitHubMachine = setup({
     }),
     clearError: assign({
       error: undefined,
+      fetchErrors: {
+        size: undefined,
+        metadata: undefined,
+        branches: undefined,
+      },
+    }),
+    updateRepoUrl: assign({
+      repoUrl({ event }) {
+        assertEvent(event, 'updateRepoUrl');
+        return event.url;
+      },
+      repoSize: undefined, // Reset size when URL changes
+    }),
+    parseRepoUrl: assign(({ context }) => {
+      // Parse GitHub URL and extract owner/repo/ref
+      try {
+        const url = new URL(context.repoUrl);
+        if (url.hostname !== 'github.com') {
+          return {};
+        }
+
+        const pathParts = url.pathname.split('/').filter(Boolean);
+        if (pathParts.length < 2) {
+          return {};
+        }
+
+        const [owner, repoRaw] = pathParts;
+        if (!owner || !repoRaw) {
+          return {};
+        }
+
+        const repo = repoRaw.replace(/\.git$/, '');
+        const ref = 'main'; // Default to main, could be extended later
+
+        return { owner, repo, ref };
+      } catch {
+        return {};
+      }
+    }),
+    setRepoSize: assign({
+      repoSize({ event }) {
+        assertActorDoneEvent(event);
+        assertEvent(event.output, 'sizeRetrieved');
+        return event.output.size;
+      },
+      estimatedDownloadTime({ event }) {
+        assertActorDoneEvent(event);
+        assertEvent(event.output, 'sizeRetrieved');
+        const { size } = event.output;
+        if (size === undefined) {
+          return undefined;
+        }
+
+        // Estimate download time: size (bytes) / average speed (5 MB/s)
+        const estimatedSeconds = size / (5 * 1024 * 1024);
+        return Math.ceil(estimatedSeconds);
+      },
+    }),
+    setRepoMetadata: assign({
+      repoMetadata({ event }) {
+        assertActorDoneEvent(event);
+        assertEvent(event.output, 'metadataRetrieved');
+        return event.output.metadata;
+      },
+      selectedBranch({ event, context }) {
+        assertActorDoneEvent(event);
+        assertEvent(event.output, 'metadataRetrieved');
+        // Use default branch from metadata, or keep current selection
+        return event.output.metadata.defaultBranch ?? context.selectedBranch;
+      },
+    }),
+    setBranches: assign({
+      branches({ event }) {
+        assertActorDoneEvent(event);
+        assertEvent(event.output, 'branchesRetrieved');
+        return event.output.branches;
+      },
+    }),
+    setSelectedBranch: assign({
+      selectedBranch({ event }) {
+        assertEvent(event, 'selectBranch');
+        return event.branch;
+      },
+      ref({ event }) {
+        assertEvent(event, 'selectBranch');
+        return event.branch;
+      },
     }),
     applyDownloadProgressImmediately: assign({
       downloadProgress({ event }) {
@@ -298,21 +443,78 @@ export const importGitHubMachine = setup({
         enqueue.sendTo(context.unzipRef, { type: 'extract', zipBlob: event.output.blob });
       }
     }),
+    setSizeError: assign({
+      fetchErrors: ({ context, event }) => ({
+        ...context.fetchErrors,
+        size:
+          'error' in event && event.error instanceof Error ? event.error : new Error('Failed to fetch repository size'),
+      }),
+    }),
+    setMetadataError: assign({
+      fetchErrors: ({ context, event }) => ({
+        ...context.fetchErrors,
+        metadata:
+          'error' in event && event.error instanceof Error
+            ? event.error
+            : new Error('Failed to fetch repository metadata'),
+      }),
+    }),
+    setBranchesError: assign({
+      fetchErrors: ({ context, event }) => ({
+        ...context.fetchErrors,
+        branches:
+          'error' in event && event.error instanceof Error ? event.error : new Error('Failed to fetch branches'),
+      }),
+    }),
   },
   guards: {
+    hasValidRepo({ context }) {
+      return context.owner.length > 0 && context.repo.length > 0 && context.ref.length > 0;
+    },
+    hasValidRepoWithoutError({ context }) {
+      return (
+        context.owner.length > 0 && context.repo.length > 0 && context.ref.length > 0 && context.error === undefined
+      );
+    },
+    shouldFetchRepoInfo({ context }) {
+      // Only fetch if we have a valid repo AND we haven't fetched metadata yet (or encountered a blocking error)
+      return (
+        context.owner.length > 0 &&
+        context.repo.length > 0 &&
+        context.ref.length > 0 &&
+        context.repoMetadata === undefined &&
+        context.fetchErrors.metadata === undefined
+      );
+    },
     hasSelectedMainFile({ context }) {
       return context.selectedMainFile !== undefined && context.selectedMainFile.length > 0;
+    },
+    hasCriticalFetchError({ context }) {
+      // Critical errors are 404 or rate limit on metadata (means repo doesn't exist or is inaccessible)
+      const metadataError = context.fetchErrors.metadata;
+      if (!metadataError) {
+        return false;
+      }
+
+      const errorMessage = metadataError.message;
+      return errorMessage.includes('404') || errorMessage.includes('403') || errorMessage.includes('rate limit');
     },
   },
 }).createMachine({
   id: 'importGitHub',
   context: ({ input }) => ({
     parentRef: input.parentRef,
-    owner: input.owner,
-    repo: input.repo,
-    ref: input.ref,
-    requestedMainFile: input.mainFile,
+    repoUrl: input.owner && input.repo ? `https://github.com/${input.owner}/${input.repo}` : '',
+    owner: input.owner ?? '',
+    repo: input.repo ?? '',
+    ref: input.ref ?? 'main',
+    requestedMainFile: input.mainFile ?? '',
     selectedMainFile: undefined,
+    repoSize: undefined,
+    repoMetadata: undefined,
+    branches: [],
+    selectedBranch: input.ref ?? 'main',
+    estimatedDownloadTime: undefined,
     downloadProgress: { loaded: 0, total: 0 },
     extractProgress: { processed: 0, total: 0 },
     unzipRef: undefined,
@@ -320,9 +522,199 @@ export const importGitHubMachine = setup({
     files: new Map(),
     buildId: undefined,
     error: undefined,
+    fetchErrors: {
+      size: undefined,
+      metadata: undefined,
+      branches: undefined,
+    },
   }),
-  initial: 'downloading',
+  initial: 'enteringDetails',
   states: {
+    enteringDetails: {
+      always: [
+        {
+          target: 'checkingSize',
+          guard: 'shouldFetchRepoInfo',
+        },
+      ],
+      on: {
+        updateRepoUrl: {
+          actions: ['clearError', 'updateRepoUrl', 'parseRepoUrl'],
+          target: 'checkingSize',
+          reenter: true,
+        },
+        selectBranch: {
+          actions: 'setSelectedBranch',
+        },
+        startImport: {
+          target: 'downloading',
+          guard: 'hasValidRepo',
+        },
+      },
+    },
+    checkingSize: {
+      after: {
+        debounceDelay: {
+          target: 'fetchingSize',
+          guard: 'hasValidRepo',
+        },
+      },
+      on: {
+        updateRepoUrl: {
+          actions: ['updateRepoUrl', 'parseRepoUrl'],
+          target: 'checkingSize',
+          reenter: true,
+        },
+        startImport: {
+          target: 'downloading',
+          guard: 'hasValidRepo',
+        },
+      },
+    },
+    fetchingSize: {
+      type: 'parallel',
+      states: {
+        size: {
+          initial: 'fetching',
+          states: {
+            fetching: {
+              invoke: {
+                id: 'fetchSize',
+                src: 'getRepoSizeActor',
+                input: ({ context }) => ({
+                  owner: context.owner,
+                  repo: context.repo,
+                  ref: context.ref,
+                }),
+                onDone: {
+                  target: 'success',
+                  actions: assign({
+                    repoSize: ({ event }) => event.output.size,
+                    estimatedDownloadTime({ event: { output } }) {
+                      // Estimate 1MB/s download speed
+                      const { size } = output;
+                      if (size !== undefined && size > 0) {
+                        return (size / (1024 * 1024)) * 1000;
+                      }
+
+                      return undefined;
+                    },
+                  }),
+                },
+                onError: {
+                  target: 'error',
+                  actions: [
+                    'setSizeError',
+                    assign({
+                      repoSize: undefined,
+                      estimatedDownloadTime: undefined,
+                    }),
+                  ],
+                },
+              },
+            },
+            success: {
+              type: 'final',
+            },
+            error: {
+              type: 'final',
+            },
+          },
+        },
+        metadata: {
+          initial: 'fetching',
+          states: {
+            fetching: {
+              invoke: {
+                id: 'fetchMetadata',
+                src: 'getRepoMetadataActor',
+                input: ({ context }) => ({
+                  owner: context.owner,
+                  repo: context.repo,
+                }),
+                onDone: {
+                  target: 'success',
+                  actions: assign({
+                    repoMetadata: ({ event }) => event.output.metadata,
+                    ref: ({ context, event }) =>
+                      context.ref === 'main' && event.output.metadata.defaultBranch
+                        ? event.output.metadata.defaultBranch
+                        : context.ref,
+                    fetchErrors: ({ context }) => ({
+                      ...context.fetchErrors,
+                      metadata: undefined,
+                    }),
+                    error: undefined,
+                  }),
+                },
+                onError: {
+                  target: 'error',
+                  actions: [
+                    'setMetadataError',
+                    assign({
+                      repoMetadata: undefined,
+                      error: ({ event }) => toMetadataFetchError(event.error),
+                    }),
+                  ],
+                },
+              },
+            },
+            success: {
+              type: 'final',
+            },
+            error: {
+              type: 'final',
+            },
+          },
+        },
+        branches: {
+          initial: 'fetching',
+          states: {
+            fetching: {
+              invoke: {
+                id: 'fetchBranches',
+                src: 'getBranchesActor',
+                input: ({ context }) => ({
+                  owner: context.owner,
+                  repo: context.repo,
+                }),
+                onDone: {
+                  target: 'success',
+                  actions: assign({
+                    branches: ({ event }) => event.output.branches,
+                  }),
+                },
+                onError: {
+                  target: 'error',
+                  actions: [
+                    'setBranchesError',
+                    assign({
+                      branches: [],
+                    }),
+                  ],
+                },
+              },
+            },
+            success: {
+              type: 'final',
+            },
+            error: {
+              type: 'final',
+            },
+          },
+        },
+      },
+      onDone: {
+        target: 'enteringDetails',
+      },
+      on: {
+        updateRepoUrl: {
+          actions: ['updateRepoUrl', 'parseRepoUrl'],
+          target: 'checkingSize',
+          reenter: true,
+        },
+      },
+    },
     downloading: {
       entry: ['clearError', 'spawnUnzipMachine'],
       invoke: {
@@ -347,6 +739,10 @@ export const importGitHubMachine = setup({
       on: {
         updateDownloadProgress: {
           actions: 'applyDownloadProgressImmediately',
+        },
+        cancelDownload: {
+          target: 'enteringDetails',
+          actions: 'clearError',
         },
       },
     },
@@ -403,6 +799,10 @@ export const importGitHubMachine = setup({
       on: {
         updateExtractProgress: {
           actions: 'applyExtractProgressImmediately',
+        },
+        cancelDownload: {
+          target: 'enteringDetails',
+          actions: 'clearError',
         },
         extractionComplete: {
           target: 'selectingMainFile',
@@ -463,7 +863,7 @@ export const importGitHubMachine = setup({
     },
     error: {
       on: {
-        retry: 'downloading',
+        retry: 'enteringDetails',
       },
     },
   },

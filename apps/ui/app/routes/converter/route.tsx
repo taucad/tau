@@ -50,8 +50,6 @@ import { cn } from '#utils/ui.utils.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
 import { metaConfig } from '#constants/meta.constants.js';
 
-const yUpFormats = new Set<InputFormat>(['gltf', 'glb', 'ifc']);
-
 export const handle: Handle = {
   breadcrumb() {
     return (

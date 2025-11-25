@@ -350,7 +350,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     this.trace(`Reading file: ${path}`, { operation: 'readFile' });
 
-    const data = fileManager.readFile(fullPath, encoding);
+    const data = await this.fileManager.readFile(fullPath, encoding);
 
     const duration = performance.now() - start;
     this.trace(`Read ${path} (${duration.toFixed(2)}ms)`, { operation: 'readFile' });

@@ -112,7 +112,9 @@ const webBrowserImpl = async (input: WebBrowserInput, options: WebBrowserOptions
  * This version uses the functional API from LangChain.
  */
 export const createWebBrowserTool = (options: WebBrowserOptions): DynamicStructuredTool => {
+  // @ts-expect-error -- TODO: fix during AI-framework upgrade.
   return tool(
+    // @ts-expect-error -- TODO: fix during AI-framework upgrade.
     async (input: WebBrowserInput) => {
       return webBrowserImpl(input, options);
     },

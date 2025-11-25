@@ -140,7 +140,7 @@
     "monacopilot": "^1.1.23",
     "motion": "^12.11.3",
     "nestjs-pino": "^4.4.0",
-    "nestjs-zod": "^4.3.1",
+    "nestjs-zod": "^5.0.1",
     "ollama": "^0.5.16",
     "openai": "^4.82.0",
     "openscad-wasm-prebuilt": "^1.2.0",

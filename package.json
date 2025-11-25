@@ -190,7 +190,7 @@
     "@nx/eslint-plugin": "21.3.10",
     "@nx/js": "21.3.10",
     "@nx/nest": "21.3.10",
-    "@nx/node": "21.3.10",
+    "@nx/node": "22.1.1",
     "@nx/playwright": "21.3.10",
     "@nx/react": "21.3.10",
     "@nx/vite": "21.3.10",

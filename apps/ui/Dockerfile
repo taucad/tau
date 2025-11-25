@@ -35,4 +35,4 @@ WORKDIR /app
 COPY --from=pruned /app/pruned /app
 ENV NODE_ENV="production"
 EXPOSE 3000
-CMD [ "./node_modules/.bin/react-router-serve", "build/server/index.js" ]
+CMD [ "./node_modules/.bin/react-router-serve", "build/server/server.js" ]

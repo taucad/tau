@@ -196,7 +196,7 @@
     "@nx/vite": "21.3.10",
     "@nx/web": "21.3.10",
     "@nx/webpack": "21.3.10",
-    "@playwright/test": "^1.54.1",
+    "@playwright/test": "^1.56.1",
     "@react-router/dev": "^7.9.6",
     "@react-router/fs-routes": "^7.9.6",
     "@swc-node/register": "~1.10.9",

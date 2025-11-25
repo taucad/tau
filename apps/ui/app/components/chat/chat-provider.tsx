@@ -1101,18 +1101,17 @@ function ChatSyncWrapper({
       if (buildContext) {
         const buildSnapshot = buildContext.buildRef.getSnapshot();
         const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
-        if (!mainFilePath) {
-          throw new Error('No main file path found');
+
+        // Try to get the current code, but don't fail if it's not available
+        let code: string | undefined;
+        if (mainFilePath) {
+          const fileManagerSnapshot = fileManager.fileManagerRef.getSnapshot();
+          const fileData = fileManagerSnapshot.context.openFiles.get(mainFilePath);
+
+          if (fileData) {
+            code = decodeTextFile(fileData);
+          }
         }
-
-        const fileManagerSnapshot = fileManager.fileManagerRef.getSnapshot();
-        const fileData = fileManagerSnapshot.context.openFiles.get(mainFilePath);
-
-        if (!fileData) {
-          throw new Error('No file data found');
-        }
-
-        const code = decodeTextFile(fileData);
 
         // Get error state from CAD machine
         const cadActorState = buildContext.cadRef.getSnapshot();

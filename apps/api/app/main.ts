@@ -15,6 +15,7 @@ import { generatePrefixedId } from '#utils/id.utils.js';
 import type { Environment } from '#config/environment.config.js';
 import { getFastifyLoggingConfig } from '#logger/fastify.logger.js';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
+import { createCorsOriginValidatorFromList } from '#utils/cors.utils.js';
 import { httpBodyLimit } from '#constants/http-body.constant.js';
 
 async function bootstrap() {
@@ -33,8 +34,11 @@ async function bootstrap() {
   app.useLogger(app.get(PinoLogger));
   app.flushLogs(); // Standalone applications require flushing after configuring the logger - https://github.com/iamolegga/nestjs-pino/issues/553
 
+  const frontendUrl = appConfig.get('TAU_FRONTEND_URL', { infer: true });
+  const additionalCorsOrigins = appConfig.get('ADDITIONAL_CORS_ORIGINS', { infer: true });
+
   app.enableCors({
-    origin: [appConfig.get('TAU_FRONTEND_URL', { infer: true })],
+    origin: createCorsOriginValidatorFromList([frontendUrl, ...additionalCorsOrigins]),
     ...corsBaseConfiguration,
   });
   app.enableVersioning({

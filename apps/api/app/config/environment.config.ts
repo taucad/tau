@@ -1,5 +1,6 @@
 import process from 'node:process';
 import { z } from 'zod/v4';
+import { jsonCodec } from '#lib/zod.lib.js';
 
 const environmentSchema = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
@@ -7,6 +8,9 @@ const environmentSchema = z.object({
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
   TAU_FRONTEND_URL: z.string(),
+  ADDITIONAL_CORS_ORIGINS: jsonCodec(z.array(z.string()).describe('Additional CORS origin glob patterns to allow.'))
+    .optional()
+    .default([]),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']),
   LOG_SERVICE: z.enum(['console', 'fly', 'google-logging', 'aws-cloudwatch']).default('console'),
 
@@ -15,24 +19,21 @@ const environmentSchema = z.object({
   ANTHROPIC_API_KEY: z.string(),
   SAMBA_API_KEY: z.string().optional(),
   MORPH_API_KEY: z.string().optional(),
-  GOOGLE_VERTEX_AI_CREDENTIALS: z
-    .string()
-    .transform((value) => JSON.parse(value) as Record<string, unknown>)
-    .pipe(
-      z.object({
-        type: z.string(),
-        project_id: z.string(),
-        private_key_id: z.string(),
-        private_key: z.string(),
-        client_email: z.string(),
-        client_id: z.string(),
-        auth_uri: z.string(),
-        token_uri: z.string(),
-        auth_provider_x509_cert_url: z.string(),
-        client_x509_cert_url: z.string(),
-        universe_domain: z.string(),
-      }),
-    ),
+  GOOGLE_VERTEX_AI_CREDENTIALS: jsonCodec(
+    z.object({
+      type: z.string(),
+      project_id: z.string(),
+      private_key_id: z.string(),
+      private_key: z.string(),
+      client_email: z.string(),
+      client_id: z.string(),
+      auth_uri: z.string(),
+      token_uri: z.string(),
+      auth_provider_x509_cert_url: z.string(),
+      client_x509_cert_url: z.string(),
+      universe_domain: z.string(),
+    }),
+  ),
   CEREBRAS_API_KEY: z.string().optional(),
   LANGSMITH_TRACING: z.string().optional(),
   LANGSMITH_ENDPOINT: z.string().optional(),

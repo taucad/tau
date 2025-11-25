@@ -72,7 +72,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         error: 'Validation failed',
         code: 'VALIDATION_ERROR',
         statusCode,
-        message: exception.errors.map((error) => `${error.path.join('.')}: ${error.message}`),
+        message: exception.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
         path: request.url,
         requestId,
       };

@@ -15,12 +15,7 @@ import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
 import { Textarea } from '#components/ui/textarea.js';
 import { Tags, TagsTrigger } from '#components/ui/input-tags.js';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { useBuild } from '#hooks/use-build.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
@@ -206,35 +201,44 @@ export function ChatDetails({
 
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Main File:</label>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" className="w-full justify-between font-normal">
-                      {mainFile ? (
+                <ComboBoxResponsive
+                  groupedItems={[
+                    {
+                      name: 'Files',
+                      items: availableFiles.map((filename) => ({ name: filename })),
+                    },
+                  ]}
+                  renderLabel={(file, selected) => (
+                    <div className="flex items-center gap-2">
+                      <FileCode className="size-4" />
+                      <span className={selected?.name === file.name ? 'font-medium' : ''}>{file.name}</span>
+                    </div>
+                  )}
+                  getValue={(file) => file.name}
+                  defaultValue={mainFile ? { name: mainFile } : undefined}
+                  placeholder="Select main file..."
+                  searchPlaceHolder="Search files..."
+                  title="Select Main File"
+                  description="Choose the main file for your build"
+                  isDisabled={() => availableFiles.length === 0}
+                  emptyListMessage="No files available"
+                  withVirtualization={availableFiles.length > 20}
+                  virtualizationHeight={300}
+                  className="w-full"
+                  onSelect={handleMainFileChange}
+                >
+                  <Button variant="outline" className="w-full justify-between font-normal">
+                    {mainFile ? (
+                      <div className="flex items-center gap-2 truncate">
+                        <FileCode className="size-4 shrink-0" />
                         <span className="truncate text-left">{mainFile}</span>
-                      ) : (
-                        <span className="text-muted-foreground">Select main file...</span>
-                      )}
-                      <ChevronDown className="size-4 shrink-0" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent className="max-h-64 w-[--radix-dropdown-menu-trigger-width] overflow-y-auto">
-                    {availableFiles.length === 0 ? (
-                      <DropdownMenuItem disabled>No files available</DropdownMenuItem>
+                      </div>
                     ) : (
-                      availableFiles.map((filename) => (
-                        <DropdownMenuItem
-                          key={filename}
-                          onSelect={() => {
-                            handleMainFileChange(filename);
-                          }}
-                        >
-                          <FileCode className="size-4" />
-                          <span className="truncate">{filename}</span>
-                        </DropdownMenuItem>
-                      ))
+                      <span className="text-muted-foreground">Select main file...</span>
                     )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                    <ChevronDown className="size-4 shrink-0" />
+                  </Button>
+                </ComboBoxResponsive>
               </div>
             </div>
 

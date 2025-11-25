@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import React from 'react';
 import type { ClassValue } from 'clsx';
+import { Virtuoso } from 'react-virtuoso';
 import { useIsMobile } from '#hooks/use-mobile.js';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '#components/ui/command.js';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '#components/ui/drawer.js';
@@ -35,6 +36,8 @@ type ComboBoxResponsiveProperties<T> = Omit<React.HTMLAttributes<HTMLDivElement>
   readonly title: string;
   readonly description: string;
   readonly isSearchEnabled?: boolean;
+  readonly withVirtualization?: boolean;
+  readonly virtualizationHeight?: number;
 };
 
 export function ComboBoxResponsive<T>({
@@ -57,6 +60,8 @@ export function ComboBoxResponsive<T>({
   title,
   description,
   isSearchEnabled = true,
+  withVirtualization = false,
+  virtualizationHeight = 300,
   ...properties
 }: ComboBoxResponsiveProperties<T>): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
@@ -115,6 +120,8 @@ export function ComboBoxResponsive<T>({
               isDisabled={isDisabled}
               emptyListMessage={emptyListMessage}
               isSearchEnabled={isSearchEnabled}
+              withVirtualization={withVirtualization}
+              virtualizationHeight={virtualizationHeight}
             />
           </div>
         </DrawerContent>
@@ -142,6 +149,8 @@ export function ComboBoxResponsive<T>({
           isDisabled={isDisabled}
           emptyListMessage={emptyListMessage}
           isSearchEnabled={isSearchEnabled}
+          withVirtualization={withVirtualization}
+          virtualizationHeight={virtualizationHeight}
         />
       </PopoverContent>
     </Popover>
@@ -160,6 +169,8 @@ function ItemList<T>({
   isDisabled,
   emptyListMessage,
   isSearchEnabled = true,
+  withVirtualization = false,
+  virtualizationHeight = 300,
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
   readonly setSelectedItem: (item: T) => void;
@@ -172,7 +183,86 @@ function ItemList<T>({
   readonly isDisabled?: (item: T) => boolean;
   readonly emptyListMessage?: ReactNode;
   readonly isSearchEnabled?: boolean;
+  readonly withVirtualization?: boolean;
+  readonly virtualizationHeight?: number;
 }) {
+  const [search, setSearch] = React.useState('');
+
+  // Flatten all items from all groups for virtualization
+  const flattenedItems = React.useMemo(() => {
+    return groupedItems.flatMap((group) =>
+      group.items.map((item) => ({
+        item,
+        groupName: group.name,
+        value: getValue(item),
+      })),
+    );
+  }, [groupedItems, getValue]);
+
+  // Filter items based on search
+  const filteredItems = React.useMemo(() => {
+    if (!search || !withVirtualization) {
+      return flattenedItems;
+    }
+
+    const searchLower = search.toLowerCase();
+    return flattenedItems.filter(
+      ({ value, groupName }) =>
+        value.toLowerCase().includes(searchLower) || groupName.toLowerCase().includes(searchLower),
+    );
+  }, [flattenedItems, search, withVirtualization]);
+
+  // Render individual item
+  const renderItem = React.useCallback(
+    (index: number) => {
+      const itemData = filteredItems[index];
+      if (!itemData) {
+        return undefined;
+      }
+
+      const { item, value } = itemData;
+
+      return (
+        <CommandItem
+          key={value}
+          asChild={labelAsChild}
+          value={value}
+          keywords={[itemData.groupName]}
+          className={cn(labelClassName)}
+          disabled={isDisabled?.(item)}
+          onSelect={() => {
+            setSelectedItem(item);
+          }}
+        >
+          {renderLabel(item, selectedItem)}
+        </CommandItem>
+      );
+    },
+    [filteredItems, labelAsChild, labelClassName, isDisabled, renderLabel, selectedItem, setSelectedItem],
+  );
+
+  if (withVirtualization) {
+    return (
+      <Command shouldFilter={false}>
+        {isSearchEnabled ? (
+          <CommandInput placeholder={searchPlaceHolder} value={search} onValueChange={setSearch} />
+        ) : null}
+        <CommandList className="p-1">
+          {filteredItems.length === 0 ? (
+            <CommandEmpty>{emptyListMessage}</CommandEmpty>
+          ) : (
+            <Virtuoso
+              style={{ height: `${virtualizationHeight}px` }}
+              totalCount={filteredItems.length}
+              itemContent={renderItem}
+              className="overflow-y-auto"
+            />
+          )}
+        </CommandList>
+      </Command>
+    );
+  }
+
   return (
     <Command>
       {isSearchEnabled ? <CommandInput placeholder={searchPlaceHolder} /> : null}

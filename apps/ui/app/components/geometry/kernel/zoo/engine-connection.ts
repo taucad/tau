@@ -4,7 +4,7 @@ import type { Context } from '@taucad/kcl-wasm-lib';
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
 import { binaryToUuid } from '#utils/binary.utils.js';
 import { KclError, KclAuthError } from '#components/geometry/kernel/zoo/kcl-errors.js';
-import { FileSystemManager } from '#components/geometry/kernel/zoo/filesystem-manager.js';
+import type { FileSystemManager } from '#components/geometry/kernel/zoo/filesystem-manager.js';
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- required
 export type WasmModule = typeof import('@taucad/kcl-wasm-lib');
@@ -102,13 +102,15 @@ export class EngineConnection {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly wasmModule: WasmModule;
+  private readonly fileSystemManager: FileSystemManager;
   private pingIntervalId: NodeJS.Timeout | undefined;
   private initializationContext: InitializationContext | undefined;
 
-  public constructor(apiKey: string, baseUrl: string, wasmModule: WasmModule) {
+  public constructor(apiKey: string, baseUrl: string, wasmModule: WasmModule, fileSystemManager: FileSystemManager) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
     this.wasmModule = wasmModule;
+    this.fileSystemManager = fileSystemManager;
   }
 
   public async initialize(): Promise<void> {
@@ -117,9 +119,8 @@ export class EngineConnection {
       let authTimeoutId: NodeJS.Timeout;
 
       const initializeAsync = async (): Promise<void> => {
-        const fsManager = new FileSystemManager();
         // eslint-disable-next-line @typescript-eslint/await-thenable -- await is required here.
-        this.context = await new this.wasmModule.Context(this, fsManager);
+        this.context = await new this.wasmModule.Context(this, this.fileSystemManager);
 
         try {
           const url = new URL('/ws/modeling/commands', this.baseUrl);

@@ -1,57 +1,40 @@
-import { fileManager } from '#machines/file-manager.js';
+/* eslint-disable @typescript-eslint/parameter-properties -- parameter properties are non-erasable TypeScript */
+import type { FileReader } from '#components/geometry/kernel/utils/file-reader.js';
 
-export function getBuildDirectory(buildId: string): string {
-  return `/builds/${buildId}`;
-}
-
-/// FileSystemManager is a class that provides a way to read files from the
-/// local file system. The module's singleton instance assumes that you are in a
-/// project since it is solely used by the std lib when executing code.
-const defaultBuildId = 'bld_mDLGh4VtHyuyYBtlSPrCP';
-
+/// FileSystemManager is a stateless adapter that provides filesystem operations
+/// to the WASM context. It delegates to a FileReader implementation which handles
+/// path resolution and logging.
 export class FileSystemManager {
-  // Hardcoded build ID for now - in the future this could be passed via constructor
-  private readonly _buildId: string;
-  private readonly buildDir: string;
+  private readonly reader: FileReader;
 
-  public constructor() {
-    this._buildId = defaultBuildId;
-    this.buildDir = getBuildDirectory(this._buildId);
-  }
-
-  public get buildId(): string {
-    return this._buildId;
-  }
-
-  public get projectDir(): string {
-    return 'public/kcl-samples/axial-fan';
+  public constructor(reader: FileReader) {
+    this.reader = reader;
   }
 
   /**
    * Called from WASM.
+   * Reads a file using a path relative to the current working directory.
+   * Path resolution and logging are handled by the FileReader implementation.
    */
   public async readFile(path: string): Promise<Uint8Array> {
-    const fullPath = `${this.buildDir}/${this.projectDir}/${path}`;
-    console.log('readFile', fullPath);
-
-    return fileManager.readFile(fullPath);
+    return this.reader.readFile(path);
   }
 
   /**
    * Called from WASM.
+   * Checks if a file exists using a path relative to the current working directory.
+   * Path resolution and logging are handled by the FileReader implementation.
    */
   public async exists(path: string): Promise<boolean> {
-    const fullPath = `${this.buildDir}/${this.projectDir}/${path}`;
-
-    return fileManager.exists(fullPath);
+    return this.reader.exists(path);
   }
 
   /**
    * Called from WASM.
+   * Lists all files in a directory using a path relative to the current working directory.
+   * Path resolution and logging are handled by the FileReader implementation.
    */
   public async getAllFiles(path: string): Promise<string[]> {
-    const fullPath = `${this.buildDir}/${this.projectDir}/${path}`;
-
-    return fileManager.readdir(fullPath);
+    return this.reader.readdir(path);
   }
 }

@@ -69,7 +69,7 @@ const determineWorkerActor = fromPromise<
 
     try {
       // eslint-disable-next-line no-await-in-loop -- Need to check workers sequentially
-      const canHandle = await worker.canHandle(event.file);
+      const canHandle = await worker.canHandleEntry(event.file);
       if (canHandle) {
         workerSelectionCache.set(cacheKey, workerType);
         return { type: 'workerDetermined', worker: workerType, parameters: event.parameters, file: event.file };
@@ -238,7 +238,7 @@ const parseParametersActor = fromPromise<
   }
 
   try {
-    const parametersResult = await wrappedWorker.extractParameters(file);
+    const parametersResult = await wrappedWorker.extractParametersEntry(file);
 
     if (isKernelSuccess(parametersResult)) {
       const { defaultParameters, jsonSchema } = parametersResult.data as {
@@ -327,7 +327,7 @@ const evaluateCodeActor = fromPromise<
   // Merge default parameters with provided parameters
   const mergedParameters = deepmerge(defaultParameters, parameters);
 
-  const result = await wrappedWorker.computeGeometry(file, mergedParameters);
+  const result = await wrappedWorker.computeGeometryEntry(file, mergedParameters);
 
   // Handle the result pattern
   if (isKernelSuccess(result)) {
@@ -390,7 +390,7 @@ const exportGeometryActor = fromPromise<
     }
 
     // TODO: add a proper type guard for the export format
-    const result = await wrappedWorker.exportGeometry(format as never);
+    const result = await wrappedWorker.exportGeometryEntry(format as never);
 
     if (isKernelSuccess(result)) {
       const { data } = result;

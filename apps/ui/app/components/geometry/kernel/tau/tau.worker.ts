@@ -4,7 +4,6 @@ import type {
   ExportFormat,
   ExportGeometryResult,
   ExtractParametersResult,
-  GeometryFile,
   GeometryGltf,
 } from '@taucad/types';
 import { importToGlb, exportFromGlb, supportedExportFormats, supportedImportFormats } from '@taucad/converter';
@@ -17,13 +16,16 @@ class TauWorker extends KernelWorker {
   protected override readonly name: string = 'TauWorker';
   private glbDataMemory: Record<string, Uint8Array> = {};
 
-  public override async canHandle(file: GeometryFile): Promise<boolean> {
+  public override async cleanup(): Promise<void> {
+    this.glbDataMemory = {};
+  }
+
+  protected override async canHandle(_filename: string, extension: string): Promise<boolean> {
     // Import supported formats from converter
-    const extension = KernelWorker.getFileExtension(file.filename);
     return supportedImportFormats.includes(extension as InputFormat);
   }
 
-  public override async extractParameters(_file: GeometryFile): Promise<ExtractParametersResult> {
+  protected override async extractParameters(_filename: string): Promise<ExtractParametersResult> {
     // Files don't have parameters by default
     // In the future, we may extract parameters from file metadata
     return createKernelSuccess({
@@ -32,20 +34,20 @@ class TauWorker extends KernelWorker {
     });
   }
 
-  public override async computeGeometry(
-    file: GeometryFile,
+  protected override async computeGeometry(
+    filename: string,
     _parameters?: Record<string, unknown>,
     geometryId = 'defaultGeometry',
   ): Promise<ComputeGeometryResult> {
     try {
-      // Extract code from file
-      const data = await this.readFile(file);
-      const format = KernelWorker.getFileExtension(file.filename);
+      // Read file as binary
+      const data = await this.readFile(filename);
+      const format = KernelWorker.getFileExtension(filename);
       const formattedFormat = String(format).toUpperCase();
       this.log(`Converting ${formattedFormat} to GLB`, { operation: 'computeGeometry' });
 
       // Convert file to GLB using the converter
-      const glbData = await importToGlb([{ name: file.filename, data }], format as InputFormat);
+      const glbData = await importToGlb([{ name: filename, data }], format as InputFormat);
 
       // Store GLB data for export
       this.glbDataMemory[geometryId] = glbData;
@@ -71,7 +73,7 @@ class TauWorker extends KernelWorker {
     }
   }
 
-  public override async exportGeometry(
+  protected override async exportGeometry(
     fileType: ExportFormat,
     geometryId = 'defaultGeometry',
   ): Promise<ExportGeometryResult> {
@@ -109,10 +111,6 @@ class TauWorker extends KernelWorker {
         type: 'runtime',
       });
     }
-  }
-
-  public override async cleanup(): Promise<void> {
-    this.glbDataMemory = {};
   }
 }
 

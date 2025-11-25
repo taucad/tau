@@ -13,7 +13,6 @@ import type {
   ExportFormat,
   GeometryGltf,
   GeometrySvg,
-  GeometryFile,
 } from '@taucad/types';
 import { isKernelError } from '@taucad/types/guards';
 import { createKernelError, createKernelSuccess } from '#components/geometry/kernel/utils/kernel-helpers.js';
@@ -98,15 +97,42 @@ class ReplicadWorker extends KernelWorker<ReplicadOptions> {
     }
   }
 
-  public override async canHandle(file: GeometryFile): Promise<boolean> {
+  public async extractDefaultNameFromCode(code: string): Promise<ExtractNameResult> {
+    if (/^\s*export\s+/m.test(code)) {
+      const module = await buildEsModule(code);
+      return createKernelSuccess(module.defaultName ?? undefined);
+    }
+
+    const editedText = `
+${code}
+try {
+  return defaultName;
+} catch (e) {
+  return;
+}
+  `;
+
+    try {
+      const result = await runInCjsContext(editedText, {});
+      return createKernelSuccess((result ?? {}) as string | undefined);
+    } catch {
+      return createKernelError({
+        message: 'Failed to extract default name from code',
+        startLineNumber: 0,
+        startColumn: 0,
+        type: 'runtime',
+      });
+    }
+  }
+
+  protected override async canHandle(filename: string, extension: string): Promise<boolean> {
     // Check if the file format is a JavaScript/TypeScript file
-    const extension = KernelWorker.getFileExtension(file.filename);
     if (!['ts', 'js', 'tsx', 'jsx'].includes(extension)) {
       return false;
     }
 
     // Extract code and check for replicad imports/usage
-    const code = await this.extractCodeFromFile(file);
+    const code = await this.readFile(filename, 'utf8');
 
     // Check for direct replicad imports
     // Use 's' flag to make '.' match newlines for multiline imports
@@ -129,9 +155,9 @@ class ReplicadWorker extends KernelWorker<ReplicadOptions> {
     );
   }
 
-  public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {
+  protected override async extractParameters(filename: string): Promise<ExtractParametersResult> {
     try {
-      const code = await this.extractCodeFromFile(file);
+      const code = await this.readFile(filename, 'utf8');
       let defaultParameters: Record<string, unknown> = {};
 
       if (/^\s*export\s+/m.test(code)) {
@@ -174,44 +200,16 @@ try {
     }
   }
 
-  public async extractDefaultNameFromCode(code: string): Promise<ExtractNameResult> {
-    if (/^\s*export\s+/m.test(code)) {
-      const module = await buildEsModule(code);
-      return createKernelSuccess(module.defaultName ?? undefined);
-    }
-
-    const editedText = `
-${code}
-try {
-  return defaultName;
-} catch (e) {
-  return;
-}
-  `;
-
-    try {
-      const result = await runInCjsContext(editedText, {});
-      return createKernelSuccess((result ?? {}) as string | undefined);
-    } catch {
-      return createKernelError({
-        message: 'Failed to extract default name from code',
-        startLineNumber: 0,
-        startColumn: 0,
-        type: 'runtime',
-      });
-    }
-  }
-
-  public override async computeGeometry(
-    file: GeometryFile,
+  protected override async computeGeometry(
+    filename: string,
     parameters: Record<string, unknown>,
   ): Promise<ComputeGeometryResult> {
     const startTime = performance.now();
     this.log('Computing geometry from code', { operation: 'computeGeometry' });
 
     try {
-      // Extract code from file
-      const code = await this.extractCodeFromFile(file);
+      // Read code from file
+      const code = await this.readFile(filename, 'utf8');
 
       // Ensure font is loaded
       // TODO: Review font loading
@@ -293,7 +291,7 @@ try {
     }
   }
 
-  public override async exportGeometry(
+  protected override async exportGeometry(
     fileType: ExportFormat,
     geometryId = 'defaultGeometry',
     meshConfig?: {

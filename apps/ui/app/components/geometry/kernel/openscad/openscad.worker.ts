@@ -9,7 +9,6 @@ import type {
   ExtractParametersResult,
   ExportFormat,
   GeometryGltf,
-  GeometryFile,
 } from '@taucad/types';
 import type { OpenScadParameterExport } from '#components/geometry/kernel/openscad/parse-parameters.js';
 import {
@@ -37,13 +36,12 @@ class OpenScadWorker extends KernelWorker {
 
   private offDataMemory: Record<string, string> = {};
 
-  public override async canHandle(file: GeometryFile): Promise<boolean> {
-    const extension = KernelWorker.getFileExtension(file.filename);
+  protected override async canHandle(_filename: string, extension: string): Promise<boolean> {
     return extension === 'scad';
   }
 
-  public override async extractParameters(file: GeometryFile): Promise<ExtractParametersResult> {
-    const code = await this.extractCodeFromFile(file);
+  protected override async extractParameters(filename: string): Promise<ExtractParametersResult> {
+    const code = await this.readFile(filename, 'utf8');
     try {
       const instance = await this.createInstance();
       const inputFile = '/input.scad';
@@ -79,13 +77,13 @@ class OpenScadWorker extends KernelWorker {
     }
   }
 
-  public override async computeGeometry(
-    file: GeometryFile,
+  protected override async computeGeometry(
+    filename: string,
     parameters?: Record<string, unknown>,
     geometryId = 'defaultGeometry',
   ): Promise<ComputeGeometryResult> {
     try {
-      const code = await this.extractCodeFromFile(file);
+      const code = await this.readFile(filename, 'utf8');
       const trimmedCode = code.trim();
       if (trimmedCode === '') {
         return createKernelSuccess([]);
@@ -126,7 +124,7 @@ class OpenScadWorker extends KernelWorker {
     }
   }
 
-  public override async exportGeometry(
+  protected override async exportGeometry(
     fileType: ExportFormat,
     geometryId = 'defaultGeometry',
   ): Promise<ExportGeometryResult> {

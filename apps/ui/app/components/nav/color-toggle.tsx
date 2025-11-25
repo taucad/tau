@@ -22,7 +22,7 @@ export function ColorToggle(): React.JSX.Element {
           variant="ghost"
           size="icon"
           className={cn(
-            'w-auto overflow-hidden border-none bg-transparent shadow-none ring-sidebar-ring! dark:bg-transparent',
+            'size-7 overflow-hidden border-none bg-transparent shadow-none ring-sidebar-ring! dark:bg-transparent',
             // Active styles
             'data-[state=open]:bg-primary hover:data-[state=open]:bg-primary',
             // Text styles

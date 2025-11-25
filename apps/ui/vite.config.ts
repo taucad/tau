@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { reactRouter } from '@react-router/dev/vite';
 import netlifyReactRouter from '@netlify/vite-plugin-react-router';
@@ -43,6 +44,7 @@ const base64Loader: Plugin = {
 
 export default defineConfig(({ mode }) => {
   const isTest = mode === 'test';
+  const isNetlify = process.env['NETLIFY'] === 'true';
 
   return {
     root: __dirname,
@@ -54,7 +56,11 @@ export default defineConfig(({ mode }) => {
       ...(isTest
         ? []
         : // In non-test mode, include the React Router plugin and the Netlify plugin
-          [reactRouter(), netlifyReactRouter()]),
+          [
+            reactRouter(),
+            // Netlify plugin is only needed for Netlify builds
+            ...(isNetlify ? [netlifyReactRouter()] : []),
+          ]),
       tailwindcss(),
       // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
 

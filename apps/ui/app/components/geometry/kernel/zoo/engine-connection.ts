@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/parameter-properties -- parameter properties are non-erasable TypeScript */
 import type { Models } from '@kittycad/lib';
 import type { Context } from '@taucad/kcl-wasm-lib';
-import { BSON } from 'bson';
+import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
 import { binaryToUuid } from '#utils/binary.utils.js';
 import { KclError, KclAuthError } from '#components/geometry/kernel/zoo/kcl-errors.js';
 import { FileSystemManager } from '#components/geometry/kernel/zoo/filesystem-manager.js';
@@ -184,7 +184,7 @@ export class EngineConnection {
 
       const response = (await this.sendCommand(modelingCommand)) as WebSocketResponse;
 
-      return BSON.serialize(response);
+      return msgpackEncode(response);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -336,16 +336,16 @@ export class EngineConnection {
 
   // eslint-disable-next-line complexity -- this is a complex function.
   private handleMessage(event: MessageEvent): void {
-    // Handle binary messages (BSON-serialized responses)
-    let message: WebSocketResponse;
+    // Handle binary messages (msgpack-serialized responses)
+    let message!: WebSocketResponse;
 
     if (event.data instanceof ArrayBuffer) {
-      // BSON deserialize the command (same as reference implementation)
-      message = BSON.deserialize(new Uint8Array(event.data)) as WebSocketResponse;
-      // The request id comes back as binary and we want to get the uuid
-      // string from that.
+      const binaryData = new Uint8Array(event.data);
+
+      message = msgpackDecode(binaryData) as WebSocketResponse;
       message.request_id &&= binaryToUuid(message.request_id);
-      clg.debug('Received binary BSON message, deserialized successfully');
+
+      clg.debug('Received binary msgpack message, deserialized successfully');
     } else if (typeof event.data === 'string') {
       message = JSON.parse(event.data) as WebSocketResponse;
     } else {
@@ -374,7 +374,7 @@ export class EngineConnection {
     // Send the response to WASM context
     if (this.context) {
       try {
-        void this.context.sendResponse(BSON.serialize(message as Record<string, unknown>));
+        void this.context.sendResponse(msgpackEncode(message));
       } catch (error) {
         clg.error('Error sending response to WASM:', error);
       }

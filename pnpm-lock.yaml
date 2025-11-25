@@ -94,6 +94,9 @@ importers:
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.54.0)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@msgpack/msgpack':
+        specifier: ^3.1.2
+        version: 3.1.2
       '@nestjs/common':
         specifier: ^11.1.5
         version: 11.1.5(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -230,8 +233,8 @@ importers:
         specifier: ^8.21.3
         version: 8.21.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@taucad/kcl-wasm-lib':
-        specifier: 0.1.109
-        version: 0.1.109
+        specifier: 0.1.111
+        version: 0.1.111
       '@types/pg':
         specifier: ^8.15.4
         version: 8.15.4
@@ -3801,6 +3804,10 @@ packages:
     peerDependencies:
       three: '>= 0.159.0'
 
+  '@msgpack/msgpack@3.1.2':
+    resolution: {integrity: sha512-JEW4DEtBzfe8HvUYecLU9e6+XJnKDlUAIve8FvPzF3Kzs6Xo/KuZkZJsDH0wJXl/qEZbeeE7edxDNY3kMs39hQ==}
+    engines: {node: '>= 18'}
+
   '@napi-rs/wasm-runtime@0.2.12':
     resolution: {integrity: sha512-ZVWUcfwY4E/yPitQJl481FjFo3K22D6qF0DuFH6Y/nbnE11GY5uguDxZMGXPQ8WQ0128MXQD7TnfHyK4oWoIJQ==}
 
@@ -6468,8 +6475,8 @@ packages:
     resolution: {integrity: sha512-ldZXEhOBb8Is7xLs01fR3YEc3DERiz5silj8tnGkFZytt1abEvl/GhUmCE0PMLaMPTa3Jk4HbKmRlHmu+gCftg==}
     engines: {node: '>=12'}
 
-  '@taucad/kcl-wasm-lib@0.1.109':
-    resolution: {integrity: sha512-Ql9V50o3Nl7W+0cxu3pZc0NbYYqM7SF7Wp+Pg+PJyWjoQdgDrzNXe54xaYVME7FIhWak0AfFylUNoowQxKxs2A==}
+  '@taucad/kcl-wasm-lib@0.1.111':
+    resolution: {integrity: sha512-NnEbJ/+pRjvDk/Ir16dQDFXlYKcTmYIgTvL9HGYIgBR+UB86xKcKbFSfThYP2/DGf9i6GEj79B8SZlFUKS1nAQ==}
 
   '@testing-library/dom@10.4.0':
     resolution: {integrity: sha512-pemlzrSESWbdAloYml3bAJMEfNh1Z7EduzqPKprCH5S341frlpYnUEW0H72dLxa6IsYr+mPno20GiSm+h9dEdQ==}
@@ -18807,6 +18814,8 @@ snapshots:
       promise-worker-transferable: 1.0.4
       three: 0.179.0
 
+  '@msgpack/msgpack@3.1.2': {}
+
   '@napi-rs/wasm-runtime@0.2.12':
     dependencies:
       '@emnapi/core': 1.5.0
@@ -21852,7 +21861,7 @@ snapshots:
 
   '@tanstack/table-core@8.21.3': {}
 
-  '@taucad/kcl-wasm-lib@0.1.109': {}
+  '@taucad/kcl-wasm-lib@0.1.111': {}
 
   '@testing-library/dom@10.4.0':
     dependencies:

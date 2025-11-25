@@ -14,7 +14,7 @@ import type { ImportSpecifier } from 'es-module-lexer';
 import type { CadModuleExports } from '@taucad/types';
 import * as jscadModeling from '@jscad/modeling';
 import * as replicad from 'replicad';
-import * as zod from 'zod/v4';
+import * as zod from 'zod';
 import { hashCode } from '#utils/crypto.utils.js';
 
 // Module cache - keyed by both code hash and active modules to prevent cross-kernel contamination

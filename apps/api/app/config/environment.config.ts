@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { z } from 'zod/v4';
+import { z } from 'zod';
 import { jsonCodec } from '#lib/zod.lib.js';
 
 const environmentSchema = z.object({

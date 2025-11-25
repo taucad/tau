@@ -40,6 +40,11 @@ export async function loader({ request }: Route.LoaderArgs): Promise<Response> {
     headers.set('Accept', accept);
   }
 
+  const acceptEncoding = request.headers.get('Accept-Encoding');
+  if (acceptEncoding) {
+    headers.set('Accept-Encoding', acceptEncoding);
+  }
+
   // Forward the request to the target URL
   const response = await fetch(targetUrl, {
     headers,

@@ -77,6 +77,28 @@ const downloadZipActor = fromPromise<
   const zipUrl = `https://api.github.com/repos/${input.owner}/${input.repo}/zipball/${input.ref}`;
   const proxyUrl = `/api/import?url=${encodeURIComponent(zipUrl)}`;
 
+  // First, try to get the file size with a HEAD request
+  let contentLength: number | undefined;
+  try {
+    const headResponse = await fetch(proxyUrl, {
+      method: 'HEAD',
+      headers: {
+        'User-Agent': 'TauCAD',
+        accept: 'application/vnd.github.v3+json',
+        'Accept-Encoding': 'identity', // Request uncompressed to get accurate size
+      },
+    });
+
+    if (headResponse.ok) {
+      const contentLengthHeader = headResponse.headers.get('content-length');
+      contentLength = contentLengthHeader ? Number(contentLengthHeader) : undefined;
+    }
+  } catch {
+    // HEAD request failed, we'll proceed without knowing the total size
+    contentLength = undefined;
+  }
+
+  // Now download the actual file
   const response = await fetch(proxyUrl, {
     headers: {
       'User-Agent': 'TauCAD',
@@ -88,8 +110,15 @@ const downloadZipActor = fromPromise<
     throw new Error(`GitHub download failed: ${response.status} ${response.statusText}`);
   }
 
-  const contentLengthHeader = response.headers.get('content-length');
-  const contentLength = contentLengthHeader ? Number(contentLengthHeader) : undefined;
+  // If we didn't get content length from HEAD, try from GET response
+  if (!contentLength) {
+    const contentLengthHeader = response.headers.get('content-length');
+    contentLength = contentLengthHeader ? Number(contentLengthHeader) : undefined;
+  }
+
+  // Send initial progress with total size (now that we have the most accurate value)
+  input.onProgress(0, contentLength ?? 0);
+
   const reader = response.body?.getReader();
 
   if (!reader) {
@@ -98,19 +127,32 @@ const downloadZipActor = fromPromise<
 
   const chunks: Uint8Array[] = [];
   let receivedLength = 0;
+  let lastProgressUpdate = 0;
+  const progressUpdateInterval = 100; // Update every 100ms
 
-  // eslint-disable-next-line no-await-in-loop -- reading stream sequentially
-  for (let result = await reader.read(); !result.done; result = await reader.read()) {
-    chunks.push(result.value);
-    receivedLength += result.value.length;
+  // Read the stream in chunks
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- standard stream reading pattern
+  while (true) {
+    // eslint-disable-next-line no-await-in-loop -- reading stream sequentially
+    const { done, value } = await reader.read();
 
-    // Send progress update - throttling handled by state machine
-    // Use -1 to indicate unknown total size (for indeterminate progress UI)
-    const total = contentLength ?? -1;
-    input.onProgress(receivedLength, total);
+    if (done) {
+      break;
+    }
+
+    chunks.push(value);
+    receivedLength += value.length;
+
+    // Throttle progress updates to avoid overwhelming the UI
+    const now = Date.now();
+    if (now - lastProgressUpdate >= progressUpdateInterval || lastProgressUpdate === 0) {
+      const total = contentLength ?? 0; // Use 0 for indeterminate, will be updated at end
+      input.onProgress(receivedLength, total);
+      lastProgressUpdate = now;
+    }
   }
 
-  // Send final progress update
+  // Always send final progress update with actual total
   const finalTotal = contentLength ?? receivedLength;
   input.onProgress(receivedLength, finalTotal);
 

@@ -392,14 +392,22 @@ export default function ImportRoute(): React.JSX.Element {
                       '✓ Downloaded'
                     )}
                   </span>
-                  {downloadProgress.total > 0 ? (
+                  {downloadProgress.loaded > 0 ? (
                     <span className="text-muted-foreground">
-                      {formatFileSize(downloadProgress.loaded)} / {formatFileSize(downloadProgress.total)}
+                      {downloadProgress.total > 0
+                        ? `${formatFileSize(downloadProgress.loaded)} / ${formatFileSize(downloadProgress.total)}`
+                        : formatFileSize(downloadProgress.loaded)}
                     </span>
                   ) : undefined}
                 </div>
                 <Progress
-                  value={downloadProgress.total > 0 ? (downloadProgress.loaded / downloadProgress.total) * 100 : 0}
+                  value={
+                    downloadProgress.total > 0 && downloadProgress.loaded > 0
+                      ? (downloadProgress.loaded / downloadProgress.total) * 100
+                      : downloadProgress.loaded > 0
+                        ? undefined
+                        : 0
+                  }
                   className="h-2"
                 />
               </div>

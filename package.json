@@ -185,7 +185,7 @@
     "@nestjs/schematics": "^11.0.5",
     "@nestjs/testing": "^11.1.5",
     "@netlify/vite-plugin-react-router": "^2.1.2",
-    "@nx/devkit": "21.3.10",
+    "@nx/devkit": "22.1.1",
     "@nx/eslint": "21.3.10",
     "@nx/eslint-plugin": "21.3.10",
     "@nx/js": "21.3.10",

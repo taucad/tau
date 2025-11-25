@@ -231,7 +231,7 @@ export function BuildCommandPaletteItems({ match }: { readonly match: UIMatch })
   useEffect(() => {
     const subscription = cadActor.on('geometryEvaluated', (event) => {
       if (event.geometries.length > 0) {
-        // UpdateThumbnailScreenshot();
+        updateThumbnailScreenshot();
       }
     });
 

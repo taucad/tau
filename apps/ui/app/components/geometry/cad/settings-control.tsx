@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import type { ClassValue } from 'clsx';
-import { Axis3D, Box, Grid3X3, Rotate3D, Settings, PenLine, Sparkles } from 'lucide-react';
+import { Axis3D, Box, Grid3X3, Rotate3D, Settings, PenLine, Sparkles, RotateCw } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
@@ -25,6 +25,7 @@ type ViewSettings = {
   grid: boolean;
   axes: boolean;
   matcap: boolean;
+  yupRotation: boolean;
 };
 
 // Default settings
@@ -35,6 +36,7 @@ const defaultSettings: ViewSettings = {
   grid: true,
   axes: true,
   matcap: false,
+  yupRotation: false,
 };
 
 type CameraSettingsProps = {
@@ -80,6 +82,10 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
     graphicsActor.send({ type: 'setMatcapVisibility', payload: viewSettings.matcap });
   }, [viewSettings.matcap, graphicsActor]);
 
+  useEffect(() => {
+    graphicsActor.send({ type: 'setYupRotationVisibility', payload: viewSettings.yupRotation });
+  }, [viewSettings.yupRotation, graphicsActor]);
+
   const handleMeshToggle = useCallback(
     (checked: boolean) => {
       setViewSettings((previous) => ({ ...previous, surface: checked }));
@@ -118,6 +124,13 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
   const handleMatcapToggle = useCallback(
     (checked: boolean) => {
       setViewSettings((previous) => ({ ...previous, matcap: checked }));
+    },
+    [setViewSettings],
+  );
+
+  const handleYupRotationToggle = useCallback(
+    (checked: boolean) => {
+      setViewSettings((previous) => ({ ...previous, yupRotation: checked }));
     },
     [setViewSettings],
   );
@@ -218,6 +231,16 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
           <span className="flex items-center gap-2">
             <Axis3D />
             Axes
+          </span>
+        </DropdownMenuSwitchItem>
+        <DropdownMenuSwitchItem
+          className={cn('flex w-full justify-between', is2dGeometry && 'hidden')}
+          isChecked={viewSettings.yupRotation}
+          onIsCheckedChange={handleYupRotationToggle}
+        >
+          <span className="flex items-center gap-2">
+            <RotateCw />
+            Y-up Rotation
           </span>
         </DropdownMenuSwitchItem>
       </DropdownMenuContent>

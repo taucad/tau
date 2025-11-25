@@ -84,6 +84,7 @@ function ConverterContent(): React.JSX.Element {
   const enableGrid = useSelector(graphicsActor, (state) => state.context.enableGrid);
   const enableAxes = useSelector(graphicsActor, (state) => state.context.enableAxes);
   const enableMatcap = useSelector(graphicsActor, (state) => state.context.enableMatcap);
+  const enableYupRotation = useSelector(graphicsActor, (state) => state.context.enableYupRotation);
 
   const handleFileSelect = useCallback(async (file: File) => {
     setIsConverting(true);
@@ -197,7 +198,7 @@ function ConverterContent(): React.JSX.Element {
               <CadViewer
                 enableZoom
                 enablePan
-                enableYupRotation={uploadedFile ? yUpFormats.has(uploadedFile.format) : false}
+                enableYupRotation={enableYupRotation}
                 enableMatcap={enableMatcap}
                 enableLines={enableLines}
                 enableAxes={enableAxes}
@@ -212,7 +213,7 @@ function ConverterContent(): React.JSX.Element {
             <div className="pointer-events-none absolute bottom-2 left-2 z-10 flex w-90 shrink-0 flex-col gap-2 transition-[left] duration-200 ease-linear md:left-(--sidebar-width-current)">
               {/* File info overlay */}
               {uploadedFile ? (
-                <div className="pointer-events-auto rounded-md border bg-sidebar p-3">
+                <div className="pointer-events-auto w-100 rounded-md border bg-sidebar p-3">
                   <div className="flex items-center gap-1">
                     <div className="text-sm font-medium">{uploadedFile.name}</div>
                     <InfoTooltip>{formatConfigurations[uploadedFile.format].description}</InfoTooltip>
@@ -222,19 +223,19 @@ function ConverterContent(): React.JSX.Element {
                   </div>
                 </div>
               ) : undefined}
-              <ChatInterfaceGraphics className="w-90" />
+              <ChatInterfaceGraphics className="w-100" />
               <div className="pointer-events-auto flex items-center gap-2">
                 <FovControl defaultAngle={60} className="w-60" />
                 <GridSizeIndicator />
                 <SectionViewControl />
                 <MeasureControl />
                 <ResetCameraControl />
+                <SettingsControl />
               </div>
             </div>
 
             {/* Export panel trigger */}
-            <div className="absolute top-(--header-height) right-2 z-10 flex gap-2">
-              <SettingsControl />
+            <div className="absolute top-(--header-height) right-2 z-10 flex h-full gap-2 pb-[calc(var(--header-height)+var(--spacing)*2)]">
               <FloatingPanel isOpen side="right" className="rounded-md border">
                 <FloatingPanelContent className="w-80">
                   <FloatingPanelContentHeader>

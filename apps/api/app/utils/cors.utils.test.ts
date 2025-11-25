@@ -109,32 +109,32 @@ describe('createCorsOriginValidator', () => {
   });
 
   it('should match Netlify deploy preview URLs', () => {
-    const validator = createCorsOriginValidator([], ['https://deploy-preview-*--taucad.netlify.app']);
+    const validator = createCorsOriginValidator([], ['https://deploy-preview-*--example.netlify.app']);
     const callback = vi.fn();
 
-    validator('https://deploy-preview-78--taucad.netlify.app', callback);
+    validator('https://deploy-preview-78--example.netlify.app', callback);
 
     expect(callback).toHaveBeenCalledWith(null, true);
   });
 
   it('should match Netlify deploy preview URLs with different PR numbers', () => {
-    const validator = createCorsOriginValidator([], ['https://deploy-preview-*--taucad.netlify.app']);
+    const validator = createCorsOriginValidator([], ['https://deploy-preview-*--example.netlify.app']);
 
     const callback1 = vi.fn();
-    validator('https://deploy-preview-1--taucad.netlify.app', callback1);
+    validator('https://deploy-preview-1--example.netlify.app', callback1);
     expect(callback1).toHaveBeenCalledWith(null, true);
 
     const callback2 = vi.fn();
-    validator('https://deploy-preview-999--taucad.netlify.app', callback2);
+    validator('https://deploy-preview-999--example.netlify.app', callback2);
     expect(callback2).toHaveBeenCalledWith(null, true);
 
     const callback3 = vi.fn();
-    validator('https://deploy-preview-12345--taucad.netlify.app', callback3);
+    validator('https://deploy-preview-12345--example.netlify.app', callback3);
     expect(callback3).toHaveBeenCalledWith(null, true);
   });
 
   it('should reject non-matching Netlify URLs', () => {
-    const validator = createCorsOriginValidator([], ['https://deploy-preview-*--taucad.netlify.app']);
+    const validator = createCorsOriginValidator([], ['https://deploy-preview-*--example.netlify.app']);
     const callback = vi.fn();
 
     validator('https://deploy-preview-78--otherdomain.netlify.app', callback);

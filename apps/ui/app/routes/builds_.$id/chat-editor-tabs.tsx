@@ -5,6 +5,8 @@ import { useBuild } from '#hooks/use-build.js';
 import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
 import { FloatingPanelContentHeader } from '#components/ui/floating-panel.js';
+import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 
 export function ChatEditorTabs(): React.JSX.Element {
   const { fileExplorerRef, gitRef } = useBuild();
@@ -66,7 +68,7 @@ export function ChatEditorTabs(): React.JSX.Element {
               <Fragment key={file.path}>
                 <div
                   className={cn(
-                    'group/editor-tab flex h-full min-w-0 cursor-pointer items-center gap-1 border-y border-y-transparent pr-2 pl-4 text-sm transition-colors',
+                    'group/editor-tab flex h-full min-w-0 cursor-pointer items-center gap-1 border-y border-y-transparent pr-2 pl-3 text-sm transition-colors',
                     'hover:bg-accent/40',
                     isActive
                       ? 'border-b-[1.5px] border-b-primary bg-accent/50 text-foreground'
@@ -84,30 +86,41 @@ export function ChatEditorTabs(): React.JSX.Element {
                     }
                   }}
                 >
-                  <span className="flex max-w-32 items-center gap-1.5 truncate">
-                    <span className="truncate">{file.name}</span>
-                    {gitStatus && gitStatus !== 'clean' ? (
-                      <span
-                        aria-label={`File has git changes: ${gitStatus}`}
-                        className="size-1.5 shrink-0 rounded-full bg-yellow"
-                        title={`Git status: ${gitStatus}`}
-                      />
-                    ) : null}
-                  </span>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className={cn(
-                      'ml-1 size-4 p-0 transition-opacity hover:bg-primary/20',
-                      isActive ? 'opacity-100' : 'opacity-0 group-hover/editor-tab:opacity-100',
-                    )}
-                    aria-label={`Close ${file.name}`}
-                    onClick={(event) => {
-                      handleTabClose(event, file.path);
-                    }}
-                  >
-                    <X className="size-3" />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="flex max-w-32 items-center gap-1.5 truncate">
+                        <FileExtensionIcon filename={file.name} className="size-3 shrink-0" />
+                        <span className="truncate">{file.name}</span>
+                        {gitStatus && gitStatus !== 'clean' ? (
+                          <span
+                            aria-label={`File has git changes: ${gitStatus}`}
+                            className="size-1.5 shrink-0 rounded-full bg-yellow"
+                            title={`Git status: ${gitStatus}`}
+                          />
+                        ) : null}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{file.path}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className={cn(
+                          'ml-1 size-4 p-0 transition-opacity hover:bg-primary/20',
+                          isActive ? 'opacity-100' : 'opacity-0 group-hover/editor-tab:opacity-100',
+                        )}
+                        aria-label={`Close ${file.name}`}
+                        onClick={(event) => {
+                          handleTabClose(event, file.path);
+                        }}
+                      >
+                        <X className="size-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Close</TooltipContent>
+                  </Tooltip>
                 </div>
                 <div className="h-full w-px bg-border" />
               </Fragment>

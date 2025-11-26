@@ -12,6 +12,7 @@ import { useBuild } from '#hooks/use-build.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 
 export function ChatEditorBreadcrumbs(): ReactNode {
   const { fileExplorerRef } = useBuild();
@@ -66,7 +67,12 @@ export function ChatEditorBreadcrumbs(): ReactNode {
         {activeFile.parts.length > 0 ? (
           activeFile.parts.map((part, index) => (
             <Fragment key={part}>
-              <span className="truncate text-sm font-medium">{part}</span>
+              <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                {index === activeFile.parts.length - 1 && (
+                  <FileExtensionIcon filename={part} className="size-3 shrink-0" />
+                )}
+                {part}
+              </span>
               {index < activeFile.parts.length - 1 && <ChevronRight className="size-4 shrink-0" />}
             </Fragment>
           ))

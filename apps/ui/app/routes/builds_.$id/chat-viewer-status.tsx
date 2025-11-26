@@ -15,8 +15,8 @@ export function ChatViewerStatus({ className, ...props }: React.HTMLAttributes<H
         className,
       )}
     >
-      <span className="font-mono text-sm text-muted-foreground capitalize">{state}...</span>
       <HammerAnimation className="size-4 animate-spin text-primary ease-in-out md:size-6" />
+      <span className="font-mono text-sm text-muted-foreground capitalize">{state}...</span>
     </div>
   ) : null;
 }

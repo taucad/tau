@@ -1835,6 +1835,196 @@ describe('Parameters - Reset Functionality', () => {
   });
 });
 
+describe('Parameters - Reactive Configuration Changes', () => {
+  let mockOnParametersChange: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockOnParametersChange = vi.fn();
+  });
+
+  it('should re-render without errors when min/max props change', () => {
+    const defaultParameters = {
+      width: 50,
+    };
+
+    const initialSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        width: {
+          type: 'number',
+          default: 50,
+          minimum: 0,
+          maximum: 100,
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={initialSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Component should render the number input
+    const initialInput = screen.getByLabelText('Input for Width');
+    expect(initialInput).toBeTruthy();
+
+    // Update schema with different min/max values
+    const updatedSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        width: {
+          type: 'number',
+          default: 50,
+          minimum: 10,
+          maximum: 200,
+        },
+      },
+    };
+
+    // Re-render with updated schema - should not throw errors
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={updatedSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Component should still render the input after prop changes
+    const updatedInput = screen.getByLabelText('Input for Width');
+    expect(updatedInput).toBeTruthy();
+  });
+
+  it('should re-render without errors when step prop changes', () => {
+    const defaultParameters = {
+      height: 25,
+    };
+
+    const initialSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        height: {
+          type: 'number',
+          default: 25,
+          multipleOf: 1,
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={initialSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Component should render the number input
+    const initialInput = screen.getByLabelText('Input for Height');
+    expect(initialInput).toBeTruthy();
+
+    // Update schema with different step value
+    const updatedSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        height: {
+          type: 'number',
+          default: 25,
+          multipleOf: 5,
+        },
+      },
+    };
+
+    // Re-render with updated schema - should not throw errors
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={updatedSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Component should still render the input after prop changes
+    const updatedInput = screen.getByLabelText('Input for Height');
+    expect(updatedInput).toBeTruthy();
+  });
+
+  it('should re-render without errors when default value changes significantly', () => {
+    const initialDefaultParameters = {
+      size: 10,
+    };
+
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        size: {
+          type: 'number',
+          default: 10,
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={initialDefaultParameters}
+          jsonSchema={schema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Component should render with initial default value
+    const initialInput = screen.getByLabelText('Input for Size');
+    expect(initialInput).toBeTruthy();
+    expect(initialInput).toHaveValue('10');
+
+    // Update default value to a much larger value
+    const updatedDefaultParameters = {
+      size: 1000,
+    };
+
+    // Re-render with updated default value - should not throw errors
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={updatedDefaultParameters}
+          jsonSchema={schema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Component should render with updated default value
+    const updatedInput = screen.getByLabelText('Input for Size');
+    expect(updatedInput).toBeTruthy();
+    expect(updatedInput).toHaveValue('1000');
+  });
+});
+
 describe('Parameters - Reset Single Parameter Bug', () => {
   let user: ReturnType<typeof userEvent.setup>;
   let mockOnParametersChange: ReturnType<typeof vi.fn>;

@@ -266,6 +266,15 @@ type ParameterEventInternal =
   | { type: 'inputChanged'; value: number }
   | { type: 'textInputChanged'; text: string }
   | { type: 'unitChanged'; unitFactor: number; unit: string }
+  | {
+      type: 'configChanged';
+      defaultValue?: number;
+      descriptor?: MeasurementDescriptor;
+      min?: number;
+      max?: number;
+      step?: number;
+      enableContinualOnChange?: boolean;
+    }
   | { type: 'keyStateChanged'; key: string; isPressed: boolean }
   | { type: 'focusStateChanged'; isFocused: boolean }
   | { type: 'arrowKeyPressed'; direction: 'up' | 'down' };
@@ -426,6 +435,55 @@ export const parameterMachine = setup({
         localValue,
         currentUnitFactor: newUnitFactor,
         currentSymbol: newUnit,
+        ...range,
+        ...formatting,
+      };
+    }),
+
+    handleConfigChange: assign(({ event, context }) => {
+      if (event.type !== 'configChanged') {
+        return {};
+      }
+
+      // Update context values with new config
+      const newDefaultValue = event.defaultValue ?? context.defaultValue;
+      const newDescriptor = event.descriptor ?? context.descriptor;
+      const newMin = event.min ?? context.min;
+      const newMax = event.max ?? context.max;
+      const newStep = event.step ?? context.originalStep;
+      const newEnableContinualOnChange = event.enableContinualOnChange ?? context.enableContinualOnChange;
+
+      // Check if descriptor changed - if so, we may need to update unit handling
+      const isLength = newDescriptor === 'length';
+      const unitFactor = isLength ? context.currentUnitFactor : 1;
+
+      // Recalculate display value based on new descriptor
+      const displayValue = context.committedValue / unitFactor;
+      const hasConversion = isLength && unitFactor !== 1;
+      const localValue = hasConversion ? roundToSignificantFigures(displayValue, 4) : displayValue;
+
+      // Recalculate range with new config values
+      const range = calculateParameterRange({
+        defaultValue: newDefaultValue,
+        unitFactor,
+        isLength,
+        min: newMin,
+        max: newMax,
+        step: newStep,
+      });
+
+      // Recalculate formatting (preserve precision if actively editing)
+      const isEditing = context.isFocused || context.isDragging;
+      const formatting = calculateFormatting(context.committedValue, unitFactor, isLength, isEditing);
+
+      return {
+        defaultValue: newDefaultValue,
+        descriptor: newDescriptor,
+        min: newMin,
+        max: newMax,
+        originalStep: newStep,
+        enableContinualOnChange: newEnableContinualOnChange,
+        localValue,
         ...range,
         ...formatting,
       };
@@ -656,6 +714,9 @@ export const parameterMachine = setup({
         },
         unitChanged: {
           actions: 'handleUnitChange',
+        },
+        configChanged: {
+          actions: 'handleConfigChange',
         },
         keyStateChanged: {
           actions: 'handleShiftKeyChange',

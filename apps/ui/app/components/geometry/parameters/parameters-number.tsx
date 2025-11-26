@@ -88,6 +88,19 @@ export function ParametersNumber({
     });
   }, [units.length.factor, units.length.symbol, parameterRef]);
 
+  // Send config updates to parameter machine when config props change
+  React.useEffect(() => {
+    parameterRef.send({
+      type: 'configChanged',
+      defaultValue,
+      descriptor,
+      min,
+      max,
+      step,
+      enableContinualOnChange,
+    });
+  }, [defaultValue, descriptor, min, max, step, enableContinualOnChange, parameterRef]);
+
   // Derive all state from machines
   const localValue = useSelector(parameterRef, (state) => state.context.localValue);
   const formattedValue = useSelector(parameterRef, (state) => state.context.formattedValue);

@@ -2,6 +2,7 @@ import { useParams, Link, useNavigate } from 'react-router';
 import { useCallback, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { Download, Star, GitFork, FileCode, Eye, Code, ChevronDown, SlidersHorizontal, Loader2 } from 'lucide-react';
+import { Virtuoso } from 'react-virtuoso';
 import type { ExportFormat } from '@taucad/types';
 import { fileExtensionFromExportFormat } from '@taucad/types/constants';
 import { Button } from '#components/ui/button.js';
@@ -176,6 +177,26 @@ function BuildPreviewContent(): React.JSX.Element {
     setShowParameters((previous) => !previous);
   }, []);
 
+  const renderFileItem = useCallback(
+    (index: number) => {
+      const file = files[index];
+      if (!file) {
+        return undefined;
+      }
+
+      return (
+        <div key={file.path} className="flex items-center justify-between border-b px-4 py-3 last:border-b-0">
+          <div className="flex items-center gap-3">
+            <FileCode className="size-5 text-muted-foreground" />
+            <span className="font-medium">{file.path}</span>
+          </div>
+          <span className="text-sm text-muted-foreground">{(file.size / 1024).toFixed(2)} KB</span>
+        </div>
+      );
+    },
+    [files],
+  );
+
   if (!build) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -265,28 +286,25 @@ function BuildPreviewContent(): React.JSX.Element {
           <div className="flex flex-1 overflow-hidden">
             {/* Main Content */}
             <div className="flex-1 overflow-hidden">
-              <TabsContent value="files" className="h-full overflow-auto p-6 data-[state=inactive]:hidden">
+              <TabsContent
+                enableAnimation={false}
+                value="files"
+                className="h-full overflow-auto p-6 data-[state=inactive]:hidden"
+              >
                 {files.length > 0 ? (
-                  <div className="rounded-md border text-sm">
-                    {files.map((file) => (
-                      <div
-                        key={file.path}
-                        className="flex items-center justify-between border-b px-4 py-3 last:border-b-0"
-                      >
-                        <div className="flex items-center gap-3">
-                          <FileCode className="size-5 text-muted-foreground" />
-                          <span className="font-medium">{file.path}</span>
-                        </div>
-                        <span className="text-sm text-muted-foreground">{(file.size / 1024).toFixed(2)} KB</span>
-                      </div>
-                    ))}
+                  <div className="h-full rounded-md border text-sm">
+                    <Virtuoso
+                      totalCount={files.length}
+                      itemContent={renderFileItem}
+                      className="h-full overflow-y-auto"
+                    />
                   </div>
                 ) : (
                   <p className="text-center text-muted-foreground">No files available</p>
                 )}
               </TabsContent>
 
-              <TabsContent value="3d" className="h-full data-[state=inactive]:hidden">
+              <TabsContent enableAnimation={false} value="3d" className="h-full data-[state=inactive]:hidden">
                 <div className="flex h-full">
                   {/* 3D Viewer */}
                   <div className="relative flex-1">
@@ -312,6 +330,7 @@ function BuildPreviewContent(): React.JSX.Element {
                             defaultParameters={defaultParameters}
                             jsonSchema={jsonSchema}
                             units={units}
+                            emptyDescription="This model has no parameters"
                             onParametersChange={handleParametersChange}
                           />
                         </div>

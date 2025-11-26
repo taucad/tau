@@ -6,14 +6,6 @@ import { ENV } from '#config.js';
  * GitHub API client singleton
  * Provides authenticated access to GitHub API with proper typing
  */
-function buildCodeloadZipUrl(owner: string, repo: string, ref: string): string {
-  const ownerSegment = encodeURIComponent(owner);
-  const repoSegment = encodeURIComponent(repo);
-  // Allow refs like "refs/heads/main" to pass through unchanged to keep slashes meaningful.
-  const refSegment = ref.startsWith('refs/') ? ref : ref;
-  return `https://codeload.github.com/${ownerSegment}/${repoSegment}/zip/${refSegment}`;
-}
-
 class GitHubApiClient {
   public static getInstance(auth?: string): GitHubApiClient {
     GitHubApiClient.instance ??= new GitHubApiClient(auth);
@@ -84,51 +76,37 @@ class GitHubApiClient {
   }
 
   /**
-   * Get the size of a repository archive (ZIP)
-   * Makes a HEAD request directly against codeload (which provides Content-Length)
-   * Uses proxy to avoid CORS issues
-   */
-  public async getArchiveSize(owner: string, repo: string, ref: string): Promise<number | undefined> {
-    const zipUrl = buildCodeloadZipUrl(owner, repo, ref);
-    // Use proxy endpoint to avoid CORS issues
-    const proxyUrl = `/api/import?url=${encodeURIComponent(zipUrl)}`;
-
-    try {
-      const response = await fetch(proxyUrl, {
-        method: 'HEAD',
-        redirect: 'follow',
-      });
-
-      if (!response.ok) {
-        return undefined;
-      }
-
-      const contentLength = response.headers.get('Content-Length');
-      if (!contentLength) {
-        return undefined;
-      }
-
-      return Number.parseInt(contentLength, 10);
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
    * Download repository archive as a stream with size information
    * Uses proxy to avoid CORS issues
    * Returns both the stream and the content length from the response headers
+   *
+   * Note: GitHub API returns Content-Length header when using full refs like refs/heads/main
    */
   public async downloadArchiveWithSize(
     owner: string,
     repo: string,
     ref: string,
+    signal?: AbortSignal,
   ): Promise<{ stream: ReadableStream<Uint8Array>; size: number | undefined }> {
-    const zipUrl = buildCodeloadZipUrl(owner, repo, ref);
+    // Convert short ref to full ref for GitHub API (required for Content-Length header)
+    // refs/heads/main, refs/tags/v1.0, etc work; short refs like "main" don't return Content-Length
+    const fullRef = ref.startsWith('refs/') ? ref : `refs/heads/${ref}`;
+
+    // Use GitHub API endpoint (not direct codeload.github.com) to get Content-Length header
+    const zipUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${fullRef}`;
     // Use proxy endpoint to avoid CORS issues
     const proxyUrl = `/api/import?url=${encodeURIComponent(zipUrl)}`;
 
-    const response = await fetch(proxyUrl, { redirect: 'follow' });
+    const response = await fetch(proxyUrl, {
+      headers: {
+        'User-Agent': metaConfig.userAgent,
+        accept: 'application/vnd.github.v3+json',
+        // Request uncompressed to get accurate size
+        'Accept-Encoding': 'identity',
+      },
+      redirect: 'follow',
+      signal,
+    });
 
     if (!response.ok) {
       throw new Error(`Failed to download archive: ${response.status} ${response.statusText}`);

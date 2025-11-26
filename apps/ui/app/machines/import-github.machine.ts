@@ -16,7 +16,6 @@ export type ImportGitHubContext = {
   ref: string;
   requestedMainFile: string;
   selectedMainFile: string | undefined;
-  repoSize: number | undefined;
   repoMetadata:
     | {
         avatarUrl: string | undefined;
@@ -32,7 +31,6 @@ export type ImportGitHubContext = {
     | undefined;
   branches: Array<{ name: string; sha: string }>;
   selectedBranch: string;
-  estimatedDownloadTime: number | undefined;
   downloadProgress: { loaded: number; total: number };
   extractProgress: { processed: number; total: number };
   unzipRef: ActorRefFrom<UnzipMachineActor> | undefined;
@@ -41,7 +39,6 @@ export type ImportGitHubContext = {
   buildId: string | undefined;
   error: Error | undefined;
   fetchErrors: {
-    size: Error | undefined;
     metadata: Error | undefined;
     branches: Error | undefined;
   };
@@ -111,7 +108,6 @@ type ImportGitHubEvent = ImportGitHubEventExternalDone | ImportGitHubEventIntern
 
 // Actor output types
 type DownloadResult = { type: 'downloaded'; blob: Blob };
-type RepoSizeResult = { type: 'sizeRetrieved'; size: number | undefined };
 type RepoMetadataResult = {
   type: 'metadataRetrieved';
   metadata: {
@@ -130,15 +126,6 @@ type BranchesResult = {
   type: 'branchesRetrieved';
   branches: Array<{ name: string; sha: string }>;
 };
-
-// Get repository size actor
-const getRepoSizeActor = fromPromise<RepoSizeResult, { owner: string; repo: string; ref: string }>(
-  async ({ input }) => {
-    const client = getGitHubClient();
-    const size = await client.getArchiveSize(input.owner, input.repo, input.ref);
-    return { type: 'sizeRetrieved', size };
-  },
-);
 
 // Get repository metadata actor
 const getRepoMetadataActor = fromPromise<RepoMetadataResult, { owner: string; repo: string }>(async ({ input }) => {
@@ -165,15 +152,29 @@ const getBranchesActor = fromPromise<BranchesResult, { owner: string; repo: stri
 // Download actor
 const downloadZipActor = fromPromise<
   DownloadResult,
-  { owner: string; repo: string; ref: string; onProgress: (loaded: number, total: number) => void }
->(async ({ input }) => {
+  {
+    owner: string;
+    repo: string;
+    ref: string;
+    onProgress: (loaded: number, total: number) => void;
+  }
+>(async ({ input, signal }) => {
   const client = getGitHubClient();
 
-  // Download the archive and get size from the GET response
-  const { stream, size: contentLength } = await client.downloadArchiveWithSize(input.owner, input.repo, input.ref);
+  // Download the archive and get size from the GET response headers
+  // Pass the signal to abort the fetch request if canceled
+  const { stream, size: contentLength } = await client.downloadArchiveWithSize(
+    input.owner,
+    input.repo,
+    input.ref,
+    signal,
+  );
+
+  // Use size from Content-Length header (available immediately when download starts)
+  const totalBytes = contentLength ?? 0;
 
   // Send initial progress with total size
-  input.onProgress(0, contentLength ?? 0);
+  input.onProgress(0, totalBytes);
 
   const reader = stream.getReader();
 
@@ -182,41 +183,51 @@ const downloadZipActor = fromPromise<
   let lastProgressUpdate = 0;
   const progressUpdateInterval = 100; // Update every 100ms
 
-  // Read the stream in chunks
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- standard stream reading pattern
-  while (true) {
-    // eslint-disable-next-line no-await-in-loop -- reading stream sequentially
-    const { done, value } = await reader.read();
+  try {
+    // Read the stream in chunks
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- standard stream reading pattern
+    while (true) {
+      // Check if aborted before reading next chunk
+      if (signal.aborted) {
+        // eslint-disable-next-line no-await-in-loop -- need to cancel stream before throwing
+        await reader.cancel();
+        throw new Error('Download canceled');
+      }
 
-    if (done) {
-      break;
+      // eslint-disable-next-line no-await-in-loop -- reading stream sequentially
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      chunks.push(value);
+      receivedLength += value.length;
+
+      // Throttle progress updates to avoid overwhelming the UI
+      const now = Date.now();
+      if (now - lastProgressUpdate >= progressUpdateInterval || lastProgressUpdate === 0) {
+        input.onProgress(receivedLength, totalBytes);
+        lastProgressUpdate = now;
+      }
     }
 
-    chunks.push(value);
-    receivedLength += value.length;
+    // Always send final progress update with actual total
+    input.onProgress(receivedLength, totalBytes);
 
-    // Throttle progress updates to avoid overwhelming the UI
-    const now = Date.now();
-    if (now - lastProgressUpdate >= progressUpdateInterval || lastProgressUpdate === 0) {
-      const total = contentLength ?? 0; // Use 0 for indeterminate, will be updated at end
-      input.onProgress(receivedLength, total);
-      lastProgressUpdate = now;
+    // Combine chunks into a single Uint8Array
+    const zipData = new Uint8Array(receivedLength);
+    let position = 0;
+    for (const chunk of chunks) {
+      zipData.set(chunk, position);
+      position += chunk.length;
     }
+
+    return { type: 'downloaded', blob: new Blob([zipData], { type: 'application/zip' }) };
+  } finally {
+    // Always release the reader lock
+    reader.releaseLock();
   }
-
-  // Always send final progress update with actual total
-  const finalTotal = contentLength ?? receivedLength;
-  input.onProgress(receivedLength, finalTotal);
-
-  // Combine chunks into a single Uint8Array
-  const zipData = new Uint8Array(receivedLength);
-  let position = 0;
-  for (const chunk of chunks) {
-    zipData.set(chunk, position);
-    position += chunk.length;
-  }
-
-  return { type: 'downloaded', blob: new Blob([zipData], { type: 'application/zip' }) };
 });
 
 // This actor should be provided via the `provide` mechanism in the route
@@ -234,7 +245,6 @@ const createBuildActor = fromPromise<
 });
 
 const importGitHubActors = {
-  getRepoSizeActor,
   getRepoMetadataActor,
   getBranchesActor,
   downloadZipActor,
@@ -294,7 +304,6 @@ export const importGitHubMachine = setup({
     clearError: assign({
       error: undefined,
       fetchErrors: {
-        size: undefined,
         metadata: undefined,
         branches: undefined,
       },
@@ -304,7 +313,6 @@ export const importGitHubMachine = setup({
         assertEvent(event, 'updateRepoUrl');
         return event.url;
       },
-      repoSize: undefined, // Reset size when URL changes
     }),
     parseRepoUrl: assign(({ context }) => {
       // Parse GitHub URL and extract owner/repo/ref
@@ -331,25 +339,6 @@ export const importGitHubMachine = setup({
       } catch {
         return {};
       }
-    }),
-    setRepoSize: assign({
-      repoSize({ event }) {
-        assertActorDoneEvent(event);
-        assertEvent(event.output, 'sizeRetrieved');
-        return event.output.size;
-      },
-      estimatedDownloadTime({ event }) {
-        assertActorDoneEvent(event);
-        assertEvent(event.output, 'sizeRetrieved');
-        const { size } = event.output;
-        if (size === undefined) {
-          return undefined;
-        }
-
-        // Estimate download time: size (bytes) / average speed (5 MB/s)
-        const estimatedSeconds = size / (5 * 1024 * 1024);
-        return Math.ceil(estimatedSeconds);
-      },
     }),
     setRepoMetadata: assign({
       repoMetadata({ event }) {
@@ -443,13 +432,6 @@ export const importGitHubMachine = setup({
         enqueue.sendTo(context.unzipRef, { type: 'extract', zipBlob: event.output.blob });
       }
     }),
-    setSizeError: assign({
-      fetchErrors: ({ context, event }) => ({
-        ...context.fetchErrors,
-        size:
-          'error' in event && event.error instanceof Error ? event.error : new Error('Failed to fetch repository size'),
-      }),
-    }),
     setMetadataError: assign({
       fetchErrors: ({ context, event }) => ({
         ...context.fetchErrors,
@@ -510,11 +492,9 @@ export const importGitHubMachine = setup({
     ref: input.ref ?? 'main',
     requestedMainFile: input.mainFile ?? '',
     selectedMainFile: undefined,
-    repoSize: undefined,
     repoMetadata: undefined,
     branches: [],
     selectedBranch: input.ref ?? 'main',
-    estimatedDownloadTime: undefined,
     downloadProgress: { loaded: 0, total: 0 },
     extractProgress: { processed: 0, total: 0 },
     unzipRef: undefined,
@@ -523,7 +503,6 @@ export const importGitHubMachine = setup({
     buildId: undefined,
     error: undefined,
     fetchErrors: {
-      size: undefined,
       metadata: undefined,
       branches: undefined,
     },
@@ -533,14 +512,14 @@ export const importGitHubMachine = setup({
     enteringDetails: {
       always: [
         {
-          target: 'checkingSize',
+          target: 'checkingRepo',
           guard: 'shouldFetchRepoInfo',
         },
       ],
       on: {
         updateRepoUrl: {
           actions: ['clearError', 'updateRepoUrl', 'parseRepoUrl'],
-          target: 'checkingSize',
+          target: 'checkingRepo',
           reenter: true,
         },
         selectBranch: {
@@ -552,17 +531,17 @@ export const importGitHubMachine = setup({
         },
       },
     },
-    checkingSize: {
+    checkingRepo: {
       after: {
         debounceDelay: {
-          target: 'fetchingSize',
+          target: 'fetchingRepoInfo',
           guard: 'hasValidRepo',
         },
       },
       on: {
         updateRepoUrl: {
           actions: ['updateRepoUrl', 'parseRepoUrl'],
-          target: 'checkingSize',
+          target: 'checkingRepo',
           reenter: true,
         },
         startImport: {
@@ -571,56 +550,9 @@ export const importGitHubMachine = setup({
         },
       },
     },
-    fetchingSize: {
+    fetchingRepoInfo: {
       type: 'parallel',
       states: {
-        size: {
-          initial: 'fetching',
-          states: {
-            fetching: {
-              invoke: {
-                id: 'fetchSize',
-                src: 'getRepoSizeActor',
-                input: ({ context }) => ({
-                  owner: context.owner,
-                  repo: context.repo,
-                  ref: context.ref,
-                }),
-                onDone: {
-                  target: 'success',
-                  actions: assign({
-                    repoSize: ({ event }) => event.output.size,
-                    estimatedDownloadTime({ event: { output } }) {
-                      // Estimate 1MB/s download speed
-                      const { size } = output;
-                      if (size !== undefined && size > 0) {
-                        return (size / (1024 * 1024)) * 1000;
-                      }
-
-                      return undefined;
-                    },
-                  }),
-                },
-                onError: {
-                  target: 'error',
-                  actions: [
-                    'setSizeError',
-                    assign({
-                      repoSize: undefined,
-                      estimatedDownloadTime: undefined,
-                    }),
-                  ],
-                },
-              },
-            },
-            success: {
-              type: 'final',
-            },
-            error: {
-              type: 'final',
-            },
-          },
-        },
         metadata: {
           initial: 'fetching',
           states: {
@@ -710,7 +642,7 @@ export const importGitHubMachine = setup({
       on: {
         updateRepoUrl: {
           actions: ['updateRepoUrl', 'parseRepoUrl'],
-          target: 'checkingSize',
+          target: 'checkingRepo',
           reenter: true,
         },
       },

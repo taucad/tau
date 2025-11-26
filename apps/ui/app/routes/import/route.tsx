@@ -242,13 +242,11 @@ export default function ImportRoute(): React.JSX.Element {
   const selectedMainFile = useSelector(importActorRef, (snapshot) => snapshot.context.selectedMainFile);
   const requestedMainFile = useSelector(importActorRef, (snapshot) => snapshot.context.requestedMainFile);
   const repoUrl = useSelector(importActorRef, (snapshot) => snapshot.context.repoUrl);
-  const repoSize = useSelector(importActorRef, (snapshot) => snapshot.context.repoSize);
   const repoOwner = useSelector(importActorRef, (snapshot) => snapshot.context.owner);
   const repoName = useSelector(importActorRef, (snapshot) => snapshot.context.repo);
   const repoMetadata = useSelector(importActorRef, (snapshot) => snapshot.context.repoMetadata);
   const branches = useSelector(importActorRef, (snapshot) => snapshot.context.branches);
   const selectedBranch = useSelector(importActorRef, (snapshot) => snapshot.context.selectedBranch);
-  const estimatedTime = useSelector(importActorRef, (snapshot) => snapshot.context.estimatedDownloadTime);
   const fetchErrors = useSelector(importActorRef, (snapshot) => snapshot.context.fetchErrors);
 
   // Navigate when build is created
@@ -261,9 +259,9 @@ export default function ImportRoute(): React.JSX.Element {
   const fileTree = useMemo(() => buildFileTree(files), [files]);
 
   switch (true) {
-    case state.matches('enteringDetails') || state.matches('checkingSize') || state.matches('fetchingSize'): {
+    case state.matches('enteringDetails') || state.matches('checkingRepo') || state.matches('fetchingRepoInfo'): {
       const isValidRepo = repoOwner.length > 0 && repoName.length > 0;
-      const isCheckingOrFetching = state.matches('checkingSize') || state.matches('fetchingSize');
+      const isCheckingOrFetching = state.matches('checkingRepo') || state.matches('fetchingRepoInfo');
 
       return (
         <div className="flex h-full items-center justify-center px-4 pt-8 pb-16">
@@ -304,8 +302,6 @@ export default function ImportRoute(): React.JSX.Element {
                     metadata={repoMetadata}
                     owner={repoOwner}
                     repo={repoName}
-                    size={repoSize}
-                    estimatedTime={estimatedTime}
                     isLoading={isCheckingOrFetching}
                   />
 
@@ -336,16 +332,13 @@ export default function ImportRoute(): React.JSX.Element {
                   ) : undefined}
 
                   {/* Fetch Errors - Show warnings for non-critical failures */}
-                  {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing, unicorn/explicit-length-check -- Error objects, not booleans or collections */}
-                  {repoMetadata && !isCheckingOrFetching && (fetchErrors.size || fetchErrors.branches) ? (
+                  {repoMetadata && !isCheckingOrFetching && fetchErrors.branches ? (
                     <div className="flex items-start gap-3 rounded-lg border border-warning/50 bg-warning/10 p-4 text-warning">
                       <AlertCircle className="size-5 shrink-0" />
                       <div className="flex flex-col gap-1">
                         <div className="font-semibold">Partial Information</div>
                         <div className="text-sm">
-                          {/* eslint-disable-next-line unicorn/explicit-length-check -- Error object, not collection */}
-                          {fetchErrors.size ? <div>• Could not fetch repository size</div> : undefined}
-                          {fetchErrors.branches ? <div>• Could not fetch branches list</div> : undefined}
+                          <div>Could not fetch branches list</div>
                           <div className="mt-1">You can still proceed with the import.</div>
                         </div>
                       </div>
@@ -538,14 +531,7 @@ export default function ImportRoute(): React.JSX.Element {
 
             {/* Repository Preview Card (read-only) */}
             {repoMetadata ? (
-              <RepositoryCard
-                metadata={repoMetadata}
-                owner={repoOwner}
-                repo={repoName}
-                size={repoSize}
-                estimatedTime={estimatedTime}
-                isLoading={false}
-              />
+              <RepositoryCard metadata={repoMetadata} owner={repoOwner} repo={repoName} isLoading={false} />
             ) : undefined}
 
             <div className="space-y-4">

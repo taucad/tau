@@ -1,7 +1,6 @@
 import { Star, GitFork, Eye, Scale, Lock, Globe, Clock } from 'lucide-react';
 import { Badge } from '#components/ui/badge.js';
 import { Skeleton } from '#components/ui/skeleton.js';
-import { formatFileSize } from '#components/geometry/converter/converter-utils.js';
 import { cn } from '#utils/ui.utils.js';
 
 type RepositoryCardProperties = {
@@ -20,8 +19,6 @@ type RepositoryCardProperties = {
     | undefined;
   readonly owner: string;
   readonly repo: string;
-  readonly size: number | undefined;
-  readonly estimatedTime: number | undefined;
   readonly isLoading?: boolean;
   readonly className?: string;
 };
@@ -64,7 +61,7 @@ function formatRelativeTime(dateString: string | undefined): string {
 
 // eslint-disable-next-line complexity -- acceptable for containment.
 export function RepositoryCard(properties: RepositoryCardProperties): React.JSX.Element {
-  const { metadata, owner, repo, size, estimatedTime, isLoading, className } = properties;
+  const { metadata, owner, repo, isLoading, className } = properties;
 
   if (isLoading) {
     return (
@@ -152,16 +149,6 @@ export function RepositoryCard(properties: RepositoryCardProperties): React.JSX.
             {metadata.license}
           </Badge>
         ) : undefined}
-
-        {/* Size and estimated time */}
-        {size === undefined ? undefined : (
-          <Badge variant="secondary" className="gap-1">
-            <span className="font-mono">{formatFileSize(size)}</span>
-            {estimatedTime !== undefined && estimatedTime > 0 ? (
-              <span className="text-muted-foreground">(~{estimatedTime}s)</span>
-            ) : undefined}
-          </Badge>
-        )}
 
         {/* Last updated */}
         {metadata?.lastUpdated ? (

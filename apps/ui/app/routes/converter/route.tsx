@@ -82,7 +82,7 @@ function ConverterContent(): React.JSX.Element {
   const enableGrid = useSelector(graphicsActor, (state) => state.context.enableGrid);
   const enableAxes = useSelector(graphicsActor, (state) => state.context.enableAxes);
   const enableMatcap = useSelector(graphicsActor, (state) => state.context.enableMatcap);
-  const enableYupRotation = useSelector(graphicsActor, (state) => state.context.enableYupRotation);
+  const upDirection = useSelector(graphicsActor, (state) => state.context.upDirection);
 
   const handleFileSelect = useCallback(async (file: File) => {
     setIsConverting(true);
@@ -196,7 +196,7 @@ function ConverterContent(): React.JSX.Element {
               <CadViewer
                 enableZoom
                 enablePan
-                enableYupRotation={enableYupRotation}
+                upDirection={upDirection}
                 enableMatcap={enableMatcap}
                 enableLines={enableLines}
                 enableAxes={enableAxes}

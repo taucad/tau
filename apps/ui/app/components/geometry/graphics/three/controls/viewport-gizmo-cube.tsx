@@ -18,11 +18,27 @@ type ViewportGizmoCubeProps = {
    * When provided, the gizmo will be appended to this container instead of the renderer's parent.
    */
   readonly container?: HTMLElement | string;
+  /**
+   * Optional dependencies array that will be appended to the effect dependencies.
+   * When any of these values change, the gizmo will be disposed and recreated.
+   * Useful for triggering recreation when coordinate systems or other external state changes.
+   *
+   * @example
+   * ```tsx
+   * <ViewportGizmoCube dependencies={[enableYupRotation]} />
+   * ```
+   */
+  readonly dependencies?: readonly unknown[];
 };
 
 const className = 'viewport-gizmo-cube';
+const emptyDependencies: readonly unknown[] = [];
 
-export function ViewportGizmoCube({ size = 128, container }: ViewportGizmoCubeProps): ReactNode {
+export function ViewportGizmoCube({
+  size = 128,
+  container,
+  dependencies = emptyDependencies,
+}: ViewportGizmoCubeProps): ReactNode {
   const { camera, gl, controls, scene, invalidate } = useThree((state) => ({
     camera: state.camera as THREE.PerspectiveCamera,
     gl: state.gl,
@@ -175,7 +191,8 @@ export function ViewportGizmoCube({ size = 128, container }: ViewportGizmoCubePr
         renderer.dispose();
       }
     };
-  }, [camera, gl, controls, scene, serialized.hex, theme, size, handleChange, container]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dependencies array is user-provided for custom recreation triggers
+  }, [camera, gl, controls, scene, serialized.hex, theme, size, handleChange, container, ...dependencies]);
 
   return null;
 }

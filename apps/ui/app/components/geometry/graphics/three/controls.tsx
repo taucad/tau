@@ -50,6 +50,7 @@ export const Controls = React.memo(function ({
   const availablePlanes = useSelector(graphicsActor, (state) => state.context.availableSectionViews);
   const planeName = useSelector(graphicsActor, (state) => state.context.planeName);
   const hoveredSectionViewId = useSelector(graphicsActor, (state) => state.context.hoveredSectionViewId);
+  const upDirection = useSelector(graphicsActor, (state) => state.context.upDirection);
 
   // Handlers to send events to xstate
   const handleSelectPlane = (planeId: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy'): void => {
@@ -109,7 +110,7 @@ export const Controls = React.memo(function ({
         onSetRotation={handleSetRotation}
         onSetPivot={handleSetPivot}
       />
-      {enableGizmo ? <ViewportGizmoCube container={gizmoContainer} /> : null}
+      {enableGizmo ? <ViewportGizmoCube container={gizmoContainer} dependencies={[upDirection]} /> : null}
     </>
   );
 });

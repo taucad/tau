@@ -21,10 +21,6 @@ type GltfMeshDisplayProperties = {
    * Whether to enable lines.
    */
   readonly enableLines?: boolean;
-  /**
-   * Whether to enable Y-up rotation.
-   */
-  readonly enableYupRotation?: boolean;
 };
 
 /**
@@ -45,7 +41,6 @@ type GltfMeshDisplayProperties = {
  * @param name - The name of the mesh
  * @param enableSurfaces - Whether to enable surfaces
  * @param enableLines - Whether to enable lines
- * @param enableYupRotation - Whether to enable Y-up rotation
  * @returns A React component with Three.js primitives that renders the GLTF mesh
  */
 export function GltfMesh({
@@ -53,7 +48,6 @@ export function GltfMesh({
   enableMatcap = true,
   enableSurfaces = true,
   enableLines = true,
-  enableYupRotation = false,
 }: GltfMeshDisplayProperties): React.JSX.Element | undefined {
   const [scene, setScene] = useState<Group | undefined>(undefined);
   const isLoadingRef = useRef(false);
@@ -85,11 +79,6 @@ export function GltfMesh({
           await applyMatcap(gltf);
         }
 
-        if (enableYupRotation) {
-          // Apply 90-degree rotation around x-axis
-          gltf.scene.rotation.x = Math.PI / 2;
-        }
-
         setScene(gltf.scene);
         isLoadingRef.current = false;
       } catch (error) {
@@ -107,7 +96,7 @@ export function GltfMesh({
     return () => {
       cancelled = true;
     };
-  }, [gltfFile, enableMatcap, enableYupRotation, enableLines]);
+  }, [gltfFile, enableMatcap, enableLines]);
 
   // Toggle visibility of surfaces and lines based on props
   useEffect(() => {

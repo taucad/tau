@@ -1,7 +1,6 @@
 import type { CanvasProps } from '@react-three/fiber';
 import { Canvas } from '@react-three/fiber';
-import * as THREE from 'three';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Scene } from '#components/geometry/graphics/three/scene.js';
 import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
 import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js';
@@ -14,6 +13,7 @@ export type ThreeViewerProperties = {
   readonly enableZoom?: boolean;
   readonly enablePan?: boolean;
   readonly enableDamping?: boolean;
+  readonly upDirection?: 'x' | 'y' | 'z';
   readonly className?: string;
   readonly enableCentering?: boolean;
   readonly stageOptions?: StageOptions;
@@ -31,6 +31,7 @@ export function ThreeProvider({
   enableZoom = false,
   enablePan = false,
   enableDamping = false,
+  upDirection = 'z',
   enableCentering = true,
   className,
   stageOptions,
@@ -40,10 +41,6 @@ export function ThreeProvider({
 }: ThreeContextProperties): React.JSX.Element {
   const dpr = Math.min(globalThis.devicePixelRatio, 2);
   const [isCanvasReady, setIsCanvasReady] = useState(false);
-
-  useEffect(() => {
-    THREE.Object3D.DEFAULT_UP.set(0, 0, 1); // Z-up coordinate system
-  }, []);
 
   return (
     <Canvas
@@ -71,6 +68,7 @@ export function ThreeProvider({
         enablePan={enablePan}
         enableGrid={enableGrid}
         enableAxes={enableAxes}
+        upDirection={upDirection}
         stageOptions={stageOptions}
         zoomSpeed={zoomSpeed}
         gizmoContainer={gizmoContainer}

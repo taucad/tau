@@ -23,7 +23,7 @@ export const ChatViewer = memo(function () {
       enableGrid: state.context.enableGrid,
       enableAxes: state.context.enableAxes,
       enableMatcap: state.context.enableMatcap,
-      enableYupRotation: state.context.enableYupRotation,
+      upDirection: state.context.upDirection,
     }),
     (a, b) =>
       a.enableSurfaces === b.enableSurfaces &&
@@ -32,7 +32,7 @@ export const ChatViewer = memo(function () {
       a.enableGrid === b.enableGrid &&
       a.enableAxes === b.enableAxes &&
       a.enableMatcap === b.enableMatcap &&
-      a.enableYupRotation === b.enableYupRotation,
+      a.upDirection === b.upDirection,
   );
 
   return (
@@ -45,7 +45,7 @@ export const ChatViewer = memo(function () {
       enableSurfaces={graphicsState.enableSurfaces}
       enableLines={graphicsState.enableLines}
       enableMatcap={graphicsState.enableMatcap}
-      enableYupRotation={graphicsState.enableYupRotation}
+      upDirection={graphicsState.upDirection}
       geometries={geometries}
       gizmoContainer="#viewport-gizmo-container"
     />

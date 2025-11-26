@@ -13,6 +13,7 @@ function calculateFovFromAngle(cameraFovAngle: number): number {
 /**
  * Calculates a 3D position from spherical coordinates.
  * Converts distance (radius), horizontal angle (phi), and vertical angle (theta) into x, y, z coordinates.
+ * Supports both Z-up and Y-up coordinate systems by checking THREE.Object3D.DEFAULT_UP.
  */
 function calculatePositionFromSphericalCoordinates({
   distance,
@@ -24,9 +25,22 @@ function calculatePositionFromSphericalCoordinates({
   verticalAngle: number;
 }): THREE.Vector3 {
   const cosTheta = Math.cos(verticalAngle);
+  const sinTheta = Math.sin(verticalAngle);
   const x = distance * cosTheta * Math.cos(horizontalAngle);
+
+  // Check if Y-up coordinate system is active
+  const isYaxisUp = THREE.Object3D.DEFAULT_UP.y === 1;
+
+  if (isYaxisUp) {
+    // Y-up: Y is the vertical axis, Z is horizontal (negated to match coordinate handedness)
+    const y = distance * sinTheta;
+    const z = -distance * cosTheta * Math.sin(horizontalAngle);
+    return new THREE.Vector3(x, y, z);
+  }
+
+  // Z-up: Z is the vertical axis, Y is horizontal
   const y = distance * cosTheta * Math.sin(horizontalAngle);
-  const z = distance * Math.sin(verticalAngle);
+  const z = distance * sinTheta;
   return new THREE.Vector3(x, y, z);
 }
 

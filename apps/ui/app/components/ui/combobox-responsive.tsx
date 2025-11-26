@@ -7,6 +7,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '#components/ui/drawer.js';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
 import { cn } from '#utils/ui.utils.js';
+import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 
 type GroupedItems<T> = {
   name: string;
@@ -38,6 +39,8 @@ type ComboBoxResponsiveProperties<T> = Omit<React.HTMLAttributes<HTMLDivElement>
   readonly isSearchEnabled?: boolean;
   readonly withVirtualization?: boolean;
   readonly virtualizationHeight?: number;
+  readonly isLoadingMore?: boolean;
+  readonly onLoadMore?: () => void;
 };
 
 export function ComboBoxResponsive<T>({
@@ -62,6 +65,8 @@ export function ComboBoxResponsive<T>({
   isSearchEnabled = true,
   withVirtualization = false,
   virtualizationHeight = 300,
+  isLoadingMore = false,
+  onLoadMore,
   ...properties
 }: ComboBoxResponsiveProperties<T>): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
@@ -122,6 +127,8 @@ export function ComboBoxResponsive<T>({
               isSearchEnabled={isSearchEnabled}
               withVirtualization={withVirtualization}
               virtualizationHeight={virtualizationHeight}
+              isLoadingMore={isLoadingMore}
+              onLoadMore={onLoadMore}
             />
           </div>
         </DrawerContent>
@@ -151,6 +158,8 @@ export function ComboBoxResponsive<T>({
           isSearchEnabled={isSearchEnabled}
           withVirtualization={withVirtualization}
           virtualizationHeight={virtualizationHeight}
+          isLoadingMore={isLoadingMore}
+          onLoadMore={onLoadMore}
         />
       </PopoverContent>
     </Popover>
@@ -171,6 +180,8 @@ function ItemList<T>({
   isSearchEnabled = true,
   withVirtualization = false,
   virtualizationHeight = 300,
+  isLoadingMore = false,
+  onLoadMore,
 }: {
   readonly groupedItems: Array<GroupedItems<T>>;
   readonly setSelectedItem: (item: T) => void;
@@ -185,6 +196,8 @@ function ItemList<T>({
   readonly isSearchEnabled?: boolean;
   readonly withVirtualization?: boolean;
   readonly virtualizationHeight?: number;
+  readonly isLoadingMore?: boolean;
+  readonly onLoadMore?: () => void;
 }) {
   const [search, setSearch] = React.useState('');
 
@@ -256,6 +269,17 @@ function ItemList<T>({
               totalCount={filteredItems.length}
               itemContent={renderItem}
               className="overflow-y-auto"
+              endReached={onLoadMore}
+              components={{
+                Footer: isLoadingMore
+                  ? () => (
+                      <div className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
+                        <LoadingSpinner />
+                        <span>Loading more...</span>
+                      </div>
+                    )
+                  : undefined,
+              }}
             />
           )}
         </CommandList>

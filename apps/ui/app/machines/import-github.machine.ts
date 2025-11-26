@@ -31,6 +31,9 @@ export type ImportGitHubContext = {
     | undefined;
   branches: Array<{ name: string; sha: string }>;
   selectedBranch: string;
+  branchesPage: number;
+  hasMoreBranches: boolean;
+  isLoadingMoreBranches: boolean;
   downloadProgress: { loaded: number; total: number };
   extractProgress: { processed: number; total: number };
   unzipRef: ActorRefFrom<UnzipMachineActor> | undefined;
@@ -80,6 +83,7 @@ type ImportGitHubEventInternal =
   | { type: 'selectBranch'; branch: string }
   | { type: 'startImport' }
   | { type: 'cancelDownload' }
+  | { type: 'loadMoreBranches' }
   | {
       type: 'updateDownloadProgress';
       loaded: number;
@@ -125,6 +129,7 @@ type RepoMetadataResult = {
 type BranchesResult = {
   type: 'branchesRetrieved';
   branches: Array<{ name: string; sha: string }>;
+  hasMore: boolean;
 };
 
 // Get repository metadata actor
@@ -139,15 +144,20 @@ const getRepoMetadataActor = fromPromise<RepoMetadataResult, { owner: string; re
 });
 
 // Get branches actor
-const getBranchesActor = fromPromise<BranchesResult, { owner: string; repo: string }>(async ({ input }) => {
-  const client = getGitHubClient();
-  const branches = await client.listBranches(input.owner, input.repo);
+const getBranchesActor = fromPromise<BranchesResult, { owner: string; repo: string; page: number }>(
+  async ({ input }): Promise<BranchesResult> => {
+    const client = getGitHubClient();
+    const result = await client.listBranches(input.owner, input.repo, input.page);
 
-  return {
-    type: 'branchesRetrieved',
-    branches,
-  };
-});
+    return {
+      type: 'branchesRetrieved' as const,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- result.branches is correctly typed from GitHubApiClient
+      branches: result.branches,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- result.hasMore is correctly typed from GitHubApiClient
+      hasMore: result.hasMore,
+    };
+  },
+);
 
 // Download actor
 const downloadZipActor = fromPromise<
@@ -359,6 +369,31 @@ export const importGitHubMachine = setup({
         assertEvent(event.output, 'branchesRetrieved');
         return event.output.branches;
       },
+      hasMoreBranches({ event }) {
+        assertActorDoneEvent(event);
+        assertEvent(event.output, 'branchesRetrieved');
+        return event.output.hasMore;
+      },
+      branchesPage: 1,
+    }),
+    appendBranches: assign({
+      branches({ event, context }) {
+        assertActorDoneEvent(event);
+        assertEvent(event.output, 'branchesRetrieved');
+        return [...context.branches, ...event.output.branches];
+      },
+      hasMoreBranches({ event }) {
+        assertActorDoneEvent(event);
+        assertEvent(event.output, 'branchesRetrieved');
+        return event.output.hasMore;
+      },
+      branchesPage({ context }) {
+        return context.branchesPage + 1;
+      },
+      isLoadingMoreBranches: false,
+    }),
+    setLoadingMoreBranches: assign({
+      isLoadingMoreBranches: true,
     }),
     setSelectedBranch: assign({
       selectedBranch({ event }) {
@@ -481,6 +516,9 @@ export const importGitHubMachine = setup({
       const errorMessage = metadataError.message;
       return errorMessage.includes('404') || errorMessage.includes('403') || errorMessage.includes('rate limit');
     },
+    canLoadMoreBranches({ context }) {
+      return context.hasMoreBranches && !context.isLoadingMoreBranches;
+    },
   },
 }).createMachine({
   id: 'importGitHub',
@@ -495,6 +533,9 @@ export const importGitHubMachine = setup({
     repoMetadata: undefined,
     branches: [],
     selectedBranch: input.ref ?? 'main',
+    branchesPage: 1,
+    hasMoreBranches: false,
+    isLoadingMoreBranches: false,
     downloadProgress: { loaded: 0, total: 0 },
     extractProgress: { processed: 0, total: 0 },
     unzipRef: undefined,
@@ -528,6 +569,42 @@ export const importGitHubMachine = setup({
         startImport: {
           target: 'downloading',
           guard: 'hasValidRepo',
+        },
+        loadMoreBranches: {
+          target: 'loadingMoreBranches',
+          guard: 'canLoadMoreBranches',
+        },
+      },
+    },
+    loadingMoreBranches: {
+      entry: 'setLoadingMoreBranches',
+      invoke: {
+        id: 'loadMoreBranches',
+        src: 'getBranchesActor',
+        input: ({ context }) => ({
+          owner: context.owner,
+          repo: context.repo,
+          page: context.branchesPage + 1,
+        }),
+        onDone: {
+          target: 'enteringDetails',
+          actions: 'appendBranches',
+        },
+        onError: {
+          target: 'enteringDetails',
+          actions: assign({
+            isLoadingMoreBranches: false,
+          }),
+        },
+      },
+      on: {
+        updateRepoUrl: {
+          actions: ['clearError', 'updateRepoUrl', 'parseRepoUrl'],
+          target: 'checkingRepo',
+          reenter: true,
+        },
+        selectBranch: {
+          actions: 'setSelectedBranch',
         },
       },
     },
@@ -609,12 +686,11 @@ export const importGitHubMachine = setup({
                 input: ({ context }) => ({
                   owner: context.owner,
                   repo: context.repo,
+                  page: 1,
                 }),
                 onDone: {
                   target: 'success',
-                  actions: assign({
-                    branches: ({ event }) => event.output.branches,
-                  }),
+                  actions: 'setBranches',
                 },
                 onError: {
                   target: 'error',
@@ -622,6 +698,7 @@ export const importGitHubMachine = setup({
                     'setBranchesError',
                     assign({
                       branches: [],
+                      hasMoreBranches: false,
                     }),
                   ],
                 },

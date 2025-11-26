@@ -5,12 +5,14 @@ import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 type BranchSelectorProperties = {
   readonly branches: Array<{ name: string; sha: string }>;
   readonly selectedBranch: string;
-  readonly onSelect: (branch: string) => void;
   readonly isDisabled?: boolean;
+  readonly isLoadingMore?: boolean;
+  readonly onSelect: (branch: string) => void;
+  readonly onLoadMore?: () => void;
 };
 
 export function BranchSelector(properties: BranchSelectorProperties): React.JSX.Element {
-  const { branches, selectedBranch, onSelect, isDisabled } = properties;
+  const { branches, selectedBranch, isDisabled, isLoadingMore, onSelect, onLoadMore } = properties;
 
   const groupedBranches = [
     {
@@ -39,7 +41,9 @@ export function BranchSelector(properties: BranchSelectorProperties): React.JSX.
       withVirtualization={branches.length > 20}
       virtualizationHeight={300}
       className="w-full"
+      isLoadingMore={isLoadingMore}
       onSelect={onSelect}
+      onLoadMore={onLoadMore}
     >
       <Button variant="outline" className="w-full justify-between" disabled={isDisabled}>
         <div className="flex items-center gap-2">

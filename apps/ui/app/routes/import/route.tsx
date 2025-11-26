@@ -248,6 +248,8 @@ export default function ImportRoute(): React.JSX.Element {
   const branches = useSelector(importActorRef, (snapshot) => snapshot.context.branches);
   const selectedBranch = useSelector(importActorRef, (snapshot) => snapshot.context.selectedBranch);
   const fetchErrors = useSelector(importActorRef, (snapshot) => snapshot.context.fetchErrors);
+  const hasMoreBranches = useSelector(importActorRef, (snapshot) => snapshot.context.hasMoreBranches);
+  const isLoadingMoreBranches = useSelector(importActorRef, (snapshot) => snapshot.context.isLoadingMoreBranches);
 
   // Navigate when build is created
   useEffect(() => {
@@ -259,7 +261,10 @@ export default function ImportRoute(): React.JSX.Element {
   const fileTree = useMemo(() => buildFileTree(files), [files]);
 
   switch (true) {
-    case state.matches('enteringDetails') || state.matches('checkingRepo') || state.matches('fetchingRepoInfo'): {
+    case state.matches('enteringDetails') ||
+      state.matches('checkingRepo') ||
+      state.matches('fetchingRepoInfo') ||
+      state.matches('loadingMoreBranches'): {
       const isValidRepo = repoOwner.length > 0 && repoName.length > 0;
       const isCheckingOrFetching = state.matches('checkingRepo') || state.matches('fetchingRepoInfo');
 
@@ -352,9 +357,17 @@ export default function ImportRoute(): React.JSX.Element {
                       <BranchSelector
                         branches={branches}
                         selectedBranch={selectedBranch}
+                        isLoadingMore={isLoadingMoreBranches}
                         onSelect={(branch) => {
                           importActorRef.send({ type: 'selectBranch', branch });
                         }}
+                        onLoadMore={
+                          hasMoreBranches
+                            ? () => {
+                                importActorRef.send({ type: 'loadMoreBranches' });
+                              }
+                            : undefined
+                        }
                       />
                     </div>
                   ) : undefined}

@@ -61,18 +61,30 @@ class GitHubApiClient {
   /**
    * Get list of branches for a repository
    */
-  public async listBranches(owner: string, repo: string): Promise<Array<{ name: string; sha: string }>> {
+  public async listBranches(
+    owner: string,
+    repo: string,
+    page = 1,
+  ): Promise<{
+    branches: Array<{ name: string; sha: string }>;
+    hasMore: boolean;
+  }> {
+    const perPage = 100;
     const { data } = await this.octokit.repos.listBranches({
       owner,
       repo,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- GitHub API uses snake_case
-      per_page: 100,
+      per_page: perPage,
+      page,
     });
 
-    return data.map((branch) => ({
-      name: branch.name,
-      sha: branch.commit.sha,
-    }));
+    return {
+      branches: data.map((branch) => ({
+        name: branch.name,
+        sha: branch.commit.sha,
+      })),
+      hasMore: data.length === perPage,
+    };
   }
 
   /**

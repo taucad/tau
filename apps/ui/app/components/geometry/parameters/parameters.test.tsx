@@ -2101,7 +2101,30 @@ describe('Parameters - Empty State', () => {
     expect(screen.getByText('Parameters will appear here when they become available for this model')).toBeTruthy();
   });
 
-  it('should show empty state when mergedData is empty', () => {
+  it('should show empty state when schema has no properties', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {},
+    };
+
+    render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={{}}
+          jsonSchema={schema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Should show default empty message
+    expect(screen.getByText('No parameters available')).toBeTruthy();
+    expect(screen.getByText('Parameters will appear here when they become available for this model')).toBeTruthy();
+  });
+
+  it('should show form when schema has properties even if data is empty', () => {
     const schema: RJSFSchema = {
       type: 'object',
       properties: {
@@ -2121,9 +2144,10 @@ describe('Parameters - Empty State', () => {
       </TestWrapper>,
     );
 
-    // Should show default empty message
-    expect(screen.getByText('No parameters available')).toBeTruthy();
-    expect(screen.getByText('Parameters will appear here when they become available for this model')).toBeTruthy();
+    // Should show the form, not the empty state
+    expect(screen.queryByText('No parameters available')).toBeNull();
+    // Should render the parameter field
+    expect(screen.getByLabelText('Input for Name')).toBeTruthy();
   });
 
   it('should show custom empty message when provided', () => {

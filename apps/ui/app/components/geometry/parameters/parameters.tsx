@@ -119,7 +119,7 @@ export function Parameters({
   );
 
   const mergedData = useMemo(() => ({ ...defaultParameters, ...parameters }), [defaultParameters, parameters]);
-  const hasParameters = jsonSchema && Object.keys(mergedData).length > 0;
+  const hasParameters = jsonSchema && Object.keys(jsonSchema.properties ?? {}).length > 0;
 
   // Initialize the ref with the current edited parameters when component mounts or data changes
   React.useEffect(() => {

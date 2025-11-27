@@ -3,6 +3,42 @@ import type { Primitive } from '@gltf-transform/core';
 import { Document, NodeIO } from '@gltf-transform/core';
 
 /**
+ * Type guard to check if a shape has a color property
+ */
+function hasColor(shape: unknown): shape is { color: number[] } {
+  return (
+    typeof shape === 'object' &&
+    shape !== null &&
+    'color' in shape &&
+    Array.isArray((shape as Record<string, unknown>)['color'])
+  );
+}
+
+/**
+ * Extract color from JSCAD shape, returning normalized RGBA values
+ * @param shape - JSCAD geometry object that may have a color property
+ * @returns RGBA array [r, g, b, a] with values 0-1, or undefined if no color
+ */
+function extractColorFromShape(shape: unknown): [number, number, number, number] | undefined {
+  if (!hasColor(shape)) {
+    return undefined;
+  }
+
+  const { color } = shape;
+  if (color.length < 3) {
+    return undefined;
+  }
+
+  // JSCAD colors are already in 0-1 range
+  const r = color[0] ?? 0.8;
+  const g = color[1] ?? 0.8;
+  const b = color[2] ?? 0.8;
+  const a = color[3] ?? 1;
+
+  return [r, g, b, a];
+}
+
+/**
  * Extract triangulated mesh data from JSCAD shapes
  *
  * Processes JSCAD geometries (geom3 objects) and converts them into WebGL-compatible
@@ -139,36 +175,58 @@ function extractMeshDataFromJscadShapes(shapes: unknown[]): {
  * - Double-sided rendering enabled for robustness (handles reversed normals)
  * - Metallic: 0.1 (slightly reflective, mostly matte)
  * - Roughness: 0.7 (matte surface)
- * - Base color: Light gray [0.8, 0.8, 0.8, 1.0] for neutral appearance
+ * - Base color: Provided color or light gray [0.8, 0.8, 0.8, 1.0] for neutral appearance
+ * - Alpha mode: BLEND if color has transparency, otherwise OPAQUE
  *
  * Primitive mode 4 specifies TRIANGLES (each 3 indices = 1 triangle).
  *
  * @param document - glTF Document to create mesh components within
- * @param vertices - Flat array of vertex positions [x1,y1,z1,x2,y2,z2,...]
- * @param normals - Flat array of normals [nx1,ny1,nz1,nx2,ny2,nz2,...]
- * @param indices - Flat array of triangle indices [v0,v1,v2,v3,v4,v5,...]
+ * @param meshData - Object containing mesh data and optional color
  * @returns Configured glTF Primitive ready to be added to a Mesh
  *
  * @internal This is a helper function. For public API, see jscadToGltf().
  */
 function createPrimitiveFromJscadMesh(
   document: Document,
-  vertices: number[],
-  normals: number[],
-  indices: number[],
+  meshData: {
+    vertices: number[];
+    normals: number[];
+    indices: number[];
+    color?: [number, number, number, number];
+  },
 ): Primitive {
+  const { vertices, normals, indices, color } = meshData;
+
   // Convert to typed arrays
   const positions = new Float32Array(vertices);
   const normalsArray = new Float32Array(normals);
   const indicesArray = new Uint32Array(indices);
 
-  // Create material with default styling
+  // Use provided color or default to light gray
+  const baseColor: [number, number, number, number] = color ?? [0.8, 0.8, 0.8, 1];
+
+  // Create material with color styling
   const material = document
     .createMaterial()
     .setDoubleSided(true)
     .setMetallicFactor(0.1)
     .setRoughnessFactor(0.7)
-    .setBaseColorFactor([0.8, 0.8, 0.8, 1]); // Light gray
+    .setBaseColorFactor(baseColor);
+
+  // Set alpha mode based on opacity
+  if (baseColor[3] < 1) {
+    material.setAlphaMode('BLEND');
+  } else {
+    material.setAlphaMode('OPAQUE');
+  }
+
+  // Set material name based on color for debugging
+  if (color) {
+    const colorString = `rgba(${Math.round(color[0] * 255)},${Math.round(color[1] * 255)},${Math.round(color[2] * 255)},${color[3].toFixed(2)})`;
+    material.setName(colorString);
+  } else {
+    material.setName('default');
+  }
 
   // Create primitive with triangulated data
   const primitive = document
@@ -183,14 +241,19 @@ function createPrimitiveFromJscadMesh(
 }
 
 /**
- * Create a GLTF document from JSCAD shapes
+ * Create a GLTF document from JSCAD shapes with color support
  *
  * Orchestrates the complete conversion pipeline from JSCAD geometries to a glTF document.
  * This function:
  * 1. Creates a new glTF Document with a buffer
- * 2. Creates a scene and extracts mesh data from all shapes
- * 3. Creates a mesh with a primitive containing the geometry
- * 4. Adds the mesh to the scene
+ * 2. Creates a separate mesh/node for each shape to preserve individual geometry
+ * 3. Applies color from each shape to its material
+ * 4. Adds all meshes to the scene
+ *
+ * Color handling:
+ * - Each shape gets its own mesh with its own material
+ * - Colors are preserved from colorize() applied to individual shapes
+ * - Transparent colors (alpha < 1) are handled with BLEND alpha mode
  *
  * If no valid geometry is extracted (empty vertices or indices), the scene contains no mesh
  * but the document is still valid (which jscadToGltf handles by checking for empty geometry).
@@ -206,45 +269,63 @@ function createGltfDocumentFromJscadShapes(shapes: unknown[]): Document {
 
   const scene = document.createScene();
 
-  // Extract mesh data from all shapes
-  const { vertices, normals, indices } = extractMeshDataFromJscadShapes(shapes);
+  // Process each shape separately to preserve individual geometry
+  for (const [shapeIndex, shape] of shapes.entries()) {
+    // Extract color from this shape
+    const color = extractColorFromShape(shape);
 
-  // Only create mesh if we have geometry
-  if (vertices.length > 0 && indices.length > 0) {
-    const mesh = document.createMesh();
-    const primitive = createPrimitiveFromJscadMesh(document, vertices, normals, indices);
-    mesh.addPrimitive(primitive);
+    // Extract mesh data from this single shape
+    const { vertices, normals, indices } = extractMeshDataFromJscadShapes([shape]);
 
-    const node = document.createNode().setMesh(mesh).setName('JSCAD_Geometry');
-    scene.addChild(node);
+    // Only create mesh if we have geometry
+    if (vertices.length > 0 && indices.length > 0) {
+      const mesh = document.createMesh();
+      const primitive = createPrimitiveFromJscadMesh(document, { vertices, normals, indices, color });
+      mesh.addPrimitive(primitive);
+
+      // Create a descriptive node name
+      const nodeName = `JSCAD_Shape_${shapeIndex}`;
+
+      const node = document.createNode().setMesh(mesh).setName(nodeName);
+      scene.addChild(node);
+    }
   }
 
   return document;
 }
 
 /**
- * Convert JSCAD geometry to GLTF Blob for rendering
+ * Convert JSCAD geometry to GLTF Blob for rendering with full color support
  *
  * Public API for converting JSCAD geometries into renderable glTF format (GLB binary).
  * This is the primary integration point between the JSCAD CAD engine and the 3D viewer.
  *
  * Conversion pipeline:
  * 1. Normalizes input to array format (single shape -> [shape])
- * 2. Creates glTF document with mesh data extraction, triangulation, and normals
- * 3. Serializes to GLB (binary glTF) format for efficient transmission and storage
+ * 2. Creates separate mesh/node for each shape to preserve individual geometry
+ * 3. Creates glTF document with mesh data extraction, triangulation, normals, and colors
+ * 4. Serializes to GLB (binary glTF) format for efficient transmission and storage
+ *
+ * Color support:
+ * - Automatically detects and preserves colors applied via colorize() from @jscad/modeling
+ * - Each shape gets its own mesh with its own material and color
+ * - Supports both opaque and transparent colors (RGB and RGBA)
+ * - Colors are defined as [R, G, B, A] arrays with values 0-1
  *
  * The function handles:
  * - Single shapes or arrays of shapes
+ * - Colored and non-colored shapes (defaults to light gray)
  * - Empty geometry (returns valid GLB with empty scene)
  * - Throws error for invalid or unconvertible shapes
  *
- * Material properties are set to sensible defaults (light gray, matte, double-sided)
+ * Material properties are set to sensible defaults (matte, double-sided, low metallic)
  * suitable for preview visualization. For production export, use specialized exporters.
  *
  * @param shape - JSCAD geometry object(s):
- *               - Single geom3/geom2 object
+ *               - Single geom3/geom2 object (colored or default)
  *               - Array of geometry objects
  *               - Any shape produced by @jscad/modeling functions
+ *               - Shapes created with colorize() will preserve their colors
  * @returns Promise resolving to GLB Blob (binary glTF format)
  *          Type: 'model/gltf-binary'
  *
@@ -253,12 +334,17 @@ function createGltfDocumentFromJscadShapes(shapes: unknown[]): Document {
  *
  * @example
  * ```typescript
- * import { box } from '@jscad/modeling/primitives';
+ * import { primitives, colors } from '@jscad/modeling';
  * import { jscadToGltf } from '#components/geometry/kernel/jscad/jscad-to-gltf.js';
  *
- * const shape = box({ size: 10 });
+ * // Simple shape without color
+ * const shape = primitives.cube({ size: 10 });
  * const gltfData = await jscadToGltf(shape);
- * // Use gltfData with Three.js or other WebGL viewers
+ *
+ * // Colored shapes (each will be a separate mesh with its own color)
+ * const redSphere = colors.colorize([1, 0, 0], primitives.sphere({ radius: 5 }));
+ * const blueCube = colors.colorize([0, 0, 1, 0.5], primitives.cube({ size: 10 })); // transparent
+ * const coloredGltf = await jscadToGltf([redSphere, blueCube]);
  * ```
  */
 export async function jscadToGltf(shape: unknown): Promise<Uint8Array> {

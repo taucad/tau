@@ -1,9 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import type { chatTabs } from '#routes/builds_.$id/chat-interface-nav.js';
 import { useViewContext } from '#routes/builds_.$id/chat-interface-view-context.js';
-
 /**
  * Minimum panel size constants for the chat interface layout (in pixels)
  * Used for both default sizes and minimum constraints on panes
@@ -40,6 +39,8 @@ const defaultChatInterfaceSizes = [
   panelMinSizeStandard, // Details panel: additional object details and metadata
 ];
 
+export const mobileDrawerSnapPoints: Array<number | string> = [0.7, 1];
+
 export type ChatInterfaceState = {
   // View context state
   isChatOpen: boolean;
@@ -67,6 +68,14 @@ export type ChatInterfaceState = {
   isFullHeightPanel: boolean;
   setIsFullHeightPanel: (value: boolean | ((previous: boolean) => boolean)) => void;
 
+  // Mobile drawer state
+  drawerOpen: boolean;
+  handleDrawerChange: (value: boolean) => void;
+  snapPoints: Array<number | string>;
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
+  activeSnapPoint: number | string | null;
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
+  handleSnapChange: (value: number | string | null) => void;
   // Actions
   handleTabChange: (value: string) => void;
   toggleFullHeightPanel: () => void;
@@ -81,9 +90,39 @@ export function useChatInterfaceState(): ChatInterfaceState {
   const [chatResize, setChatResize] = useCookie(cookieName.chatRsInterface, defaultChatInterfaceSizes);
   const [activeTab, setActiveTab] = useCookie<(typeof chatTabs)[number]['id']>(cookieName.chatInterfaceTab, 'chat');
   const [isFullHeightPanel, setIsFullHeightPanel] = useCookie(cookieName.chatInterfaceFullHeight, false);
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(activeTab !== 'model');
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
+  const [snapPoint, setSnapPoint] = useState<number | string | null>(mobileDrawerSnapPoints[0]!);
+
+  const handleDrawerChange = (value: boolean): void => {
+    console.log('handleDrawerChange', value);
+    if (!value && activeTab !== 'model') {
+      console.log('setting active tab to model');
+      setActiveTab('model');
+    }
+
+    setDrawerOpen(value);
+  };
 
   const handleTabChange = (value: string): void => {
+    console.log('handleTabChange', value);
     setActiveTab(value as (typeof chatTabs)[number]['id']);
+
+    if (!drawerOpen && value !== 'model') {
+      // When the drawer is closed and the new tab is not the model tab, open the drawer
+      setDrawerOpen(true);
+      console.log('opening drawer');
+    } else if (drawerOpen && value === 'model') {
+      // When the drawer is open and the new tab is the model tab, close the drawer
+      setDrawerOpen(false);
+      console.log('closing drawer');
+    }
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
+  const handleSnapChange = (value: number | string | null): void => {
+    console.log('handleSnapChange', value);
+    setSnapPoint(value);
   };
 
   const toggleFullHeightPanel = (): void => {
@@ -100,6 +139,11 @@ export function useChatInterfaceState(): ChatInterfaceState {
     setActiveTab,
     isFullHeightPanel,
     setIsFullHeightPanel,
+    drawerOpen,
+    handleDrawerChange,
+    activeSnapPoint: snapPoint,
+    snapPoints: mobileDrawerSnapPoints,
+    handleSnapChange,
     handleTabChange,
     toggleFullHeightPanel,
   };

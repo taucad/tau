@@ -123,8 +123,10 @@ export type ParameterContext = {
   enableContinualOnChange: boolean;
   /** Current unit factor (cached for comparison) */
   currentUnitFactor: number;
-  /** Current symbol (for parsing) */
-  currentSymbol: LengthSymbol;
+  /** Current unit symbol (for parsing) */
+  currentUnitSymbol: LengthSymbol;
+  /** Display unit string (for UI display) */
+  displayUnit: string;
   /** Default value in baseline units (for range calculations) */
   defaultValue: number;
   /** Optional minimum value in baseline units */
@@ -168,8 +170,8 @@ export type ParameterInput = {
   enableContinualOnChange: boolean;
   /** Initial unit factor */
   initialUnitFactor: number;
-  /** Initial symbol */
-  initialSymbol: LengthSymbol;
+  /** Initial unit symbol */
+  initialUnitSymbol: LengthSymbol;
   /** Ref to the input element for focus/arrow key listeners */
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- ref can be null
   inputRef: React.RefObject<HTMLInputElement | null>;
@@ -265,7 +267,7 @@ type ParameterEventInternal =
   | { type: 'sliderReleased'; value: number }
   | { type: 'inputChanged'; value: number }
   | { type: 'textInputChanged'; text: string }
-  | { type: 'unitChanged'; unitFactor: number; unit: string }
+  | { type: 'unitChanged'; unitFactor: number; unitSymbol: string }
   | {
       type: 'configChanged';
       defaultValue?: number;
@@ -407,10 +409,11 @@ export const parameterMachine = setup({
         return {};
       }
 
-      // Convert committed value to new display units
+      // Only apply unit conversion for length measurements
       const isLength = context.descriptor === 'length';
-      const newUnitFactor = event.unitFactor;
-      const newUnit = event.unit;
+      const newUnitFactor = isLength ? event.unitFactor : 1;
+      const newUnit = isLength ? event.unitSymbol : 'mm';
+      const displayUnit = isLength ? event.unitSymbol : '';
       const displayValue = context.committedValue / newUnitFactor;
 
       // Apply rounding if conversion occurred
@@ -434,7 +437,8 @@ export const parameterMachine = setup({
       return {
         localValue,
         currentUnitFactor: newUnitFactor,
-        currentSymbol: newUnit,
+        currentUnitSymbol: newUnit,
+        displayUnit,
         ...range,
         ...formatting,
       };
@@ -456,6 +460,8 @@ export const parameterMachine = setup({
       // Check if descriptor changed - if so, we may need to update unit handling
       const isLength = newDescriptor === 'length';
       const unitFactor = isLength ? context.currentUnitFactor : 1;
+      const unitSymbol = isLength ? context.currentUnitSymbol : 'mm';
+      const displayUnit = isLength ? context.currentUnitSymbol : '';
 
       // Recalculate display value based on new descriptor
       const displayValue = context.committedValue / unitFactor;
@@ -483,6 +489,9 @@ export const parameterMachine = setup({
         max: newMax,
         originalStep: newStep,
         enableContinualOnChange: newEnableContinualOnChange,
+        currentUnitFactor: unitFactor,
+        currentUnitSymbol: unitSymbol,
+        displayUnit,
         localValue,
         ...range,
         ...formatting,
@@ -587,9 +596,9 @@ export const parameterMachine = setup({
         if (parsed) {
           // If a unit was specified and differs from current unit, convert
           // eslint-disable-next-line unicorn/prefer-ternary -- ternary is not as readable as if/else
-          if (parsed.symbol && parsed.symbol !== context.currentSymbol) {
+          if (parsed.symbol && parsed.symbol !== context.currentUnitSymbol) {
             // Convert from parsed unit to current display unit
-            valueInDisplayUnit = convertLength(parsed.value, parsed.symbol, context.currentSymbol);
+            valueInDisplayUnit = convertLength(parsed.value, parsed.symbol, context.currentUnitSymbol);
           } else {
             valueInDisplayUnit = parsed.value;
           }
@@ -640,9 +649,11 @@ export const parameterMachine = setup({
 }).createMachine({
   id: 'parameter',
   context({ input }) {
+    // Only apply unit conversion for length measurements
     const isLength = input.descriptor === 'length';
     const unitFactor = isLength ? input.initialUnitFactor : 1;
-    const symbol = isLength ? input.initialSymbol : 'mm';
+    const unitSymbol = isLength ? input.initialUnitSymbol : 'mm';
+    const displayUnit = isLength ? input.initialUnitSymbol : '';
     const displayValue = input.initialValue / unitFactor;
     const hasConversion = isLength && unitFactor !== 1;
     const localValue = hasConversion ? roundToSignificantFigures(displayValue, 4) : displayValue;
@@ -668,7 +679,8 @@ export const parameterMachine = setup({
       descriptor: input.descriptor,
       enableContinualOnChange: input.enableContinualOnChange,
       currentUnitFactor: unitFactor,
-      currentSymbol: symbol,
+      currentUnitSymbol: unitSymbol,
+      displayUnit,
       defaultValue: input.defaultValue,
       min: input.min,
       max: input.max,

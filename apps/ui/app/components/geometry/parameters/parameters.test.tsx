@@ -2825,6 +2825,270 @@ describe('Parameters - Edge Cases', () => {
   });
 });
 
+describe('Parameters - Unit Conversion Only for Length', () => {
+  let mockOnParametersChange: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockOnParametersChange = vi.fn();
+  });
+
+  it('should apply unit conversion for length descriptor when units change from mm to cm', () => {
+    const defaultParameters = {
+      width: 100, // 100mm
+    };
+
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        width: {
+          type: 'number',
+          default: 100,
+        },
+      },
+    };
+
+    // Start with mm units
+    const mmUnits: Units = {
+      length: {
+        factor: 1, // Mm
+        symbol: 'mm',
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={mmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Initial value should be 100
+    const widthInput = screen.getByLabelText('Input for Width');
+    expect(widthInput).toHaveValue('100');
+
+    // Change to cm units (10mm = 1cm, so 100mm = 10cm)
+    const cmUnits: Units = {
+      length: {
+        factor: 10, // Cm (1cm = 10mm)
+        symbol: 'cm',
+      },
+    };
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={cmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Value should now be 10 (100mm / 10 = 10cm)
+    const widthInputAfterConversion = screen.getByLabelText('Input for Width');
+    expect(widthInputAfterConversion).toHaveValue('10');
+  });
+
+  it('should NOT apply unit conversion for angle descriptor when units change', () => {
+    const defaultParameters = {
+      rotation: 45, // 45 degrees
+    };
+
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        rotation: {
+          type: 'number',
+          default: 45,
+        },
+      },
+    };
+
+    // Start with mm units
+    const mmUnits: Units = {
+      length: {
+        factor: 1, // Mm
+        symbol: 'mm',
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={mmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Initial value should be 45
+    const rotationInput = screen.getByLabelText('Input for Rotation');
+    expect(rotationInput).toHaveValue('45');
+
+    // Change to cm units
+    const cmUnits: Units = {
+      length: {
+        factor: 10, // Cm
+        symbol: 'cm',
+      },
+    };
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={cmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Value should STILL be 45 (not converted)
+    const rotationInputAfterConversion = screen.getByLabelText('Input for Rotation');
+    expect(rotationInputAfterConversion).toHaveValue('45');
+  });
+
+  it('should NOT apply unit conversion for count descriptor when units change', () => {
+    const defaultParameters = {
+      count: 5,
+    };
+
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        count: {
+          type: 'number',
+          default: 5,
+        },
+      },
+    };
+
+    // Start with mm units
+    const mmUnits: Units = {
+      length: {
+        factor: 1,
+        symbol: 'mm',
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={mmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Initial value should be 5
+    const countInput = screen.getByLabelText('Input for Count');
+    expect(countInput).toHaveValue('5');
+
+    // Change to cm units
+    const cmUnits: Units = {
+      length: {
+        factor: 10,
+        symbol: 'cm',
+      },
+    };
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={cmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Value should STILL be 5 (not converted)
+    const countInputAfterConversion = screen.getByLabelText('Input for Count');
+    expect(countInputAfterConversion).toHaveValue('5');
+  });
+
+  it('should NOT apply unit conversion for unitless descriptor when units change', () => {
+    const defaultParameters = {
+      factor: 2.5,
+    };
+
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        factor: {
+          type: 'number',
+          default: 2.5,
+        },
+      },
+    };
+
+    // Start with mm units
+    const mmUnits: Units = {
+      length: {
+        factor: 1,
+        symbol: 'mm',
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={mmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Initial value should be 2.5
+    const factorInput = screen.getByLabelText('Input for Factor');
+    expect(factorInput).toHaveValue('2.5');
+
+    // Change to cm units
+    const cmUnits: Units = {
+      length: {
+        factor: 10,
+        symbol: 'cm',
+      },
+    };
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={cmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Value should STILL be 2.5 (not converted)
+    const factorInputAfterConversion = screen.getByLabelText('Input for Factor');
+    expect(factorInputAfterConversion).toHaveValue('2.5');
+  });
+});
+
 describe('Parameters - onChange Only Modified Values', () => {
   let user: ReturnType<typeof userEvent.setup>;
   let mockOnParametersChange: ReturnType<typeof vi.fn>;

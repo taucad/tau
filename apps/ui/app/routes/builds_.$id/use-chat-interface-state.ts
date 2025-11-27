@@ -23,12 +23,13 @@ export const panelSizeViewer = 420;
 
 /**
  * Default panel sizes for the chat interface layout (in pixels)
- * Maps to the pane order: [ChatHistory, Explorer, Viewer, Parameters, Editor, Converter, Git, Details]
+ * Maps to the pane order: [ChatHistory, FileTree, Explorer, Viewer, Parameters, Editor, Converter, Git, Details]
  */
 const defaultChatInterfaceSizes = [
   // Left-side panels
   panelMinSizeStandard, // Chat History panel: displays conversation history and file navigation
-  panelMinSizeStandard, // Explorer panel: shows project file structure and navigation tree
+  panelMinSizeStandard, // File Tree panel: shows project file structure and file management
+  panelMinSizeStandard, // Explorer panel: shows 3D model structure and navigation tree
   // Center panel
   panelSizeViewer, // Viewer panel: main 3D CAD visualization and content area
   // Right-side panels
@@ -43,6 +44,8 @@ export type ChatInterfaceState = {
   // View context state
   isChatOpen: boolean;
   setIsChatOpen: (value: boolean | ((previous: boolean) => boolean)) => void;
+  isFileTreeOpen: boolean;
+  setIsFileTreeOpen: (value: boolean | ((previous: boolean) => boolean)) => void;
   isParametersOpen: boolean;
   setIsParametersOpen: (value: boolean | ((previous: boolean) => boolean)) => void;
   isEditorOpen: boolean;
@@ -104,6 +107,7 @@ export function useChatInterfaceState(): ChatInterfaceState {
 
 type UsePanePositionObserverOptions = {
   isChatOpen: boolean;
+  isFileTreeOpen: boolean;
   isParametersOpen: boolean;
   isEditorOpen: boolean;
   isExplorerOpen: boolean;
@@ -121,8 +125,16 @@ export function usePanePositionObserver(
   allotmentRef: React.RefObject<HTMLDivElement | null>,
   options: UsePanePositionObserverOptions,
 ): void {
-  const { isChatOpen, isParametersOpen, isEditorOpen, isExplorerOpen, isConverterOpen, isGitOpen, isDetailsOpen } =
-    options;
+  const {
+    isChatOpen,
+    isFileTreeOpen,
+    isParametersOpen,
+    isEditorOpen,
+    isExplorerOpen,
+    isConverterOpen,
+    isGitOpen,
+    isDetailsOpen,
+  } = options;
 
   useEffect(() => {
     if (!allotmentRef.current) {
@@ -192,6 +204,7 @@ export function usePanePositionObserver(
   }, [
     allotmentRef,
     isChatOpen,
+    isFileTreeOpen,
     isParametersOpen,
     isEditorOpen,
     isExplorerOpen,

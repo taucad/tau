@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { Eye, EyeClosed } from 'lucide-react';
 import { ChatHistory } from '#routes/builds_.$id/chat-history.js';
+import { ChatFileTree } from '#routes/builds_.$id/chat-file-tree.js';
 import { ChatParameters } from '#routes/builds_.$id/chat-parameters.js';
 import { ChatViewer } from '#routes/builds_.$id/chat-viewer.js';
 import { ChatEditorLayout } from '#routes/builds_.$id/chat-editor-layout.js';
@@ -124,6 +125,9 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
       >
         <TabsContent enableAnimation={false} value="chat">
           <ChatHistory />
+        </TabsContent>
+        <TabsContent enableAnimation={false} value="files">
+          <ChatFileTree />
         </TabsContent>
         <TabsContent enableAnimation={false} value="parameters">
           <ChatParameters />

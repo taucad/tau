@@ -151,9 +151,7 @@ const getBranchesActor = fromPromise<BranchesResult, { owner: string; repo: stri
 
     return {
       type: 'branchesRetrieved' as const,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- result.branches is correctly typed from GitHubApiClient
       branches: result.branches,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- result.hasMore is correctly typed from GitHubApiClient
       hasMore: result.hasMore,
     };
   },

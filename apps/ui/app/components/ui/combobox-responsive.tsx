@@ -112,25 +112,23 @@ export function ComboBoxResponsive<T>({
           <DrawerDescription className="sr-only" id="drawer-description">
             {description}
           </DrawerDescription>
-          <div className="mt-1">
-            <ItemList
-              groupedItems={groupedItems}
-              setSelectedItem={handleSelect}
-              selectedItem={selectedItem}
-              renderLabel={renderLabel}
-              getValue={getValue}
-              searchPlaceHolder={searchPlaceHolder}
-              asChildLabel={asChildLabel}
-              labelClassName={labelClassName}
-              isDisabled={isDisabled}
-              emptyListMessage={emptyListMessage}
-              isSearchEnabled={isSearchEnabled}
-              withVirtualization={withVirtualization}
-              virtualizationHeight={virtualizationHeight}
-              isLoadingMore={isLoadingMore}
-              onLoadMore={onLoadMore}
-            />
-          </div>
+          <ItemList
+            groupedItems={groupedItems}
+            setSelectedItem={handleSelect}
+            selectedItem={selectedItem}
+            renderLabel={renderLabel}
+            getValue={getValue}
+            searchPlaceHolder={searchPlaceHolder}
+            asChildLabel={asChildLabel}
+            labelClassName={labelClassName}
+            isDisabled={isDisabled}
+            emptyListMessage={emptyListMessage}
+            isSearchEnabled={isSearchEnabled}
+            withVirtualization={withVirtualization}
+            virtualizationHeight={virtualizationHeight}
+            isLoadingMore={isLoadingMore}
+            onLoadMore={onLoadMore}
+          />
         </DrawerContent>
       </Drawer>
     );

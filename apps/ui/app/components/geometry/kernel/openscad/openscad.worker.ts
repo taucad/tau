@@ -44,8 +44,8 @@ class OpenScadWorker extends KernelWorker {
     const code = await this.readFile(filename, 'utf8');
     try {
       const instance = await this.createInstance();
-      const inputFile = '/input.scad';
-      const parameterFile = '/params.json';
+      const inputFile = filename;
+      const parameterFile = `${filename}.params.json`;
 
       instance.FS.writeFile(inputFile, code);
 
@@ -90,8 +90,8 @@ class OpenScadWorker extends KernelWorker {
       }
 
       const instance = await this.createInstance();
-      const inputFile = '/input.scad';
-      const outputFile = '/output.off';
+      const inputFile = filename;
+      const outputFile = `${filename}.off`;
 
       instance.FS.writeFile(inputFile, code);
 

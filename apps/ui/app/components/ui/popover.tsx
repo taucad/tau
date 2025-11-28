@@ -1,5 +1,6 @@
 import * as React from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
+import { Slot } from '@radix-ui/react-slot';
 import { cn } from '#utils/ui.utils.js';
 
 function Popover({ ...properties }: React.ComponentProps<typeof PopoverPrimitive.Root>): React.JSX.Element {
@@ -14,10 +15,25 @@ function PopoverContent({
   className,
   align = 'center',
   sideOffset = 4,
+  withPortal = true,
   ...properties
-}: React.ComponentProps<typeof PopoverPrimitive.Content>): React.JSX.Element {
+}: React.ComponentProps<typeof PopoverPrimitive.Content> & {
+  /**
+   * Whether to use a portal for the popover content.
+   * If true, the popover content will be rendered in a portal.
+   * If false, the popover content will be rendered in the same document.
+   *
+   * `true` is useful to keep the popover content css cascade isolated from the parent.
+   * `false` is useful to apply child-level css to the popover content.
+   *
+   * @default true
+   */
+  readonly withPortal?: boolean;
+}): React.JSX.Element {
+  const Component = withPortal ? PopoverPrimitive.Portal : Slot;
+
   return (
-    <PopoverPrimitive.Portal>
+    <Component>
       <PopoverPrimitive.Content
         data-slot="popover-content"
         align={align}
@@ -28,7 +44,7 @@ function PopoverContent({
         )}
         {...properties}
       />
-    </PopoverPrimitive.Portal>
+    </Component>
   );
 }
 

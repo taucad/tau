@@ -9,8 +9,6 @@ import {
   Upload,
   FileEdit,
   Search,
-  ChevronsRight,
-  ChevronsDown,
   Eye,
   EyeOff,
   Folder,
@@ -641,15 +639,6 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
     [uploadTargetPath, tree, fileManagerRef, fileExplorerRef],
   );
 
-  const allFoldersExpanded = useMemo(() => {
-    const allFolderIds = tree
-      .getItems()
-      .filter((item) => item.isFolder() && item.getId() !== rootId)
-      .map((item) => item.getId());
-
-    return allFolderIds.length > 0 && allFolderIds.every((id) => expandedItems.includes(id));
-  }, [tree, expandedItems]);
-
   return (
     <>
       <input
@@ -669,7 +658,7 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
               <TooltipTrigger asChild>
                 <Button
                   aria-label={showHiddenFiles ? 'Hide hidden files' : 'Show hidden files'}
-                  className="size-6"
+                  className="size-6 rounded-sm"
                   size="icon"
                   variant="ghost"
                   onClick={() => {
@@ -685,7 +674,7 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
               <TooltipTrigger asChild>
                 <Button
                   aria-label="Search files"
-                  className="size-6"
+                  className="size-6 rounded-sm"
                   size="icon"
                   variant="ghost"
                   onClick={() => {
@@ -699,7 +688,7 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
             </Tooltip>
             <DropdownMenu>
               <Tooltip>
-                <Button asChild aria-label="Create new file" className="size-6" size="icon" variant="ghost">
+                <Button asChild aria-label="Create new file" className="size-6 rounded-sm" size="icon" variant="ghost">
                   <TooltipTrigger asChild>
                     <DropdownMenuTrigger>
                       <FilePlus className="size-4" />
@@ -734,7 +723,7 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
               <TooltipTrigger asChild>
                 <Button
                   aria-label="Create new folder"
-                  className="size-6"
+                  className="size-6 rounded-sm"
                   size="icon"
                   variant="ghost"
                   onClick={handleCreateFolder}
@@ -748,7 +737,7 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
               <TooltipTrigger asChild>
                 <Button
                   aria-label="Collapse all folders"
-                  className="size-6"
+                  className="size-6 rounded-sm"
                   size="icon"
                   variant="ghost"
                   onClick={() => {
@@ -774,7 +763,7 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-6"
+                className="size-6 rounded-sm"
                 aria-label="Close search"
                 onClick={() => {
                   tree.closeSearch();

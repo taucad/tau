@@ -19,10 +19,9 @@ const floatingPanelTriggerButtonVariants = cva(cn('text-muted-foreground hover:t
       absolute: cn(
         'absolute group-data-[state=open]/floating-panel:z-10',
         'rounded-md group-data-[state=open]/floating-panel:rounded-sm',
-        'size-8 group-data-[state=open]/floating-panel:size-7',
+        'size-8 group-data-[state=open]/floating-panel:size-6',
         'md:opacity-0 md:group-hover/floating-panel:opacity-100',
-        'transition-opacity duration-200',
-        'max-md:size-7 max-md:items-center max-md:justify-center max-md:border',
+        'max-md:size-6 max-md:items-center max-md:justify-center max-md:border',
       ),
       static: '',
     },
@@ -42,26 +41,26 @@ const floatingPanelTriggerButtonVariants = cva(cn('text-muted-foreground hover:t
       variant: 'absolute',
       side: 'left',
       align: 'start',
-      class: 'top-0 ml-0.25 mt-0.25 left-0 max-md:ml-2',
+      class: 'top-0 ml-0.75 mt-0.75 left-0 max-md:ml-2',
     },
     {
       variant: 'absolute',
       side: 'left',
       align: 'end',
-      class: 'bottom-0 ml-0.25 mb-0.25 left-0 max-md:ml-2',
+      class: 'bottom-0 ml-0.75 mb-0.75 left-0 max-md:ml-2',
     },
     // Right side positions
     {
       variant: 'absolute',
       side: 'right',
       align: 'start',
-      class: 'top-0 mr-0.25 mt-0.25 right-0 max-md:mr-2',
+      class: 'top-0 mr-0.75 mt-0.75 right-0 max-md:mr-2',
     },
     {
       variant: 'absolute',
       side: 'right',
       align: 'end',
-      class: 'bottom-0 mr-0.25 mb-0.25 right-0 max-md:mr-2',
+      class: 'bottom-0 mr-0.75 mb-0.75 right-0 max-md:mr-2',
     },
   ],
   defaultVariants: {
@@ -77,13 +76,12 @@ const floatingPanelContentHeaderVariants = cva(
     'flex h-7.75 items-center justify-between',
     'border-b bg-sidebar py-0.5',
     'text-sm font-medium text-muted-foreground',
-    'transition-all duration-100 ease-in-out',
   ),
   {
     variants: {
       side: {
-        left: 'pr-0.25 pl-2 group-hover/floating-panel:pl-8 max-md:pl-12',
-        right: 'pr-8 pl-2 max-md:pr-12',
+        left: 'pr-0.75 pl-2 group-hover/floating-panel:pl-8 max-md:pl-12',
+        right: 'pr-7 pl-2 max-md:pr-12',
       },
     },
     defaultVariants: {
@@ -233,15 +231,7 @@ function FloatingPanelTriggerButton({
           data-slot="floating-panel-trigger"
           onClick={onClick}
         >
-          <span
-            className={cn(
-              'transition-transform duration-300 ease-in-out',
-              '[&_svg]:transition-colors [&_svg]:duration-300',
-              'group-data-[state=open]/floating-panel:[&_svg]:text-primary',
-            )}
-          >
-            {renderIcon()}
-          </span>
+          <span className={cn('group-data-[state=open]/floating-panel:[&_svg]:text-primary')}>{renderIcon()}</span>
           {children}
         </Button>
       </TooltipTrigger>
@@ -406,7 +396,7 @@ function FloatingPanelContentHeaderActions({
   return (
     <div
       className={cn(
-        'flex items-center max-md:gap-0.5',
+        'flex items-center pl-1 max-md:gap-0.5',
         'group-hover/floating-panel:opacity-100 md:opacity-0',
         // Position header actions above the DrawerHandle to keep them interactive
         'z-60',

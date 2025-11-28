@@ -169,7 +169,7 @@ export function ChatHistorySelector(): ReactNode {
   return (
     <>
       <div className={cn('wrap w-full flex-1 truncate', isGeneratingName && 'animate-pulse')}>{activeChat?.name}</div>
-      <FloatingPanelContentHeaderActions>
+      <FloatingPanelContentHeaderActions className="h-7.75">
         <Tooltip>
           <ComboBoxResponsive
             groupedItems={groupedChats}
@@ -189,7 +189,7 @@ export function ChatHistorySelector(): ReactNode {
             }}
           >
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="size-7">
+              <Button variant="ghost" size="icon" className="size-6 rounded-sm">
                 <Search className="size-4" />
               </Button>
             </TooltipTrigger>
@@ -199,7 +199,7 @@ export function ChatHistorySelector(): ReactNode {
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-7" onClick={handleAddChat}>
+            <Button variant="ghost" size="icon" className="size-6 rounded-sm" onClick={handleAddChat}>
               <Plus className="size-4" />
             </Button>
           </TooltipTrigger>

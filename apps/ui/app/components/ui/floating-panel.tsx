@@ -407,6 +407,7 @@ function FloatingPanelContentHeaderActions({
     <div
       className={cn(
         'flex items-center max-md:gap-0.5',
+        'group-hover/floating-panel:opacity-100 md:opacity-0',
         // Position header actions above the DrawerHandle to keep them interactive
         'z-60',
         className,

@@ -15,6 +15,7 @@ import {
   EyeOff,
   Folder,
   FolderOpen,
+  CopyMinus,
 } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { minimatch } from 'minimatch';
@@ -640,20 +641,6 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
     [uploadTargetPath, tree, fileManagerRef, fileExplorerRef],
   );
 
-  const handleToggleExpandAll = useCallback(() => {
-    const allFolderIds = tree
-      .getItems()
-      .filter((item) => item.isFolder() && item.getId() !== rootId)
-      .map((item) => item.getId());
-    const allExpanded = allFolderIds.every((id) => expandedItems.includes(id));
-
-    if (allExpanded) {
-      tree.collapseAll();
-    } else {
-      void tree.expandAll();
-    }
-  }, [tree, expandedItems]);
-
   const allFoldersExpanded = useMemo(() => {
     const allFolderIds = tree
       .getItems()
@@ -681,22 +668,8 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  aria-label={allFoldersExpanded ? 'Collapse all folders' : 'Expand all folders'}
-                  className="size-7"
-                  size="icon"
-                  variant="ghost"
-                  onClick={handleToggleExpandAll}
-                >
-                  {allFoldersExpanded ? <ChevronsDown className="size-4" /> : <ChevronsRight className="size-4" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{allFoldersExpanded ? 'Collapse all folders' : 'Expand all folders'}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
                   aria-label={showHiddenFiles ? 'Hide hidden files' : 'Show hidden files'}
-                  className="size-7"
+                  className="size-6"
                   size="icon"
                   variant="ghost"
                   onClick={() => {
@@ -712,7 +685,7 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
               <TooltipTrigger asChild>
                 <Button
                   aria-label="Search files"
-                  className="size-7"
+                  className="size-6"
                   size="icon"
                   variant="ghost"
                   onClick={() => {
@@ -726,7 +699,7 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
             </Tooltip>
             <DropdownMenu>
               <Tooltip>
-                <Button asChild aria-label="Create new file" className="size-7" size="icon" variant="ghost">
+                <Button asChild aria-label="Create new file" className="size-6" size="icon" variant="ghost">
                   <TooltipTrigger asChild>
                     <DropdownMenuTrigger>
                       <FilePlus className="size-4" />
@@ -761,7 +734,7 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
               <TooltipTrigger asChild>
                 <Button
                   aria-label="Create new folder"
-                  className="size-7"
+                  className="size-6"
                   size="icon"
                   variant="ghost"
                   onClick={handleCreateFolder}
@@ -770,6 +743,22 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Create new folder</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label="Collapse all folders"
+                  className="size-6"
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => {
+                    tree.collapseAll();
+                  }}
+                >
+                  <CopyMinus className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Collapse all folders</TooltipContent>
             </Tooltip>
           </FloatingPanelContentHeaderActions>
         </FloatingPanelContentHeader>
@@ -785,7 +774,7 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-7"
+                className="size-6"
                 aria-label="Close search"
                 onClick={() => {
                   tree.closeSearch();

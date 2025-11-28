@@ -168,8 +168,9 @@ export function ChatHistorySelector(): ReactNode {
 
   return (
     <>
-      <div className="flex h-7 w-full items-center justify-between">
-        <div className="group min-w-0 flex-1">
+      <div className="wrap w-full flex-1 truncate md:hidden">Chat - {activeChat?.name}</div>
+      <div className="z-50 flex h-7 w-full min-w-0 flex-1 items-center justify-end max-md:gap-1 max-md:pr-2 md:justify-between">
+        <div className="group md:min-w-0 md:flex-1">
           <Tooltip>
             <ComboBoxResponsive
               groupedItems={groupedChats}
@@ -192,11 +193,11 @@ export function ChatHistorySelector(): ReactNode {
                 <Button
                   variant="ghost"
                   className={cn(
-                    'h-7 w-full justify-between gap-2 truncate overflow-hidden rounded-sm text-left',
+                    'h-7 justify-between gap-2 truncate overflow-hidden rounded-sm text-left max-md:size-7 max-md:items-center max-md:justify-center max-md:border md:w-full',
                     isGeneratingName && 'animate-pulse',
                   )}
                 >
-                  <span className="truncate">
+                  <span className="truncate max-md:hidden">
                     {isLoading ? null : chatCount === 0 ? 'Initial design' : (activeChat?.name ?? 'Select a chat')}
                   </span>
                   <Search className="size-4 shrink-0 md:opacity-0 md:group-hover:opacity-100" />
@@ -207,10 +208,15 @@ export function ChatHistorySelector(): ReactNode {
           </Tooltip>
         </div>
 
-        <div className="flex-shrink-0">
+        <div className="shrink-0">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="size-7 rounded-sm" onClick={handleAddChat}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 rounded-sm max-md:size-7 max-md:items-center max-md:justify-center max-md:border"
+                onClick={handleAddChat}
+              >
                 <Plus className="size-4" />
               </Button>
             </TooltipTrigger>

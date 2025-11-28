@@ -2,9 +2,12 @@ import * as React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
+import { Slot } from '@radix-ui/react-slot';
 import { cn } from '#utils/ui.utils.js';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { DrawerClose, DrawerHandle } from '#components/ui/drawer.js';
+import { useIsMobile } from '#hooks/use-mobile.js';
 
 type Side = 'left' | 'right';
 type TooltipSide = 'left' | 'right' | 'top' | 'bottom';
@@ -19,6 +22,7 @@ const floatingPanelTriggerButtonVariants = cva(cn('text-muted-foreground hover:t
         'size-8 group-data-[state=open]/floating-panel:size-7',
         'md:opacity-0 md:group-hover/floating-panel:opacity-100',
         'transition-opacity duration-200',
+        'max-md:size-7 max-md:items-center max-md:justify-center max-md:border',
       ),
       static: '',
     },
@@ -38,26 +42,26 @@ const floatingPanelTriggerButtonVariants = cva(cn('text-muted-foreground hover:t
       variant: 'absolute',
       side: 'left',
       align: 'start',
-      class: 'top-0 ml-0.25 mt-0.25 left-0 ',
+      class: 'top-0 ml-0.25 mt-0.25 left-0 max-md:ml-2',
     },
     {
       variant: 'absolute',
       side: 'left',
       align: 'end',
-      class: 'bottom-0 ml-0.25 mb-0.25 left-0  ',
+      class: 'bottom-0 ml-0.25 mb-0.25 left-0 max-md:ml-2',
     },
     // Right side positions
     {
       variant: 'absolute',
       side: 'right',
       align: 'start',
-      class: 'top-0 mr-0.25 mt-0.25 right-0',
+      class: 'top-0 mr-0.25 mt-0.25 right-0 max-md:mr-2',
     },
     {
       variant: 'absolute',
       side: 'right',
       align: 'end',
-      class: 'bottom-0 mr-0.25 mb-0.25 right-0 ',
+      class: 'bottom-0 mr-0.25 mb-0.25 right-0 max-md:mr-2',
     },
   ],
   defaultVariants: {
@@ -76,8 +80,8 @@ const floatingPanelContentHeaderVariants = cva(
   {
     variants: {
       side: {
-        left: 'pr-0.25 pl-8',
-        right: 'pr-8 pl-2',
+        left: 'pr-0.25 pl-8 max-md:pl-12',
+        right: 'pr-8 pl-2 max-md:pr-12',
       },
     },
     defaultVariants: {
@@ -254,17 +258,24 @@ type FloatingPanelCloseProps = {
 function FloatingPanelClose({ icon, className, children, tooltipContent }: FloatingPanelCloseProps): React.JSX.Element {
   const { isOpen, close } = useFloatingPanel();
 
+  const isMobile = useIsMobile();
+
+  // Only use DrawerClose on mobile to ensure it's wrapped with a `Dialog` from `<Drawer />`
+  const Comp = isMobile ? DrawerClose : Slot;
+
   return (
-    <FloatingPanelTriggerButton
-      icon={icon}
-      tooltipSide="top"
-      className={className}
-      tooltipContent={tooltipContent(isOpen)}
-      variant="absolute"
-      onClick={close}
-    >
-      {children}
-    </FloatingPanelTriggerButton>
+    <Comp asChild>
+      <FloatingPanelTriggerButton
+        icon={icon}
+        tooltipSide="top"
+        className={className}
+        tooltipContent={tooltipContent(isOpen)}
+        variant="absolute"
+        onClick={close}
+      >
+        {children}
+      </FloatingPanelTriggerButton>
+    </Comp>
   );
 }
 
@@ -371,9 +382,11 @@ function FloatingPanelContentHeader({ children, className }: FloatingPanelConten
 
   return (
     <div
-      className={cn(floatingPanelContentHeaderVariants({ side }), className)}
+      className={cn('relative', floatingPanelContentHeaderVariants({ side }), className)}
       data-slot="floating-panel-content-header"
     >
+      {/* Mobile drawer handle area */}
+      <DrawerHandle className="absolute! inset-0! m-auto! size-full! opacity-0!" />
       {children}
     </div>
   );

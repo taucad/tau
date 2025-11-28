@@ -29,7 +29,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
       <div
         className="relative h-full transition-all duration-200 ease-linear"
         style={{
-          paddingBottom: isModelTab ? '0' : `calc(${Number(activeSnapPoint) - 0.06} * 100dvh)`,
+          paddingBottom: isModelTab ? '0' : `calc(${Number(activeSnapPoint) - 0.07} * 100dvh)`,
         }}
       >
         <ChatViewer />
@@ -76,6 +76,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
       </div>
 
       <Drawer
+        handleOnly
         open={drawerOpen}
         snapPoints={snapPoints}
         activeSnapPoint={activeSnapPoint}
@@ -97,10 +98,9 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
           className={cn(
             'flex-1 rounded-t-lg border-t bg-sidebar',
             //
-            // 'h-[94vh]!',
             'data-[vaul-drawer-direction=bottom]:max-h-[94vh]!',
             'data-[vaul-drawer-direction=bottom]:mt-0',
-            '[&_[data-slot=drawer-handle]]:bg-sidebar-primary/20',
+            '[&_[data-slot=drawer-handle-indicator]]:bg-sidebar-primary/15',
           )}
           style={{
             // Height: isModelTab ? '100dvh' : `calc(${Number(activeSnapPoint) - 0.06} * 100dvh)`,
@@ -112,7 +112,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
             value={activeTab}
             className="flex h-full flex-col pb-13"
             style={{
-              height: isModelTab ? '100dvh' : `calc(${Number(activeSnapPoint) - 0.06} * 100dvh)`,
+              height: isModelTab ? '100dvh' : `calc(${Number(activeSnapPoint) - 0.05} * 100dvh)`,
             }}
             onValueChange={handleTabChange}
           >

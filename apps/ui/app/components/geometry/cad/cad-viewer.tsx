@@ -48,6 +48,10 @@ export function CadViewer({
             throw new Error('2D geometries are not supported');
           }
 
+          case 'video-stream': {
+            throw new Error('Video stream geometries are not supported');
+          }
+
           default: {
             const neverGeometry: never = geometry;
             throw new Error(`Unknown geometry type: ${JSON.stringify(neverGeometry)}`);

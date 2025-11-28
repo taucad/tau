@@ -119,7 +119,7 @@ export function ChatEditorTabs(): React.JSX.Element {
               <Fragment key={file.path}>
                 <div
                   className={cn(
-                    'group/editor-tab flex h-full min-w-0 cursor-pointer items-center gap-1 border-y border-y-transparent pr-2 pl-3 text-sm transition-colors',
+                    'group/editor-tab flex h-full min-w-0 cursor-pointer items-center gap-0 border-y border-y-transparent pr-1 pl-3 text-sm transition-colors',
                     'hover:bg-accent/40',
                     isActive
                       ? 'border-b-[1.5px] border-b-primary bg-accent/50 text-foreground'
@@ -159,7 +159,7 @@ export function ChatEditorTabs(): React.JSX.Element {
                         size="icon"
                         variant="ghost"
                         className={cn(
-                          'ml-1 size-4 p-0 transition-opacity hover:bg-primary/20',
+                          'ml-1 size-6 rounded-sm p-0 transition-opacity hover:bg-primary/20',
                           isActive ? 'opacity-100' : 'opacity-0 group-hover/editor-tab:opacity-100',
                         )}
                         aria-label={`Close ${file.name}`}

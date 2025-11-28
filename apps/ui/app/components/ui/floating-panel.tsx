@@ -73,14 +73,16 @@ const floatingPanelTriggerButtonVariants = cva(cn('text-muted-foreground hover:t
 
 const floatingPanelContentHeaderVariants = cva(
   cn(
+    'group/floating-panel-content-header',
     'flex h-7.75 items-center justify-between',
     'border-b bg-sidebar py-0.5',
     'text-sm font-medium text-muted-foreground',
+    'transition-all duration-100 ease-in-out',
   ),
   {
     variants: {
       side: {
-        left: 'pr-0.25 pl-8 max-md:pl-12',
+        left: 'pr-0.25 pl-2 group-hover/floating-panel:pl-8 max-md:pl-12',
         right: 'pr-8 pl-2 max-md:pr-12',
       },
     },
@@ -392,6 +394,33 @@ function FloatingPanelContentHeader({ children, className }: FloatingPanelConten
   );
 }
 
+type FloatingPanelContentHeaderActionsProps = {
+  readonly children: React.ReactNode;
+  readonly className?: string;
+};
+
+function FloatingPanelContentHeaderActions({
+  children,
+  className,
+}: FloatingPanelContentHeaderActionsProps): React.JSX.Element {
+  return (
+    <div
+      className={cn(
+        'flex items-center max-md:gap-0.5',
+        '[&_[data-slot=button]]:rounded-sm',
+        '[&_[data-slot=button]]:size-7',
+        'max-md:[&_[data-slot=button]]:border',
+        // Position header actions above the DrawerHandle to keep them interactive
+        'z-60',
+        className,
+      )}
+      data-slot="floating-panel-content-header-actions"
+    >
+      {children}
+    </div>
+  );
+}
+
 function FloatingPanelContentTitle({ children, className }: FloatingPanelContentTitleProps): React.JSX.Element {
   return (
     <h2 className={cn('text-sm font-medium text-nowrap', className)} data-slot="floating-panel-content-title">
@@ -415,6 +444,7 @@ export {
   FloatingPanelToggle,
   FloatingPanelContent,
   FloatingPanelContentHeader,
+  FloatingPanelContentHeaderActions,
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
   useFloatingPanel,

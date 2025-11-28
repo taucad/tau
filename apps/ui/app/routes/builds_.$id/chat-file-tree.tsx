@@ -12,7 +12,7 @@ import { formatKeyCombination } from '#utils/keys.utils.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 
 const toggleFileTreeKeyCombination = {
-  key: 's',
+  key: 'f',
   ctrlKey: true,
 } satisfies KeyCombination;
 

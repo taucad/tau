@@ -407,9 +407,6 @@ function FloatingPanelContentHeaderActions({
     <div
       className={cn(
         'flex items-center max-md:gap-0.5',
-        '[&_[data-slot=button]]:rounded-sm',
-        '[&_[data-slot=button]]:size-7',
-        'max-md:[&_[data-slot=button]]:border',
         // Position header actions above the DrawerHandle to keep them interactive
         'z-60',
         className,

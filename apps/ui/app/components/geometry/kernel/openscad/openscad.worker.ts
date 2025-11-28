@@ -49,7 +49,18 @@ class OpenScadWorker extends KernelWorker {
 
       instance.FS.writeFile(inputFile, code);
 
-      instance.callMain([inputFile, '-o', parameterFile, '--export-format=param']);
+      const result = instance.callMain([inputFile, '-o', parameterFile, '--export-format=param']);
+
+      if (result !== 0) {
+        // @ts-expect-error - TODO: add typings for formatException, ensure this API is available.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call -- formatException is not typed
+        const error = instance.formatException?.(result);
+        return createKernelError({
+          message: `Failed to build geometry: ${result}`,
+          startColumn: 0,
+          startLineNumber: 0,
+        });
+      }
 
       let jsonSchema: JSONSchema7 = { type: 'object' };
       let defaultParameters: Record<string, unknown> = {};
@@ -104,7 +115,18 @@ class OpenScadWorker extends KernelWorker {
         }
       }
 
-      instance.callMain(args);
+      const result = instance.callMain(args);
+
+      if (result !== 0) {
+        // @ts-expect-error - TODO: add typings for formatException, ensure this API is available.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call -- formatException is not typed
+        const error = instance.formatException?.(result);
+        return createKernelError({
+          message: `Failed to build geometry: ${result}`,
+          startColumn: 0,
+          startLineNumber: 0,
+        });
+      }
 
       const offData = instance.FS.readFile(outputFile, { encoding: 'utf8' });
       this.offDataMemory[geometryId] = offData;

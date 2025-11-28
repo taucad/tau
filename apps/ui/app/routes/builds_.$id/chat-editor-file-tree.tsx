@@ -41,6 +41,7 @@ import {
   FloatingPanelContent,
   FloatingPanelContentBody,
   FloatingPanelContentHeader,
+  FloatingPanelContentHeaderActions,
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
 import {
@@ -64,6 +65,7 @@ import { HighlightText } from '#components/highlight-text.js';
 import { FileExtensionIcon, getIconIdFromExtension } from '#components/icons/file-extension-icon.js';
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 
 type TreeItemData = {
   path: string;
@@ -673,78 +675,103 @@ export const ChatEditorFileTree = memo(function (): React.JSX.Element {
       />
 
       <FloatingPanelContent>
-        <FloatingPanelContentHeader className="flex items-center justify-between pr-1">
+        <FloatingPanelContentHeader>
           <FloatingPanelContentTitle>Files</FloatingPanelContentTitle>
-          <div className="flex items-center -space-x-0.5 text-muted-foreground/50 **:data-[slot=button]:rounded-xs">
-            <Button
-              aria-label={allFoldersExpanded ? 'Collapse all folders' : 'Expand all folders'}
-              className="size-6"
-              size="icon"
-              variant="ghost"
-              onClick={handleToggleExpandAll}
-            >
-              {allFoldersExpanded ? <ChevronsDown className="size-4" /> : <ChevronsRight className="size-4" />}
-            </Button>
-            <Button
-              aria-label={showHiddenFiles ? 'Hide hidden files' : 'Show hidden files'}
-              className="size-6"
-              size="icon"
-              variant="ghost"
-              onClick={() => {
-                setShowHiddenFiles(!showHiddenFiles);
-              }}
-            >
-              {showHiddenFiles ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
-            </Button>
-            <Button
-              aria-label="Search files"
-              className="size-6"
-              size="icon"
-              variant="ghost"
-              onClick={() => {
-                tree.openSearch();
-              }}
-            >
-              <Search className="size-4" />
-            </Button>
-            <DropdownMenu>
-              <Button asChild aria-label="Create new file" className="size-6" size="icon" variant="ghost">
-                <DropdownMenuTrigger>
-                  <FilePlus className="size-4" />
-                </DropdownMenuTrigger>
-              </Button>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>New File</DropdownMenuLabel>
-                <DropdownMenuItem
+          <FloatingPanelContentHeaderActions>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label={allFoldersExpanded ? 'Collapse all folders' : 'Expand all folders'}
+                  className="size-7"
+                  size="icon"
+                  variant="ghost"
+                  onClick={handleToggleExpandAll}
+                >
+                  {allFoldersExpanded ? <ChevronsDown className="size-4" /> : <ChevronsRight className="size-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{allFoldersExpanded ? 'Collapse all folders' : 'Expand all folders'}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label={showHiddenFiles ? 'Hide hidden files' : 'Show hidden files'}
+                  className="size-7"
+                  size="icon"
+                  variant="ghost"
                   onClick={() => {
-                    handleCreateFile(undefined);
+                    setShowHiddenFiles(!showHiddenFiles);
                   }}
                 >
-                  Blank
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                {kernelConfigurations.map((kernel) => (
+                  {showHiddenFiles ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{showHiddenFiles ? 'Hide hidden files' : 'Show hidden files'}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label="Search files"
+                  className="size-7"
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => {
+                    tree.openSearch();
+                  }}
+                >
+                  <Search className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Search files</TooltipContent>
+            </Tooltip>
+            <DropdownMenu>
+              <Tooltip>
+                <Button asChild aria-label="Create new file" className="size-7" size="icon" variant="ghost">
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger>
+                      <FilePlus className="size-4" />
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                </Button>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel>New File</DropdownMenuLabel>
                   <DropdownMenuItem
-                    key={kernel.id}
                     onClick={() => {
-                      handleCreateFile(kernel);
+                      handleCreateFile(undefined);
                     }}
                   >
-                    {kernel.name} ({kernel.mainFile})
+                    Blank
                   </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
+                  <DropdownMenuSeparator />
+                  {kernelConfigurations.map((kernel) => (
+                    <DropdownMenuItem
+                      key={kernel.id}
+                      onClick={() => {
+                        handleCreateFile(kernel);
+                      }}
+                    >
+                      {kernel.name} ({kernel.mainFile})
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+                <TooltipContent>Create new file</TooltipContent>
+              </Tooltip>
             </DropdownMenu>
-            <Button
-              aria-label="Create new folder"
-              className="size-6"
-              size="icon"
-              variant="ghost"
-              onClick={handleCreateFolder}
-            >
-              <FolderPlus className="mt-0.5 size-4" />
-            </Button>
-          </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label="Create new folder"
+                  className="size-7"
+                  size="icon"
+                  variant="ghost"
+                  onClick={handleCreateFolder}
+                >
+                  <FolderPlus className="mt-0.5 size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Create new folder</TooltipContent>
+            </Tooltip>
+          </FloatingPanelContentHeaderActions>
         </FloatingPanelContentHeader>
         <FloatingPanelContentBody className="flex min-h-0 flex-col p-1">
           {tree.isSearchOpen() && (

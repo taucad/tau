@@ -95,9 +95,7 @@ export function useChatInterfaceState(): ChatInterfaceState {
   const [snapPoint, setSnapPoint] = useState<number | string | null>(mobileDrawerSnapPoints[0]!);
 
   const handleDrawerChange = (value: boolean): void => {
-    console.log('handleDrawerChange', value);
     if (!value && activeTab !== 'model') {
-      console.log('setting active tab to model');
       setActiveTab('model');
     }
 
@@ -105,23 +103,19 @@ export function useChatInterfaceState(): ChatInterfaceState {
   };
 
   const handleTabChange = (value: string): void => {
-    console.log('handleTabChange', value);
     setActiveTab(value as (typeof chatTabs)[number]['id']);
 
     if (!drawerOpen && value !== 'model') {
       // When the drawer is closed and the new tab is not the model tab, open the drawer
       setDrawerOpen(true);
-      console.log('opening drawer');
     } else if (drawerOpen && value === 'model') {
       // When the drawer is open and the new tab is the model tab, close the drawer
       setDrawerOpen(false);
-      console.log('closing drawer');
     }
   };
 
   // eslint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
   const handleSnapChange = (value: number | string | null): void => {
-    console.log('handleSnapChange', value);
     setSnapPoint(value);
   };
 

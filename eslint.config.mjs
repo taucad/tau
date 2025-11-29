@@ -53,6 +53,7 @@ const config = [
       '**/generated',
       '**/assets',
       '**/.source/**/*', // Fumadocs source files.
+      '**/.netlify',
     ],
   },
   // First, apply XO's base configuration

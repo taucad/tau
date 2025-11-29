@@ -58,7 +58,7 @@ class OpenScadWorker extends KernelWorker {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call -- formatException is not typed
         const error = instance.formatException?.(result);
         return createKernelError({
-          message: `Failed to build geometry: ${result}`,
+          message: `Failed to build geometry: ${error}`,
           startColumn: 0,
           startLineNumber: 0,
         });
@@ -126,7 +126,7 @@ class OpenScadWorker extends KernelWorker {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call -- formatException is not typed
         const error = instance.formatException?.(result);
         return createKernelError({
-          message: `Failed to build geometry: ${result}`,
+          message: `Failed to build geometry: ${error}`,
           startColumn: 0,
           startLineNumber: 0,
         });

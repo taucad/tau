@@ -1836,9 +1836,11 @@ describe('Parameters - Reset Functionality', () => {
 });
 
 describe('Parameters - Reactive Configuration Changes', () => {
+  let user: ReturnType<typeof userEvent.setup>;
   let mockOnParametersChange: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    user = userEvent.setup();
     mockOnParametersChange = vi.fn();
   });
 
@@ -2022,6 +2024,189 @@ describe('Parameters - Reactive Configuration Changes', () => {
     const updatedInput = screen.getByLabelText('Input for Size');
     expect(updatedInput).toBeTruthy();
     expect(updatedInput).toHaveValue('1000');
+  });
+
+  it('should allow clearing min/max/step constraints when schema changes from constrained to unconstrained', async () => {
+    const defaultParameters = {
+      width: 50,
+    };
+
+    let currentParameters: Record<string, unknown> = {};
+    const mockOnChange = vi.fn((newParameters: Record<string, unknown>) => {
+      currentParameters = newParameters;
+    });
+
+    // Initial schema with constraints (minimum 10, maximum 100)
+    const constrainedSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        width: {
+          type: 'number',
+          default: 50,
+          minimum: 10,
+          maximum: 100,
+          multipleOf: 5,
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={currentParameters}
+          defaultParameters={defaultParameters}
+          jsonSchema={constrainedSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Verify component renders
+    const initialInput = screen.getByLabelText('Input for Width');
+    expect(initialInput).toBeTruthy();
+
+    // Update schema to remove all constraints
+    const unconstrainedSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        width: {
+          type: 'number',
+          default: 50,
+          // No minimum, maximum, or multipleOf - constraints should be cleared
+        },
+      },
+    };
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={currentParameters}
+          defaultParameters={defaultParameters}
+          jsonSchema={unconstrainedSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Clear mock to isolate the test of the constraint removal
+    mockOnChange.mockClear();
+
+    // Now try to enter a value that was previously outside the constraints
+    // With the old bug, the parameter machine would still enforce the old min (10)
+    // With the fix, the value should be accepted
+    const updatedInput = screen.getByLabelText('Input for Width');
+    await user.clear(updatedInput);
+    await user.type(updatedInput, '5'); // Value below old minimum of 10
+    await user.tab(); // Trigger blur to commit the value
+
+    // Wait for onChange to fire
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+
+    // Verify that the value below the old minimum was accepted
+    expect(currentParameters).toHaveProperty('width');
+    expect(currentParameters['width']).toBe(5);
+  });
+
+  it('should allow clearing individual constraints (min, max, step) independently', async () => {
+    const defaultParameters = {
+      height: 25,
+    };
+
+    let currentParameters: Record<string, unknown> = {};
+    const mockOnChange = vi.fn((newParameters: Record<string, unknown>) => {
+      currentParameters = newParameters;
+    });
+
+    // Initial schema with all constraints
+    const allConstraintsSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        height: {
+          type: 'number',
+          default: 25,
+          minimum: 10,
+          maximum: 50,
+          multipleOf: 5,
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={currentParameters}
+          defaultParameters={defaultParameters}
+          jsonSchema={allConstraintsSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Verify component renders
+    expect(screen.getByLabelText('Input for Height')).toBeTruthy();
+
+    // Remove only minimum constraint - should allow values below old minimum
+    const noMinSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        height: {
+          type: 'number',
+          default: 25,
+          // Minimum removed
+          maximum: 50,
+          multipleOf: 5,
+        },
+      },
+    };
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={currentParameters}
+          defaultParameters={defaultParameters}
+          jsonSchema={noMinSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnChange}
+        />
+      </TestWrapper>,
+    );
+
+    mockOnChange.mockClear();
+
+    // Try to enter a value below the old minimum (10)
+    const noMinInput = screen.getByLabelText('Input for Height');
+    await user.clear(noMinInput);
+    await user.type(noMinInput, '5'); // Below old minimum
+    await user.tab();
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+
+    // Should accept the value below old minimum
+    expect(currentParameters).toHaveProperty('height');
+    expect(currentParameters['height']).toBe(5);
+
+    // Verify the change persists on rerender
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={currentParameters}
+          defaultParameters={defaultParameters}
+          jsonSchema={noMinSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnChange}
+        />
+      </TestWrapper>,
+    );
+
+    const verifyInput = screen.getByLabelText('Input for Height');
+    expect(verifyInput).toHaveValue('5');
   });
 });
 

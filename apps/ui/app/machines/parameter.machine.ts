@@ -450,11 +450,14 @@ export const parameterMachine = setup({
       }
 
       // Update context values with new config
+      // For required properties (defaultValue, descriptor, enableContinualOnChange), use ?? since they should never be undefined
+      // For optional constraints (min, max, step), use 'in' operator to distinguish between:
+      //   - undefined (clear constraint) vs absent (keep old value)
       const newDefaultValue = event.defaultValue ?? context.defaultValue;
       const newDescriptor = event.descriptor ?? context.descriptor;
-      const newMin = event.min ?? context.min;
-      const newMax = event.max ?? context.max;
-      const newStep = event.step ?? context.originalStep;
+      const newMin = 'min' in event ? event.min : context.min;
+      const newMax = 'max' in event ? event.max : context.max;
+      const newStep = 'step' in event ? event.step : context.originalStep;
       const newEnableContinualOnChange = event.enableContinualOnChange ?? context.enableContinualOnChange;
 
       // Check if descriptor changed - if so, we may need to update unit handling

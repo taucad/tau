@@ -44,6 +44,8 @@ class OpenScadWorker extends KernelWorker {
     const code = await this.readFile(filename, 'utf8');
     try {
       const instance = await this.createInstance();
+      await this.mountFilesystem(instance, this.basePath);
+
       const inputFile = filename;
       const parameterFile = `${filename}.params.json`;
 
@@ -101,6 +103,8 @@ class OpenScadWorker extends KernelWorker {
       }
 
       const instance = await this.createInstance();
+      await this.mountFilesystem(instance, this.basePath);
+
       const inputFile = filename;
       const outputFile = `${filename}.off`;
 
@@ -252,6 +256,55 @@ class OpenScadWorker extends KernelWorker {
     }
 
     return String(value);
+  }
+
+  /**
+   * Mount the current directory filesystem into Emscripten's FS.
+   * Pre-populates all files from basePath so OpenSCAD can access them.
+   *
+   * @param instance - The OpenSCAD instance with FS API.
+   * @param basePath - The base path to mount files from.
+   */
+  private async mountFilesystem(instance: OpenSCAD, basePath: string): Promise<void> {
+    try {
+      this.debug('Mounting filesystem from basePath', { operation: 'mountFilesystem', data: { basePath } });
+
+      // Get all files from the current directory
+      const files = await this.fileManager.getDirectoryContents(basePath);
+      const fileCount = Object.keys(files).length;
+
+      this.debug(`Found ${fileCount} files to mount`, { operation: 'mountFilesystem' });
+
+      // Create directories and write files into Emscripten FS
+      for (const [relativePath, content] of Object.entries(files)) {
+        // Extract directory path from file path
+        const lastSlashIndex = relativePath.lastIndexOf('/');
+        if (lastSlashIndex > 0) {
+          const dirPath = relativePath.slice(0, lastSlashIndex);
+          const dirSegments = dirPath.split('/');
+
+          // Create nested directories
+          let currentPath = '';
+          for (const segment of dirSegments) {
+            currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+            try {
+              instance.FS.mkdir(currentPath);
+            } catch {
+              // Directory already exists, ignore error
+            }
+          }
+        }
+
+        // Write the file
+        instance.FS.writeFile(relativePath, content);
+        this.trace(`Mounted file: ${relativePath}`, { operation: 'mountFilesystem' });
+      }
+
+      this.debug(`Successfully mounted ${fileCount} files`, { operation: 'mountFilesystem' });
+    } catch (error) {
+      this.error('Failed to mount filesystem', { operation: 'mountFilesystem', data: error });
+      throw error;
+    }
   }
 }
 

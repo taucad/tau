@@ -53,7 +53,7 @@ export function BuildProvider({
   readonly children: ReactNode;
   readonly buildId: string;
   readonly provide?: Parameters<typeof buildMachine.provide>[0];
-  readonly input?: Omit<Parameters<typeof useActorRef<typeof buildMachine>>[1]['input'], 'buildId'>;
+  readonly input?: Omit<Parameters<typeof useActorRef<typeof buildMachine>>[1]['input'], 'buildId' | 'fileManagerRef'>;
 }): React.JSX.Element {
   const queryClient = useQueryClient();
   // Create the build machine actor - it will auto-load based on buildId
@@ -81,7 +81,7 @@ export function BuildProvider({
       ...provide,
     }),
     {
-      input: { buildId, ...input },
+      input: { buildId, fileManagerRef: fileManager.fileManagerRef, ...input },
       inspect,
     },
   );

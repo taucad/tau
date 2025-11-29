@@ -25,7 +25,6 @@ import { renderOutput } from '#components/geometry/kernel/replicad/utils/render-
 import { convertReplicadGeometriesToGltf } from '#components/geometry/kernel/replicad/utils/replicad-to-gltf.js';
 import { jsonSchemaFromJson } from '#utils/schema.utils.js';
 import type { InputShape, MainResultShapes } from '#components/geometry/kernel/replicad/utils/render-output.js';
-import type { OnWorkerLog } from '#types/console.types.js';
 import { KernelWorker } from '#components/geometry/kernel/utils/kernel-worker.js';
 import type { GeometryReplicad } from '#components/geometry/kernel/replicad/replicad.types.js';
 
@@ -78,25 +77,6 @@ class ReplicadWorker extends KernelWorker<ReplicadOptions> {
     registerKernelModules();
   }
 
-  public override async initialize(
-    onLog: OnWorkerLog,
-    options: ReplicadOptions = {} as ReplicadOptions,
-  ): Promise<void> {
-    await super.initialize(onLog, options);
-
-    const { withExceptions } = this.options;
-    const startTime = performance.now();
-    const oc = await this.initializeOpenCascadeInstance(withExceptions);
-    const ocEndTime = performance.now();
-    this.debug(`OpenCascade initialization took ${ocEndTime - startTime}ms`);
-
-    if (!this.replicadHasOc) {
-      this.debug('Setting OC in replicad');
-      replicad.setOC(oc);
-      this.replicadHasOc = true;
-    }
-  }
-
   public async extractDefaultNameFromCode(code: string): Promise<ExtractNameResult> {
     if (/^\s*export\s+/m.test(code)) {
       const module = await buildEsModule(code);
@@ -122,6 +102,20 @@ try {
         startColumn: 0,
         type: 'runtime',
       });
+    }
+  }
+
+  protected override async initialize(): Promise<void> {
+    const { withExceptions } = this.options;
+    const startTime = performance.now();
+    const oc = await this.initializeOpenCascadeInstance(withExceptions);
+    const ocEndTime = performance.now();
+    this.debug(`OpenCascade initialization took ${ocEndTime - startTime}ms`);
+
+    if (!this.replicadHasOc) {
+      this.debug('Setting OC in replicad');
+      replicad.setOC(oc);
+      this.replicadHasOc = true;
     }
   }
 

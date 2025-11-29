@@ -14,7 +14,6 @@ import { convertKclErrorToKernelError, mapErrorToKclError } from '#components/ge
 import { getErrorPosition } from '#components/geometry/kernel/zoo/source-range-utils.js';
 import { KernelWorker } from '#components/geometry/kernel/utils/kernel-worker.js';
 import { FileSystemManager } from '#components/geometry/kernel/zoo/filesystem-manager.js';
-import type { OnWorkerLog } from '#types/console.types.js';
 
 type ZooOptions = {
   apiKey: string;
@@ -34,12 +33,11 @@ class ZooWorker extends KernelWorker<ZooOptions> {
   private kclUtils: KclUtils | undefined;
   private fileSystemManager!: FileSystemManager;
 
-  public override async initialize(onLog: OnWorkerLog, options: ZooOptions): Promise<void> {
-    await super.initialize(onLog, options);
+  protected override async initialize(): Promise<void> {
     this.fileSystemManager = new FileSystemManager(this.fileReader);
   }
 
-  public override async cleanup(): Promise<void> {
+  protected override async cleanup(): Promise<void> {
     await this.kclUtils?.cleanup();
     this.kclUtils = undefined;
     this.gltfDataMemory = {};

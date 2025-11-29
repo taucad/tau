@@ -16,7 +16,7 @@ class TauWorker extends KernelWorker {
   protected override readonly name: string = 'TauWorker';
   private glbDataMemory: Record<string, Uint8Array> = {};
 
-  public override async cleanup(): Promise<void> {
+  protected override async cleanup(): Promise<void> {
     this.glbDataMemory = {};
   }
 

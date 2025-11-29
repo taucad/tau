@@ -15,7 +15,7 @@ jobs:
     environment: production
     concurrency: deploy-ui-group
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       
       - uses: superfly/flyctl-actions/setup-flyctl@master
       

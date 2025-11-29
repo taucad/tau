@@ -360,6 +360,22 @@ export const importGitHubMachine = setup({
         // Use default branch from metadata, or keep current selection
         return event.output.metadata.defaultBranch ?? context.selectedBranch;
       },
+      ref({ event, context }) {
+        assertActorDoneEvent(event);
+        assertEvent(event.output, 'metadataRetrieved');
+        // If ref is 'main' and metadata has a different default branch, use it
+        // This handles cases where repos use 'master' or other default branches
+        return context.ref === 'main' && event.output.metadata.defaultBranch
+          ? event.output.metadata.defaultBranch
+          : context.ref;
+      },
+      fetchErrors({ context }) {
+        return {
+          ...context.fetchErrors,
+          metadata: undefined,
+        };
+      },
+      error: undefined,
     }),
     setBranches: assign({
       branches({ event }) {
@@ -641,18 +657,7 @@ export const importGitHubMachine = setup({
                 }),
                 onDone: {
                   target: 'success',
-                  actions: assign({
-                    repoMetadata: ({ event }) => event.output.metadata,
-                    ref: ({ context, event }) =>
-                      context.ref === 'main' && event.output.metadata.defaultBranch
-                        ? event.output.metadata.defaultBranch
-                        : context.ref,
-                    fetchErrors: ({ context }) => ({
-                      ...context.fetchErrors,
-                      metadata: undefined,
-                    }),
-                    error: undefined,
-                  }),
+                  actions: 'setRepoMetadata',
                 },
                 onError: {
                   target: 'error',

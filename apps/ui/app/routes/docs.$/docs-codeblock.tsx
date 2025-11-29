@@ -29,7 +29,7 @@ export function DocsCodeBlock({ title, text, children, className, ...rest }: Doc
           <CopyButton size="xs" variant="ghost" className="h-8 [&_[data-slot=label]]:hidden" getText={() => text} />
         </CodeBlockAction>
       </CodeBlockHeader>
-      <CodeBlockContent>{children}</CodeBlockContent>
+      <CodeBlockContent className="px-0">{children}</CodeBlockContent>
     </CodeBlock>
   );
 }

@@ -275,6 +275,9 @@ class OpenScadWorker extends KernelWorker {
 
       this.debug(`Found ${fileCount} files to mount`, { operation: 'mountFilesystem' });
 
+      // Add locale directory - required to silence OpenSCAD warnings about missing locale directory
+      instance.FS.mkdir('/locale');
+
       // Create directories and write files into Emscripten FS
       for (const [relativePath, content] of Object.entries(files)) {
         // Extract directory path from file path

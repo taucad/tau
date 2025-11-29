@@ -1,4 +1,4 @@
-import { Plus, Search, Pencil, Trash } from 'lucide-react';
+import { Plus, Pencil, Trash, History } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import type { Message } from '@ai-sdk/react';
@@ -181,7 +181,7 @@ export function ChatHistorySelector(): ReactNode {
             title="Chats"
             description="Select a chat to continue the conversation."
             popoverProperties={{
-              align: 'start',
+              align: 'end',
               className: 'w-[300px]',
             }}
             onSelect={(chatId) => {
@@ -190,7 +190,7 @@ export function ChatHistorySelector(): ReactNode {
           >
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="size-6 rounded-sm">
-                <Search className="size-4" />
+                <History className="size-4" />
               </Button>
             </TooltipTrigger>
           </ComboBoxResponsive>

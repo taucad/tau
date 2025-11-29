@@ -10,6 +10,7 @@ import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { ChatEditorFileTree } from '#routes/builds_.$id/chat-editor-file-tree.js';
 
 const toggleFileTreeKeyCombination = {
   key: 'f',
@@ -64,7 +65,9 @@ export const ChatFileTree = memo(function (props: {
           </div>
         )}
       />
-      <FloatingPanelContent>TODO</FloatingPanelContent>
+      <FloatingPanelContent>
+        <ChatEditorFileTree />
+      </FloatingPanelContent>
     </FloatingPanel>
   );
 });

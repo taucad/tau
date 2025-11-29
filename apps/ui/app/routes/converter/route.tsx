@@ -59,7 +59,6 @@ export const handle: Handle = {
     );
   },
   enableFloatingSidebar: true,
-  enableOverflowY: true,
 };
 
 type UploadedFileInfo = {
@@ -178,7 +177,7 @@ function ConverterContent(): React.JSX.Element {
   const hasModel = glbData !== undefined;
 
   return (
-    <div className="relative flex h-full flex-col">
+    <div className={cn('relative flex h-full flex-col', !hasModel && 'overflow-y-auto')}>
       {hasModel ? (
         // Loaded state - model rendered with floating panel
         <>
@@ -274,7 +273,7 @@ function ConverterContent(): React.JSX.Element {
         </>
       ) : (
         // Landing state - no model loaded
-        <div className="container mx-auto mt-(--header-height) grid h-full items-start gap-8 px-4 transition-[padding-left] duration-200 ease-linear md:pt-8 md:pl-[calc(var(--sidebar-width-current)-var(--spacing)*2)] lg:grid-cols-[300px_1fr_300px] xl:grid-cols-[350px_1fr_350px]">
+        <div className="container mx-auto mt-(--header-height) grid h-full items-start gap-8 px-4 transition-[padding-left] duration-200 ease-linear md:pt-8 md:pl-[calc(var(--sidebar-width-current)-var(--spacing)*2)] lg:grid-cols-[300px_1fr_300px]">
           {/* Import Formats - Left */}
           <FormatsList
             icon={Upload}

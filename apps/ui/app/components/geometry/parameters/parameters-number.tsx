@@ -40,10 +40,6 @@ export function ParametersNumber({
   enableContinualOnChange = false,
   ...properties
 }: ParametersNumberProps): React.JSX.Element {
-  // Extract unit values from units prop
-  const initialUnitFactor = units.length.factor;
-  const initialSymbol = units.length.symbol;
-
   // Create ref for input element (for focus and arrow key listeners)
   const inputRef = React.useRef<HTMLInputElement>(null);
 
@@ -54,8 +50,8 @@ export function ParametersNumber({
       defaultValue,
       descriptor,
       enableContinualOnChange,
-      initialUnitFactor,
-      initialSymbol,
+      initialUnitFactor: units.length.factor,
+      initialUnitSymbol: units.length.symbol,
       inputRef,
       min,
       max,
@@ -84,9 +80,22 @@ export function ParametersNumber({
     parameterRef.send({
       type: 'unitChanged',
       unitFactor: units.length.factor,
-      unit: units.length.symbol,
+      unitSymbol: units.length.symbol,
     });
   }, [units.length.factor, units.length.symbol, parameterRef]);
+
+  // Send config updates to parameter machine when config props change
+  React.useEffect(() => {
+    parameterRef.send({
+      type: 'configChanged',
+      defaultValue,
+      descriptor,
+      min,
+      max,
+      step,
+      enableContinualOnChange,
+    });
+  }, [defaultValue, descriptor, min, max, step, enableContinualOnChange, parameterRef]);
 
   // Derive all state from machines
   const localValue = useSelector(parameterRef, (state) => state.context.localValue);
@@ -96,11 +105,7 @@ export function ParametersNumber({
   const rangeMax = useSelector(parameterRef, (state) => state.context.rangeMax);
   const baseStep = useSelector(parameterRef, (state) => state.context.baseStep);
   const currentStep = useSelector(parameterRef, (state) => state.context.step);
-
-  // Only apply unit conversion for length measurements
-  const isLength = descriptor === 'length';
-  const unitFactor = isLength ? units.length.factor : 1;
-  const displayUnit = isLength ? units.length.symbol : 'mm';
+  const displayUnit = useSelector(parameterRef, (state) => state.context.displayUnit);
 
   return (
     <div className="flex w-full flex-row items-center gap-2">
@@ -127,7 +132,6 @@ export function ParametersNumber({
         formattedValue={formattedValue}
         isApproximation={isApproximation}
         unit={displayUnit}
-        unitFactor={unitFactor}
         step={baseStep}
         descriptor={descriptor}
         disabled={disabled}

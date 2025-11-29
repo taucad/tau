@@ -35,6 +35,7 @@
     "tests/**/*.spec.tsx",
     "tests/**/*.test.tsx",
     "vite-environment.d.ts",
-    ".source/**/*" // Fumadocs collections
+    ".source/**/*", // Fumadocs collections
+    "package.json"
   ]
 }

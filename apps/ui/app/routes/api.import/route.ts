@@ -1,5 +1,6 @@
 // eslint-disable-next-line no-restricted-imports -- allowed for route types
 import type { Route } from './+types/route.js';
+import { ENV } from '#config.js';
 
 /**
  * Generic proxy route for importing external resources.
@@ -40,6 +41,21 @@ export async function loader({ request }: Route.LoaderArgs): Promise<Response> {
     headers.set('Accept', accept);
   }
 
+  const acceptEncoding = request.headers.get('Accept-Encoding');
+  if (acceptEncoding) {
+    headers.set('Accept-Encoding', acceptEncoding);
+  }
+
+  // Add GitHub authentication if available and requesting from GitHub API
+  const isGitHubApiHost = parsedUrl.hostname === 'api.github.com' || parsedUrl.hostname === 'codeload.github.com';
+
+  if (isGitHubApiHost) {
+    const githubToken = ENV.GITHUB_API_TOKEN;
+    if (githubToken) {
+      headers.set('Authorization', `Bearer ${githubToken}`);
+    }
+  }
+
   // Forward the request to the target URL
   const response = await fetch(targetUrl, {
     headers,
@@ -55,6 +71,13 @@ export async function loader({ request }: Route.LoaderArgs): Promise<Response> {
 
   // Stream the response back to client
   const responseHeaders = new Headers(response.headers);
+
+  // Ensure Content-Length is preserved for HEAD requests
+  const contentLength = response.headers.get('Content-Length');
+  if (contentLength) {
+    responseHeaders.set('Content-Length', contentLength);
+  }
+
   // Remove CORS headers as they're handled by the proxy
   responseHeaders.delete('Access-Control-Allow-Origin');
   responseHeaders.delete('Access-Control-Allow-Credentials');

@@ -84,7 +84,7 @@ export const ChatParameters = memo(function (props: {
           <FloatingPanelContentTitle>Parameters</FloatingPanelContentTitle>
         </FloatingPanelContentHeader>
 
-        <FloatingPanelContentBody>
+        <FloatingPanelContentBody className="overflow-y-hidden">
           <Parameters
             parameters={parameters}
             defaultParameters={defaultParameters}

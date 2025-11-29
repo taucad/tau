@@ -1,4 +1,4 @@
-import { Plus, Search, Pencil, Trash } from 'lucide-react';
+import { Plus, Pencil, Trash, History } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import type { Message } from '@ai-sdk/react';
@@ -18,6 +18,7 @@ import { groupItemsByTimeHorizon } from '#utils/temporal.utils.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
+import { FloatingPanelContentHeaderActions } from '#components/ui/floating-panel.js';
 
 const newChatKeyCombination = {
   key: 'c',
@@ -28,7 +29,6 @@ const newChatKeyCombination = {
 export function ChatHistorySelector(): ReactNode {
   const { buildRef, addChat, setActiveChat, updateChatName, deleteChat } = useBuild();
   const isLoading = useSelector(buildRef, (state) => state.context.isLoading);
-  const chatCount = useSelector(buildRef, (state) => state.context.build?.chats.length ?? 0);
   const groupedChats = useSelector(buildRef, (state) => groupItemsByTimeHorizon(state.context.build?.chats ?? []));
   const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId) ?? '';
   const activeChat = useSelector(buildRef, (state) =>
@@ -168,61 +168,49 @@ export function ChatHistorySelector(): ReactNode {
 
   return (
     <>
-      <div className="flex h-7 w-full items-center justify-between">
-        <div className="group min-w-0 flex-1">
-          <Tooltip>
-            <ComboBoxResponsive
-              groupedItems={groupedChats}
-              renderLabel={renderChatLabel}
-              getValue={getChatValue}
-              defaultValue={activeChat}
-              placeholder="Select a chat"
-              searchPlaceHolder="Search chats..."
-              title="Chats"
-              description="Select a chat to continue the conversation."
-              popoverProperties={{
-                align: 'start',
-                className: 'w-[300px]',
-              }}
-              onSelect={(chatId) => {
-                setActiveChat(chatId);
-              }}
-            >
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  className={cn(
-                    'h-7 w-full justify-between gap-2 truncate overflow-hidden rounded-sm text-left',
-                    isGeneratingName && 'animate-pulse',
-                  )}
-                >
-                  <span className="truncate">
-                    {isLoading ? null : chatCount === 0 ? 'Initial design' : (activeChat?.name ?? 'Select a chat')}
-                  </span>
-                  <Search className="size-4 shrink-0 md:opacity-0 md:group-hover:opacity-100" />
-                </Button>
-              </TooltipTrigger>
-            </ComboBoxResponsive>
-            <TooltipContent side="top">Search chats</TooltipContent>
-          </Tooltip>
-        </div>
-
-        <div className="flex-shrink-0">
-          <Tooltip>
+      <div className={cn('wrap w-full flex-1 truncate', isGeneratingName && 'animate-pulse')}>{activeChat?.name}</div>
+      <FloatingPanelContentHeaderActions className="h-7.75">
+        <Tooltip>
+          <ComboBoxResponsive
+            groupedItems={groupedChats}
+            renderLabel={renderChatLabel}
+            getValue={getChatValue}
+            defaultValue={activeChat}
+            placeholder="Select a chat"
+            searchPlaceHolder="Search chats..."
+            title="Chats"
+            description="Select a chat to continue the conversation."
+            popoverProperties={{
+              align: 'end',
+              className: 'w-[300px]',
+            }}
+            onSelect={(chatId) => {
+              setActiveChat(chatId);
+            }}
+          >
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="size-7 rounded-sm" onClick={handleAddChat}>
-                <Plus className="size-4" />
+              <Button variant="ghost" size="icon" className="size-6 rounded-sm">
+                <History className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">
-              New chat{' '}
-              <KeyShortcut variant="tooltip" className="ml-1">
-                {formattedKeyCombination}
-              </KeyShortcut>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
+          </ComboBoxResponsive>
+          <TooltipContent side="top">Search chats</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-6 rounded-sm" onClick={handleAddChat}>
+              <Plus className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            New chat{' '}
+            <KeyShortcut variant="tooltip" className="ml-1">
+              {formattedKeyCombination}
+            </KeyShortcut>
+          </TooltipContent>
+        </Tooltip>
+      </FloatingPanelContentHeaderActions>
 
       {/* Rename Dialog */}
       <Dialog open={isRenameDialogOpen} onOpenChange={setIsRenameDialogOpen}>

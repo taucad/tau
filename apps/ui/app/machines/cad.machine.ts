@@ -7,6 +7,7 @@ import { kernelMachine } from '#machines/kernel.machine.js';
 import type { KernelEventExternal } from '#machines/kernel.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { logMachine } from '#machines/logs.machine.js';
+import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 
 // Interface defining the context for the CAD machine
 export type CadContext = {
@@ -27,6 +28,7 @@ export type CadContext = {
   isKernelInitialized: boolean;
   graphicsRef?: ActorRefFrom<typeof graphicsMachine>;
   logActorRef?: ActorRefFrom<typeof logMachine>;
+  fileManagerRef?: ActorRefFrom<typeof fileManagerMachine>;
   jsonSchema?: JSONSchema7;
 };
 
@@ -49,6 +51,7 @@ type CadInput = {
   shouldInitializeKernelOnStart: boolean;
   graphicsRef?: ActorRefFrom<typeof graphicsMachine>;
   logRef?: ActorRefFrom<typeof logMachine>;
+  fileManagerRef?: ActorRefFrom<typeof fileManagerMachine>;
 };
 
 // Debounce delays in milliseconds
@@ -241,13 +244,16 @@ export const cadMachine = setup({
     geometries: [],
     kernelError: undefined,
     codeErrors: [],
-    kernelRef: spawn(kernelMachine),
+    kernelRef: spawn(kernelMachine, {
+      input: { fileManagerRef: input.fileManagerRef },
+    }),
     exportedBlob: undefined,
     shouldInitializeKernelOnStart: input.shouldInitializeKernelOnStart,
     isKernelInitializing: false,
     isKernelInitialized: false,
     graphicsRef: input.graphicsRef,
     logActorRef: input.logRef,
+    fileManagerRef: input.fileManagerRef,
     jsonSchema: undefined,
   }),
   initial: 'booting',

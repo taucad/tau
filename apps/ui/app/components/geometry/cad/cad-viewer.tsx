@@ -9,7 +9,6 @@ type CadViewerProperties = ThreeViewerProperties & {
   readonly enableSurfaces?: boolean;
   readonly enableLines?: boolean;
   readonly enableMatcap?: boolean;
-  readonly enableYupRotation?: boolean;
 };
 
 export function CadViewer({
@@ -17,7 +16,6 @@ export function CadViewer({
   enableSurfaces = true,
   enableLines = true,
   enableMatcap = true,
-  enableYupRotation = false,
   ...properties
 }: CadViewerProperties): React.JSX.Element {
   const svgGeometries = geometries.filter((geometry) => geometry.format === 'svg');
@@ -42,13 +40,16 @@ export function CadViewer({
                 enableMatcap={enableMatcap}
                 enableSurfaces={enableSurfaces}
                 enableLines={enableLines}
-                enableYupRotation={enableYupRotation}
               />
             );
           }
 
           case 'svg': {
             throw new Error('2D geometries are not supported');
+          }
+
+          case 'video-stream': {
+            throw new Error('Video stream geometries are not supported');
           }
 
           default: {

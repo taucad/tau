@@ -1,6 +1,6 @@
 import { memo } from 'react';
-import { Eye, EyeClosed } from 'lucide-react';
 import { ChatHistory } from '#routes/builds_.$id/chat-history.js';
+import { ChatFileTree } from '#routes/builds_.$id/chat-file-tree.js';
 import { ChatParameters } from '#routes/builds_.$id/chat-parameters.js';
 import { ChatViewer } from '#routes/builds_.$id/chat-viewer.js';
 import { ChatEditorLayout } from '#routes/builds_.$id/chat-editor-layout.js';
@@ -11,48 +11,45 @@ import { ChatDetails } from '#routes/builds_.$id/chat-details.js';
 import { ChatConverter } from '#routes/builds_.$id/chat-converter.js';
 import { cn } from '#utils/ui.utils.js';
 import { ChatInterfaceNav } from '#routes/builds_.$id/chat-interface-nav.js';
-import { Tabs, TabsContents, TabsContent } from '#components/ui/tabs.js';
-import { Button } from '#components/ui/button.js';
+import { Tabs, TabsContent } from '#components/ui/tabs.js';
 import { ChatInterfaceStatus } from '#routes/builds_.$id/chat-interface-status.js';
 import { useChatInterfaceState } from '#routes/builds_.$id/use-chat-interface-state.js';
+import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '#components/ui/drawer.js';
 
 export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
-  const { activeTab, handleTabChange, isFullHeightPanel, toggleFullHeightPanel } = useChatInterfaceState();
+  const { activeTab, handleTabChange, drawerOpen, handleDrawerChange, snapPoints, activeSnapPoint, handleSnapChange } =
+    useChatInterfaceState();
+
+  const isModelTab = activeTab === 'model';
 
   return (
-    <Tabs
-      className={cn(
-        'group/chat-tabs absolute inset-0 size-full gap-0',
-        '[--nav-height:calc(var(--spacing)*9)]',
-        'md:hidden',
-        '[--full-panel-collapsed:40dvh]',
-      )}
-      value={activeTab}
-      data-active-tab={activeTab}
-      data-full-height-panel={isFullHeightPanel}
-      onValueChange={handleTabChange}
-    >
+    <div className={cn('absolute inset-0 size-full', '[--nav-height:calc(var(--spacing)*10)]', 'md:hidden')}>
+      {/* Main viewer - always visible */}
       <div
-        // Position the model tab content absolutely to the top of the header height.
-        className={cn(
-          'relative size-full',
-          'pb-0',
-          'group-data-[full-height-panel=true]/chat-tabs:pb-[calc(100dvh-var(--full-panel-collapsed))]',
-          'group-data-[active-tab=model]/chat-tabs:pb-0!',
-        )}
+        className="relative h-full transition-all duration-200 ease-linear"
+        style={{
+          paddingBottom: isModelTab ? '0' : `calc(${Number(activeSnapPoint) - 0.07} * 100dvh)`,
+        }}
       >
-        {/* Main viewer */}
         <ChatViewer />
 
         {/* Gizmo Container - Static container for the gizmo to ensure it shares the same containing block as the anchor */}
-        <div id="viewport-gizmo-container" className="absolute right-0 bottom-18" />
+        <div
+          id="viewport-gizmo-container"
+          className={cn('absolute right-0 bottom-18', isModelTab ? 'bottom-18' : 'hidden')}
+        />
 
-        {/* Top-left Content */}
-        <div className="absolute top-(--header-height) right-2 left-2 hidden group-data-[active-tab=model]/chat-tabs:block group-data-[full-height-panel=true]/chat-tabs:block">
+        {/* Top Content - Stack trace */}
+        <div
+          className={cn(
+            'absolute top-(--header-height) right-2 left-2',
+            isModelTab || !drawerOpen ? 'block' : 'hidden',
+          )}
+        >
           <ChatStackTrace />
         </div>
 
-        {/* Centered Content */}
+        {/* Centered Content - Status indicators */}
         <div
           className={cn(
             'absolute',
@@ -66,79 +63,87 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
           <ChatInterfaceStatus />
         </div>
 
-        {/* Bottom-left Content */}
+        {/* Bottom-left Content - Viewer controls (only visible on model tab) */}
         <div
           className={cn(
-            'pointer-events-auto absolute bottom-11 left-0 z-10 flex w-full flex-row justify-between gap-2 px-2',
-            'hidden group-data-[active-tab=model]/chat-tabs:flex',
-            'group-data-[full-height-panel=false]/chat-tabs:hidden',
+            'pointer-events-auto absolute bottom-[calc(var(--nav-height)+var(--spacing)*2)] left-0 z-10 flex w-full flex-row justify-between gap-2 px-2',
+            isModelTab ? 'flex' : 'hidden',
           )}
         >
           <ChatViewerControls />
         </div>
       </div>
-      <div className="absolute right-0 bottom-0 left-0 z-20 flex w-full flex-row items-center justify-between gap-2 px-2 pt-0">
-        <ChatInterfaceNav className="h-(--nav-height)" />
-        <Button
-          size="icon"
-          variant="overlay"
-          className="size-9 rounded-full bg-sidebar shadow-none [&_svg]:size-5! [&_svg]:stroke-[1.5] [&_svg]:text-muted-foreground"
-          onClick={toggleFullHeightPanel}
-        >
-          <EyeClosed className="group-data-[full-height-panel=true]/chat-tabs:hidden" />
-          <Eye className="group-data-[full-height-panel=false]/chat-tabs:hidden" />
-        </Button>
-      </div>
-      <TabsContents
-        className={cn(
-          'absolute inset-0',
-          'size-full!',
 
-          // Disable pointer events for the tabs contents so the user can interact with the viewer when height is half.
-          'pointer-events-none',
-
-          // Full height panel effect - toggle between half and full height.
-          'pt-(--header-height)',
-          'group-data-[full-height-panel=true]/chat-tabs:pt-(--full-panel-collapsed)',
-          'transition-[padding-top] duration-200 ease-in-out',
-
-          // Make only the top of the floating panel rounded.
-          '[&_[data-slot=floating-panel]]:rounded-t-lg',
-          '[&_[data-slot=floating-panel]]:border-t',
-          '[&_[data-slot=floating-panel]]:pointer-events-auto',
-
-          // Make sure the content is padded to the bottom of the floating panel.
-          '[&_[data-slot=floating-panel-content]]:transition-none',
-          '[&_[data-slot=floating-panel-content]]:pb-9',
-
-          // Hide the floating panel trigger.
-          '[&_[data-slot=floating-panel-trigger]]:hidden',
-          '[&_[data-slot=floating-panel-content-header]]:px-3',
-
-          // Make sure the tabs content is full height to allow the floating panel to be full height.
-          '[&_[data-slot=tabs-content]]:h-full',
-
-          // Model tab takes full height with floating panel effect.
-          'group-data-[active-tab=model]/chat-tabs:border-t-0',
-        )}
+      <Drawer
+        handleOnly
+        open={drawerOpen}
+        snapPoints={snapPoints}
+        activeSnapPoint={activeSnapPoint}
+        setActiveSnapPoint={handleSnapChange}
+        modal={false}
+        onOpenChange={handleDrawerChange}
       >
-        <TabsContent enableAnimation={false} value="chat">
-          <ChatHistory />
-        </TabsContent>
-        <TabsContent enableAnimation={false} value="parameters">
-          <ChatParameters />
-        </TabsContent>
-        <TabsContent enableAnimation={false} value="model" className="pointer-events-none size-full" />
-        <TabsContent enableAnimation={false} value="editor">
-          <ChatEditorLayout />
-        </TabsContent>
-        <TabsContent enableAnimation={false} value="details">
-          <ChatDetails />
-        </TabsContent>
-        <TabsContent enableAnimation={false} value="converter">
-          <ChatConverter />
-        </TabsContent>
-      </TabsContents>
-    </Tabs>
+        <DrawerTitle className="sr-only" id="drawer-title">
+          Chat Interface
+        </DrawerTitle>
+        <DrawerDescription className="sr-only" id="drawer-description">
+          Chat Interface - use navigation tabs to switch between panels
+        </DrawerDescription>
+
+        {/* Drawer for content panels */}
+        <DrawerContent
+          aria-labelledby="drawer-title"
+          aria-describedby="drawer-description"
+          className={cn(
+            'flex-1 rounded-t-lg border-t bg-sidebar',
+            //
+            'data-[vaul-drawer-direction=bottom]:max-h-[94vh]!',
+            'data-[vaul-drawer-direction=bottom]:mt-0',
+            '[&_[data-slot=drawer-handle-indicator]]:bg-sidebar-primary/15',
+          )}
+          style={{
+            // Height: isModelTab ? '100dvh' : `calc(${Number(activeSnapPoint) - 0.06} * 100dvh)`,
+            height: '100%',
+          }}
+        >
+          {/* Tab contents */}
+          <Tabs
+            value={activeTab}
+            className="flex h-full flex-col pb-13"
+            style={{
+              height: isModelTab ? '100dvh' : `calc(${Number(activeSnapPoint) - 0.05} * 100dvh)`,
+            }}
+            onValueChange={handleTabChange}
+          >
+            <TabsContent enableAnimation={false} value="chat" className="flex h-full flex-col">
+              <ChatHistory />
+            </TabsContent>
+            <TabsContent enableAnimation={false} value="files" className="flex h-full flex-col">
+              <ChatFileTree />
+            </TabsContent>
+            <TabsContent enableAnimation={false} value="parameters" className="flex h-full flex-col">
+              <ChatParameters />
+            </TabsContent>
+            <TabsContent enableAnimation={false} value="model" className="flex h-full flex-col" />
+            <TabsContent enableAnimation={false} value="editor" className="flex h-full flex-col">
+              <ChatEditorLayout />
+            </TabsContent>
+            <TabsContent enableAnimation={false} value="details" className="flex h-full flex-col">
+              <ChatDetails />
+            </TabsContent>
+            <TabsContent enableAnimation={false} value="converter" className="flex h-full flex-col">
+              <ChatConverter />
+            </TabsContent>
+          </Tabs>
+        </DrawerContent>
+      </Drawer>
+
+      {/* Navigation tabs - Always visible and sticky to bottom */}
+      <div className={cn('pointer-events-auto fixed right-0 bottom-0 left-0 z-60')}>
+        <Tabs value={activeTab} onValueChange={handleTabChange}>
+          <ChatInterfaceNav className="h-(--nav-height)" />
+        </Tabs>
+      </div>
+    </div>
   );
 });

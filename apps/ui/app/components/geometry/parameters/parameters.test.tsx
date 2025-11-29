@@ -1835,6 +1835,381 @@ describe('Parameters - Reset Functionality', () => {
   });
 });
 
+describe('Parameters - Reactive Configuration Changes', () => {
+  let user: ReturnType<typeof userEvent.setup>;
+  let mockOnParametersChange: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    user = userEvent.setup();
+    mockOnParametersChange = vi.fn();
+  });
+
+  it('should re-render without errors when min/max props change', () => {
+    const defaultParameters = {
+      width: 50,
+    };
+
+    const initialSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        width: {
+          type: 'number',
+          default: 50,
+          minimum: 0,
+          maximum: 100,
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={initialSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Component should render the number input
+    const initialInput = screen.getByLabelText('Input for Width');
+    expect(initialInput).toBeTruthy();
+
+    // Update schema with different min/max values
+    const updatedSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        width: {
+          type: 'number',
+          default: 50,
+          minimum: 10,
+          maximum: 200,
+        },
+      },
+    };
+
+    // Re-render with updated schema - should not throw errors
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={updatedSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Component should still render the input after prop changes
+    const updatedInput = screen.getByLabelText('Input for Width');
+    expect(updatedInput).toBeTruthy();
+  });
+
+  it('should re-render without errors when step prop changes', () => {
+    const defaultParameters = {
+      height: 25,
+    };
+
+    const initialSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        height: {
+          type: 'number',
+          default: 25,
+          multipleOf: 1,
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={initialSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Component should render the number input
+    const initialInput = screen.getByLabelText('Input for Height');
+    expect(initialInput).toBeTruthy();
+
+    // Update schema with different step value
+    const updatedSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        height: {
+          type: 'number',
+          default: 25,
+          multipleOf: 5,
+        },
+      },
+    };
+
+    // Re-render with updated schema - should not throw errors
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={updatedSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Component should still render the input after prop changes
+    const updatedInput = screen.getByLabelText('Input for Height');
+    expect(updatedInput).toBeTruthy();
+  });
+
+  it('should re-render without errors when default value changes significantly', () => {
+    const initialDefaultParameters = {
+      size: 10,
+    };
+
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        size: {
+          type: 'number',
+          default: 10,
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={initialDefaultParameters}
+          jsonSchema={schema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Component should render with initial default value
+    const initialInput = screen.getByLabelText('Input for Size');
+    expect(initialInput).toBeTruthy();
+    expect(initialInput).toHaveValue('10');
+
+    // Update default value to a much larger value
+    const updatedDefaultParameters = {
+      size: 1000,
+    };
+
+    // Re-render with updated default value - should not throw errors
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={updatedDefaultParameters}
+          jsonSchema={schema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Component should render with updated default value
+    const updatedInput = screen.getByLabelText('Input for Size');
+    expect(updatedInput).toBeTruthy();
+    expect(updatedInput).toHaveValue('1000');
+  });
+
+  it('should allow clearing min/max/step constraints when schema changes from constrained to unconstrained', async () => {
+    const defaultParameters = {
+      width: 50,
+    };
+
+    let currentParameters: Record<string, unknown> = {};
+    const mockOnChange = vi.fn((newParameters: Record<string, unknown>) => {
+      currentParameters = newParameters;
+    });
+
+    // Initial schema with constraints (minimum 10, maximum 100)
+    const constrainedSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        width: {
+          type: 'number',
+          default: 50,
+          minimum: 10,
+          maximum: 100,
+          multipleOf: 5,
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={currentParameters}
+          defaultParameters={defaultParameters}
+          jsonSchema={constrainedSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Verify component renders
+    const initialInput = screen.getByLabelText('Input for Width');
+    expect(initialInput).toBeTruthy();
+
+    // Update schema to remove all constraints
+    const unconstrainedSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        width: {
+          type: 'number',
+          default: 50,
+          // No minimum, maximum, or multipleOf - constraints should be cleared
+        },
+      },
+    };
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={currentParameters}
+          defaultParameters={defaultParameters}
+          jsonSchema={unconstrainedSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Clear mock to isolate the test of the constraint removal
+    mockOnChange.mockClear();
+
+    // Now try to enter a value that was previously outside the constraints
+    // With the old bug, the parameter machine would still enforce the old min (10)
+    // With the fix, the value should be accepted
+    const updatedInput = screen.getByLabelText('Input for Width');
+    await user.clear(updatedInput);
+    await user.type(updatedInput, '5'); // Value below old minimum of 10
+    await user.tab(); // Trigger blur to commit the value
+
+    // Wait for onChange to fire
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+
+    // Verify that the value below the old minimum was accepted
+    expect(currentParameters).toHaveProperty('width');
+    expect(currentParameters['width']).toBe(5);
+  });
+
+  it('should allow clearing individual constraints (min, max, step) independently', async () => {
+    const defaultParameters = {
+      height: 25,
+    };
+
+    let currentParameters: Record<string, unknown> = {};
+    const mockOnChange = vi.fn((newParameters: Record<string, unknown>) => {
+      currentParameters = newParameters;
+    });
+
+    // Initial schema with all constraints
+    const allConstraintsSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        height: {
+          type: 'number',
+          default: 25,
+          minimum: 10,
+          maximum: 50,
+          multipleOf: 5,
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={currentParameters}
+          defaultParameters={defaultParameters}
+          jsonSchema={allConstraintsSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Verify component renders
+    expect(screen.getByLabelText('Input for Height')).toBeTruthy();
+
+    // Remove only minimum constraint - should allow values below old minimum
+    const noMinSchema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        height: {
+          type: 'number',
+          default: 25,
+          // Minimum removed
+          maximum: 50,
+          multipleOf: 5,
+        },
+      },
+    };
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={currentParameters}
+          defaultParameters={defaultParameters}
+          jsonSchema={noMinSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnChange}
+        />
+      </TestWrapper>,
+    );
+
+    mockOnChange.mockClear();
+
+    // Try to enter a value below the old minimum (10)
+    const noMinInput = screen.getByLabelText('Input for Height');
+    await user.clear(noMinInput);
+    await user.type(noMinInput, '5'); // Below old minimum
+    await user.tab();
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+
+    // Should accept the value below old minimum
+    expect(currentParameters).toHaveProperty('height');
+    expect(currentParameters['height']).toBe(5);
+
+    // Verify the change persists on rerender
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={currentParameters}
+          defaultParameters={defaultParameters}
+          jsonSchema={noMinSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnChange}
+        />
+      </TestWrapper>,
+    );
+
+    const verifyInput = screen.getByLabelText('Input for Height');
+    expect(verifyInput).toHaveValue('5');
+  });
+});
+
 describe('Parameters - Reset Single Parameter Bug', () => {
   let user: ReturnType<typeof userEvent.setup>;
   let mockOnParametersChange: ReturnType<typeof vi.fn>;
@@ -2101,7 +2476,30 @@ describe('Parameters - Empty State', () => {
     expect(screen.getByText('Parameters will appear here when they become available for this model')).toBeTruthy();
   });
 
-  it('should show empty state when mergedData is empty', () => {
+  it('should show empty state when schema has no properties', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {},
+    };
+
+    render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={{}}
+          jsonSchema={schema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Should show default empty message
+    expect(screen.getByText('No parameters available')).toBeTruthy();
+    expect(screen.getByText('Parameters will appear here when they become available for this model')).toBeTruthy();
+  });
+
+  it('should show form when schema has properties even if data is empty', () => {
     const schema: RJSFSchema = {
       type: 'object',
       properties: {
@@ -2121,9 +2519,10 @@ describe('Parameters - Empty State', () => {
       </TestWrapper>,
     );
 
-    // Should show default empty message
-    expect(screen.getByText('No parameters available')).toBeTruthy();
-    expect(screen.getByText('Parameters will appear here when they become available for this model')).toBeTruthy();
+    // Should show the form, not the empty state
+    expect(screen.queryByText('No parameters available')).toBeNull();
+    // Should render the parameter field
+    expect(screen.getByLabelText('Input for Name')).toBeTruthy();
   });
 
   it('should show custom empty message when provided', () => {
@@ -2608,6 +3007,270 @@ describe('Parameters - Edge Cases', () => {
     const rootElement = container.querySelector('[data-slot="parameters"]');
     expect(rootElement).toBeTruthy();
     expect(rootElement).toHaveClass('custom-class');
+  });
+});
+
+describe('Parameters - Unit Conversion Only for Length', () => {
+  let mockOnParametersChange: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockOnParametersChange = vi.fn();
+  });
+
+  it('should apply unit conversion for length descriptor when units change from mm to cm', () => {
+    const defaultParameters = {
+      width: 100, // 100mm
+    };
+
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        width: {
+          type: 'number',
+          default: 100,
+        },
+      },
+    };
+
+    // Start with mm units
+    const mmUnits: Units = {
+      length: {
+        factor: 1, // Mm
+        symbol: 'mm',
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={mmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Initial value should be 100
+    const widthInput = screen.getByLabelText('Input for Width');
+    expect(widthInput).toHaveValue('100');
+
+    // Change to cm units (10mm = 1cm, so 100mm = 10cm)
+    const cmUnits: Units = {
+      length: {
+        factor: 10, // Cm (1cm = 10mm)
+        symbol: 'cm',
+      },
+    };
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={cmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Value should now be 10 (100mm / 10 = 10cm)
+    const widthInputAfterConversion = screen.getByLabelText('Input for Width');
+    expect(widthInputAfterConversion).toHaveValue('10');
+  });
+
+  it('should NOT apply unit conversion for angle descriptor when units change', () => {
+    const defaultParameters = {
+      rotation: 45, // 45 degrees
+    };
+
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        rotation: {
+          type: 'number',
+          default: 45,
+        },
+      },
+    };
+
+    // Start with mm units
+    const mmUnits: Units = {
+      length: {
+        factor: 1, // Mm
+        symbol: 'mm',
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={mmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Initial value should be 45
+    const rotationInput = screen.getByLabelText('Input for Rotation');
+    expect(rotationInput).toHaveValue('45');
+
+    // Change to cm units
+    const cmUnits: Units = {
+      length: {
+        factor: 10, // Cm
+        symbol: 'cm',
+      },
+    };
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={cmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Value should STILL be 45 (not converted)
+    const rotationInputAfterConversion = screen.getByLabelText('Input for Rotation');
+    expect(rotationInputAfterConversion).toHaveValue('45');
+  });
+
+  it('should NOT apply unit conversion for count descriptor when units change', () => {
+    const defaultParameters = {
+      count: 5,
+    };
+
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        count: {
+          type: 'number',
+          default: 5,
+        },
+      },
+    };
+
+    // Start with mm units
+    const mmUnits: Units = {
+      length: {
+        factor: 1,
+        symbol: 'mm',
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={mmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Initial value should be 5
+    const countInput = screen.getByLabelText('Input for Count');
+    expect(countInput).toHaveValue('5');
+
+    // Change to cm units
+    const cmUnits: Units = {
+      length: {
+        factor: 10,
+        symbol: 'cm',
+      },
+    };
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={cmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Value should STILL be 5 (not converted)
+    const countInputAfterConversion = screen.getByLabelText('Input for Count');
+    expect(countInputAfterConversion).toHaveValue('5');
+  });
+
+  it('should NOT apply unit conversion for unitless descriptor when units change', () => {
+    const defaultParameters = {
+      factor: 2.5,
+    };
+
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        factor: {
+          type: 'number',
+          default: 2.5,
+        },
+      },
+    };
+
+    // Start with mm units
+    const mmUnits: Units = {
+      length: {
+        factor: 1,
+        symbol: 'mm',
+      },
+    };
+
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={mmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Initial value should be 2.5
+    const factorInput = screen.getByLabelText('Input for Factor');
+    expect(factorInput).toHaveValue('2.5');
+
+    // Change to cm units
+    const cmUnits: Units = {
+      length: {
+        factor: 10,
+        symbol: 'cm',
+      },
+    };
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={cmUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    // Value should STILL be 2.5 (not converted)
+    const factorInputAfterConversion = screen.getByLabelText('Input for Factor');
+    expect(factorInputAfterConversion).toHaveValue('2.5');
   });
 });
 

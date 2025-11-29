@@ -10,6 +10,14 @@ export type CodeError = {
   endColumn: number;
 };
 
+/**
+ * SVG geometry type.
+ *
+ * This is a type that is used to represent a SVG geometry.
+ * It is used to represent a 2D geometry, which is a collection of paths.
+ *
+ * @see https://www.w3.org/TR/SVG11/
+ */
 export type GeometrySvg = {
   color?: string;
   format: 'svg';
@@ -20,12 +28,31 @@ export type GeometrySvg = {
   name: string;
 };
 
+/**
+ * GLTF geometry type.
+ *
+ * This is a type that is used to represent a GLTF geometry.
+ * It is used to represent a 3D geometry, which is a collection of meshes.
+ *
+ * @see https://www.khronos.org/gltf/
+ */
 export type GeometryGltf = {
   format: 'gltf';
   content: Uint8Array;
 };
 
-export type Geometry = GeometrySvg | GeometryGltf;
+/**
+ * NOT IMPLEMENTED.
+ *
+ * A placeholder for a video stream geometry from a remote server
+ * for server-rendered 3D geometries.
+ */
+export type GeometryVideoStream = {
+  format: 'video-stream';
+  stream: ReadableStream | MediaStream;
+};
+
+export type Geometry = GeometrySvg | GeometryGltf | GeometryVideoStream;
 
 export type EngineeringDiscipline = keyof typeof engineeringDisciplines;
 

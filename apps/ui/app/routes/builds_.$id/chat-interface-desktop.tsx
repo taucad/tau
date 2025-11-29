@@ -1,6 +1,7 @@
 import { memo, useRef, useState, useEffect } from 'react';
 import { Allotment } from 'allotment';
 import { ChatHistory, ChatHistoryTrigger } from '#routes/builds_.$id/chat-history.js';
+import { ChatFileTree, ChatFileTreeTrigger } from '#routes/builds_.$id/chat-file-tree.js';
 import { ChatParameters, ChatParametersTrigger } from '#routes/builds_.$id/chat-parameters.js';
 import { ChatViewer } from '#routes/builds_.$id/chat-viewer.js';
 import { ChatEditorLayout, ChatEditorLayoutTrigger } from '#routes/builds_.$id/chat-editor-layout.js';
@@ -26,6 +27,8 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   const {
     isChatOpen,
     setIsChatOpen,
+    isFileTreeOpen,
+    setIsFileTreeOpen,
     isParametersOpen,
     setIsParametersOpen,
     isEditorOpen,
@@ -54,6 +57,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   // Only run when the actual Allotment is rendered (client-side)
   usePanePositionObserver(isClient ? allotmentRef : { current: null }, {
     isChatOpen,
+    isFileTreeOpen,
     isParametersOpen,
     isEditorOpen,
     isExplorerOpen,
@@ -120,6 +124,10 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
           <ChatHistory isExpanded={isChatOpen} setIsExpanded={setIsChatOpen} />
         </Allotment.Pane>
 
+        <Allotment.Pane className="rs-left z-10" minSize={panelMinSizeStandard} visible={isFileTreeOpen}>
+          <ChatFileTree isExpanded={isFileTreeOpen} setIsExpanded={setIsFileTreeOpen} />
+        </Allotment.Pane>
+
         <Allotment.Pane className="rs-left z-10" minSize={panelMinSizeStandard} visible={isExplorerOpen}>
           <ChatExplorerTree isExpanded={isExplorerOpen} setIsExpanded={setIsExplorerOpen} />
         </Allotment.Pane>
@@ -131,6 +139,12 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
               isOpen={isChatOpen}
               onToggle={() => {
                 setIsChatOpen((previous) => !previous);
+              }}
+            />
+            <ChatFileTreeTrigger
+              isOpen={isFileTreeOpen}
+              onToggle={() => {
+                setIsFileTreeOpen((previous) => !previous);
               }}
             />
             <ChatExplorerTrigger

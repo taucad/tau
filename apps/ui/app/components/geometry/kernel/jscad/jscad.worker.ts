@@ -150,16 +150,14 @@ class JscadWorker extends KernelWorker {
     registerKernelModules();
   }
 
-  public override async initialize(onLog: Parameters<KernelWorker['initialize']>[0], options: Record<string, never>) {
-    await super.initialize(onLog, options);
+  protected override async initialize(): Promise<void> {
     this.debug('Initialized JSCAD worker with @jscad/modeling', { operation: 'initialize' });
   }
 
-  public override async cleanup(): Promise<void> {
+  protected override async cleanup(): Promise<void> {
     // Clear all stored shapes to free memory
     this.shapesMemory = {};
     this.geometryAccessOrder = [];
-    await super.cleanup();
   }
 
   protected override async canHandle(filename: string, extension: string): Promise<boolean> {

@@ -65,7 +65,7 @@ export const ChatModeSelector = memo(function ({
           <TooltipTrigger asChild>
             <DropdownMenuTrigger>
               {currentMode?.icon ? <currentMode.icon className="size-4" /> : null}
-              {currentMode?.label}
+              <span>{currentMode?.label}</span>
             </DropdownMenuTrigger>
           </TooltipTrigger>
         </Button>

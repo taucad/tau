@@ -2,7 +2,8 @@ import { useLoaderData, useNavigate } from 'react-router';
 import type { MetaDescriptor } from 'react-router';
 import { useEffect, useMemo } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
-import { AlertCircle, ChevronDown, FileCode } from 'lucide-react';
+import { idPrefix } from '@taucad/types/constants';
+import { AlertCircle, ChevronDown, FileCode, RotateCcw, XCircle } from 'lucide-react';
 import { fromPromise } from 'xstate';
 // eslint-disable-next-line no-restricted-imports -- allowed for route types
 import type { Route } from './+types/route.js';
@@ -12,16 +13,16 @@ import { importGitHubMachine } from '#machines/import-github.machine.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 import { Progress } from '#components/ui/progress.js';
 import { Button } from '#components/ui/button.js';
+import { Input } from '#components/ui/input.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
 import { Tree, Folder, File } from '#components/magicui/file-tree.js';
 import { formatFileSize } from '#components/geometry/converter/converter-utils.js';
 import { useBuildManager } from '#hooks/use-build-manager.js';
+import { RepositoryCard } from '#routes/import/repository-card.js';
+import { BranchSelector } from '#routes/import/branch-selector.js';
+import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { consoleInspector } from '#machines/inspector.js';
+import { generatePrefixedId } from '#utils/id.utils.js';
 
 export const handle: Handle = {
   enableOverflowY: true,
@@ -150,8 +151,14 @@ export function loader({ request }: Route.LoaderArgs) {
   const ref = url.searchParams.get('ref') ?? 'main';
   const mainFile = url.searchParams.get('main') ?? '';
 
+  // If no repo URL provided, return defaults for entering details state
   if (!repoUrl) {
-    throw new Error('Missing required parameter: repo');
+    return {
+      owner: '',
+      repo: '',
+      ref: 'main',
+      mainFile: '',
+    } satisfies GitHubRepoInfo;
   }
 
   const parsed = parseGitHubUrl(repoUrl);
@@ -195,7 +202,15 @@ export default function ImportRoute(): React.JSX.Element {
               },
               tags: [],
               thumbnail: '',
-              chats: [],
+              chats: [
+                {
+                  id: generatePrefixedId(idPrefix.chat),
+                  name: 'Initial design',
+                  messages: [],
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                },
+              ],
               assets: {
                 mechanical: {
                   main: input.mainFile,
@@ -217,6 +232,7 @@ export default function ImportRoute(): React.JSX.Element {
         ref,
         mainFile,
       },
+      inspect: consoleInspector,
     },
   );
 
@@ -235,6 +251,15 @@ export default function ImportRoute(): React.JSX.Element {
   const files = useSelector(importActorRef, (snapshot) => snapshot.context.files);
   const selectedMainFile = useSelector(importActorRef, (snapshot) => snapshot.context.selectedMainFile);
   const requestedMainFile = useSelector(importActorRef, (snapshot) => snapshot.context.requestedMainFile);
+  const repoUrl = useSelector(importActorRef, (snapshot) => snapshot.context.repoUrl);
+  const repoOwner = useSelector(importActorRef, (snapshot) => snapshot.context.owner);
+  const repoName = useSelector(importActorRef, (snapshot) => snapshot.context.repo);
+  const repoMetadata = useSelector(importActorRef, (snapshot) => snapshot.context.repoMetadata);
+  const branches = useSelector(importActorRef, (snapshot) => snapshot.context.branches);
+  const selectedBranch = useSelector(importActorRef, (snapshot) => snapshot.context.selectedBranch);
+  const fetchErrors = useSelector(importActorRef, (snapshot) => snapshot.context.fetchErrors);
+  const hasMoreBranches = useSelector(importActorRef, (snapshot) => snapshot.context.hasMoreBranches);
+  const isLoadingMoreBranches = useSelector(importActorRef, (snapshot) => snapshot.context.isLoadingMoreBranches);
 
   // Navigate when build is created
   useEffect(() => {
@@ -246,6 +271,136 @@ export default function ImportRoute(): React.JSX.Element {
   const fileTree = useMemo(() => buildFileTree(files), [files]);
 
   switch (true) {
+    case state.matches('enteringDetails') ||
+      state.matches('checkingRepo') ||
+      state.matches('fetchingRepoInfo') ||
+      state.matches('loadingMoreBranches'): {
+      const isValidRepo = repoOwner.length > 0 && repoName.length > 0;
+      const isCheckingOrFetching = state.matches('checkingRepo') || state.matches('fetchingRepoInfo');
+
+      return (
+        <div className="flex h-full items-center justify-center px-4 pt-8 pb-16">
+          <div className="w-full max-w-2xl space-y-6">
+            <div className="flex flex-col items-center gap-4">
+              <div className="flex size-16 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10">
+                <SvgIcon id="github" className="size-8 text-primary" />
+              </div>
+
+              <div className="text-center">
+                <h1 className="text-2xl font-semibold">Import from GitHub</h1>
+                <p className="text-sm text-muted-foreground">Enter a GitHub repository URL to get started</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {/* Repository URL Input */}
+              <div className="space-y-2 rounded-lg border bg-sidebar p-6">
+                <label htmlFor="repo-url" className="text-sm font-medium">
+                  Repository URL
+                </label>
+                <Input
+                  id="repo-url"
+                  type="url"
+                  placeholder="https://github.com/owner/repo"
+                  value={repoUrl}
+                  className="font-mono text-sm"
+                  onChange={(event) => {
+                    importActorRef.send({ type: 'updateRepoUrl', url: event.target.value });
+                  }}
+                />
+              </div>
+
+              {/* Repository Preview Card */}
+              {isValidRepo ? (
+                <>
+                  <RepositoryCard
+                    metadata={repoMetadata}
+                    owner={repoOwner}
+                    repo={repoName}
+                    isLoading={isCheckingOrFetching}
+                  />
+
+                  {/* Validation Feedback */}
+                  {!isCheckingOrFetching && !repoMetadata ? (
+                    <div className="flex items-start gap-3 rounded-lg border border-warning/50 bg-warning/10 p-4 text-warning">
+                      <AlertCircle className="size-5 shrink-0" />
+                      <div className="flex flex-col gap-1">
+                        <div className="font-semibold">Repository Not Found</div>
+                        <div className="text-sm">
+                          The repository may not exist, be private, or you may not have access to it. Please check the
+                          URL and try again.
+                        </div>
+                      </div>
+                    </div>
+                  ) : undefined}
+
+                  {!isCheckingOrFetching && repoMetadata?.isPrivate ? (
+                    <div className="border-info/50 bg-info/10 text-info flex items-start gap-3 rounded-lg border p-4">
+                      <AlertCircle className="size-5 shrink-0" />
+                      <div className="flex flex-col gap-1">
+                        <div className="font-semibold">Private Repository</div>
+                        <div className="text-sm">
+                          This is a private repository. Make sure you have access permissions to import it.
+                        </div>
+                      </div>
+                    </div>
+                  ) : undefined}
+
+                  {/* Fetch Errors - Show warnings for non-critical failures */}
+                  {repoMetadata && !isCheckingOrFetching && fetchErrors.branches ? (
+                    <div className="flex items-start gap-3 rounded-lg border border-warning/50 bg-warning/10 p-4 text-warning">
+                      <AlertCircle className="size-5 shrink-0" />
+                      <div className="flex flex-col gap-1">
+                        <div className="font-semibold">Partial Information</div>
+                        <div className="text-sm">
+                          <div>Could not fetch branches list</div>
+                          <div className="mt-1">You can still proceed with the import.</div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : undefined}
+
+                  {/* Branch Selector */}
+                  {branches.length > 0 ? (
+                    <div className="space-y-2 rounded-lg border bg-sidebar p-6">
+                      <label className="text-sm font-medium">Branch</label>
+                      <BranchSelector
+                        branches={branches}
+                        selectedBranch={selectedBranch}
+                        isLoadingMore={isLoadingMoreBranches}
+                        onSelect={(branch) => {
+                          importActorRef.send({ type: 'selectBranch', branch });
+                        }}
+                        onLoadMore={
+                          hasMoreBranches
+                            ? () => {
+                                importActorRef.send({ type: 'loadMoreBranches' });
+                              }
+                            : undefined
+                        }
+                      />
+                    </div>
+                  ) : undefined}
+
+                  {/* Start Import Button */}
+                  <Button
+                    className="w-full"
+                    size="lg"
+                    disabled={isCheckingOrFetching || !repoMetadata}
+                    onClick={() => {
+                      importActorRef.send({ type: 'startImport' });
+                    }}
+                  >
+                    Start Import
+                  </Button>
+                </>
+              ) : undefined}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     case state.matches('selectingMainFile'): {
       const fileNames = [...files.keys()];
 
@@ -286,35 +441,42 @@ export default function ImportRoute(): React.JSX.Element {
               <div className="space-y-3">
                 <h2 className="text-sm font-medium">Main File</h2>
                 <div className="space-y-4 rounded-md border bg-sidebar p-4">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" className="w-full justify-between">
-                        {selectedMainFile ? (
-                          <span className="truncate">{selectedMainFile}</span>
-                        ) : (
-                          <span className="text-muted-foreground">Select main file...</span>
-                        )}
-                        <ChevronDown className="size-4 shrink-0" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="max-h-64 w-[--radix-dropdown-menu-trigger-width] overflow-y-auto">
-                      {fileNames.length === 0 ? (
-                        <DropdownMenuItem disabled>No files available</DropdownMenuItem>
+                  <ComboBoxResponsive
+                    groupedItems={[
+                      {
+                        name: 'Files',
+                        items: fileNames.map((name) => ({ name })),
+                      },
+                    ]}
+                    renderLabel={(file, selected) => (
+                      <div className="flex items-center gap-2">
+                        <FileCode className="size-4" />
+                        <span className={selected?.name === file.name ? 'font-medium' : ''}>{file.name}</span>
+                      </div>
+                    )}
+                    getValue={(file) => file.name}
+                    defaultValue={selectedMainFile ? { name: selectedMainFile } : undefined}
+                    placeholder="Select main file..."
+                    searchPlaceHolder="Search files..."
+                    title="Select Main File"
+                    description="Choose the main entry file for your project"
+                    emptyListMessage="No files found"
+                    withVirtualization={fileNames.length > 50}
+                    virtualizationHeight={300}
+                    className="w-full"
+                    onSelect={(filename) => {
+                      importActorRef.send({ type: 'selectMainFile', filename });
+                    }}
+                  >
+                    <Button variant="outline" className="w-full justify-between">
+                      {selectedMainFile ? (
+                        <span className="truncate">{selectedMainFile}</span>
                       ) : (
-                        fileNames.map((filename) => (
-                          <DropdownMenuItem
-                            key={filename}
-                            onSelect={() => {
-                              importActorRef.send({ type: 'selectMainFile', filename });
-                            }}
-                          >
-                            <FileCode className="mr-2 size-4" />
-                            <span className="truncate">{filename}</span>
-                          </DropdownMenuItem>
-                        ))
+                        <span className="text-muted-foreground">Select main file...</span>
                       )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                      <ChevronDown className="size-4 shrink-0" />
+                    </Button>
+                  </ComboBoxResponsive>
 
                   {selectedMainFile ? (
                     <div className="rounded-md bg-muted/50 p-3 text-xs">
@@ -352,9 +514,21 @@ export default function ImportRoute(): React.JSX.Element {
               </div>
             </div>
 
-            <Button asChild variant="outline" className="w-full">
-              <a href="/">Back to Home</a>
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="default"
+                className="flex-1"
+                onClick={() => {
+                  importActorRef.send({ type: 'retry' });
+                }}
+              >
+                <RotateCcw className="mr-2 size-4" />
+                Restart
+              </Button>
+              <Button asChild variant="outline" className="flex-1">
+                <a href="/">Back to Home</a>
+              </Button>
+            </div>
           </div>
         </div>
       );
@@ -362,8 +536,8 @@ export default function ImportRoute(): React.JSX.Element {
 
     default: {
       return (
-        <div className="flex h-full items-center justify-center px-4">
-          <div className="w-full max-w-md space-y-6">
+        <div className="flex h-full items-center justify-center px-4 pt-8 pb-16">
+          <div className="w-full max-w-2xl space-y-6">
             <div className="flex flex-col items-center gap-4">
               <div className="flex size-16 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10">
                 <SvgIcon id="github" className="size-8 text-primary" />
@@ -372,11 +546,16 @@ export default function ImportRoute(): React.JSX.Element {
               <div className="text-center">
                 <h1 className="text-2xl font-semibold">Importing Repository</h1>
                 <p className="text-sm text-muted-foreground">
-                  {owner}/{repo}
-                  {ref === 'main' ? '' : ` @ ${ref}`}
+                  {repoOwner}/{repoName}
+                  {selectedBranch && selectedBranch !== 'main' ? ` @ ${selectedBranch}` : ''}
                 </p>
               </div>
             </div>
+
+            {/* Repository Preview Card (read-only) */}
+            {repoMetadata ? (
+              <RepositoryCard metadata={repoMetadata} owner={repoOwner} repo={repoName} isLoading={false} />
+            ) : undefined}
 
             <div className="space-y-4">
               {/* Downloading */}
@@ -392,14 +571,22 @@ export default function ImportRoute(): React.JSX.Element {
                       '✓ Downloaded'
                     )}
                   </span>
-                  {downloadProgress.total > 0 ? (
+                  {downloadProgress.loaded > 0 ? (
                     <span className="text-muted-foreground">
-                      {formatFileSize(downloadProgress.loaded)} / {formatFileSize(downloadProgress.total)}
+                      {downloadProgress.total > 0
+                        ? `${formatFileSize(downloadProgress.loaded)} / ${formatFileSize(downloadProgress.total)}`
+                        : formatFileSize(downloadProgress.loaded)}
                     </span>
                   ) : undefined}
                 </div>
                 <Progress
-                  value={downloadProgress.total > 0 ? (downloadProgress.loaded / downloadProgress.total) * 100 : 0}
+                  value={
+                    downloadProgress.total > 0 && downloadProgress.loaded > 0
+                      ? (downloadProgress.loaded / downloadProgress.total) * 100
+                      : downloadProgress.loaded > 0
+                        ? undefined
+                        : 0
+                  }
                   className="h-2"
                 />
               </div>
@@ -442,6 +629,20 @@ export default function ImportRoute(): React.JSX.Element {
                   </div>
                   <Progress value={100} className="h-2" />
                 </div>
+              ) : undefined}
+
+              {/* Cancel Button - show during download/extract only */}
+              {state.matches('downloading') || state.matches('extracting') ? (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    importActorRef.send({ type: 'cancelDownload' });
+                  }}
+                >
+                  <XCircle className="mr-2 size-4" />
+                  Cancel Import
+                </Button>
               ) : undefined}
             </div>
           </div>

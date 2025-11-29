@@ -18,6 +18,26 @@ function DrawerClose({ ...properties }: React.ComponentProps<typeof DrawerPrimit
   return <DrawerPrimitive.Close data-slot="drawer-close" {...properties} />;
 }
 
+function DrawerHandle({ ...properties }: React.ComponentProps<typeof DrawerPrimitive.Handle>): React.JSX.Element {
+  return <DrawerPrimitive.Handle data-slot="drawer-handle" {...properties} />;
+}
+
+function DrawerHandleIndicator({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
+  return (
+    <div className="relative">
+      <DrawerHandle className="absolute! inset-0! m-auto! size-full! opacity-0!" />
+      <div
+        data-slot="drawer-handle-indicator"
+        className={cn(
+          'relative mx-auto mt-1 hidden h-1 w-[60px] shrink-0 rounded-full bg-accent group-data-[vaul-drawer-direction=bottom]/drawer-content:block',
+          className,
+        )}
+        {...properties}
+      />
+    </div>
+  );
+}
+
 function DrawerOverlay({
   className,
   ...properties
@@ -55,7 +75,7 @@ function DrawerContent({
         )}
         {...properties}
       >
-        <div className="mx-auto mt-1 hidden h-1 w-[100px] shrink-0 rounded-full bg-accent group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
+        <DrawerHandleIndicator />
         {children}
       </DrawerPrimitive.Content>
     </DrawerPortal>
@@ -102,6 +122,7 @@ export {
   DrawerOverlay,
   DrawerTrigger,
   DrawerClose,
+  DrawerHandle,
   DrawerContent,
   DrawerHeader,
   DrawerFooter,

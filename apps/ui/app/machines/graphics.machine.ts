@@ -62,6 +62,7 @@ export type GraphicsContext = {
   enableGrid: boolean;
   enableAxes: boolean;
   enableMatcap: boolean;
+  upDirection: 'x' | 'y' | 'z';
 
   // Clipping plane state
   isSectionViewActive: boolean;
@@ -137,6 +138,7 @@ export type GraphicsEvent =
   | { type: 'setGridVisibility'; payload: boolean }
   | { type: 'setAxesVisibility'; payload: boolean }
   | { type: 'setMatcapVisibility'; payload: boolean }
+  | { type: 'setUpDirection'; payload: 'x' | 'y' | 'z' }
   // Clipping plane events
   | { type: 'setSectionViewActive'; payload: boolean }
   | { type: 'selectSectionView'; payload: 'xy' | 'xz' | 'yz' | undefined }
@@ -737,6 +739,13 @@ export const graphicsMachine = setup({
       },
     }),
 
+    setUpDirection: assign({
+      upDirection({ event }) {
+        assertEvent(event, 'setUpDirection');
+        return event.payload;
+      },
+    }),
+
     setSectionViewActive: assign({
       isSectionViewActive({ event }) {
         assertEvent(event, 'setSectionViewActive');
@@ -1057,6 +1066,7 @@ export const graphicsMachine = setup({
     enableGrid: true,
     enableAxes: true,
     enableMatcap: false,
+    upDirection: 'z',
 
     // Clipping plane state
     isSectionViewActive: false,
@@ -1146,6 +1156,9 @@ export const graphicsMachine = setup({
         },
         setMatcapVisibility: {
           actions: 'setMatcapVisibility',
+        },
+        setUpDirection: {
+          actions: 'setUpDirection',
         },
 
         // Plane naming and hover are global in operational state

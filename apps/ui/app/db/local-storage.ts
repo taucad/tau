@@ -7,7 +7,7 @@ import { metaConfig } from '#constants/meta.constants.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
 
 export class LocalStorageProvider implements StorageProvider {
-  private readonly buildsKey = `${metaConfig.cookiePrefix}builds`;
+  private readonly buildsKey = `${metaConfig.databasePrefix}builds`;
 
   public async createBuild(build: Omit<Build, 'id' | 'createdAt' | 'updatedAt'>): Promise<Build> {
     const id = generatePrefixedId(idPrefix.build);

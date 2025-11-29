@@ -20,7 +20,7 @@
       "dependsOn": ["build"],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "react-router-serve build/server/server.js"
+        "command": "react-router-serve build/server/index.js"
       },
       "configurations": {},
       "parallelism": true

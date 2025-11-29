@@ -44,12 +44,25 @@ class OpenScadWorker extends KernelWorker {
     const code = await this.readFile(filename, 'utf8');
     try {
       const instance = await this.createInstance();
-      const inputFile = '/input.scad';
-      const parameterFile = '/params.json';
+      await this.mountFilesystem(instance, this.basePath);
+
+      const inputFile = filename;
+      const parameterFile = `${filename}.params.json`;
 
       instance.FS.writeFile(inputFile, code);
 
-      instance.callMain([inputFile, '-o', parameterFile, '--export-format=param']);
+      const result = instance.callMain([inputFile, '-o', parameterFile, '--export-format=param']);
+
+      if (result !== 0) {
+        // @ts-expect-error - TODO: add typings for formatException, ensure this API is available.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call -- formatException is not typed
+        const error = instance.formatException?.(result);
+        return createKernelError({
+          message: `Failed to build geometry: ${error}`,
+          startColumn: 0,
+          startLineNumber: 0,
+        });
+      }
 
       let jsonSchema: JSONSchema7 = { type: 'object' };
       let defaultParameters: Record<string, unknown> = {};
@@ -90,8 +103,10 @@ class OpenScadWorker extends KernelWorker {
       }
 
       const instance = await this.createInstance();
-      const inputFile = '/input.scad';
-      const outputFile = '/output.off';
+      await this.mountFilesystem(instance, this.basePath);
+
+      const inputFile = filename;
+      const outputFile = `${filename}.off`;
 
       instance.FS.writeFile(inputFile, code);
 
@@ -104,7 +119,18 @@ class OpenScadWorker extends KernelWorker {
         }
       }
 
-      instance.callMain(args);
+      const result = instance.callMain(args);
+
+      if (result !== 0) {
+        // @ts-expect-error - TODO: add typings for formatException, ensure this API is available.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call -- formatException is not typed
+        const error = instance.formatException?.(result);
+        return createKernelError({
+          message: `Failed to build geometry: ${error}`,
+          startColumn: 0,
+          startLineNumber: 0,
+        });
+      }
 
       const offData = instance.FS.readFile(outputFile, { encoding: 'utf8' });
       this.offDataMemory[geometryId] = offData;
@@ -230,6 +256,58 @@ class OpenScadWorker extends KernelWorker {
     }
 
     return String(value);
+  }
+
+  /**
+   * Mount the current directory filesystem into Emscripten's FS.
+   * Pre-populates all files from basePath so OpenSCAD can access them.
+   *
+   * @param instance - The OpenSCAD instance with FS API.
+   * @param basePath - The base path to mount files from.
+   */
+  private async mountFilesystem(instance: OpenSCAD, basePath: string): Promise<void> {
+    try {
+      this.debug('Mounting filesystem from basePath', { operation: 'mountFilesystem', data: { basePath } });
+
+      // Get all files from the current directory
+      const files = await this.fileManager.getDirectoryContents(basePath);
+      const fileCount = Object.keys(files).length;
+
+      this.debug(`Found ${fileCount} files to mount`, { operation: 'mountFilesystem' });
+
+      // Add locale directory - required to silence OpenSCAD warnings about missing locale directory
+      instance.FS.mkdir('/locale');
+
+      // Create directories and write files into Emscripten FS
+      for (const [relativePath, content] of Object.entries(files)) {
+        // Extract directory path from file path
+        const lastSlashIndex = relativePath.lastIndexOf('/');
+        if (lastSlashIndex > 0) {
+          const dirPath = relativePath.slice(0, lastSlashIndex);
+          const dirSegments = dirPath.split('/');
+
+          // Create nested directories
+          let currentPath = '';
+          for (const segment of dirSegments) {
+            currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+            try {
+              instance.FS.mkdir(currentPath);
+            } catch {
+              // Directory already exists, ignore error
+            }
+          }
+        }
+
+        // Write the file
+        instance.FS.writeFile(relativePath, content);
+        this.trace(`Mounted file: ${relativePath}`, { operation: 'mountFilesystem' });
+      }
+
+      this.debug(`Successfully mounted ${fileCount} files`, { operation: 'mountFilesystem' });
+    } catch (error) {
+      this.error('Failed to mount filesystem', { operation: 'mountFilesystem', data: error });
+      throw error;
+    }
   }
 }
 

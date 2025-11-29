@@ -1,9 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import type { chatTabs } from '#routes/builds_.$id/chat-interface-nav.js';
 import { useViewContext } from '#routes/builds_.$id/chat-interface-view-context.js';
-
 /**
  * Minimum panel size constants for the chat interface layout (in pixels)
  * Used for both default sizes and minimum constraints on panes
@@ -23,12 +22,13 @@ export const panelSizeViewer = 420;
 
 /**
  * Default panel sizes for the chat interface layout (in pixels)
- * Maps to the pane order: [ChatHistory, Explorer, Viewer, Parameters, Editor, Converter, Git, Details]
+ * Maps to the pane order: [ChatHistory, FileTree, Explorer, Viewer, Parameters, Editor, Converter, Git, Details]
  */
 const defaultChatInterfaceSizes = [
   // Left-side panels
   panelMinSizeStandard, // Chat History panel: displays conversation history and file navigation
-  panelMinSizeStandard, // Explorer panel: shows project file structure and navigation tree
+  panelMinSizeStandard, // File Tree panel: shows project file structure and file management
+  panelMinSizeStandard, // Explorer panel: shows 3D model structure and navigation tree
   // Center panel
   panelSizeViewer, // Viewer panel: main 3D CAD visualization and content area
   // Right-side panels
@@ -39,10 +39,14 @@ const defaultChatInterfaceSizes = [
   panelMinSizeStandard, // Details panel: additional object details and metadata
 ];
 
+export const mobileDrawerSnapPoints: Array<number | string> = [0.7, 1];
+
 export type ChatInterfaceState = {
   // View context state
   isChatOpen: boolean;
   setIsChatOpen: (value: boolean | ((previous: boolean) => boolean)) => void;
+  isFileTreeOpen: boolean;
+  setIsFileTreeOpen: (value: boolean | ((previous: boolean) => boolean)) => void;
   isParametersOpen: boolean;
   setIsParametersOpen: (value: boolean | ((previous: boolean) => boolean)) => void;
   isEditorOpen: boolean;
@@ -64,6 +68,14 @@ export type ChatInterfaceState = {
   isFullHeightPanel: boolean;
   setIsFullHeightPanel: (value: boolean | ((previous: boolean) => boolean)) => void;
 
+  // Mobile drawer state
+  drawerOpen: boolean;
+  handleDrawerChange: (value: boolean) => void;
+  snapPoints: Array<number | string>;
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
+  activeSnapPoint: number | string | null;
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
+  handleSnapChange: (value: number | string | null) => void;
   // Actions
   handleTabChange: (value: string) => void;
   toggleFullHeightPanel: () => void;
@@ -78,9 +90,33 @@ export function useChatInterfaceState(): ChatInterfaceState {
   const [chatResize, setChatResize] = useCookie(cookieName.chatRsInterface, defaultChatInterfaceSizes);
   const [activeTab, setActiveTab] = useCookie<(typeof chatTabs)[number]['id']>(cookieName.chatInterfaceTab, 'chat');
   const [isFullHeightPanel, setIsFullHeightPanel] = useCookie(cookieName.chatInterfaceFullHeight, false);
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(activeTab !== 'model');
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
+  const [snapPoint, setSnapPoint] = useState<number | string | null>(mobileDrawerSnapPoints[0]!);
+
+  const handleDrawerChange = (value: boolean): void => {
+    if (!value && activeTab !== 'model') {
+      setActiveTab('model');
+    }
+
+    setDrawerOpen(value);
+  };
 
   const handleTabChange = (value: string): void => {
     setActiveTab(value as (typeof chatTabs)[number]['id']);
+
+    if (!drawerOpen && value !== 'model') {
+      // When the drawer is closed and the new tab is not the model tab, open the drawer
+      setDrawerOpen(true);
+    } else if (drawerOpen && value === 'model') {
+      // When the drawer is open and the new tab is the model tab, close the drawer
+      setDrawerOpen(false);
+    }
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
+  const handleSnapChange = (value: number | string | null): void => {
+    setSnapPoint(value);
   };
 
   const toggleFullHeightPanel = (): void => {
@@ -97,6 +133,11 @@ export function useChatInterfaceState(): ChatInterfaceState {
     setActiveTab,
     isFullHeightPanel,
     setIsFullHeightPanel,
+    drawerOpen,
+    handleDrawerChange,
+    activeSnapPoint: snapPoint,
+    snapPoints: mobileDrawerSnapPoints,
+    handleSnapChange,
     handleTabChange,
     toggleFullHeightPanel,
   };
@@ -104,6 +145,7 @@ export function useChatInterfaceState(): ChatInterfaceState {
 
 type UsePanePositionObserverOptions = {
   isChatOpen: boolean;
+  isFileTreeOpen: boolean;
   isParametersOpen: boolean;
   isEditorOpen: boolean;
   isExplorerOpen: boolean;
@@ -121,8 +163,16 @@ export function usePanePositionObserver(
   allotmentRef: React.RefObject<HTMLDivElement | null>,
   options: UsePanePositionObserverOptions,
 ): void {
-  const { isChatOpen, isParametersOpen, isEditorOpen, isExplorerOpen, isConverterOpen, isGitOpen, isDetailsOpen } =
-    options;
+  const {
+    isChatOpen,
+    isFileTreeOpen,
+    isParametersOpen,
+    isEditorOpen,
+    isExplorerOpen,
+    isConverterOpen,
+    isGitOpen,
+    isDetailsOpen,
+  } = options;
 
   useEffect(() => {
     if (!allotmentRef.current) {
@@ -192,6 +242,7 @@ export function usePanePositionObserver(
   }, [
     allotmentRef,
     isChatOpen,
+    isFileTreeOpen,
     isParametersOpen,
     isEditorOpen,
     isExplorerOpen,

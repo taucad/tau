@@ -1,7 +1,7 @@
-import { assign, assertEvent, setup, sendTo, fromPromise } from 'xstate';
+import { assign, assertEvent, setup, sendTo, fromPromise, waitFor } from 'xstate';
 import deepmerge from 'deepmerge';
-import type { Snapshot, ActorRef, OutputFrom, DoneActorEvent } from 'xstate';
-import { proxy, wrap } from 'comlink';
+import type { Snapshot, ActorRef, OutputFrom, DoneActorEvent, ActorRefFrom } from 'xstate';
+import { proxy, wrap, transfer, createEndpoint } from 'comlink';
 import type { Remote } from 'comlink';
 import type {
   Geometry,
@@ -25,6 +25,7 @@ import JscadBuilderWorker from '#components/geometry/kernel/jscad/jscad.worker.j
 import { assertActorDoneEvent } from '#lib/xstate.js';
 import type { LogLevel, LogOrigin, OnWorkerLog } from '#types/console.types.js';
 import { ENV } from '#config.js';
+import type { FileManagerMachine } from '#machines/file-manager.machine.js';
 
 type KernelProvider = CadKernelProvider | 'tau' | 'jscad';
 
@@ -120,6 +121,25 @@ const createWorkersActor = fromPromise<
   }
 
   try {
+    // Wait for file manager to be ready and extract the wrapped worker
+    if (!context.fileManagerRef) {
+      return {
+        type: 'kernelError',
+        error: { message: 'File manager actor not initialized', startLineNumber: 0, startColumn: 0, type: 'runtime' },
+      };
+    }
+
+    const snapshot = await waitFor(context.fileManagerRef, (state) => state.matches('ready'));
+    const fileManagerContext = snapshot.context;
+    const wrappedFileManager = fileManagerContext.wrappedWorker;
+
+    if (!wrappedFileManager) {
+      return {
+        type: 'kernelError',
+        error: { message: 'File manager worker not initialized', startLineNumber: 0, startColumn: 0, type: 'runtime' },
+      };
+    }
+
     // Create all workers
     // eslint-disable-next-line new-cap -- following type definitions
     const replicadWorker = new workers.replicad();
@@ -152,12 +172,31 @@ const createWorkersActor = fromPromise<
     };
 
     // Initialize all workers with the default exception handling mode
+    // Initialize all workers with optional file manager ports for direct communication
+    // Create dedicated MessagePort endpoints for each worker for direct communication
+    const replicadPort = await wrappedFileManager[createEndpoint]();
+    const openscadPort = await wrappedFileManager[createEndpoint]();
+    const zooPort = await wrappedFileManager[createEndpoint]();
+    const tauPort = await wrappedFileManager[createEndpoint]();
+    const jscadPort = await wrappedFileManager[createEndpoint]();
+
+    // Initialize all workers with callbacks (proxied), transferables (MessagePorts), and options
     await Promise.all([
-      wrappedReplicadWorker.initialize(proxy(onLog), { withExceptions: false }),
-      wrappedOpenscadWorker.initialize(proxy(onLog), {}),
-      wrappedZooWorker.initialize(proxy(onLog), { apiKey: ENV.ZOO_API_KEY ?? '' }),
-      wrappedTauWorker.initialize(proxy(onLog), {}),
-      wrappedJscadWorker.initialize(proxy(onLog), {}),
+      wrappedReplicadWorker.initializeEntry(
+        proxy({ onLog }),
+        transfer({ fileManagerPort: replicadPort }, [replicadPort]),
+        { withExceptions: false },
+      ),
+      wrappedOpenscadWorker.initializeEntry(
+        proxy({ onLog }),
+        transfer({ fileManagerPort: openscadPort }, [openscadPort]),
+        {},
+      ),
+      wrappedZooWorker.initializeEntry(proxy({ onLog }), transfer({ fileManagerPort: zooPort }, [zooPort]), {
+        apiKey: ENV.ZOO_API_KEY ?? '',
+      }),
+      wrappedTauWorker.initializeEntry(proxy({ onLog }), transfer({ fileManagerPort: tauPort }, [tauPort]), {}),
+      wrappedJscadWorker.initializeEntry(proxy({ onLog }), transfer({ fileManagerPort: jscadPort }, [jscadPort]), {}),
     ]);
 
     // Store references to all workers
@@ -470,6 +509,11 @@ type KernelContext = {
   >;
   parentRef?: CadActor;
   selectedWorker?: KernelProvider;
+  fileManagerRef?: ActorRefFrom<FileManagerMachine>;
+};
+
+type KernelInput = {
+  fileManagerRef?: ActorRefFrom<FileManagerMachine>;
 };
 
 /**
@@ -489,6 +533,8 @@ export const kernelMachine = setup({
     context: {} as KernelContext,
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
     events: {} as KernelEvent,
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
+    input: {} as KernelInput,
   },
   actors: kernelActors,
   actions: {
@@ -512,35 +558,35 @@ export const kernelMachine = setup({
     }),
     async destroyWorkers({ context }) {
       if (context.workers.replicad) {
-        await context.wrappedWorkers.replicad?.cleanup();
+        await context.wrappedWorkers.replicad?.cleanupEntry();
         context.workers.replicad.terminate();
         context.workers.replicad = undefined;
         context.wrappedWorkers.replicad = undefined;
       }
 
       if (context.workers.openscad) {
-        await context.wrappedWorkers.openscad?.cleanup();
+        await context.wrappedWorkers.openscad?.cleanupEntry();
         context.workers.openscad.terminate();
         context.workers.openscad = undefined;
         context.wrappedWorkers.openscad = undefined;
       }
 
       if (context.workers.zoo) {
-        await context.wrappedWorkers.zoo?.cleanup();
+        await context.wrappedWorkers.zoo?.cleanupEntry();
         context.workers.zoo.terminate();
         context.workers.zoo = undefined;
         context.wrappedWorkers.zoo = undefined;
       }
 
       if (context.workers.tau) {
-        await context.wrappedWorkers.tau?.cleanup();
+        await context.wrappedWorkers.tau?.cleanupEntry();
         context.workers.tau.terminate();
         context.workers.tau = undefined;
         context.wrappedWorkers.tau = undefined;
       }
 
       if (context.workers.jscad) {
-        await context.wrappedWorkers.jscad?.cleanup();
+        await context.wrappedWorkers.jscad?.cleanupEntry();
         context.workers.jscad.terminate();
         context.workers.jscad = undefined;
         context.wrappedWorkers.jscad = undefined;
@@ -556,7 +602,7 @@ export const kernelMachine = setup({
 }).createMachine({
   /** @xstate-layout N4IgpgJg5mDOIC5QGswCcB2YA2A6AlhvgC74CG2+AXoVAMSEnmVWQDaADALqKgAOAe1hMBGXiAAeiAEwA2AJy4AzBwCMqgCwrZ0gByzVSgDQgAnogCsujbmnyOG1bvlKlegOy6Avl5OpMOAREpBTUtHToaAJonDxIIILCpKLiUgiyWsrSSupy8hYq7u4m5ghu0riq7vIZ8qoc2dIWFj5+6Fh4aGBkEKZ0AMYCALZ8AK7EYADiYMNgxGimseKJImLxafIaFfYcsrsaGrLuByWILu64W1VFug1uukqtIP4duF09fWASgmjE07PzRbcZZCVapRCqbIWXAFSEaXSqfLVdyyU4IaqyGG6awWVR7QzHeRPF6BL4-UgYegwAELACi32iEwgS3iK2Sa1AaU0Gg4uGRSns0k08jkxjMiHuuBFNQFKg48ncSlkxPapIZv3CkWiLP4oPZ4IQ9QyuH0+gO6luejRTmhRQFegF+SVmxVATwZMZkDoElgxDIE1wZAAZhM0AAKDgASjoJPd6qZOoSevwKXWEKs0Ic5Q4uIs0hRxXFCHyFQFDwK0gO8qVrtefDIaGElLo9bQZCGc3QsAACg3YOxgazk6nORLeSjnSKlMdXEp9GihZjdO4OBwlXj4dda4FW036FqYoPdUkUxzJIhbhc4Qr5ccGhZUUWRSbCc55c5ZJ-vL5nqr3QA3ChRn9cJqQ7QEAGFhjGBMjyTE8R3PMpblwPYlFhDR3DzEVKzRZcLg4Fc8ycHMDAsDRtwAoCQObA9EzZU8DT2aE5AaWQrEaGU0S2RQLEIrCFB0AoOAeSjcDAQDsGAplvV9f0wEDEN0AjaNY3EyTpIHOJjzBNMEF0SspUVSFBUOeVpDwzwYSIppPE8GUxIPAZoPGKYZnAhZ6OHM80gnSpywsGo+OCsVSnhJQYWkOQEQRJoHFkR4fzUpyPV+f4PKBbT4N00dDQaGwinqfjFXI0KJSiyoMTnAyDgKb82jdcS0CiNAGGCZhqDALyEJ8yxAtQix3EhbQUUvBc8RfVcH3caRSPqb8fwwAQIDgcRYxBHqDQAWkRbZMMcQ4US2B40WhacNHkewtAUET9jExgQhYWgNpypCmgqG5mnxOpDmaBd8lsA59ErHQqk-MT3l6F79T0+oAcwlcXAUREGjwxEYXYtQeSiiikr-cT42eodNthuQl3Q-IFT2TZdjRdDVClXZZqqIVLt0QbHPjSBocY2GOJhWVVFxaqql0NFPwuZoHhmxVqluRKGrrPsiZ0mHcp2g4pX2zQjgyB1rSVE0Es8diLv0PZlTxxqJOoikoB5xC0kcXRKkRKp1GOOx2O4vNLmsFQ6lI6xDEcjT5IgB3evSVwjJcL6DDxZc0R2XAHBXawos-HkFd-a3muiSODQRaEJZlPZl3kE6iyUDRoSFnQ1Erci7PcHwfCAA */
   id: 'kernel',
-  context: {
+  context: ({ input }) => ({
     workers: {
       replicad: undefined,
       openscad: undefined,
@@ -573,7 +619,8 @@ export const kernelMachine = setup({
     },
     parentRef: undefined,
     selectedWorker: undefined,
-  },
+    fileManagerRef: input.fileManagerRef,
+  }),
   initial: 'initializing',
   exit: ['destroyWorkers'],
   states: {

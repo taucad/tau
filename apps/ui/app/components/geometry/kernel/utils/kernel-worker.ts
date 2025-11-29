@@ -5,9 +5,10 @@ import type {
   ExtractParametersResult,
   GeometryFile,
 } from '@taucad/types';
+import { wrap } from 'comlink';
+import type { Remote } from 'comlink';
 import { logLevels } from '#types/console.types';
 import type { OnWorkerLog } from '#types/console.types';
-import { fileManager } from '#machines/file-manager.js';
 import type { FileManager } from '#machines/file-manager.js';
 import type { FileReader } from '#components/geometry/kernel/utils/file-reader.js';
 
@@ -56,6 +57,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   protected fileReader!: FileReader;
 
   /**
+   * The file manager instance.
+   * Initialized via registerFileManager() during worker setup.
+   * This is a Remote proxy to the file-manager worker.
+   */
+  protected fileManager!: Remote<FileManager>;
+
+  /**
    * The name of the worker.
    *
    * @example ReplicadWorker, TauWorker, ZooWorker.
@@ -63,29 +71,36 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   protected abstract readonly name: string;
 
   /**
-   * The file manager instance.
-   */
-  private readonly fileManager: FileManager;
-
-  /**
    * The constructor for the worker.
    */
   public constructor() {
-    this.fileManager = fileManager;
     this.onLog = () => {
       throw new Error('onLog must be initialized before use');
     };
   }
 
   /**
-   * Initialize the worker. This is called once when the worker is created.
+   * Entry point for initializing the worker. This is called once when the worker is created.
+   * Handles common initialization logic and then calls the protected initialize method.
    *
-   * @param onLog - The function to call when a log is emitted.
+   * @param callbacks - Object containing callback functions (proxied).
+   * @param callbacks.onLog - The function to call when a log is emitted.
+   * @param transferables - Object containing transferable resources like MessagePorts.
+   * @param transferables.fileManagerPort - Optional MessagePort for direct communication with file-manager worker.
    * @param options - The options passed to the worker. These are specific to the kernel provider.
    */
-  public async initialize(onLog: OnWorkerLog, options: Options): Promise<void> {
-    this.onLog = onLog;
+  public async initializeEntry(
+    callbacks: { onLog: OnWorkerLog },
+    transferables: { fileManagerPort?: MessagePort },
+    options: Options,
+  ): Promise<void> {
+    this.onLog = callbacks.onLog;
     this.options = options;
+
+    // Register file manager if port is provided
+    if (transferables.fileManagerPort) {
+      this.fileManager = wrap<FileManager>(transferables.fileManagerPort);
+    }
 
     // Initialize fileReader with logged filesystem operations relative to basePath
     this.fileReader = {
@@ -93,6 +108,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       exists: async (path: string) => this.exists(path),
       readdir: async (path: string) => this.readdir(path),
     };
+
+    // Call worker-specific initialization
+    await this.initialize();
   }
 
   /**
@@ -105,12 +123,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Cleanup the worker. This is called when the worker is destroyed.
-   *
-   * This can be used to release memory, close connections, etc.
+   * Entry point for cleaning up the worker. This is called when the worker is destroyed.
+   * Handles common cleanup logic and then calls the protected cleanup method.
    */
-  public async cleanup(): Promise<void> {
-    // This is a base implementation that can be overridden.
+  public async cleanupEntry(): Promise<void> {
+    await this.cleanup();
   }
 
   /**
@@ -198,12 +215,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Check if this worker can handle the given file.
-   * This is a lightweight check that should not require heavy initialization.
-   *
-   * @param params - Object containing path and extension.
-   * @returns True if this worker can handle the file, false otherwise.
+   * Worker-specific initialization. Override this method to add custom initialization logic.
+   * No need to call super.initialize() - common initialization is handled by initializeEntry.
    */
+  protected async initialize(): Promise<void> {
+    // Base implementation - can be overridden by subclasses
+  }
+
+  /**
+   * Worker-specific cleanup. Override this method to add custom cleanup logic.
+   * No need to call super.cleanup() - common cleanup is handled by cleanupEntry.
+   *
+   * This can be used to release memory, close connections, etc.
+   */
+  protected async cleanup(): Promise<void> {
+    // Base implementation - can be overridden by subclasses
+  }
 
   /**
    * Log a message.
@@ -396,6 +423,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return entries;
   }
 
+  /**
+   * Check if this worker can handle the given file.
+   * This is a lightweight check that should not require heavy initialization.
+   *
+   * @param params - Object containing path and extension.
+   * @returns True if this worker can handle the file, false otherwise.
+   */
   protected abstract canHandle(filename: string, extension: string): Promise<boolean>;
 
   /**

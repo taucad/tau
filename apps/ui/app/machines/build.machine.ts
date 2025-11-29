@@ -12,6 +12,7 @@ import { gitMachine } from '#machines/git.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
 import { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
+import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import { generatePrefixedId } from '#utils/id.utils.js';
 
 /**
@@ -24,6 +25,7 @@ export type BuildContext = {
   isLoading: boolean;
   enableFilePreview: boolean;
   shouldLoadModelOnStart: boolean;
+  fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
   gitRef: ActorRefFrom<typeof gitMachine>;
   graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   cadRef: ActorRefFrom<typeof cadMachine>;
@@ -38,6 +40,7 @@ export type BuildContext = {
 type BuildInput = {
   buildId: string;
   shouldLoadModelOnStart?: boolean;
+  fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
 };
 
 // Define the actors that the machine can invoke
@@ -474,12 +477,24 @@ export const buildMachine = setup({
     stopStatefulActors: enqueueActions(({ enqueue, context }) => {
       // Stop the old stateful actors (they'll be garbage collected)
       enqueue.stopChild(context.gitRef);
+      enqueue.stopChild(context.cadRef);
     }),
     respawnStatefulActors: assign({
       gitRef({ context, spawn, self }) {
         return spawn('git', {
           id: `git-${context.buildId}`,
           input: { buildId: context.buildId, parentRef: self },
+        });
+      },
+      cadRef({ context, spawn }) {
+        return spawn('cad', {
+          id: `cad-${context.buildId}`,
+          input: {
+            shouldInitializeKernelOnStart: false,
+            graphicsRef: context.graphicsRef,
+            logRef: context.logRef,
+            fileManagerRef: context.fileManagerRef,
+          },
         });
       },
     }),
@@ -575,7 +590,7 @@ export const buildMachine = setup({
 }).createMachine({
   id: 'build',
   context({ input, spawn, self }) {
-    const { buildId, shouldLoadModelOnStart = true } = input;
+    const { buildId, shouldLoadModelOnStart = true, fileManagerRef } = input;
 
     const gitRef = spawn('git', {
       id: `git-${buildId}`,
@@ -600,6 +615,7 @@ export const buildMachine = setup({
         shouldInitializeKernelOnStart: false,
         graphicsRef,
         logRef,
+        fileManagerRef,
       },
     });
 
@@ -620,6 +636,7 @@ export const buildMachine = setup({
       isLoading: true,
       enableFilePreview: true, // Default to enabled
       shouldLoadModelOnStart,
+      fileManagerRef,
       gitRef,
       graphicsRef,
       cadRef,

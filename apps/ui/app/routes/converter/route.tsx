@@ -50,8 +50,6 @@ import { cn } from '#utils/ui.utils.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
 import { metaConfig } from '#constants/meta.constants.js';
 
-const yUpFormats = new Set<InputFormat>(['gltf', 'glb', 'ifc']);
-
 export const handle: Handle = {
   breadcrumb() {
     return (
@@ -61,7 +59,6 @@ export const handle: Handle = {
     );
   },
   enableFloatingSidebar: true,
-  enableOverflowY: true,
 };
 
 type UploadedFileInfo = {
@@ -84,6 +81,7 @@ function ConverterContent(): React.JSX.Element {
   const enableGrid = useSelector(graphicsActor, (state) => state.context.enableGrid);
   const enableAxes = useSelector(graphicsActor, (state) => state.context.enableAxes);
   const enableMatcap = useSelector(graphicsActor, (state) => state.context.enableMatcap);
+  const upDirection = useSelector(graphicsActor, (state) => state.context.upDirection);
 
   const handleFileSelect = useCallback(async (file: File) => {
     setIsConverting(true);
@@ -179,7 +177,7 @@ function ConverterContent(): React.JSX.Element {
   const hasModel = glbData !== undefined;
 
   return (
-    <div className="relative flex h-full flex-col">
+    <div className={cn('relative flex h-full flex-col', !hasModel && 'overflow-y-auto')}>
       {hasModel ? (
         // Loaded state - model rendered with floating panel
         <>
@@ -197,7 +195,7 @@ function ConverterContent(): React.JSX.Element {
               <CadViewer
                 enableZoom
                 enablePan
-                enableYupRotation={uploadedFile ? yUpFormats.has(uploadedFile.format) : false}
+                upDirection={upDirection}
                 enableMatcap={enableMatcap}
                 enableLines={enableLines}
                 enableAxes={enableAxes}
@@ -212,7 +210,7 @@ function ConverterContent(): React.JSX.Element {
             <div className="pointer-events-none absolute bottom-2 left-2 z-10 flex w-90 shrink-0 flex-col gap-2 transition-[left] duration-200 ease-linear md:left-(--sidebar-width-current)">
               {/* File info overlay */}
               {uploadedFile ? (
-                <div className="pointer-events-auto rounded-md border bg-sidebar p-3">
+                <div className="pointer-events-auto w-100 rounded-md border bg-sidebar p-3">
                   <div className="flex items-center gap-1">
                     <div className="text-sm font-medium">{uploadedFile.name}</div>
                     <InfoTooltip>{formatConfigurations[uploadedFile.format].description}</InfoTooltip>
@@ -222,19 +220,19 @@ function ConverterContent(): React.JSX.Element {
                   </div>
                 </div>
               ) : undefined}
-              <ChatInterfaceGraphics className="w-90" />
+              <ChatInterfaceGraphics className="w-100" />
               <div className="pointer-events-auto flex items-center gap-2">
                 <FovControl defaultAngle={60} className="w-60" />
                 <GridSizeIndicator />
                 <SectionViewControl />
                 <MeasureControl />
                 <ResetCameraControl />
+                <SettingsControl />
               </div>
             </div>
 
             {/* Export panel trigger */}
-            <div className="absolute top-(--header-height) right-2 z-10 flex gap-2">
-              <SettingsControl />
+            <div className="absolute top-(--header-height) right-2 z-10 flex h-full gap-2 pb-[calc(var(--header-height)+var(--spacing)*2)]">
               <FloatingPanel isOpen side="right" className="rounded-md border">
                 <FloatingPanelContent className="w-80">
                   <FloatingPanelContentHeader>
@@ -275,7 +273,7 @@ function ConverterContent(): React.JSX.Element {
         </>
       ) : (
         // Landing state - no model loaded
-        <div className="container mx-auto mt-(--header-height) grid h-full items-start gap-8 px-4 transition-[padding-left] duration-200 ease-linear md:pt-8 md:pl-[calc(var(--sidebar-width-current)-var(--spacing)*2)] lg:grid-cols-[300px_1fr_300px] xl:grid-cols-[350px_1fr_350px]">
+        <div className="container mx-auto mt-(--header-height) grid h-full items-start gap-8 px-4 transition-[padding-left] duration-200 ease-linear md:pt-8 md:pl-[calc(var(--sidebar-width-current)-var(--spacing)*2)] lg:grid-cols-[300px_1fr_300px]">
           {/* Import Formats - Left */}
           <FormatsList
             icon={Upload}

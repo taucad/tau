@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
 import { Stage } from '#components/geometry/graphics/three/stage.js';
 import { Controls } from '#components/geometry/graphics/three/controls.js';
+import { UpDirectionHandler } from '#components/geometry/graphics/three/up-direction-handler.js';
 
 type SceneProperties = {
   readonly children: ReactNode;
@@ -11,6 +12,7 @@ type SceneProperties = {
   readonly enablePan?: boolean;
   readonly enableGrid?: boolean;
   readonly enableAxes?: boolean;
+  readonly upDirection?: 'x' | 'y' | 'z';
   readonly stageOptions?: StageOptions;
   readonly enableCentering?: boolean;
   readonly zoomSpeed: number;
@@ -25,6 +27,7 @@ export function Scene({
   enablePan = false,
   enableGrid = false,
   enableAxes = false,
+  upDirection = 'z',
   stageOptions,
   enableCentering = true,
   zoomSpeed,
@@ -32,6 +35,7 @@ export function Scene({
 }: SceneProperties): React.JSX.Element {
   return (
     <>
+      <UpDirectionHandler upDirection={upDirection} />
       <Controls
         enableGizmo={enableGizmo}
         enableDamping={enableDamping}

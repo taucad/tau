@@ -5,6 +5,8 @@ import { cookieName } from '#constants/cookie.constants.js';
 type ViewContextType = {
   isChatOpen: boolean;
   setIsChatOpen: (value: boolean | ((current: boolean) => boolean)) => void;
+  isFileTreeOpen: boolean;
+  setIsFileTreeOpen: (value: boolean | ((current: boolean) => boolean)) => void;
   isParametersOpen: boolean;
   setIsParametersOpen: (value: boolean | ((current: boolean) => boolean)) => void;
   isEditorOpen: boolean;
@@ -32,6 +34,7 @@ export const useViewContext = (): ViewContextType => {
 
 export function ViewContextProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const [isChatOpen, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
+  const [isFileTreeOpen, setIsFileTreeOpen] = useCookie(cookieName.chatOpFileExplorer, false);
   const [isParametersOpen, setIsParametersOpen] = useCookie(cookieName.chatOpParameters, true);
   const [isEditorOpen, setIsEditorOpen] = useCookie(cookieName.chatOpEditor, false);
   const [isExplorerOpen, setIsExplorerOpen] = useCookie(cookieName.chatOpModelExplorer, false);
@@ -43,6 +46,8 @@ export function ViewContextProvider({ children }: { readonly children: React.Rea
     () => ({
       isChatOpen,
       setIsChatOpen,
+      isFileTreeOpen,
+      setIsFileTreeOpen,
       isParametersOpen,
       setIsParametersOpen,
       isEditorOpen,
@@ -59,6 +64,8 @@ export function ViewContextProvider({ children }: { readonly children: React.Rea
     [
       isChatOpen,
       setIsChatOpen,
+      isFileTreeOpen,
+      setIsFileTreeOpen,
       isParametersOpen,
       setIsParametersOpen,
       isEditorOpen,

@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import type { ClassValue } from 'clsx';
-import { Axis3D, Box, Grid3X3, Rotate3D, Settings, PenLine, Sparkles } from 'lucide-react';
+import { Axis3D, Box, Grid3X3, Rotate3D, Settings, PenLine, Sparkles, ArrowUp } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
@@ -13,10 +13,12 @@ import {
   DropdownMenuSwitchItem,
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu.js';
+import { ToggleGroup, ToggleGroupItem } from '#components/ui/toggle-group.js';
 import { cn } from '#utils/ui.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
+import { axesColors } from '#constants/color.constants.js';
 
 type ViewSettings = {
   surface: boolean;
@@ -25,6 +27,7 @@ type ViewSettings = {
   grid: boolean;
   axes: boolean;
   matcap: boolean;
+  upDirection: 'x' | 'y' | 'z';
 };
 
 // Default settings
@@ -35,6 +38,7 @@ const defaultSettings: ViewSettings = {
   grid: true,
   axes: true,
   matcap: false,
+  upDirection: 'z',
 };
 
 type CameraSettingsProps = {
@@ -80,6 +84,10 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
     graphicsActor.send({ type: 'setMatcapVisibility', payload: viewSettings.matcap });
   }, [viewSettings.matcap, graphicsActor]);
 
+  useEffect(() => {
+    graphicsActor.send({ type: 'setUpDirection', payload: viewSettings.upDirection });
+  }, [viewSettings.upDirection, graphicsActor]);
+
   const handleMeshToggle = useCallback(
     (checked: boolean) => {
       setViewSettings((previous) => ({ ...previous, surface: checked }));
@@ -118,6 +126,15 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
   const handleMatcapToggle = useCallback(
     (checked: boolean) => {
       setViewSettings((previous) => ({ ...previous, matcap: checked }));
+    },
+    [setViewSettings],
+  );
+
+  const handleUpDirectionChange = useCallback(
+    (value: string) => {
+      if (value === 'x' || value === 'y' || value === 'z') {
+        setViewSettings((previous) => ({ ...previous, upDirection: value }));
+      }
     },
     [setViewSettings],
   );
@@ -220,6 +237,31 @@ export function SettingsControl({ className }: CameraSettingsProps): React.React
             Axes
           </span>
         </DropdownMenuSwitchItem>
+        {!is2dGeometry && (
+          <div className="flex items-center justify-between px-2 py-0.5">
+            <span className="flex items-center gap-2 text-sm">
+              <ArrowUp className="size-4" />
+              Up Direction
+            </span>
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              value={viewSettings.upDirection}
+              className="font-semibold"
+              onValueChange={handleUpDirectionChange}
+            >
+              <ToggleGroupItem value="x" aria-label="X-up" className="h-7 flex-1">
+                <span style={{ color: axesColors.x }}>X</span>
+              </ToggleGroupItem>
+              <ToggleGroupItem value="y" aria-label="Y-up" className="h-7 flex-1">
+                <span style={{ color: axesColors.y }}>Y</span>
+              </ToggleGroupItem>
+              <ToggleGroupItem value="z" aria-label="Z-up" className="h-7 flex-1">
+                <span style={{ color: axesColors.z }}>Z</span>
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

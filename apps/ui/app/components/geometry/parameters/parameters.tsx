@@ -119,7 +119,7 @@ export function Parameters({
   );
 
   const mergedData = useMemo(() => ({ ...defaultParameters, ...parameters }), [defaultParameters, parameters]);
-  const hasParameters = jsonSchema && Object.keys(mergedData).length > 0;
+  const hasParameters = jsonSchema && Object.keys(jsonSchema.properties ?? {}).length > 0;
 
   // Initialize the ref with the current edited parameters when component mounts or data changes
   React.useEffect(() => {
@@ -137,7 +137,7 @@ export function Parameters({
         <>
           {/* Search and Controls Bar */}
           {enableSearch || enableExpandAll ? (
-            <div className="flex w-full flex-row gap-2 p-2">
+            <div className="flex w-full flex-row gap-2 border-b bg-sidebar p-2">
               {enableSearch ? (
                 <SearchInput
                   ref={searchInputReference}
@@ -203,7 +203,7 @@ export function Parameters({
             widgets={widgets}
             formData={mergedData}
             formContext={formContext}
-            className="flex flex-1 flex-col px-0 py-0"
+            className="flex flex-1 flex-col overflow-y-auto px-0 py-0"
             onChange={handleChange}
           />
         </>

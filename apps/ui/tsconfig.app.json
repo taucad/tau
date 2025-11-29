@@ -7,7 +7,8 @@
     "app/**/*.jsx",
     "vite-environment.d.ts",
     ".react-router/types/**/*",
-    ".source/**/*" // Fumadocs collections
+    ".source/**/*", // Fumadocs collections
+    "package.json"
   ],
   "compilerOptions": {
     "outDir": "./out-tsc/lib",

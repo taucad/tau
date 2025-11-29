@@ -20,7 +20,6 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const { activeTab, handleTabChange, drawerOpen, handleDrawerChange, snapPoints, activeSnapPoint, handleSnapChange } =
     useChatInterfaceState();
 
-  console.log('activeSnapPoint', activeSnapPoint);
   const isModelTab = activeTab === 'model';
 
   return (

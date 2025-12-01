@@ -15,6 +15,9 @@
   "exclude": ["app/**/*.spec.ts", "app/**/*.test.ts"],
   "references": [
     {
+      "path": "../../libs/chat/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api-extractor/tsconfig.lib.json"
     },
     {

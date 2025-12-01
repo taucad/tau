@@ -11,6 +11,7 @@
     "@taucad/tau-examples": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/units": "workspace:*",
+    "@taucad/chat": "workspace:*",
     "isbot": "^5"
   },
   "imports": {

@@ -5,7 +5,7 @@ import { useActorRef, useSelector } from '@xstate/react';
 import { idPrefix } from '@taucad/types/constants';
 import { AlertCircle, ChevronDown, FileCode, RotateCcw, XCircle } from 'lucide-react';
 import { fromPromise } from 'xstate';
-// eslint-disable-next-line no-restricted-imports -- allowed for route types
+import { generatePrefixedId } from '@taucad/utils/id';
 import type { Route } from './+types/route.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
 import type { Handle } from '#types/matches.types.js';
@@ -22,7 +22,6 @@ import { RepositoryCard } from '#routes/import/repository-card.js';
 import { BranchSelector } from '#routes/import/branch-selector.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { consoleInspector } from '#machines/inspector.js';
-import { generatePrefixedId } from '@taucad/utils/id';
 
 export const handle: Handle = {
   enableOverflowY: true,

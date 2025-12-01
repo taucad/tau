@@ -80,7 +80,7 @@ const floatingPanelContentHeaderVariants = cva(
   {
     variants: {
       side: {
-        left: 'pr-0.75 pl-2 group-hover/floating-panel:pl-8 max-md:pl-12',
+        left: 'pr-0.75 md:pl-8 pl-12',
         right: 'pr-7 pl-2 max-md:pr-12',
       },
     },

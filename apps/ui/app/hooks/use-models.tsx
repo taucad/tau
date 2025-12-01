@@ -31,6 +31,7 @@ export const useModels = () => {
   const { data, isLoading } = useQuery({
     queryKey: ['models'],
     queryFn: async () => getModels(),
+    refetchInterval: 1000 * 60 * 5, // 5 minutes
     initialData: loaderData?.models,
   });
 

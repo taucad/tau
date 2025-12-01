@@ -9,7 +9,7 @@ import { idPrefix } from '@taucad/types/constants';
 import type { DatabaseService } from '#database/database.service.js';
 import type { AuthService } from '#auth/auth.service.js';
 import type { Environment } from '#config/environment.config.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
+import { generatePrefixedId } from '@taucad/utils/id';
 import { staticAuthConfig } from '#config/auth.js';
 
 /**

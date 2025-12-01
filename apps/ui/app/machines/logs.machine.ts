@@ -2,7 +2,7 @@ import { setup, assign } from 'xstate';
 import { idPrefix } from '@taucad/types/constants';
 import type { LogEntry, LogOptions } from '#types/console.types.js';
 import { logLevels } from '#types/console.types.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
+import { generatePrefixedId } from '@taucad/utils/id';
 
 const defaultMaxLogs = 1000;
 

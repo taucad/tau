@@ -4,6 +4,9 @@
   "include": [],
   "references": [
     {
+      "path": "../../libs/utils"
+    },
+    {
       "path": "../../libs/chat"
     },
     {

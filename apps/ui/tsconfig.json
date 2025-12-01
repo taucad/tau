@@ -4,7 +4,7 @@
   "include": [],
   "references": [
     {
-      "path": "../../libs/chat"
+      "path": "../../libs/utils"
     },
     {
       "path": "../../packages/json-schema"
@@ -20,6 +20,9 @@
     },
     {
       "path": "../../libs/units"
+    },
+    {
+      "path": "../../libs/chat"
     },
     {
       "path": "../../libs/types"

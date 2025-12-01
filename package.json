@@ -142,6 +142,7 @@
     "monaco-editor": "^0.54.0",
     "monacopilot": "^1.1.23",
     "motion": "^12.11.3",
+    "nanoid": "^5.1.6",
     "nestjs-pino": "^4.4.0",
     "nestjs-zod": "^5.0.1",
     "ollama": "^0.5.16",

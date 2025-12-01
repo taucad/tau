@@ -13,7 +13,7 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
 import { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
+import { generatePrefixedId } from '@taucad/utils/id';
 
 /**
  * Build Machine Context

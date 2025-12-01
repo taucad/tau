@@ -4,7 +4,7 @@ import type { GridSizes, ScreenshotOptions, Geometry } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import type { LengthSymbol, UnitSystem } from '@taucad/units';
 import { standardInternationalBaseUnits } from '@taucad/units/constants';
-import { generatePrefixedId } from '#utils/id.utils.js';
+import { generatePrefixedId } from '@taucad/utils/id';
 
 // Context type definition
 export type GraphicsContext = {

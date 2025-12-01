@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
 import type { KernelProvider } from '@taucad/types';
 import { idPrefix, kernelConfigurations } from '@taucad/types/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
 import { Button } from '#components/ui/button.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '#components/ui/card.js';
 import { Input } from '#components/ui/input.js';
@@ -21,7 +22,6 @@ import { useKeydown } from '#hooks/use-keydown.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useBuildManager } from '#hooks/use-build-manager.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
 
 export const handle: Handle = {
   breadcrumb() {

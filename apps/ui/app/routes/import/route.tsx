@@ -22,7 +22,7 @@ import { RepositoryCard } from '#routes/import/repository-card.js';
 import { BranchSelector } from '#routes/import/branch-selector.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { consoleInspector } from '#machines/inspector.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
+import { generatePrefixedId } from '@taucad/utils/id';
 
 export const handle: Handle = {
   enableOverflowY: true,

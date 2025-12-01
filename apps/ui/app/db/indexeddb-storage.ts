@@ -2,8 +2,8 @@ import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
 import type { Build } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
 import type { StorageProvider } from '#types/storage.types.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
 import { metaConfig } from '#constants/meta.constants.js';
 
 export class IndexedDbStorageProvider implements StorageProvider {

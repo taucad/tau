@@ -355,6 +355,9 @@ importers:
       motion:
         specifier: ^12.11.3
         version: 12.11.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      nanoid:
+        specifier: ^5.1.6
+        version: 5.1.6
       nestjs-pino:
         specifier: ^4.4.0
         version: 4.4.0(@nestjs/common@11.1.5(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@10.5.0)(pino@9.6.0)(rxjs@7.8.2)
@@ -710,6 +713,9 @@ importers:
       '@taucad/types':
         specifier: workspace:*
         version: link:../../libs/types
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
 
   apps/ui:
     dependencies:
@@ -737,6 +743,9 @@ importers:
       '@taucad/units':
         specifier: workspace:*
         version: link:../../libs/units
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
       isbot:
         specifier: ^5
         version: 5.1.29
@@ -754,6 +763,12 @@ importers:
         version: link:../units
 
   libs/units: {}
+
+  libs/utils:
+    dependencies:
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../types
 
   packages/converter:
     dependencies:
@@ -12200,13 +12215,13 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  nanoid@3.3.8:
-    resolution: {integrity: sha512-WNLf5Sd8oZxOm+TzppcYk8gVOgP+l58xNy58D0nbUnOxOWRWvlcCV4kUF7ltmI6PsrLl/BgKEyS4mqsGChFN0w==}
-    engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
-    hasBin: true
-
   nanoid@5.1.5:
     resolution: {integrity: sha512-Ir/+ZpE9fDsNH0hQ3C68uyThDXzYcim2EqcZ8zn8Chtt1iylPT9xXJB0kPCnqzgcEGikO9RxSrh63MsmVCU7Fw==}
+    engines: {node: ^18 || >=20}
+    hasBin: true
+
+  nanoid@5.1.6:
+    resolution: {integrity: sha512-c7+7RQ+dMB5dPwwCp4ee1/iV/q2P6aK1mTZcfr1BTuVlyW9hJYiMPybJCcnBlQtuSmTIWNeazm/zqNoZSSElBg==}
     engines: {node: ^18 || >=20}
     hasBin: true
 
@@ -21362,7 +21377,7 @@ snapshots:
       lodash: 4.17.21
       lodash-es: 4.17.21
       markdown-to-jsx: 7.7.12(react@19.2.0)
-      nanoid: 3.3.8
+      nanoid: 3.3.11
       prop-types: 15.8.1
       react: 19.2.0
 
@@ -28962,9 +28977,9 @@ snapshots:
 
   nanoid@3.3.11: {}
 
-  nanoid@3.3.8: {}
-
   nanoid@5.1.5: {}
+
+  nanoid@5.1.6: {}
 
   nanostores@1.0.1: {}
 

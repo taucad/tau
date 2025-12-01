@@ -39,6 +39,9 @@
     },
     {
       "path": "./libs/chat"
+    },
+    {
+      "path": "./libs/utils"
     }
   ],
   "files": [],

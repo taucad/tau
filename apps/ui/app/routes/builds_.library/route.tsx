@@ -36,6 +36,7 @@ import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import { useSelector } from '@xstate/react';
 import type { EngineeringDiscipline, Build, KernelProvider } from '@taucad/types';
 import { engineeringDisciplines, messageRole, messageStatus, idPrefix } from '@taucad/types/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
 import { createInitialBuild } from '#constants/build.constants.js';
 import { createColumns } from '#routes/builds_.library/columns.js';
 import { CategoryBadge } from '#components/category-badge.js';
@@ -89,7 +90,6 @@ import { createMessage } from '#utils/chat.utils.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultBuildName } from '#constants/build-names.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
 import { useBuildManager } from '#hooks/use-build-manager.js';
 
 const categoryIconsFromEngineeringDiscipline = {

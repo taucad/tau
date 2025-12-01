@@ -17,7 +17,7 @@ export const ChatError = memo(function ({
   readonly className?: string;
 }): React.ReactNode {
   const error = useChatSelector((state) => state.context.error);
-  const { reload } = useChatActions();
+  const { regenerate } = useChatActions();
 
   if (!error) {
     return null;
@@ -49,7 +49,7 @@ export const ChatError = memo(function ({
               variant="outline"
               size="xs"
               onClick={async () => {
-                reload();
+                regenerate();
               }}
             >
               <RefreshCcw className="size-3" />

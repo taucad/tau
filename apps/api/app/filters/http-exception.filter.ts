@@ -1,7 +1,7 @@
-import { Catch, HttpException, HttpStatus } from '@nestjs/common';
+import { Catch, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import type { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { Logger } from 'nestjs-pino';
+import { ZodSerializationException } from 'nestjs-zod';
 import { ZodError } from 'zod';
 import { httpHeader } from '#constants/http-header.constant.js';
 
@@ -16,7 +16,7 @@ export type ErrorResponse = {
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
-  public constructor(private readonly logger: Logger) {}
+  private readonly logger = new Logger(HttpExceptionFilter.name);
 
   public catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
@@ -66,17 +66,24 @@ export class HttpExceptionFilter implements ExceptionFilter {
           requestId,
         };
       }
-    } else if (exception instanceof ZodError) {
-      // Handle Zod validation errors
-      statusCode = HttpStatus.BAD_REQUEST;
-      errorResponse = {
-        error: 'Validation failed',
-        code: 'VALIDATION_ERROR',
-        statusCode,
-        message: exception.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
-        path: request.url,
-        requestId,
-      };
+    } else if (exception instanceof ZodSerializationException && exception.getZodError() instanceof ZodError) {
+      const zodError = exception.getZodError();
+      if (zodError instanceof ZodError) {
+        console.log(zodError);
+        statusCode = HttpStatus.BAD_REQUEST;
+        errorResponse = {
+          error: 'Validation failed',
+          code: 'VALIDATION_ERROR',
+          statusCode,
+          message: zodError.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
+          path: request.url,
+          requestId,
+        };
+      } else {
+        throw new TypeError(
+          'ZodSerializationException is not a ZodError. Something was probably misconfigured in the exception filter.',
+        );
+      }
     } else if (exception instanceof Error) {
       // Handle unknown errors
       statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
@@ -101,24 +108,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     // Log error details
     if (statusCode >= 500) {
-      this.logger.error({
-        msg: `Unhandled exception: ${errorResponse.error}`,
-        err: exception instanceof Error ? exception : new Error(String(exception)),
-        method: request.method,
-        url: request.url,
-        requestId,
-        statusCode,
-        context: HttpExceptionFilter.name,
-      });
+      this.logger.error(exception, `Unhandled exception: ${errorResponse.error}`);
     } else if (statusCode >= 400) {
-      this.logger.warn({
-        msg: `Client error: ${errorResponse.error}`,
-        method: request.method,
-        url: request.url,
-        requestId,
-        statusCode,
-        context: HttpExceptionFilter.name,
-      });
+      this.logger.warn(`Client error: ${errorResponse.error}`);
     }
 
     // Set request ID in response header (matching middleware behavior)

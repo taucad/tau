@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import type { MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER, APP_PIPE } from '@nestjs/core';
-import { ZodValidationPipe } from 'nestjs-zod';
+import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
+import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod';
 import { DatabaseModule } from '#database/database.module.js';
 import { AuthModule } from '#auth/auth.module.js';
 import { getEnvironment } from '#config/environment.config.js';
@@ -24,6 +24,10 @@ import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
     {
       provide: APP_PIPE,
       useClass: ZodValidationPipe,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ZodSerializerInterceptor,
     },
     {
       provide: APP_FILTER,

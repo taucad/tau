@@ -17,7 +17,7 @@ import {
 } from '#api/chat/utils/convert-messages.js';
 import { objectToXml } from '#utils/xml.js';
 import { AuthGuard } from '#auth/auth.guard.js';
-import type { CreateChatDto } from '#api/chat/chat.dto.js';
+import { CreateChatDto } from '#api/chat/chat.dto.js';
 
 @UseGuards(AuthGuard)
 @Controller({ path: 'chat', version: '1' })

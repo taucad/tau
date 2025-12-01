@@ -1,7 +1,7 @@
 import { Catch, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import type { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { ZodSerializationException } from 'nestjs-zod';
+import { ZodSerializationException, ZodValidationException } from 'nestjs-zod';
 import { ZodError } from 'zod';
 import { httpHeader } from '#constants/http-header.constant.js';
 
@@ -30,7 +30,24 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let statusCode: number;
     let errorResponse: ErrorResponse;
 
-    if (exception instanceof HttpException) {
+    if (exception instanceof ZodValidationException || exception instanceof ZodSerializationException) {
+      const zodError = exception.getZodError();
+      if (zodError instanceof ZodError) {
+        statusCode = HttpStatus.BAD_REQUEST;
+        errorResponse = {
+          error: 'Validation failed',
+          code: 'VALIDATION_ERROR',
+          statusCode,
+          message: zodError.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
+          path: request.url,
+          requestId,
+        };
+      } else {
+        throw new TypeError(
+          'ZodSerializationException is not a ZodError. Something was probably misconfigured in the exception filter.',
+        );
+      }
+    } else if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
       const exceptionResponse = exception.getResponse();
 
@@ -65,24 +82,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
           path: request.url,
           requestId,
         };
-      }
-    } else if (exception instanceof ZodSerializationException && exception.getZodError() instanceof ZodError) {
-      const zodError = exception.getZodError();
-      if (zodError instanceof ZodError) {
-        console.log(zodError);
-        statusCode = HttpStatus.BAD_REQUEST;
-        errorResponse = {
-          error: 'Validation failed',
-          code: 'VALIDATION_ERROR',
-          statusCode,
-          message: zodError.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
-          path: request.url,
-          requestId,
-        };
-      } else {
-        throw new TypeError(
-          'ZodSerializationException is not a ZodError. Something was probably misconfigured in the exception filter.',
-        );
       }
     } else if (exception instanceof Error) {
       // Handle unknown errors

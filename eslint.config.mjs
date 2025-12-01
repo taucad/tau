@@ -257,6 +257,7 @@ const config = [
             'UseFilters',
             'Catch',
             'ZodSerializerDto',
+            'Sse',
           ],
         },
       ],

@@ -2,7 +2,6 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ConfigService } from '@nestjs/config';
 import type { Params } from 'nestjs-pino';
 import type { Options } from 'pino-http';
-import type { PrettyOptions } from 'pino-pretty';
 import { loggingRedactPaths, logServiceProvider } from '#constants/app.constant.js';
 import type { LogServiceProvider } from '#constants/app.constant.js';
 import type { Environment } from '#config/environment.config.js';
@@ -246,18 +245,16 @@ export function consoleLoggingConfig(): Options {
     };
   }
 
-  const options: PrettyOptions = {
-    singleLine: true,
-    colorize: true,
-    ignore: 'pid,hostname,req,res,responseTime,context',
-    messageFormat: `${colors.bright}{if context}${colors.yellow}[{context}] {end}${colors.reset}{if msg}{msg}{end}`,
-  };
-
   return {
     messageKey: 'msg',
     transport: {
       target: 'pino-pretty',
-      options,
+      options: {
+        singleLine: false,
+        colorize: true,
+        ignore: 'pid,hostname,req,res,responseTime,context,data',
+        messageFormat: `${colors.bright}{if context}${colors.yellow}[{context}] {end}${colors.reset}{if msg}{msg}{end}{if data}\n{data}{end}`,
+      },
     },
   };
 }

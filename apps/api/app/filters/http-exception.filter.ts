@@ -1,6 +1,7 @@
-import { Catch, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { Catch, HttpException, HttpStatus } from '@nestjs/common';
 import type { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { Logger } from 'nestjs-pino';
 import { ZodError } from 'zod';
 import { httpHeader } from '#constants/http-header.constant.js';
 
@@ -15,7 +16,7 @@ export type ErrorResponse = {
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(HttpExceptionFilter.name);
+  public constructor(private readonly logger: Logger) {}
 
   public catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
@@ -86,13 +87,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
         path: request.url,
         requestId,
       };
-
-      // Log the full error for debugging
-      this.logger.error(
-        `Unhandled exception: ${exception.message}`,
-        exception.stack,
-        `${request.method} ${request.url}`,
-      );
     } else {
       // Handle completely unknown error types
       statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
@@ -103,19 +97,28 @@ export class HttpExceptionFilter implements ExceptionFilter {
         path: request.url,
         requestId,
       };
-
-      this.logger.error(`Unknown exception type: ${String(exception)}`, undefined, `${request.method} ${request.url}`);
     }
 
-    // Log error details (except for client errors)
+    // Log error details
     if (statusCode >= 500) {
-      this.logger.error(
-        `Exception caught: ${errorResponse.error}`,
-        exception instanceof Error ? exception.stack : undefined,
-        `${request.method} ${request.url}`,
-      );
+      this.logger.error({
+        msg: `Unhandled exception: ${errorResponse.error}`,
+        err: exception instanceof Error ? exception : new Error(String(exception)),
+        method: request.method,
+        url: request.url,
+        requestId,
+        statusCode,
+        context: HttpExceptionFilter.name,
+      });
     } else if (statusCode >= 400) {
-      this.logger.warn(`Client error: ${errorResponse.error}`, `${request.method} ${request.url}`);
+      this.logger.warn({
+        msg: `Client error: ${errorResponse.error}`,
+        method: request.method,
+        url: request.url,
+        requestId,
+        statusCode,
+        context: HttpExceptionFilter.name,
+      });
     }
 
     // Set request ID in response header (matching middleware behavior)

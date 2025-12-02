@@ -1,19 +1,25 @@
-import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
+import type { UIToolInvocation } from 'ai';
 import { LoaderCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
+import type { MyTools } from '@taucad/chat';
 import { Badge } from '#components/ui/badge.js';
 import { createFaviconUrl, extractDomainFromUrl } from '#utils/url.utils.js';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
 
-export function ChatMessageToolWebBrowser({ part }: { readonly part: ToolInvocationUIPart }): ReactNode {
-  switch (part.toolInvocation.state) {
-    case 'call':
-    case 'result': {
-      const url = part.toolInvocation.args.url as string;
+export function ChatMessageToolWebBrowser({
+  part,
+}: {
+  readonly part: UIToolInvocation<MyTools['webBrowser']>;
+}): ReactNode | undefined {
+  switch (part.state) {
+    case 'input-available':
+    case 'output-available': {
+      const { input } = part;
+      const { url } = input;
       const faviconUrl = createFaviconUrl(url);
       const domain = extractDomainFromUrl(url, { includeTld: true });
 
-      if (part.toolInvocation.state === 'call') {
+      if (part.state === 'input-available') {
         return (
           <Badge variant="outline">
             <AnimatedShinyText className="flex max-w-full flex-row items-center gap-2">
@@ -32,8 +38,12 @@ export function ChatMessageToolWebBrowser({ part }: { readonly part: ToolInvocat
       );
     }
 
-    case 'partial-call': {
+    case 'input-streaming': {
       return null;
+    }
+
+    case 'output-error': {
+      return <div>Web browser failed</div>;
     }
   }
 }

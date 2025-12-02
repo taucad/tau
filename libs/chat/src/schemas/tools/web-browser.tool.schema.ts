@@ -9,5 +9,3 @@ export const webBrowserOutputSchema = z.string();
 
 export type WebBrowserInput = z.infer<typeof webBrowserInputSchema>;
 export type WebBrowserOutput = z.infer<typeof webBrowserOutputSchema>;
-
-export const WEB_BROWSER_TOOL_NAME = 'web_browser';

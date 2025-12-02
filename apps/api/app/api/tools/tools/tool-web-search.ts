@@ -1,14 +1,9 @@
 import { TavilySearch } from '@langchain/tavily';
 import type { TavilyBaseSearchResponse } from '@langchain/tavily';
-import { Logger } from '@nestjs/common';
-
-type WebSearchResult = {
-  title: string;
-  url: string;
-  content: string;
-};
+import type { WebSearchOutput } from '@taucad/chat';
 
 export const webSearchTool = new TavilySearch({
+  name: 'webSearch',
   maxResults: 5,
   topic: 'general',
   // IncludeAnswer: false,
@@ -21,8 +16,7 @@ export const webSearchTool = new TavilySearch({
   // excludeDomains: [],
 });
 
-export const parseWebSearchResults = (content: string): WebSearchResult[] => {
-  Logger.log(content);
+export const parseWebSearchResults = (content: string): WebSearchOutput => {
   const parsedContent = JSON.parse(content) as TavilyBaseSearchResponse;
   return parsedContent.results;
   // Try {

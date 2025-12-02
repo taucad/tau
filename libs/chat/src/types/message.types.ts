@@ -15,15 +15,15 @@ const metadataSchema = z.object({
   }),
 });
 
-type MyMetadata = z.infer<typeof metadataSchema>;
+export type MyMetadata = z.infer<typeof metadataSchema>;
 
 const dataPartSchema = z.object({
   // Add data parts here
 });
 
-type MyDataPart = z.infer<typeof dataPartSchema>;
+export type MyDataPart = z.infer<typeof dataPartSchema>;
 
-type MyTools = InferUITools<{
+export type MyTools = InferUITools<{
   editFile: Tool<FileEditInput, FileEditOutput>;
   analyzeImage: Tool<ImageAnalysisInput, ImageAnalysisOutput>;
   webBrowser: Tool<WebBrowserInput, WebBrowserOutput>;

@@ -1,29 +1,13 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { interrupt } from '@langchain/langgraph';
+import { fileEditInputSchema } from '@taucad/chat';
+import type { FileEditOutput } from '@taucad/chat';
 
-type FileEditResult =
-  | {
-      success: true;
-    }
-  | {
-      success: false;
-      error: string;
-    };
-
-const fileEditSchema = z.object({
-  targetFile: z.string().describe('The target file to modify.'),
-  codeEdit: z
-    .string()
-    .describe(
-      'Specify ONLY the precise lines of code that you wish to edit. Use // ... existing code ... for unchanged sections.',
-    ),
-});
-
-const fileEditJsonSchema = z.toJSONSchema(fileEditSchema);
+const fileEditJsonSchema = z.toJSONSchema(fileEditInputSchema);
 
 export const fileEditToolDefinition = {
-  name: 'edit_file',
+  name: 'editFile',
   description: `Use this tool to propose an edit to an existing file.
 
 This will be read by a less intelligent model, which will quickly apply the edit. You should make it clear what the edit is, while also minimizing the unchanged code you write.
@@ -48,6 +32,6 @@ DO NOT omit spans of pre-existing code without using the // ... existing code ..
 } as const;
 
 export const fileEditTool = tool((args) => {
-  const result = interrupt<unknown, FileEditResult>(args);
+  const result = interrupt<unknown, FileEditOutput>(args);
   return result;
 }, fileEditToolDefinition);

@@ -71,7 +71,7 @@ export const ChatHistory = memo(function (props: {
 }) {
   const { className, isExpanded = true, setIsExpanded } = props;
   const messageIds = useChatSelector((state) => state.context.messageOrder);
-  const { append } = useChatActions();
+  const { sendMessage } = useChatActions();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const toggleChatHistory = useCallback(() => {
     setIsExpanded?.((current) => !current);
@@ -90,9 +90,9 @@ export const ChatHistory = memo(function (props: {
         model,
         imageUrls,
       });
-      append(userMessage);
+      sendMessage(userMessage);
     },
-    [append],
+    [sendMessage],
   );
 
   // Memoize the item renderer for Virtuoso with stable references

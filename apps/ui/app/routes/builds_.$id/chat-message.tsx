@@ -1,11 +1,9 @@
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
-import type { Message } from '@ai-sdk/react';
+import type { UIMessage } from '@ai-sdk/react';
 import { messageRole } from '@taucad/types/constants';
-import type { MessageAnnotation } from '@taucad/types';
 import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
 import { ChatMessageReasoning } from '#routes/builds_.$id/chat-message-reasoning.js';
-import { ChatMessageTool } from '#routes/builds_.$id/chat-message-tool.js';
 import { ChatMessageAnnotations } from '#routes/builds_.$id/chat-message-annotation.js';
 import { ChatMessageText } from '#routes/builds_.$id/chat-message-text.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
@@ -23,14 +21,20 @@ import {
   DropdownMenuLabel,
 } from '#components/ui/dropdown-menu.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
+import { ChatMessageToolWebSearch } from '#routes/builds_.$id/chat-message-tool-web-search.js';
+import { ChatMessageToolWebBrowser } from '#routes/builds_.$id/chat-message-tool-web-browser.js';
+import { ChatMessageToolFileEdit } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
+import { ChatMessageToolImageAnalysis } from '#routes/builds_.$id/chat-message-tool-image-analysis.js';
+import { ChatMessagePartUnknown } from '#routes/builds_.$id/chat-message-tool-unknown.js';
+import { ChatMessageToolTransfer } from '#routes/builds_.$id/chat-message-tool-transfer.js';
 
 type ChatMessageProperties = {
   readonly messageId: string;
 };
 
-const getMessageContent = (message: Message): string => {
+const getMessageContent = (message: UIMessage): string => {
   const content = [];
-  for (const part of message.parts ?? []) {
+  for (const part of message.parts) {
     if (part.type === 'text') {
       content.push(part.text);
     }
@@ -106,7 +110,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
             )}
             onClick={handleEditClick}
           >
-            {displayMessage.parts?.map((part, index) => {
+            {displayMessage.parts.map((part, index) => {
               switch (part.type) {
                 case 'text': {
                   return (
@@ -121,26 +125,15 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                 case 'reasoning': {
                   /* TODO: remove trim when backend is fixed to trim thinking tags */
                   return (
-                    part.reasoning.trim().length > 0 && (
+                    part.text.trim().length > 0 && (
                       <ChatMessageReasoning
                         // eslint-disable-next-line react/no-array-index-key -- Index is stable
                         key={`${displayMessage.id}-message-part-${index}`}
                         part={part}
-                        hasContent={displayMessage.content.length > 0}
+                        hasContent={part.text.trim().length > 0}
                       />
                     )
                   );
-                }
-
-                case 'tool-invocation': {
-                  // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                  return <ChatMessageTool key={`${displayMessage.id}-message-part-${index}`} part={part} />;
-                }
-
-                case 'source': {
-                  // TODO: add source rendering to the message
-
-                  return null;
                 }
 
                 case 'step-start': {
@@ -154,9 +147,47 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                   throw new Error('File rendering is not implemented');
                 }
 
+                case 'dynamic-tool': {
+                  throw new Error('Dynamic tool rendering is not implemented');
+                }
+
+                case 'source-url': {
+                  throw new Error('Source URL rendering is not implemented');
+                }
+
+                case 'source-document': {
+                  throw new Error('Source document rendering is not implemented');
+                }
+
+                // TOOLS
+                case 'tool-webSearch': {
+                  return <ChatMessageToolWebSearch key={part.toolCallId} part={part} />;
+                }
+
+                case 'tool-webBrowser': {
+                  return <ChatMessageToolWebBrowser key={part.toolCallId} part={part} />;
+                }
+
+                case 'tool-editFile': {
+                  return <ChatMessageToolFileEdit key={part.toolCallId} part={part} />;
+                }
+
+                case 'tool-analyzeImage': {
+                  return <ChatMessageToolImageAnalysis key={part.toolCallId} part={part} />;
+                }
+
+                // @ts-expect-error -- TODO: Fix transfer tool typings
+                case 'tool-transfer_to_cad_expert': {
+                  return <ChatMessageToolTransfer key={part} part={part} />;
+                }
+
+                // @ts-expect-error -- TODO: Fix transfer tool typings
+                case 'tool-transfer_to_research_expert': {
+                  return <ChatMessageToolTransfer key={part} part={part} />;
+                }
+
                 default: {
-                  const exhaustiveCheck: never = part;
-                  throw new Error(`Unknown part: ${JSON.stringify(exhaustiveCheck)}`);
+                  return <ChatMessagePartUnknown key={part.id} part={part} />;
                 }
               }
             })}

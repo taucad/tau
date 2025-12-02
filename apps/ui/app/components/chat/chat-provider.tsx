@@ -12,63 +12,62 @@ import { useChat } from '@ai-sdk/react';
 import { createActorContext } from '@xstate/react';
 import { setup, assign, enqueueActions } from 'xstate';
 import { useEffect, useCallback } from 'react';
-import type { Message } from '@ai-sdk/react';
-import { messageStatus } from '@taucad/types/constants';
-import type { Chat, KernelProvider } from '@taucad/types';
+import { messageStatus } from '@taucad/chat/constants';
+import type { Chat, MyUIMessage } from '@taucad/chat';
+import type { KernelProvider } from '@taucad/types';
+import { DefaultChatTransport } from 'ai';
 import { useBuild } from '#hooks/use-build.js';
 import { inspect } from '#machines/inspector.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { ENV } from '#config.js';
+import { createMessage } from '#utils/chat.utils.js';
 
-type UseChatArgs = NonNullable<Parameters<typeof useChat>[0]>;
-type UseChatReturn = ReturnType<typeof useChat>;
+type UseChatArgs = NonNullable<Parameters<typeof useChat<MyUIMessage>>[0]>;
+type UseChatReturn = ReturnType<typeof useChat<MyUIMessage>>;
 
 // Define the machine context to mirror useChat state
 export type ChatMachineContext = {
   chatId?: string; // Current chat ID for emissions
   lastInitializedChatId?: string; // Track last chat that was initialized to prevent stale sync overwrites
-  messages: Message[]; // Keep array for compatibility with useChat
-  messagesById: Map<string, Message>; // O(1) lookup map
+  messages: MyUIMessage[]; // Keep array for compatibility with useChat
+  messagesById: Map<string, MyUIMessage>; // O(1) lookup map
   messageOrder: string[]; // Preserve message order
   input: string;
   isLoading: boolean;
   error?: Error;
   data?: unknown;
   status: UseChatReturn['status'];
-  // Draft message state (minimal - Message is built on emission)
+  // Draft message state (minimal - MyUIMessage is built on emission)
   draftText: string; // Draft text content
   draftImages: string[]; // Draft image URLs
   draftToolChoice: string | string[]; // Selected tool choice for draft
   // Edit draft state (for editing existing messages)
-  messageEdits: Record<string, Message>; // Mirrored from buildMachine
+  messageEdits: Record<string, MyUIMessage>; // Mirrored from buildMachine
   activeEditMessageId?: string; // Currently editing
   editDraftText: string; // Edit draft text content
   editDraftImages: string[]; // Edit draft image URLs
   // Pending sync data to batch updates during debounce period
   pendingSyncData?: Partial<Omit<ChatMachineContext, '_chatActions' | 'pendingSyncData' | 'pendingReload'>>;
-  // Flag to track if reload should be called after _chatActions is registered
+  // Flag to track if regenerate should be called after _chatActions is registered
   pendingReload?: boolean;
   // Internal refs to useChat actions - prefixed with _ to indicate internal use
   _chatActions?: {
-    append: UseChatReturn['append'];
-    reload: UseChatReturn['reload'];
+    sendMessage: UseChatReturn['sendMessage'];
+    regenerate: UseChatReturn['regenerate'];
     stop: UseChatReturn['stop'];
-    setInput: UseChatReturn['setInput'];
     setMessages: UseChatReturn['setMessages'];
-    setData: UseChatReturn['setData'];
-    handleSubmit: UseChatReturn['handleSubmit'];
   };
 };
 
 // Define events for the machine
 // Helper function to normalize messages for O(1) lookup
-function normalizeMessages(messages: Message[]): {
-  messagesById: Map<string, Message>;
+function normalizeMessages(messages: MyUIMessage[]): {
+  messagesById: Map<string, MyUIMessage>;
   messageOrder: string[];
 } {
-  const messagesById = new Map<string, Message>();
+  const messagesById = new Map<string, MyUIMessage>();
   const messageOrder: string[] = [];
 
   for (const message of messages) {
@@ -80,8 +79,8 @@ function normalizeMessages(messages: Message[]): {
 }
 
 // Helper to build draft message from text and images
-function buildDraftMessage(text: string, images: string[]): Message {
-  const parts: Message['parts'] = [];
+function buildDraftMessage(text: string, images: string[]): MyUIMessage {
+  const parts: MyUIMessage['parts'] = [];
 
   if (text.trim().length > 0) {
     parts.push({
@@ -93,30 +92,32 @@ function buildDraftMessage(text: string, images: string[]): Message {
   for (const image of images) {
     parts.push({
       type: 'file',
-      data: image,
-      mimeType: 'image/png',
+      url: image,
+      mediaType: 'image/png',
     });
   }
 
   return {
     id: 'draft',
     role: 'user',
-    content: parts.map((part) => (part.type === 'text' ? part.text : '')).join(''),
+    metadata: {
+      createdAt: Date.now(),
+      status: 'pending',
+    },
     parts,
-    model: '',
-    status: 'pending',
   };
 }
 
 // Helper to create empty draft
-export function createEmptyDraftMessage(): Message {
+export function createEmptyDraftMessage(): MyUIMessage {
   return {
     id: '',
     role: 'user',
-    content: '',
     parts: [],
-    model: '',
-    status: 'pending',
+    metadata: {
+      createdAt: Date.now(),
+      status: 'pending',
+    },
   };
 }
 
@@ -126,26 +127,23 @@ type ChatMachineEvents =
       payload: Partial<Omit<ChatMachineContext, '_chatActions' | 'pendingSyncData'>>;
     }
   | { type: 'registerChatActions'; actions: NonNullable<ChatMachineContext['_chatActions']> }
-  | { type: 'append'; message: Parameters<UseChatReturn['append']>[0] }
-  | { type: 'reload' }
+  | { type: 'sendMessage'; message: Parameters<UseChatReturn['sendMessage']>[0] }
+  | { type: 'regenerate' }
   | { type: 'stop' }
-  | { type: 'setInput'; input: string }
-  | { type: 'setMessages'; messages: Message[] }
-  | { type: 'setData'; data: Parameters<UseChatReturn['setData']>[0] }
-  | { type: 'submit' }
+  | { type: 'setMessages'; messages: MyUIMessage[] }
   | { type: 'setDraftText'; text: string }
   | { type: 'addDraftImage'; image: string }
   | { type: 'removeDraftImage'; index: number }
   | { type: 'setDraftToolChoice'; toolChoice: string | string[] }
   | { type: 'clearDraft' }
-  | { type: 'loadDraftFromMessage'; draft: Message }
+  | { type: 'loadDraftFromMessage'; draft: MyUIMessage }
   | { type: 'setEditDraftText'; text: string }
   | { type: 'addEditDraftImage'; image: string }
   | { type: 'removeEditDraftImage'; index: number }
-  | { type: 'loadAllMessageEdits'; edits: Record<string, Message> }
+  | { type: 'loadAllMessageEdits'; edits: Record<string, MyUIMessage> }
   | { type: 'startEditingMessage'; messageId: string }
   | { type: 'exitEditMode' }
-  | { type: 'loadEditDraftFromMessage'; messageId: string; draft: Message }
+  | { type: 'loadEditDraftFromMessage'; messageId: string; draft: MyUIMessage }
   | { type: 'clearEditDraft' }
   | { type: 'editMessage'; messageId: string; content: string; model: string; metadata?: unknown; imageUrls?: string[] }
   | { type: 'retryMessage'; messageId: string; modelId?: string }
@@ -155,8 +153,8 @@ type ChatMachineEvents =
     };
 
 type ChatMachineEmitted =
-  | { type: 'draftChanged'; chatId: string; draft: Message }
-  | { type: 'editDraftChanged'; chatId: string; messageId: string; draft: Message }
+  | { type: 'draftChanged'; chatId: string; draft: MyUIMessage }
+  | { type: 'editDraftChanged'; chatId: string; messageId: string; draft: MyUIMessage }
   | { type: 'messageEditCleared'; chatId: string; messageId: string };
 
 // Create the XState machine with delayed transitions for debouncing
@@ -228,18 +226,18 @@ const chatMachine = setup({
                     context._chatActions.setMessages(context.messages);
                   }
 
-                  // If reload was pending, execute it now that _chatActions is registered
+                  // If regenerate was pending, execute it now that _chatActions is registered
                   if (context.pendingReload && context._chatActions) {
                     enqueue.assign({
                       pendingReload: undefined,
                     });
-                    void context._chatActions.reload();
+                    void context._chatActions.regenerate();
                   }
                 }),
               ],
             },
             // Direct action events
-            append: {
+            sendMessage: {
               actions: [
                 assign({ error: undefined }),
                 assign({
@@ -247,26 +245,21 @@ const chatMachine = setup({
                   draftImages: [],
                 }),
                 ({ context, event }) => {
-                  void context._chatActions?.append(event.message);
+                  void context._chatActions?.sendMessage(event.message);
                 },
               ],
             },
-            reload: {
+            regenerate: {
               actions: [
                 assign({ error: undefined }),
                 ({ context }) => {
-                  void context._chatActions?.reload();
+                  void context._chatActions?.regenerate();
                 },
               ],
             },
             stop: {
               actions({ context }) {
-                context._chatActions?.stop();
-              },
-            },
-            setInput: {
-              actions({ context, event }) {
-                context._chatActions?.setInput(event.input);
+                void context._chatActions?.stop();
               },
             },
             setMessages: {
@@ -302,15 +295,15 @@ const chatMachine = setup({
 
                   // Handle undefined/null draft - provide default empty draft
                   const draftMessage = draft ?? createEmptyDraftMessage();
-                  const textPart = draftMessage.parts?.find((p) => p.type === 'text');
-                  const draftText = textPart && 'text' in textPart ? textPart.text : '';
-                  const imageParts = draftMessage.parts?.filter((p) => p.type === 'file') ?? [];
-                  const draftImages = imageParts.map((p) => ('data' in p ? p.data : '')).filter((url) => url !== '');
+                  const textPart = draftMessage.parts.find((p) => p.type === 'text');
+                  const draftText = textPart?.text ?? '';
+                  const imageParts = draftMessage.parts.filter((p) => p.type === 'file');
+                  const draftImages = imageParts.map((p) => p.url);
 
                   // Handle undefined/null messageEdits - provide default empty object
                   const edits = messageEdits ?? {};
 
-                  // Check if we need to auto-reload (last message from user)
+                  // Check if we need to auto-regenerate (last message from user)
                   const lastMessage = messages.at(-1);
                   const shouldReload = lastMessage?.role === 'user';
 
@@ -327,23 +320,10 @@ const chatMachine = setup({
                     activeEditMessageId: undefined,
                     editDraftText: '',
                     editDraftImages: [],
-                    // Set pending reload flag if needed (will be executed when _chatActions is registered)
+                    // Set pending regenerate flag if needed (will be executed when _chatActions is registered)
                     pendingReload: shouldReload ? true : undefined,
                   };
                 }),
-              ],
-            },
-            setData: {
-              actions({ context, event }) {
-                context._chatActions?.setData(event.data);
-              },
-            },
-            submit: {
-              actions: [
-                assign({ error: undefined }),
-                ({ context }) => {
-                  context._chatActions?.handleSubmit();
-                },
               ],
             },
             editMessage: [
@@ -370,21 +350,23 @@ const chatMachine = setup({
                     }
 
                     // Create new message with updated content
-                    const newMessage: Message = {
+                    const newMessage: MyUIMessage = createMessage({
                       id: event.messageId,
-                      role: 'user',
                       content: event.content,
-                      createdAt: new Date(),
-                      model: event.model,
-                      status: messageStatus.pending,
-                    };
+                      role: 'user',
+                      imageUrls: event.imageUrls,
+                      metadata: {
+                        status: messageStatus.pending,
+                        model: event.model,
+                      },
+                    });
 
                     // Update messages array - keep messages up to and including the edited one
                     const newMessages = [...context.messages.slice(0, messageIndex), newMessage];
 
-                    // Set messages and reload
+                    // Set messages and regenerate
                     context._chatActions.setMessages(newMessages);
-                    void context._chatActions.reload();
+                    void context._chatActions.regenerate();
                   },
                   enqueueActions(({ context, event, enqueue }) => {
                     enqueue.emit({
@@ -417,21 +399,23 @@ const chatMachine = setup({
                     }
 
                     // Create new message with updated content
-                    const newMessage: Message = {
+                    const newMessage: MyUIMessage = createMessage({
                       id: event.messageId,
-                      role: 'user',
                       content: event.content,
-                      createdAt: new Date(),
-                      model: event.model,
-                      status: messageStatus.pending,
-                    };
+                      role: 'user',
+                      imageUrls: event.imageUrls,
+                      metadata: {
+                        status: messageStatus.pending,
+                        model: event.model,
+                      },
+                    });
 
                     // Update messages array - keep messages up to and including the edited one
                     const newMessages = [...context.messages.slice(0, messageIndex), newMessage];
 
-                    // Set messages and reload
+                    // Set messages and regenerate
                     context._chatActions.setMessages(newMessages);
-                    void context._chatActions.reload();
+                    void context._chatActions.regenerate();
                   },
                 ],
               },
@@ -452,9 +436,9 @@ const chatMachine = setup({
 
                   const newMessages = context.messages.slice(0, messageIndex);
 
-                  // Set messages and reload to retry
+                  // Set messages and regenerate to retry
                   context._chatActions.setMessages(newMessages);
-                  void context._chatActions.reload();
+                  void context._chatActions.regenerate();
                 },
               ],
             },
@@ -597,7 +581,7 @@ const chatMachine = setup({
             _chatActions: ({ event }) => event.actions,
           }),
         },
-        append: {
+        sendMessage: {
           actions: [
             assign({ error: undefined }),
             assign({
@@ -605,26 +589,21 @@ const chatMachine = setup({
               draftImages: [],
             }),
             ({ context, event }) => {
-              void context._chatActions?.append(event.message);
+              void context._chatActions?.sendMessage(event.message);
             },
           ],
         },
-        reload: {
+        regenerate: {
           actions: [
             assign({ error: undefined }),
             ({ context }) => {
-              void context._chatActions?.reload();
+              void context._chatActions?.regenerate();
             },
           ],
         },
         stop: {
           actions({ context }) {
-            context._chatActions?.stop();
-          },
-        },
-        setInput: {
-          actions({ context, event }) {
-            context._chatActions?.setInput(event.input);
+            void context._chatActions?.stop();
           },
         },
         setMessages: {
@@ -632,23 +611,6 @@ const chatMachine = setup({
             assign({ error: undefined }),
             ({ context, event }) => {
               context._chatActions?.setMessages(event.messages);
-            },
-          ],
-        },
-        setData: {
-          actions({ context, event }) {
-            context._chatActions?.setData(event.data);
-          },
-        },
-        submit: {
-          actions: [
-            assign({ error: undefined }),
-            assign({
-              draftText: '',
-              draftImages: [],
-            }),
-            ({ context }) => {
-              context._chatActions?.handleSubmit();
             },
           ],
         },
@@ -682,12 +644,12 @@ const chatMachine = setup({
         loadDraftFromMessage: {
           actions: assign({
             draftText({ event }) {
-              const textPart = event.draft.parts?.find((p) => p.type === 'text');
-              return textPart && 'text' in textPart ? textPart.text : '';
+              const textPart = event.draft.parts.find((p) => p.type === 'text');
+              return textPart?.text ?? '';
             },
             draftImages({ event }) {
-              const imageParts = event.draft.parts?.filter((p) => p.type === 'file') ?? [];
-              return imageParts.map((p) => ('data' in p ? p.data : '')).filter((url) => url !== '');
+              const imageParts = event.draft.parts.filter((p) => p.type === 'file');
+              return imageParts.map((p) => p.url);
             },
           }),
         },
@@ -711,15 +673,15 @@ const chatMachine = setup({
                   const editDraft = context.messageEdits[event.messageId];
                   const originalMessage = context.messagesById.get(event.messageId);
                   const draftToLoad = editDraft ?? originalMessage;
-                  const textPart = draftToLoad?.parts?.find((p) => p.type === 'text');
-                  return textPart && 'text' in textPart ? textPart.text : '';
+                  const textPart = draftToLoad?.parts.find((p) => p.type === 'text');
+                  return textPart?.text ?? '';
                 })(),
                 editDraftImages: (() => {
                   const editDraft = context.messageEdits[event.messageId];
                   const originalMessage = context.messagesById.get(event.messageId);
                   const draftToLoad = editDraft ?? originalMessage;
-                  const imageParts = draftToLoad?.parts?.filter((p) => p.type === 'file') ?? [];
-                  return imageParts.map((p) => ('data' in p ? p.data : '')).filter((url) => url !== '');
+                  const imageParts = draftToLoad?.parts.filter((p) => p.type === 'file') ?? [];
+                  return imageParts.map((p) => p.url);
                 })(),
               };
             }
@@ -729,13 +691,13 @@ const chatMachine = setup({
             const originalMessage = context.messagesById.get(event.messageId);
             const draftToLoad = editDraft ?? originalMessage;
 
-            const textPart = draftToLoad?.parts?.find((p) => p.type === 'text');
-            const imageParts = draftToLoad?.parts?.filter((p) => p.type === 'file') ?? [];
+            const textPart = draftToLoad?.parts.find((p) => p.type === 'text');
+            const imageParts = draftToLoad?.parts.filter((p) => p.type === 'file') ?? [];
 
             return {
               activeEditMessageId: event.messageId,
-              editDraftText: textPart && 'text' in textPart ? textPart.text : '',
-              editDraftImages: imageParts.map((p) => ('data' in p ? p.data : '')).filter((url) => url !== ''),
+              editDraftText: textPart?.text ?? '',
+              editDraftImages: imageParts.map((p) => p.url),
             };
           }),
         },
@@ -776,12 +738,12 @@ const chatMachine = setup({
         loadEditDraftFromMessage: {
           actions: assign({
             editDraftText({ event }) {
-              const textPart = event.draft.parts?.find((p) => p.type === 'text');
-              return textPart && 'text' in textPart ? textPart.text : '';
+              const textPart = event.draft.parts.find((p) => p.type === 'text');
+              return textPart?.text ?? '';
             },
             editDraftImages({ event }) {
-              const imageParts = event.draft.parts?.filter((p) => p.type === 'file') ?? [];
-              return imageParts.map((p) => ('data' in p ? p.data : '')).filter((url) => url !== '');
+              const imageParts = event.draft.parts.filter((p) => p.type === 'file');
+              return imageParts.map((p) => p.url);
             },
           }),
         },
@@ -815,21 +777,23 @@ const chatMachine = setup({
                 }
 
                 // Create new message with updated content
-                const newMessage: Message = {
+                const newMessage: MyUIMessage = createMessage({
                   id: event.messageId,
-                  role: 'user',
                   content: event.content,
-                  createdAt: new Date(),
-                  model: event.model,
-                  status: messageStatus.pending,
-                };
+                  imageUrls: event.imageUrls ?? [],
+                  role: 'user',
+                  metadata: {
+                    status: messageStatus.pending,
+                    model: event.model,
+                  },
+                });
 
                 // Update messages array - keep messages up to and including the edited one
                 const newMessages = [...context.messages.slice(0, messageIndex), newMessage];
 
-                // Set messages and reload
+                // Set messages and regenerate
                 context._chatActions.setMessages(newMessages);
-                void context._chatActions.reload();
+                void context._chatActions.regenerate();
               },
               enqueueActions(({ context, event, enqueue }) => {
                 enqueue.emit({
@@ -861,22 +825,23 @@ const chatMachine = setup({
                   return;
                 }
 
-                // Create new message with updated content
-                const newMessage: Message = {
+                const newMessage = createMessage({
+                  content: event.content,
+                  imageUrls: event.imageUrls,
                   id: event.messageId,
                   role: 'user',
-                  content: event.content,
-                  createdAt: new Date(),
-                  model: event.model,
-                  status: messageStatus.pending,
-                };
+                  metadata: {
+                    status: messageStatus.pending,
+                    model: event.model,
+                  },
+                });
 
                 // Update messages array - keep messages up to and including the edited one
                 const newMessages = [...context.messages.slice(0, messageIndex), newMessage];
 
-                // Set messages and reload
+                // Set messages and regenerate
                 context._chatActions.setMessages(newMessages);
-                void context._chatActions.reload();
+                void context._chatActions.regenerate();
               },
             ],
           },
@@ -912,7 +877,7 @@ const chatMachine = setup({
                 context._chatActions.setMessages(newMessages);
               }
 
-              void context._chatActions.reload();
+              void context._chatActions.regenerate();
             },
           ],
         },
@@ -927,19 +892,7 @@ const chatMachine = setup({
             addDraftImage: 'pendingEmit',
             removeDraftImage: 'pendingEmit',
             // Handle draft clearing events with immediate emission
-            append: [
-              {
-                guard: 'isValidChatId',
-                actions: enqueueActions(({ context, enqueue }) => {
-                  enqueue.emit({
-                    type: 'draftChanged' as const,
-                    chatId: context.chatId!,
-                    draft: createEmptyDraftMessage(),
-                  });
-                }),
-              },
-            ],
-            submit: [
+            sendMessage: [
               {
                 guard: 'isValidChatId',
                 actions: enqueueActions(({ context, enqueue }) => {
@@ -1092,73 +1045,75 @@ function ChatSyncWrapper({
   const [kernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
 
   // Initialize useChat with sync callbacks
-  const chat = useChat({
+  const chat = useChat<MyUIMessage>({
     ...value,
-    credentials: 'include',
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- experimental API
-    experimental_prepareRequestBody(requestBody) {
-      let feedback = {};
-      if (buildContext) {
-        const buildSnapshot = buildContext.buildRef.getSnapshot();
-        const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
-
-        // Try to get the current code, but don't fail if it's not available
-        let code: string | undefined;
-        if (mainFilePath) {
-          const fileManagerSnapshot = fileManager.fileManagerRef.getSnapshot();
-          const fileData = fileManagerSnapshot.context.openFiles.get(mainFilePath);
-
-          if (fileData) {
-            code = decodeTextFile(fileData);
-          }
-        }
-
-        // Get error state from CAD machine
-        const cadActorState = buildContext.cadRef.getSnapshot();
-        feedback = {
-          code,
-          kernel,
-          codeErrors: cadActorState.context.codeErrors,
-          kernelError: cadActorState.context.kernelError,
-        };
-      }
-
-      // Send messages needed for LangGraph to process the request:
-      // - Last user message (for model ID and context)
-      // - Last assistant message + messages after it (for resuming with tool results)
-      // LangGraph checkpointer maintains full conversation history via thread_id
-      const { messages } = requestBody;
-
-      // Find the last user message (needed for model ID)
-      const lastUserMessage = messages.findLast((m) => m.role === 'user');
-
-      // Find messages from last assistant onward (includes assistant + tool results for resume)
-      const lastAssistantIndex = messages.findLastIndex((m) => m.role === 'assistant');
-      const hasAssistantMessage = lastAssistantIndex !== -1;
-      const messagesFromAssistant = hasAssistantMessage
-        ? messages.slice(lastAssistantIndex).filter((m) => m.role !== 'user')
-        : [];
-
-      // Combine: last user message + [assistant message + tool results] if present
-      const newMessages = lastUserMessage ? [lastUserMessage, ...messagesFromAssistant] : [];
-
-      const body = {
-        ...requestBody,
-        messages: newMessages,
-        ...feedback,
-      } as const satisfies typeof requestBody;
-
-      return body;
+    async onToolCall(toolCall) {
+      console.log('toolCall', toolCall);
     },
+    transport: new DefaultChatTransport({
+      api: `${ENV.TAU_API_URL}/v1/chat`,
+      credentials: 'include',
+      // PrepareSendMessagesRequest(requestBody) {
+      //   let feedback = {};
+      //   if (buildContext) {
+      //     const buildSnapshot = buildContext.buildRef.getSnapshot();
+      //     const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
+
+      //     // Try to get the current code, but don't fail if it's not available
+      //     let code: string | undefined;
+      //     if (mainFilePath) {
+      //       const fileManagerSnapshot = fileManager.fileManagerRef.getSnapshot();
+      //       const fileData = fileManagerSnapshot.context.openFiles.get(mainFilePath);
+
+      //       if (fileData) {
+      //         code = decodeTextFile(fileData);
+      //       }
+      //     }
+
+      //     // Get error state from CAD machine
+      //     const cadActorState = buildContext.cadRef.getSnapshot();
+      //     feedback = {
+      //       code,
+      //       kernel,
+      //       codeErrors: cadActorState.context.codeErrors,
+      //       kernelError: cadActorState.context.kernelError,
+      //     };
+      //   }
+
+      //   // Send messages needed for LangGraph to process the request:
+      //   // - Last user message (for model ID and context)
+      //   // - Last assistant message + messages after it (for resuming with tool results)
+      //   // LangGraph checkpointer maintains full conversation history via thread_id
+      //   const { messages } = requestBody;
+
+      //   // Find the last user message (needed for model ID)
+      //   const lastUserMessage = messages.findLast((m) => m.role === 'user');
+
+      //   // Find messages from last assistant onward (includes assistant + tool results for resume)
+      //   const lastAssistantIndex = messages.findLastIndex((m) => m.role === 'assistant');
+      //   const hasAssistantMessage = lastAssistantIndex !== -1;
+      //   const messagesFromAssistant = hasAssistantMessage
+      //     ? messages.slice(lastAssistantIndex).filter((m) => m.role !== 'user')
+      //     : [];
+
+      //   // Combine: last user message + [assistant message + tool results] if present
+      //   const newMessages = lastUserMessage ? [lastUserMessage, ...messagesFromAssistant] : [];
+
+      //   const body = {
+      //     ...requestBody,
+      //     messages: newMessages,
+      //     ...feedback,
+      //   } as const satisfies typeof requestBody;
+
+      //   return body;
+      // },
+    }),
     onFinish(..._args) {
       // Queue sync instead of immediate sync - XState will debounce
       queueSyncChatState();
     },
     onError(...args) {
       console.error('Chat error:', args);
-      queueSyncChatState();
-    },
-    onResponse(..._args) {
       queueSyncChatState();
     },
   });
@@ -1169,36 +1124,31 @@ function ChatSyncWrapper({
       type: 'queueSync',
       payload: {
         messages: chat.messages,
-        input: chat.input,
         isLoading: chat.status === 'streaming',
         error: chat.error,
-        data: chat.data,
         status: chat.status,
       },
     });
-  }, [actorRef, chat.messages, chat.input, chat.status, chat.error, chat.data]);
+  }, [actorRef, chat.messages, chat.status, chat.error]);
 
   // Register useChat actions with XState on mount and when chat changes
   useEffect(() => {
     actorRef.send({
       type: 'registerChatActions',
       actions: {
-        append: chat.append,
-        reload: chat.reload,
+        sendMessage: chat.sendMessage,
+        regenerate: chat.regenerate,
         stop: chat.stop,
-        setInput: chat.setInput,
         setMessages: chat.setMessages,
-        setData: chat.setData,
-        handleSubmit: chat.handleSubmit,
       },
     });
-  }, [actorRef, chat.append, chat.handleSubmit, chat.reload, chat.setData, chat.setInput, chat.setMessages, chat.stop]);
+  }, [actorRef, chat.sendMessage, chat.regenerate, chat.setMessages, chat.stop]);
 
   // Queue sync on key changes (XState will handle debouncing)
   useEffect(() => {
     queueSyncChatState();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- queueSyncChatState is stable and captures latest values
-  }, [chat.messages, chat.input, chat.status, chat.error, chat.data]);
+  }, [chat.messages, chat.status, chat.error]);
 
   return children as React.JSX.Element;
 }
@@ -1211,21 +1161,10 @@ export function useChatSelector<T>(
   return ChatContext.useSelector(selector, equalityFn);
 }
 
-// Hook for accessing sync state (useful for debugging)
-export function useChatSyncState(): {
-  isInSyncState: boolean;
-  hasPendingSync: boolean;
-} {
-  return useChatSelector((state) => ({
-    isInSyncState: state.matches({ sync: 'pendingSync' }),
-    hasPendingSync: Boolean(state.context.pendingSyncData),
-  }));
-}
-
 // Hook for chat actions (proxied through XState)
 export function useChatActions(): {
-  append: (message: Parameters<UseChatReturn['append']>[0]) => void;
-  reload: () => void;
+  sendMessage: (message: Parameters<UseChatReturn['sendMessage']>[0]) => void;
+  regenerate: () => void;
   stop: () => void;
   setDraftText: (text: string) => void;
   addDraftImage: (image: string) => void;
@@ -1242,11 +1181,11 @@ export function useChatActions(): {
   const actorRef = ChatContext.useActorRef();
 
   return {
-    append(message: Parameters<UseChatReturn['append']>[0]) {
-      actorRef.send({ type: 'append', message });
+    sendMessage(message: Parameters<UseChatReturn['sendMessage']>[0]) {
+      actorRef.send({ type: 'sendMessage', message });
     },
-    reload() {
-      actorRef.send({ type: 'reload' });
+    regenerate() {
+      actorRef.send({ type: 'regenerate' });
     },
     stop() {
       actorRef.send({ type: 'stop' });

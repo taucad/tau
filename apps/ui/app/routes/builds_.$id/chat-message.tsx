@@ -27,6 +27,7 @@ import { ChatMessageToolFileEdit } from '#routes/builds_.$id/chat-message-tool-f
 import { ChatMessageToolImageAnalysis } from '#routes/builds_.$id/chat-message-tool-image-analysis.js';
 import { ChatMessagePartUnknown } from '#routes/builds_.$id/chat-message-tool-unknown.js';
 import { ChatMessageToolTransfer } from '#routes/builds_.$id/chat-message-tool-transfer.js';
+import { ChatMessageFile } from '#routes/builds_.$id/chat-message-file.js';
 
 type ChatMessageProperties = {
   readonly messageId: string;
@@ -124,13 +125,14 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
 
                 case 'reasoning': {
                   /* TODO: remove trim when backend is fixed to trim thinking tags */
+                  const hasPartsAfter = index < displayMessage.parts.length - 1;
                   return (
                     part.text.trim().length > 0 && (
                       <ChatMessageReasoning
                         // eslint-disable-next-line react/no-array-index-key -- Index is stable
                         key={`${displayMessage.id}-message-part-${index}`}
                         part={part}
-                        hasContent={part.text.trim().length > 0}
+                        hasContent={hasPartsAfter}
                       />
                     )
                   );
@@ -143,8 +145,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                 }
 
                 case 'file': {
-                  // TODO: add file rendering
-                  throw new Error('File rendering is not implemented');
+                  return <ChatMessageFile key={part.url} part={part} />;
                 }
 
                 case 'dynamic-tool': {

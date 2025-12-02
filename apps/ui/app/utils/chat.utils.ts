@@ -1,20 +1,15 @@
-import type { Message, useChat } from '@ai-sdk/react';
-import type {
-  MessageRole,
-  MessageStatus,
-  KernelProvider,
-  ToolWithSelection,
-  EngineeringDiscipline,
-  ManufacturingMethod,
-} from '@taucad/types';
+import type { useChat } from '@ai-sdk/react';
+import type { MessageRole, MyMetadata, MyUIMessage } from '@taucad/chat';
 import { idPrefix } from '@taucad/types/constants';
-import { generatePrefixedId } from '#utils/id.utils.js';
+import { DefaultChatTransport } from 'ai';
+import { generatePrefixedId } from '@taucad/utils/id';
 import { ENV } from '#config.js';
 
 export const useChatConstants = {
-  api: `${ENV.TAU_API_URL}/v1/chat`,
-  sendExtraMessageFields: true,
-  maxSteps: 10, // Allow the LLM to respond to client side tool calls.
+  transport: new DefaultChatTransport({
+    api: `${ENV.TAU_API_URL}/v1/chat`,
+    credentials: 'include',
+  }),
 } as const satisfies Parameters<typeof useChat>[0];
 
 /**
@@ -41,46 +36,31 @@ export function createMessage({
   id,
   content,
   role,
-  model,
-  status,
   metadata,
   imageUrls = [],
 }: {
   id?: string;
   content: string;
   role: MessageRole;
-  model: string;
-  status: MessageStatus;
-  metadata: {
-    toolChoice?: ToolWithSelection;
-    kernel?: KernelProvider;
-    manufacturingMethod?: ManufacturingMethod;
-    engineeringDiscipline?: EngineeringDiscipline;
-  };
+  metadata: MyMetadata;
   imageUrls?: string[];
-}): Message {
-  const parts: Message['parts'] = [
+}): MyUIMessage {
+  const parts: MyUIMessage['parts'] = [
     {
       type: 'text' as const,
       text: content.trim(),
     },
+    ...imageUrls.map((url) => ({
+      type: 'file' as const,
+      url,
+      mediaType: extractMimeTypeFromDataUrl(url),
+    })),
   ];
-
-  const attachments: Message['experimental_attachments'] = imageUrls.map((url) => ({
-    url,
-    contentType: extractMimeTypeFromDataUrl(url),
-  }));
 
   return {
     id: id ?? generatePrefixedId(idPrefix.message),
-    content: '',
     role,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- experimental properties use experimental_ prefix
-    experimental_attachments: attachments,
     parts,
-    status,
-    model,
-    metadata,
-    createdAt: new Date(),
+    metadata: { ...metadata, createdAt: Date.now() },
   };
 }

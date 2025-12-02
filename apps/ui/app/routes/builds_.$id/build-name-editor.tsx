@@ -1,7 +1,7 @@
 import { useChat } from '@ai-sdk/react';
-import type { Message } from 'ai';
 import { useState, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
+import type { MyUIMessage } from '@taucad/chat';
 import { defaultBuildName } from '#constants/build-names.js';
 import { useBuild } from '#hooks/use-build.js';
 import { useChatConstants } from '#utils/chat.utils.js';
@@ -22,11 +22,10 @@ export function BuildNameEditor(): React.JSX.Element {
   });
   const [displayName, setDisplayName] = useState<string>(buildName);
   const [isNameAnimating, setIsNameAnimating] = useState(false);
-  const { append } = useChat({
+  const { sendMessage } = useChat({
     ...useChatConstants,
-    credentials: 'include',
-    onFinish(message) {
-      const textPart = message.parts?.find((part) => part.type === 'text');
+    onFinish({ message }) {
+      const textPart = message.parts.find((part) => part.type === 'text');
       if (textPart) {
         updateName(textPart.text);
         setDisplayName(textPart.text);
@@ -49,12 +48,11 @@ export function BuildNameEditor(): React.JSX.Element {
       // Create and send message for name generation
       const message = {
         ...activeChatFirstMessage,
-        model: 'name-generator',
         metadata: {
-          toolChoice: 'none',
+          model: 'name-generator',
         },
-      } as const satisfies Message;
-      void append(message);
+      } as const satisfies MyUIMessage;
+      void sendMessage(message);
     } else {
       setDisplayName(buildName);
     }

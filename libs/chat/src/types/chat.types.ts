@@ -32,10 +32,12 @@ export type ChatUsageCost = {
 
 export type Chat = {
   id: string;
+  resourceId: string; // Links chat to a resource (e.g., build)
   name: string;
   messages: MyUIMessage[];
   draft?: MyUIMessage; // Main draft
   messageEdits?: Record<string, MyUIMessage>; // Edit drafts by messageId
   createdAt: number;
   updatedAt: number;
+  deletedAt?: number; // Soft delete support
 };

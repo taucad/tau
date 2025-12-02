@@ -1,10 +1,11 @@
 /* eslint-disable max-depth -- TODO: fix this */
 import type { IterableReadableStream } from '@langchain/core/utils/stream';
-import { formatDataStreamPart, createDataStream } from 'ai';
-import type { DataStreamWriter } from 'ai';
+import { createUIMessageStream } from 'ai';
+import type { UIMessageStreamWriter } from 'ai';
 import type { StreamEvent as LangchainStreamEvent } from '@langchain/core/tracers/log_stream';
 import { idPrefix } from '@taucad/types/constants';
-import { generatePrefixedId } from '#utils/id.utils.js';
+import type { MyUIMessage } from '@taucad/chat';
+import { generatePrefixedId } from '@taucad/utils/id';
 import type { ChatUsageTokens } from '#api/chat/chat.schema.js';
 import { processContent } from '#api/chat/utils/process-content.js';
 import type {
@@ -15,17 +16,7 @@ import type {
   ToolEndEvent,
 } from '#api/chat/utils/langgraph-types.js';
 
-/**
- * Enhanced DataStream with a convenient write method for streaming content.
- */
-export type EnhancedDataStreamWriter = DataStreamWriter & {
-  /**
-   * Formats and writes a part to the data stream.
-   * @param arguments_ - The arguments to pass to formatDataStreamPart.
-   * @returns The formatted data stream part.
-   */
-  writePart: typeof formatDataStreamPart;
-};
+type TypedUiMessageStreamWriter = UIMessageStreamWriter<MyUIMessage>;
 
 /**
  * Callbacks for the LangGraphAdapter to handle different events.
@@ -39,7 +30,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.type - The type of content being streamed.
    */
   onChatModelStream?: (parameters: {
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     content: string | unknown[];
     type: string;
   }) => void;
@@ -50,7 +41,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.dataStream - The enhanced data stream writer.
    * @param parameters.messageId - The ID of the message being generated.
    */
-  onChatModelStart?: (parameters: { dataStream: EnhancedDataStreamWriter; messageId: string }) => void;
+  onChatModelStart?: (parameters: { dataStream: TypedUiMessageStreamWriter; messageId: string }) => void;
 
   /**
    * Called when a chat model finishes generating content.
@@ -60,7 +51,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.usageTokens - Token usage information.
    */
   onChatModelEnd?: (parameters: {
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     modelId: string;
     usageTokens: ChatUsageTokens;
   }) => void;
@@ -74,7 +65,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.args - The arguments passed to the tool.
    */
   onToolStart?: (parameters: {
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     toolCallId: string;
     toolName: string;
     args: unknown;
@@ -89,7 +80,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.result - The result returned by the tool.
    */
   onToolEnd?: (parameters: {
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     toolCallId: string;
     toolName: string;
     result: unknown;
@@ -111,7 +102,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.usageTokens - Token usage information.
    */
   onMessageComplete?: (parameters: {
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     modelId: string;
     usageTokens: ChatUsageTokens;
   }) => void;
@@ -170,12 +161,9 @@ export class LangGraphAdapter {
     const typedStream = stream as IterableReadableStream<StreamEvent>;
     const { modelId, callbacks = {}, toolTypeMap = {}, parseToolResults } = options;
 
-    const dataStream = createDataStream({
+    const dataStream = createUIMessageStream({
       // eslint-disable-next-line complexity -- acceptable to keep the function contained.
-      execute: async (rawDataStream) => {
-        // Create enhanced data stream
-        const dataStream = this.createDataStreamWriter(rawDataStream);
-
+      execute: async (dataStream) => {
         const id = generatePrefixedId(idPrefix.message);
 
         // Keep reasoning state in a mutable object to avoid closure issues
@@ -206,11 +194,12 @@ export class LangGraphAdapter {
             case 'on_chat_model_stream': {
               this.handleChatModelStream({
                 streamEvent,
-                dataStream,
+                dataStream: dataStream.writer,
                 callbacks,
                 reasoningState,
                 toolCallState,
                 toolTypeMap,
+                messageId: id,
               });
               break;
             }
@@ -218,7 +207,7 @@ export class LangGraphAdapter {
             case 'on_chat_model_start': {
               this.handleChatModelStart({
                 messageId: id,
-                dataStream,
+                dataStream: dataStream.writer,
                 callbacks,
               });
               break;
@@ -227,7 +216,7 @@ export class LangGraphAdapter {
             case 'on_chat_model_end': {
               this.handleChatModelEnd({
                 streamEvent,
-                dataStream,
+                dataStream: dataStream.writer,
                 callbacks,
                 modelId,
                 totalUsageTokens,
@@ -238,7 +227,7 @@ export class LangGraphAdapter {
             case 'on_tool_start': {
               this.handleToolStart({
                 streamEvent,
-                dataStream,
+                dataStream: dataStream.writer,
                 callbacks,
                 toolCallState,
               });
@@ -248,7 +237,7 @@ export class LangGraphAdapter {
             case 'on_tool_end': {
               this.handleToolEnd({
                 streamEvent,
-                dataStream,
+                dataStream: dataStream.writer,
                 callbacks,
                 parseToolResults,
                 toolCallState,
@@ -303,15 +292,12 @@ export class LangGraphAdapter {
           }
         }
 
-        callbacks.onMessageComplete?.({ dataStream, modelId, usageTokens: totalUsageTokens });
+        callbacks.onMessageComplete?.({ dataStream: dataStream.writer, modelId, usageTokens: totalUsageTokens });
 
         // Write finish message
-        dataStream.writePart('finish_message', {
+        dataStream.writer.write({
+          type: 'finish',
           finishReason: 'stop',
-          usage: {
-            promptTokens: totalUsageTokens.inputTokens,
-            completionTokens: totalUsageTokens.outputTokens,
-          },
         });
       },
       onError(error) {
@@ -329,13 +315,14 @@ export class LangGraphAdapter {
   // eslint-disable-next-line complexity -- acceptable to keep the function contained.
   private static handleChatModelStream(parameters: {
     streamEvent: ChatModelStreamEvent;
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
     reasoningState: { thinkingBuffer: string; isReasoning: boolean };
     toolCallState: { currentToolCallId: string; currentToolName: string };
     toolTypeMap: Record<string, string>;
+    messageId: string;
   }): void {
-    const { streamEvent, dataStream, callbacks, reasoningState, toolCallState, toolTypeMap } = parameters;
+    const { streamEvent, dataStream, callbacks, reasoningState, toolCallState, toolTypeMap, messageId } = parameters;
 
     if (streamEvent.data.chunk.tool_calls.length > 0) {
       const toolCall = streamEvent.data.chunk.tool_calls[0]!;
@@ -349,7 +336,8 @@ export class LangGraphAdapter {
         }
 
         toolCallState.currentToolName = toolName;
-        dataStream.writePart('tool_call_streaming_start', {
+        dataStream.write({
+          type: 'tool-input-start',
           toolCallId,
           toolName,
         });
@@ -358,9 +346,10 @@ export class LangGraphAdapter {
       // If tool call chunks are present, we need to handle them separately.
       const toolCallChunk = streamEvent.data.chunk.tool_call_chunks[0]!;
       if (toolCallState.currentToolCallId) {
-        dataStream.writePart('tool_call_delta', {
+        dataStream.write({
+          type: 'tool-input-delta',
           toolCallId: toolCallState.currentToolCallId,
-          argsTextDelta: toolCallChunk.args,
+          inputTextDelta: toolCallChunk.args,
         });
       } else {
         throw new Error('Attempted to write tool call delta without a current tool call ID');
@@ -385,8 +374,20 @@ export class LangGraphAdapter {
         // Empty content can sometimes be present, so we check for it and only write if it's present
         // to avoid writing empty parts to the data stream.
         if (content) {
-          // Write to data stream
-          dataStream.writePart(type, content);
+          if (type === 'reasoning') {
+            // Write to data stream
+            dataStream.write({
+              type: 'reasoning-delta',
+              id: messageId,
+              delta: content,
+            });
+          } else {
+            dataStream.write({
+              type: 'text-delta',
+              id: messageId,
+              delta: content,
+            });
+          }
 
           // Call callback if provided
           callbacks.onChatModelStream?.({ dataStream, content, type });
@@ -403,7 +404,11 @@ export class LangGraphAdapter {
                 // No-op: Sometimes empty strings are present
                 // We don't need to write them to the data stream.
               } else {
-                dataStream.writePart('text', textPart.text);
+                dataStream.write({
+                  type: 'text-delta',
+                  id: generatePrefixedId(idPrefix.message),
+                  delta: textPart.text,
+                });
                 callbacks.onChatModelStream?.({ dataStream, content: textPart.text, type: 'text' });
               }
 
@@ -416,11 +421,18 @@ export class LangGraphAdapter {
                   // No-op: Sometimes empty strings are present
                   // We don't need to write them to the data stream.
                 } else {
-                  dataStream.writePart('reasoning', part.thinking);
+                  dataStream.write({
+                    type: 'reasoning-delta',
+                    id: generatePrefixedId(idPrefix.message),
+                    delta: part.thinking,
+                  });
                   callbacks.onChatModelStream?.({ dataStream, content: part.thinking, type: 'reasoning' });
                 }
               } else if ('signature' in part) {
-                dataStream.writePart('reasoning_signature', { signature: part.signature });
+                dataStream.write({
+                  type: 'reasoning-end',
+                  id: generatePrefixedId(idPrefix.message),
+                });
                 callbacks.onChatModelStream?.({
                   dataStream,
                   content: [{ signature: part.signature }],
@@ -434,7 +446,11 @@ export class LangGraphAdapter {
             }
 
             case 'redacted_thinking': {
-              dataStream.writePart('redacted_reasoning', { data: part.data });
+              dataStream.write({
+                type: 'reasoning-delta',
+                id: generatePrefixedId(idPrefix.message),
+                delta: part.data,
+              });
               callbacks.onChatModelStream?.({
                 dataStream,
                 content: [{ data: part.data }],
@@ -469,13 +485,17 @@ export class LangGraphAdapter {
    */
   private static handleChatModelStart(parameters: {
     messageId: string;
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
   }): void {
     const { messageId, dataStream, callbacks } = parameters;
 
-    dataStream.writePart('start_step', {
-      messageId,
+    dataStream.write({
+      type: 'start-step',
+    });
+    dataStream.write({
+      type: 'text-start',
+      id: messageId,
     });
 
     callbacks.onChatModelStart?.({ dataStream, messageId });
@@ -486,7 +506,7 @@ export class LangGraphAdapter {
    */
   private static handleChatModelEnd(parameters: {
     streamEvent: ChatModelEndEvent;
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
     modelId: string;
     totalUsageTokens: ChatUsageTokens;
@@ -506,10 +526,8 @@ export class LangGraphAdapter {
     totalUsageTokens.cachedReadTokens += usageTokens.cachedReadTokens;
     totalUsageTokens.cachedWriteTokens += usageTokens.cachedWriteTokens;
 
-    dataStream.writePart('finish_step', {
-      finishReason: 'stop',
-      usage: { promptTokens: usageTokens.inputTokens, completionTokens: usageTokens.outputTokens },
-      isContinued: false,
+    dataStream.write({
+      type: 'finish-step',
     });
 
     callbacks.onChatModelEnd?.({ dataStream, modelId, usageTokens });
@@ -521,7 +539,7 @@ export class LangGraphAdapter {
    */
   private static handleToolStart(parameters: {
     streamEvent: ToolStartEvent;
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
     toolCallState: { currentToolCallId: string; currentToolName: string };
   }): void {
@@ -564,10 +582,15 @@ export class LangGraphAdapter {
       args = { input };
     }
 
-    dataStream.writePart('tool_call', {
+    dataStream.write({
+      type: 'tool-input-start',
       toolCallId,
       toolName,
-      args,
+    });
+    dataStream.write({
+      type: 'tool-input-delta',
+      toolCallId,
+      inputTextDelta: String(input),
     });
 
     callbacks.onToolStart?.({ dataStream, toolCallId, toolName, args });
@@ -578,7 +601,7 @@ export class LangGraphAdapter {
    */
   private static handleToolEnd(parameters: {
     streamEvent: ToolEndEvent;
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
     parseToolResults?: Partial<Record<string, (content: string) => unknown[]>>;
     toolCallState: { currentToolCallId: string; currentToolName: string };
@@ -626,25 +649,12 @@ export class LangGraphAdapter {
       result = '';
     }
 
-    dataStream.writePart('tool_result', {
+    dataStream.write({
+      type: 'tool-output-available',
       toolCallId,
-      result,
+      output: result,
     });
 
     callbacks.onToolEnd?.({ dataStream, toolCallId, toolName, result });
-  }
-
-  /**
-   * Creates an enhanced data stream writer.
-   */
-  private static createDataStreamWriter(dataStream: DataStreamWriter): EnhancedDataStreamWriter {
-    return Object.assign(dataStream, {
-      writePart(...arguments_: Parameters<typeof formatDataStreamPart>) {
-        const part = formatDataStreamPart(...arguments_);
-        dataStream.write(part);
-
-        return part;
-      },
-    });
   }
 }

@@ -1,7 +1,7 @@
 import { useRouteLoaderData } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import type { Model } from '@taucad/types';
+import type { Model } from '@taucad/chat';
 import { ENV } from '#config.js';
 import type { loader } from '#root.js';
 import { useCookie } from '#hooks/use-cookie.js';

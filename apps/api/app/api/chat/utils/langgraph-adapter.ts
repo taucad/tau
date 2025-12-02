@@ -177,6 +177,12 @@ export class LangGraphAdapter {
           currentToolName: '',
         };
 
+        // Track whether start events have been sent to ensure proper event sequencing
+        const streamStartState = {
+          textStartSent: false,
+          reasoningStartSent: false,
+        };
+
         const totalUsageTokens = {
           inputTokens: 0,
           outputTokens: 0,
@@ -198,6 +204,7 @@ export class LangGraphAdapter {
                 callbacks,
                 reasoningState,
                 toolCallState,
+                streamStartState,
                 toolTypeMap,
                 messageId: id,
               });
@@ -220,6 +227,8 @@ export class LangGraphAdapter {
                 callbacks,
                 modelId,
                 totalUsageTokens,
+                streamStartState,
+                messageId: id,
               });
               break;
             }
@@ -319,10 +328,20 @@ export class LangGraphAdapter {
     callbacks: LangGraphAdapterCallbacks;
     reasoningState: { thinkingBuffer: string; isReasoning: boolean };
     toolCallState: { currentToolCallId: string; currentToolName: string };
+    streamStartState: { textStartSent: boolean; reasoningStartSent: boolean };
     toolTypeMap: Record<string, string>;
     messageId: string;
   }): void {
-    const { streamEvent, dataStream, callbacks, reasoningState, toolCallState, toolTypeMap, messageId } = parameters;
+    const {
+      streamEvent,
+      dataStream,
+      callbacks,
+      reasoningState,
+      toolCallState,
+      streamStartState,
+      toolTypeMap,
+      messageId,
+    } = parameters;
 
     if (streamEvent.data.chunk.tool_calls.length > 0) {
       const toolCall = streamEvent.data.chunk.tool_calls[0]!;
@@ -375,6 +394,15 @@ export class LangGraphAdapter {
         // to avoid writing empty parts to the data stream.
         if (content) {
           if (type === 'reasoning') {
+            // Ensure reasoning-start is sent before the first reasoning-delta
+            if (!streamStartState.reasoningStartSent) {
+              dataStream.write({
+                type: 'reasoning-start',
+                id: messageId,
+              });
+              streamStartState.reasoningStartSent = true;
+            }
+
             // Write to data stream
             dataStream.write({
               type: 'reasoning-delta',
@@ -382,6 +410,15 @@ export class LangGraphAdapter {
               delta: content,
             });
           } else {
+            // Ensure text-start is sent before the first text-delta
+            if (!streamStartState.textStartSent) {
+              dataStream.write({
+                type: 'text-start',
+                id: messageId,
+              });
+              streamStartState.textStartSent = true;
+            }
+
             dataStream.write({
               type: 'text-delta',
               id: messageId,
@@ -404,9 +441,18 @@ export class LangGraphAdapter {
                 // No-op: Sometimes empty strings are present
                 // We don't need to write them to the data stream.
               } else {
+                // Ensure text-start is sent before the first text-delta
+                if (!streamStartState.textStartSent) {
+                  dataStream.write({
+                    type: 'text-start',
+                    id: messageId,
+                  });
+                  streamStartState.textStartSent = true;
+                }
+
                 dataStream.write({
                   type: 'text-delta',
-                  id: generatePrefixedId(idPrefix.message),
+                  id: messageId,
                   delta: textPart.text,
                 });
                 callbacks.onChatModelStream?.({ dataStream, content: textPart.text, type: 'text' });
@@ -421,9 +467,18 @@ export class LangGraphAdapter {
                   // No-op: Sometimes empty strings are present
                   // We don't need to write them to the data stream.
                 } else {
+                  // Ensure reasoning-start is sent before the first reasoning-delta
+                  if (!streamStartState.reasoningStartSent) {
+                    dataStream.write({
+                      type: 'reasoning-start',
+                      id: messageId,
+                    });
+                    streamStartState.reasoningStartSent = true;
+                  }
+
                   dataStream.write({
                     type: 'reasoning-delta',
-                    id: generatePrefixedId(idPrefix.message),
+                    id: messageId,
                     delta: part.thinking,
                   });
                   callbacks.onChatModelStream?.({ dataStream, content: part.thinking, type: 'reasoning' });
@@ -431,13 +486,15 @@ export class LangGraphAdapter {
               } else if ('signature' in part) {
                 dataStream.write({
                   type: 'reasoning-end',
-                  id: generatePrefixedId(idPrefix.message),
+                  id: messageId,
                 });
                 callbacks.onChatModelStream?.({
                   dataStream,
                   content: [{ signature: part.signature }],
                   type: 'reasoning_signature',
                 });
+                // Reset reasoning start state after reasoning-end
+                streamStartState.reasoningStartSent = false;
               } else {
                 throw new Error('Unknown part type: ' + JSON.stringify(part));
               }
@@ -446,9 +503,18 @@ export class LangGraphAdapter {
             }
 
             case 'redacted_thinking': {
+              // Ensure reasoning-start is sent before the first reasoning-delta
+              if (!streamStartState.reasoningStartSent) {
+                dataStream.write({
+                  type: 'reasoning-start',
+                  id: messageId,
+                });
+                streamStartState.reasoningStartSent = true;
+              }
+
               dataStream.write({
                 type: 'reasoning-delta',
-                id: generatePrefixedId(idPrefix.message),
+                id: messageId,
                 delta: part.data,
               });
               callbacks.onChatModelStream?.({
@@ -493,10 +559,6 @@ export class LangGraphAdapter {
     dataStream.write({
       type: 'start-step',
     });
-    dataStream.write({
-      type: 'text-start',
-      id: messageId,
-    });
 
     callbacks.onChatModelStart?.({ dataStream, messageId });
   }
@@ -510,8 +572,10 @@ export class LangGraphAdapter {
     callbacks: LangGraphAdapterCallbacks;
     modelId: string;
     totalUsageTokens: ChatUsageTokens;
+    streamStartState: { textStartSent: boolean; reasoningStartSent: boolean };
+    messageId: string;
   }): void {
-    const { streamEvent, dataStream, callbacks, modelId, totalUsageTokens } = parameters;
+    const { streamEvent, dataStream, callbacks, modelId, totalUsageTokens, streamStartState, messageId } = parameters;
 
     const usageTokens = {
       inputTokens: streamEvent.data.output.usage_metadata.input_tokens,
@@ -526,9 +590,28 @@ export class LangGraphAdapter {
     totalUsageTokens.cachedReadTokens += usageTokens.cachedReadTokens;
     totalUsageTokens.cachedWriteTokens += usageTokens.cachedWriteTokens;
 
+    // Send explicit end events for any active streams before finishing the step
+    if (streamStartState.textStartSent) {
+      dataStream.write({
+        type: 'text-end',
+        id: messageId,
+      });
+    }
+
+    if (streamStartState.reasoningStartSent) {
+      dataStream.write({
+        type: 'reasoning-end',
+        id: messageId,
+      });
+    }
+
     dataStream.write({
       type: 'finish-step',
     });
+
+    // Reset start state flags after step finishes so new steps can send start events
+    streamStartState.textStartSent = false;
+    streamStartState.reasoningStartSent = false;
 
     callbacks.onChatModelEnd?.({ dataStream, modelId, usageTokens });
     callbacks.onUsageUpdate?.({ modelId, usageTokens });

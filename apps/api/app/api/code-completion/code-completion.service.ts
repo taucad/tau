@@ -16,7 +16,7 @@ export class CodeCompletionService {
           system: prompt.context,
           prompt: `<instructions>${prompt.instruction}</instructions><file-content>${prompt.fileContent}</file-content>`,
           temperature: 0.2,
-          maxTokens: 256,
+          maxOutputTokens: 256,
         });
 
         return {

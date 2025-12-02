@@ -9,7 +9,7 @@ export const modelSupportSchema = z.object({
 export const modelConfigurationSchema = z.object({
   streaming: z.boolean().describe('Whether the model is streaming'),
   temperature: z.number().describe('The temperature of the model').optional(),
-  maxTokens: z.number().describe('The maximum number of tokens to generate').optional(),
+  maxOutputTokens: z.number().describe('The maximum number of tokens to generate').optional(),
   topP: z.number().describe('The top P of the model').optional(),
   thinking: z
     .object({
@@ -28,7 +28,7 @@ export const modelDetailsSchema = z.object({
   parameterSize: z.string().describe('The parameter size of the model').optional(),
   quantizationLevel: z.string().describe('The quantization level of the model').optional(),
   contextWindow: z.number().describe('The context window of the model'),
-  maxTokens: z.number().describe('The max tokens the model is capable of generating'),
+  maxOutputTokens: z.number().describe('The max tokens the model is capable of generating'),
   cost: z.object({
     inputTokens: z.number().describe('The cost of the input tokens of the model'),
     outputTokens: z.number().describe('The cost of the output tokens of the model'),

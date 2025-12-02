@@ -121,7 +121,7 @@ export class ModelService implements OnModuleInit {
               parameterSize: model.details.parameter_size,
               quantizationLevel: model.details.quantization_level,
               contextWindow: 200_000,
-              maxTokens: 100_000,
+              maxOutputTokens: 100_000,
               cost: {
                 inputTokens: 0,
                 outputTokens: 0,

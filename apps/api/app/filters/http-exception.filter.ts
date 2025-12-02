@@ -33,12 +33,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
     if (exception instanceof ZodValidationException || exception instanceof ZodSerializationException) {
       const zodError = exception.getZodError();
       if (zodError instanceof ZodError) {
+        const message = zodError.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`);
+
+        if (import.meta.env.DEV) {
+          // Log validation errors in development
+          this.logger.error(message, `Validation failed:`);
+        }
+
         statusCode = HttpStatus.BAD_REQUEST;
         errorResponse = {
           error: 'Validation failed',
           code: 'VALIDATION_ERROR',
           statusCode,
-          message: zodError.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
+          message,
           path: request.url,
           requestId,
         };

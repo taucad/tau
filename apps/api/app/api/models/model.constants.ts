@@ -16,7 +16,7 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
         family: 'gemini',
         families: ['Gemini'],
         contextWindow: 1_048_576,
-        maxOutputTokens: 65_536,
+        maxTokens: 65_536,
         cost: {
           inputTokens: 1.25,
           outputTokens: 10,
@@ -46,7 +46,7 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
         families: ['Claude'],
         contextWindow: 200_000,
         // Sonnet 4.5 supports standard output up to 8192 tokens
-        maxOutputTokens: 8192,
+        maxTokens: 8192,
         cost: {
           inputTokens: 3,
           outputTokens: 15,
@@ -76,7 +76,7 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
         families: ['Claude'],
         contextWindow: 200_000,
         // Extended thinking mode supports up to 64000 tokens
-        maxOutputTokens: 64_000,
+        maxTokens: 64_000,
         cost: {
           inputTokens: 3,
           outputTokens: 15,
@@ -86,7 +86,7 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
       },
       configuration: {
         streaming: true,
-        maxOutputTokens: 20_000,
+        maxTokens: 20_000,
         // @ts-expect-error: FIXME - some models use camelCase
         // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
         max_tokens: 20_000,
@@ -113,7 +113,7 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
         family: 'claude',
         families: ['Claude'],
         contextWindow: 200_000,
-        maxOutputTokens: 32_000,
+        maxTokens: 32_000,
         cost: {
           inputTokens: 15,
           outputTokens: 75,
@@ -123,7 +123,7 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
       },
       configuration: {
         streaming: true,
-        maxOutputTokens: 20_000,
+        maxTokens: 20_000,
         // @ts-expect-error: FIXME - some models use camelCase
         // eslint-disable-next-line @typescript-eslint/naming-convention -- some models use snake_case
         max_tokens: 20_000,
@@ -147,7 +147,7 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
         family: 'claude',
         families: ['Claude'],
         contextWindow: 200_000,
-        maxOutputTokens: 64_000,
+        maxTokens: 64_000,
         cost: {
           inputTokens: 1,
           outputTokens: 5,
@@ -175,7 +175,7 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
         family: 'gpt',
         families: ['GPT-5.1'],
         contextWindow: 1_000_000,
-        maxOutputTokens: 100_000,
+        maxTokens: 100_000,
         cost: {
           inputTokens: 2,
           outputTokens: 8,
@@ -205,7 +205,7 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
         family: 'gpt',
         families: ['GPT-4.1'],
         contextWindow: 1_047_576,
-        maxOutputTokens: 32_768,
+        maxTokens: 32_768,
         cost: {
           inputTokens: 2,
           outputTokens: 8,
@@ -230,7 +230,7 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
         family: 'gpt',
         families: ['GPT-O3'],
         contextWindow: 200_000,
-        maxOutputTokens: 100_000,
+        maxTokens: 100_000,
         cost: {
           inputTokens: 2,
           outputTokens: 8,
@@ -257,7 +257,7 @@ export const modelList: Record<CloudProviderId, Record<string, Model>> = {
         family: 'gpt',
         families: ['GPT-OSS'],
         contextWindow: 64_000,
-        maxOutputTokens: 64_000,
+        maxTokens: 64_000,
         cost: {
           inputTokens: 0.25,
           outputTokens: 0.69,

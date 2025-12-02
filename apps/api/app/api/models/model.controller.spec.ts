@@ -20,7 +20,7 @@ const mockModels: Model[] = [
       family: 'claude',
       families: ['Claude'],
       contextWindow: 200_000,
-      maxOutputTokens: 64_000,
+      maxTokens: 64_000,
       cost: {
         inputTokens: 3,
         outputTokens: 15,
@@ -30,7 +30,7 @@ const mockModels: Model[] = [
     },
     configuration: {
       streaming: true,
-      maxOutputTokens: 20_000,
+      maxTokens: 20_000,
       temperature: 0,
     },
   },
@@ -47,7 +47,7 @@ const mockModels: Model[] = [
       family: 'gpt',
       families: ['GPT-4o'],
       contextWindow: 128_000,
-      maxOutputTokens: 4096,
+      maxTokens: 4096,
       cost: {
         inputTokens: 2.5,
         outputTokens: 10,
@@ -128,7 +128,7 @@ describe('ModelController', () => {
         expect(model.details).toHaveProperty('family');
         expect(model.details).toHaveProperty('families');
         expect(model.details).toHaveProperty('contextWindow');
-        expect(model.details).toHaveProperty('maxOutputTokens');
+        expect(model.details).toHaveProperty('maxTokens');
         expect(model.details).toHaveProperty('cost');
 
         // Check configuration structure

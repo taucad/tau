@@ -8,7 +8,7 @@ const isConsoleInspectorEnabled = true;
 
 export function consoleInspector(args: InspectionEvent): void {
   if (args.type === '@xstate.event') {
-    console.info(JSON.stringify(args.event, null, 2));
+    console.info('XState Event:', args.event);
   }
 }
 

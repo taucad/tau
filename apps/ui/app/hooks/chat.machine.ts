@@ -1,33 +1,25 @@
 /**
- * XState-powered AI Chat Provider
+ * Chat Machine
  *
- * @deprecated Use the new ChatProvider from use-chat.tsx instead.
- * This file will be removed once the migration to the new chat system is complete.
- *
- * This provider wraps the useChat hook from @ai-sdk/react with XState for:
+ * XState machine for managing chat state with AI SDK integration:
  * - Performance optimized state subscriptions via useSelector
  * - Centralized state management
  * - Debounced state synchronization using XState delayed transitions
  * - Proxy actions through XState for consistent state management
  */
 
-import { useChat } from '@ai-sdk/react';
-import { createActorContext } from '@xstate/react';
+import type { useChat } from '@ai-sdk/react';
 import { setup, assign, enqueueActions } from 'xstate';
-import { useEffect, useCallback } from 'react';
 import { messageStatus } from '@taucad/chat/constants';
 import type { Chat, MyUIMessage } from '@taucad/chat';
-import { DefaultChatTransport } from 'ai';
-import { inspect } from '#machines/inspector.js';
-import { ENV } from '#config.js';
 import { createMessage } from '#utils/chat.utils.js';
 
-type UseChatArgs = NonNullable<Parameters<typeof useChat<MyUIMessage>>[0]>;
 type UseChatReturn = ReturnType<typeof useChat<MyUIMessage>>;
 
 // Define the machine context to mirror useChat state
 export type ChatMachineContext = {
   chatId?: string; // Current chat ID for emissions
+  resourceId?: string; // Resource ID this chat belongs to
   lastInitializedChatId?: string; // Track last chat that was initialized to prevent stale sync overwrites
   messages: MyUIMessage[]; // Keep array for compatibility with useChat
   messagesById: Map<string, MyUIMessage>; // O(1) lookup map
@@ -59,7 +51,11 @@ export type ChatMachineContext = {
   };
 };
 
-// Define events for the machine
+export type ChatMachineInput = {
+  chatId?: string;
+  resourceId?: string;
+};
+
 // Helper function to normalize messages for O(1) lookup
 function normalizeMessages(messages: MyUIMessage[]): {
   messagesById: Map<string, MyUIMessage>;
@@ -145,18 +141,16 @@ type ChatMachineEvents =
   | { type: 'clearEditDraft' }
   | { type: 'editMessage'; messageId: string; content: string; model: string; metadata?: unknown; imageUrls?: string[] }
   | { type: 'retryMessage'; messageId: string; modelId?: string }
-  | {
-      type: 'initializeChat';
-      chat: Chat;
-    };
+  | { type: 'initializeChat'; chat: Chat };
 
-type ChatMachineEmitted =
+export type ChatMachineEmitted =
   | { type: 'draftChanged'; chatId: string; draft: MyUIMessage }
   | { type: 'editDraftChanged'; chatId: string; messageId: string; draft: MyUIMessage }
-  | { type: 'messageEditCleared'; chatId: string; messageId: string };
+  | { type: 'messageEditCleared'; chatId: string; messageId: string }
+  | { type: 'messagesChanged'; chatId: string; messages: MyUIMessage[] };
 
 // Create the XState machine with delayed transitions for debouncing
-const chatMachine = setup({
+export const chatMachine = setup({
   types: {
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate types
     context: {} as ChatMachineContext,
@@ -165,16 +159,17 @@ const chatMachine = setup({
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate types
     emitted: {} as ChatMachineEmitted,
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate types
-    input: {} as { chatId?: string },
+    input: {} as ChatMachineInput,
   },
   guards: {
     isValidChatId: ({ context }) => Boolean(context.chatId?.startsWith('chat_')),
   },
 }).createMachine({
-  id: 'ai-chat',
+  id: 'chat',
   context({ input }) {
     return {
       chatId: input.chatId,
+      resourceId: input.resourceId,
       lastInitializedChatId: undefined,
       messages: [],
       messagesById: new Map(),
@@ -1005,233 +1000,6 @@ const chatMachine = setup({
 });
 
 // Define the state type from the machine
-type ChatMachineState = ReturnType<typeof chatMachine.getInitialSnapshot>;
+export type ChatMachineState = ReturnType<typeof chatMachine.getInitialSnapshot>;
 
-// Create the actor context using XState's createActorContext
-export const ChatContext = createActorContext(chatMachine, {
-  inspect,
-});
-
-// Provider component that wraps useChat and syncs with XState
-export function ChatProvider({
-  children,
-  value,
-  chatId,
-}: {
-  readonly children: React.ReactNode;
-  readonly value: Omit<UseChatArgs, 'onFinish' | 'onError' | 'onResponse'>;
-  readonly chatId?: string;
-}): React.JSX.Element {
-  return (
-    <ChatContext.Provider options={{ input: { chatId } }}>
-      <ChatSyncWrapper value={value}>{children}</ChatSyncWrapper>
-    </ChatContext.Provider>
-  );
-}
-
-// Internal component that handles useChat and syncing
-/**
- * @deprecated Use the new ChatSyncWrapper in use-chat.tsx instead.
- * This file will be removed once the migration to the new chat system is complete.
- */
-function ChatSyncWrapper({
-  children,
-  value,
-}: {
-  readonly children: React.ReactNode;
-  readonly value: Omit<UseChatArgs, 'onFinish' | 'onError' | 'onResponse'>;
-}): React.JSX.Element {
-  const actorRef = ChatContext.useActorRef();
-
-  // Initialize useChat with sync callbacks
-  const chat = useChat<MyUIMessage>({
-    ...value,
-    async onToolCall(toolCall) {
-      console.log('toolCall', toolCall);
-    },
-    transport: new DefaultChatTransport({
-      api: `${ENV.TAU_API_URL}/v1/chat`,
-      credentials: 'include',
-      // PrepareSendMessagesRequest(requestBody) {
-      //   let feedback = {};
-      //   if (buildContext) {
-      //     const buildSnapshot = buildContext.buildRef.getSnapshot();
-      //     const mainFilePath = buildSnapshot.context.build?.assets.mechanical?.main;
-
-      //     // Try to get the current code, but don't fail if it's not available
-      //     let code: string | undefined;
-      //     if (mainFilePath) {
-      //       const fileManagerSnapshot = fileManager.fileManagerRef.getSnapshot();
-      //       const fileData = fileManagerSnapshot.context.openFiles.get(mainFilePath);
-
-      //       if (fileData) {
-      //         code = decodeTextFile(fileData);
-      //       }
-      //     }
-
-      //     // Get error state from CAD machine
-      //     const cadActorState = buildContext.cadRef.getSnapshot();
-      //     feedback = {
-      //       code,
-      //       kernel,
-      //       codeErrors: cadActorState.context.codeErrors,
-      //       kernelError: cadActorState.context.kernelError,
-      //     };
-      //   }
-
-      //   // Send messages needed for LangGraph to process the request:
-      //   // - Last user message (for model ID and context)
-      //   // - Last assistant message + messages after it (for resuming with tool results)
-      //   // LangGraph checkpointer maintains full conversation history via thread_id
-      //   const { messages } = requestBody;
-
-      //   // Find the last user message (needed for model ID)
-      //   const lastUserMessage = messages.findLast((m) => m.role === 'user');
-
-      //   // Find messages from last assistant onward (includes assistant + tool results for resume)
-      //   const lastAssistantIndex = messages.findLastIndex((m) => m.role === 'assistant');
-      //   const hasAssistantMessage = lastAssistantIndex !== -1;
-      //   const messagesFromAssistant = hasAssistantMessage
-      //     ? messages.slice(lastAssistantIndex).filter((m) => m.role !== 'user')
-      //     : [];
-
-      //   // Combine: last user message + [assistant message + tool results] if present
-      //   const newMessages = lastUserMessage ? [lastUserMessage, ...messagesFromAssistant] : [];
-
-      //   const body = {
-      //     ...requestBody,
-      //     messages: newMessages,
-      //     ...feedback,
-      //   } as const satisfies typeof requestBody;
-
-      //   return body;
-      // },
-    }),
-    onFinish(..._args) {
-      // Queue sync instead of immediate sync - XState will debounce
-      queueSyncChatState();
-    },
-    onError(...args) {
-      console.error('Chat error:', args);
-      queueSyncChatState();
-    },
-  });
-
-  // Function to queue chat state sync (will be debounced by XState)
-  const queueSyncChatState = useCallback(() => {
-    actorRef.send({
-      type: 'queueSync',
-      payload: {
-        messages: chat.messages,
-        isLoading: chat.status === 'streaming',
-        error: chat.error,
-        status: chat.status,
-      },
-    });
-  }, [actorRef, chat.messages, chat.status, chat.error]);
-
-  // Register useChat actions with XState on mount and when chat changes
-  useEffect(() => {
-    actorRef.send({
-      type: 'registerChatActions',
-      actions: {
-        sendMessage: chat.sendMessage,
-        regenerate: chat.regenerate,
-        stop: chat.stop,
-        setMessages: chat.setMessages,
-      },
-    });
-  }, [actorRef, chat.sendMessage, chat.regenerate, chat.setMessages, chat.stop]);
-
-  // Queue sync on key changes (XState will handle debouncing)
-  useEffect(() => {
-    queueSyncChatState();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- queueSyncChatState is stable and captures latest values
-  }, [chat.messages, chat.status, chat.error]);
-
-  return children as React.JSX.Element;
-}
-
-// Type-safe selector hook with full TypeScript support
-export function useChatSelector<T>(
-  selector: (state: ChatMachineState) => T,
-  equalityFn?: (previous: T, next: T) => boolean,
-): T {
-  return ChatContext.useSelector(selector, equalityFn);
-}
-
-// Hook for chat actions (proxied through XState)
-export function useChatActions(): {
-  sendMessage: (message: Parameters<UseChatReturn['sendMessage']>[0]) => void;
-  regenerate: () => void;
-  stop: () => void;
-  setDraftText: (text: string) => void;
-  addDraftImage: (image: string) => void;
-  removeDraftImage: (index: number) => void;
-  setDraftToolChoice: (toolChoice: string | string[]) => void;
-  startEditingMessage: (messageId: string) => void;
-  exitEditMode: () => void;
-  setEditDraftText: (text: string) => void;
-  addEditDraftImage: (image: string) => void;
-  removeEditDraftImage: (index: number) => void;
-  editMessage: (messageId: string, content: string, model: string, metadata?: unknown, imageUrls?: string[]) => void;
-  retryMessage: (messageId: string, modelId?: string) => void;
-} {
-  const actorRef = ChatContext.useActorRef();
-
-  return {
-    sendMessage(message: Parameters<UseChatReturn['sendMessage']>[0]) {
-      actorRef.send({ type: 'sendMessage', message });
-    },
-    regenerate() {
-      actorRef.send({ type: 'regenerate' });
-    },
-    stop() {
-      actorRef.send({ type: 'stop' });
-    },
-    setDraftText(text: string) {
-      actorRef.send({ type: 'setDraftText', text });
-    },
-    addDraftImage(image: string) {
-      actorRef.send({ type: 'addDraftImage', image });
-    },
-    removeDraftImage(index: number) {
-      actorRef.send({ type: 'removeDraftImage', index });
-    },
-    setDraftToolChoice(toolChoice: string | string[]) {
-      actorRef.send({ type: 'setDraftToolChoice', toolChoice });
-    },
-    startEditingMessage(messageId: string) {
-      actorRef.send({ type: 'startEditingMessage', messageId });
-    },
-    exitEditMode() {
-      actorRef.send({ type: 'exitEditMode' });
-    },
-    setEditDraftText(text: string) {
-      actorRef.send({ type: 'setEditDraftText', text });
-    },
-    addEditDraftImage(image: string) {
-      actorRef.send({ type: 'addEditDraftImage', image });
-    },
-    removeEditDraftImage(index: number) {
-      actorRef.send({ type: 'removeEditDraftImage', index });
-    },
-    editMessage(messageId: string, content: string, model: string, metadata?: unknown, imageUrls?: string[]) {
-      actorRef.send({
-        type: 'editMessage',
-        messageId,
-        content,
-        model,
-        metadata,
-        imageUrls,
-      });
-    },
-    retryMessage(messageId: string, modelId?: string) {
-      actorRef.send({
-        type: 'retryMessage',
-        messageId,
-        modelId,
-      });
-    },
-  };
-}
+export type ChatMachineActor = typeof chatMachine;

@@ -126,15 +126,6 @@ function ProjectCard({
           tags,
           assets,
           forkedFrom: id,
-          chats: [
-            {
-              id: chatId,
-              name: 'Initial design',
-              messages: [],
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-            },
-          ],
           lastChatId: chatId,
         };
 

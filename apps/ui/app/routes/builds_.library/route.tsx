@@ -85,7 +85,7 @@ import { EmptyItems } from '#components/ui/empty-items.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { KernelSelector } from '#components/chat/kernel-selector.js';
-import { ChatProvider } from '#components/chat/chat-provider.js';
+import { ChatProvider } from '#hooks/use-chat.js';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { createMessage } from '#utils/chat.utils.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';

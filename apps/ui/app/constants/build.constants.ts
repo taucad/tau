@@ -1,10 +1,10 @@
-import type { Message } from '@ai-sdk/react';
+import type { MyUIMessage } from '@taucad/chat';
 import type { Build, File } from '@taucad/types';
 
 export type CreateInitialBuildOptions = {
   buildName: string;
   chatId: string;
-  initialMessage: Message;
+  initialMessage: MyUIMessage;
   mainFileName: string;
   emptyCodeContent: Uint8Array;
 };
@@ -15,7 +15,7 @@ export type CreateInitialBuildResult = {
 };
 
 export function createInitialBuild(options: CreateInitialBuildOptions): CreateInitialBuildResult {
-  const { buildName, chatId, initialMessage, mainFileName, emptyCodeContent } = options;
+  const { buildName, chatId, mainFileName, emptyCodeContent } = options;
 
   const buildData: Omit<Build, 'id' | 'createdAt' | 'updatedAt'> = {
     name: buildName,
@@ -28,15 +28,6 @@ export function createInitialBuild(options: CreateInitialBuildOptions): CreateIn
     },
     tags: [],
     thumbnail: '',
-    chats: [
-      {
-        id: chatId,
-        name: 'Initial design',
-        messages: [initialMessage],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      },
-    ],
     lastChatId: chatId,
     assets: {
       mechanical: {

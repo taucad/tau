@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
 import type { UIMessage } from '@ai-sdk/react';
 import { messageRole } from '@taucad/chat/constants';
-import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
+import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { ChatMessageReasoning } from '#routes/builds_.$id/chat-message-reasoning.js';
 import { ChatMessageMetadata } from '#routes/builds_.$id/chat-message-metadata.js';
 import { ChatMessageText } from '#routes/builds_.$id/chat-message-text.js';

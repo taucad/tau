@@ -5,7 +5,7 @@ import type { KernelProvider, KernelStackFrame } from '@taucad/types';
 import { languageFromKernel } from '@taucad/types/constants';
 import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { Button } from '#components/ui/button.js';
-import { useChatActions } from '#components/chat/chat-provider.js';
+import { useChatActions } from '#hooks/use-chat.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useBuild } from '#hooks/use-build.js';
 import { useCookie } from '#hooks/use-cookie.js';

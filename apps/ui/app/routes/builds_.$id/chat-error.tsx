@@ -2,7 +2,7 @@ import { memo } from 'react';
 import type React from 'react';
 import { ChevronRight, RefreshCcw } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
-import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
+import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { cn } from '#utils/ui.utils.js';

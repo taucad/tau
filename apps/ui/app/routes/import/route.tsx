@@ -2,10 +2,8 @@ import { useLoaderData, useNavigate } from 'react-router';
 import type { MetaDescriptor } from 'react-router';
 import { useEffect, useMemo } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
-import { idPrefix } from '@taucad/types/constants';
 import { AlertCircle, ChevronDown, FileCode, RotateCcw, XCircle } from 'lucide-react';
 import { fromPromise } from 'xstate';
-import { generatePrefixedId } from '@taucad/utils/id';
 import type { Route } from './+types/route.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
 import type { Handle } from '#types/matches.types.js';
@@ -201,15 +199,6 @@ export default function ImportRoute(): React.JSX.Element {
               },
               tags: [],
               thumbnail: '',
-              chats: [
-                {
-                  id: generatePrefixedId(idPrefix.chat),
-                  name: 'Initial design',
-                  messages: [],
-                  createdAt: Date.now(),
-                  updatedAt: Date.now(),
-                },
-              ],
               assets: {
                 mechanical: {
                   main: input.mainFile,

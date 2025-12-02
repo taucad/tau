@@ -12,7 +12,7 @@ import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
 import { useBuild } from '#hooks/use-build.js';
-import { useChatSelector } from '#components/chat/chat-provider.js';
+import { useChatSelector } from '#hooks/use-chat.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';

@@ -45,22 +45,21 @@ export function createMessage({
   metadata: MyMetadata;
   imageUrls?: string[];
 }): MyUIMessage {
-  const parts: MyUIMessage['parts'] = [
-    {
-      type: 'text' as const,
-      text: content.trim(),
-    },
-    ...imageUrls.map((url) => ({
-      type: 'file' as const,
-      url,
-      mediaType: extractMimeTypeFromDataUrl(url),
-    })),
-  ];
-
   return {
     id: id ?? generatePrefixedId(idPrefix.message),
     role,
-    parts,
+    parts: [
+      // Always add image parts first so they are rendered first in the UI
+      ...imageUrls.map((url) => ({
+        type: 'file' as const,
+        url,
+        mediaType: extractMimeTypeFromDataUrl(url),
+      })),
+      {
+        type: 'text' as const,
+        text: content.trim(),
+      },
+    ],
     metadata: { ...metadata, createdAt: Date.now() },
   };
 }

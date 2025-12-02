@@ -3,7 +3,9 @@ import { useCallback, useEffect } from 'react';
 import { createActor, waitFor } from 'xstate';
 import { useActorRef, useSelector } from '@xstate/react';
 import { toast } from 'sonner';
-// eslint-disable-next-line no-restricted-imports -- allowed for route types
+import type { FileEditOutput, MyUIMessage } from '@taucad/chat';
+import type { ChatOnToolCallCallback } from 'ai';
+import { toolName } from '@taucad/chat/constants';
 import type { Route } from './+types/route.js';
 import { ChatInterface } from '#routes/builds_.$id/chat-interface.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
@@ -12,7 +14,6 @@ import { useChatConstants } from '#utils/chat.utils.js';
 import { ChatProvider, useChatSelector, ChatContext } from '#components/chat/chat-provider.js';
 import { BuildNameEditor } from '#routes/builds_.$id/build-name-editor.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
-import type { FileEditToolResult } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
 import { ViewContextProvider } from '#routes/builds_.$id/chat-interface-view-context.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import { BuildCommandPaletteItems } from '#routes/builds_.$id/build-command-items.js';
@@ -142,10 +143,10 @@ function ChatWithProvider() {
   const fileEditRef = useActorRef(fileEditMachine);
 
   // Tool call handler that integrates with the new architecture
-  const onToolCall = useCallback(
-    async ({ toolCall }: { toolCall: { toolName: string; args: unknown } }) => {
-      if (toolCall.toolName === 'edit_file') {
-        const toolCallArgs = toolCall.args as { targetFile: string; codeEdit: string };
+  const onToolCall: ChatOnToolCallCallback<MyUIMessage> = useCallback(
+    async ({ toolCall }) => {
+      if (toolCall.toolName === toolName.fileEdit) {
+        const toolCallArgs = toolCall.input;
 
         // Get current code from build machine
         const mainFilePath = await getMainFilename();
@@ -187,12 +188,12 @@ function ChatWithProvider() {
         const toolResult = {
           codeErrors: cadSnapshot.context.codeErrors,
           kernelError: cadSnapshot.context.kernelError,
-        } satisfies FileEditToolResult['result'];
+        } satisfies FileEditOutput;
 
         return toolResult;
       }
 
-      if (toolCall.toolName === 'analyze_image') {
+      if (toolCall.toolName === toolName.imageAnalysis) {
         return new Promise<{ screenshot: string }>((resolve, reject) => {
           // Create screenshot request machine instance
           const screenshotActor = createActor(screenshotRequestMachine, {

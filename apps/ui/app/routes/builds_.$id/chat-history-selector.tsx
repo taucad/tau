@@ -1,9 +1,8 @@
 import { Plus, Pencil, Trash, History } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ReactNode } from 'react';
-import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
-import type { Chat } from '@taucad/types';
+import type { Chat, MyUIMessage } from '@taucad/chat';
 import { useSelector } from '@xstate/react';
 import { Button } from '#components/ui/button.js';
 import { useBuild } from '#hooks/use-build.js';
@@ -46,15 +45,14 @@ export function ChatHistorySelector(): ReactNode {
 
   const { formattedKeyCombination } = useKeydown(newChatKeyCombination, handleAddChat);
 
-  const { append } = useChat({
+  const { sendMessage } = useChat({
     ...useChatConstants,
-    credentials: 'include',
-    onFinish(message) {
+    onFinish({ message }) {
       if (!activeChatId) {
         return;
       }
 
-      const textPart = message.parts?.find((part) => part.type === 'text');
+      const textPart = message.parts.find((part) => part.type === 'text');
       if (textPart) {
         updateChatName(activeChatId, textPart.text);
         setIsGeneratingName(false);
@@ -75,14 +73,13 @@ export function ChatHistorySelector(): ReactNode {
       // Create and send message for name generation
       const message = {
         ...activeChat.messages[0],
-        model: 'name-generator',
         metadata: {
-          toolChoice: 'none',
+          model: 'name-generator',
         },
-      } as const satisfies Message;
-      void append(message);
+      } as const satisfies MyUIMessage;
+      void sendMessage(message);
     }
-  }, [activeChatId, activeChat, isLoading]);
+  }, [activeChatId, activeChat, isLoading, sendMessage]);
 
   const handleRenameChat = (chatId: string, currentName: string) => {
     setChatToRename(chatId);

@@ -1,6 +1,6 @@
 import type { ToolUIPart, UIToolInvocation } from 'ai';
 import { useCallback, useState } from 'react';
-import { File, LoaderCircle, Play, X, ChevronDown, AlertTriangle, Bug, Camera, Check, RotateCcw } from 'lucide-react';
+import { File, LoaderCircle, Play, X, ChevronDown, AlertTriangle, Bug, Check, RotateCcw } from 'lucide-react';
 import { useActorRef, useSelector } from '@xstate/react';
 import type { CodeError, KernelError } from '@taucad/types';
 import { waitFor } from 'xstate';
@@ -13,7 +13,6 @@ import { cn } from '#utils/ui.utils.js';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
 import { useBuild } from '#hooks/use-build.js';
 import { useChatSelector } from '#components/chat/chat-provider.js';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
@@ -278,29 +277,6 @@ export function ChatMessageToolFileEdit({
           </div>
           <div>
             <div>
-              {result.screenshot ? (
-                <div className="border-t p-2 pt-1">
-                  <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
-                    <Camera className="size-3" />
-                    <span>views</span>
-                  </div>
-                  <HoverCard>
-                    <HoverCardTrigger asChild>
-                      <div className="cursor-pointer rounded-md border bg-neutral/5 hover:bg-neutral/10">
-                        <img
-                          src={result.screenshot}
-                          alt="Generated screenshot"
-                          className="size-full rounded-sm object-cover object-top"
-                        />
-                      </div>
-                    </HoverCardTrigger>
-                    <HoverCardContent asChild side="top" align="start" className="w-96">
-                      <img src={result.screenshot} alt="Generated screenshot (full size)" className="max-w-full" />
-                    </HoverCardContent>
-                  </HoverCard>
-                </div>
-              ) : null}
-
               <ErrorSection
                 isInitiallyOpen
                 className="border-t"

@@ -9,7 +9,15 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./constants": {
+      "types": "./src/constants/index.ts",
+      "import": "./src/constants/index.ts",
+      "default": "./src/constants/index.ts"
     }
+  },
+  "dependencies": {
+    "@taucad/types": "workspace:*"
   },
   "imports": {
     "#*": "./src/*"

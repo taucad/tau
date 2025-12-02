@@ -4,7 +4,7 @@ import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from 'remix-
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import type { Model } from '@taucad/types';
+import type { Model } from '@taucad/chat';
 import { getEnvironment } from '#config.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { Page } from '#components/layout/page.js';

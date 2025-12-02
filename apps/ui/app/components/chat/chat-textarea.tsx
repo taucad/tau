@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { ArrowUp, X, Square, CircuitBoard, ChevronDown, Paperclip, Wrench } from 'lucide-react';
 import type { ClassValue } from 'clsx';
-import type { ToolWithSelection } from '@taucad/types';
+import type { ToolSelection } from '@taucad/chat';
 import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
@@ -39,7 +39,7 @@ export type ChatTextareaProperties = {
   }: {
     content: string;
     model: string;
-    metadata?: { toolChoice?: ToolWithSelection };
+    metadata?: { toolChoice?: ToolSelection };
     imageUrls?: string[];
   }) => Promise<void>;
   readonly onEscapePressed?: () => void;
@@ -87,7 +87,7 @@ export const ChatTextarea = memo(function ({
     mode === 'main' ? state.context.draftImages : state.context.editDraftImages,
   );
   const selectedToolChoice = useChatSelector((state) =>
-    mode === 'main' ? (state.context.draftToolChoice as ToolWithSelection) : 'auto',
+    mode === 'main' ? (state.context.draftToolChoice as ToolSelection) : 'auto',
   );
 
   const {

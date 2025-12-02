@@ -35,7 +35,8 @@ import {
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import { useSelector } from '@xstate/react';
 import type { EngineeringDiscipline, Build, KernelProvider } from '@taucad/types';
-import { engineeringDisciplines, messageRole, messageStatus, idPrefix } from '@taucad/types/constants';
+import { engineeringDisciplines, idPrefix } from '@taucad/types/constants';
+import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { createInitialBuild } from '#constants/build.constants.js';
 import { createColumns } from '#routes/builds_.library/columns.js';
@@ -190,9 +191,7 @@ export default function PersonalCadProjects(): React.JSX.Element {
         const userMessage = createMessage({
           content,
           role: messageRole.user,
-          model,
-          status: messageStatus.pending,
-          metadata: metadata ?? {},
+          metadata: { ...metadata, model, status: messageStatus.pending },
           imageUrls,
         });
 
@@ -847,7 +846,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
         </div>
         <CardDescription className="line-clamp-2">{build.description}</CardDescription>
       </CardHeader>
-      <CardContent className="flex-grow">
+      <CardContent className="grow">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap gap-2">
             {Object.keys(build.assets).map((cat) => (

@@ -1,6 +1,7 @@
+import type { CodeError, KernelError } from '@taucad/types';
 import { z } from 'zod';
 
-const codeErrorSchema = z
+const codeErrorSchema: z.ZodType<CodeError> = z
   .object({
     message: z.string(),
     startLineNumber: z.number(),
@@ -10,13 +11,13 @@ const codeErrorSchema = z
   })
   .meta({ id: 'CodeError' });
 
-const kernelErrorSchema = z
+const kernelErrorSchema: z.ZodType<KernelError> = z
   .object({
     message: z.string(),
     startLineNumber: z.number(),
-    endLineNumber: z.number(),
     startColumn: z.number(),
-    endColumn: z.number(),
+    endLineNumber: z.number().optional(),
+    endColumn: z.number().optional(),
     stack: z.string(),
     stackFrames: z.array(
       z.object({
@@ -38,7 +39,6 @@ export const fileEditInputSchema = z.object({
 export const fileEditOutputSchema = z.object({
   codeErrors: z.array(codeErrorSchema),
   kernelError: kernelErrorSchema.optional(),
-  screenshot: z.string().optional(),
 });
 
 export type FileEditInput = z.infer<typeof fileEditInputSchema>;

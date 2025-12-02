@@ -752,7 +752,11 @@ importers:
 
   libs/api-extractor: {}
 
-  libs/chat: {}
+  libs/chat:
+    dependencies:
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../types
 
   libs/tau-examples: {}
 
@@ -12215,11 +12219,6 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  nanoid@5.1.5:
-    resolution: {integrity: sha512-Ir/+ZpE9fDsNH0hQ3C68uyThDXzYcim2EqcZ8zn8Chtt1iylPT9xXJB0kPCnqzgcEGikO9RxSrh63MsmVCU7Fw==}
-    engines: {node: ^18 || >=20}
-    hasBin: true
-
   nanoid@5.1.6:
     resolution: {integrity: sha512-c7+7RQ+dMB5dPwwCp4ee1/iV/q2P6aK1mTZcfr1BTuVlyW9hJYiMPybJCcnBlQtuSmTIWNeazm/zqNoZSSElBg==}
     engines: {node: ^18 || >=20}
@@ -22134,7 +22133,7 @@ snapshots:
       '@triplit/logger': 0.0.3(typescript@5.8.3)
       core-js: 3.45.1
       elen: 1.0.10
-      nanoid: 5.1.5
+      nanoid: 5.1.6
       sorted-btree: 1.8.1
       web-worker: 1.5.0
     transitivePeerDependencies:
@@ -28976,8 +28975,6 @@ snapshots:
   mutative@1.2.0: {}
 
   nanoid@3.3.11: {}
-
-  nanoid@5.1.5: {}
 
   nanoid@5.1.6: {}
 

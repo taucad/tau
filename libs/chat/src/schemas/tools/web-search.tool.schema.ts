@@ -14,3 +14,4 @@ export const webSearchOutputSchema = z.array(
 
 export type WebSearchInput = z.infer<typeof webSearchInputSchema>;
 export type WebSearchOutput = z.infer<typeof webSearchOutputSchema>;
+

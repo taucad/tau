@@ -1,10 +1,10 @@
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
 import type { UIMessage } from '@ai-sdk/react';
-import { messageRole } from '@taucad/types/constants';
+import { messageRole } from '@taucad/chat/constants';
 import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
 import { ChatMessageReasoning } from '#routes/builds_.$id/chat-message-reasoning.js';
-import { ChatMessageAnnotations } from '#routes/builds_.$id/chat-message-annotation.js';
+import { ChatMessageMetadata } from '#routes/builds_.$id/chat-message-metadata.js';
 import { ChatMessageText } from '#routes/builds_.$id/chat-message-text.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
 import { CopyButton } from '#components/copy-button.js';
@@ -186,8 +186,20 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                   return <ChatMessageToolTransfer key={part} part={part} />;
                 }
 
+                // @ts-expect-error -- TODO: Fix transfer tool typings
+                case 'tool-transfer_back_to_supervisor': {
+                  return <ChatMessageToolTransfer key={part} part={part} />;
+                }
+
+                case 'data-test': {
+                  // A data part is required to be present to exhaustively match all parts.
+                  // This should replace with an actual data part when it becomes available.
+                  return <div>Data test</div>;
+                }
+
                 default: {
-                  return <ChatMessagePartUnknown key={part.id} part={part} />;
+                  const unknownPart: never = part;
+                  return <ChatMessagePartUnknown key={String(unknownPart)} part={unknownPart} />;
                 }
               }
             })}
@@ -245,9 +257,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
               <TooltipContent side="bottom">Switch model</TooltipContent>
             </Tooltip>
             <div className="mx-1 flex flex-row items-center justify-end gap-1">
-              {displayMessage.annotations && displayMessage.annotations.length > 0 ? (
-                <ChatMessageAnnotations annotations={displayMessage.annotations as MessageAnnotation[]} />
-              ) : null}
+              {displayMessage.metadata ? <ChatMessageMetadata metadata={displayMessage.metadata} /> : null}
             </div>
           </div>
         </When>

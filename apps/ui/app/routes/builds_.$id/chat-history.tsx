@@ -2,7 +2,7 @@ import { memo, useCallback, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { XIcon, MessageCircle } from 'lucide-react';
-import { messageRole, messageStatus } from '@taucad/types/constants';
+import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { ChatMessage } from '#routes/builds_.$id/chat-message.js';
 import { ScrollDownButton } from '#routes/builds_.$id/scroll-down-button.js';
 import { ChatError } from '#routes/builds_.$id/chat-error.js';
@@ -85,9 +85,7 @@ export const ChatHistory = memo(function (props: {
       const userMessage = createMessage({
         content,
         role: messageRole.user,
-        status: messageStatus.pending,
-        metadata: metadata ?? {},
-        model,
+        metadata: { ...metadata, model, status: messageStatus.pending },
         imageUrls,
       });
       sendMessage(userMessage);

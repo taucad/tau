@@ -1,4 +1,3 @@
-import type { Message } from '@ai-sdk/react';
 import type { EngineeringDiscipline } from '#types/cad.types.js';
 
 export type File = {
@@ -6,16 +5,6 @@ export type File = {
   // Could add metadata in the future
   lastModified?: number;
   size?: number;
-};
-
-export type Chat = {
-  id: string;
-  name: string;
-  messages: Message[];
-  draft?: Message; // Main draft
-  messageEdits?: Record<string, Message>; // Edit drafts by messageId
-  createdAt: number;
-  updatedAt: number;
 };
 
 // Individual asset structure for a specific category
@@ -39,7 +28,6 @@ export type Build = {
   };
   tags: string[];
   thumbnail: string;
-  chats: Chat[];
   lastChatId?: string; // Reference to the last active chat
   createdAt: number;
   updatedAt: number;

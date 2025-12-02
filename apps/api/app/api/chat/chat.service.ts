@@ -3,10 +3,11 @@ import { openai } from '@ai-sdk/openai';
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import { createSupervisor } from '@langchain/langgraph-supervisor';
 import { streamText } from 'ai';
-import type { CoreMessage } from 'ai';
+import type { ModelMessage } from 'ai';
 import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
 import { ConfigService } from '@nestjs/config';
-import type { KernelProvider, ToolWithSelection } from '@taucad/types';
+import type { KernelProvider } from '@taucad/types';
+import type { ToolSelection } from '@taucad/chat';
 import { ModelService } from '#api/models/model.service.js';
 import { ToolService } from '#api/tools/tool.service.js';
 import { buildNameGenerationSystemPrompt } from '#api/chat/prompts/chat-prompt-name.js';
@@ -25,7 +26,7 @@ export class ChatService {
     private readonly configService: ConfigService<Environment, true>,
   ) {}
 
-  public getBuildNameGenerator(coreMessages: CoreMessage[]): ReturnType<typeof streamText> {
+  public getBuildNameGenerator(coreMessages: ModelMessage[]): ReturnType<typeof streamText> {
     return streamText({
       model: openai('gpt-4o-mini'),
       messages: coreMessages,
@@ -33,7 +34,7 @@ export class ChatService {
     });
   }
 
-  public getCommitMessageGenerator(coreMessages: CoreMessage[]): ReturnType<typeof streamText> {
+  public getCommitMessageGenerator(coreMessages: ModelMessage[]): ReturnType<typeof streamText> {
     return streamText({
       model: openai('gpt-4o-mini'),
       messages: coreMessages,
@@ -42,7 +43,7 @@ export class ChatService {
   }
 
   // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- This is a complex generic that can be left inferred.
-  public async createGraph(modelId: string, selectedToolChoice: ToolWithSelection, selectedKernel: KernelProvider) {
+  public async createGraph(modelId: string, selectedToolChoice: ToolSelection, selectedKernel: KernelProvider) {
     const { tools } = this.toolService.getTools(selectedToolChoice);
 
     const databaseUrl = this.configService.get('DATABASE_URL', { infer: true });
@@ -51,7 +52,7 @@ export class ChatService {
     });
     await checkpointer.setup();
 
-    const researchTools = [tools.web_search, tools.web_browser].filter((tool) => tool !== undefined);
+    const researchTools = [tools.webSearch, tools.webBrowser].filter((tool) => tool !== undefined);
     const { model: supervisorModel } = this.modelService.buildModel(modelId);
     const { model: cadModel, support: cadSupport } = this.modelService.buildModel(modelId);
     const { model: researchModel, support: researchSupport } = this.modelService.buildModel(modelId);
@@ -63,11 +64,11 @@ export class ChatService {
       tools: researchTools,
       name: 'research_expert',
       prompt: `You are a research expert that can use specialized tools to accomplish tasks. 
-        Always use the web_search tool, and only the web_browser tool if the web_search tool does not supply enough information.`,
+        Always use the webSearch tool, and only the webBrowser tool if the webSearch tool does not supply enough information.`,
     });
 
     // Create a general agent for handling direct responses
-    const cadTools = [tools.edit_file, tools.analyze_image].filter((tool) => tool !== undefined);
+    const cadTools = [tools.editFile, tools.analyzeImage].filter((tool) => tool !== undefined);
     const cadSystemPrompt = await getCadSystemPrompt(selectedKernel);
     const cadAgent = createReactAgent({
       llm: cadSupport?.tools === false ? cadModel : (cadModel.bindTools?.(cadTools) ?? cadModel),
@@ -125,14 +126,19 @@ Your goal is to ensure users receive expert-level assistance by connecting them 
         const normalizedUsageTokens = this.modelService.normalizeUsageTokens(id, usageTokens);
         const usageCost = this.modelService.getModelCost(id, normalizedUsageTokens);
 
-        dataStream.writePart('message_annotations', [
-          {
-            type: 'usage',
-            usageCost,
-            usageTokens: normalizedUsageTokens,
+        dataStream.write({
+          type: 'message-metadata',
+          messageMetadata: {
+            usageCost: {
+              inputTokens: normalizedUsageTokens.inputTokens,
+              outputTokens: normalizedUsageTokens.outputTokens,
+              cachedReadTokens: normalizedUsageTokens.cachedReadTokens,
+              cachedWriteTokens: normalizedUsageTokens.cachedWriteTokens,
+              usageCost: usageCost.totalCost,
+            },
             model: id,
           },
-        ]);
+        });
       },
       onEvent(parameters) {
         logger.verbose(`onEvent: ${JSON.stringify(parameters.event)}`);

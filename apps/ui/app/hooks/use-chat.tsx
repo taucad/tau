@@ -54,6 +54,7 @@ export function ChatProvider({
 
   // Refs for functions that actors need access to (set after useChat is created)
   const setMessagesRef = useRef<UseChatReturn['setMessages'] | undefined>(undefined);
+  const regenerateRef = useRef<UseChatReturn['regenerate'] | undefined>(undefined);
   const initializeDraftRef = useRef<((chat: NonNullable<Awaited<ReturnType<typeof getChat>>>) => void) | undefined>(
     undefined,
   );
@@ -97,13 +98,20 @@ export function ChatProvider({
     chatPersistenceMachine.provide({
       actors: {
         loadChatActor: fromPromise(async ({ input }) => {
-          console.log('loadChatActor', input);
           const loadedChat = await getChat(input.chatId);
 
           // Set messages directly in the actor (no React effect needed)
           if (loadedChat) {
             setMessagesRef.current?.(loadedChat.messages);
             initializeDraftRef.current?.(loadedChat);
+
+            // Check if last message needs AI response (pending user message).
+            // This happens when the user creates a message (i.e. on home page) and the
+            // AI response is not yet generated.
+            const lastMessage = loadedChat.messages.at(-1);
+            if (lastMessage?.role === 'user' && lastMessage.metadata?.status === 'pending') {
+              void regenerateRef.current?.();
+            }
           } else {
             // New chat - clear messages
             setMessagesRef.current?.([]);
@@ -147,6 +155,7 @@ export function ChatProvider({
 
   // Update refs so actors can access current functions
   setMessagesRef.current = chat.setMessages;
+  regenerateRef.current = chat.regenerate;
   initializeDraftRef.current = (loadedChat) => {
     draftActorRef.send({ type: 'initializeFromChat', chat: loadedChat });
   };

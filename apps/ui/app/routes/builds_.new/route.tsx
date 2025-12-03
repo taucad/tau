@@ -2,8 +2,7 @@ import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useAuthenticate } from '@daveyplate/better-auth-ui';
 import type { KernelProvider } from '@taucad/types';
-import { idPrefix, kernelConfigurations } from '@taucad/types/constants';
-import { generatePrefixedId } from '@taucad/utils/id';
+import { kernelConfigurations } from '@taucad/types/constants';
 import { Button } from '#components/ui/button.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '#components/ui/card.js';
 import { Input } from '#components/ui/input.js';
@@ -22,6 +21,7 @@ import { useKeydown } from '#hooks/use-keydown.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useBuildManager } from '#hooks/use-build-manager.js';
+import { useChatManager } from '#hooks/use-chat-manager.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -80,6 +80,7 @@ function useBuildCreation() {
   const { user } = useAuthenticate({ enabled: false });
   const [, setIsEditorOpen] = useCookie(cookieName.chatOpEditor, false);
   const buildManager = useBuildManager();
+  const chatManager = useChatManager();
 
   const createBuild = useCallback(
     async (buildData: { name: string; description: string; kernel: KernelProvider }) => {
@@ -87,9 +88,7 @@ function useBuildCreation() {
       try {
         const selectedOption = getKernelOption(buildData.kernel);
 
-        // Prepare build data without files
-
-        const chatId = generatePrefixedId(idPrefix.chat);
+        // Prepare build data without lastChatId (will be set after chat creation)
         const newBuild = {
           name: buildData.name.trim(),
           description: buildData.description.trim(),
@@ -101,16 +100,6 @@ function useBuildCreation() {
           },
           tags: [],
           thumbnail: '',
-          chats: [
-            {
-              id: chatId,
-              name: 'Initial design',
-              messages: [],
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-            },
-          ],
-          lastChatId: chatId,
           assets: {
             mechanical: {
               main: selectedOption.mainFile,
@@ -126,7 +115,17 @@ function useBuildCreation() {
           },
         };
 
+        // Create the build first (without lastChatId)
         const createdBuild = await buildManager.createBuild(newBuild, files);
+
+        // Create the chat and get its ID
+        const createdChat = await chatManager.createChat(createdBuild.id, {
+          name: 'Initial design',
+          messages: [],
+        });
+
+        // Update the build with the correct lastChatId
+        await buildManager.updateBuild(createdBuild.id, { lastChatId: createdChat.id });
 
         // Ensure editor is open when navigating to the build page
         setIsEditorOpen(true);
@@ -139,7 +138,7 @@ function useBuildCreation() {
         setIsCreating(false);
       }
     },
-    [user?.name, user?.image, buildManager, setIsEditorOpen, navigate],
+    [user?.name, user?.image, buildManager, chatManager, setIsEditorOpen, navigate],
   );
 
   return { createBuild, isCreating };

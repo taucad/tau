@@ -58,7 +58,7 @@ const objectStoreWorker = {
 
   async createChat(
     resourceId: string,
-    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'>,
+    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'> & { id?: string },
   ): Promise<Chat> {
     return storage.createChat(resourceId, chat);
   },

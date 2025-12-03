@@ -2,6 +2,8 @@ import { Link, NavLink, useNavigate } from 'react-router';
 import { useCallback } from 'react';
 import { messageRole, messageStatus } from '@taucad/chat/constants';
 import type { KernelProvider } from '@taucad/types';
+import { idPrefix } from '@taucad/types/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
 import { createInitialBuild } from '#constants/build.constants.js';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
@@ -49,27 +51,27 @@ export default function ChatStart(): React.JSX.Element {
           imageUrls,
         });
 
-        // Create initial build using factory function (without chatId for now)
+        // Pre-generate the chat ID
+        const chatId = generatePrefixedId(idPrefix.chat);
+
+        // Create initial build using factory function with the pre-generated chatId
         const { buildData, files } = createInitialBuild({
           buildName: defaultBuildName,
-          chatId: '', // Temporary placeholder, will be updated after chat creation
+          chatId,
           initialMessage: userMessage,
           mainFileName,
           emptyCodeContent: encodeTextFile(emptyCode),
         });
 
-        // Create the build first (without lastChatId)
-        const { lastChatId, ...buildDataWithoutChatId } = buildData;
-        const createdBuild = await buildManager.createBuild(buildDataWithoutChatId, files);
+        // Create the build with lastChatId already set
+        const createdBuild = await buildManager.createBuild(buildData, files);
 
-        // Create the chat and get its ID
-        const createdChat = await chatManager.createChat(createdBuild.id, {
+        // Create the chat with the same pre-generated ID
+        await chatManager.createChat(createdBuild.id, {
+          id: chatId,
           name: 'Initial design',
           messages: [userMessage],
         });
-
-        // Update the build with the correct lastChatId
-        await buildManager.updateBuild(createdBuild.id, { lastChatId: createdChat.id });
 
         // Ensure chat is open when navigating to the build page
         setIsChatOpen(true);

@@ -92,6 +92,7 @@ import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultBuildName } from '#constants/build-names.js';
 import { useBuildManager } from '#hooks/use-build-manager.js';
+import { useChatManager } from '#hooks/use-chat-manager.js';
 
 const categoryIconsFromEngineeringDiscipline = {
   mechanical: Wrench,
@@ -127,6 +128,7 @@ export default function PersonalCadProjects(): React.JSX.Element {
   const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
   const [, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
   const buildManager = useBuildManager();
+  const chatManager = useChatManager();
 
   const handleToggleDeleted = useCallback((value: boolean) => {
     setShowDeleted(value);
@@ -191,13 +193,14 @@ export default function PersonalCadProjects(): React.JSX.Element {
         const userMessage = createMessage({
           content,
           role: messageRole.user,
-          metadata: { ...metadata, model, status: messageStatus.pending },
+          metadata: { ...metadata, kernel: selectedKernel, model, status: messageStatus.pending },
           imageUrls,
         });
 
+        // Pre-generate the chat ID
         const chatId = generatePrefixedId(idPrefix.chat);
 
-        // Create initial build using factory function
+        // Create initial build using factory function with the pre-generated chatId
         const { buildData, files } = createInitialBuild({
           buildName: defaultBuildName,
           chatId,
@@ -206,7 +209,15 @@ export default function PersonalCadProjects(): React.JSX.Element {
           emptyCodeContent: encodeTextFile(emptyCode),
         });
 
+        // Create the build with lastChatId already set
         const createdBuild = await buildManager.createBuild(buildData, files);
+
+        // Create the chat with the same pre-generated ID
+        await chatManager.createChat(createdBuild.id, {
+          id: chatId,
+          name: 'Initial design',
+          messages: [userMessage],
+        });
 
         // Ensure chat is open when navigating to the build page
         setIsChatOpen(true);
@@ -217,7 +228,7 @@ export default function PersonalCadProjects(): React.JSX.Element {
         toast.error('Failed to create build');
       }
     },
-    [selectedKernel, buildManager, setIsChatOpen, navigate],
+    [selectedKernel, buildManager, chatManager, setIsChatOpen, navigate],
   );
 
   const actions: BuildActions = {

@@ -13,7 +13,10 @@ type ChatManagerContextType = {
   isLoading: boolean;
   error: Error | undefined;
   chatManagerRef: ActorRefFrom<typeof chatManagerMachine>;
-  createChat: (resourceId: string, chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'>) => Promise<Chat>;
+  createChat: (
+    resourceId: string,
+    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'> & { id?: string },
+  ) => Promise<Chat>;
   updateChat: (
     chatId: string,
     update: PartialDeep<Chat>,
@@ -60,7 +63,7 @@ export function ChatManagerProvider({ children }: { readonly children: ReactNode
   const createChat = useCallback(
     async (
       resourceId: string,
-      chatData: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'>,
+      chatData: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'> & { id?: string },
     ): Promise<Chat> => {
       const worker = await getReadiedWorker();
       return worker.createChat(resourceId, chatData);

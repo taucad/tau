@@ -200,9 +200,9 @@ export class IndexedDbStorageProvider implements StorageProvider {
 
   public async createChat(
     resourceId: string,
-    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'>,
+    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'> & { id?: string },
   ): Promise<Chat> {
-    const id = generatePrefixedId(idPrefix.chat);
+    const id = chat.id ?? generatePrefixedId(idPrefix.chat);
     const timestamp = Date.now();
     const chatWithId: Chat = {
       ...chat,

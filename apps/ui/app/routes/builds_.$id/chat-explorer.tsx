@@ -147,7 +147,7 @@ function ExplorerCollapsibleSection({
       <CollapsibleTrigger className="group/collapsible flex h-8 w-full items-center justify-between px-3 py-1.5 transition-colors hover:bg-muted/50">
         <h3 className="flex min-w-0 flex-1 items-center text-xs font-semibold tracking-wide text-muted-foreground uppercase">
           <span className="truncate">{title}</span>
-          <span className="ml-1.5 flex-shrink-0 text-muted-foreground/50">({count})</span>
+          <span className="ml-1.5 shrink-0 text-muted-foreground/50">({count})</span>
         </h3>
         <ChevronRight className="size-3.5 text-muted-foreground transition-transform duration-200 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
       </CollapsibleTrigger>

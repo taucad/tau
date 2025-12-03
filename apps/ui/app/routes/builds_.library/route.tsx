@@ -505,7 +505,7 @@ function UnifiedBuildList({
           className="h-8"
           placeholder="Search builds..."
           value={globalFilter}
-          containerClassName="flex-grow"
+          containerClassName="grow"
           onChange={(event) => {
             setGlobalFilter(event.target.value);
           }}

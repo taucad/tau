@@ -107,7 +107,7 @@ export default function CadCommunity(): React.JSX.Element {
           <SearchInput
             placeholder="Search projects..."
             value={searchTerm}
-            containerClassName="flex-grow"
+            containerClassName="grow"
             onChange={(event) => {
               setSearchTerm(event.target.value);
             }}

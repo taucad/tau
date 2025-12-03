@@ -175,6 +175,8 @@ export class LangGraphAdapter {
         const toolCallState = {
           currentToolCallId: '',
           currentToolName: '',
+          toolInputStartSent: false,
+          pendingFinishStep: false, // Tracks if finish-step was deferred due to pending tool call
         };
 
         // Track whether start events have been sent to ensure proper event sequencing
@@ -228,6 +230,7 @@ export class LangGraphAdapter {
                 modelId,
                 totalUsageTokens,
                 streamStartState,
+                toolCallState,
                 messageId: id,
               });
               break;
@@ -239,6 +242,8 @@ export class LangGraphAdapter {
                 dataStream: dataStream.writer,
                 callbacks,
                 toolCallState,
+                streamStartState,
+                messageId: id,
               });
               break;
             }
@@ -327,7 +332,12 @@ export class LangGraphAdapter {
     dataStream: TypedUiMessageStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
     reasoningState: { thinkingBuffer: string; isReasoning: boolean };
-    toolCallState: { currentToolCallId: string; currentToolName: string };
+    toolCallState: {
+      currentToolCallId: string;
+      currentToolName: string;
+      toolInputStartSent: boolean;
+      pendingFinishStep: boolean;
+    };
     streamStartState: { textStartSent: boolean; reasoningStartSent: boolean };
     toolTypeMap: Record<string, string>;
     messageId: string;
@@ -355,6 +365,7 @@ export class LangGraphAdapter {
         }
 
         toolCallState.currentToolName = toolName;
+        toolCallState.toolInputStartSent = true;
         dataStream.write({
           type: 'tool-input-start',
           toolCallId,
@@ -573,9 +584,24 @@ export class LangGraphAdapter {
     modelId: string;
     totalUsageTokens: ChatUsageTokens;
     streamStartState: { textStartSent: boolean; reasoningStartSent: boolean };
+    toolCallState: {
+      currentToolCallId: string;
+      currentToolName: string;
+      toolInputStartSent: boolean;
+      pendingFinishStep: boolean;
+    };
     messageId: string;
   }): void {
-    const { streamEvent, dataStream, callbacks, modelId, totalUsageTokens, streamStartState, messageId } = parameters;
+    const {
+      streamEvent,
+      dataStream,
+      callbacks,
+      modelId,
+      totalUsageTokens,
+      streamStartState,
+      toolCallState,
+      messageId,
+    } = parameters;
 
     const usageTokens = {
       inputTokens: streamEvent.data.output.usage_metadata.input_tokens,
@@ -590,28 +616,37 @@ export class LangGraphAdapter {
     totalUsageTokens.cachedReadTokens += usageTokens.cachedReadTokens;
     totalUsageTokens.cachedWriteTokens += usageTokens.cachedWriteTokens;
 
-    // Send explicit end events for any active streams before finishing the step
-    if (streamStartState.textStartSent) {
+    // Check if there's a pending tool call - if so, defer finish-step until tool completes
+    // AI SDK v5 expects: tool-input-available → text-end → tool-output-available → finish-step
+    const hasPendingToolCall = Boolean(toolCallState.currentToolCallId);
+
+    if (hasPendingToolCall) {
+      // Defer finish-step and text-end/reasoning-end until after tool completes
+      toolCallState.pendingFinishStep = true;
+    } else {
+      // No pending tool call - send end events and finish-step normally
+      if (streamStartState.textStartSent) {
+        dataStream.write({
+          type: 'text-end',
+          id: messageId,
+        });
+      }
+
+      if (streamStartState.reasoningStartSent) {
+        dataStream.write({
+          type: 'reasoning-end',
+          id: messageId,
+        });
+      }
+
       dataStream.write({
-        type: 'text-end',
-        id: messageId,
+        type: 'finish-step',
       });
+
+      // Reset start state flags after step finishes so new steps can send start events
+      streamStartState.textStartSent = false;
+      streamStartState.reasoningStartSent = false;
     }
-
-    if (streamStartState.reasoningStartSent) {
-      dataStream.write({
-        type: 'reasoning-end',
-        id: messageId,
-      });
-    }
-
-    dataStream.write({
-      type: 'finish-step',
-    });
-
-    // Reset start state flags after step finishes so new steps can send start events
-    streamStartState.textStartSent = false;
-    streamStartState.reasoningStartSent = false;
 
     callbacks.onChatModelEnd?.({ dataStream, modelId, usageTokens });
     callbacks.onUsageUpdate?.({ modelId, usageTokens });
@@ -624,9 +659,16 @@ export class LangGraphAdapter {
     streamEvent: ToolStartEvent;
     dataStream: TypedUiMessageStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
-    toolCallState: { currentToolCallId: string; currentToolName: string };
+    toolCallState: {
+      currentToolCallId: string;
+      currentToolName: string;
+      toolInputStartSent: boolean;
+      pendingFinishStep: boolean;
+    };
+    streamStartState: { textStartSent: boolean; reasoningStartSent: boolean };
+    messageId: string;
   }): void {
-    const { streamEvent, dataStream, callbacks, toolCallState } = parameters;
+    const { streamEvent, dataStream, callbacks, toolCallState, streamStartState, messageId } = parameters;
 
     const toolCallId = toolCallState.currentToolCallId;
     const toolName = toolCallState.currentToolName;
@@ -665,16 +707,52 @@ export class LangGraphAdapter {
       args = { input };
     }
 
+    // Only write tool-input-start and tool-input-delta if they haven't been sent yet.
+    // handleChatModelStream already sends these events when streaming tool calls,
+    // so we skip them here to avoid duplicates. AI SDK v5 expects exactly one
+    // tool-input-start event per tool call.
+    if (!toolCallState.toolInputStartSent) {
+      dataStream.write({
+        type: 'tool-input-start',
+        toolCallId,
+        toolName,
+      });
+      dataStream.write({
+        type: 'tool-input-delta',
+        toolCallId,
+        inputTextDelta: String(input),
+      });
+      toolCallState.toolInputStartSent = true;
+    }
+
+    // AI SDK v5 requires tool-input-available to signal that tool input is complete
+    // This must be sent before tool-output-available
     dataStream.write({
-      type: 'tool-input-start',
+      type: 'tool-input-available',
       toolCallId,
       toolName,
+      input: args,
     });
-    dataStream.write({
-      type: 'tool-input-delta',
-      toolCallId,
-      inputTextDelta: String(input),
-    });
+
+    // AI SDK v5 expects: tool-input-available → text-end → tool-output-available → finish-step
+    // Send text-end/reasoning-end that were deferred from handleChatModelEnd
+    if (toolCallState.pendingFinishStep) {
+      if (streamStartState.textStartSent) {
+        dataStream.write({
+          type: 'text-end',
+          id: messageId,
+        });
+        streamStartState.textStartSent = false;
+      }
+
+      if (streamStartState.reasoningStartSent) {
+        dataStream.write({
+          type: 'reasoning-end',
+          id: messageId,
+        });
+        streamStartState.reasoningStartSent = false;
+      }
+    }
 
     callbacks.onToolStart?.({ dataStream, toolCallId, toolName, args });
   }
@@ -687,7 +765,12 @@ export class LangGraphAdapter {
     dataStream: TypedUiMessageStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
     parseToolResults?: Partial<Record<string, (content: string) => unknown[]>>;
-    toolCallState: { currentToolCallId: string; currentToolName: string };
+    toolCallState: {
+      currentToolCallId: string;
+      currentToolName: string;
+      toolInputStartSent: boolean;
+      pendingFinishStep: boolean;
+    };
   }): void {
     const { streamEvent, dataStream, callbacks, parseToolResults, toolCallState } = parameters;
 
@@ -717,6 +800,7 @@ export class LangGraphAdapter {
 
     toolCallState.currentToolCallId = ''; // Reset the current tool call ID
     toolCallState.currentToolName = ''; // Reset the current tool name
+    toolCallState.toolInputStartSent = false; // Reset the tool input start flag
 
     // Parse tool results using the configurable parser with tool name.
     // If no parser is configured, use the content as is.
@@ -737,6 +821,17 @@ export class LangGraphAdapter {
       toolCallId,
       output: result,
     });
+
+    // If finish-step was deferred due to pending tool call, send it now
+    // AI SDK v5 expects: tool-input-available → text-end → tool-output-available → finish-step
+    // Note: text-end/reasoning-end were already sent in handleToolStart
+    if (toolCallState.pendingFinishStep) {
+      dataStream.write({
+        type: 'finish-step',
+      });
+
+      toolCallState.pendingFinishStep = false;
+    }
 
     callbacks.onToolEnd?.({ dataStream, toolCallId, toolName, result });
   }

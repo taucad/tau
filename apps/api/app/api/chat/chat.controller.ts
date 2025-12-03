@@ -35,19 +35,28 @@ export class ChatController {
   ): Promise<void> {
     this.logger.debug(`Creating chat: ${body.id}`);
     // Sanitize messages to handle partial tool calls before conversion
-    const sanitizedMessages = sanitizeMessagesForConversion(body.messages);
+    const sanitizedMessages = sanitizeMessagesForConversion(body.messages, this.logger);
     const coreMessages = convertToModelMessages(sanitizedMessages);
     const lastHumanMessage = body.messages.findLast((message) => message.role === 'user');
 
     this.logger.debug(lastHumanMessage, `Last human message:`);
     let modelId: string;
-    const selectedToolChoice: ToolSelection = 'auto';
+    let selectedToolChoice: ToolSelection = 'auto';
 
     if (lastHumanMessage?.role === 'user') {
-      modelId = lastHumanMessage.metadata?.model ?? '';
-      // If (lastHumanMessage.metadata.toolChoice) {
-      //   selectedToolChoice = lastHumanMessage.metadata.toolChoice;
-      // }
+      const messageModel = lastHumanMessage.metadata?.model;
+
+      if (!messageModel) {
+        throw new Error('Message model is required');
+      }
+
+      modelId = messageModel;
+
+      const messageToolChoice = lastHumanMessage.metadata?.toolChoice;
+
+      if (messageToolChoice) {
+        selectedToolChoice = messageToolChoice;
+      }
     } else {
       throw new Error('Last message is not a user message');
     }

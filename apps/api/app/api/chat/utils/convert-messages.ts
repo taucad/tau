@@ -1,5 +1,6 @@
 import type { BaseMessageLike } from '@langchain/core/messages';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
+import type { Logger } from '@nestjs/common';
 import type { ModelMessage, ToolUIPart, UIDataTypes, UIMessage, UIMessagePart, UITools } from 'ai';
 
 const isToolPart = (part: UIMessagePart<UIDataTypes, UITools>): part is ToolUIPart => part.type.startsWith('tool-');
@@ -11,7 +12,7 @@ const isToolPart = (part: UIMessagePart<UIDataTypes, UITools>): part is ToolUIPa
  * @param messages - The UI messages that may contain partial tool calls
  * @returns Processed messages with all tool calls in completed state
  */
-export function sanitizeMessagesForConversion(messages: UIMessage[]): UIMessage[] {
+export function sanitizeMessagesForConversion(messages: UIMessage[], logger: Logger): UIMessage[] {
   return messages.map((message) => {
     if (message.role !== 'assistant') {
       return message;
@@ -20,6 +21,10 @@ export function sanitizeMessagesForConversion(messages: UIMessage[]): UIMessage[
     // Handle parts array - convert partial tool calls to completed state
     const sanitizedParts = message.parts.map((part) => {
       if (isToolPart(part) && part.state === 'input-available') {
+        logger.warn(
+          part,
+          'Converting partial tool call to completed state with mock result. This is likely due to the UI calling with incomplete tool calls.',
+        );
         // Convert partial tool calls to completed state with mock result
         return {
           ...part,

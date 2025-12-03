@@ -28,11 +28,11 @@ type ChatToolSelectorProperties = {
   readonly children: (properties: {
     selectedMode: ToolSelectorMode;
     selectedTools: ToolName[];
-    toolMetadata: Record<ToolName, ToolMetadata>;
+    toolMetadata: Partial<Record<ToolName, ToolMetadata>>;
   }) => ReactNode;
 };
 
-const toolMetadata: Record<ToolName, ToolMetadata> = {
+const toolMetadata: Partial<Record<ToolName, ToolMetadata>> = {
   [toolName.webSearch]: {
     label: 'Web Search',
     description: 'Search the web for information',

@@ -714,7 +714,11 @@ export const ChatTextarea = memo(function ({
                   {selectedMode === 'custom' && selectedTools.length > 0 ? (
                     <span className="flex items-center gap-1">
                       {selectedTools.map((tool) => {
-                        const Icon = toolMetadata[tool].icon;
+                        const Icon = toolMetadata[tool]?.icon;
+                        if (!Icon) {
+                          return null;
+                        }
+
                         return <Icon key={tool} className="size-4" />;
                       })}
                     </span>

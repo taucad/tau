@@ -11,9 +11,8 @@ primary_region = 'syd'
 
 [env]
   NODE_ENV = 'production'
-  TAU_API_URL = 'https://api.taucad.dev'
-  TAU_FRONTEND_URL = 'https://taucad.dev'
-  ADDITIONAL_CORS_ORIGINS = '["https://deploy-preview-*--taucad.netlify.app","https://tau-ui-pr-*.fly.dev"]'
+  TAU_API_URL = 'https://api.tau.new'
+  TAU_FRONTEND_URL = 'https://tau.new'
 
 [http_service]
   internal_port = 3000

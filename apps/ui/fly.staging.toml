@@ -1,9 +1,9 @@
-# fly.toml app configuration file generated for tau-api on 2025-02-25T12:43:15+13:00
+# fly.toml app configuration file for staging environment (taucad.dev)
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'tau-api'
+app = 'tau-ui-staging'
 primary_region = 'syd'
 
 [build]
@@ -11,13 +11,8 @@ primary_region = 'syd'
 
 [env]
   NODE_ENV = 'production'
-  TAU_FRONTEND_URL = 'https://tau.new'
-  LANGSMITH_TRACING = true
-  LANGSMITH_ENDPOINT = 'https://api.smith.langchain.com'
-  LANGSMITH_PROJECT = 'tau-api-prod'
-  AUTH_URL = 'https://api.tau.new'
-  LOG_SERVICE = 'fly'
-  LOG_LEVEL = 'info'
+  TAU_API_URL = 'https://api.taucad.dev'
+  TAU_FRONTEND_URL = 'https://taucad.dev'
 
 [http_service]
   internal_port = 3000
@@ -31,3 +26,4 @@ primary_region = 'syd'
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
+

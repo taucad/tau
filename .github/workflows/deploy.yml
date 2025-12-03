@@ -1,0 +1,62 @@
+# Reusable workflow for deploying to Fly.io
+# Supports both staging (taucad.dev) and production (tau.new) environments
+
+name: Deploy to Fly.io
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: 'Environment to deploy (staging or production)'
+      app:
+        required: true
+        type: string
+        description: 'App to deploy (api or ui)'
+  workflow_dispatch:
+    # Manual trigger from GitHub UI
+    inputs:
+      environment:
+        required: true
+        type: choice
+        description: 'Environment to deploy'
+        options:
+          - staging
+          - production
+      app:
+        required: true
+        type: choice
+        description: 'App to deploy'
+        options:
+          - api
+          - ui
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.app }} to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency: deploy-${{ inputs.app }}-${{ inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Fly.io CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to Fly.io
+        run: |
+          # Use staging config file for staging environment, otherwise use default fly.toml
+          if [ "${{ inputs.environment }}" = "staging" ]; then
+            CONFIG_FILE="apps/${{ inputs.app }}/fly.staging.toml"
+          else
+            CONFIG_FILE="apps/${{ inputs.app }}/fly.toml"
+          fi
+          
+          echo "Deploying ${{ inputs.app }} to ${{ inputs.environment }} using $CONFIG_FILE"
+          flyctl deploy --remote-only --config "$CONFIG_FILE" --dockerfile "apps/${{ inputs.app }}/Dockerfile"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+

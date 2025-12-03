@@ -77,18 +77,44 @@ jobs:
           echo "$affected_apps" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-  # Call API deployment workflow
-  deploy-api:
-    name: Deploy API
+  # Production deployments (tau.new)
+  deploy-api-production:
+    name: Deploy API (Production)
     needs: [main, changes]
     if: contains(fromJSON(needs.changes.outputs.affected_apps), 'api')
-    uses: ./.github/workflows/fly-deploy-api.yml
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      app: api
     secrets: inherit
 
-  # Call UI deployment workflow  
-  deploy-ui:
-    name: Deploy UI
+  deploy-ui-production:
+    name: Deploy UI (Production)
     needs: [main, changes]
     if: contains(fromJSON(needs.changes.outputs.affected_apps), 'ui')
-    uses: ./.github/workflows/fly-deploy-ui.yml
-    secrets: inherit 
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      app: ui
+    secrets: inherit
+
+  # Staging deployments (taucad.dev)
+  deploy-api-staging:
+    name: Deploy API (Staging)
+    needs: [main, changes]
+    if: contains(fromJSON(needs.changes.outputs.affected_apps), 'api')
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      app: api
+    secrets: inherit
+
+  deploy-ui-staging:
+    name: Deploy UI (Staging)
+    needs: [main, changes]
+    if: contains(fromJSON(needs.changes.outputs.affected_apps), 'ui')
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      app: ui
+    secrets: inherit

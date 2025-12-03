@@ -2,8 +2,8 @@
 # 
 # Environment Variables:
 # Production values are set below in [context.production.environment]
-# - TAU_API_URL: Set to https://api.taucad.dev (production)
-# - TAU_FRONTEND_URL: Set to https://taucad.dev (production)
+# - TAU_API_URL: Set to https://api.tau.new (production)
+# - TAU_FRONTEND_URL: Set to https://tau.new (production)
 #
 # For branch/preview deploys, TAU_FRONTEND_URL is auto-extracted at runtime from
 # NETLIFY_AI_GATEWAY_URL (apps/ui/app/config.ts removes the /.netlify/ai suffix)
@@ -24,15 +24,15 @@
   command = "pnpm nx build ui"
   [context.production.environment]
     NODE_ENV = "production"
-    TAU_API_URL = "https://api.taucad.dev"
-    TAU_FRONTEND_URL = "https://taucad.dev"
+    TAU_API_URL = "https://api.tau.new"
+    TAU_FRONTEND_URL = "https://tau.new"
 
 # Deploy preview context (pull requests)
 [context.deploy-preview]
   command = "pnpm nx build ui"
   [context.deploy-preview.environment]
     NODE_ENV = "production"
-    TAU_API_URL = "https://api.taucad.dev"
+    TAU_API_URL = "https://api.tau.new"
     # TAU_FRONTEND_URL not set - will use NETLIFY_AI_GATEWAY_URL
 
 # Branch deploy context (non-production branches)
@@ -40,7 +40,7 @@
   command = "pnpm nx build ui"
   [context.branch-deploy.environment]
     NODE_ENV = "production"
-    TAU_API_URL = "https://api.taucad.dev"
+    TAU_API_URL = "https://api.tau.new"
     # TAU_FRONTEND_URL not set - will use NETLIFY_AI_GATEWAY_URL
 
 # Local development configuration (for Netlify Dev)

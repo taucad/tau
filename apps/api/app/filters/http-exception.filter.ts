@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { Catch, HttpException, HttpStatus, Injectable, Logger, Scope } from '@nestjs/common';
+import { Catch, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import type { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ZodSerializationException, ZodValidationException } from 'nestjs-zod';

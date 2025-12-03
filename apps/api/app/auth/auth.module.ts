@@ -138,7 +138,7 @@ export class AuthModule implements NestModule, OnModuleInit {
           },
         );
       } catch (error) {
-        this.logger.fatal(`Better auth error ${String(error)}`);
+        this.logger.fatal(error, 'Better auth error');
         void reply.status(500).send({
           error: 'Internal authentication error',
           code: 'AUTH_FAILURE',

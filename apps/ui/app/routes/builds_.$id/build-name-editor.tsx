@@ -13,7 +13,7 @@ import { InlineTextEditor } from '#components/inline-text-editor.js';
 const animationDuration = 2000;
 
 export function BuildNameEditor(): React.JSX.Element {
-  const { buildRef, updateName, buildId } = useBuild();
+  const { buildRef, updateName } = useBuild();
   const buildName = useSelector(buildRef, (state) => state.context.build?.name) ?? '';
   const isLoading = useSelector(buildRef, (state) => state.context.isLoading);
   const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId);
@@ -74,9 +74,6 @@ export function BuildNameEditor(): React.JSX.Element {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only run after loading completes
   }, [buildName, isLoading, activeChatFirstMessage]);
-
-  // Suppress unused variable warning - buildId is used for context identification
-  void buildId;
 
   return (
     <Tooltip>

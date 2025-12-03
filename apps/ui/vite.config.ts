@@ -6,7 +6,6 @@ import { reactRouter } from '@react-router/dev/vite';
 import netlifyReactRouter from '@netlify/vite-plugin-react-router';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import devtoolsJson from 'vite-plugin-devtools-json';
-import tsconfigPaths from 'vite-tsconfig-paths';
 import tailwindcss from '@tailwindcss/vite';
 import { visualizer } from 'rollup-plugin-visualizer';
 import mdx from 'fumadocs-mdx/vite';
@@ -64,9 +63,8 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
 
-      // Paths
+      // Paths - use nxViteTsPaths only (tsconfigPaths is redundant in Nx workspaces)
       nxViteTsPaths(),
-      tsconfigPaths(),
 
       // Fumadocs
       mdx(MdxConfig, { configPath: path.resolve(__dirname, './app/lib/fumadocs/source.config.ts') }), // Fumadocs
@@ -100,7 +98,7 @@ export default defineConfig(({ mode }) => {
     worker: {
       // Workers need their own plugins.
       // https://vite.dev/config/worker-options.html#worker-plugins
-      plugins: () => [nxViteTsPaths(), tsconfigPaths()],
+      plugins: () => [nxViteTsPaths()],
       format: 'es',
     },
 

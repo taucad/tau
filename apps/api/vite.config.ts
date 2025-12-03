@@ -3,7 +3,6 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { defineConfig } from 'vite';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
-import tsconfigPaths from 'vite-tsconfig-paths';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { VitePluginNode as vitePluginNode } from 'vite-plugin-node';
 import swc from 'unplugin-swc';
@@ -30,7 +29,6 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       nxViteTsPaths(),
-      tsconfigPaths(),
       viteStaticCopy({
         targets: [
           {

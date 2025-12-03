@@ -8,6 +8,7 @@ import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
 import { ConfigService } from '@nestjs/config';
 import type { KernelProvider } from '@taucad/types';
 import type { ToolSelection } from '@taucad/chat';
+import { toolName } from '@taucad/chat/constants';
 import { ModelService } from '#api/models/model.service.js';
 import { ToolService } from '#api/tools/tool.service.js';
 import { buildNameGenerationSystemPrompt } from '#api/chat/prompts/chat-prompt-name.js';
@@ -64,7 +65,7 @@ export class ChatService {
       tools: researchTools,
       name: 'research_expert',
       prompt: `You are a research expert that can use specialized tools to accomplish tasks. 
-        Always use the web_search tool, and only the webBrowser tool if the web_search tool does not supply enough information.`,
+        Always use the \`${toolName.webSearch}\` tool, and only the \`${toolName.webBrowser}\` tool if the \`${toolName.webSearch}\` tool does not supply enough information.`,
     });
 
     // Create a general agent for handling direct responses

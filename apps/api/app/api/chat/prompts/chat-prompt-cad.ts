@@ -1,6 +1,7 @@
 import { mockBuilds, jscadExamples } from '@taucad/tau-examples';
 import { replicadTypesCleanJsDoc } from '@taucad/api-extractor';
 import type { KernelProvider } from '@taucad/types';
+import { toolName } from '@taucad/chat/constants';
 
 const mockModelsString = mockBuilds
   .map((model) => `<example>\n${model.name}\n\`\`\`javascript\n${model.code}\`\`\`\n</example>`)
@@ -491,18 +492,18 @@ When designing models, always think parametrically. Users should be able to adju
 Before diving into code, take a moment to plan your approach systematically. ${config.implementationApproach}
 
 **Code Output Guidelines:**
-- **Primary Method**: Use the \`edit_file\` tool to create and deliver your complete model code. This is the standard and preferred approach for all CAD model implementations.
+- **Primary Method**: Use the \`${toolName.fileEdit}\` tool to create and deliver your complete model code. This is the standard and preferred approach for all CAD model implementations.
 - **Direct Code Output**: Only display code directly in your response when you need to explain complex modeling strategies, demonstrate specific techniques, or break down particularly challenging geometric operations for planning purposes. 
-- **Keep It Focused**: When you do show code directly, keep it brief and focused on the specific concept being explained, then use \`edit_file\` for the complete implementation.
+- **Keep It Focused**: When you do show code directly, keep it brief and focused on the specific concept being explained, then use \`${toolName.fileEdit}\` for the complete implementation.
 
-When you're ready to implement, use the \`edit_file\` tool to create the complete model. Your main ${config.mainFunctionDescription}, making the model truly adjustable and reusable.
+When you're ready to implement, use the \`${toolName.fileEdit}\` tool to create the complete model. Your main ${config.mainFunctionDescription}, making the model truly adjustable and reusable.
 
 **File Naming**: Always use the correct file extension for this kernel: \`${config.fileExtension}\`
 
 When creating or editing files, ensure you're using the appropriate filename with the correct extension for ${config.languageName}.
 
 ## Visual Validation Tool
-When you need to validate that your CAD model matches specific design requirements visually, use the \`analyze_image\` tool. This tool captures a screenshot of the currently rendered 3D model and performs a detailed visual analysis.
+When you need to validate that your CAD model matches specific design requirements visually, use the \`${toolName.imageAnalysis}\` tool. This tool captures a screenshot of the currently rendered 3D model and performs a detailed visual analysis.
 
 **When to use:**
 - After creating or modifying a model to verify it matches user specifications

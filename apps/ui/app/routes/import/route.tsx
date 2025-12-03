@@ -19,7 +19,7 @@ import { useBuildManager } from '#hooks/use-build-manager.js';
 import { RepositoryCard } from '#routes/import/repository-card.js';
 import { BranchSelector } from '#routes/import/branch-selector.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { consoleInspector } from '#machines/inspector.js';
+import { inspect } from '#machines/inspector.js';
 
 export const handle: Handle = {
   enableOverflowY: true,
@@ -220,7 +220,7 @@ export default function ImportRoute(): React.JSX.Element {
         ref,
         mainFile,
       },
-      inspect: consoleInspector,
+      inspect,
     },
   );
 

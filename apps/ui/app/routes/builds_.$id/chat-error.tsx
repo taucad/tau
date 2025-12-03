@@ -16,7 +16,7 @@ export const ChatError = memo(function ({
   readonly onOpenChange?: (open: boolean) => void;
   readonly className?: string;
 }): React.ReactNode {
-  const error = useChatSelector((state) => state.context.error);
+  const error = useChatSelector((state) => state.error);
   const { regenerate } = useChatActions();
 
   if (!error) {

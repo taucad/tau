@@ -1,200 +1,414 @@
 /**
  * Chat Provider and Hooks
  *
- * Provides XState-driven chat functionality with AI SDK integration.
- * This is the new architecture replacing the deprecated chat-provider.tsx.
+ * Event-driven architecture using AI SDK callbacks + XState debouncing.
+ * - useChat from AI SDK is the source of truth for messages
+ * - chatPersistenceMachine handles message persistence with debouncing
+ * - draftMachine handles drafts/edits with direct persistence
  */
 
 import { useChat } from '@ai-sdk/react';
-import { createActorContext } from '@xstate/react';
-import { useEffect, useCallback } from 'react';
+import { useActorRef, useSelector } from '@xstate/react';
+import { fromPromise } from 'xstate';
+import { createContext, useContext, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ChatOnToolCallCallback } from 'ai';
 import { DefaultChatTransport } from 'ai';
-import { chatMachine } from '#hooks/chat.machine.js';
-import type { ChatMachineInput, ChatMachineState } from '#hooks/chat.machine.js';
-import { inspect } from '#machines/inspector.js';
+import { draftMachine } from '#hooks/draft.machine.js';
+import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
+import { useChats } from '#hooks/use-chats.js';
+import { consoleInspector, inspect } from '#machines/inspector.js';
 import { ENV } from '#config.js';
 
-type UseChatArgs = NonNullable<Parameters<typeof useChat<MyUIMessage>>[0]>;
 type UseChatReturn = ReturnType<typeof useChat<MyUIMessage>>;
+type UseChatArgs = NonNullable<Parameters<typeof useChat<MyUIMessage>>[0]>;
 type ChatProviderValue = Omit<UseChatArgs, 'onFinish' | 'onError' | 'onResponse' | 'id'> & {
   onToolCall?: ChatOnToolCallCallback<MyUIMessage>;
 };
 
-// Create the actor context using XState's createActorContext
-export const ChatContext = createActorContext(chatMachine, {
-  inspect,
-});
+// Single context for all chat state
+type ChatContextValue = {
+  chat: UseChatReturn;
+  activeChatId: string | undefined;
+  resourceId: string | undefined;
+  isLoadingChat: boolean;
+  queuePersist: (messages: MyUIMessage[]) => void;
+  draftActorRef: ReturnType<typeof useActorRef<typeof draftMachine>>;
+};
 
-// Provider component that wraps useChat and syncs with XState
+const ChatContext = createContext<ChatContextValue | undefined>(undefined);
+
+// Provider component - manages all chat state
 export function ChatProvider({
   children,
   resourceId,
-  chatId,
+  chatId: activeChatId,
   value,
 }: {
   readonly children: React.ReactNode;
-  readonly resourceId?: string; // Optional for routes that don't need chat persistence
+  readonly resourceId?: string;
   readonly chatId?: string;
   readonly value?: ChatProviderValue;
 }): React.JSX.Element {
-  const input: ChatMachineInput = { chatId, resourceId };
+  const { getChat, updateChat } = useChats(resourceId ?? '');
 
-  return (
-    <ChatContext.Provider options={{ input }}>
-      <ChatSyncWrapper value={value}>{children}</ChatSyncWrapper>
-    </ChatContext.Provider>
+  // Refs for functions that actors need access to (set after useChat is created)
+  const setMessagesRef = useRef<UseChatReturn['setMessages'] | undefined>(undefined);
+  const initializeDraftRef = useRef<((chat: NonNullable<Awaited<ReturnType<typeof getChat>>>) => void) | undefined>(
+    undefined,
   );
-}
 
-// Internal component that handles useChat and syncing
-function ChatSyncWrapper({
-  children,
-  value,
-}: {
-  readonly children: React.ReactNode;
-  readonly value?: ChatProviderValue;
-}): React.JSX.Element {
-  const actorRef = ChatContext.useActorRef();
-  const chatId = ChatContext.useSelector((state) => state.context.chatId);
+  // Create draft machine with provided actors (like use-build.tsx pattern)
+  const draftActorRef = useActorRef(
+    draftMachine.provide({
+      actors: {
+        persistDraftActor: fromPromise(async ({ input }) => {
+          await updateChat(input.chatId, { draft: input.draft }, { ignoreKeys: ['draft'] });
+        }),
+        persistEditDraftActor: fromPromise(async ({ input }) => {
+          await updateChat(
+            input.chatId,
+            { messageEdits: { [input.messageId]: input.draft } },
+            { ignoreKeys: ['messageEdits'] },
+          );
+        }),
+        clearMessageEditActor: fromPromise(async ({ input }) => {
+          const loadedChat = await getChat(input.chatId);
+          if (loadedChat?.messageEdits?.[input.messageId]) {
+            const updatedEdits = { ...loadedChat.messageEdits };
+            // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- need to remove message edit
+            delete updatedEdits[input.messageId];
+            await updateChat(input.chatId, { messageEdits: updatedEdits }, { ignoreKeys: ['messageEdits'] });
+          }
+        }),
+      },
+    }),
+    {
+      input: {
+        chatId: activeChatId,
+      },
+      inspect: consoleInspector,
+    },
+  );
 
-  // Use chat ID when available for thread persistence
-  const threadId = chatId;
+  // Create persistence machine with provided actors
+  // Actors handle the complete load flow: fetch → setMessages → initialize draft
+  const persistenceActorRef = useActorRef(
+    chatPersistenceMachine.provide({
+      actors: {
+        loadChatActor: fromPromise(async ({ input }) => {
+          console.log('loadChatActor', input);
+          const loadedChat = await getChat(input.chatId);
 
-  // Initialize useChat with sync callbacks
+          // Set messages directly in the actor (no React effect needed)
+          if (loadedChat) {
+            setMessagesRef.current?.(loadedChat.messages);
+            initializeDraftRef.current?.(loadedChat);
+          } else {
+            // New chat - clear messages
+            setMessagesRef.current?.([]);
+          }
+
+          return loadedChat;
+        }),
+        persistMessagesActor: fromPromise(async ({ input }) => {
+          await updateChat(input.chatId, { messages: input.messages }, { ignoreKeys: ['messages'] });
+        }),
+      },
+    }),
+    {
+      input: {
+        activeChatId,
+        resourceId,
+      },
+      inspect,
+    },
+  );
+
+  // Track loading state from persistence machine
+  const isLoadingChat = useSelector(persistenceActorRef, (state) => state.context.isLoadingChat);
+
+  // Initialize useChat with callbacks for event-driven persistence
   const chat = useChat<MyUIMessage>({
     ...value,
-    id: threadId,
+    id: activeChatId,
     transport: new DefaultChatTransport({
       api: `${ENV.TAU_API_URL}/v1/chat`,
       credentials: 'include',
     }),
-    onFinish(..._args) {
-      // Queue sync instead of immediate sync - XState will debounce
-      queueSyncChatState();
+    onFinish({ messages }) {
+      // Persist when AI finishes - machine guards against persisting during load
+      persistenceActorRef.send({ type: 'queuePersist', messages });
     },
-    onError(...args) {
-      console.error('Chat error:', args);
-      queueSyncChatState();
+    onError(error) {
+      persistenceActorRef.send({ type: 'handleError', error });
     },
   });
 
-  // Function to queue chat state sync (will be debounced by XState)
-  const queueSyncChatState = useCallback(() => {
-    actorRef.send({
-      type: 'queueSync',
-      payload: {
-        messages: chat.messages,
-        isLoading: chat.status === 'streaming',
-        error: chat.error,
-        status: chat.status,
-      },
-    });
-  }, [actorRef, chat.messages, chat.status, chat.error]);
+  // Update refs so actors can access current functions
+  setMessagesRef.current = chat.setMessages;
+  initializeDraftRef.current = (loadedChat) => {
+    draftActorRef.send({ type: 'initializeFromChat', chat: loadedChat });
+  };
 
-  // Register useChat actions with XState on mount and when chat changes
+  // Load chat when activeChatId changes
   useEffect(() => {
-    actorRef.send({
-      type: 'registerChatActions',
-      actions: {
-        sendMessage: chat.sendMessage,
-        regenerate: chat.regenerate,
-        stop: chat.stop,
-        setMessages: chat.setMessages,
-      },
-    });
-  }, [actorRef, chat.sendMessage, chat.regenerate, chat.setMessages, chat.stop]);
+    if (!activeChatId) {
+      return;
+    }
 
-  // Queue sync on key changes (XState will handle debouncing)
-  useEffect(() => {
-    queueSyncChatState();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- queueSyncChatState is stable and captures latest values
-  }, [chat.messages, chat.status, chat.error]);
+    // Tell persistence machine to load chat (actor handles setMessages)
+    persistenceActorRef.send({ type: 'setActiveChatId', chatId: activeChatId });
 
-  return children as React.JSX.Element;
+    // Update draft machine with new chat ID
+    draftActorRef.send({ type: 'setChatId', chatId: activeChatId });
+  }, [activeChatId, persistenceActorRef, draftActorRef]);
+
+  // Queue persistence function for use by actions
+  const queuePersist = useCallback(
+    (messages: MyUIMessage[]) => {
+      if (activeChatId) {
+        persistenceActorRef.send({ type: 'queuePersist', messages });
+      }
+    },
+    [activeChatId, persistenceActorRef],
+  );
+
+  const contextValue = useMemo<ChatContextValue>(
+    () => ({
+      chat,
+      activeChatId,
+      resourceId,
+      isLoadingChat,
+      queuePersist,
+      draftActorRef,
+    }),
+    [chat, activeChatId, resourceId, isLoadingChat, queuePersist, draftActorRef],
+  );
+
+  return <ChatContext.Provider value={contextValue}>{children}</ChatContext.Provider>;
 }
 
-// Type-safe selector hook with full TypeScript support
-export function useChatSelector<T>(
-  selector: (state: ChatMachineState) => T,
-  equalityFn?: (previous: T, next: T) => boolean,
-): T {
-  return ChatContext.useSelector(selector, equalityFn);
+// Internal hook to get chat context
+function useChatContext(): ChatContextValue {
+  const context = useContext(ChatContext);
+  if (!context) {
+    throw new Error('useChatContext must be used within a ChatProvider');
+  }
+
+  return context;
 }
 
-// Hook for chat actions (proxied through XState)
+// Combined state type for useChatSelector - the primary way to read chat state
+type CombinedChatState = {
+  messages: MyUIMessage[];
+  messagesById: Map<string, MyUIMessage>;
+  messageOrder: string[];
+  status: UseChatReturn['status'];
+  error: Error | undefined;
+  isLoading: boolean;
+  // Draft state from machine
+  draftText: string;
+  draftImages: string[];
+  draftToolChoice: string | string[];
+  messageEdits: Record<string, MyUIMessage>;
+  activeEditMessageId: string | undefined;
+  editDraftText: string;
+  editDraftImages: string[];
+};
+
+// Cache for messagesById to avoid recreating on every render
+const messagesByIdCache = new WeakMap<MyUIMessage[], Map<string, MyUIMessage>>();
+
+function getMessagesById(messages: MyUIMessage[]): Map<string, MyUIMessage> {
+  let cached = messagesByIdCache.get(messages);
+  if (!cached) {
+    cached = new Map<string, MyUIMessage>();
+    for (const message of messages) {
+      cached.set(message.id, message);
+    }
+
+    messagesByIdCache.set(messages, cached);
+  }
+
+  return cached;
+}
+
+/**
+ * Primary hook for reading chat state.
+ * Combines AI SDK useChat state with draft machine state.
+ */
+export function useChatSelector<T>(selector: (state: CombinedChatState) => T): T {
+  const { chat, draftActorRef } = useChatContext();
+  const draftContext = useSelector(draftActorRef, (state) => state.context);
+
+  // Use cached messagesById based on messages array identity
+  const messagesById = getMessagesById(chat.messages);
+  const messageOrder = useMemo(() => chat.messages.map((m) => m.id), [chat.messages]);
+
+  // Combine chat state with draft state
+  const combinedState = useMemo<CombinedChatState>(
+    () => ({
+      messages: chat.messages,
+      messagesById,
+      messageOrder,
+      status: chat.status,
+      error: chat.error,
+      isLoading: chat.status === 'streaming',
+      // Draft state
+      draftText: draftContext.draftText,
+      draftImages: draftContext.draftImages,
+      draftToolChoice: draftContext.draftToolChoice,
+      messageEdits: draftContext.messageEdits,
+      activeEditMessageId: draftContext.activeEditMessageId,
+      editDraftText: draftContext.editDraftText,
+      editDraftImages: draftContext.editDraftImages,
+    }),
+    [chat.messages, messagesById, messageOrder, chat.status, chat.error, draftContext],
+  );
+
+  return selector(combinedState);
+}
+
+// Hook for chat actions
 export function useChatActions(): {
   sendMessage: (message: Parameters<UseChatReturn['sendMessage']>[0]) => void;
   regenerate: () => void;
   stop: () => void;
+  setMessages: (messages: MyUIMessage[]) => void;
   setDraftText: (text: string) => void;
   addDraftImage: (image: string) => void;
   removeDraftImage: (index: number) => void;
   setDraftToolChoice: (toolChoice: string | string[]) => void;
+  clearDraft: () => void;
   startEditingMessage: (messageId: string) => void;
   exitEditMode: () => void;
   setEditDraftText: (text: string) => void;
   addEditDraftImage: (image: string) => void;
   removeEditDraftImage: (index: number) => void;
+  clearMessageEdit: (messageId: string) => void;
   editMessage: (messageId: string, content: string, model: string, metadata?: unknown, imageUrls?: string[]) => void;
   retryMessage: (messageId: string, modelId?: string) => void;
 } {
-  const actorRef = ChatContext.useActorRef();
+  const { chat, queuePersist, draftActorRef } = useChatContext();
 
-  return {
-    sendMessage(message: Parameters<UseChatReturn['sendMessage']>[0]) {
-      actorRef.send({ type: 'sendMessage', message });
-    },
-    regenerate() {
-      actorRef.send({ type: 'regenerate' });
-    },
-    stop() {
-      actorRef.send({ type: 'stop' });
-    },
-    setDraftText(text: string) {
-      actorRef.send({ type: 'setDraftText', text });
-    },
-    addDraftImage(image: string) {
-      actorRef.send({ type: 'addDraftImage', image });
-    },
-    removeDraftImage(index: number) {
-      actorRef.send({ type: 'removeDraftImage', index });
-    },
-    setDraftToolChoice(toolChoice: string | string[]) {
-      actorRef.send({ type: 'setDraftToolChoice', toolChoice });
-    },
-    startEditingMessage(messageId: string) {
-      actorRef.send({ type: 'startEditingMessage', messageId });
-    },
-    exitEditMode() {
-      actorRef.send({ type: 'exitEditMode' });
-    },
-    setEditDraftText(text: string) {
-      actorRef.send({ type: 'setEditDraftText', text });
-    },
-    addEditDraftImage(image: string) {
-      actorRef.send({ type: 'addEditDraftImage', image });
-    },
-    removeEditDraftImage(index: number) {
-      actorRef.send({ type: 'removeEditDraftImage', index });
-    },
-    editMessage(messageId: string, content: string, model: string, metadata?: unknown, imageUrls?: string[]) {
-      actorRef.send({
-        type: 'editMessage',
-        messageId,
-        content,
-        model,
-        metadata,
-        imageUrls,
-      });
-    },
-    retryMessage(messageId: string, modelId?: string) {
-      actorRef.send({
-        type: 'retryMessage',
-        messageId,
-        modelId,
-      });
-    },
-  };
+  return useMemo(
+    () => ({
+      // UseChat actions (direct)
+      sendMessage(message: Parameters<UseChatReturn['sendMessage']>[0]) {
+        // Clear draft when sending
+        draftActorRef.send({ type: 'clearDraft' });
+
+        // Persist immediately with user message included
+        queuePersist([...chat.messages, message as MyUIMessage]);
+
+        void chat.sendMessage(message);
+      },
+      regenerate() {
+        void chat.regenerate();
+      },
+      stop() {
+        void chat.stop();
+      },
+      setMessages(messages: MyUIMessage[]) {
+        chat.setMessages(messages);
+      },
+
+      // Draft actions (via XState)
+      setDraftText(text: string) {
+        draftActorRef.send({ type: 'setDraftText', text });
+      },
+      addDraftImage(image: string) {
+        draftActorRef.send({ type: 'addDraftImage', image });
+      },
+      removeDraftImage(index: number) {
+        draftActorRef.send({ type: 'removeDraftImage', index });
+      },
+      setDraftToolChoice(toolChoice: string | string[]) {
+        draftActorRef.send({ type: 'setDraftToolChoice', toolChoice });
+      },
+      clearDraft() {
+        draftActorRef.send({ type: 'clearDraft' });
+      },
+
+      // Edit actions (via XState)
+      startEditingMessage(messageId: string) {
+        const originalMessage = chat.messages.find((m) => m.id === messageId);
+        draftActorRef.send({ type: 'startEditingMessage', messageId, originalMessage });
+      },
+      exitEditMode() {
+        draftActorRef.send({ type: 'exitEditMode' });
+      },
+      setEditDraftText(text: string) {
+        draftActorRef.send({ type: 'setEditDraftText', text });
+      },
+      addEditDraftImage(image: string) {
+        draftActorRef.send({ type: 'addEditDraftImage', image });
+      },
+      removeEditDraftImage(index: number) {
+        draftActorRef.send({ type: 'removeEditDraftImage', index });
+      },
+      clearMessageEdit(messageId: string) {
+        draftActorRef.send({ type: 'clearMessageEdit', messageId });
+      },
+
+      // Edit and retry - uses both useChat and draft machine
+      editMessage(messageId: string, content: string, model: string, _metadata?: unknown, imageUrls?: string[]) {
+        // Clear the edit from draft machine
+        draftActorRef.send({ type: 'clearMessageEdit', messageId });
+
+        // Find message index
+        const messageIndex = chat.messages.findIndex((m) => m.id === messageId);
+        if (messageIndex === -1) {
+          return;
+        }
+
+        // Create new message with updated content
+        const newMessage: MyUIMessage = {
+          id: messageId,
+          role: 'user',
+          parts: [
+            { type: 'text', text: content },
+            ...(imageUrls?.map((url) => ({ type: 'file' as const, url, mediaType: 'image/png' as const })) ?? []),
+          ],
+          metadata: {
+            createdAt: Date.now(),
+            status: 'pending',
+            model,
+          },
+        };
+
+        // Update messages array - keep messages up to the edited one
+        const newMessages = [...chat.messages.slice(0, messageIndex), newMessage];
+        chat.setMessages(newMessages);
+        void chat.regenerate();
+      },
+
+      retryMessage(messageId: string, modelId?: string) {
+        const messageIndex = chat.messages.findIndex((m) => m.id === messageId);
+        if (messageIndex === -1) {
+          return;
+        }
+
+        const sliceIndex = Math.max(messageIndex - 1, 0);
+        const previousMessage = chat.messages[sliceIndex];
+
+        if (previousMessage && modelId) {
+          // Update the previous message with the new model
+          const updatedMessages = [
+            ...chat.messages.slice(0, sliceIndex),
+            { ...previousMessage, metadata: { ...previousMessage.metadata, model: modelId } },
+          ];
+          chat.setMessages(updatedMessages);
+        } else {
+          // Just slice the messages array
+          const newMessages = chat.messages.slice(0, messageIndex);
+          chat.setMessages(newMessages);
+        }
+
+        void chat.regenerate();
+      },
+    }),
+    [chat, draftActorRef, queuePersist],
+  );
 }

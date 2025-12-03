@@ -40,7 +40,7 @@ function ToolTitle({
 
 export function ChatMessageToolImageAnalysis({ part }: { readonly part: ToolUIPart }): React.JSX.Element {
   const [isRequirementsExpanded, setIsRequirementsExpanded] = useState(false);
-  const status = useChatSelector((state) => state.context.status);
+  const status = useChatSelector((state) => state.status);
 
   switch (part.state) {
     case 'input-streaming':

@@ -126,7 +126,7 @@ export function ChatMessageToolFileEdit({
 }): React.JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const { getMainFilename } = useBuild();
-  const status = useChatSelector((state) => state.context.status);
+  const status = useChatSelector((state) => state.status);
 
   // Create file edit machine
   const fileEditRef = useActorRef(fileEditMachine);

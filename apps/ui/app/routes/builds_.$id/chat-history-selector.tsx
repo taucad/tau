@@ -1,12 +1,12 @@
 import { Plus, Pencil, Trash, History } from 'lucide-react';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useChat } from '@ai-sdk/react';
 import type { Chat, MyUIMessage } from '@taucad/chat';
 import { useSelector } from '@xstate/react';
 import { Button } from '#components/ui/button.js';
 import { useBuild } from '#hooks/use-build.js';
-import { useChatManager } from '#hooks/use-chat-manager.js';
+import { useChats } from '#hooks/use-chats.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { cn } from '#utils/ui.utils.js';
 import { useChatConstants } from '#utils/chat.utils.js';
@@ -15,7 +15,6 @@ import { formatRelativeTime } from '#utils/date.utils.js';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '#components/ui/dialog.js';
 import { Input } from '#components/ui/input.js';
 import { groupItemsByTimeHorizon } from '#utils/temporal.utils.js';
-import type { TemporalGroup } from '#utils/temporal.utils.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { useKeydown } from '#hooks/use-keydown.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
@@ -29,68 +28,30 @@ const newChatKeyCombination = {
 
 export function ChatHistorySelector(): ReactNode {
   const { buildRef, buildId, setLastChatId } = useBuild();
-  const { createChat, updateChat, deleteChat: deleteChatFromManager, getChatsForResource } = useChatManager();
+  const { chats, createChat, updateChatName, deleteChat, isLoading: isChatsLoading } = useChats(buildId);
 
-  const isLoading = useSelector(buildRef, (state) => state.context.isLoading);
+  const isBuildLoading = useSelector(buildRef, (state) => state.context.isLoading);
   const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId) ?? '';
 
-  const [chats, setChats] = useState<Chat[]>([]);
-  const [activeChat, setActiveChat] = useState<Chat | undefined>(undefined);
-  const [groupedChats, setGroupedChats] = useState<Array<TemporalGroup<Chat>>>([]);
+  // Derive activeChat and groupedChats from chats
+  const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId), [chats, activeChatId]);
+  const groupedChats = useMemo(() => groupItemsByTimeHorizon(chats), [chats]);
+
   const [isGeneratingName, setIsGeneratingName] = useState(false);
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [chatToRename, setChatToRename] = useState<string | undefined>(undefined);
   const [newChatName, setNewChatName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Load chats for the current build
-  const loadChats = useCallback(async () => {
-    if (!buildId) {
-      return;
-    }
-
-    const loadedChats = await getChatsForResource(buildId);
-    setChats(loadedChats);
-    setGroupedChats(groupItemsByTimeHorizon(loadedChats));
-
-    // Update active chat
-    if (activeChatId) {
-      const active = loadedChats.find((chat) => chat.id === activeChatId);
-      setActiveChat(active);
-    }
-  }, [buildId, getChatsForResource, activeChatId]);
-
-  // Load chats on mount and when buildId changes
-  useEffect(() => {
-    void loadChats();
-  }, [loadChats]);
-
-  // Update active chat when activeChatId changes
-  useEffect(() => {
-    if (activeChatId && chats.length > 0) {
-      const active = chats.find((chat) => chat.id === activeChatId);
-      setActiveChat(active);
-    }
-  }, [activeChatId, chats]);
-
   const handleAddChat = useCallback(async () => {
-    if (!buildId) {
-      return;
-    }
-
-    const newChat = await createChat(buildId, {
+    const newChat = await createChat({
       name: 'New chat',
       messages: [],
     });
 
-    // Update local state
-    setChats((previous) => [...previous, newChat]);
-    setGroupedChats(groupItemsByTimeHorizon([...chats, newChat]));
-
     // Set as active chat
     setLastChatId(newChat.id);
-    setActiveChat(newChat);
-  }, [buildId, createChat, chats, setLastChatId]);
+  }, [createChat, setLastChatId]);
 
   const { formattedKeyCombination } = useKeydown(newChatKeyCombination, handleAddChat);
 
@@ -109,47 +70,38 @@ export function ChatHistorySelector(): ReactNode {
     },
   });
 
-  // Generate name for new chats
-  useEffect(() => {
-    if (isLoading || !activeChat) {
-      return;
-    }
+  // Generate name for new chats when activeChat changes and has messages but default name
+  const previousActiveChatIdRef = useRef<string | undefined>(undefined);
+  if (
+    activeChat &&
+    !isBuildLoading &&
+    !isChatsLoading &&
+    activeChat.name === 'New chat' &&
+    activeChat.messages[0] &&
+    !isGeneratingName &&
+    previousActiveChatIdRef.current !== activeChatId
+  ) {
+    previousActiveChatIdRef.current = activeChatId;
+    setIsGeneratingName(true);
 
-    // Check if this chat needs a name
-    if (activeChat.name === 'New chat' && activeChat.messages[0]) {
-      setIsGeneratingName(true);
-
-      // Create and send message for name generation
-      const nameGenMessage = {
-        ...activeChat.messages[0],
-        metadata: {
-          model: 'name-generator',
-        },
-      } as const satisfies MyUIMessage;
-      void sendMessage(nameGenMessage);
-    }
-  }, [activeChatId, activeChat, isLoading, sendMessage]);
+    // Create and send message for name generation
+    const nameGenMessage = {
+      ...activeChat.messages[0],
+      metadata: {
+        model: 'name-generator',
+      },
+    } as const satisfies MyUIMessage;
+    void sendMessage(nameGenMessage);
+  }
 
   const handleUpdateChatName = useCallback(
     async (chatId: string, name: string) => {
-      await updateChat(chatId, { name });
-
-      // Update local state
-      setChats((previous) => previous.map((chat) => (chat.id === chatId ? { ...chat, name } : chat)));
-
-      // Refresh grouped chats
-      const updatedChats = chats.map((chat) => (chat.id === chatId ? { ...chat, name } : chat));
-      setGroupedChats(groupItemsByTimeHorizon(updatedChats));
-
-      // Update active chat if it's the one being renamed
-      if (activeChat?.id === chatId) {
-        setActiveChat({ ...activeChat, name });
-      }
+      await updateChatName(chatId, name);
     },
-    [updateChat, chats, activeChat],
+    [updateChatName],
   );
 
-  const handleRenameChat = (chatId: string, currentName: string) => {
+  const handleRenameChat = (chatId: string, currentName: string): void => {
     setChatToRename(chatId);
     setNewChatName(currentName);
     setIsRenameDialogOpen(true);
@@ -160,7 +112,7 @@ export function ChatHistorySelector(): ReactNode {
     }, 100);
   };
 
-  const handleSaveRename = () => {
+  const handleSaveRename = (): void => {
     if (chatToRename && newChatName.trim()) {
       void handleUpdateChatName(chatToRename, newChatName.trim());
       setIsRenameDialogOpen(false);
@@ -170,34 +122,25 @@ export function ChatHistorySelector(): ReactNode {
 
   const handleDeleteChat = useCallback(
     async (chatId: string) => {
-      await deleteChatFromManager(chatId);
-
-      // Update local state
-      const updatedChats = chats.filter((chat) => chat.id !== chatId);
-      setChats(updatedChats);
-      setGroupedChats(groupItemsByTimeHorizon(updatedChats));
+      await deleteChat(chatId);
 
       // If we deleted the active chat, switch to the most recent one
-      if (activeChatId === chatId && updatedChats.length > 0) {
-        const mostRecent = [...updatedChats].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      if (activeChatId === chatId && chats.length > 1) {
+        const remainingChats = chats.filter((chat) => chat.id !== chatId);
+        const mostRecent = [...remainingChats].sort((a, b) => b.updatedAt - a.updatedAt)[0];
         if (mostRecent) {
           setLastChatId(mostRecent.id);
-          setActiveChat(mostRecent);
         }
-      } else if (updatedChats.length === 0) {
-        setActiveChat(undefined);
       }
     },
-    [deleteChatFromManager, chats, activeChatId, setLastChatId],
+    [deleteChat, chats, activeChatId, setLastChatId],
   );
 
   const handleSelectChat = useCallback(
     (chatId: string) => {
       setLastChatId(chatId);
-      const selected = chats.find((chat) => chat.id === chatId);
-      setActiveChat(selected);
     },
-    [setLastChatId, chats],
+    [setLastChatId],
   );
 
   // Render function for each chat item
@@ -254,7 +197,7 @@ export function ChatHistorySelector(): ReactNode {
   );
 
   // Get value function for the ComboBoxResponsive component
-  const getChatValue = (chat: Chat) => chat.id;
+  const getChatValue = (chat: Chat): string => chat.id;
 
   return (
     <>

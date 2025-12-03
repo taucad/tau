@@ -45,10 +45,8 @@ const getMessageContent = (message: UIMessage): string => {
 };
 
 export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties): React.JSX.Element {
-  const message = useChatSelector((state) => state.context.messagesById.get(messageId));
-  const displayMessage = useChatSelector(
-    (state) => state.context.messageEdits[messageId] ?? state.context.messagesById.get(messageId),
-  );
+  const message = useChatSelector((state) => state.messagesById.get(messageId));
+  const displayMessage = useChatSelector((state) => state.messageEdits[messageId] ?? state.messagesById.get(messageId));
   const { editMessage, retryMessage, startEditingMessage, exitEditMode } = useChatActions();
   const [isEditing, setIsEditing] = useState(false);
 

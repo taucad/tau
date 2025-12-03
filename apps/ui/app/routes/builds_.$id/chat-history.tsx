@@ -71,7 +71,7 @@ export const ChatHistory = memo(function (props: {
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }) {
   const { className, isExpanded = true, setIsExpanded } = props;
-  const messageIds = useChatSelector((state) => state.context.messageOrder);
+  const messageIds = useChatSelector((state) => state.messageOrder);
   const { sendMessage } = useChatActions();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const toggleChatHistory = useCallback(() => {

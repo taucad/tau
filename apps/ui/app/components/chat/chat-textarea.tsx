@@ -77,17 +77,13 @@ export const ChatTextarea = memo(function ({
   const fileInputReference = useRef<HTMLInputElement>(null);
   const textareaReference = useRef<HTMLTextAreaElement>(null);
   const { selectedModel } = useModels();
-  const status = useChatSelector((state) => state.context.status);
+  const status = useChatSelector((state) => state.status);
 
   // Read draft state from machine based on mode
-  const inputText = useChatSelector((state) =>
-    mode === 'main' ? state.context.draftText : state.context.editDraftText,
-  );
-  const images = useChatSelector((state) =>
-    mode === 'main' ? state.context.draftImages : state.context.editDraftImages,
-  );
+  const inputText = useChatSelector((state) => (mode === 'main' ? state.draftText : state.editDraftText));
+  const images = useChatSelector((state) => (mode === 'main' ? state.draftImages : state.editDraftImages));
   const selectedToolChoice = useChatSelector((state) =>
-    mode === 'main' ? (state.context.draftToolChoice as ToolSelection) : 'auto',
+    mode === 'main' ? (state.draftToolChoice as ToolSelection) : 'auto',
   );
 
   const {

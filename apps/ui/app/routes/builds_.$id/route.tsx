@@ -60,12 +60,12 @@ function ChatWithProvider(): React.JSX.Element {
   const description = useSelector(buildRef, (state) => state.context.build?.description);
   const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId);
 
-  // Get chat tools handler
-  const { onToolCall } = useChatTools();
+  // Get chat tools factory
+  const { createOnToolCall } = useChatTools();
 
   return (
     <ViewContextProvider>
-      <ChatProvider value={{ ...useChatConstants, onToolCall }} chatId={activeChatId} resourceId={buildId}>
+      <ChatProvider value={{ ...useChatConstants, createOnToolCall }} chatId={activeChatId} resourceId={buildId}>
         {name ? <title>{name}</title> : null}
         {description ? <meta name="description" content={description} /> : null}
         <Chat />

@@ -12,18 +12,18 @@ import { useActorRef, useSelector } from '@xstate/react';
 import { fromPromise } from 'xstate';
 import { createContext, useContext, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { MyUIMessage } from '@taucad/chat';
-import type { ChatOnToolCallCallback } from 'ai';
-import { DefaultChatTransport } from 'ai';
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
 import { draftMachine } from '#hooks/draft.machine.js';
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useChats } from '#hooks/use-chats.js';
 import { inspect } from '#machines/inspector.js';
 import { ENV } from '#config.js';
+import type { CreateOnToolCallFn } from '#hooks/use-chat-tools.js';
 
 type UseChatReturn = ReturnType<typeof useChat<MyUIMessage>>;
 type UseChatArgs = NonNullable<Parameters<typeof useChat<MyUIMessage>>[0]>;
-type ChatProviderValue = Omit<UseChatArgs, 'onFinish' | 'onError' | 'onResponse' | 'id'> & {
-  onToolCall?: ChatOnToolCallCallback<MyUIMessage>;
+type ChatProviderValue = Omit<UseChatArgs, 'onFinish' | 'onError' | 'onResponse' | 'id' | 'onToolCall'> & {
+  createOnToolCall?: CreateOnToolCallFn;
 };
 
 // Single context for all chat state
@@ -55,6 +55,7 @@ export function ChatProvider({
   // Refs for functions that actors need access to (set after useChat is created)
   const setMessagesRef = useRef<UseChatReturn['setMessages'] | undefined>(undefined);
   const regenerateRef = useRef<UseChatReturn['regenerate'] | undefined>(undefined);
+  const addToolOutputRef = useRef<UseChatReturn['addToolOutput'] | undefined>(undefined);
   const initializeDraftRef = useRef<((chat: NonNullable<Awaited<ReturnType<typeof getChat>>>) => void) | undefined>(
     undefined,
   );
@@ -136,6 +137,23 @@ export function ChatProvider({
   // Track loading state from persistence machine
   const isLoadingChat = useSelector(persistenceActorRef, (state) => state.context.isLoadingChat);
 
+  // Create wrapped onToolCall that injects addToolOutput via ref
+  // This allows the tool handler to access addToolOutput without circular dependency
+  const wrappedOnToolCall = useMemo(() => {
+    if (!value?.createOnToolCall) {
+      return undefined;
+    }
+
+    // Create the onToolCall callback with a proxy that uses the ref
+    return value.createOnToolCall({
+      async addToolOutput(parameters) {
+        if (addToolOutputRef.current) {
+          return addToolOutputRef.current(parameters);
+        }
+      },
+    });
+  }, [value]);
+
   // Initialize useChat with callbacks for event-driven persistence
   const chat = useChat<MyUIMessage>({
     ...value,
@@ -144,6 +162,9 @@ export function ChatProvider({
       api: `${ENV.TAU_API_URL}/v1/chat`,
       credentials: 'include',
     }),
+    // Automatically submit tool outputs when assistant message is complete with tool calls
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    onToolCall: wrappedOnToolCall,
     onFinish({ messages }) {
       // Persist when AI finishes - machine guards against persisting during load
       persistenceActorRef.send({ type: 'queuePersist', messages });
@@ -152,6 +173,9 @@ export function ChatProvider({
       persistenceActorRef.send({ type: 'handleError', error });
     },
   });
+
+  // Update addToolOutput ref so tool handlers can access it
+  addToolOutputRef.current = chat.addToolOutput;
 
   // Update refs so actors can access current functions
   setMessagesRef.current = chat.setMessages;

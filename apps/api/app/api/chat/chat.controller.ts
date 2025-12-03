@@ -69,7 +69,9 @@ export class ChatController {
       void response.header('x-vercel-ai-ui-message-stream', 'v1');
       void response.header('x-accel-buffering', 'no');
 
-      return response.send(result.toUIMessageStream());
+      const sseStream = result.toUIMessageStream().pipeThrough(new JsonToSseTransformStream());
+
+      return response.send(sseStream.pipeThrough(new TextEncoderStream()));
     }
 
     if (modelId === 'commit-name-generator') {
@@ -80,7 +82,9 @@ export class ChatController {
       void response.header('x-vercel-ai-ui-message-stream', 'v1');
       void response.header('x-accel-buffering', 'no');
 
-      return response.send(result.toUIMessageStream());
+      const sseStream = result.toUIMessageStream().pipeThrough(new JsonToSseTransformStream());
+
+      return response.send(sseStream.pipeThrough(new TextEncoderStream()));
     }
 
     // Extract kernel from request body (default to openscad if not provided)

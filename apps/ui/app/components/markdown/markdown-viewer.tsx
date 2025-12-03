@@ -51,7 +51,7 @@ export const MarkdownViewer = memo(({ children }: { readonly children: string })
             if (match?.[1]) {
               const language = match[1];
               return (
-                <CollapsibleCodeBlock language={language} text={text} className={className ?? ''}>
+                <CollapsibleCodeBlock language={language} title={language} text={text} className={className ?? ''}>
                   {children}
                 </CollapsibleCodeBlock>
               );

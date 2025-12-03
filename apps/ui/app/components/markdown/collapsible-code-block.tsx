@@ -14,16 +14,20 @@ import { cn } from '#utils/ui.utils.js';
 
 export function CollapsibleCodeBlock({
   language,
+  title,
   text,
   children,
   collapsedLineCount = 4,
   className = '',
+  containerClassName = '-mx-3',
 }: {
   readonly language: string;
+  readonly title?: string;
   readonly text: string;
   readonly children: React.ReactNode;
   readonly collapsedLineCount?: number;
   readonly className?: string;
+  readonly containerClassName?: string;
 }): React.JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const lines = text.split('\n');
@@ -31,9 +35,9 @@ export function CollapsibleCodeBlock({
   const shouldShowToggle = lines.length > collapsedLineCount;
 
   return (
-    <CodeBlock className="-mx-3" variant="standard">
+    <CodeBlock className={containerClassName} variant="standard">
       <CodeBlockHeader variant="standard">
-        <CodeBlockTitle variant="standard">{language}</CodeBlockTitle>
+        <CodeBlockTitle variant="standard">{title}</CodeBlockTitle>
         <CodeBlockAction variant="standard">
           <CopyButton
             size="xs"

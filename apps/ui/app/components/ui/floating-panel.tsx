@@ -1,5 +1,7 @@
 import * as React from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
+import { AlertCircle, RefreshCcw, RotateCcw } from 'lucide-react';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
 import { Slot } from '@radix-ui/react-slot';
@@ -8,6 +10,7 @@ import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { DrawerClose, DrawerHandle } from '#components/ui/drawer.js';
 import { useIsMobile } from '#hooks/use-mobile.js';
+import { CollapsibleCodeBlock } from '#components/markdown/collapsible-code-block.js';
 
 type Side = 'left' | 'right';
 type TooltipSide = 'left' | 'right' | 'top' | 'bottom';
@@ -346,9 +349,17 @@ type FloatingPanelContentHeaderProps = {
   readonly className?: string;
 };
 
+// Error fallback props passed to custom error fallback components
+type FloatingPanelErrorFallbackProps = {
+  readonly error: Error | undefined;
+  readonly onRetry: () => void;
+  readonly onReload: () => void;
+};
+
 type FloatingPanelContentProps = {
   readonly children: React.ReactNode;
   readonly className?: string;
+  readonly errorFallback?: (props: FloatingPanelErrorFallbackProps) => ReactNode;
 };
 
 type FloatingPanelContentTitleProps = {
@@ -361,10 +372,57 @@ type FloatingPanelContentBodyProps = {
   readonly className?: string;
 };
 
-function FloatingPanelContent({ children, className }: FloatingPanelContentProps): React.JSX.Element {
+// Internal error boundary state
+type FloatingPanelErrorBoundaryState = {
+  hasError: boolean;
+  error: Error | undefined;
+};
+
+// Internal error boundary for FloatingPanelContent
+class FloatingPanelErrorBoundary extends React.Component<
+  {
+    readonly children: ReactNode;
+    readonly fallback: (props: FloatingPanelErrorFallbackProps) => ReactNode;
+  },
+  FloatingPanelErrorBoundaryState
+> {
+  public static getDerivedStateFromError(error: Error): FloatingPanelErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  public override state: FloatingPanelErrorBoundaryState = { hasError: false, error: undefined };
+
+  public override componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    console.error('FloatingPanel content error:', error, errorInfo);
+  }
+
+  public override render(): ReactNode {
+    if (this.state.hasError) {
+      return this.props.fallback({
+        error: this.state.error,
+        onRetry: this.handleRetry,
+        onReload: this.handleReload,
+      });
+    }
+
+    return this.props.children;
+  }
+
+  private readonly handleRetry = (): void => {
+    this.setState({ hasError: false, error: undefined });
+  };
+
+  private readonly handleReload = (): void => {
+    globalThis.location.reload();
+  };
+}
+
+function FloatingPanelContent({ children, className, errorFallback }: FloatingPanelContentProps): React.JSX.Element {
+  const fallback = errorFallback ?? ((props) => <FloatingPanelErrorContent {...props} />);
+
   return (
     <div className={cn('flex size-full flex-col bg-sidebar/50', className)} data-slot="floating-panel-content">
-      {children}
+      <FloatingPanelErrorBoundary fallback={fallback}>{children}</FloatingPanelErrorBoundary>
     </div>
   );
 }
@@ -425,6 +483,76 @@ function FloatingPanelContentBody({ children, className }: FloatingPanelContentB
   );
 }
 
+// Default error content component for floating panels
+type FloatingPanelErrorContentProps = FloatingPanelErrorFallbackProps & {
+  readonly title?: string;
+  readonly description?: string;
+  readonly className?: string;
+};
+
+function FloatingPanelErrorContent({
+  error,
+  onRetry,
+  onReload,
+  title = 'Something went wrong',
+  description,
+  className,
+}: FloatingPanelErrorContentProps): React.JSX.Element {
+  const errorMessage = error?.message;
+  const errorStack = error?.stack;
+  const displayDescription =
+    description ?? (errorMessage ? undefined : 'An unexpected error occurred. Please try again.');
+
+  return (
+    <div className={cn('flex h-full flex-col items-center justify-center gap-4 p-6', className)}>
+      <div className="flex w-full max-w-sm flex-col items-center gap-3 text-center">
+        {/* Error Icon */}
+        <div className="flex size-12 items-center justify-center rounded-full bg-destructive/10">
+          <AlertCircle className="size-6 text-destructive" />
+        </div>
+
+        {/* Error Title */}
+        <h3 className="text-lg font-semibold text-foreground">{title}</h3>
+
+        {/* Description */}
+        {displayDescription ? (
+          <p className="max-w-xs text-sm text-muted-foreground">{displayDescription}</p>
+        ) : undefined}
+
+        {/* Error Details with Stack Trace */}
+        {errorStack ? (
+          <CollapsibleCodeBlock
+            language="bash"
+            title={errorMessage ?? 'Error'}
+            text={errorStack}
+            collapsedLineCount={3}
+            className="text-left text-destructive/80"
+            containerClassName="w-full"
+          >
+            {errorStack}
+          </CollapsibleCodeBlock>
+        ) : errorMessage ? (
+          <div className="w-full rounded-md border border-destructive/20 bg-destructive/5 p-3 text-left">
+            <p className="text-xs font-medium text-destructive/80">{errorMessage}</p>
+          </div>
+        ) : undefined}
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button variant="default" size="sm" className="gap-2" onClick={onRetry}>
+          <RotateCcw className="size-4" />
+          Try Again
+        </Button>
+        <Button variant="outline" size="sm" className="gap-2" onClick={onReload}>
+          <RefreshCcw className="size-4" />
+          Reload Page
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export {
   FloatingPanel,
   FloatingPanelClose,
@@ -435,6 +563,7 @@ export {
   FloatingPanelContentHeaderActions,
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
+  FloatingPanelErrorContent,
   useFloatingPanel,
 };
-export type { Side, Align };
+export type { Side, Align, FloatingPanelErrorFallbackProps };

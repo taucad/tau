@@ -18,6 +18,7 @@ import {
   FloatingPanelClose,
   FloatingPanelContent,
   FloatingPanelContentHeader,
+  FloatingPanelErrorContent,
   FloatingPanelTrigger,
 } from '#components/ui/floating-panel.js';
 import { useKeydown } from '#hooks/use-keydown.js';
@@ -132,7 +133,16 @@ export const ChatHistory = memo(function (props: {
           </div>
         )}
       />
-      <FloatingPanelContent className={cn(!isExpanded && 'hidden')}>
+      <FloatingPanelContent
+        className={cn(!isExpanded && 'hidden')}
+        errorFallback={(errorProps) => (
+          <FloatingPanelErrorContent
+            {...errorProps}
+            title="Chat Unavailable"
+            description="Something went wrong while loading the chat. This might be due to a storage issue."
+          />
+        )}
+      >
         {/* Header with search */}
         <FloatingPanelContentHeader>
           <ChatHistorySelector />

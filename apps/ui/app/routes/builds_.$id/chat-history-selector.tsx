@@ -29,7 +29,7 @@ const newChatKeyCombination = {
 
 export function ChatHistorySelector(): ReactNode {
   const { buildRef, buildId, setLastChatId } = useBuild();
-  const { createChat, updateChat, deleteChat: deleteChatFromManager, getChatsForResource, getChat } = useChatManager();
+  const { createChat, updateChat, deleteChat: deleteChatFromManager, getChatsForResource } = useChatManager();
 
   const isLoading = useSelector(buildRef, (state) => state.context.isLoading);
   const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId) ?? '';
@@ -255,9 +255,6 @@ export function ChatHistorySelector(): ReactNode {
 
   // Get value function for the ComboBoxResponsive component
   const getChatValue = (chat: Chat) => chat.id;
-
-  // Suppress unused variable - getChat is available for future use
-  void getChat;
 
   return (
     <>

@@ -11,4 +11,3 @@ export const imageAnalysisOutputSchema = z.object({
 
 export type ImageAnalysisInput = z.infer<typeof imageAnalysisInputSchema>;
 export type ImageAnalysisOutput = z.infer<typeof imageAnalysisOutputSchema>;
-

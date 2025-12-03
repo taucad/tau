@@ -3,11 +3,12 @@ import { z } from 'zod';
 import { interrupt } from '@langchain/langgraph';
 import { imageAnalysisInputSchema } from '@taucad/chat';
 import type { ImageAnalysisOutput } from '@taucad/chat';
+import { toolName } from '@taucad/chat/constants';
 
 const imageAnalysisJsonSchema = z.toJSONSchema(imageAnalysisInputSchema);
 
 export const imageAnalysisToolDefinition = {
-  name: 'analyzeImage',
+  name: toolName.imageAnalysis,
   description: 'Visually validate a CAD model against specific requirements.',
   schema: imageAnalysisJsonSchema,
 } as const;

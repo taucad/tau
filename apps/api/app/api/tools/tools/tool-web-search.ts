@@ -1,5 +1,6 @@
 import { TavilySearch } from '@langchain/tavily';
 import type { TavilyBaseSearchResponse } from '@langchain/tavily';
+import { toolName } from '@taucad/chat/constants';
 
 type WebSearchResult = {
   title: string;
@@ -16,6 +17,7 @@ export const createWebSearchTool = ({ tavilyApiKey }: CreateWebSearchToolOptions
     maxResults: 5,
     topic: 'general',
     tavilyApiKey,
+    name: toolName.webSearch,
     // IncludeAnswer: false,
     // includeRawContent: false,
     // includeImages: false,

@@ -12,6 +12,7 @@ import type { DynamicStructuredTool } from '@langchain/core/tools';
 import { tool } from '@langchain/core/tools';
 import { webBrowserInputSchema } from '@taucad/chat';
 import type { WebBrowserInput } from '@taucad/chat';
+import { toolName } from '@taucad/chat/constants';
 
 // Interface for WebBrowser options
 export type WebBrowserOptions = {
@@ -111,7 +112,7 @@ export const createWebBrowserTool = (options: WebBrowserOptions): DynamicStructu
       return webBrowserImpl(input, options);
     },
     {
-      name: 'webBrowser',
+      name: toolName.webBrowser,
       description: 'Useful for when you need to find something on or summarize a webpage.',
       schema: webBrowserInputSchema,
     },

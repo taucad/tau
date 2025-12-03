@@ -3,11 +3,12 @@ import { z } from 'zod';
 import { interrupt } from '@langchain/langgraph';
 import { fileEditInputSchema } from '@taucad/chat';
 import type { FileEditOutput } from '@taucad/chat';
+import { toolName } from '@taucad/chat/constants';
 
 const fileEditJsonSchema = z.toJSONSchema(fileEditInputSchema);
 
 export const fileEditToolDefinition = {
-  name: 'editFile',
+  name: toolName.fileEdit,
   description: `Use this tool to propose an edit to an existing file.
 
 This will be read by a less intelligent model, which will quickly apply the edit. You should make it clear what the edit is, while also minimizing the unchanged code you write.

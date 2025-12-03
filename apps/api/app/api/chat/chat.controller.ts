@@ -67,6 +67,7 @@ export class ChatController {
       // Mark the response as a v1 data stream:
       void response.header('content-type', 'text/event-stream');
       void response.header('x-vercel-ai-ui-message-stream', 'v1');
+      void response.header('x-accel-buffering', 'no');
 
       return response.send(result.toUIMessageStream());
     }
@@ -77,6 +78,7 @@ export class ChatController {
       // Mark the response as a v1 data stream:
       void response.header('content-type', 'text/event-stream');
       void response.header('x-vercel-ai-ui-message-stream', 'v1');
+      void response.header('x-accel-buffering', 'no');
 
       return response.send(result.toUIMessageStream());
     }
@@ -157,6 +159,7 @@ export class ChatController {
 
     void response.header('content-type', 'text/event-stream');
     void response.header('x-vercel-ai-ui-message-stream', 'v1');
+    void response.header('x-accel-buffering', 'no');
 
     return response.send(sseStream.pipeThrough(new TextEncoderStream()));
   }

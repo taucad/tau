@@ -1,9 +1,7 @@
 import { Link, NavLink, useNavigate } from 'react-router';
 import { useCallback } from 'react';
 import { messageRole, messageStatus } from '@taucad/chat/constants';
-import { idPrefix } from '@taucad/types/constants';
 import type { KernelProvider } from '@taucad/types';
-import { generatePrefixedId } from '@taucad/utils/id';
 import { createInitialBuild } from '#constants/build.constants.js';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';

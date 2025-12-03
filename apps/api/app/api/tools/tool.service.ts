@@ -82,6 +82,10 @@ export class ToolService {
   private getWebSearchTool(): TavilySearch {
     if (!this.webSearchTool) {
       const tavilyApiKey = this.configService.get('TAVILY_API_KEY', { infer: true });
+      if (!tavilyApiKey) {
+        throw new Error('Tried to create web search tool without TAVILY_API_KEY in the environment variables');
+      }
+
       this.webSearchTool = createWebSearchTool({ tavilyApiKey });
     }
 

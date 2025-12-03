@@ -5,6 +5,7 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 export default defineConfig({
   plugins: [nxViteTsPaths(), tsconfigPaths()],
   test: {
+    passWithNoTests: true,
     environment: 'node',
     typecheck: {
       enabled: true,

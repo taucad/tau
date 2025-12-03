@@ -20,7 +20,7 @@ export function sanitizeMessagesForConversion(messages: UIMessage[], logger: Log
 
     // Handle parts array - convert partial tool calls to completed state
     const sanitizedParts = message.parts.map((part) => {
-      if (isToolPart(part) && part.state === 'input-available') {
+      if (isToolPart(part) && (part.state === 'input-available' || part.state === 'input-streaming')) {
         logger.warn(
           part,
           'Converting partial tool call to completed state with mock result. This is likely due to the UI calling with incomplete tool calls.',

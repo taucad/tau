@@ -376,6 +376,9 @@ export const buildMachine = setup({
       return context.buildId !== event.buildId;
     },
   },
+  delays: {
+    storeDebounce: 500,
+  },
 }).createMachine({
   id: 'build',
   context({ input, spawn, self }) {
@@ -562,8 +565,7 @@ export const buildMachine = setup({
             },
             pending: {
               after: {
-                // eslint-disable-next-line @typescript-eslint/naming-convention -- XState delayed transition syntax
-                500: 'writing',
+                storeDebounce: 'writing',
               },
               on: {
                 updateName: {

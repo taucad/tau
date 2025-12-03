@@ -6,7 +6,6 @@ import { RootProvider } from 'fumadocs-ui/provider/react-router';
 import { ReactRouterProvider } from 'fumadocs-core/framework/react-router';
 import type * as PageTree from 'fumadocs-core/page-tree';
 import browserCollections from 'fumadocs-mdx:collections/browser';
-// eslint-disable-next-line no-restricted-imports -- allowed for route types
 import type { Route } from './+types/route.js';
 import { DocsPageActions } from '#routes/docs.$/docs-page-actions.js';
 import { Button } from '#components/ui/button.js';

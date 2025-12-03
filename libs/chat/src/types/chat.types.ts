@@ -1,14 +1,12 @@
-import type { UIMessage } from 'ai';
-import type { ConstantRecord } from '#types/constant.types.js';
+import type { ConstantRecord } from '@taucad/types';
 import type { messageRole, messageStatus } from '#constants/message.constants.js';
+import type { MyUIMessage } from '#types/message.types.js';
 
 export type MessageRole = ConstantRecord<typeof messageRole>;
 
 export type MessageStatus = ConstantRecord<typeof messageStatus>;
 
-export type SourceOrigin = 'web' | 'notion' | 'history' | 'projects';
-
-export type MessagePart = UIMessage['parts'][number];
+export type MessagePart = MyUIMessage['parts'][number];
 
 export type MessageAnnotation = {
   type: 'usage';
@@ -30,4 +28,16 @@ export type ChatUsageCost = {
   cachedReadTokensCost: number;
   cachedWriteTokensCost: number;
   totalCost: number;
+};
+
+export type Chat = {
+  id: string;
+  resourceId: string; // Links chat to a resource (e.g., build)
+  name: string;
+  messages: MyUIMessage[];
+  draft?: MyUIMessage; // Main draft
+  messageEdits?: Record<string, MyUIMessage>; // Edit drafts by messageId
+  createdAt: number;
+  updatedAt: number;
+  deletedAt?: number; // Soft delete support
 };

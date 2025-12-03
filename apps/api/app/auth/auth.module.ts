@@ -62,7 +62,7 @@ export class AuthModule implements NestModule, OnModuleInit {
     @Inject(authInstanceKey) private readonly auth: AuthInstance,
     @Inject(DiscoveryService) private readonly discoveryService: DiscoveryService,
     @Inject(MetadataScanner) private readonly metadataScanner: MetadataScanner,
-    @Inject(HttpAdapterHost) private readonly adapter: HttpAdapterHost,
+    @Inject(HttpAdapterHost) private readonly adapter: HttpAdapterHost<FastifyAdapter>,
   ) {}
 
   public onModuleInit(): void {
@@ -93,7 +93,18 @@ export class AuthModule implements NestModule, OnModuleInit {
     const basePath = this.auth.options.basePath!;
 
     const { httpAdapter } = this.adapter;
-    const instance = httpAdapter.getInstance<FastifyAdapter>();
+    const instance = httpAdapter.getInstance();
+
+    const isAuthRouteRegistered = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'].some((method) =>
+      instance.hasRoute({ url: `${basePath}/*`, method }),
+    );
+
+    if (isAuthRouteRegistered) {
+      // Vite HMR will reload the app but can leave the routes registered, so we check
+      // if the routes are already registered and skip the configuration.
+      this.logger.log(`Routes: "${basePath}/*" already registered`);
+      return;
+    }
 
     // Configure the auth routes
     instance.all(`${basePath}/*`, async (request: Request, reply: Reply) => {
@@ -127,7 +138,7 @@ export class AuthModule implements NestModule, OnModuleInit {
           },
         );
       } catch (error) {
-        this.logger.fatal(`Better auth error ${String(error)}`);
+        this.logger.fatal(error, 'Better auth error');
         void reply.status(500).send({
           error: 'Internal authentication error',
           code: 'AUTH_FAILURE',

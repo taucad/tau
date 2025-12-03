@@ -1,17 +1,18 @@
 import type { BaseMessageLike } from '@langchain/core/messages';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
-import type { CoreMessage, Message, UIMessage } from 'ai';
+import type { Logger } from '@nestjs/common';
+import type { ModelMessage, ToolUIPart, UIDataTypes, UIMessage, UIMessagePart, UITools } from 'ai';
+
+const isToolPart = (part: UIMessagePart<UIDataTypes, UITools>): part is ToolUIPart => part.type.startsWith('tool-');
 
 /**
  * Preprocesses UI messages to handle partial tool calls by converting them to completed state
  * with mock results. This prevents MessageConversionError when partial tool calls are present.
  *
- * Deprecated properties have been removed: ['data', 'annotations']
- *
  * @param messages - The UI messages that may contain partial tool calls
  * @returns Processed messages with all tool calls in completed state
  */
-export function sanitizeMessagesForConversion(messages: Array<Omit<UIMessage, 'data' | 'annotations'>>): UIMessage[] {
+export function sanitizeMessagesForConversion(messages: UIMessage[], logger: Logger): UIMessage[] {
   return messages.map((message) => {
     if (message.role !== 'assistant') {
       return message;
@@ -19,15 +20,16 @@ export function sanitizeMessagesForConversion(messages: Array<Omit<UIMessage, 'd
 
     // Handle parts array - convert partial tool calls to completed state
     const sanitizedParts = message.parts.map((part) => {
-      if (part.type === 'tool-invocation' && part.toolInvocation.state === 'partial-call') {
+      if (isToolPart(part) && (part.state === 'input-available' || part.state === 'input-streaming')) {
+        logger.warn(
+          part,
+          'Converting partial tool call to completed state with mock result. This is likely due to the UI calling with incomplete tool calls.',
+        );
         // Convert partial tool calls to completed state with mock result
         return {
           ...part,
-          toolInvocation: {
-            ...part.toolInvocation,
-            state: 'result' as const,
-            result: `[Tool execution in progress: ${part.toolInvocation.toolName}]`,
-          },
+          state: 'output-available' as const,
+          output: `[Tool execution in progress: ${part.type}]`,
         };
       }
 
@@ -52,8 +54,8 @@ export function sanitizeMessagesForConversion(messages: Array<Omit<UIMessage, 'd
  * @returns The list of Langchain messages
  */
 export const convertAiSdkMessagesToLangchainMessages: (
-  uiMessages: Message[],
-  coreMessages: CoreMessage[],
+  uiMessages: UIMessage[],
+  coreMessages: ModelMessage[],
 ) => BaseMessageLike[] = (uiMessages, coreMessages) => {
   // Track user message count to match correctly
   let userMessageCount = 0;
@@ -79,18 +81,19 @@ export const convertAiSdkMessagesToLangchainMessages: (
           throw new TypeError('Core message content is not an array');
         }
 
+        const fileParts = correspondingUiMessage.parts.filter((part) => part.type === 'file');
         return [
           new HumanMessage({
             content: [
               // Map attachments to images.
               // Images always come first as the LLM is more performant when receiving images first.
-              ...(correspondingUiMessage.experimental_attachments?.map((attachment) => ({
+              ...fileParts.map((part) => ({
                 type: 'image_url',
                 // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
-                image_url: { url: attachment.url },
-              })) ?? []),
-              // Remove all the images from the core message content.
-              ...coreMessageContent.filter((part) => part.type !== 'image'),
+                image_url: { url: part.url },
+              })),
+              // Remove all the files from the core message content.
+              ...coreMessageContent.filter((part) => part.type !== 'file'),
             ],
           }),
         ];
@@ -101,7 +104,7 @@ export const convertAiSdkMessagesToLangchainMessages: (
         return coreMessage.content.map(
           (part) =>
             new ToolMessage({
-              content: JSON.stringify(part.result),
+              content: JSON.stringify(part.output),
               // eslint-disable-next-line @typescript-eslint/naming-convention -- Langchain uses snake_case.
               tool_call_id: part.toolCallId,
               name: part.toolName,
@@ -126,7 +129,7 @@ export const convertAiSdkMessagesToLangchainMessages: (
             tool_calls: toolCalls.flatMap((part) => ({
               name: part.toolName,
 
-              args: part.args as Record<string, unknown>,
+              args: part.input as Record<string, unknown>,
               id: part.toolCallId,
               type: 'tool_call',
             })),
@@ -150,16 +153,6 @@ export const convertAiSdkMessagesToLangchainMessages: (
                   };
                 }
 
-                case 'redacted-reasoning': {
-                  // Similar to the `reasoning type`, redacted reasoning is not supported by many LLMs.
-                  // To preserve the previous thinking for better context, we wrap it in a <redacted-thinking> tag instead and use the `text` type.
-                  return {
-                    type: 'text',
-                    text: `<redacted-thinking>${part.data}</redacted-thinking>`,
-                    ...part.providerOptions,
-                  };
-                }
-
                 case 'file': {
                   return {
                     type: 'document',
@@ -173,7 +166,16 @@ export const convertAiSdkMessagesToLangchainMessages: (
                     type: 'tool_use',
                     name: part.toolName,
                     id: part.toolCallId,
-                    input: JSON.stringify(part.args),
+                    input: JSON.stringify(part.input),
+                  };
+                }
+
+                case 'tool-result': {
+                  return {
+                    type: 'tool_result',
+                    name: part.toolName,
+                    id: part.toolCallId,
+                    result: JSON.stringify(part.output),
                   };
                 }
 

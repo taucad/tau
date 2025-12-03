@@ -1,7 +1,9 @@
 import { Link, NavLink, useNavigate } from 'react-router';
 import { useCallback } from 'react';
-import { messageRole, messageStatus, idPrefix } from '@taucad/types/constants';
+import { messageRole, messageStatus } from '@taucad/chat/constants';
 import type { KernelProvider } from '@taucad/types';
+import { idPrefix } from '@taucad/types/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
 import { createInitialBuild } from '#constants/build.constants.js';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
@@ -13,16 +15,16 @@ import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { CommunityBuildGrid } from '#components/project-grid.js';
 import { sampleBuilds } from '#constants/build-examples.js';
 import { defaultBuildName } from '#constants/build-names.js';
-import { ChatProvider } from '#components/chat/chat-provider.js';
+import { ChatProvider } from '#hooks/use-chat.js';
 import { Separator } from '#components/ui/separator.js';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { toast } from '#components/ui/sonner.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
 import type { Handle } from '#types/matches.types.js';
 import { useBuildManager } from '#hooks/use-build-manager.js';
+import { useChatManager } from '#hooks/use-chat-manager.js';
 
 export const handle: Handle = {
   enableOverflowY: true,
@@ -33,6 +35,7 @@ export default function ChatStart(): React.JSX.Element {
   const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
   const [, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
   const buildManager = useBuildManager();
+  const chatManager = useChatManager();
 
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content, model, metadata, imageUrls }) => {
@@ -44,15 +47,14 @@ export default function ChatStart(): React.JSX.Element {
         const userMessage = createMessage({
           content,
           role: messageRole.user,
-          model,
-          status: messageStatus.pending,
-          metadata: metadata ?? {},
+          metadata: { ...metadata, kernel: selectedKernel, model, status: messageStatus.pending },
           imageUrls,
         });
 
+        // Pre-generate the chat ID
         const chatId = generatePrefixedId(idPrefix.chat);
 
-        // Create initial build using factory function
+        // Create initial build using factory function with the pre-generated chatId
         const { buildData, files } = createInitialBuild({
           buildName: defaultBuildName,
           chatId,
@@ -61,18 +63,27 @@ export default function ChatStart(): React.JSX.Element {
           emptyCodeContent: encodeTextFile(emptyCode),
         });
 
+        // Create the build with lastChatId already set
         const createdBuild = await buildManager.createBuild(buildData, files);
+
+        // Create the chat with the same pre-generated ID
+        await chatManager.createChat(createdBuild.id, {
+          id: chatId,
+          name: 'Initial design',
+          messages: [userMessage],
+        });
 
         // Ensure chat is open when navigating to the build page
         setIsChatOpen(true);
 
         // Navigate immediately - the build page will handle the streaming
         await navigate(`/builds/${createdBuild.id}`);
-      } catch {
+      } catch (error) {
+        console.error('Failed to create build:', error);
         toast.error('Failed to create build');
       }
     },
-    [selectedKernel, buildManager, setIsChatOpen, navigate],
+    [selectedKernel, buildManager, chatManager, setIsChatOpen, navigate],
   );
 
   return (

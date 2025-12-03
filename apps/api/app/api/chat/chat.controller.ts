@@ -1,12 +1,11 @@
 import { Body, Controller, Logger, Post, Req, Res, UseGuards } from '@nestjs/common';
-import { convertToCoreMessages } from 'ai';
+import { convertToModelMessages, JsonToSseTransformStream } from 'ai';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { HumanMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
 import type { StateSnapshot } from '@langchain/langgraph';
 import type { IterableReadableStream } from '@langchain/core/utils/stream';
 import type { StreamEvent } from '@langchain/core/tracers/log_stream';
-import type { ToolWithSelection } from '@taucad/types';
+import type { ToolSelection } from '@taucad/chat';
 import { tryExtractLastToolResult } from '#api/chat/utils/extract-tool-result.js';
 import { ToolService, toolChoiceFromToolName } from '#api/tools/tool.service.js';
 import { ChatService } from '#api/chat/chat.service.js';
@@ -15,9 +14,8 @@ import {
   convertAiSdkMessagesToLangchainMessages,
   sanitizeMessagesForConversion,
 } from '#api/chat/utils/convert-messages.js';
-import { objectToXml } from '#utils/xml.js';
 import { AuthGuard } from '#auth/auth.guard.js';
-import type { CreateChatDto } from '#api/chat/chat.dto.js';
+import { CreateChatDto } from '#api/chat/chat.dto.js';
 
 @UseGuards(AuthGuard)
 @Controller({ path: 'chat', version: '1' })
@@ -37,19 +35,28 @@ export class ChatController {
   ): Promise<void> {
     this.logger.debug(`Creating chat: ${body.id}`);
     // Sanitize messages to handle partial tool calls before conversion
-    const sanitizedMessages = sanitizeMessagesForConversion(body.messages);
-    const coreMessages = convertToCoreMessages(sanitizedMessages);
+    const sanitizedMessages = sanitizeMessagesForConversion(body.messages, this.logger);
+    const coreMessages = convertToModelMessages(sanitizedMessages);
     const lastHumanMessage = body.messages.findLast((message) => message.role === 'user');
 
-    this.logger.debug(`Last human message: ${JSON.stringify(lastHumanMessage)}`);
+    this.logger.debug(lastHumanMessage, `Last human message:`);
     let modelId: string;
-    const selectedToolChoice: ToolWithSelection = 'auto';
+    let selectedToolChoice: ToolSelection = 'auto';
 
     if (lastHumanMessage?.role === 'user') {
-      modelId = lastHumanMessage.model;
-      // If (lastHumanMessage.metadata.toolChoice) {
-      //   selectedToolChoice = lastHumanMessage.metadata.toolChoice;
-      // }
+      const messageModel = lastHumanMessage.metadata?.model;
+
+      if (!messageModel) {
+        throw new Error('Message model is required');
+      }
+
+      modelId = messageModel;
+
+      const messageToolChoice = lastHumanMessage.metadata?.toolChoice;
+
+      if (messageToolChoice) {
+        selectedToolChoice = messageToolChoice;
+      }
     } else {
       throw new Error('Last message is not a user message');
     }
@@ -58,24 +65,30 @@ export class ChatController {
       const result = this.chatService.getBuildNameGenerator(coreMessages);
 
       // Mark the response as a v1 data stream:
-      void response.header('X-Vercel-AI-Data-Stream', 'v1');
-      void response.header('Content-Type', 'text/plain; charset=utf-8');
+      void response.header('content-type', 'text/event-stream');
+      void response.header('x-vercel-ai-ui-message-stream', 'v1');
+      void response.header('x-accel-buffering', 'no');
 
-      return response.send(result.toDataStream());
+      const sseStream = result.toUIMessageStream().pipeThrough(new JsonToSseTransformStream());
+
+      return response.send(sseStream.pipeThrough(new TextEncoderStream()));
     }
 
     if (modelId === 'commit-name-generator') {
       const result = this.chatService.getCommitMessageGenerator(coreMessages);
 
       // Mark the response as a v1 data stream:
-      void response.header('X-Vercel-AI-Data-Stream', 'v1');
-      void response.header('Content-Type', 'text/plain; charset=utf-8');
+      void response.header('content-type', 'text/event-stream');
+      void response.header('x-vercel-ai-ui-message-stream', 'v1');
+      void response.header('x-accel-buffering', 'no');
 
-      return response.send(result.toDataStream());
+      const sseStream = result.toUIMessageStream().pipeThrough(new JsonToSseTransformStream());
+
+      return response.send(sseStream.pipeThrough(new TextEncoderStream()));
     }
 
     // Extract kernel from request body (default to openscad if not provided)
-    const selectedKernel = body.kernel ?? 'openscad';
+    const selectedKernel = lastHumanMessage.metadata?.kernel ?? 'openscad';
 
     const langchainMessages = convertAiSdkMessagesToLangchainMessages(sanitizedMessages, coreMessages);
     const graph = await this.chatService.createGraph(modelId, selectedToolChoice, selectedKernel);
@@ -127,37 +140,9 @@ export class ChatController {
     } else {
       // Normal execution - start new conversation or continue existing one
       this.logger.debug(`Starting normal execution for thread: ${body.id}`);
-
-      const resultMessage = new HumanMessage({
-        content: [
-          {
-            type: 'text',
-            text: `# CAD Code Generation Information
-If code errors or kernel errors are present, use this information to fix the errors.
-
-${objectToXml({
-  ...(body.codeErrors.length > 0 && {
-    codeErrors: body.codeErrors.map((error) => ({
-      message: error.message,
-      startLineNum: error.startLineNumber,
-      endLineNum: error.endLineNumber,
-      startCol: error.startColumn,
-      endCol: error.endColumn,
-    })),
-  }),
-  ...(body.kernelError && {
-    kernelError: `${body.kernelError.message}${body.kernelError.startLineNumber ? ` (Line ${body.kernelError.startLineNumber}${body.kernelError.startColumn ? `:${body.kernelError.startColumn}` : ''})` : ''}${body.kernelError.stack ? `\n\nStack trace:\n${body.kernelError.stack}` : ''}`,
-  }),
-  currentCode: body.code,
-  selectedKernel,
-})}
-`,
-          },
-        ],
-      });
       eventStream = graph.streamEvents(
         {
-          messages: [...langchainMessages, resultMessage],
+          messages: langchainMessages,
         },
         {
           ...config,
@@ -174,9 +159,12 @@ ${objectToXml({
       callbacks: this.chatService.getCallbacks(),
     });
 
-    void response.header('X-Vercel-AI-Data-Stream', 'v1');
-    void response.header('Content-Type', 'text/plain; charset=utf-8');
+    const sseStream = result.pipeThrough(new JsonToSseTransformStream());
 
-    return response.send(result);
+    void response.header('content-type', 'text/event-stream');
+    void response.header('x-vercel-ai-ui-message-stream', 'v1');
+    void response.header('x-accel-buffering', 'no');
+
+    return response.send(sseStream.pipeThrough(new TextEncoderStream()));
   }
 }

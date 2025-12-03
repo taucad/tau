@@ -10,16 +10,9 @@ import { MemoryVectorStore } from 'langchain/vectorstores/memory';
 import { formatDocumentsAsString } from 'langchain/util/document';
 import type { DynamicStructuredTool } from '@langchain/core/tools';
 import { tool } from '@langchain/core/tools';
-import { z } from 'zod';
-
-// Schema for tool input
-const webBrowserSchema = z.object({
-  url: z.url().describe('A valid URL to browse including protocol (e.g., https://)'),
-  query: z.string().optional().describe('What to find on the page, used for the Vector Search'),
-});
-
-// Type for schema inference
-type WebBrowserInput = z.infer<typeof webBrowserSchema>;
+import { webBrowserInputSchema } from '@taucad/chat';
+import type { WebBrowserInput } from '@taucad/chat';
+import { toolName } from '@taucad/chat/constants';
 
 // Interface for WebBrowser options
 export type WebBrowserOptions = {
@@ -119,9 +112,9 @@ export const createWebBrowserTool = (options: WebBrowserOptions): DynamicStructu
       return webBrowserImpl(input, options);
     },
     {
-      name: 'web_browser',
+      name: toolName.webBrowser,
       description: 'Useful for when you need to find something on or summarize a webpage.',
-      schema: webBrowserSchema,
+      schema: webBrowserInputSchema,
     },
   );
 };

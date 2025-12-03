@@ -202,6 +202,9 @@ const config = [
           patterns: [
             {
               group: ['.*'],
+              // Exclude relative imports of React-Router route types.
+              // e.g. `import type { Route } from './+types/route.js';`
+              allowImportNamePattern: '^Route$',
               message:
                 "Use absolute imports instead of relative imports. For example, instead of `import { hexToRgb } from './utils/color.utils'`, use `import { hexToRgb } from '#utils/color.utils'`.",
             },
@@ -256,6 +259,8 @@ const config = [
             'UseInterceptors',
             'UseFilters',
             'Catch',
+            'ZodSerializerDto',
+            'Sse',
           ],
         },
       ],

@@ -1,4 +1,16 @@
-import { BookOpen, Bot, FileAxis3D, Frame, Hammer, Map, PieChart, Settings, UsersRound, Workflow } from 'lucide-react';
+import {
+  BookOpen,
+  Bot,
+  FileAxis3D,
+  Frame,
+  Hammer,
+  Import,
+  Map,
+  PieChart,
+  Settings,
+  UsersRound,
+  Workflow,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 type NavRoute = {
@@ -47,6 +59,11 @@ export const navRoutes: {
       title: 'Converter',
       url: '/converter',
       icon: FileAxis3D,
+    },
+    {
+      title: 'Importer',
+      url: '/import',
+      icon: Import,
     },
     {
       title: 'Workflows',

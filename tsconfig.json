@@ -36,6 +36,12 @@
     },
     {
       "path": "./libs/units"
+    },
+    {
+      "path": "./libs/chat"
+    },
+    {
+      "path": "./libs/utils"
     }
   ],
   "files": [],

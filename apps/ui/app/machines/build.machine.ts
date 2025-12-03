@@ -1,9 +1,7 @@
 import { assign, assertEvent, setup, fromPromise, emit, enqueueActions } from 'xstate';
 import type { ActorRefFrom, OutputFrom, DoneActorEvent, AnyStateMachine } from 'xstate';
 import { produce } from 'immer';
-import type { Message } from '@ai-sdk/react';
-import type { Build, Chat } from '@taucad/types';
-import { idPrefix } from '@taucad/types/constants';
+import type { Build } from '@taucad/types';
 import { isBrowser } from '#constants/browser.constants.js';
 import { assertActorDoneEvent } from '#lib/xstate.js';
 import { cameraCapabilityMachine } from '#machines/camera-capability.machine.js';
@@ -13,7 +11,6 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
 import { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
 
 /**
  * Build Machine Context
@@ -80,14 +77,7 @@ type BuildEventInternal =
   | { type: 'updateDescription'; description: string }
   | { type: 'updateTags'; tags: string[] }
   | { type: 'updateThumbnail'; thumbnail: string }
-  | { type: 'addChat'; initialMessages?: Message[] }
-  | { type: 'updateChatMessages'; chatId: string; messages: Message[] }
-  | { type: 'updateChatName'; chatId: string; name: string }
-  | { type: 'updateChatDraft'; chatId: string; draft: Message }
-  | { type: 'updateMessageEdit'; chatId: string; messageId: string; draft: Message }
-  | { type: 'clearMessageEdit'; chatId: string; messageId: string }
-  | { type: 'setActiveChat'; chatId: string }
-  | { type: 'deleteChat'; chatId: string }
+  | { type: 'setLastChatId'; chatId: string }
   | {
       type: 'updateCodeParameters';
       files: Record<string, { content: Uint8Array }>;
@@ -109,8 +99,7 @@ type BuildEvent = BuildEventExternalDone | BuildEventInternal;
 type BuildEmitted =
   | { type: 'buildLoaded'; build: Build }
   | { type: 'error'; error: Error }
-  | { type: 'buildUpdated'; build: Build }
-  | { type: 'activeChatChanged'; chat: Chat };
+  | { type: 'buildUpdated'; build: Build };
 
 /**
  * Build Machine
@@ -223,203 +212,16 @@ export const buildMachine = setup({
         // Don't update updatedAt for thumbnails - they're metadata
       });
     }),
-    addChatToContext: enqueueActions(({ enqueue, context, event }) => {
-      assertEvent(event, 'addChat');
-      if (!context.build) {
-        return;
-      }
-
-      const chatId = generatePrefixedId(idPrefix.chat);
-      const timestamp = Date.now();
-      const newChat: Chat = {
-        id: chatId,
-        name: 'New Chat',
-        messages: event.initialMessages ?? [],
-        draft: {
-          id: '',
-          role: 'user',
-          content: '',
-          parts: [],
-          model: '',
-          status: 'pending',
-        },
-        messageEdits: {},
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      };
-
-      enqueue.assign({
-        build: {
-          ...context.build,
-          chats: [...context.build.chats, newChat],
-          lastChatId: chatId,
-          updatedAt: timestamp,
-        },
-      });
-
-      // Emit activeChatChanged for new chat
-      enqueue.emit({
-        type: 'activeChatChanged' as const,
-        chat: newChat,
-      });
-    }),
-    updateChatMessagesInContext: assign(({ context, event }) => {
-      assertEvent(event, 'updateChatMessages');
-      if (!context.build) {
-        return {};
-      }
-
-      const timestamp = Date.now();
-      const chatIndex = context.build.chats.findIndex((c) => c.id === event.chatId);
-
-      if (chatIndex === -1) {
-        return {};
-      }
-
-      return produce(context, (draft) => {
-        const originalChat = context.build!.chats[chatIndex]!;
-        const updatedChat: Chat = {
-          ...originalChat,
-          messages: event.messages,
-          updatedAt: timestamp,
-        };
-
-        // @ts-expect-error -- Immer types struggle with this.
-        draft.build!.chats[chatIndex] = updatedChat;
-        draft.build!.updatedAt = timestamp;
-      });
-    }),
-    updateChatNameInContext: assign(({ context, event }) => {
-      assertEvent(event, 'updateChatName');
-      if (!context.build) {
-        return {};
-      }
-
-      const timestamp = Date.now();
-
-      return produce(context, (draft) => {
-        draft.build!.chats = draft.build!.chats.map((chat) =>
-          chat.id === event.chatId ? { ...chat, name: event.name, updatedAt: timestamp } : chat,
-        );
-        draft.build!.updatedAt = timestamp;
-      });
-    }),
-    updateChatDraftInContext: assign(({ context, event }) => {
-      assertEvent(event, 'updateChatDraft');
+    setLastChatIdInContext: assign(({ context, event }) => {
+      assertEvent(event, 'setLastChatId');
       if (!context.build) {
         return {};
       }
 
       return produce(context, (draft) => {
-        const chatIndex = draft.build!.chats.findIndex((c) => c.id === event.chatId);
-        if (chatIndex !== -1) {
-          draft.build!.chats[chatIndex]!.draft = event.draft;
-          // Don't update updatedAt for draft changes - they're transient
-        }
+        draft.build!.lastChatId = event.chatId;
+        // Don't update updatedAt for switching active chat
       });
-    }),
-    updateMessageEditInContext: assign(({ context, event }) => {
-      assertEvent(event, 'updateMessageEdit');
-      if (!context.build) {
-        return {};
-      }
-
-      return produce(context, (draft) => {
-        const chatIndex = draft.build!.chats.findIndex((c) => c.id === event.chatId);
-        if (chatIndex !== -1) {
-          const chat = draft.build!.chats[chatIndex]!;
-          chat.messageEdits ??= {};
-          chat.messageEdits[event.messageId] = event.draft;
-          // Don't update updatedAt for edit drafts - they're transient
-        }
-      });
-    }),
-    clearMessageEditInContext: assign(({ context, event }) => {
-      assertEvent(event, 'clearMessageEdit');
-      if (!context.build) {
-        return {};
-      }
-
-      return produce(context, (draft) => {
-        const chatIndex = draft.build!.chats.findIndex((c) => c.id === event.chatId);
-        if (chatIndex !== -1) {
-          const chat = draft.build!.chats[chatIndex]!;
-          if (chat.messageEdits?.[event.messageId]) {
-            // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- need to remove message edit
-            delete chat.messageEdits[event.messageId];
-            // Don't update updatedAt for clearing edit drafts
-          }
-        }
-      });
-    }),
-    setActiveChatInContext: enqueueActions(({ enqueue, context, event }) => {
-      assertEvent(event, 'setActiveChat');
-      if (!context.build) {
-        return;
-      }
-
-      enqueue.assign(
-        produce(context, (draft) => {
-          draft.build!.lastChatId = event.chatId;
-          // Don't update updatedAt for switching active chat
-        }),
-      );
-
-      // Find the new active chat and emit event
-      const newChat = context.build.chats.find((c) => c.id === event.chatId);
-      if (newChat) {
-        enqueue.emit({
-          type: 'activeChatChanged' as const,
-          chat: newChat,
-        });
-      }
-    }),
-    deleteChatFromContext: enqueueActions(({ enqueue, context, event }) => {
-      assertEvent(event, 'deleteChat');
-      if (!context.build) {
-        return;
-      }
-
-      const wasActiveChat = context.build.lastChatId === event.chatId;
-      const chatIndex = context.build.chats.findIndex((c) => c.id === event.chatId);
-
-      // Calculate the new active chat before deletion if we're deleting the active chat
-      let newActiveChat: Chat | undefined;
-      if (wasActiveChat && chatIndex !== -1) {
-        const remainingChats = context.build.chats.filter((c) => c.id !== event.chatId);
-        if (remainingChats.length > 0) {
-          newActiveChat = [...remainingChats].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-        }
-      }
-
-      // Delete the chat and update lastChatId
-      enqueue.assign(
-        produce(context, (draft) => {
-          if (chatIndex !== -1) {
-            draft.build!.chats.splice(chatIndex, 1);
-          }
-
-          // Update lastChatId if we deleted the active chat
-          if (wasActiveChat) {
-            if (newActiveChat) {
-              draft.build!.lastChatId = newActiveChat.id;
-            } else {
-              // No chats remaining
-              draft.build!.lastChatId = undefined;
-            }
-          }
-
-          draft.build!.updatedAt = Date.now();
-        }),
-      );
-
-      // Emit activeChatChanged if we deleted the active chat and set a new one
-      if (wasActiveChat && newActiveChat) {
-        enqueue.emit({
-          type: 'activeChatChanged' as const,
-          chat: newActiveChat,
-        });
-      }
     }),
     updateCodeParametersInContext: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'updateCodeParameters');
@@ -547,19 +349,6 @@ export const buildMachine = setup({
         return event.enabled;
       },
     }),
-    emitActiveChatChangedIfExists: enqueueActions(({ enqueue, event }) => {
-      assertActorDoneEvent(event);
-      const build = event.output as Build;
-      const activeChatId = build.lastChatId;
-      const activeChat = build.chats.find((c) => c.id === activeChatId);
-
-      if (activeChat) {
-        enqueue.emit({
-          type: 'activeChatChanged' as const,
-          chat: activeChat,
-        });
-      }
-    }),
     emitBuildLoaded: emit(({ event }) => {
       assertActorDoneEvent(event);
       return {
@@ -586,6 +375,9 @@ export const buildMachine = setup({
       assertEvent(event, 'loadBuild');
       return context.buildId !== event.buildId;
     },
+  },
+  delays: {
+    storeDebounce: 500,
   },
 }).createMachine({
   id: 'build',
@@ -680,13 +472,7 @@ export const buildMachine = setup({
         input: ({ context }) => ({ buildId: context.buildId }),
         onDone: {
           target: 'ready',
-          actions: [
-            'setBuild',
-            'clearLoading',
-            'initializeKernelIfNeeded',
-            'emitBuildLoaded',
-            'emitActiveChatChangedIfExists',
-          ],
+          actions: ['setBuild', 'clearLoading', 'initializeKernelIfNeeded', 'emitBuildLoaded'],
         },
         onError: {
           target: 'error',
@@ -726,29 +512,8 @@ export const buildMachine = setup({
             updateThumbnail: {
               actions: ['updateThumbnail'],
             },
-            addChat: {
-              actions: ['addChatToContext'],
-            },
-            updateChatMessages: {
-              actions: ['updateChatMessagesInContext'],
-            },
-            updateChatName: {
-              actions: ['updateChatNameInContext'],
-            },
-            updateChatDraft: {
-              actions: ['updateChatDraftInContext'],
-            },
-            updateMessageEdit: {
-              actions: ['updateMessageEditInContext'],
-            },
-            clearMessageEdit: {
-              actions: ['clearMessageEditInContext'],
-            },
-            setActiveChat: {
-              actions: ['setActiveChatInContext'],
-            },
-            deleteChat: {
-              actions: ['deleteChatFromContext'],
+            setLastChatId: {
+              actions: ['setLastChatIdInContext'],
             },
             updateCodeParameters: {
               actions: ['updateCodeParametersInContext'],
@@ -784,28 +549,7 @@ export const buildMachine = setup({
                 updateThumbnail: {
                   target: 'pending',
                 },
-                addChat: {
-                  target: 'pending',
-                },
-                updateChatMessages: {
-                  target: 'pending',
-                },
-                updateChatName: {
-                  target: 'pending',
-                },
-                updateChatDraft: {
-                  target: 'pending',
-                },
-                updateMessageEdit: {
-                  target: 'pending',
-                },
-                clearMessageEdit: {
-                  target: 'pending',
-                },
-                setActiveChat: {
-                  target: 'pending',
-                },
-                deleteChat: {
+                setLastChatId: {
                   target: 'pending',
                 },
                 updateCodeParameters: {
@@ -821,8 +565,7 @@ export const buildMachine = setup({
             },
             pending: {
               after: {
-                // eslint-disable-next-line @typescript-eslint/naming-convention -- XState delayed transition syntax
-                500: 'writing',
+                storeDebounce: 'writing',
               },
               on: {
                 updateName: {
@@ -841,35 +584,7 @@ export const buildMachine = setup({
                   target: 'pending',
                   reenter: true,
                 },
-                addChat: {
-                  target: 'pending',
-                  reenter: true,
-                },
-                updateChatMessages: {
-                  target: 'pending',
-                  reenter: true,
-                },
-                updateChatName: {
-                  target: 'pending',
-                  reenter: true,
-                },
-                updateChatDraft: {
-                  target: 'pending',
-                  reenter: true,
-                },
-                updateMessageEdit: {
-                  target: 'pending',
-                  reenter: true,
-                },
-                clearMessageEdit: {
-                  target: 'pending',
-                  reenter: true,
-                },
-                setActiveChat: {
-                  target: 'pending',
-                  reenter: true,
-                },
-                deleteChat: {
+                setLastChatId: {
                   target: 'pending',
                   reenter: true,
                 },

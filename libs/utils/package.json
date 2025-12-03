@@ -1,0 +1,20 @@
+{
+  "name": "@taucad/utils",
+  "version": "0.1.0",
+  "description": "Tau shared utilities",
+  "type": "module",
+  "private": true,
+  "exports": {
+    "./id": {
+      "types": "./src/id.utils.ts",
+      "import": "./src/id.utils.ts",
+      "default": "./src/id.utils.ts"
+    }
+  },
+  "dependencies": {
+    "@taucad/types": "workspace:*"
+  },
+  "imports": {
+    "#*": "./src/*"
+  }
+}

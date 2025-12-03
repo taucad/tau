@@ -1,8 +1,8 @@
 import { memo, useCallback, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Globe, Code, Image, Eye } from 'lucide-react';
-import type { ToolWithSelection, Tool } from '@taucad/types';
-import { tool, toolSelection } from '@taucad/types/constants';
+import type { ToolSelection, ToolName } from '@taucad/chat';
+import { toolName, toolMode } from '@taucad/chat/constants';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,32 +23,32 @@ type ToolMetadata = {
 };
 
 type ChatToolSelectorProperties = {
-  readonly value?: ToolWithSelection;
-  readonly onValueChange?: (value: ToolWithSelection) => void;
+  readonly value?: ToolSelection;
+  readonly onValueChange?: (value: ToolSelection) => void;
   readonly children: (properties: {
     selectedMode: ToolSelectorMode;
-    selectedTools: Tool[];
-    toolMetadata: Record<Tool, ToolMetadata>;
+    selectedTools: ToolName[];
+    toolMetadata: Partial<Record<ToolName, ToolMetadata>>;
   }) => ReactNode;
 };
 
-const toolMetadata: Record<Tool, ToolMetadata> = {
-  [tool.webSearch]: {
+const toolMetadata: Partial<Record<ToolName, ToolMetadata>> = {
+  [toolName.webSearch]: {
     label: 'Web Search',
     description: 'Search the web for information',
     icon: Globe,
   },
-  [tool.webBrowser]: {
+  [toolName.webBrowser]: {
     label: 'Web Browser',
     description: 'Browse and analyze web pages',
     icon: Eye,
   },
-  [tool.fileEdit]: {
+  [toolName.fileEdit]: {
     label: 'File Edit',
     description: 'Edit and create files',
     icon: Code,
   },
-  [tool.imageAnalysis]: {
+  [toolName.imageAnalysis]: {
     label: 'Image Analysis',
     description: 'Analyze images',
     icon: Image,
@@ -82,16 +82,16 @@ const modeOptions: Array<{
   },
 ];
 
-const getModeFromValue = (value?: ToolWithSelection): ToolSelectorMode => {
-  if (!value || value === toolSelection.auto) {
+const getModeFromValue = (value?: ToolSelection): ToolSelectorMode => {
+  if (!value || value === toolMode.auto) {
     return 'auto';
   }
 
-  if (value === toolSelection.none) {
+  if (value === toolMode.none) {
     return 'none';
   }
 
-  if (value === toolSelection.any) {
+  if (value === toolMode.any) {
     return 'any';
   }
 
@@ -102,7 +102,7 @@ const getModeFromValue = (value?: ToolWithSelection): ToolSelectorMode => {
   return 'auto';
 };
 
-const getToolsFromValue = (value?: ToolWithSelection): Tool[] => {
+const getToolsFromValue = (value?: ToolSelection): ToolName[] => {
   if (Array.isArray(value)) {
     return value;
   }
@@ -123,23 +123,23 @@ export const ChatToolSelector = memo(function ({
     (newMode: ToolSelectorMode) => {
       switch (newMode) {
         case 'auto': {
-          onValueChange?.(toolSelection.auto);
+          onValueChange?.(toolMode.auto);
           break;
         }
 
         case 'none': {
-          onValueChange?.(toolSelection.none);
+          onValueChange?.(toolMode.none);
           break;
         }
 
         case 'any': {
-          onValueChange?.(toolSelection.any);
+          onValueChange?.(toolMode.any);
           break;
         }
 
         case 'custom': {
           // Default to all tools when switching to custom
-          onValueChange?.([tool.webSearch, tool.fileEdit]);
+          onValueChange?.([toolName.webSearch, toolName.fileEdit]);
           break;
         }
 
@@ -153,20 +153,20 @@ export const ChatToolSelector = memo(function ({
   );
 
   const handleToolToggle = useCallback(
-    (tool: Tool) => {
+    (toolName: ToolName) => {
       const currentTools = Array.isArray(value) ? value : [];
-      const isCurrentlySelected = currentTools.includes(tool);
+      const isCurrentlySelected = currentTools.includes(toolName);
 
       if (isCurrentlySelected) {
-        const newTools = currentTools.filter((t) => t !== tool);
+        const newTools = currentTools.filter((t) => t !== toolName);
         // If no tools selected, switch back to auto
         if (newTools.length === 0) {
-          onValueChange?.(toolSelection.auto);
+          onValueChange?.(toolMode.auto);
         } else {
           onValueChange?.(newTools);
         }
       } else {
-        const newTools = [...currentTools, tool];
+        const newTools = [...currentTools, toolName];
         onValueChange?.(newTools);
       }
     },
@@ -181,7 +181,7 @@ export const ChatToolSelector = memo(function ({
     <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
       <DropdownMenuTrigger asChild>{children({ selectedMode: mode, selectedTools, toolMetadata })}</DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-60">
-        <DropdownMenuLabel>Tool Selection</DropdownMenuLabel>
+        <DropdownMenuLabel>ToolName Selection</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuRadioGroup
           value={mode}
@@ -204,7 +204,7 @@ export const ChatToolSelector = memo(function ({
             <DropdownMenuSeparator />
             <DropdownMenuLabel>Select tools to use</DropdownMenuLabel>
             {Object.entries(toolMetadata).map(([key, metadata]) => {
-              const toolKey = key as Tool;
+              const toolKey = key as ToolName;
               const Icon = metadata.icon;
               const isSelected = selectedTools.includes(toolKey);
 

@@ -1,12 +1,10 @@
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
-import type { Message } from '@ai-sdk/react';
-import { messageRole } from '@taucad/types/constants';
-import type { MessageAnnotation } from '@taucad/types';
-import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
+import { messageRole } from '@taucad/chat/constants';
+import type { MyUIMessage } from '@taucad/chat';
+import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { ChatMessageReasoning } from '#routes/builds_.$id/chat-message-reasoning.js';
-import { ChatMessageTool } from '#routes/builds_.$id/chat-message-tool.js';
-import { ChatMessageAnnotations } from '#routes/builds_.$id/chat-message-annotation.js';
+import { ChatMessageMetadata } from '#routes/builds_.$id/chat-message-metadata.js';
 import { ChatMessageText } from '#routes/builds_.$id/chat-message-text.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
 import { CopyButton } from '#components/copy-button.js';
@@ -23,14 +21,21 @@ import {
   DropdownMenuLabel,
 } from '#components/ui/dropdown-menu.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
+import { ChatMessageToolWebSearch } from '#routes/builds_.$id/chat-message-tool-web-search.js';
+import { ChatMessageToolWebBrowser } from '#routes/builds_.$id/chat-message-tool-web-browser.js';
+import { ChatMessageToolFileEdit } from '#routes/builds_.$id/chat-message-tool-file-edit.js';
+import { ChatMessageToolImageAnalysis } from '#routes/builds_.$id/chat-message-tool-image-analysis.js';
+import { ChatMessagePartUnknown } from '#routes/builds_.$id/chat-message-tool-unknown.js';
+import { ChatMessageToolTransfer } from '#routes/builds_.$id/chat-message-tool-transfer.js';
+import { ChatMessageFile } from '#routes/builds_.$id/chat-message-file.js';
 
 type ChatMessageProperties = {
   readonly messageId: string;
 };
 
-const getMessageContent = (message: Message): string => {
+const getMessageContent = (message: MyUIMessage): string => {
   const content = [];
-  for (const part of message.parts ?? []) {
+  for (const part of message.parts) {
     if (part.type === 'text') {
       content.push(part.text);
     }
@@ -40,10 +45,8 @@ const getMessageContent = (message: Message): string => {
 };
 
 export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties): React.JSX.Element {
-  const message = useChatSelector((state) => state.context.messagesById.get(messageId));
-  const displayMessage = useChatSelector(
-    (state) => state.context.messageEdits[messageId] ?? state.context.messagesById.get(messageId),
-  );
+  const message = useChatSelector((state) => state.messagesById.get(messageId));
+  const displayMessage = useChatSelector((state) => state.messageEdits[messageId] ?? state.messagesById.get(messageId));
   const { editMessage, retryMessage, startEditingMessage, exitEditMode } = useChatActions();
   const [isEditing, setIsEditing] = useState(false);
 
@@ -106,7 +109,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
             )}
             onClick={handleEditClick}
           >
-            {displayMessage.parts?.map((part, index) => {
+            {displayMessage.parts.map((part, index) => {
               switch (part.type) {
                 case 'text': {
                   return (
@@ -120,27 +123,17 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
 
                 case 'reasoning': {
                   /* TODO: remove trim when backend is fixed to trim thinking tags */
+                  const hasPartsAfter = index < displayMessage.parts.length - 1;
                   return (
-                    part.reasoning.trim().length > 0 && (
+                    part.text.trim().length > 0 && (
                       <ChatMessageReasoning
                         // eslint-disable-next-line react/no-array-index-key -- Index is stable
                         key={`${displayMessage.id}-message-part-${index}`}
                         part={part}
-                        hasContent={displayMessage.content.length > 0}
+                        hasContent={hasPartsAfter}
                       />
                     )
                   );
-                }
-
-                case 'tool-invocation': {
-                  // eslint-disable-next-line react/no-array-index-key -- Index is stable
-                  return <ChatMessageTool key={`${displayMessage.id}-message-part-${index}`} part={part} />;
-                }
-
-                case 'source': {
-                  // TODO: add source rendering to the message
-
-                  return null;
                 }
 
                 case 'step-start': {
@@ -150,13 +143,59 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                 }
 
                 case 'file': {
-                  // TODO: add file rendering
-                  throw new Error('File rendering is not implemented');
+                  return <ChatMessageFile key={part.url} part={part} />;
+                }
+
+                case 'dynamic-tool': {
+                  throw new Error('Dynamic tool rendering is not implemented');
+                }
+
+                case 'source-url': {
+                  throw new Error('Source URL rendering is not implemented');
+                }
+
+                case 'source-document': {
+                  throw new Error('Source document rendering is not implemented');
+                }
+
+                // TOOLS
+                case 'tool-web_search': {
+                  return <ChatMessageToolWebSearch key={part.toolCallId} part={part} />;
+                }
+
+                case 'tool-web_browser': {
+                  return <ChatMessageToolWebBrowser key={part.toolCallId} part={part} />;
+                }
+
+                case 'tool-edit_file': {
+                  return <ChatMessageToolFileEdit key={part.toolCallId} part={part} />;
+                }
+
+                case 'tool-analyze_image': {
+                  return <ChatMessageToolImageAnalysis key={part.toolCallId} part={part} />;
+                }
+
+                case 'tool-transfer_to_cad_expert': {
+                  return <ChatMessageToolTransfer key={part.toolCallId} part={part} />;
+                }
+
+                case 'tool-transfer_to_research_expert': {
+                  return <ChatMessageToolTransfer key={part.toolCallId} part={part} />;
+                }
+
+                case 'tool-transfer_back_to_supervisor': {
+                  return <ChatMessageToolTransfer key={part.toolCallId} part={part} />;
+                }
+
+                case 'data-test': {
+                  // A data part is required to be present to exhaustively match all parts.
+                  // This should replace with an actual data part when it becomes available.
+                  return <div>Data test</div>;
                 }
 
                 default: {
-                  const exhaustiveCheck: never = part;
-                  throw new Error(`Unknown part: ${JSON.stringify(exhaustiveCheck)}`);
+                  const unknownPart: never = part;
+                  return <ChatMessagePartUnknown key={String(unknownPart)} part={unknownPart} />;
                 }
               }
             })}
@@ -214,9 +253,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
               <TooltipContent side="bottom">Switch model</TooltipContent>
             </Tooltip>
             <div className="mx-1 flex flex-row items-center justify-end gap-1">
-              {displayMessage.annotations && displayMessage.annotations.length > 0 ? (
-                <ChatMessageAnnotations annotations={displayMessage.annotations as MessageAnnotation[]} />
-              ) : null}
+              {displayMessage.metadata ? <ChatMessageMetadata metadata={displayMessage.metadata} /> : null}
             </div>
           </div>
         </When>

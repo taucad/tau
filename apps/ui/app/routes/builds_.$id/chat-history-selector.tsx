@@ -1,12 +1,12 @@
 import { Plus, Pencil, Trash, History } from 'lucide-react';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import type { Message } from '@ai-sdk/react';
 import { useChat } from '@ai-sdk/react';
-import type { Chat } from '@taucad/types';
+import type { Chat, MyUIMessage } from '@taucad/chat';
 import { useSelector } from '@xstate/react';
 import { Button } from '#components/ui/button.js';
 import { useBuild } from '#hooks/use-build.js';
+import { useChats } from '#hooks/use-chats.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { cn } from '#utils/ui.utils.js';
 import { useChatConstants } from '#utils/chat.utils.js';
@@ -27,64 +27,81 @@ const newChatKeyCombination = {
 } satisfies KeyCombination;
 
 export function ChatHistorySelector(): ReactNode {
-  const { buildRef, addChat, setActiveChat, updateChatName, deleteChat } = useBuild();
-  const isLoading = useSelector(buildRef, (state) => state.context.isLoading);
-  const groupedChats = useSelector(buildRef, (state) => groupItemsByTimeHorizon(state.context.build?.chats ?? []));
+  const { buildRef, buildId, setLastChatId } = useBuild();
+  const { chats, createChat, updateChatName, deleteChat, isLoading: isChatsLoading } = useChats(buildId);
+
+  const isBuildLoading = useSelector(buildRef, (state) => state.context.isLoading);
   const activeChatId = useSelector(buildRef, (state) => state.context.build?.lastChatId) ?? '';
-  const activeChat = useSelector(buildRef, (state) =>
-    state.context.build?.chats.find((chat) => chat.id === activeChatId),
-  );
+
+  // Derive activeChat and groupedChats from chats
+  const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId), [chats, activeChatId]);
+  const groupedChats = useMemo(() => groupItemsByTimeHorizon(chats), [chats]);
+
   const [isGeneratingName, setIsGeneratingName] = useState(false);
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [chatToRename, setChatToRename] = useState<string | undefined>(undefined);
   const [newChatName, setNewChatName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleAddChat = async () => {
-    addChat();
-  };
+  const handleAddChat = useCallback(async () => {
+    const newChat = await createChat({
+      name: 'New chat',
+      messages: [],
+    });
+
+    // Set as active chat
+    setLastChatId(newChat.id);
+  }, [createChat, setLastChatId]);
 
   const { formattedKeyCombination } = useKeydown(newChatKeyCombination, handleAddChat);
 
-  const { append } = useChat({
+  const { sendMessage } = useChat({
     ...useChatConstants,
-    credentials: 'include',
-    onFinish(message) {
+    onFinish({ message }) {
       if (!activeChatId) {
         return;
       }
 
-      const textPart = message.parts?.find((part) => part.type === 'text');
+      const textPart = message.parts.find((part) => part.type === 'text');
       if (textPart) {
-        updateChatName(activeChatId, textPart.text);
+        void handleUpdateChatName(activeChatId, textPart.text);
         setIsGeneratingName(false);
       }
     },
   });
 
-  // Generate name for new chats
-  useEffect(() => {
-    if (isLoading || !activeChat) {
-      return;
-    }
+  // Generate name for new chats when activeChat changes and has messages but default name
+  const previousActiveChatIdRef = useRef<string | undefined>(undefined);
+  if (
+    activeChat &&
+    !isBuildLoading &&
+    !isChatsLoading &&
+    activeChat.name === 'New chat' &&
+    activeChat.messages[0] &&
+    !isGeneratingName &&
+    previousActiveChatIdRef.current !== activeChatId
+  ) {
+    previousActiveChatIdRef.current = activeChatId;
+    setIsGeneratingName(true);
 
-    // Check if this chat needs a name
-    if (activeChat.name === 'New chat' && activeChat.messages[0]) {
-      setIsGeneratingName(true);
-
-      // Create and send message for name generation
-      const message = {
-        ...activeChat.messages[0],
+    // Create and send message for name generation
+    const nameGenMessage = {
+      ...activeChat.messages[0],
+      metadata: {
         model: 'name-generator',
-        metadata: {
-          toolChoice: 'none',
-        },
-      } as const satisfies Message;
-      void append(message);
-    }
-  }, [activeChatId, activeChat, isLoading]);
+      },
+    } as const satisfies MyUIMessage;
+    void sendMessage(nameGenMessage);
+  }
 
-  const handleRenameChat = (chatId: string, currentName: string) => {
+  const handleUpdateChatName = useCallback(
+    async (chatId: string, name: string) => {
+      await updateChatName(chatId, name);
+    },
+    [updateChatName],
+  );
+
+  const handleRenameChat = (chatId: string, currentName: string): void => {
     setChatToRename(chatId);
     setNewChatName(currentName);
     setIsRenameDialogOpen(true);
@@ -95,9 +112,9 @@ export function ChatHistorySelector(): ReactNode {
     }, 100);
   };
 
-  const handleSaveRename = () => {
+  const handleSaveRename = (): void => {
     if (chatToRename && newChatName.trim()) {
-      updateChatName(chatToRename, newChatName.trim());
+      void handleUpdateChatName(chatToRename, newChatName.trim());
       setIsRenameDialogOpen(false);
       setChatToRename(undefined);
     }
@@ -105,9 +122,25 @@ export function ChatHistorySelector(): ReactNode {
 
   const handleDeleteChat = useCallback(
     async (chatId: string) => {
-      deleteChat(chatId);
+      await deleteChat(chatId);
+
+      // If we deleted the active chat, switch to the most recent one
+      if (activeChatId === chatId && chats.length > 1) {
+        const remainingChats = chats.filter((chat) => chat.id !== chatId);
+        const mostRecent = [...remainingChats].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+        if (mostRecent) {
+          setLastChatId(mostRecent.id);
+        }
+      }
     },
-    [deleteChat],
+    [deleteChat, chats, activeChatId, setLastChatId],
+  );
+
+  const handleSelectChat = useCallback(
+    (chatId: string) => {
+      setLastChatId(chatId);
+    },
+    [setLastChatId],
   );
 
   // Render function for each chat item
@@ -164,7 +197,7 @@ export function ChatHistorySelector(): ReactNode {
   );
 
   // Get value function for the ComboBoxResponsive component
-  const getChatValue = (chat: Chat) => chat.id;
+  const getChatValue = (chat: Chat): string => chat.id;
 
   return (
     <>
@@ -184,9 +217,7 @@ export function ChatHistorySelector(): ReactNode {
               align: 'end',
               className: 'w-[300px]',
             }}
-            onSelect={(chatId) => {
-              setActiveChat(chatId);
-            }}
+            onSelect={handleSelectChat}
           >
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="size-6 rounded-sm">

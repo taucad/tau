@@ -32,9 +32,9 @@ export type InfiniteGridMaterialProperties = {
   /**
    * The axes to use for the grid.
    * Defines the plane orientation of the grid.
-   * First two letters determine the grid plane axes, third letter is the normal axis.
-   * 'xyz': Grid on XY plane with Z as normal (standard top-down view)
-   * 'xzy': Grid on XZ plane with Y as normal (standard front view)
+   * - 'xyz': Grid on XY plane with Z as normal (standard top-down view)
+   * - 'xzy': Grid on XZ plane with Y as normal (standard front view)
+   * - 'zyx': Grid on ZY plane with X as normal (standard side view)
    * @default 'xyz'
    */
   readonly axes?: 'xyz' | 'xzy' | 'zyx';
@@ -72,15 +72,35 @@ export type InfiniteGridMaterialProperties = {
    * @default 0.2
    */
   readonly fadeEnd?: number;
+  /**
+   * Offset applied to the grid along its normal axis to prevent z-fighting with other geometry.
+   * Increasing this value pushes the grid further away from the plane.
+   * @default 0.001
+   */
+  readonly normalOffset?: number;
 };
+
+/**
+ * Maps string-based axes to numeric indices for the shader uniform.
+ * This provides a user-friendly API while maintaining shader security by avoiding string interpolation.
+ */
+function mapAxesToIndex(axes: 'xyz' | 'xzy' | 'zyx'): 0 | 1 | 2 {
+  const mapping = {
+    xyz: 0,
+    xzy: 1,
+    zyx: 2,
+  } as const;
+  return mapping[axes];
+}
 
 // Original Author: Fyrestar https://mevedia.com (https://github.com/Fyrestar/THREE.InfiniteGridHelper)
 // Modified by @rifont to:
 // - use varying thickness and enhanced distance falloff
 // - work correctly with logarithmic depth buffer
+// - use secure uniform-based axis configuration instead of string interpolation
 export function infiniteGridMaterial(properties?: InfiniteGridMaterialProperties): THREE.ShaderMaterial {
   const {
-    smallSize = 10,
+    smallSize = 1,
     largeSize = 100,
     color = new THREE.Color('grey'),
     axes = 'xyz',
@@ -88,17 +108,19 @@ export function infiniteGridMaterial(properties?: InfiniteGridMaterialProperties
     largeThickness = 2.5,
     lineOpacity = 0.4,
     minGridDistance = 10,
-    gridDistanceMultiplier = 30,
+    gridDistanceMultiplier = 20,
     fadeStart = 0.05,
     fadeEnd = 0.2,
     alphaThreshold = 0.01,
+    normalOffset = 0.001,
   } = properties ?? {};
-  // Validate to ensure axes cannot be used to inject malicious code
+
+  // Validate and convert axes parameter to numeric index
   if (!['xyz', 'xzy', 'zyx'].includes(axes)) {
-    throw new Error('Invalid axes parameter');
+    throw new Error('Invalid axes parameter: must be "xyz", "xzy", or "zyx"');
   }
 
-  const planeAxes = axes.slice(0, 2);
+  const axesIndex = mapAxesToIndex(axes);
 
   const material = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
@@ -137,6 +159,12 @@ export function infiniteGridMaterial(properties?: InfiniteGridMaterialProperties
       uFadeEnd: {
         value: fadeEnd,
       },
+      uAxes: {
+        value: axesIndex,
+      },
+      uNormalOffset: {
+        value: normalOffset,
+      },
     },
 
     vertexShader: `
@@ -146,6 +174,8 @@ export function infiniteGridMaterial(properties?: InfiniteGridMaterialProperties
   
       uniform float uGridDistanceMultiplier;
       uniform float uMinGridDistance;
+      uniform float uNormalOffset;
+      uniform int uAxes;
       
       void main() {
         // Calculate the camera distance
@@ -158,10 +188,21 @@ export function infiniteGridMaterial(properties?: InfiniteGridMaterialProperties
         gridDistance = max(gridDistance, uMinGridDistance);
         
         // Scale the grid based on the calculated distance
-        vec3 pos = position.${axes} * gridDistance;
-        
-        // Apply a small offset to avoid z-fighting but not hide the grid
-        pos.${axes[2]} -= 0.001; 
+        // Use conditional logic instead of string interpolation for security
+        vec3 pos;
+        if (uAxes == 0) {
+          // xyz: Grid on XY plane with Z as normal
+          pos = position.xyz * gridDistance;
+          pos.z -= uNormalOffset;
+        } else if (uAxes == 1) {
+          // xzy: Grid on XZ plane with Y as normal
+          pos = position.xzy * gridDistance;
+          pos.y -= uNormalOffset;
+        } else {
+          // zyx: Grid on ZY plane with X as normal
+          pos = position.zyx * gridDistance;
+          pos.x -= uNormalOffset;
+        }
         
         worldPosition = pos;
         
@@ -188,9 +229,10 @@ export function infiniteGridMaterial(properties?: InfiniteGridMaterialProperties
       uniform float uAlphaThreshold;
       uniform float uFadeStart;
       uniform float uFadeEnd;
+      uniform int uAxes;
 
-      float getGrid(float size, float thickness) {
-        vec2 r = worldPosition.${planeAxes} / size;
+      float getGrid(vec2 planePos, float size, float thickness) {
+        vec2 r = planePos / size;
         
         vec2 grid = abs(fract(r - 0.5) - 0.5) / (fwidth(r) * thickness);
         float line = min(grid.x, grid.y);
@@ -201,8 +243,27 @@ export function infiniteGridMaterial(properties?: InfiniteGridMaterialProperties
       void main() {
         #include <logdepthbuf_fragment>
         
+        // Extract plane axes based on configuration
+        // Use conditional logic instead of string interpolation for security
+        vec2 worldPlane;
+        vec2 cameraPlane;
+        
+        if (uAxes == 0) {
+          // xyz: Grid on XY plane
+          worldPlane = worldPosition.xy;
+          cameraPlane = cameraPosition.xy;
+        } else if (uAxes == 1) {
+          // xzy: Grid on XZ plane
+          worldPlane = worldPosition.xz;
+          cameraPlane = cameraPosition.xz;
+        } else {
+          // zyx: Grid on ZY plane
+          worldPlane = worldPosition.zy;
+          cameraPlane = cameraPosition.zy;
+        }
+        
         // Calculate planar distance - distance in the grid plane
-        float planarDistance = distance(cameraPosition.${planeAxes}, worldPosition.${planeAxes});
+        float planarDistance = distance(cameraPlane, worldPlane);
         
         // Calculate the camera distance
         float cameraDistance = length(cameraPosition);
@@ -219,8 +280,8 @@ export function infiniteGridMaterial(properties?: InfiniteGridMaterialProperties
         // Calculate fade factor using smoothstep for cleaner fade
         float fadeFactor = smoothstep(uFadeEnd, uFadeStart, distanceRatio);
         
-        float gridSmall = getGrid(uSmallSize, uSmallThickness);
-        float gridLarge = getGrid(uLargeSize, uLargeThickness);
+        float gridSmall = getGrid(worldPlane, uSmallSize, uSmallThickness);
+        float gridLarge = getGrid(worldPlane, uLargeSize, uLargeThickness);
         
         float grid = max(gridSmall, gridLarge);
         

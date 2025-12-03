@@ -1,4 +1,4 @@
-import type { ReasoningUIPart } from '@ai-sdk/ui-utils';
+import type { ReasoningUIPart } from 'ai';
 import { ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '#components/ui/button.js';
@@ -40,7 +40,7 @@ export function ChatMessageReasoning({ part, hasContent }: ChatMessageReasoningP
   return (
     <>
       {/* Show the collapsible section there is reasoning content */}
-      {part.reasoning.trim() !== '' && (
+      {part.text.trim() !== '' && (
         // Force open if content is empty, otherwise let state handle it.
         // This ensures the reasoning content is initially visible during generation,
         // then collapses when the content is generated.
@@ -55,19 +55,15 @@ export function ChatMessageReasoning({ part, hasContent }: ChatMessageReasoningP
               Thought Process
             </Button>
           </CollapsibleTrigger>
-
           <CollapsibleContent className="data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up">
             <div className="border-l border-foreground/20 pl-5 text-sm whitespace-pre-wrap text-foreground/60 italic">
-              {part.reasoning.trim()}
+              {part.text.trim()}
             </div>
           </CollapsibleContent>
         </Collapsible>
       )}
-
       {/* Show "Thinking..." label when there is no reasoning content */}
-      {part.reasoning.trim() === '' && (
-        <div className={cn('mb-2 text-sm font-medium text-foreground/60')}>Thinking...</div>
-      )}
+      {part.text.trim() === '' && <div className={cn('mb-2 text-sm font-medium text-foreground/60')}>Thinking...</div>}
     </>
   );
 }

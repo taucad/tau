@@ -2,7 +2,7 @@ import { memo, useCallback, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { XIcon, MessageCircle } from 'lucide-react';
-import { messageRole, messageStatus } from '@taucad/types/constants';
+import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { ChatMessage } from '#routes/builds_.$id/chat-message.js';
 import { ScrollDownButton } from '#routes/builds_.$id/scroll-down-button.js';
 import { ChatError } from '#routes/builds_.$id/chat-error.js';
@@ -10,7 +10,7 @@ import { ChatStatus } from '#routes/builds_.$id/chat-status.js';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { createMessage } from '#utils/chat.utils.js';
-import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
+import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { ChatHistorySelector } from '#routes/builds_.$id/chat-history-selector.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {
@@ -18,6 +18,7 @@ import {
   FloatingPanelClose,
   FloatingPanelContent,
   FloatingPanelContentHeader,
+  FloatingPanelErrorContent,
   FloatingPanelTrigger,
 } from '#components/ui/floating-panel.js';
 import { useKeydown } from '#hooks/use-keydown.js';
@@ -70,8 +71,8 @@ export const ChatHistory = memo(function (props: {
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }) {
   const { className, isExpanded = true, setIsExpanded } = props;
-  const messageIds = useChatSelector((state) => state.context.messageOrder);
-  const { append } = useChatActions();
+  const messageIds = useChatSelector((state) => state.messageOrder);
+  const { sendMessage } = useChatActions();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const toggleChatHistory = useCallback(() => {
     setIsExpanded?.((current) => !current);
@@ -85,14 +86,12 @@ export const ChatHistory = memo(function (props: {
       const userMessage = createMessage({
         content,
         role: messageRole.user,
-        status: messageStatus.pending,
-        metadata: metadata ?? {},
-        model,
+        metadata: { ...metadata, model, status: messageStatus.pending },
         imageUrls,
       });
-      append(userMessage);
+      sendMessage(userMessage);
     },
-    [append],
+    [sendMessage],
   );
 
   // Memoize the item renderer for Virtuoso with stable references
@@ -134,7 +133,16 @@ export const ChatHistory = memo(function (props: {
           </div>
         )}
       />
-      <FloatingPanelContent className={cn(!isExpanded && 'hidden')}>
+      <FloatingPanelContent
+        className={cn(!isExpanded && 'hidden')}
+        errorFallback={(errorProps) => (
+          <FloatingPanelErrorContent
+            {...errorProps}
+            title="Chat Unavailable"
+            description="Something went wrong while loading the chat. This might be due to a storage issue."
+          />
+        )}
+      >
         {/* Header with search */}
         <FloatingPanelContentHeader>
           <ChatHistorySelector />

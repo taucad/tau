@@ -36,7 +36,6 @@ const createBuild = (model: Omit<Model, 'language'>, mainFile: string, kernel: K
     stars: 0,
     forks: 0,
     thumbnail: model.thumbnail,
-    chats: [],
     files: { [mainFile]: { content: encodeTextFile(model.code) } },
   };
 };

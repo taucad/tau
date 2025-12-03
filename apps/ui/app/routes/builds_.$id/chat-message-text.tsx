@@ -1,4 +1,4 @@
-import type { TextUIPart } from '@ai-sdk/ui-utils';
+import type { TextUIPart } from 'ai';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 
 export function ChatMessageText({ part }: { readonly part: TextUIPart }): React.JSX.Element {

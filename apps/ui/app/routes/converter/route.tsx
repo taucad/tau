@@ -434,7 +434,6 @@ export default function ConverterRoute(): React.JSX.Element {
     },
     tags: [],
     thumbnail: '',
-    chats: [],
     createdAt: now,
     updatedAt: now,
     assets: {},

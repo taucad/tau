@@ -1,7 +1,7 @@
 import { useRouteLoaderData } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import type { Model } from '@taucad/types';
+import type { Model } from '@taucad/chat';
 import { ENV } from '#config.js';
 import type { loader } from '#root.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -31,6 +31,7 @@ export const useModels = () => {
   const { data, isLoading } = useQuery({
     queryKey: ['models'],
     queryFn: async () => getModels(),
+    refetchInterval: 1000 * 60 * 5, // 5 minutes
     initialData: loaderData?.models,
   });
 

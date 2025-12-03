@@ -4,10 +4,10 @@
   "include": [],
   "references": [
     {
-      "path": "../../packages/json-schema"
+      "path": "../../libs/utils"
     },
     {
-      "path": "../../libs/units"
+      "path": "../../packages/json-schema"
     },
     {
       "path": "../../libs/api-extractor"
@@ -17,6 +17,12 @@
     },
     {
       "path": "../../packages/converter"
+    },
+    {
+      "path": "../../libs/units"
+    },
+    {
+      "path": "../../libs/chat"
     },
     {
       "path": "../../libs/types"

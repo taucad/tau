@@ -1,10 +1,11 @@
-import type { ToolInvocationUIPart } from '@ai-sdk/ui-utils';
+import type { ToolUIPart, UIToolInvocation } from 'ai';
 import { useCallback, useState } from 'react';
-import { File, LoaderCircle, Play, X, ChevronDown, AlertTriangle, Bug, Camera, Check, RotateCcw } from 'lucide-react';
-import type { ToolResult } from 'ai';
+import { File, LoaderCircle, Play, X, ChevronDown, AlertTriangle, Bug, Check, RotateCcw } from 'lucide-react';
 import { useActorRef, useSelector } from '@xstate/react';
 import type { CodeError, KernelError } from '@taucad/types';
 import { waitFor } from 'xstate';
+import type { MyTools } from '@taucad/chat';
+import type { toolName } from '@taucad/chat/constants';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { CopyButton } from '#components/copy-button.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
@@ -12,25 +13,11 @@ import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
 import { useBuild } from '#hooks/use-build.js';
-import { useChatSelector } from '#components/chat/chat-provider.js';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
+import { useChatSelector } from '#hooks/use-chat.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { fileEditMachine } from '#machines/file-edit.machine.js';
 import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-
-export type FileEditToolResult = ToolResult<
-  'edit_file',
-  {
-    targetFile: string;
-    codeEdit: string;
-  },
-  {
-    codeErrors: CodeError[];
-    kernelError?: KernelError;
-    screenshot?: string;
-  }
->;
 
 function ErrorSection({
   type,
@@ -103,13 +90,13 @@ function StatusIcon({
   toolStatus,
 }: {
   readonly chatStatus: 'error' | 'submitted' | 'streaming' | 'ready';
-  readonly toolStatus: ToolInvocationUIPart['toolInvocation']['state'];
+  readonly toolStatus: ToolUIPart['state'];
 }): React.JSX.Element {
-  if (chatStatus === 'streaming' && ['partial-call', 'call'].includes(toolStatus)) {
+  if (chatStatus === 'streaming' && ['input-streaming', 'input-available'].includes(toolStatus)) {
     return <LoaderCircle className="size-3 animate-spin" />;
   }
 
-  if (['error', 'ready'].includes(chatStatus) && ['partial-call', 'call'].includes(toolStatus)) {
+  if (['error', 'ready'].includes(chatStatus) && ['input-streaming', 'input-available'].includes(toolStatus)) {
     return <X className="size-3 text-destructive" />;
   }
 
@@ -123,9 +110,9 @@ function Filename({
 }: {
   readonly targetFile: string;
   readonly chatStatus: 'error' | 'submitted' | 'streaming' | 'ready';
-  readonly toolStatus: ToolInvocationUIPart['toolInvocation']['state'];
+  readonly toolStatus: ToolUIPart['state'];
 }): React.JSX.Element {
-  if (chatStatus === 'streaming' && ['partial-call', 'call'].includes(toolStatus)) {
+  if (chatStatus === 'streaming' && ['input-streaming', 'input-available'].includes(toolStatus)) {
     return <AnimatedShinyText>{targetFile}</AnimatedShinyText>;
   }
 
@@ -133,10 +120,14 @@ function Filename({
 }
 
 // eslint-disable-next-line complexity -- refactor later
-export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocationUIPart }): React.JSX.Element {
+export function ChatMessageToolFileEdit({
+  part,
+}: {
+  readonly part: UIToolInvocation<MyTools[typeof toolName.fileEdit]>;
+}): React.JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const { getMainFilename } = useBuild();
-  const status = useChatSelector((state) => state.context.status);
+  const status = useChatSelector((state) => state.status);
 
   // Create file edit machine
   const fileEditRef = useActorRef(fileEditMachine);
@@ -168,7 +159,7 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
           throw new Error('No content received from file edit service');
         }
 
-        fileManager.writeFile(resolvedPath, encodeTextFile(result.editedContent));
+        void fileManager.writeFile(resolvedPath, encodeTextFile(result.editedContent));
       }
 
       if (snapshot.matches('error')) {
@@ -179,13 +170,11 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
     [fileEditRef, fileManager, getMainFilename],
   );
 
-  switch (part.toolInvocation.state) {
-    case 'partial-call':
-    case 'call': {
-      const { targetFile = '', codeEdit = '' } = (part.toolInvocation.args ?? {}) as {
-        codeEdit?: string;
-        targetFile?: string;
-      };
+  switch (part.state) {
+    case 'input-streaming':
+    case 'input-available': {
+      const { input } = part;
+      const { targetFile = '', codeEdit = '' } = input ?? {};
 
       // Show last 4 lines during streaming
       const lines = codeEdit.split('\n');
@@ -195,8 +184,8 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
       return (
         <div className="@container/code overflow-hidden rounded-md border bg-neutral/10">
           <div className="flex h-7 w-full flex-row items-center gap-1 pr-1 pl-2 text-xs text-muted-foreground">
-            <StatusIcon chatStatus={status} toolStatus={part.toolInvocation.state} />
-            <Filename targetFile={targetFile} chatStatus={status} toolStatus={part.toolInvocation.state} />
+            <StatusIcon chatStatus={status} toolStatus={part.state} />
+            <Filename targetFile={targetFile} chatStatus={status} toolStatus={part.state} />
           </div>
           {hasContent ? (
             <div className="h-[100px] overflow-hidden border-t">
@@ -207,20 +196,18 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
       );
     }
 
-    case 'result': {
-      const { targetFile = '', codeEdit = '' } = (part.toolInvocation.args ?? {}) as {
-        codeEdit?: string;
-        targetFile?: string;
-      };
+    case 'output-available': {
+      const { input } = part;
+      const { targetFile = '', codeEdit = '' } = input;
 
-      const result = part.toolInvocation.result as FileEditToolResult['result'];
+      const result = part.output;
 
       return (
         <div className="@container/code overflow-hidden rounded-md border bg-neutral/10">
           <div className="sticky top-0 flex flex-row items-center justify-between py-1 pr-1 pl-2 text-foreground/50">
             <div className="flex flex-row items-center gap-1 text-xs text-muted-foreground">
-              <StatusIcon chatStatus={status} toolStatus={part.toolInvocation.state} />
-              <Filename targetFile={targetFile} chatStatus={status} toolStatus={part.toolInvocation.state} />
+              <StatusIcon chatStatus={status} toolStatus={part.state} />
+              <Filename targetFile={targetFile} chatStatus={status} toolStatus={part.state} />
             </div>
             <div className="flex flex-row gap-1">
               <CopyButton
@@ -291,29 +278,6 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
           </div>
           <div>
             <div>
-              {result.screenshot ? (
-                <div className="border-t p-2 pt-1">
-                  <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
-                    <Camera className="size-3" />
-                    <span>views</span>
-                  </div>
-                  <HoverCard>
-                    <HoverCardTrigger asChild>
-                      <div className="cursor-pointer rounded-md border bg-neutral/5 hover:bg-neutral/10">
-                        <img
-                          src={result.screenshot}
-                          alt="Generated screenshot"
-                          className="size-full rounded-sm object-cover object-top"
-                        />
-                      </div>
-                    </HoverCardTrigger>
-                    <HoverCardContent asChild side="top" align="start" className="w-96">
-                      <img src={result.screenshot} alt="Generated screenshot (full size)" className="max-w-full" />
-                    </HoverCardContent>
-                  </HoverCard>
-                </div>
-              ) : null}
-
               <ErrorSection
                 isInitiallyOpen
                 className="border-t"
@@ -343,6 +307,10 @@ export function ChatMessageToolFileEdit({ part }: { readonly part: ToolInvocatio
           </div>
         </div>
       );
+    }
+
+    case 'output-error': {
+      return <div>File edit failed</div>;
     }
   }
 }

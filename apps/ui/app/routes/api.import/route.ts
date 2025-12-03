@@ -1,4 +1,3 @@
-// eslint-disable-next-line no-restricted-imports -- allowed for route types
 import type { Route } from './+types/route.js';
 import { ENV } from '#config.js';
 

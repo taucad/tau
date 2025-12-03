@@ -3,7 +3,6 @@ import { createContext, useContext, useMemo, useCallback, useEffect } from 'reac
 import { useActorRef, useSelector } from '@xstate/react';
 import { fromPromise, waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import type { Message } from '@ai-sdk/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { buildMachine } from '#machines/build.machine.js';
@@ -27,7 +26,6 @@ type BuildContextType = {
   screenshotRef: ActorRefFrom<typeof screenshotCapabilityMachine>;
   cameraRef: ActorRefFrom<typeof cameraCapabilityMachine>;
   logRef: ActorRefFrom<typeof logMachine>;
-  setChatMessages: (chatId: string, messages: Message[]) => void;
   setCodeParameters: (files: Record<string, { content: Uint8Array }>, parameters: Record<string, unknown>) => void;
   setParameters: (parameters: Record<string, unknown>) => void;
   updateName: (name: string) => void;
@@ -35,11 +33,7 @@ type BuildContextType = {
   updateTags: (tags: string[]) => void;
   updateThumbnail: (thumbnail: string) => void;
   getMainFilename: () => Promise<string>;
-  // Chat related functions
-  addChat: (initialMessages?: Message[]) => void;
-  setActiveChat: (chatId: string) => void;
-  updateChatName: (chatId: string, name: string) => void;
-  deleteChat: (chatId: string) => void;
+  setLastChatId: (chatId: string) => void;
 };
 
 const BuildContext = createContext<BuildContextType | undefined>(undefined);
@@ -131,13 +125,6 @@ export function BuildProvider({
   }, [actorRef, queryClient]);
 
   // Memoize callbacks
-  const setChatMessages = useCallback(
-    (chatId: string, messages: Message[]) => {
-      actorRef.send({ type: 'updateChatMessages', chatId, messages });
-    },
-    [actorRef],
-  );
-
   const setCodeParameters = useCallback(
     (files: Record<string, { content: Uint8Array }>, parameters: Record<string, unknown>) => {
       actorRef.send({ type: 'updateCodeParameters', files, parameters });
@@ -180,30 +167,9 @@ export function BuildProvider({
     [actorRef],
   );
 
-  const addChat = useCallback(
-    (initialMessages?: Message[]) => {
-      actorRef.send({ type: 'addChat', initialMessages });
-    },
-    [actorRef],
-  );
-
-  const setActiveChat = useCallback(
+  const setLastChatId = useCallback(
     (chatId: string) => {
-      actorRef.send({ type: 'setActiveChat', chatId });
-    },
-    [actorRef],
-  );
-
-  const updateChatName = useCallback(
-    (chatId: string, name: string) => {
-      actorRef.send({ type: 'updateChatName', chatId, name });
-    },
-    [actorRef],
-  );
-
-  const deleteChat = useCallback(
-    (chatId: string) => {
-      actorRef.send({ type: 'deleteChat', chatId });
+      actorRef.send({ type: 'setLastChatId', chatId });
     },
     [actorRef],
   );
@@ -229,17 +195,13 @@ export function BuildProvider({
       screenshotRef,
       cameraRef,
       logRef,
-      setChatMessages,
       setCodeParameters,
       setParameters,
       updateName,
       updateDescription,
       updateTags,
       updateThumbnail,
-      addChat,
-      setActiveChat,
-      updateChatName,
-      deleteChat,
+      setLastChatId,
       getMainFilename,
     };
   }, [
@@ -252,17 +214,13 @@ export function BuildProvider({
     screenshotRef,
     cameraRef,
     logRef,
-    setChatMessages,
     setCodeParameters,
     setParameters,
     updateName,
     updateDescription,
     updateTags,
     updateThumbnail,
-    addChat,
-    setActiveChat,
-    updateChatName,
-    deleteChat,
+    setLastChatId,
     getMainFilename,
   ]);
 

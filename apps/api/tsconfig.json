@@ -4,6 +4,12 @@
   "include": [],
   "references": [
     {
+      "path": "../../libs/utils"
+    },
+    {
+      "path": "../../libs/chat"
+    },
+    {
       "path": "../../libs/api-extractor"
     },
     {

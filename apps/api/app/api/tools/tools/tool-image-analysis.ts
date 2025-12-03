@@ -1,26 +1,20 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { interrupt } from '@langchain/langgraph';
+import { imageAnalysisInputSchema } from '@taucad/chat';
+import type { ImageAnalysisOutput } from '@taucad/chat';
+import { toolName } from '@taucad/chat/constants';
 
-type ImageAnalysisResult = {
-  screenshot: string;
-};
-
-type ScreenshotInterruptResult = { screenshot: string };
-
-const imageAnalysisSchema = z.object({
-  requirements: z.array(z.string()),
-});
-const imageAnalysisJsonSchema = z.toJSONSchema(imageAnalysisSchema);
+const imageAnalysisJsonSchema = z.toJSONSchema(imageAnalysisInputSchema);
 
 export const imageAnalysisToolDefinition = {
-  name: 'analyze_image',
+  name: toolName.imageAnalysis,
   description: 'Visually validate a CAD model against specific requirements.',
   schema: imageAnalysisJsonSchema,
 } as const;
 
 export const imageAnalysisTool = tool(async (args) => {
-  const { screenshot } = interrupt<unknown, ScreenshotInterruptResult>(args);
-  const result: ImageAnalysisResult = { screenshot };
+  const { screenshot } = interrupt<unknown, ImageAnalysisOutput>(args);
+  const result: ImageAnalysisOutput = { screenshot, analysis: '' };
   return result;
 }, imageAnalysisToolDefinition);

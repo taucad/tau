@@ -1,22 +1,27 @@
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
 import type { Build } from '@taucad/types';
+import type { Chat } from '@taucad/chat';
 import { idPrefix } from '@taucad/types/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
 import type { StorageProvider } from '#types/storage.types.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
 import { metaConfig } from '#constants/meta.constants.js';
 
 export class IndexedDbStorageProvider implements StorageProvider {
-  private get dbName() {
+  private get dbName(): string {
     return `${metaConfig.databasePrefix}db`;
   }
 
-  private get storeName() {
+  private get buildsStoreName(): string {
     return 'builds';
   }
 
-  private get version() {
-    return 1;
+  private get chatsStoreName(): string {
+    return 'chats';
+  }
+
+  private get version(): number {
+    return 3;
   }
 
   public async createBuild(build: Omit<Build, 'id' | 'createdAt' | 'updatedAt'>): Promise<Build> {
@@ -32,8 +37,8 @@ export class IndexedDbStorageProvider implements StorageProvider {
     const db = await this.getDb();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeName, 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction(this.buildsStoreName, 'readwrite');
+      const store = transaction.objectStore(this.buildsStoreName);
 
       const request = store.add(buildWithId);
 
@@ -106,8 +111,8 @@ export class IndexedDbStorageProvider implements StorageProvider {
     }
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeName, 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction(this.buildsStoreName, 'readwrite');
+      const store = transaction.objectStore(this.buildsStoreName);
 
       const request = store.put(updatedBuild);
 
@@ -131,8 +136,8 @@ export class IndexedDbStorageProvider implements StorageProvider {
     const db = await this.getDb();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeName, 'readonly');
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction(this.buildsStoreName, 'readonly');
+      const store = transaction.objectStore(this.buildsStoreName);
       const request = store.getAll();
 
       // eslint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
@@ -158,8 +163,8 @@ export class IndexedDbStorageProvider implements StorageProvider {
     const db = await this.getDb();
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.storeName, 'readonly');
-      const store = transaction.objectStore(this.storeName);
+      const transaction = db.transaction(this.buildsStoreName, 'readonly');
+      const store = transaction.objectStore(this.buildsStoreName);
       const request = store.get(buildId);
 
       // eslint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
@@ -189,6 +194,196 @@ export class IndexedDbStorageProvider implements StorageProvider {
     await this.updateBuild(buildId, { deletedAt: Date.now() });
   }
 
+  // ============================================================================
+  // Chat Methods
+  // ============================================================================
+
+  public async createChat(
+    resourceId: string,
+    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'> & { id?: string },
+  ): Promise<Chat> {
+    const id = chat.id ?? generatePrefixedId(idPrefix.chat);
+    const timestamp = Date.now();
+    const chatWithId: Chat = {
+      ...chat,
+      id,
+      resourceId,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    const db = await this.getDb();
+
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.chatsStoreName, 'readwrite');
+      const store = transaction.objectStore(this.chatsStoreName);
+
+      const request = store.add(chatWithId);
+
+      // eslint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
+      request.onerror = () => {
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        resolve(chatWithId);
+      };
+
+      transaction.oncomplete = () => {
+        db.close();
+      };
+    });
+  }
+
+  public async updateChat(
+    chatId: string,
+    update: PartialDeep<Chat>,
+    options?: {
+      ignoreKeys?: string[];
+      noUpdatedAt?: boolean;
+    },
+  ): Promise<Chat | undefined> {
+    const db = await this.getDb();
+    const existingChat = await this.getChat(chatId);
+
+    if (!existingChat) {
+      return undefined;
+    }
+
+    // If update contains an 'id' field matching chatId, treat it as a full chat replacement
+    const isFullChat = 'id' in update && update.id === chatId;
+
+    let updatedChat: Chat;
+
+    if (isFullChat) {
+      // Full chat replacement - no merging needed
+      updatedChat = update as Chat;
+    } else {
+      // Partial update - use deepmerge
+      const mergeIgnoreKeys = new Set(options?.ignoreKeys ?? []);
+      const optionalParameters = {
+        ...(options?.noUpdatedAt ? {} : { updatedAt: Date.now() }),
+      };
+
+      updatedChat = deepmerge(
+        existingChat,
+        { ...update, ...optionalParameters },
+        {
+          customMerge(key) {
+            if (mergeIgnoreKeys.has(key)) {
+              return (_source: unknown, target: unknown) => target;
+            }
+
+            return undefined;
+          },
+        },
+      ) as Chat;
+    }
+
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.chatsStoreName, 'readwrite');
+      const store = transaction.objectStore(this.chatsStoreName);
+
+      const request = store.put(updatedChat);
+
+      // eslint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
+      request.onerror = () => {
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        resolve(updatedChat);
+      };
+
+      transaction.oncomplete = () => {
+        db.close();
+      };
+    });
+  }
+
+  public async getChat(chatId: string): Promise<Chat | undefined> {
+    const db = await this.getDb();
+
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.chatsStoreName, 'readonly');
+      const store = transaction.objectStore(this.chatsStoreName);
+      const request = store.get(chatId);
+
+      // eslint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
+      request.onerror = () => {
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        resolve(request.result as Chat | undefined);
+      };
+
+      transaction.oncomplete = () => {
+        db.close();
+      };
+    });
+  }
+
+  public async getChatsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]> {
+    const db = await this.getDb();
+
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.chatsStoreName, 'readonly');
+      const store = transaction.objectStore(this.chatsStoreName);
+      const index = store.index('resourceId');
+      const request = index.getAll(resourceId);
+
+      // eslint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
+      request.onerror = () => {
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        const chats = request.result as Chat[];
+        // Filter out deleted chats unless explicitly requested
+        const filteredChats = options?.includeDeleted ? chats : chats.filter((chat) => !chat.deletedAt);
+        resolve(filteredChats);
+      };
+
+      transaction.oncomplete = () => {
+        db.close();
+      };
+    });
+  }
+
+  public async deleteChat(chatId: string): Promise<void> {
+    // Get the chat to make sure it exists
+    const chat = await this.getChat(chatId);
+    if (!chat) {
+      return;
+    }
+
+    // Perform soft delete by updating deletedAt timestamp
+    await this.updateChat(chatId, { deletedAt: Date.now() });
+  }
+
+  public async duplicateChat(chatId: string): Promise<Chat> {
+    const chat = await this.getChat(chatId);
+    if (!chat) {
+      throw new Error(`Chat not found: ${chatId}`);
+    }
+
+    return this.createChat(chat.resourceId, {
+      name: `${chat.name} (Copy)`,
+      messages: chat.messages,
+      draft: chat.draft,
+      messageEdits: chat.messageEdits,
+    });
+  }
+
+  // ============================================================================
+  // Database Management
+  // ============================================================================
+
   private async getDb(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(this.dbName, this.version);
@@ -203,10 +398,19 @@ export class IndexedDbStorageProvider implements StorageProvider {
         resolve(request.result);
       };
 
-      request.onupgradeneeded = () => {
+      request.onupgradeneeded = (event) => {
         const db = request.result;
-        if (!db.objectStoreNames.contains(this.storeName)) {
-          db.createObjectStore(this.storeName, { keyPath: 'id' });
+        const { oldVersion } = event;
+
+        // Version 1: Create builds store
+        if (oldVersion < 1 && !db.objectStoreNames.contains(this.buildsStoreName)) {
+          db.createObjectStore(this.buildsStoreName, { keyPath: 'id' });
+        }
+
+        // Version 2+: Create chats store with resourceId index
+        if (oldVersion < 2 && !db.objectStoreNames.contains(this.chatsStoreName)) {
+          const chatsStore = db.createObjectStore(this.chatsStoreName, { keyPath: 'id' });
+          chatsStore.createIndex('resourceId', 'resourceId', { unique: false });
         }
       };
     });

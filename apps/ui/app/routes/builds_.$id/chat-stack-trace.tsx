@@ -2,9 +2,10 @@ import { useSelector } from '@xstate/react';
 import { useCallback } from 'react';
 import { Sparkles } from 'lucide-react';
 import type { KernelProvider, KernelStackFrame } from '@taucad/types';
-import { messageRole, messageStatus, languageFromKernel } from '@taucad/types/constants';
+import { languageFromKernel } from '@taucad/types/constants';
+import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { Button } from '#components/ui/button.js';
-import { useChatActions } from '#components/chat/chat-provider.js';
+import { useChatActions } from '#hooks/use-chat.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useBuild } from '#hooks/use-build.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -83,7 +84,11 @@ function ErrorStackTrace({
           <div className="mb-1 font-medium text-muted-foreground">Stack trace:</div>
           <div className="space-y-0.5 rounded border bg-background/50 p-2">
             {stackFrames.map((frame, index) => (
-              <StackFrame key={frame.functionName} frame={frame} index={index} />
+              <StackFrame
+                key={`${frame.functionName}-${frame.fileName}-${frame.lineNumber}-${frame.columnNumber}`}
+                frame={frame}
+                index={index}
+              />
             ))}
           </div>
         </div>
@@ -96,7 +101,7 @@ export function ChatStackTrace({ className, ...props }: React.HTMLAttributes<HTM
   const { getMainFilename, cadRef } = useBuild();
   const fileManager = useFileManager();
   const error = useSelector(cadRef, (state) => state.context.kernelError);
-  const { append } = useChatActions();
+  const { sendMessage } = useChatActions();
   const { selectedModel } = useModels();
   const [, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
   const [kernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
@@ -178,15 +183,15 @@ Please update the code to resolve this error.`;
     const message = createMessage({
       content: errorPrompt,
       role: messageRole.user,
-      model: selectedModel?.id ?? defaultChatModel,
-      status: messageStatus.pending,
       metadata: {
+        model: selectedModel?.id ?? defaultChatModel,
+        status: messageStatus.pending,
         kernel,
       },
     });
 
-    append(message);
-  }, [error, getMainFilename, fileManager, kernel, setIsChatOpen, selectedModel?.id, append]);
+    sendMessage(message);
+  }, [error, getMainFilename, fileManager, kernel, setIsChatOpen, selectedModel?.id, sendMessage]);
 
   if (!error) {
     return null;

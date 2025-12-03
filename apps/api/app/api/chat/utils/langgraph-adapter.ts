@@ -1,10 +1,11 @@
 /* eslint-disable max-depth -- TODO: fix this */
 import type { IterableReadableStream } from '@langchain/core/utils/stream';
-import { formatDataStreamPart, createDataStream } from 'ai';
-import type { DataStreamWriter } from 'ai';
+import { createUIMessageStream } from 'ai';
+import type { UIMessageStreamWriter } from 'ai';
 import type { StreamEvent as LangchainStreamEvent } from '@langchain/core/tracers/log_stream';
 import { idPrefix } from '@taucad/types/constants';
-import { generatePrefixedId } from '#utils/id.utils.js';
+import type { MyUIMessage } from '@taucad/chat';
+import { generatePrefixedId } from '@taucad/utils/id';
 import type { ChatUsageTokens } from '#api/chat/chat.schema.js';
 import { processContent } from '#api/chat/utils/process-content.js';
 import type {
@@ -15,17 +16,7 @@ import type {
   ToolEndEvent,
 } from '#api/chat/utils/langgraph-types.js';
 
-/**
- * Enhanced DataStream with a convenient write method for streaming content.
- */
-export type EnhancedDataStreamWriter = DataStreamWriter & {
-  /**
-   * Formats and writes a part to the data stream.
-   * @param arguments_ - The arguments to pass to formatDataStreamPart.
-   * @returns The formatted data stream part.
-   */
-  writePart: typeof formatDataStreamPart;
-};
+type TypedUiMessageStreamWriter = UIMessageStreamWriter<MyUIMessage>;
 
 /**
  * Callbacks for the LangGraphAdapter to handle different events.
@@ -39,7 +30,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.type - The type of content being streamed.
    */
   onChatModelStream?: (parameters: {
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     content: string | unknown[];
     type: string;
   }) => void;
@@ -50,7 +41,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.dataStream - The enhanced data stream writer.
    * @param parameters.messageId - The ID of the message being generated.
    */
-  onChatModelStart?: (parameters: { dataStream: EnhancedDataStreamWriter; messageId: string }) => void;
+  onChatModelStart?: (parameters: { dataStream: TypedUiMessageStreamWriter; messageId: string }) => void;
 
   /**
    * Called when a chat model finishes generating content.
@@ -60,7 +51,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.usageTokens - Token usage information.
    */
   onChatModelEnd?: (parameters: {
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     modelId: string;
     usageTokens: ChatUsageTokens;
   }) => void;
@@ -74,7 +65,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.args - The arguments passed to the tool.
    */
   onToolStart?: (parameters: {
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     toolCallId: string;
     toolName: string;
     args: unknown;
@@ -89,7 +80,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.result - The result returned by the tool.
    */
   onToolEnd?: (parameters: {
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     toolCallId: string;
     toolName: string;
     result: unknown;
@@ -111,7 +102,7 @@ export type LangGraphAdapterCallbacks = {
    * @param parameters.usageTokens - Token usage information.
    */
   onMessageComplete?: (parameters: {
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     modelId: string;
     usageTokens: ChatUsageTokens;
   }) => void;
@@ -170,12 +161,9 @@ export class LangGraphAdapter {
     const typedStream = stream as IterableReadableStream<StreamEvent>;
     const { modelId, callbacks = {}, toolTypeMap = {}, parseToolResults } = options;
 
-    const dataStream = createDataStream({
+    const dataStream = createUIMessageStream({
       // eslint-disable-next-line complexity -- acceptable to keep the function contained.
-      execute: async (rawDataStream) => {
-        // Create enhanced data stream
-        const dataStream = this.createDataStreamWriter(rawDataStream);
-
+      execute: async (dataStream) => {
         const id = generatePrefixedId(idPrefix.message);
 
         // Keep reasoning state in a mutable object to avoid closure issues
@@ -187,6 +175,14 @@ export class LangGraphAdapter {
         const toolCallState = {
           currentToolCallId: '',
           currentToolName: '',
+          toolInputStartSent: false,
+          pendingFinishStep: false, // Tracks if finish-step was deferred due to pending tool call
+        };
+
+        // Track whether start events have been sent to ensure proper event sequencing
+        const streamStartState = {
+          textStartSent: false,
+          reasoningStartSent: false,
         };
 
         const totalUsageTokens = {
@@ -206,11 +202,13 @@ export class LangGraphAdapter {
             case 'on_chat_model_stream': {
               this.handleChatModelStream({
                 streamEvent,
-                dataStream,
+                dataStream: dataStream.writer,
                 callbacks,
                 reasoningState,
                 toolCallState,
+                streamStartState,
                 toolTypeMap,
+                messageId: id,
               });
               break;
             }
@@ -218,7 +216,7 @@ export class LangGraphAdapter {
             case 'on_chat_model_start': {
               this.handleChatModelStart({
                 messageId: id,
-                dataStream,
+                dataStream: dataStream.writer,
                 callbacks,
               });
               break;
@@ -227,10 +225,13 @@ export class LangGraphAdapter {
             case 'on_chat_model_end': {
               this.handleChatModelEnd({
                 streamEvent,
-                dataStream,
+                dataStream: dataStream.writer,
                 callbacks,
                 modelId,
                 totalUsageTokens,
+                streamStartState,
+                toolCallState,
+                messageId: id,
               });
               break;
             }
@@ -238,9 +239,11 @@ export class LangGraphAdapter {
             case 'on_tool_start': {
               this.handleToolStart({
                 streamEvent,
-                dataStream,
+                dataStream: dataStream.writer,
                 callbacks,
                 toolCallState,
+                streamStartState,
+                messageId: id,
               });
               break;
             }
@@ -248,7 +251,7 @@ export class LangGraphAdapter {
             case 'on_tool_end': {
               this.handleToolEnd({
                 streamEvent,
-                dataStream,
+                dataStream: dataStream.writer,
                 callbacks,
                 parseToolResults,
                 toolCallState,
@@ -303,15 +306,12 @@ export class LangGraphAdapter {
           }
         }
 
-        callbacks.onMessageComplete?.({ dataStream, modelId, usageTokens: totalUsageTokens });
+        callbacks.onMessageComplete?.({ dataStream: dataStream.writer, modelId, usageTokens: totalUsageTokens });
 
         // Write finish message
-        dataStream.writePart('finish_message', {
+        dataStream.writer.write({
+          type: 'finish',
           finishReason: 'stop',
-          usage: {
-            promptTokens: totalUsageTokens.inputTokens,
-            completionTokens: totalUsageTokens.outputTokens,
-          },
         });
       },
       onError(error) {
@@ -329,13 +329,29 @@ export class LangGraphAdapter {
   // eslint-disable-next-line complexity -- acceptable to keep the function contained.
   private static handleChatModelStream(parameters: {
     streamEvent: ChatModelStreamEvent;
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
     reasoningState: { thinkingBuffer: string; isReasoning: boolean };
-    toolCallState: { currentToolCallId: string; currentToolName: string };
+    toolCallState: {
+      currentToolCallId: string;
+      currentToolName: string;
+      toolInputStartSent: boolean;
+      pendingFinishStep: boolean;
+    };
+    streamStartState: { textStartSent: boolean; reasoningStartSent: boolean };
     toolTypeMap: Record<string, string>;
+    messageId: string;
   }): void {
-    const { streamEvent, dataStream, callbacks, reasoningState, toolCallState, toolTypeMap } = parameters;
+    const {
+      streamEvent,
+      dataStream,
+      callbacks,
+      reasoningState,
+      toolCallState,
+      streamStartState,
+      toolTypeMap,
+      messageId,
+    } = parameters;
 
     if (streamEvent.data.chunk.tool_calls.length > 0) {
       const toolCall = streamEvent.data.chunk.tool_calls[0]!;
@@ -349,7 +365,9 @@ export class LangGraphAdapter {
         }
 
         toolCallState.currentToolName = toolName;
-        dataStream.writePart('tool_call_streaming_start', {
+        toolCallState.toolInputStartSent = true;
+        dataStream.write({
+          type: 'tool-input-start',
           toolCallId,
           toolName,
         });
@@ -358,9 +376,10 @@ export class LangGraphAdapter {
       // If tool call chunks are present, we need to handle them separately.
       const toolCallChunk = streamEvent.data.chunk.tool_call_chunks[0]!;
       if (toolCallState.currentToolCallId) {
-        dataStream.writePart('tool_call_delta', {
+        dataStream.write({
+          type: 'tool-input-delta',
           toolCallId: toolCallState.currentToolCallId,
-          argsTextDelta: toolCallChunk.args,
+          inputTextDelta: toolCallChunk.args,
         });
       } else {
         throw new Error('Attempted to write tool call delta without a current tool call ID');
@@ -385,8 +404,38 @@ export class LangGraphAdapter {
         // Empty content can sometimes be present, so we check for it and only write if it's present
         // to avoid writing empty parts to the data stream.
         if (content) {
-          // Write to data stream
-          dataStream.writePart(type, content);
+          if (type === 'reasoning') {
+            // Ensure reasoning-start is sent before the first reasoning-delta
+            if (!streamStartState.reasoningStartSent) {
+              dataStream.write({
+                type: 'reasoning-start',
+                id: messageId,
+              });
+              streamStartState.reasoningStartSent = true;
+            }
+
+            // Write to data stream
+            dataStream.write({
+              type: 'reasoning-delta',
+              id: messageId,
+              delta: content,
+            });
+          } else {
+            // Ensure text-start is sent before the first text-delta
+            if (!streamStartState.textStartSent) {
+              dataStream.write({
+                type: 'text-start',
+                id: messageId,
+              });
+              streamStartState.textStartSent = true;
+            }
+
+            dataStream.write({
+              type: 'text-delta',
+              id: messageId,
+              delta: content,
+            });
+          }
 
           // Call callback if provided
           callbacks.onChatModelStream?.({ dataStream, content, type });
@@ -403,7 +452,20 @@ export class LangGraphAdapter {
                 // No-op: Sometimes empty strings are present
                 // We don't need to write them to the data stream.
               } else {
-                dataStream.writePart('text', textPart.text);
+                // Ensure text-start is sent before the first text-delta
+                if (!streamStartState.textStartSent) {
+                  dataStream.write({
+                    type: 'text-start',
+                    id: messageId,
+                  });
+                  streamStartState.textStartSent = true;
+                }
+
+                dataStream.write({
+                  type: 'text-delta',
+                  id: messageId,
+                  delta: textPart.text,
+                });
                 callbacks.onChatModelStream?.({ dataStream, content: textPart.text, type: 'text' });
               }
 
@@ -416,16 +478,34 @@ export class LangGraphAdapter {
                   // No-op: Sometimes empty strings are present
                   // We don't need to write them to the data stream.
                 } else {
-                  dataStream.writePart('reasoning', part.thinking);
+                  // Ensure reasoning-start is sent before the first reasoning-delta
+                  if (!streamStartState.reasoningStartSent) {
+                    dataStream.write({
+                      type: 'reasoning-start',
+                      id: messageId,
+                    });
+                    streamStartState.reasoningStartSent = true;
+                  }
+
+                  dataStream.write({
+                    type: 'reasoning-delta',
+                    id: messageId,
+                    delta: part.thinking,
+                  });
                   callbacks.onChatModelStream?.({ dataStream, content: part.thinking, type: 'reasoning' });
                 }
               } else if ('signature' in part) {
-                dataStream.writePart('reasoning_signature', { signature: part.signature });
+                dataStream.write({
+                  type: 'reasoning-end',
+                  id: messageId,
+                });
                 callbacks.onChatModelStream?.({
                   dataStream,
                   content: [{ signature: part.signature }],
                   type: 'reasoning_signature',
                 });
+                // Reset reasoning start state after reasoning-end
+                streamStartState.reasoningStartSent = false;
               } else {
                 throw new Error('Unknown part type: ' + JSON.stringify(part));
               }
@@ -434,7 +514,20 @@ export class LangGraphAdapter {
             }
 
             case 'redacted_thinking': {
-              dataStream.writePart('redacted_reasoning', { data: part.data });
+              // Ensure reasoning-start is sent before the first reasoning-delta
+              if (!streamStartState.reasoningStartSent) {
+                dataStream.write({
+                  type: 'reasoning-start',
+                  id: messageId,
+                });
+                streamStartState.reasoningStartSent = true;
+              }
+
+              dataStream.write({
+                type: 'reasoning-delta',
+                id: messageId,
+                delta: part.data,
+              });
               callbacks.onChatModelStream?.({
                 dataStream,
                 content: [{ data: part.data }],
@@ -469,13 +562,13 @@ export class LangGraphAdapter {
    */
   private static handleChatModelStart(parameters: {
     messageId: string;
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
   }): void {
     const { messageId, dataStream, callbacks } = parameters;
 
-    dataStream.writePart('start_step', {
-      messageId,
+    dataStream.write({
+      type: 'start-step',
     });
 
     callbacks.onChatModelStart?.({ dataStream, messageId });
@@ -486,12 +579,29 @@ export class LangGraphAdapter {
    */
   private static handleChatModelEnd(parameters: {
     streamEvent: ChatModelEndEvent;
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
     modelId: string;
     totalUsageTokens: ChatUsageTokens;
+    streamStartState: { textStartSent: boolean; reasoningStartSent: boolean };
+    toolCallState: {
+      currentToolCallId: string;
+      currentToolName: string;
+      toolInputStartSent: boolean;
+      pendingFinishStep: boolean;
+    };
+    messageId: string;
   }): void {
-    const { streamEvent, dataStream, callbacks, modelId, totalUsageTokens } = parameters;
+    const {
+      streamEvent,
+      dataStream,
+      callbacks,
+      modelId,
+      totalUsageTokens,
+      streamStartState,
+      toolCallState,
+      messageId,
+    } = parameters;
 
     const usageTokens = {
       inputTokens: streamEvent.data.output.usage_metadata.input_tokens,
@@ -506,11 +616,37 @@ export class LangGraphAdapter {
     totalUsageTokens.cachedReadTokens += usageTokens.cachedReadTokens;
     totalUsageTokens.cachedWriteTokens += usageTokens.cachedWriteTokens;
 
-    dataStream.writePart('finish_step', {
-      finishReason: 'stop',
-      usage: { promptTokens: usageTokens.inputTokens, completionTokens: usageTokens.outputTokens },
-      isContinued: false,
-    });
+    // Check if there's a pending tool call - if so, defer finish-step until tool completes
+    // AI SDK v5 expects: tool-input-available → text-end → tool-output-available → finish-step
+    const hasPendingToolCall = Boolean(toolCallState.currentToolCallId);
+
+    if (hasPendingToolCall) {
+      // Defer finish-step and text-end/reasoning-end until after tool completes
+      toolCallState.pendingFinishStep = true;
+    } else {
+      // No pending tool call - send end events and finish-step normally
+      if (streamStartState.textStartSent) {
+        dataStream.write({
+          type: 'text-end',
+          id: messageId,
+        });
+      }
+
+      if (streamStartState.reasoningStartSent) {
+        dataStream.write({
+          type: 'reasoning-end',
+          id: messageId,
+        });
+      }
+
+      dataStream.write({
+        type: 'finish-step',
+      });
+
+      // Reset start state flags after step finishes so new steps can send start events
+      streamStartState.textStartSent = false;
+      streamStartState.reasoningStartSent = false;
+    }
 
     callbacks.onChatModelEnd?.({ dataStream, modelId, usageTokens });
     callbacks.onUsageUpdate?.({ modelId, usageTokens });
@@ -521,11 +657,18 @@ export class LangGraphAdapter {
    */
   private static handleToolStart(parameters: {
     streamEvent: ToolStartEvent;
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
-    toolCallState: { currentToolCallId: string; currentToolName: string };
+    toolCallState: {
+      currentToolCallId: string;
+      currentToolName: string;
+      toolInputStartSent: boolean;
+      pendingFinishStep: boolean;
+    };
+    streamStartState: { textStartSent: boolean; reasoningStartSent: boolean };
+    messageId: string;
   }): void {
-    const { streamEvent, dataStream, callbacks, toolCallState } = parameters;
+    const { streamEvent, dataStream, callbacks, toolCallState, streamStartState, messageId } = parameters;
 
     const toolCallId = toolCallState.currentToolCallId;
     const toolName = toolCallState.currentToolName;
@@ -564,11 +707,52 @@ export class LangGraphAdapter {
       args = { input };
     }
 
-    dataStream.writePart('tool_call', {
+    // Only write tool-input-start and tool-input-delta if they haven't been sent yet.
+    // handleChatModelStream already sends these events when streaming tool calls,
+    // so we skip them here to avoid duplicates. AI SDK v5 expects exactly one
+    // tool-input-start event per tool call.
+    if (!toolCallState.toolInputStartSent) {
+      dataStream.write({
+        type: 'tool-input-start',
+        toolCallId,
+        toolName,
+      });
+      dataStream.write({
+        type: 'tool-input-delta',
+        toolCallId,
+        inputTextDelta: String(input),
+      });
+      toolCallState.toolInputStartSent = true;
+    }
+
+    // AI SDK v5 requires tool-input-available to signal that tool input is complete
+    // This must be sent before tool-output-available
+    dataStream.write({
+      type: 'tool-input-available',
       toolCallId,
       toolName,
-      args,
+      input: args,
     });
+
+    // AI SDK v5 expects: tool-input-available → text-end → tool-output-available → finish-step
+    // Send text-end/reasoning-end that were deferred from handleChatModelEnd
+    if (toolCallState.pendingFinishStep) {
+      if (streamStartState.textStartSent) {
+        dataStream.write({
+          type: 'text-end',
+          id: messageId,
+        });
+        streamStartState.textStartSent = false;
+      }
+
+      if (streamStartState.reasoningStartSent) {
+        dataStream.write({
+          type: 'reasoning-end',
+          id: messageId,
+        });
+        streamStartState.reasoningStartSent = false;
+      }
+    }
 
     callbacks.onToolStart?.({ dataStream, toolCallId, toolName, args });
   }
@@ -578,10 +762,15 @@ export class LangGraphAdapter {
    */
   private static handleToolEnd(parameters: {
     streamEvent: ToolEndEvent;
-    dataStream: EnhancedDataStreamWriter;
+    dataStream: TypedUiMessageStreamWriter;
     callbacks: LangGraphAdapterCallbacks;
     parseToolResults?: Partial<Record<string, (content: string) => unknown[]>>;
-    toolCallState: { currentToolCallId: string; currentToolName: string };
+    toolCallState: {
+      currentToolCallId: string;
+      currentToolName: string;
+      toolInputStartSent: boolean;
+      pendingFinishStep: boolean;
+    };
   }): void {
     const { streamEvent, dataStream, callbacks, parseToolResults, toolCallState } = parameters;
 
@@ -611,6 +800,7 @@ export class LangGraphAdapter {
 
     toolCallState.currentToolCallId = ''; // Reset the current tool call ID
     toolCallState.currentToolName = ''; // Reset the current tool name
+    toolCallState.toolInputStartSent = false; // Reset the tool input start flag
 
     // Parse tool results using the configurable parser with tool name.
     // If no parser is configured, use the content as is.
@@ -626,25 +816,23 @@ export class LangGraphAdapter {
       result = '';
     }
 
-    dataStream.writePart('tool_result', {
+    dataStream.write({
+      type: 'tool-output-available',
       toolCallId,
-      result,
+      output: result,
     });
+
+    // If finish-step was deferred due to pending tool call, send it now
+    // AI SDK v5 expects: tool-input-available → text-end → tool-output-available → finish-step
+    // Note: text-end/reasoning-end were already sent in handleToolStart
+    if (toolCallState.pendingFinishStep) {
+      dataStream.write({
+        type: 'finish-step',
+      });
+
+      toolCallState.pendingFinishStep = false;
+    }
 
     callbacks.onToolEnd?.({ dataStream, toolCallId, toolName, result });
-  }
-
-  /**
-   * Creates an enhanced data stream writer.
-   */
-  private static createDataStreamWriter(dataStream: DataStreamWriter): EnhancedDataStreamWriter {
-    return Object.assign(dataStream, {
-      writePart(...arguments_: Parameters<typeof formatDataStreamPart>) {
-        const part = formatDataStreamPart(...arguments_);
-        dataStream.write(part);
-
-        return part;
-      },
-    });
   }
 }

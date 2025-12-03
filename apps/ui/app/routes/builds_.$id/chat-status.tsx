@@ -4,14 +4,14 @@ import type { ClassValue } from 'clsx';
 import { cn } from '#utils/ui.utils.js';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
-import { useChatSelector } from '#components/chat/chat-provider.js';
+import { useChatSelector } from '#hooks/use-chat.js';
 
 type ChatStatusProperties = {
   readonly className?: ClassValue;
 };
 
 export const ChatStatus = memo(function ({ className }: ChatStatusProperties) {
-  const status = useChatSelector((state) => state.context.status);
+  const status = useChatSelector((state) => state.status);
   const isVisible = status === 'streaming';
 
   return (

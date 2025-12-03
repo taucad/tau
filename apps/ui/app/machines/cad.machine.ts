@@ -9,7 +9,7 @@ import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { logMachine } from '#machines/logs.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 
-// Interface defining the context for the CAD machine
+// Context type for CAD machine
 export type CadContext = {
   file: GeometryFile | undefined;
   screenshot: string | undefined;
@@ -53,10 +53,6 @@ type CadInput = {
   logRef?: ActorRefFrom<typeof logMachine>;
   fileManagerRef?: ActorRefFrom<typeof fileManagerMachine>;
 };
-
-// Debounce delays in milliseconds
-const parameterDebounceDelay = 50;
-const fileDebounceDelay = 500;
 
 /**
  * CAD Machine
@@ -226,6 +222,10 @@ export const cadMachine = setup({
     isKernelInitializing: ({ context }) => context.isKernelInitializing,
     hasModel: ({ context }) => context.file !== undefined,
   },
+  delays: {
+    fileDebounce: 500,
+    parameterDebounce: 50,
+  },
 }).createMachine({
   id: 'cad',
   entry: enqueueActions(({ enqueue, context, self }) => {
@@ -371,7 +371,7 @@ export const cadMachine = setup({
     // - A way to cancel the worker job if the user navigates away from the page
     bufferingFile: {
       after: {
-        [fileDebounceDelay]: {
+        fileDebounce: {
           target: 'rendering',
         },
       },
@@ -397,7 +397,7 @@ export const cadMachine = setup({
     // The bufferingParameters state debounces rapid parameter changes (50ms)
     bufferingParameters: {
       after: {
-        [parameterDebounceDelay]: {
+        parameterDebounce: {
           target: 'rendering',
         },
       },

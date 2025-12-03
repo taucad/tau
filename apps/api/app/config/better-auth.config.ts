@@ -6,10 +6,10 @@ import type { LogLevel } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import type { IdPrefix } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
 import type { DatabaseService } from '#database/database.service.js';
 import type { AuthService } from '#auth/auth.service.js';
 import type { Environment } from '#config/environment.config.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
 import { staticAuthConfig } from '#config/auth.js';
 
 /**

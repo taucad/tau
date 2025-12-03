@@ -4,7 +4,7 @@ import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from 'remix-
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import type { Model } from '@taucad/types';
+import type { Model } from '@taucad/chat';
 import { getEnvironment } from '#config.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { Page } from '#components/layout/page.js';
@@ -23,6 +23,7 @@ import { globalStylesLinks } from '#styles/global.styles.js';
 import type { Handle } from '#types/matches.types.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
 import { BuildManagerProvider } from '#hooks/use-build-manager.js';
+import { ChatManagerProvider } from '#hooks/use-chat-manager.js';
 import { FileManagerProvider } from '#hooks/use-file-manager.js';
 
 export const links: LinksFunction = () => [...globalStylesLinks, ...webManifestLinks, ...markdownViewerLinks];
@@ -86,15 +87,17 @@ export function Layout({ children }: { readonly children: ReactNode }): React.JS
       <QueryClientProvider client={queryClient}>
         <FileManagerProvider rootDirectory="/">
           <BuildManagerProvider>
-            <ThemeProvider specifiedTheme={ssrTheme} themeAction="/action/set-theme">
-              <ColorProvider>
-                <TooltipProvider>
-                  <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme}>
-                    {children}
-                  </LayoutDocument>
-                </TooltipProvider>
-              </ColorProvider>
-            </ThemeProvider>
+            <ChatManagerProvider>
+              <ThemeProvider specifiedTheme={ssrTheme} themeAction="/action/set-theme">
+                <ColorProvider>
+                  <TooltipProvider>
+                    <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme}>
+                      {children}
+                    </LayoutDocument>
+                  </TooltipProvider>
+                </ColorProvider>
+              </ThemeProvider>
+            </ChatManagerProvider>
           </BuildManagerProvider>
         </FileManagerProvider>
       </QueryClientProvider>

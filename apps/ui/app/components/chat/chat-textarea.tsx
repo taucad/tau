@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { ArrowUp, X, Square, CircuitBoard, ChevronDown, Paperclip, Wrench } from 'lucide-react';
 import type { ClassValue } from 'clsx';
-import type { ToolWithSelection } from '@taucad/types';
-import { useChatActions, useChatSelector } from '#components/chat/chat-provider.js';
+import type { ToolSelection } from '@taucad/chat';
+import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
@@ -39,7 +39,7 @@ export type ChatTextareaProperties = {
   }: {
     content: string;
     model: string;
-    metadata?: { toolChoice?: ToolWithSelection };
+    metadata?: { toolChoice?: ToolSelection };
     imageUrls?: string[];
   }) => Promise<void>;
   readonly onEscapePressed?: () => void;
@@ -77,17 +77,13 @@ export const ChatTextarea = memo(function ({
   const fileInputReference = useRef<HTMLInputElement>(null);
   const textareaReference = useRef<HTMLTextAreaElement>(null);
   const { selectedModel } = useModels();
-  const status = useChatSelector((state) => state.context.status);
+  const status = useChatSelector((state) => state.status);
 
   // Read draft state from machine based on mode
-  const inputText = useChatSelector((state) =>
-    mode === 'main' ? state.context.draftText : state.context.editDraftText,
-  );
-  const images = useChatSelector((state) =>
-    mode === 'main' ? state.context.draftImages : state.context.editDraftImages,
-  );
+  const inputText = useChatSelector((state) => (mode === 'main' ? state.draftText : state.editDraftText));
+  const images = useChatSelector((state) => (mode === 'main' ? state.draftImages : state.editDraftImages));
   const selectedToolChoice = useChatSelector((state) =>
-    mode === 'main' ? (state.context.draftToolChoice as ToolWithSelection) : 'auto',
+    mode === 'main' ? (state.draftToolChoice as ToolSelection) : 'auto',
   );
 
   const {
@@ -718,7 +714,11 @@ export const ChatTextarea = memo(function ({
                   {selectedMode === 'custom' && selectedTools.length > 0 ? (
                     <span className="flex items-center gap-1">
                       {selectedTools.map((tool) => {
-                        const Icon = toolMetadata[tool].icon;
+                        const Icon = toolMetadata[tool]?.icon;
+                        if (!Icon) {
+                          return null;
+                        }
+
                         return <Icon key={tool} className="size-4" />;
                       })}
                     </span>

@@ -14,7 +14,7 @@ export type FileEditResult = {
   success: boolean;
   message: string;
   error?: string;
-  editedContent?: string;
+  editedContent: string;
 };
 
 // Context

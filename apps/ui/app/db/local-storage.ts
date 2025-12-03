@@ -2,9 +2,9 @@ import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge/index.js';
 import type { Build } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
 import type { StorageProvider } from '#types/storage.types.js';
 import { metaConfig } from '#constants/meta.constants.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
 
 export class LocalStorageProvider implements StorageProvider {
   private readonly buildsKey = `${metaConfig.databasePrefix}builds`;

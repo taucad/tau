@@ -35,7 +35,9 @@ import {
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import { useSelector } from '@xstate/react';
 import type { EngineeringDiscipline, Build, KernelProvider } from '@taucad/types';
-import { engineeringDisciplines, messageRole, messageStatus, idPrefix } from '@taucad/types/constants';
+import { engineeringDisciplines, idPrefix } from '@taucad/types/constants';
+import { messageRole, messageStatus } from '@taucad/chat/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
 import { createInitialBuild } from '#constants/build.constants.js';
 import { createColumns } from '#routes/builds_.library/columns.js';
 import { CategoryBadge } from '#components/category-badge.js';
@@ -83,14 +85,14 @@ import { EmptyItems } from '#components/ui/empty-items.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea.js';
 import { KernelSelector } from '#components/chat/kernel-selector.js';
-import { ChatProvider } from '#components/chat/chat-provider.js';
+import { ChatProvider } from '#hooks/use-chat.js';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { createMessage } from '#utils/chat.utils.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultBuildName } from '#constants/build-names.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
 import { useBuildManager } from '#hooks/use-build-manager.js';
+import { useChatManager } from '#hooks/use-chat-manager.js';
 
 const categoryIconsFromEngineeringDiscipline = {
   mechanical: Wrench,
@@ -126,6 +128,7 @@ export default function PersonalCadProjects(): React.JSX.Element {
   const [selectedKernel, setSelectedKernel] = useCookie<KernelProvider>(cookieName.cadKernel, 'openscad');
   const [, setIsChatOpen] = useCookie(cookieName.chatOpHistory, true);
   const buildManager = useBuildManager();
+  const chatManager = useChatManager();
 
   const handleToggleDeleted = useCallback((value: boolean) => {
     setShowDeleted(value);
@@ -190,15 +193,14 @@ export default function PersonalCadProjects(): React.JSX.Element {
         const userMessage = createMessage({
           content,
           role: messageRole.user,
-          model,
-          status: messageStatus.pending,
-          metadata: metadata ?? {},
+          metadata: { ...metadata, kernel: selectedKernel, model, status: messageStatus.pending },
           imageUrls,
         });
 
+        // Pre-generate the chat ID
         const chatId = generatePrefixedId(idPrefix.chat);
 
-        // Create initial build using factory function
+        // Create initial build using factory function with the pre-generated chatId
         const { buildData, files } = createInitialBuild({
           buildName: defaultBuildName,
           chatId,
@@ -207,7 +209,15 @@ export default function PersonalCadProjects(): React.JSX.Element {
           emptyCodeContent: encodeTextFile(emptyCode),
         });
 
+        // Create the build with lastChatId already set
         const createdBuild = await buildManager.createBuild(buildData, files);
+
+        // Create the chat with the same pre-generated ID
+        await chatManager.createChat(createdBuild.id, {
+          id: chatId,
+          name: 'Initial design',
+          messages: [userMessage],
+        });
 
         // Ensure chat is open when navigating to the build page
         setIsChatOpen(true);
@@ -218,7 +228,7 @@ export default function PersonalCadProjects(): React.JSX.Element {
         toast.error('Failed to create build');
       }
     },
-    [selectedKernel, buildManager, setIsChatOpen, navigate],
+    [selectedKernel, buildManager, chatManager, setIsChatOpen, navigate],
   );
 
   const actions: BuildActions = {
@@ -506,7 +516,7 @@ function UnifiedBuildList({
           className="h-8"
           placeholder="Search builds..."
           value={globalFilter}
-          containerClassName="flex-grow"
+          containerClassName="grow"
           onChange={(event) => {
             setGlobalFilter(event.target.value);
           }}
@@ -847,7 +857,7 @@ function BuildLibraryCard({ build, actions, isSelected, onSelect }: BuildLibrary
         </div>
         <CardDescription className="line-clamp-2">{build.description}</CardDescription>
       </CardHeader>
-      <CardContent className="flex-grow">
+      <CardContent className="grow">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap gap-2">
             {Object.keys(build.assets).map((cat) => (

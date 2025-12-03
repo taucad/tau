@@ -266,7 +266,7 @@ function ObjectFieldTemplate(
           <span className="truncate">
             <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
           </span>
-          <span className={cn('ml-1.5 flex-shrink-0 text-muted-foreground/50', isCountFiltered && 'italic')}>
+          <span className={cn('ml-1.5 shrink-0 text-muted-foreground/50', isCountFiltered && 'italic')}>
             {countDisplay}
           </span>
         </h3>
@@ -327,7 +327,7 @@ function ArrayFieldTemplate(
           <span className="truncate">
             <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
           </span>
-          <span className="ml-1.5 flex-shrink-0 text-muted-foreground/50">{countDisplay}</span>
+          <span className="ml-1.5 shrink-0 text-muted-foreground/50">{countDisplay}</span>
         </h3>
         <ChevronRight className="size-3.5 text-muted-foreground transition-transform duration-200 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
       </CollapsibleTrigger>

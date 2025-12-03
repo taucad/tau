@@ -2,7 +2,6 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ConfigService } from '@nestjs/config';
 import type { Params } from 'nestjs-pino';
 import type { Options } from 'pino-http';
-import type { PrettyOptions } from 'pino-pretty';
 import { loggingRedactPaths, logServiceProvider } from '#constants/app.constant.js';
 import type { LogServiceProvider } from '#constants/app.constant.js';
 import type { Environment } from '#config/environment.config.js';
@@ -133,7 +132,13 @@ const customSuccessMessage = (request: IncomingMessage, response: ServerResponse
   const statusColor = getStatusColor(response.statusCode);
   const url = formatUrl(request.url ?? '', true);
 
-  return `${colors.bright}${colors.white}[RES]:${formatRequestId(request.id as string)} ${methodColor}${request.method}${colors.reset} ${url} ${statusColor}${response.statusCode}${colors.reset} ${colors.dim}${responseTime}ms${colors.reset}`;
+  return [
+    `${colors.bright}${colors.white}[RES]:${formatRequestId(request.id as string)}`,
+    `${methodColor}${request.method}${colors.reset}`,
+    `${url}`,
+    `${statusColor}${response.statusCode}${colors.reset}`,
+    `${colors.dim}${responseTime}ms${colors.reset}`,
+  ].join(' ');
 };
 
 const customReceivedMessage = (request: IncomingMessage) => {
@@ -149,22 +154,58 @@ const customReceivedMessage = (request: IncomingMessage) => {
   // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- TODO: add typings
   const url = formatUrl(request.originalUrl ?? '', true);
 
-  return `${colors.bright}${colors.white}[REQ]:${formatRequestId(request.id as string)} ${methodColor}${request.method}${colors.reset} ${url}`;
+  return [
+    `${colors.bright}${colors.white}[REQ]:${formatRequestId(request.id as string)}`,
+    `${methodColor}${request.method}${colors.reset}`,
+    `${url}`,
+  ].join(' ');
 };
 
-const customErrorMessage = (request: IncomingMessage, response: ServerResponse, error: Error) => {
+const customErrorMessage = (...args: Parameters<NonNullable<Options['customErrorMessage']>>) => {
+  const [
+    request,
+    response,
+    error,
+    // @ts-expect-error -- Pino is missing the responseTime type
+    responseTime,
+  ] = args;
   const isDevMode = import.meta.env.DEV;
 
   if (!isDevMode) {
     const url = formatUrl(request.url ?? '', false);
-    return `[ERR]:${request.id as string} ${request.method} ${url} ${response.statusCode} ${error.message}`;
+    return [
+      `[ERR]:${request.id as string}`,
+      `${request.method}`,
+      `${url}`,
+      `${response.statusCode}`,
+      `${error.message}`,
+      `${responseTime}ms`,
+    ].join(' ');
   }
 
   const methodColor = getMethodColor(request.method ?? '');
   const statusColor = getStatusColor(response.statusCode);
   const url = formatUrl(request.url ?? '', true);
 
-  return `${colors.bright}${colors.red}[ERR]:${formatRequestId(request.id as string)} ${methodColor}${request.method}${colors.reset} ${url} ${statusColor}${response.statusCode}${colors.reset} ${colors.red}${error.message}${colors.reset}`;
+  return [
+    `${colors.bright}${colors.red}[ERR]:${formatRequestId(request.id as string)}`,
+    `${methodColor}${request.method}${colors.reset}`,
+    `${url}`,
+    `${statusColor}${response.statusCode}${colors.reset}`,
+    `${colors.red}${error.message}${colors.reset}`,
+    `${colors.dim}${responseTime}ms${colors.reset}`,
+  ].join(' ');
+};
+
+const customErrorObject = (
+  _request: IncomingMessage,
+  _response: ServerResponse,
+  _error: Error,
+  _responseTime: number,
+) => {
+  // We don't want to log the error object as it's handled in the `HttpExceptionFilter` logging.
+  // Returning `undefined` will cause the error object to not be logged.
+  return undefined;
 };
 
 function cloudwatchLoggingConfig(): Options {
@@ -204,21 +245,29 @@ export function consoleLoggingConfig(): Options {
     };
   }
 
-  const options: PrettyOptions = {
-    singleLine: true,
-    colorize: true,
-    ignore: 'pid,hostname,req,res,responseTime,context',
-    messageFormat: `${colors.bright}{if context}${colors.yellow}[{context}] {end}${colors.reset}{if msg}{msg}{end}`,
-  };
-
   return {
     messageKey: 'msg',
     transport: {
       target: 'pino-pretty',
-      options,
+      options: {
+        singleLine: false,
+        colorize: true,
+        ignore: 'pid,hostname,req,res,responseTime,context,data',
+        messageFormat: `${colors.bright}{if context}${colors.yellow}[{context}] {end}${colors.reset}{if msg}{msg}{end}{if data}\n{data}{end}`,
+      },
     },
   };
 }
+
+/** Custom error serializer for stack traces */
+const serializeError = (error: Error) => {
+  return {
+    type: error.name,
+    message: error.message,
+    stack: error.stack,
+    ...(error.cause ? { cause: error.cause } : {}),
+  };
+};
 
 export function logServiceConfig(logService: LogServiceProvider): Options {
   switch (logService) {
@@ -246,23 +295,33 @@ export function logServiceConfig(logService: LogServiceProvider): Options {
 }
 
 export async function useLoggerFactory(configService: ConfigService<Environment, true>): Promise<Params> {
+  const nodeEnv = configService.get('NODE_ENV', { infer: true });
   const logLevel = configService.get('LOG_LEVEL', { infer: true });
   const logService = configService.get('LOG_SERVICE', { infer: true });
+
+  // Disable logging in test environment
+  const effectiveLogLevel = nodeEnv === 'test' ? 'silent' : logLevel;
 
   const serviceOptions = logServiceConfig(logService);
 
   const pinoHttpOptions: Options = {
-    level: logLevel,
+    level: effectiveLogLevel,
     customSuccessMessage,
     customReceivedMessage,
     customErrorMessage,
+    customErrorObject,
+    serializers: {
+      /** Custom error serializer for stack traces */
+      err: serializeError,
+      error: serializeError,
+    },
     redact: {
       paths: loggingRedactPaths,
       censor() {
         /**
          * This makes sure that the redact doesn't mutate the original object
          * And only does it on the object that is being logged,
-         * It's strange but it works. No return value needed.
+         * It works by overriding the original censor function with a custom no-op function.
          */
       },
     }, // Redact sensitive information

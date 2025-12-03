@@ -13,6 +13,8 @@ export type KernelError = {
   message: string;
   startLineNumber: number;
   startColumn: number;
+  endLineNumber?: number;
+  endColumn?: number;
   stack?: string;
   stackFrames?: KernelStackFrame[];
   type?: 'compilation' | 'runtime' | 'kernel' | 'unknown';

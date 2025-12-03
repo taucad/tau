@@ -16,7 +16,7 @@ export type FileEntry = {
 type FileManagerContextType = {
   fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
   loadDirectory: (path: string) => void;
-  writeFile: (path: string, data: Uint8Array) => void;
+  writeFile: (path: string, data: Uint8Array) => Promise<void>;
   writeFiles: (files: Record<string, { content: Uint8Array }>) => Promise<void>;
   readFile: (path: string) => Promise<Uint8Array>;
   getZippedDirectory: (path: string) => Promise<Blob>;
@@ -53,8 +53,9 @@ export function FileManagerProvider({
   );
 
   const writeFile = useCallback(
-    (path: string, data: Uint8Array) => {
+    async (path: string, data: Uint8Array) => {
       actorRef.send({ type: 'writeFile', path, data });
+      await waitFor(actorRef, (state) => state.matches('ready'));
     },
     [actorRef],
   );

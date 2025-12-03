@@ -34,3 +34,26 @@ export const jsonCodec = <T extends z.core.$ZodType>(schema: T) =>
     },
     encode: (value) => JSON.stringify(value),
   });
+
+// Hack for vite's HMR:
+// without this monkey-patch, zod will throw an error whenever editing a schema file that uses
+// `.register` as it would try to re-register the schema with the same ID again
+// with this patch, re-registering will just replace the schema in the registry
+// @see https://github.com/colinhacks/zod/issues/4145
+if (import.meta.hot) {
+  const originalAdd = z.globalRegistry.add;
+
+  z.globalRegistry.add = (schema: Parameters<typeof originalAdd>[0], meta: Parameters<typeof originalAdd>[1]) => {
+    if (!meta.id) {
+      return originalAdd.call(z.globalRegistry, schema, meta);
+    }
+
+    const existingSchema = z.globalRegistry._idmap.get(meta.id);
+    if (existingSchema) {
+      z.globalRegistry.remove(existingSchema);
+      z.globalRegistry._idmap.delete(meta.id);
+    }
+
+    return originalAdd.call(z.globalRegistry, schema, meta);
+  };
+}

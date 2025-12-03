@@ -14,11 +14,11 @@ type InfiniteGridProperties = {
   readonly planeProperties?: React.ComponentProps<typeof Plane>;
   /**
    * The axes to use for the grid orientation.
-   * - 'xzy': Grid on XZ plane (Y-up coordinate system)
-   * - 'xyz': Grid on XY plane (Z-up coordinate system)
-   * - 'zyx': Grid on YZ plane (X-up coordinate system)
+   * - 'xyz': Grid on XY plane (Z-up coordinate system, CAD/engineering)
+   * - 'xzy': Grid on XZ plane (Y-up coordinate system, standard Three.js)
+   * - 'zyx': Grid on ZY plane (X-up coordinate system)
    */
-  readonly axes: 'xzy' | 'xyz' | 'zyx';
+  readonly axes: 'xyz' | 'xzy' | 'zyx';
 };
 
 /**
@@ -36,14 +36,14 @@ type InfiniteGridProperties = {
  *
  * ### Grid Orientation:
  * The grid orientation is controlled by the `axes` prop:
- * - 'xzy': Grid on XZ plane (Y-up coordinate system, standard Three.js)
  * - 'xyz': Grid on XY plane (Z-up coordinate system, CAD/engineering)
- * - 'zyx': Grid on YZ plane (X-up coordinate system)
+ * - 'xzy': Grid on XZ plane (Y-up coordinate system, standard Three.js)
+ * - 'zyx': Grid on ZY plane (X-up coordinate system)
  *
  * ### Usage:
  * ```tsx
  * <InfiniteGrid
- *   axes="xzy"
+ *   axes="xyz"
  *   materialProperties={{
  *     smallSize: 1,
  *     largeSize: 10,

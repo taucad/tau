@@ -33,9 +33,6 @@ type ScreenshotCapabilityInput = {
   graphicsRef: AnyActorRef;
 };
 
-// Registration timeout in milliseconds
-const registrationTimeout = 5000;
-
 // Default composite options
 const defaultCompositeOptions = {
   enabled: true,
@@ -605,6 +602,9 @@ export const screenshotCapabilityMachine = setup({
     isRegistered: ({ context }) => context.isRegistered,
     hasQueuedRequests: ({ context }) => context.queuedCaptureRequests.length > 0,
   },
+  delays: {
+    registrationTimeout: 5000,
+  },
 }).createMachine({
   id: 'screenshotCapability',
   context: ({ input }) => ({
@@ -621,7 +621,7 @@ export const screenshotCapabilityMachine = setup({
     // Waiting for camera registration with timeout
     waitingForRegistration: {
       after: {
-        [registrationTimeout]: {
+        registrationTimeout: {
           target: 'registrationFailed',
           actions: 'failQueuedRequests',
         },

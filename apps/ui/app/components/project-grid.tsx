@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import type { Build } from '@taucad/types';
-import { idPrefix, kernelConfigurations } from '@taucad/types/constants';
+import { kernelConfigurations } from '@taucad/types/constants';
 import { fromPromise } from 'xstate';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
@@ -13,9 +13,9 @@ import { SvgIcon } from '#components/icons/svg-icon.js';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
 import { HammerAnimation } from '#components/hammer-animation.js';
 import { LoadingSpinner } from '#components/ui/loading-spinner.js';
-import { generatePrefixedId } from '#utils/id.utils.js';
 import { BuildProvider, useBuild } from '#hooks/use-build.js';
 import { useBuildManager } from '#hooks/use-build-manager.js';
+import { useChatManager } from '#hooks/use-chat-manager.js';
 import type { BuildWithFiles } from '#constants/build-examples.js';
 
 type CommunityBuildCardProperties = BuildWithFiles;
@@ -80,6 +80,7 @@ function ProjectCard({
   const geometries = useSelector(cadRef, (state) => state.context.geometries);
   const status = useSelector(cadRef, (state) => state.value);
   const buildManager = useBuildManager();
+  const chatManager = useChatManager();
 
   const navigate = useNavigate();
 
@@ -113,9 +114,8 @@ function ProjectCard({
 
       setIsForking(true);
 
-      const chatId = generatePrefixedId(idPrefix.chat);
       try {
-        // Create a new build with forked data
+        // Create a new build with forked data (without lastChatId)
         const newBuild: Omit<Build, 'id' | 'createdAt' | 'updatedAt'> = {
           name: `${name} (Remixed)`,
           description,
@@ -126,19 +126,19 @@ function ProjectCard({
           tags,
           assets,
           forkedFrom: id,
-          chats: [
-            {
-              id: chatId,
-              name: 'Initial design',
-              messages: [],
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-            },
-          ],
-          lastChatId: chatId,
         };
 
+        // Create the build first
         const createdBuild = await buildManager.createBuild(newBuild, files);
+
+        // Create the chat and get its ID
+        const createdChat = await chatManager.createChat(createdBuild.id, {
+          name: 'Initial chat',
+          messages: [],
+        });
+
+        // Update the build with the correct lastChatId
+        await buildManager.updateBuild(createdBuild.id, { lastChatId: createdChat.id });
 
         // Navigate to the new build
         await navigate(`/builds/${createdBuild.id}`);
@@ -148,7 +148,7 @@ function ProjectCard({
         setIsForking(false);
       }
     },
-    [isForking, name, description, thumbnail, author, tags, assets, id, buildManager, files, navigate],
+    [isForking, name, description, thumbnail, author, tags, assets, id, buildManager, chatManager, files, navigate],
   );
 
   const handlePreviewToggle = useCallback(

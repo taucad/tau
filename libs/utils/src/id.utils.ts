@@ -1,8 +1,9 @@
-import { generateId } from 'ai';
 import type { IdPrefix } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
+import { customAlphabet } from 'nanoid';
 
 const idLength = 21;
+const nanoid = customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz', idLength);
 
 /**
  * Generates a prefixed ID
@@ -10,7 +11,7 @@ const idLength = 21;
  * @returns A string in the format "prefix_<id>"
  */
 export function generatePrefixedId<T extends IdPrefix>(prefix: T): `${T}_${string}` {
-  return `${prefix}_${generateId(idLength)}`;
+  return `${prefix}_${nanoid()}`;
 }
 
 /**

@@ -1,10 +1,10 @@
 import { memo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
-import { messageRole, messageStatus } from '@taucad/types/constants';
+import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { getRandomExamples } from '#constants/chat-prompt-examples.js';
 import type { ChatExample } from '#constants/chat-prompt-examples.js';
 import { Button } from '#components/ui/button.js';
-import { useChatActions } from '#components/chat/chat-provider.js';
+import { useChatActions } from '#hooks/use-chat.js';
 import { useModels } from '#hooks/use-models.js';
 import { createMessage } from '#utils/chat.utils.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
@@ -12,18 +12,19 @@ import { EmptyItems } from '#components/ui/empty-items.js';
 export const ChatExamples = memo(function () {
   // Use lazy initialization to ensure consistent examples across renders
   const [examples, setExamples] = useState(() => getRandomExamples(3));
-  const { append } = useChatActions();
+  const { sendMessage } = useChatActions();
   const { selectedModel } = useModels();
 
   const handleExampleClick = (example: ChatExample) => {
     const userMessage = createMessage({
       content: example.prompt,
       role: messageRole.user,
-      status: messageStatus.pending,
-      metadata: {},
-      model: selectedModel?.id ?? '',
+      metadata: {
+        model: selectedModel?.id ?? '',
+        status: messageStatus.pending,
+      },
     });
-    append(userMessage);
+    sendMessage(userMessage);
   };
 
   const handleRefreshExamples = () => {

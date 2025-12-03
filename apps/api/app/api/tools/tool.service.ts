@@ -1,12 +1,15 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { StructuredTool } from '@langchain/core/tools';
+import type { TavilySearch } from '@langchain/tavily';
 import { OpenAI, OpenAIEmbeddings } from '@langchain/openai';
 import type { ToolName, ToolMode, ToolSelection } from '@taucad/chat';
 import { toolName, toolMode } from '@taucad/chat/constants';
+import type { Environment } from '#config/environment.config.js';
 import { createWebBrowserTool } from '#api/tools/tools/tool-web-browser.js';
 import { fileEditTool } from '#api/tools/tools/tool-file-edit.js';
 import { imageAnalysisTool } from '#api/tools/tools/tool-image-analysis.js';
-import { parseWebSearchResults, webSearchTool } from '#api/tools/tools/tool-web-search.js';
+import { createWebSearchTool, parseWebSearchResults } from '#api/tools/tools/tool-web-search.js';
 
 export const toolChoiceFromToolName = {
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Tavily search tool name
@@ -15,6 +18,10 @@ export const toolChoiceFromToolName = {
 
 @Injectable()
 export class ToolService {
+  private webSearchTool: TavilySearch | undefined;
+
+  public constructor(private readonly configService: ConfigService<Environment, true>) {}
+
   public getTools(selectedToolChoice: ToolSelection): {
     tools: Partial<Record<ToolName, StructuredTool>>;
     resolvedToolChoice: string;
@@ -23,7 +30,7 @@ export class ToolService {
     const embeddings = new OpenAIEmbeddings();
     // Define the tools for the agent to use
     const toolCategoryToTool = {
-      [toolName.webSearch]: webSearchTool,
+      [toolName.webSearch]: this.getWebSearchTool(),
       [toolName.webBrowser]: createWebBrowserTool({
         model,
         embeddings,
@@ -70,5 +77,14 @@ export class ToolService {
     return {
       [toolName.webSearch]: parseWebSearchResults,
     };
+  }
+
+  private getWebSearchTool(): TavilySearch {
+    if (!this.webSearchTool) {
+      const tavilyApiKey = this.configService.get('TAVILY_API_KEY', { infer: true });
+      this.webSearchTool = createWebSearchTool({ tavilyApiKey });
+    }
+
+    return this.webSearchTool;
   }
 }

@@ -48,11 +48,10 @@ jobs:
 
       - name: Deploy to Fly.io
         run: |
-          # Use staging config file for staging environment, otherwise use default fly.toml
           if [ "${{ inputs.environment }}" = "staging" ]; then
             CONFIG_FILE="apps/${{ inputs.app }}/fly.staging.toml"
           else
-            CONFIG_FILE="apps/${{ inputs.app }}/fly.toml"
+            CONFIG_FILE="apps/${{ inputs.app }}/fly.prod.toml"
           fi
           
           echo "Deploying ${{ inputs.app }} to ${{ inputs.environment }} using $CONFIG_FILE"

@@ -41,13 +41,19 @@
     "deploy": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "fly deploy --config ./apps/ui/fly.toml --dockerfile ./apps/ui/Dockerfile"
+        "command": "fly deploy --config ./apps/ui/fly.staging.toml --dockerfile ./apps/ui/Dockerfile"
+      }
+    },
+    "deploy:prod": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "fly deploy --config ./apps/ui/fly.prod.toml --dockerfile ./apps/ui/Dockerfile"
       }
     },
     "launch": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "fly launch --config ./apps/ui/fly.toml"
+        "command": "fly launch --config ./apps/ui/fly.prod.toml"
       }
     }
   }

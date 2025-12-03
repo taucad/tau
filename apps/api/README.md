@@ -123,7 +123,8 @@ apps/api/
 │   ├── types/         # TypeScript types
 │   └── utils/         # Utility functions
 ├── Dockerfile         # Docker configuration
-├── fly.toml          # Fly.io deployment config
+├── fly.staging.toml          # Fly.io staging deployment config
+├── fly.prod.toml          # Fly.io production deployment config
 └── vite.config.ts    # Vite build configuration
 ```
 

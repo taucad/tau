@@ -59,7 +59,7 @@ jobs:
         with:
           name: ${{ env.UI_APP_NAME }}
           region: syd
-          config: apps/ui/fly.toml
+          config: apps/ui/fly.staging.toml
           secrets: TAU_API_URL=${{ env.API_REVIEW_URL }} TAU_FRONTEND_URL=${{ env.UI_REVIEW_URL }}
 
       - name: Update UI status - success
@@ -136,7 +136,7 @@ jobs:
         with:
           name: ${{ env.API_APP_NAME }}
           region: syd
-          config: apps/api/fly.toml
+          config: apps/api/fly.staging.toml
           secrets: TAU_FRONTEND_URL=${{ env.UI_REVIEW_URL }} AUTH_URL=${{ env.API_REVIEW_URL }} ADDITIONAL_CORS_ORIGINS=["${{ env.UI_REVIEW_URL }}"]
 
       - name: Update API status - success

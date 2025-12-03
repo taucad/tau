@@ -11,7 +11,13 @@
     "deploy": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "fly deploy --config ./apps/api/fly.toml --dockerfile ./apps/api/Dockerfile"
+        "command": "fly deploy --config ./apps/api/fly.staging.toml --dockerfile ./apps/api/Dockerfile"
+      }
+    },
+    "deploy:prod": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "fly deploy --config ./apps/api/fly.prod.toml --dockerfile ./apps/api/Dockerfile"
       }
     },
     "serve": {
@@ -41,7 +47,7 @@
     "launch": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "fly launch --config ./apps/api/fly.toml"
+        "command": "fly launch --config ./apps/api/fly.prod.toml"
       }
     },
     "db-generate-migrations": {

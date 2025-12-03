@@ -1,14 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createOpenAI } from '@ai-sdk/openai';
-import type { OpenAIProvider } from '@ai-sdk/openai';
-import { generateText } from 'ai';
+import { MorphClient } from '@morphllm/morphsdk';
 import type { Environment } from '#config/environment.config.js';
 
 export type FileEditRequest = {
   targetFile: string;
   originalContent: string;
   codeEdit: string;
+  instructions?: string;
 };
 
 export type FileEditResult = {
@@ -16,11 +15,12 @@ export type FileEditResult = {
   message: string;
   error?: string;
   editedContent?: string;
+  udiff?: string;
 };
 
 @Injectable()
 export class FileEditService {
-  private readonly openai: OpenAIProvider;
+  private readonly morph: MorphClient;
 
   public constructor(private readonly configService: ConfigService<Environment, true>) {
     const morphApiKey = this.configService.get<string>('MORPH_API_KEY', { infer: true });
@@ -29,35 +29,40 @@ export class FileEditService {
       throw new Error('MORPH_API_KEY is required for file editing functionality');
     }
 
-    this.openai = createOpenAI({
-      apiKey: morphApiKey,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- baseURL is the correct property name for OpenAI SDK
-      baseURL: 'https://api.morphllm.com/v1',
-    });
+    this.morph = new MorphClient({ apiKey: morphApiKey });
   }
 
   public async applyFileEdit(request: FileEditRequest): Promise<FileEditResult> {
     try {
-      // Use the provided original content instead of reading from filesystem
-      const { originalContent, codeEdit } = request;
+      const { originalContent, codeEdit, targetFile, instructions } = request;
 
-      // Send to Morph API using AI SDK
-      const { text } = await generateText({
-        model: this.openai('morph-v3-large'),
-        prompt: `<code>${originalContent}</code>\n<update>${codeEdit}</update>`,
+      const result = await this.morph.fastApply.applyEdit({
+        originalCode: originalContent,
+        codeEdit,
+        instructions: instructions ?? 'Apply the code edit',
+        filepath: targetFile,
       });
+
+      if (!result.success) {
+        return {
+          success: false,
+          message: 'Error applying file edit',
+          error: result.error,
+        };
+      }
 
       return {
         success: true,
-        message: `File edit applied successfully`,
-        editedContent: text,
+        message: 'File edit applied successfully',
+        editedContent: result.mergedCode,
+        udiff: result.udiff,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
 
       return {
         success: false,
-        message: `Error applying file edit`,
+        message: 'Error applying file edit',
         error: errorMessage,
       };
     }

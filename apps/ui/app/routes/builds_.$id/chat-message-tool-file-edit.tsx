@@ -5,6 +5,7 @@ import { useActorRef, useSelector } from '@xstate/react';
 import type { CodeError, KernelError } from '@taucad/types';
 import { waitFor } from 'xstate';
 import type { MyTools } from '@taucad/chat';
+import type { toolName } from '@taucad/chat/constants';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { CopyButton } from '#components/copy-button.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
@@ -122,7 +123,7 @@ function Filename({
 export function ChatMessageToolFileEdit({
   part,
 }: {
-  readonly part: UIToolInvocation<MyTools['editFile']>;
+  readonly part: UIToolInvocation<MyTools[typeof toolName.fileEdit]>;
 }): React.JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false);
   const { getMainFilename } = useBuild();

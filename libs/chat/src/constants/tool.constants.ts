@@ -1,8 +1,8 @@
 export const toolName = {
-  webSearch: 'webSearch',
-  webBrowser: 'webBrowser',
-  fileEdit: 'editFile',
-  imageAnalysis: 'analyzeImage',
+  webSearch: 'web_search',
+  webBrowser: 'web_browser',
+  fileEdit: 'edit_file',
+  imageAnalysis: 'analyze_image',
 } as const satisfies Record<string, string>;
 
 export const toolNames = Object.values(toolName) as [(typeof toolName)[keyof typeof toolName]];

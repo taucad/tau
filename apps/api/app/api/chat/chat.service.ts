@@ -52,7 +52,7 @@ export class ChatService {
     });
     await checkpointer.setup();
 
-    const researchTools = [tools.webSearch, tools.webBrowser].filter((tool) => tool !== undefined);
+    const researchTools = [tools.web_search, tools.web_browser].filter((tool) => tool !== undefined);
     const { model: supervisorModel } = this.modelService.buildModel(modelId);
     const { model: cadModel, support: cadSupport } = this.modelService.buildModel(modelId);
     const { model: researchModel, support: researchSupport } = this.modelService.buildModel(modelId);
@@ -64,11 +64,11 @@ export class ChatService {
       tools: researchTools,
       name: 'research_expert',
       prompt: `You are a research expert that can use specialized tools to accomplish tasks. 
-        Always use the webSearch tool, and only the webBrowser tool if the webSearch tool does not supply enough information.`,
+        Always use the web_search tool, and only the webBrowser tool if the web_search tool does not supply enough information.`,
     });
 
     // Create a general agent for handling direct responses
-    const cadTools = [tools.editFile, tools.analyzeImage].filter((tool) => tool !== undefined);
+    const cadTools = [tools.edit_file, tools.analyze_image].filter((tool) => tool !== undefined);
     const cadSystemPrompt = await getCadSystemPrompt(selectedKernel);
     const cadAgent = createReactAgent({
       llm: cadSupport?.tools === false ? cadModel : (cadModel.bindTools?.(cadTools) ?? cadModel),

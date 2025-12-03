@@ -1,7 +1,8 @@
-import type { ToolUIPart } from 'ai';
+import type { ToolUIPart, UIToolInvocation } from 'ai';
 import { useState } from 'react';
 import { Eye, LoaderCircle, ChevronDown, Camera } from 'lucide-react';
-import type { ImageAnalysisInput, ImageAnalysisOutput } from '@taucad/chat';
+import type { MyTools } from '@taucad/chat';
+import type { toolName } from '@taucad/chat/constants';
 import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
@@ -38,14 +39,18 @@ function ToolTitle({
   return <span>Visual Analysis</span>;
 }
 
-export function ChatMessageToolImageAnalysis({ part }: { readonly part: ToolUIPart }): React.JSX.Element {
+export function ChatMessageToolImageAnalysis({
+  part,
+}: {
+  readonly part: UIToolInvocation<MyTools[typeof toolName.imageAnalysis]>;
+}): React.JSX.Element {
   const [isRequirementsExpanded, setIsRequirementsExpanded] = useState(false);
   const status = useChatSelector((state) => state.status);
 
   switch (part.state) {
     case 'input-streaming':
     case 'input-available': {
-      const input = (part.input ?? {}) as ImageAnalysisInput;
+      const input = part.input ?? {};
       const { requirements = [] } = input;
 
       return (
@@ -66,10 +71,10 @@ export function ChatMessageToolImageAnalysis({ part }: { readonly part: ToolUIPa
     }
 
     case 'output-available': {
-      const input = (part.input ?? {}) as ImageAnalysisInput;
+      const { input } = part;
       const { requirements = [] } = input;
 
-      const result = part.output as ImageAnalysisOutput;
+      const result = part.output;
 
       return (
         <div className="@container/analysis overflow-hidden rounded-md border bg-neutral/10">
@@ -138,7 +143,7 @@ export function ChatMessageToolImageAnalysis({ part }: { readonly part: ToolUIPa
 
                     return (
                       <div key={key} className="flex items-start text-xs">
-                        <div className="mr-2 flex-shrink-0 font-mono text-muted-foreground">{index + 1}.</div>
+                        <div className="mr-2 shrink-0 font-mono text-muted-foreground">{index + 1}.</div>
                         <div className="flex-1">{requirement}</div>
                       </div>
                     );

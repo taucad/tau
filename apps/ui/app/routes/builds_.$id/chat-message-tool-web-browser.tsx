@@ -2,6 +2,7 @@ import type { UIToolInvocation } from 'ai';
 import { LoaderCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { MyTools } from '@taucad/chat';
+import type { toolName } from '@taucad/chat/constants';
 import { Badge } from '#components/ui/badge.js';
 import { createFaviconUrl, extractDomainFromUrl } from '#utils/url.utils.js';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
@@ -9,7 +10,7 @@ import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
 export function ChatMessageToolWebBrowser({
   part,
 }: {
-  readonly part: UIToolInvocation<MyTools['webBrowser']>;
+  readonly part: UIToolInvocation<MyTools[typeof toolName.webBrowser]>;
 }): ReactNode | undefined {
   switch (part.state) {
     case 'input-available':

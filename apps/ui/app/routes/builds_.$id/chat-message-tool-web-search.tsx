@@ -1,6 +1,7 @@
 import { ChevronRight } from 'lucide-react';
 import type { UIToolInvocation } from 'ai';
 import type { MyTools } from '@taucad/chat';
+import type { toolName } from '@taucad/chat/constants';
 import { Sheet, SheetDescription, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '#components/ui/sheet.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
@@ -10,7 +11,7 @@ import { extractDomainFromUrl, createFaviconUrl } from '#utils/url.utils.js';
 export function ChatMessageToolWebSearch({
   part,
 }: {
-  readonly part: UIToolInvocation<MyTools['webSearch']>;
+  readonly part: UIToolInvocation<MyTools[typeof toolName.webSearch]>;
 }): React.JSX.Element | undefined {
   switch (part.state) {
     case 'input-available':

@@ -22,8 +22,8 @@ export type ToolMode = (typeof toolMode)[keyof typeof toolMode];
 export type ToolSelection = ToolMode | ToolName[];
 
 export type MyTools = InferUITools<{
-  editFile: AiTool<FileEditInput, FileEditOutput>;
-  analyzeImage: AiTool<ImageAnalysisInput, ImageAnalysisOutput>;
-  webBrowser: AiTool<WebBrowserInput, WebBrowserOutput>;
-  webSearch: AiTool<WebSearchInput, WebSearchOutput>;
+  [toolName.fileEdit]: AiTool<FileEditInput, FileEditOutput>;
+  [toolName.imageAnalysis]: AiTool<ImageAnalysisInput, ImageAnalysisOutput>;
+  [toolName.webBrowser]: AiTool<WebBrowserInput, WebBrowserOutput>;
+  [toolName.webSearch]: AiTool<WebSearchInput, WebSearchOutput>;
 }>;

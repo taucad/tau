@@ -159,19 +159,19 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                 }
 
                 // TOOLS
-                case 'tool-webSearch': {
+                case 'tool-web_search': {
                   return <ChatMessageToolWebSearch key={part.toolCallId} part={part} />;
                 }
 
-                case 'tool-webBrowser': {
+                case 'tool-web_browser': {
                   return <ChatMessageToolWebBrowser key={part.toolCallId} part={part} />;
                 }
 
-                case 'tool-editFile': {
+                case 'tool-edit_file': {
                   return <ChatMessageToolFileEdit key={part.toolCallId} part={part} />;
                 }
 
-                case 'tool-analyzeImage': {
+                case 'tool-analyze_image': {
                   return <ChatMessageToolImageAnalysis key={part.toolCallId} part={part} />;
                 }
 

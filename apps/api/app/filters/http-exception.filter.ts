@@ -39,7 +39,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
         if (nodeEnv === 'development') {
           // Log validation errors in development
-          this.logger.error(message, `Validation failed:`);
+          this.logger.error({ message, body: request.body }, `Validation failed`);
         }
 
         statusCode = HttpStatus.BAD_REQUEST;

@@ -159,7 +159,7 @@ export function ChatMessageToolFileEdit({
           throw new Error('No content received from file edit service');
         }
 
-        fileManager.writeFile(resolvedPath, encodeTextFile(result.editedContent));
+        void fileManager.writeFile(resolvedPath, encodeTextFile(result.editedContent));
       }
 
       if (snapshot.matches('error')) {

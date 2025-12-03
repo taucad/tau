@@ -75,7 +75,7 @@ export const ChatEditor = memo(function ({ className }: { readonly className?: s
       }
 
       // Encode string → Uint8Array and write directly to fileManager
-      fileManager.writeFile(activeFile.path, encodeTextFile(value ?? ''));
+      void fileManager.writeFile(activeFile.path, encodeTextFile(value ?? ''));
     },
     [activeFile, fileManager],
   );

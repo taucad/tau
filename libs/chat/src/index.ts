@@ -3,6 +3,10 @@ export * from '#schemas/tools/web-search.tool.schema.js';
 export * from '#schemas/tools/web-browser.tool.schema.js';
 export * from '#schemas/tools/file-edit.tool.schema.js';
 export * from '#schemas/tools/image-analysis.tool.schema.js';
+export * from '#schemas/tools/transfer-tool.schema.js';
+export * from '#schemas/tools/transfer-to-cad-expert.tool.schema.js';
+export * from '#schemas/tools/transfer-to-research-expert.tool.schema.js';
+export * from '#schemas/tools/transfer-back-to-supervisor.tool.schema.js';
 export * from '#schemas/metadata.schema.js';
 export * from '#schemas/message.schema.js';
 

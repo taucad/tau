@@ -3,6 +3,9 @@ export const toolName = {
   webBrowser: 'web_browser',
   fileEdit: 'edit_file',
   imageAnalysis: 'analyze_image',
+  transferToCadExpert: 'transfer_to_cad_expert',
+  transferToResearchExpert: 'transfer_to_research_expert',
+  transferBackToSupervisor: 'transfer_back_to_supervisor',
 } as const satisfies Record<string, string>;
 
 export const toolNames = Object.values(toolName) as [(typeof toolName)[keyof typeof toolName]];

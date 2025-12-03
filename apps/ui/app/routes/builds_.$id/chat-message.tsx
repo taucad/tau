@@ -175,19 +175,16 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                   return <ChatMessageToolImageAnalysis key={part.toolCallId} part={part} />;
                 }
 
-                // @ts-expect-error -- TODO: Fix transfer tool typings
                 case 'tool-transfer_to_cad_expert': {
-                  return <ChatMessageToolTransfer key={part} part={part} />;
+                  return <ChatMessageToolTransfer key={part.toolCallId} part={part} />;
                 }
 
-                // @ts-expect-error -- TODO: Fix transfer tool typings
                 case 'tool-transfer_to_research_expert': {
-                  return <ChatMessageToolTransfer key={part} part={part} />;
+                  return <ChatMessageToolTransfer key={part.toolCallId} part={part} />;
                 }
 
-                // @ts-expect-error -- TODO: Fix transfer tool typings
                 case 'tool-transfer_back_to_supervisor': {
-                  return <ChatMessageToolTransfer key={part} part={part} />;
+                  return <ChatMessageToolTransfer key={part.toolCallId} part={part} />;
                 }
 
                 case 'data-test': {

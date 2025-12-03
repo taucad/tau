@@ -83,12 +83,70 @@ const createToolSchemas = <
   ] as const;
 };
 
+// Specialized helper for transfer tools with empty input schemas
+// Uses z.record(z.never()) for input which correctly types to Record<string, never>
+const createTransferToolSchemas = <Name extends ToolName>(toolName: Name) => {
+  const toolType = `tool-${toolName}` as const;
+  // Empty input schema that correctly resolves to Record<string, never>
+  const emptyInput = z.record(z.string(), z.never());
+  return [
+    // Input-streaming state
+    z.object({
+      type: z.literal(toolType),
+      toolCallId: z.string(),
+      state: z.literal('input-streaming'),
+      providerExecuted: z.boolean().optional(),
+      input: z.union([emptyInput, z.undefined()]),
+      output: z.never().optional(),
+      errorText: z.never().optional(),
+    }),
+    // Input-available state
+    z.object({
+      type: z.literal(toolType),
+      toolCallId: z.string(),
+      state: z.literal('input-available'),
+      providerExecuted: z.boolean().optional(),
+      input: emptyInput,
+      output: z.never().optional(),
+      errorText: z.never().optional(),
+      callProviderMetadata: providerMetadataSchema.optional(),
+    }),
+    // Output-available state
+    z.object({
+      type: z.literal(toolType),
+      toolCallId: z.string(),
+      state: z.literal('output-available'),
+      providerExecuted: z.boolean().optional(),
+      input: emptyInput,
+      output: z.string(),
+      errorText: z.never().optional(),
+      callProviderMetadata: providerMetadataSchema.optional(),
+      preliminary: z.boolean().optional(),
+    }),
+    // Output-error state
+    z.object({
+      type: z.literal(toolType),
+      toolCallId: z.string(),
+      state: z.literal('output-error'),
+      providerExecuted: z.boolean().optional(),
+      input: emptyInput,
+      output: z.never().optional(),
+      errorText: z.string(),
+      callProviderMetadata: providerMetadataSchema.optional(),
+    }),
+  ] as const;
+};
+
 // Generate tool part schemas by iterating over tools and preserving discriminated unions
 const toolPartSchemas = [
   ...createToolSchemas(toolName.webSearch, webSearchInputSchema, webSearchOutputSchema),
   ...createToolSchemas(toolName.webBrowser, webBrowserInputSchema, webBrowserOutputSchema),
   ...createToolSchemas(toolName.fileEdit, fileEditInputSchema, fileEditOutputSchema),
   ...createToolSchemas(toolName.imageAnalysis, imageAnalysisInputSchema, imageAnalysisOutputSchema),
+  // Transfer tools use specialized schemas (empty input, string output)
+  ...createTransferToolSchemas(toolName.transferToCadExpert),
+  ...createTransferToolSchemas(toolName.transferToResearchExpert),
+  ...createTransferToolSchemas(toolName.transferBackToSupervisor),
 ];
 
 export const uiMessagesSchema: z.ZodType<MyUIMessage[]> = z

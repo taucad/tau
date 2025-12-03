@@ -84,7 +84,11 @@ function ErrorStackTrace({
           <div className="mb-1 font-medium text-muted-foreground">Stack trace:</div>
           <div className="space-y-0.5 rounded border bg-background/50 p-2">
             {stackFrames.map((frame, index) => (
-              <StackFrame key={frame.functionName} frame={frame} index={index} />
+              <StackFrame
+                key={`${frame.functionName}-${frame.fileName}-${frame.lineNumber}-${frame.columnNumber}`}
+                frame={frame}
+                index={index}
+              />
             ))}
           </div>
         </div>

@@ -5,6 +5,14 @@ import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '#app.module.js';
+import { DatabaseService } from '#database/database.service.js';
+
+// Mock DatabaseService for tests that don't need database access
+const mockDatabaseService = {
+  database: {},
+  onModuleInit: () => undefined,
+  onModuleDestroy: () => undefined,
+};
 
 describe('TestApiController (e2e)', () => {
   let app: NestFastifyApplication;
@@ -13,7 +21,10 @@ describe('TestApiController (e2e)', () => {
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(DatabaseService)
+      .useValue(mockDatabaseService)
+      .compile();
 
     app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
 

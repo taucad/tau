@@ -1,4 +1,5 @@
-import { Catch, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import process from 'node:process';
+import { Catch, HttpException, HttpStatus, Injectable, Logger, Scope } from '@nestjs/common';
 import type { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ZodSerializationException, ZodValidationException } from 'nestjs-zod';
@@ -34,8 +35,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
       const zodError = exception.getZodError();
       if (zodError instanceof ZodError) {
         const message = zodError.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`);
+        const nodeEnv = process.env.NODE_ENV;
 
-        if (import.meta.env.DEV) {
+        if (nodeEnv === 'development') {
           // Log validation errors in development
           this.logger.error(message, `Validation failed:`);
         }

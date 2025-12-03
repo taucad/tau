@@ -295,13 +295,17 @@ export function logServiceConfig(logService: LogServiceProvider): Options {
 }
 
 export async function useLoggerFactory(configService: ConfigService<Environment, true>): Promise<Params> {
+  const nodeEnv = configService.get('NODE_ENV', { infer: true });
   const logLevel = configService.get('LOG_LEVEL', { infer: true });
   const logService = configService.get('LOG_SERVICE', { infer: true });
+
+  // Disable logging in test environment
+  const effectiveLogLevel = nodeEnv === 'test' ? 'silent' : logLevel;
 
   const serviceOptions = logServiceConfig(logService);
 
   const pinoHttpOptions: Options = {
-    level: logLevel,
+    level: effectiveLogLevel,
     customSuccessMessage,
     customReceivedMessage,
     customErrorMessage,

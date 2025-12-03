@@ -79,6 +79,10 @@ export default defineConfig(({ mode }) => {
       ],
     },
     test: {
+      env: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+        NODE_ENV: 'test',
+      },
       environment: 'node',
       typecheck: {
         enabled: true,

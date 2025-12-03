@@ -10,6 +10,11 @@ env:
   # Match the region with production apps
   FLY_REGION: syd
   FLY_ORG: personal
+  # Review app names and URLs (reused throughout the workflow)
+  UI_APP_NAME: tau-ui-pr-${{ github.event.number }}
+  API_APP_NAME: tau-api-pr-${{ github.event.number }}
+  UI_REVIEW_URL: https://tau-ui-pr-${{ github.event.number }}.fly.dev
+  API_REVIEW_URL: https://tau-api-pr-${{ github.event.number }}.fly.dev
 
 jobs:
   review_app_ui:
@@ -45,16 +50,17 @@ jobs:
           message: |
             ### UI Preview :balloon:
             **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || '🔄 Deploying...' }}
-            **URL:** https://tau-ui-pr-${{ github.event.number }}.fly.dev/
+            **URL:** ${{ env.UI_REVIEW_URL }}/
 
       - name: Deploy UI PR app to Fly.io
         id: deploy
         continue-on-error: true
         uses: superfly/fly-pr-review-apps@1.5.0
         with:
-          name: tau-ui-pr-${{ github.event.number }}
+          name: ${{ env.UI_APP_NAME }}
           region: syd
           config: apps/ui/fly.toml
+          secrets: TAU_API_URL=${{ env.API_REVIEW_URL }} TAU_FRONTEND_URL=${{ env.UI_REVIEW_URL }}
 
       - name: Update UI status - success
         if: steps.deploy.outcome == 'success'
@@ -64,7 +70,7 @@ jobs:
           message: |
             ### UI Preview :balloon:
             **Status:** ${{ github.event.action == 'closed' && '✅ Destroyed' || '✅ Deployed' }}
-            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || format('https://tau-ui-pr-{0}.fly.dev/', github.event.number) }}
+            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || format('{0}/', env.UI_REVIEW_URL) }}
 
       - name: Update UI status - failure
         if: steps.deploy.outcome == 'failure'
@@ -74,7 +80,7 @@ jobs:
           message: |
             ### UI Preview :balloon:
             **Status:** ❌ Deployment Failed
-            **URL:** https://tau-ui-pr-${{ github.event.number }}.fly.dev/
+            **URL:** ${{ env.UI_REVIEW_URL }}/
 
       - name: Update UI status - cancelled
         if: steps.deploy.outcome == 'cancelled'
@@ -84,7 +90,7 @@ jobs:
           message: |
             ### UI Preview :balloon:
             **Status:** ⚠️ Deployment Cancelled
-            **URL:** https://tau-ui-pr-${{ github.event.number }}.fly.dev/
+            **URL:** ${{ env.UI_REVIEW_URL }}/
 
       - name: Fail job if deployment failed
         if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled'
@@ -121,16 +127,17 @@ jobs:
           message: |
             ### API Preview :octopus:
             **Status:** ${{ github.event.action == 'closed' && '🗑️ Destroying...' || '🔄 Deploying...' }}
-            **URL:** https://tau-api-pr-${{ github.event.number }}.fly.dev
+            **URL:** ${{ env.API_REVIEW_URL }}
 
       - name: Deploy API PR app to Fly.io
         id: deploy
         continue-on-error: true
         uses: superfly/fly-pr-review-apps@1.5.0
         with:
-          name: tau-api-pr-${{ github.event.number }}
+          name: ${{ env.API_APP_NAME }}
           region: syd
           config: apps/api/fly.toml
+          secrets: TAU_FRONTEND_URL=${{ env.UI_REVIEW_URL }} AUTH_URL=${{ env.API_REVIEW_URL }} ADDITIONAL_CORS_ORIGINS=["${{ env.UI_REVIEW_URL }}"]
 
       - name: Update API status - success
         if: steps.deploy.outcome == 'success'
@@ -140,7 +147,7 @@ jobs:
           message: |
             ### API Preview :octopus:
             **Status:** ${{ github.event.action == 'closed' && '✅ Destroyed' || '✅ Deployed' }}
-            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || format('https://tau-api-pr-{0}.fly.dev', github.event.number) }}
+            **URL:** ${{ github.event.action == 'closed' && '_Review app destroyed_' || env.API_REVIEW_URL }}
 
       - name: Update API status - failure
         if: steps.deploy.outcome == 'failure'
@@ -150,7 +157,7 @@ jobs:
           message: |
             ### API Preview :octopus:
             **Status:** ❌ Deployment Failed
-            **URL:** https://tau-api-pr-${{ github.event.number }}.fly.dev
+            **URL:** ${{ env.API_REVIEW_URL }}
 
       - name: Update API status - cancelled
         if: steps.deploy.outcome == 'cancelled'
@@ -160,7 +167,7 @@ jobs:
           message: |
             ### API Preview :octopus:
             **Status:** ⚠️ Deployment Cancelled
-            **URL:** https://tau-api-pr-${{ github.event.number }}.fly.dev
+            **URL:** ${{ env.API_REVIEW_URL }}
 
       - name: Fail job if deployment failed
         if: steps.deploy.outcome == 'failure' || steps.deploy.outcome == 'cancelled'

@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
-import type { UIMessage } from '@ai-sdk/react';
 import { messageRole } from '@taucad/chat/constants';
+import type { MyUIMessage } from '@taucad/chat';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { ChatMessageReasoning } from '#routes/builds_.$id/chat-message-reasoning.js';
 import { ChatMessageMetadata } from '#routes/builds_.$id/chat-message-metadata.js';
@@ -33,7 +33,7 @@ type ChatMessageProperties = {
   readonly messageId: string;
 };
 
-const getMessageContent = (message: UIMessage): string => {
+const getMessageContent = (message: MyUIMessage): string => {
   const content = [];
   for (const part of message.parts) {
     if (part.type === 'text') {

@@ -2,12 +2,8 @@
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
   "defaultBase": "main",
   "plugins": [
-    {
-      "plugin": "./tools/tsdown.plugin.ts"
-    },
-    {
-      "plugin": "./tools/copy-files-from-to.plugin.ts"
-    },
+    { "plugin": "./tools/tsdown.plugin.ts" },
+    { "plugin": "./tools/copy-files-from-to.plugin.ts" },
     {
       "plugin": "@nx/react/router-plugin",
       "options": {
@@ -19,12 +15,7 @@
         "typecheckTargetName": "typecheck"
       }
     },
-    {
-      "plugin": "@nx/playwright/plugin",
-      "options": {
-        "targetName": "e2e"
-      }
-    },
+    { "plugin": "@nx/playwright/plugin", "options": { "targetName": "e2e" } },
     {
       "plugin": "@nx/vite/plugin",
       "options": {
@@ -37,19 +28,11 @@
         "outputPath": "dist"
       }
     },
-    {
-      "plugin": "@nx/eslint/plugin",
-      "options": {
-        "targetName": "lint",
-        "eslintConfig": "eslint.config.mjs"
-      }
-    },
+    { "plugin": "@nx/eslint/plugin", "options": { "targetName": "lint", "eslintConfig": "eslint.config.mjs" } },
     {
       "plugin": "@nx/js/typescript",
       "options": {
-        "typecheck": {
-          "targetName": "typecheck"
-        },
+        "typecheck": { "targetName": "typecheck" },
         "build": {
           "targetName": "typebuild",
           "configName": "tsconfig.lib.json",
@@ -60,36 +43,14 @@
     }
   ],
   "targetDefaults": {
-    "e2e-ci--**/*": {
-      "dependsOn": ["^build"]
-    },
-    "deploy": {
-      "executor": "nx:run-commands",
-      "options": {
-        "cwd": "."
-      }
-    },
-    "launch": {
-      "executor": "nx:run-commands",
-      "options": {
-        "cwd": "."
-      }
-    }
+    "e2e-ci--**/*": { "dependsOn": ["^build"] },
+    "deploy": { "executor": "nx:run-commands", "options": { "cwd": "." } },
+    "launch": { "executor": "nx:run-commands", "options": { "cwd": "." } }
   },
-  "generators": {
-    "@nx/react": {
-      "library": {
-        "unitTestRunner": "vitest"
-      }
-    }
-  },
-  "nxCloudId": "687b39d7852b9a43a8bba201",
-  "sync": {
-    "applyChanges": true
-  },
-  "tui": {
-    "enabled": false
-  },
+  "generators": { "@nx/react": { "library": { "unitTestRunner": "vitest" } } },
+  "nxCloudId": "69307979ae7522c0c5f02189",
+  "sync": { "applyChanges": true },
+  "tui": { "enabled": false },
   "namedInputs": {
     "sharedGlobals": ["{workspaceRoot}/.github/workflows/ci.yml"],
     "default": ["{projectRoot}/**/*", "sharedGlobals"]

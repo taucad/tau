@@ -17,7 +17,7 @@ import { DefaultChatTransport } from 'ai';
 import { draftMachine } from '#hooks/draft.machine.js';
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useChats } from '#hooks/use-chats.js';
-import { consoleInspector, inspect } from '#machines/inspector.js';
+import { inspect } from '#machines/inspector.js';
 import { ENV } from '#config.js';
 
 type UseChatReturn = ReturnType<typeof useChat<MyUIMessage>>;
@@ -88,7 +88,7 @@ export function ChatProvider({
       input: {
         chatId: activeChatId,
       },
-      inspect: consoleInspector,
+      inspect,
     },
   );
 

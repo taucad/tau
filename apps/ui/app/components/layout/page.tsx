@@ -142,11 +142,11 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
               'h-dvh',
               enableOverflowY && 'overflow-y-auto',
               !enableFloatingSidebar &&
-                'mt-[var(--header-height)] h-[calc(100dvh-var(--header-height)-1px)] transition-[margin] duration-200 ease-linear md:ml-(--sidebar-width-current)',
+                'mt-[var(--header-height)] h-[calc(100dvh-var(--header-height)-1px)] transition-[margin] duration-200 ease-linear md:ml-[calc(var(--sidebar-width-current)-var(--spacing)*2)]',
             )}
           >
             {enablePageFooter ? (
-              <div className="flex min-h-full flex-col">
+              <div className="flex min-h-full flex-col overflow-hidden">
                 <div className="flex-1">{error === undefined ? <Outlet /> : error}</div>
                 <PageFooter />
               </div>

@@ -19,7 +19,7 @@ primary_region = 'syd'
   LOG_SERVICE = 'fly'
   LOG_LEVEL = 'info'
   # Additional CORS origins for Netlify preview deployments and review apps
-  ADDITIONAL_CORS_ORIGINS = '["https://taucad.dev","https://deploy-preview-*--taucad.netlify.app","https://tau-ui-pr-*.fly.dev"]'
+  ADDITIONAL_CORS_ORIGINS = '["https://deploy-preview-*--taucad.netlify.app","https://tau-ui-pr-*.fly.dev"]'
 
 [http_service]
   internal_port = 3000

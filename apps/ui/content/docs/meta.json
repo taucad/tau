@@ -29,6 +29,10 @@
     "---Architecture---",
     "architecture/index",
     "architecture/rag",
-    "architecture/evaluation"
+    "architecture/evaluation",
+
+    "---Contributing---",
+    "contributing/index",
+    "contributing/kernels"
   ]
 }

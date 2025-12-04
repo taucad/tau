@@ -1,99 +1,133 @@
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](license)
+[![Discord](https://img.shields.io/badge/Discord-Join%20us-7289da?logo=discord&logoColor=white)](https://discord.gg/KnB7rxK3)
 [![XO code style](https://shields.io/badge/code_style-5ed9c7?logo=xo&labelColor=gray&logoSize=auto)](https://github.com/xojs/xo)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D24-brightgreen?logo=node.js&logoColor=white)](https://nodejs.org)
 
 # Tau
 
-Your AI-powered workshop companion - a free, open-source CAD platform that works offline. Design anything from 3D prints to woodworking projects with intelligent assistance, right in your browser.
+Your AI-powered workshop companion — a free, open-source CAD platform that works offline. Design anything from 3D prints to woodworking projects with intelligent assistance, right in your browser.
 
-## Development
+**[Try it now at tau.new](https://tau.new)**
 
-### Prerequisites
+![Tau Desktop View](docs/assets/tau-desktop.jpg)
 
-- Node.js 24+
-- pnpm
-- Docker
+## Features
 
-### Setup
+- **Open Source** — MIT licensed, free forever
+- **Browser-Based** — Run CAD on mobile or desktop, no **installation** required
+- **Code-Based CAD** — Precise, version-controlled designs through code
+- **AI-Powered** — Natural language interface for design creation and modification
+- **Parametric Editor** — Adjustable parameters with real-time preview
+- **Multi-Kernel** — Choose the right CAD engine for your project
+- **Embeddable** — Components to bring CAD into any web application
 
-1. Install dependencies:
-   ```bash
-   pnpm install
-   ```
+## Use Cases
 
-2. Start the PostgreSQL database:
-   ```bash
-   pnpm db:up
-   ```
+### 3D Printing
+Design and export models optimized for additive manufacturing. Export directly to STL, 3MF, or other slicer-compatible formats.
 
-3. Create your environment file in UI and API:
-   ```bash
-   cp apps/ui/.env.example apps/ui/.env.local
-   cp apps/api/.env.example apps/api/.env.local
-   # Edit .env.local with your API keys
-   ```
+### CAD Prototyping
+Rapid iteration with parametric code. Change dimensions, test variations, and version control your designs like software.
 
-4. Start the development servers:
-   ```bash
-   pnpm dev
-   ```
+### Academic Research
+Use kernel APIs for computational geometry research. Integrate CAD capabilities into research tools and educational platforms.
 
-   That's it! You can now start developing.
+## Supported Kernels
 
-### Database Commands
+Tau's multi-kernel architecture lets you choose the best CAD engine for your needs.
 
-#### Docker Compose Commands
-```bash
-# Start database
-pnpm db:up
+### Mechanical
 
-# Stop database
-pnpm db:down
+- [x] **[OpenSCAD](https://openscad.org/)** — Script-based CSG modeling, perfect for 3D printing
+- [x] **[Replicad](https://replicad.xyz/)** — TypeScript CAD with OpenCascade for precise engineering
+- [x] **[Zoo (KCL)](https://zoo.dev/)** — Cloud-native CAD with AI integration
+- [x] **[JSCAD](https://openjscad.xyz/)** — JavaScript parametric modeling
+- [ ] Fusion360
+- [ ] Build123D
+- [ ] TrCAD
+- [ ] ManifoldCAD
+- [ ] Curv
+- [ ] ScriptCAD
 
-# Reset database (destroys all data)
-pnpm db:reset
+### Electrical
 
-# View database logs
-pnpm db:logs
-```
+- [ ] **[TSCircuit](https://tscircuit.com/)** — Open-source PCB design
+- [ ] **[Atopile](https://atopile.io/)** — Hardware description language
 
-Or, if you prefer to use Docker CLI directly:
+### Firmware
 
-```bash
-# Start database
-docker compose -f infra/docker-compose.db.yml up -d
+- [ ] **[Arduino](https://www.arduino.cc/)** — Electronics platform
 
-# Stop database
-docker compose -f infra/docker-compose.db.yml down
+## File Converter
 
-# View logs
-docker compose -f infra/docker-compose.db.yml logs -f postgres
-```
+Tau includes a powerful file converter supporting **41 input formats** and **11 output formats**.
 
+### Supported Input Formats (41)
 
-#### Drizzle Commands
-```bash
-# Generate migrations. This is required when making changes to the database schema. SQL files are generated in the apps/api/app/database/migrations directory.
-pnpm db:generate
+3dm, 3ds, 3mf, ac, amf, ase, brep, bvh, cob, dae, drc, dxf, fbx, glb, gltf, ifc, iges, igs, lwo, md2, md5mesh, mesh.xml, nff, obj, off, ogex, ply, smd, step, stl, stp, usda, usdc, usdz, wrl, x, x3d, x3db, x3dv, xgl
 
-# Run migrations. This is a manual alternative to the application startup migrations.
-pnpm db:migrate
+### Supported Output Formats (11)
 
-# Open database studio. Useful for debugging database operations (a built-in alternative to pgAdmin)
-pnpm db:studio
-```
+3ds, dae, fbx, glb, gltf, obj, ply, stl, step, x, x3d
 
-### Linting
+## Built With
 
-This project uses ESLint for linting. The linting configuration is intentionally very strict, this has the following benefits:
+Tau is built on a foundation of excellent open-source projects:
 
-- Open-source contributions must all adhere to the same code style.
-- AI Copilots have guardrails to ensure code is consistent.
+| Category | Technologies |
+|----------|-------------|
+| **State Management** | [XState V5](https://xstate.js.org/) |
+| **Code Editor** | [Monaco Editor](https://microsoft.github.io/monaco-editor/) |
+| **3D Rendering** | [Three.js](https://threejs.org/), [React Three Fiber](https://docs.pmnd.rs/react-three-fiber) |
+| **UI Framework** | [React 19](https://react.dev/), [Radix UI](https://www.radix-ui.com/) |
+| **File Tree** | [Headless Tree](https://headless-tree.lukasbach.com/) |
+| **AI Orchestration** | [LangChain](https://js.langchain.com/) |
+| **3D Processing** | [glTF-Transform](https://gltf-transform.dev/), [Assimp](https://assimp.org/) |
+| **Documentation** | [Fumadocs](https://fumadocs.dev/) |
+| **Database** | [Drizzle ORM](https://orm.drizzle.team/) |
+| **Git Operations** | [Isomorphic Git](https://isomorphic-git.org/) |
 
-Here are some specific rules to be aware of, and why they are important:
-- `tsconfig.json`
-  - `strict`: required by libraries such as `zod`, enforcing TypeScript best practices.
-  - `erasableSyntaxOnly`: ensures that all Typescript code can be run on Node.js directly via type-stripping. The exception is NestJS apps, which require non-erasble syntax for dependency injection.
-- `eslint.config.ts`
-  - `@typescript-eslint/consistent-type-imports`: enforces separate type imports, supporting the Dependency Inversion Principle by making abstractions (types) explicit and separate from implementations.
-  - `@typescript-eslint/explicit-member-accessibility`: requires explicit accessibility modifiers for class members, enforcing the Single Responsibility Principle by making class member responsibilities and boundaries explicit.
-  - `@typescript-eslint/no-explicit-any`: prevents use of `any` type, enforcing the Liskov Substitution Principle by ensuring type safety and preventing unsafe substitutions.
-  - `@typescript-eslint/explicit-module-boundary-types`: all `export`ed functions and `public` methods must have a return type, including React components for the sake of consistency (even though it may seem overly verbose). This enforces the Interface Segregation Principle by making return types intentional and well-defined, with the additional benefit of reducing load on the TypeScript compiler by avoiding module-level type inference.
+## Community
+
+- **Discord** — [Join our community](https://discord.gg/KnB7rxK3)
+- **Documentation** — [tau.new/docs](https://tau.new/docs)
+- **GitHub Discussions** — Ask questions and share ideas
+
+## Contributing
+
+We welcome contributions! Please see our [Contributing Guide](contributing.md) for development setup and guidelines.
+
+## Security
+
+For security concerns, please review our [Security Policy](security.md).
+
+## Code of Conduct
+
+Please read our [Code of Conduct](code_of_conduct.md) before participating.
+
+## Acknowledgements
+
+Tau wouldn't be possible without these amazing open-source projects:
+
+- [OpenSCAD Playground](https://github.com/openscad/openscad-playground) — Inspiration for browser-based code-CAD architecture
+- [Three.js](https://threejs.org/) & [React Three Fiber](https://docs.pmnd.rs/react-three-fiber) — 3D rendering engine
+- [XState](https://xstate.js.org/) — State machine orchestration
+- [Monaco Editor](https://microsoft.github.io/monaco-editor/) — The editor powering VS Code
+- [Radix UI](https://www.radix-ui.com/) — Accessible UI primitives
+- [OpenCascade.js](https://ocjs.org/) — CAD kernel (via Replicad)
+- [Assimp](https://assimp.org/) — Multi-format 3D model importer
+- [glTF-Transform](https://gltf-transform.dev/) — 3D file processing
+- [LangChain](https://js.langchain.com/) — AI orchestration
+- [Headless Tree](https://headless-tree.lukasbach.com/) — File tree component
+- [Fumadocs](https://fumadocs.dev/) — Documentation framework
+
+## License
+
+Tau is dual-licensed:
+
+- **[MIT License](license)** — For all components except the OpenSCAD kernel
+- **GPL-2.0-or-later** — When using the OpenSCAD kernel
+
+If you use Tau **without** the OpenSCAD kernel (e.g., only Replicad, Zoo, or JSCAD), the entire codebase is available under the permissive MIT License. If you use Tau **with** the OpenSCAD kernel, the combined work is subject to [GPL-2.0-or-later](https://www.gnu.org/licenses/gpl-2.0.html) terms due to the `openscad-wasm-prebuilt` dependency.
+
+Third-party license information is available in [license-deps](license-deps).

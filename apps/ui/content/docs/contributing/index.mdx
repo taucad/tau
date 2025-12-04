@@ -1,0 +1,122 @@
+---
+title: Contributing
+description: How to contribute to Tau - guidelines, setup, and resources.
+icon: lucide:heart-handshake
+---
+
+# Contributing to Tau
+
+Thank you for your interest in contributing to Tau! We welcome contributions of all kinds — code, documentation, bug reports, feature requests, and more.
+
+## Getting Started
+
+### Development Setup
+
+See our [Contributing Guide](https://github.com/taucad/tau/blob/main/contributing.md) for detailed instructions on:
+
+- Prerequisites (Node.js 24+, pnpm, Docker)
+- Installing dependencies
+- Setting up the database
+- Running development servers
+- Database commands
+- Linting rules and conventions
+
+### Quick Start
+
+```bash
+# Clone the repository
+git clone https://github.com/taucad/tau.git
+cd tau
+
+# Install dependencies
+pnpm install
+
+# Start the database
+pnpm db:up
+
+# Copy environment files
+cp apps/ui/.env.example apps/ui/.env.local
+cp apps/api/.env.example apps/api/.env.local
+
+# Start development servers
+pnpm dev
+```
+
+## Ways to Contribute
+
+### Report Bugs
+
+Found a bug? [Open an issue](https://github.com/taucad/tau/issues/new) with:
+- Clear description of the problem
+- Steps to reproduce
+- Expected vs actual behavior
+- Screenshots or screen recordings if applicable
+
+### Suggest Features
+
+Have an idea? [Start a discussion](https://github.com/taucad/tau/discussions) or [open an issue](https://github.com/taucad/tau/issues/new) describing:
+- The problem you're trying to solve
+- Your proposed solution
+- Any alternatives you've considered
+
+### Submit Code
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Run tests and linting (`pnpm nx affected -t test,lint,typecheck`)
+5. Commit with clear messages
+6. Push and open a Pull Request
+
+### Add a CAD Kernel
+
+Want to integrate a new CAD engine? See our [Kernel Integration Guide](/docs/contributing/kernels) for step-by-step instructions on adding support for new kernels.
+
+### Improve Documentation
+
+Documentation improvements are always welcome! You can:
+- Fix typos or unclear explanations
+- Add examples and tutorials
+- Translate documentation
+- Improve API documentation
+
+## Community Guidelines
+
+### Code of Conduct
+
+Please read our [Code of Conduct](https://github.com/taucad/tau/blob/main/code_of_conduct.md) before participating. We're committed to providing a welcoming and inclusive environment.
+
+### Security
+
+Found a security vulnerability? Please review our [Security Policy](https://github.com/taucad/tau/blob/main/security.md) and report it responsibly to security@tau.new.
+
+## Resources
+
+| Resource | Description |
+|----------|-------------|
+| [Discord](https://discord.gg/KnB7rxK3) | Join our community for questions and discussions |
+| [GitHub Issues](https://github.com/taucad/tau/issues) | Bug reports and feature requests |
+| [GitHub Discussions](https://github.com/taucad/tau/discussions) | General questions and ideas |
+| [Contributing Guide](https://github.com/taucad/tau/blob/main/contributing.md) | Development setup and guidelines |
+
+## Current Limitations
+
+Some areas where contributions are especially welcome:
+
+### OpenSCAD Kernel
+- Only STL export is currently implemented; STEP export is planned
+- Error messages could be improved with better parsing
+
+### Zoo (KCL) Kernel
+- Requires internet connection for Zoo API access
+- API token required for full functionality
+
+### General
+- Accessibility improvements
+- Mobile experience optimization
+- Additional export formats
+- Performance optimizations
+
+---
+
+Thank you for helping make Tau better! 🙏

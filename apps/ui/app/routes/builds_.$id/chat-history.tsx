@@ -26,6 +26,7 @@ import type { KeyCombination } from '#utils/keys.utils.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import { cn } from '#utils/ui.utils.js';
 import { ChatHistoryEmpty } from '#routes/builds_.$id/chat-history-empty.js';
+import { useKernel } from '#hooks/use-kernel.js';
 
 const toggleChatHistoryKeyCombination = {
   key: 'c',
@@ -73,6 +74,7 @@ export const ChatHistory = memo(function (props: {
   const { className, isExpanded = true, setIsExpanded } = props;
   const messageIds = useChatSelector((state) => state.messageOrder);
   const { sendMessage } = useChatActions();
+  const { kernel } = useKernel();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const toggleChatHistory = useCallback(() => {
     setIsExpanded?.((current) => !current);
@@ -86,12 +88,12 @@ export const ChatHistory = memo(function (props: {
       const userMessage = createMessage({
         content,
         role: messageRole.user,
-        metadata: { ...metadata, model, status: messageStatus.pending },
+        metadata: { ...metadata, kernel, model, status: messageStatus.pending },
         imageUrls,
       });
       sendMessage(userMessage);
     },
-    [sendMessage],
+    [sendMessage, kernel],
   );
 
   // Memoize the item renderer for Virtuoso with stable references

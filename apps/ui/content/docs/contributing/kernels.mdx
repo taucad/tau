@@ -1,0 +1,382 @@
+---
+title: Adding a New CAD Kernel
+description: Step-by-step guide to integrating a new CAD kernel into Tau.
+icon: lucide:plus
+---
+
+This guide explains how to add a new CAD kernel to Tau. It's based on the JSCAD kernel integration and serves as a template for future kernels.
+
+## Overview
+
+Tau's multi-kernel architecture allows different CAD engines to be plugged in as Web Workers. Each kernel follows the same interface pattern, making it straightforward to add new ones.
+
+### What You'll Create
+
+1. **Worker** — Runs in a Web Worker, handles geometry computation
+2. **Type Export** — Prevents Vite from bundling the worker twice
+3. **Kernel Registry Entry** — Configuration in the types library
+4. **Machine Wiring** — Integration with the kernel state machine
+5. **Examples** (optional) — Sample builds to showcase the kernel
+6. **AI Configuration** (optional) — Prompts for AI-assisted modeling
+
+## Step 1: Create the Worker
+
+Create your worker at:
+
+```
+apps/ui/app/components/geometry/kernel/<kernel>/<kernel>.worker.ts
+```
+
+### Extend KernelWorker
+
+Import and extend the base `KernelWorker` class:
+
+```typescript
+import { expose } from 'comlink';
+import type { ComputeGeometryResult, ExportFormat, ExportGeometryResult, ExtractParametersResult } from '@taucad/types';
+import { createKernelSuccess, createKernelError } from '@taucad/types/guards';
+import { KernelWorker } from '#components/geometry/kernel/utils/kernel-worker.js';
+
+class MyKernelWorker extends KernelWorker {
+  protected readonly name = 'MyKernelWorker';
+
+  // Define supported export formats
+  protected static override readonly supportedExportFormats: ExportFormat[] = ['stl', 'glb'];
+
+  // Implement required abstract methods...
+}
+
+// Expose via Comlink
+const service = new MyKernelWorker();
+expose(service);
+
+export type MyKernelWorkerInterface = typeof service;
+```
+
+### Implement Required Methods
+
+#### `canHandle(filename, extension)`
+
+Quick check to determine if this worker can process the file. **Must be fast** — don't initialize heavy runtimes here.
+
+```typescript
+protected async canHandle(filename: string, extension: string): Promise<boolean> {
+  // Check file extension
+  if (extension !== 'myext') {
+    return false;
+  }
+
+  // Optionally check file content for specific patterns
+  const code = await this.readFile(filename, 'utf8');
+  return code.includes('mykernel-signature');
+}
+```
+
+#### `extractParameters(path)`
+
+Parse the file and extract parameters with their JSON Schema.
+
+```typescript
+protected async extractParameters(path: string): Promise<ExtractParametersResult> {
+  try {
+    const code = await this.readFile(path, 'utf8');
+    const { defaultParameters, jsonSchema } = parseParameters(code);
+
+    return createKernelSuccess({
+      defaultParameters,
+      jsonSchema,
+    });
+  } catch (error) {
+    return createKernelError({
+      message: `Failed to extract parameters: ${error}`,
+      type: 'code',
+    });
+  }
+}
+```
+
+#### `computeGeometry(path, parameters, geometryId?)`
+
+Execute the code and generate geometry (typically as glTF).
+
+```typescript
+protected async computeGeometry(
+  path: string,
+  parameters: Record<string, unknown>,
+  geometryId?: string,
+): Promise<ComputeGeometryResult> {
+  try {
+    const code = await this.readFile(path, 'utf8');
+    const geometry = await executeCode(code, parameters);
+    const gltfBlob = await convertToGltf(geometry);
+
+    return createKernelSuccess({
+      geometries: [{
+        id: geometryId ?? 'default',
+        type: 'model/gltf-binary',
+        blob: gltfBlob,
+      }],
+    });
+  } catch (error) {
+    return createKernelError({
+      message: `Geometry computation failed: ${error}`,
+      type: 'kernel',
+    });
+  }
+}
+```
+
+#### `exportGeometry(fileType, geometryId?, meshConfig?)`
+
+Export geometry to the requested format.
+
+```typescript
+protected async exportGeometry(
+  fileType: ExportFormat,
+  geometryId?: string,
+  meshConfig?: { linearTolerance: number; angularTolerance: number },
+): Promise<ExportGeometryResult> {
+  // Export from cached geometry
+  const blob = await this.exportToFormat(fileType);
+
+  return createKernelSuccess({
+    files: [{ name: `model.${fileType}`, blob }],
+  });
+}
+```
+
+### Create the Types File
+
+Create a sibling file to prevent Vite double-bundling:
+
+```
+apps/ui/app/components/geometry/kernel/<kernel>/<kernel>.worker.types.ts
+```
+
+```typescript
+// eslint-disable-next-line no-barrel-files/no-barrel-files -- Type re-export prevents Vite from bundling worker twice
+export type { MyKernelWorkerInterface } from '#components/geometry/kernel/<kernel>/<kernel>.worker.js';
+```
+
+## Step 2: Register in Kernel Machine
+
+Edit `apps/ui/app/machines/kernel.machine.ts`:
+
+### Add to Provider Union
+
+```typescript
+type KernelProvider = CadKernelProvider | 'tau' | 'jscad' | 'mykernel';
+```
+
+### Import the Worker
+
+```typescript
+import type { MyKernelWorkerInterface as MyKernelWorker } from '#components/geometry/kernel/mykernel/mykernel.worker.types.js';
+import MyKernelBuilderWorker from '#components/geometry/kernel/mykernel/mykernel.worker.js?worker';
+```
+
+### Add to Workers Map
+
+```typescript
+const workers = {
+  // ... existing workers
+  mykernel: MyKernelBuilderWorker,
+} as const satisfies Partial<Record<KernelProvider, new () => Worker>>;
+```
+
+### Add to Priority Array
+
+```typescript
+const workerPriority: KernelProvider[] = ['openscad', 'zoo', 'replicad', 'jscad', 'mykernel', 'tau'];
+```
+
+### Wire Up in `createWorkersActor`
+
+Add worker creation, wrapping, and initialization in the `createWorkersActor` promise actor.
+
+### Add Cleanup in `destroyWorkers`
+
+Ensure the worker is terminated in the cleanup action.
+
+## Step 3: Add Kernel Configuration
+
+Edit `libs/types/src/constants/kernel.constants.ts`:
+
+```typescript
+export const kernelConfigurations = [
+  // ... existing kernels
+  {
+    id: 'mykernel',
+    name: 'My Kernel',
+    dimensions: [3],
+    language: 'typescript', // or 'javascript', 'openscad', 'kcl', etc.
+    description: 'Brief description for UI',
+    mainFile: 'main.ts',
+    backendProvider: 'mybackend',
+    longDescription: 'Detailed description explaining the kernel strengths and use cases.',
+    emptyCode: `// Starter template
+export default function main() {
+  return createGeometry();
+}
+`,
+    recommended: 'Use Case Category',
+    tags: ['Tag1', 'Tag2'],
+    features: ['Feature 1', 'Feature 2'],
+  },
+] as const satisfies KernelConfiguration[];
+```
+
+## Step 4: Add Examples (Optional)
+
+### Create Examples in Library
+
+Edit `libs/tau-examples/src/build.examples.ts`:
+
+```typescript
+export const myKernelExamples = [
+  {
+    id: 'my-example-1',
+    name: 'Example Name',
+    code: `// Example code...`,
+    thumbnail: 'data:image/png;base64,...', // Optional
+  },
+];
+```
+
+### Export from Index
+
+Edit `libs/tau-examples/src/index.ts`:
+
+```typescript
+export { myKernelExamples } from './build.examples.js';
+```
+
+### Add to Sample Builds
+
+Edit `apps/ui/app/constants/build-examples.ts`:
+
+```typescript
+import { myKernelExamples } from '@taucad/tau-examples';
+
+// Map to Build objects and add to sampleBuilds
+```
+
+## Step 5: Configure AI Prompts (Optional)
+
+Edit `apps/api/app/api/chat/prompts/chat-prompt-cad.ts`:
+
+Add a `KernelConfig` entry to `cadKernelConfigs` with:
+
+- `fileExtension` — File extension (e.g., `.ts`, `.scad`)
+- `languageName` — Human-readable name
+- `roleDescription` — Brief purpose description
+- `technicalContext` — Strengths and use cases
+- `codeStandards` — Syntax and formatting rules
+- `modelingStrategy` — Design philosophy
+- `technicalResources` — Available APIs and examples
+- `commonErrorPatterns` — Typical issues and solutions
+
+## Step 6: Verify
+
+Run the following Nx tasks to verify your integration:
+
+```bash
+# Typecheck
+pnpm nx typecheck ui
+
+# Lint
+pnpm nx lint ui
+
+# Test
+pnpm nx test ui --watch=false
+```
+
+## Best Practices
+
+### Result Pattern
+
+Always return result objects using the helpers:
+
+```typescript
+import { createKernelSuccess, createKernelError } from '@taucad/types/guards';
+
+// Success
+return createKernelSuccess({ data });
+
+// Error
+return createKernelError({
+  message: 'Human-readable error',
+  type: 'code' | 'kernel', // code = syntax error, kernel = runtime error
+});
+```
+
+### Keep `canHandle` Fast
+
+The `canHandle` method is called for every file to determine which kernel to use. Don't:
+
+- Initialize heavy runtimes
+- Parse entire files
+- Make network requests
+
+Do:
+
+- Check file extensions
+- Look for quick signature patterns
+
+### Export Formats
+
+Define supported export formats as a static property:
+
+```typescript
+protected static override readonly supportedExportFormats: ExportFormat[] = ['stl', 'glb', 'step'];
+```
+
+### Use glTF-Transform for Output
+
+For consistent 3D output, use the `@gltf-transform/core` library:
+
+```typescript
+import { Document, NodeIO } from '@gltf-transform/core';
+
+const document = new Document();
+// Build scene...
+const io = new NodeIO();
+const glb = await io.writeBinary(document);
+```
+
+### File System Access
+
+Use the provided `fileReader` for filesystem operations:
+
+```typescript
+// Read file content
+const content = await this.readFile('path/to/file.txt', 'utf8');
+
+// Check if file exists
+const exists = await this.exists('path/to/file.txt');
+
+// List directory
+const files = await this.readdir('path/to/dir');
+```
+
+### Logging
+
+Use the built-in logging methods:
+
+```typescript
+this.debug('Processing file', { operation: 'computeGeometry' });
+this.warn('Deprecated feature used');
+this.error('Failed to parse', { data: { line: 42 } });
+```
+
+## Existing Kernels Reference
+
+| Kernel | Language | Backend | Description |
+|--------|----------|---------|-------------|
+| `openscad` | OpenSCAD | Manifold | CSG for 3D printing |
+| `replicad` | TypeScript | OpenCascade | Precise BRep engineering |
+| `zoo` | KCL | Zoo | Cloud-native CAD with AI |
+| `jscad` | TypeScript | JSCAD | Parametric CSG modeling |
+| `tau` | TypeScript | Replicad | File conversion kernel |
+
+See the existing implementations in `apps/ui/app/components/geometry/kernel/` for reference.

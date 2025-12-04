@@ -35,7 +35,7 @@ const defaultChatInterfaceSizes = [
   panelMinSizeStandard, // Parameters panel: LLM and generation parameters configuration
   panelMinSizeStandard, // Editor panel: KCL code editor for design modifications
   panelMinSizeStandard, // Converter panel: file format conversion utilities
-  panelMinSizeStandard, // Git panel: version control and git operations
+  // panelMinSizeStandard, // Git panel: version control and git operations
   panelMinSizeStandard, // Details panel: additional object details and metadata
 ];
 

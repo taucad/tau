@@ -4,7 +4,7 @@ import { Tau } from '#components/icons/tau.js';
 const navigationLinks = [
   { label: 'Home', href: '/' },
   { label: 'Docs', href: '/docs' },
-  { label: 'Contact', href: '/contact' },
+  { label: 'Contact', href: 'mailto:sales@tau.new' },
 ];
 
 export function PageFooter(): React.JSX.Element {

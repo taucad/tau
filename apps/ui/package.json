@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "dependencies": {
-    "@react-router/node": "^7.9.6",
+    "@react-router/node": "^7.10.0",
     "@taucad/api-extractor": "workspace:*",
     "@taucad/converter": "workspace:*",
     "@taucad/json-schema": "workspace:*",

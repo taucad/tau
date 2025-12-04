@@ -27,6 +27,7 @@ type ParametersProperties = {
   readonly emptyMessage?: string;
   readonly emptyDescription?: string;
   readonly units: Units;
+  readonly isInitialExpanded?: boolean;
 };
 
 export function Parameters({
@@ -41,8 +42,9 @@ export function Parameters({
   emptyMessage = 'No parameters available',
   emptyDescription = 'Parameters will appear here when they become available for this model',
   units,
+  isInitialExpanded = true,
 }: ParametersProperties): React.JSX.Element {
-  const [allExpanded, setAllExpanded] = useState(true);
+  const [allExpanded, setAllExpanded] = useState(isInitialExpanded);
   const [searchTerm, setSearchTerm] = useState('');
   const searchInputReference = React.useRef<HTMLInputElement>(null);
   // Ref to track current form data from RJSF's onChange handler

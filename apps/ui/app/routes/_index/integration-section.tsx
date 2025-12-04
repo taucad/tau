@@ -1,21 +1,11 @@
 import { Link } from 'react-router';
 import { ArrowRight, Package } from 'lucide-react';
-import { kernelConfigurations } from '@taucad/types/constants';
 import { Button } from '#components/ui/button.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-
-// Format kernel names as a readable list (e.g., "OpenSCAD, Replicad, Zoo, or JSCAD")
-function formatKernelList(): string {
-  const names = kernelConfigurations.map((k) => k.name);
-  if (names.length <= 1) {
-    return names[0] ?? '';
-  }
-
-  return `${names.slice(0, -1).join(', ')}, or ${names.at(-1)}`;
-}
+import { formatKernelList } from './kernel.utils.js';
 
 export function IntegrationSection(): React.JSX.Element {
-  const kernelList = formatKernelList();
+  const kernelList = formatKernelList('or');
 
   return (
     <div className="border-t bg-muted/30">

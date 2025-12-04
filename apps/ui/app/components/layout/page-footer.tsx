@@ -5,7 +5,6 @@ import { metaConfig } from '#constants/meta.constants.js';
 const navigationLinks = [
   { label: 'Home', href: '/' },
   { label: 'Docs', href: '/docs' },
-  { label: 'Contact', href: `mailto:${metaConfig.salesEmail}` },
 ];
 
 export function PageFooter(): React.JSX.Element {
@@ -26,6 +25,12 @@ export function PageFooter(): React.JSX.Element {
                 {link.label}
               </Link>
             ))}
+            <a
+              href={`mailto:${metaConfig.salesEmail}`}
+              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Contact
+            </a>
           </nav>
         </div>
       </div>

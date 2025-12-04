@@ -27,10 +27,6 @@ export function PageFooter(): React.JSX.Element {
             ))}
           </nav>
         </div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="bg-emerald-500 size-2 rounded-full" />
-          <span>All systems normal.</span>
-        </div>
       </div>
     </footer>
   );

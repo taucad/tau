@@ -189,7 +189,7 @@ function ObjectFieldTemplate(
 
   const { formContext } = registry;
 
-  const [isOpen, setIsOpen] = useState<boolean | undefined>(true);
+  const [isOpen, setIsOpen] = useState<boolean | undefined>(() => formContext.allExpanded);
   const isRoot = idSchema.$id === rjsfIdPrefix;
 
   useEffect(() => {
@@ -287,7 +287,7 @@ function ArrayFieldTemplate(
   const { title, items, canAdd, onAddClick, registry, schema } = props;
   const { formContext } = registry;
 
-  const [isOpen, setIsOpen] = useState<boolean | undefined>(true);
+  const [isOpen, setIsOpen] = useState<boolean | undefined>(() => formContext.allExpanded);
 
   useEffect(() => {
     setIsOpen(formContext.allExpanded);

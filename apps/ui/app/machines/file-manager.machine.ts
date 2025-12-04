@@ -5,6 +5,7 @@ import type { Remote } from 'comlink';
 import FileManagerWorker from '#machines/file-manager.worker.js?worker';
 import type { FileWorker } from '#machines/file-manager.worker.js';
 import { assertActorDoneEvent } from '#lib/xstate.js';
+import { joinPath, normalizePath } from '#utils/path.utils.js';
 
 type FileEntry = {
   path: string;
@@ -72,8 +73,8 @@ const readDirectoryActor = fromPromise<
   }
 
   try {
-    // Path is relative, prepend rootDirectory to make absolute
-    const absolutePath = path === '' ? context.rootDirectory : `${context.rootDirectory}/${path}`;
+    // Empty path means root directory, otherwise join with rootDirectory
+    const absolutePath = path === '' ? normalizePath(context.rootDirectory) : joinPath(context.rootDirectory, path);
     const fileStats = await context.wrappedWorker.getDirectoryStat(absolutePath);
     const entries: FileEntry[] = [];
 
@@ -114,8 +115,7 @@ const writeFileActor = fromPromise<
   }
 
   try {
-    // Prepend rootDirectory to make absolute path
-    const absolutePath = `${context.rootDirectory}/${path}`;
+    const absolutePath = joinPath(context.rootDirectory, path);
     await context.wrappedWorker.writeFile(absolutePath, data);
     return { type: 'fileWritten', path };
   } catch (error) {
@@ -141,12 +141,11 @@ const writeFilesActor = fromPromise<
   }
 
   try {
-    // Prepend rootDirectory to make absolute paths
     const absoluteFiles: Record<string, { content: Uint8Array }> = {};
     const paths = Object.keys(files);
 
     for (const path of paths) {
-      const absolutePath = `${context.rootDirectory}/${path}`;
+      const absolutePath = joinPath(context.rootDirectory, path);
       const fileData = files[path];
       if (fileData) {
         absoluteFiles[absolutePath] = fileData;
@@ -178,8 +177,7 @@ const readFileActor = fromPromise<
   }
 
   try {
-    // Prepend rootDirectory to make absolute path
-    const absolutePath = `${context.rootDirectory}/${path}`;
+    const absolutePath = joinPath(context.rootDirectory, path);
     const data = await context.wrappedWorker.readFile(absolutePath);
     return { type: 'fileRead', data };
   } catch (error) {
@@ -206,9 +204,8 @@ const renameFileActor = fromPromise<
   }
 
   try {
-    // Prepend rootDirectory to make absolute paths
-    const absoluteOldPath = `${context.rootDirectory}/${oldPath}`;
-    const absoluteNewPath = `${context.rootDirectory}/${newPath}`;
+    const absoluteOldPath = joinPath(context.rootDirectory, oldPath);
+    const absoluteNewPath = joinPath(context.rootDirectory, newPath);
     await worker.rename(absoluteOldPath, absoluteNewPath);
     return { type: 'fileRenamed', oldPath, newPath };
   } catch (error: unknown) {
@@ -235,8 +232,7 @@ const deleteFileActor = fromPromise<
   }
 
   try {
-    // Prepend rootDirectory to make absolute path
-    const absolutePath = `${context.rootDirectory}/${path}`;
+    const absolutePath = joinPath(context.rootDirectory, path);
     await worker.unlink(absolutePath);
     return { type: 'fileDeleted', path };
   } catch (error: unknown) {

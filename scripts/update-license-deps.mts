@@ -30,6 +30,39 @@ type LicenseGroup = {
 };
 
 /**
+ * Normalize a repository URL to a clickable HTTPS GitHub link.
+ * Handles various formats: git@github.com:, github:, owner/repo shorthand, etc.
+ */
+function normalizeGithubUrl(url: string): string {
+  let normalized = url
+    // Remove git+ prefix
+    .replace(/^git\+/, '')
+    // Convert git:// to https://
+    .replace(/^git:\/\//, 'https://')
+    // Remove .git suffix
+    .replace(/\.git$/, '')
+    // Convert ssh://git@ to https://
+    .replace(/^ssh:\/\/git@/, 'https://')
+    // Convert git@github.com:owner/repo to https://github.com/owner/repo
+    .replace(/^git@github\.com:/, 'https://github.com/')
+    // Convert github:owner/repo to https://github.com/owner/repo
+    .replace(/^github:/, 'https://github.com/')
+    // Fix URLs with colon instead of slash after github.com (e.g., https://github.com:owner/repo)
+    .replace(/^https:\/\/github\.com:/, 'https://github.com/');
+
+  // Convert shorthand owner/repo format to full GitHub URL
+  // Only if it looks like a GitHub shorthand (contains exactly one slash, no protocol, no spaces)
+  const isShorthand =
+    !normalized.startsWith('http://') && !normalized.startsWith('https://') && /^[\w-]+\/[\w.-]+$/.test(normalized);
+
+  if (isShorthand) {
+    normalized = `https://github.com/${normalized}`;
+  }
+
+  return normalized;
+}
+
+/**
  * Read and parse package.json from a directory.
  */
 async function readPackageJson(packagePath: string): Promise<PackageInfo | undefined> {
@@ -72,12 +105,8 @@ async function readPackageJson(packagePath: string): Promise<PackageInfo | undef
       repository = repositoryObject['url'] as string | undefined;
     }
 
-    // Clean up repository URL
-    repository &&= repository
-      .replace(/^git\+/, '')
-      .replace(/^git:\/\//, 'https://')
-      .replace(/\.git$/, '')
-      .replace(/^ssh:\/\/git@/, 'https://');
+    // Normalize repository URL to a clickable HTTPS link
+    repository &&= normalizeGithubUrl(repository);
 
     // Extract author
     let author: string | undefined;
@@ -289,7 +318,7 @@ function generateMarkdown(groups: LicenseGroup[]): string {
     '- **GPL-2.0-or-later** — When using the OpenSCAD kernel (due to `openscad-wasm-prebuilt`)',
     '',
     'If you use Tau **without** the OpenSCAD kernel, the entire codebase is available under',
-    'the permissive [MIT License](license). If you use Tau **with** the OpenSCAD kernel,',
+    'the permissive [MIT License](./license). If you use Tau **with** the OpenSCAD kernel,',
     'the combined work is subject to GPL-2.0-or-later terms.',
     '',
     'By using Tau, you agree to comply with the license terms of all included dependencies.',

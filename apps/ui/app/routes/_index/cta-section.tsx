@@ -90,6 +90,7 @@ export function CtaSection(): React.JSX.Element {
                 <KernelSelector selectedKernel={kernel} onKernelChange={setKernel} />
               </div>
               <ChatTextarea
+                enableAutoFocus={false}
                 enableContextActions={false}
                 enableKernelSelector={false}
                 className="pt-1"

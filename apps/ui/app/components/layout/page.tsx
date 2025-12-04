@@ -22,6 +22,7 @@ import { cn } from '#utils/ui.utils.js';
 import { Tau } from '#components/icons/tau.js';
 import { Compose } from '#components/ui/utils/compose.js';
 import { Commands } from '#components/layout/command-palette.js';
+import { PageFooter } from '#components/layout/page-footer.js';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 
@@ -35,6 +36,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     enableFloatingSidebar,
     enableOverflowY,
     providers,
+    enablePageFooter,
   } = useTypedMatches((handles) => ({
     breadcrumbItems: handles.breadcrumb,
     hasBreadcrumbItems: handles.breadcrumb.length > 0,
@@ -44,6 +46,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     enableFloatingSidebar: handles.enableFloatingSidebar.some((match) => match.handle.enableFloatingSidebar === true),
     enableOverflowY: handles.enableOverflowY.some((match) => match.handle.enableOverflowY === true),
     providers: handles.providers,
+    enablePageFooter: handles.enablePageFooter.some((match) => match.handle.enablePageFooter === true),
   }));
 
   const Providers = useMemo<Array<React.JSXElementConstructor<React.PropsWithChildren>>>(() => {
@@ -143,6 +146,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
             )}
           >
             {error === undefined ? <Outlet /> : error}
+            {enablePageFooter ? <PageFooter /> : null}
           </section>
         </SidebarInset>
       </SidebarProvider>

@@ -28,6 +28,7 @@ import { useKernel } from '#hooks/use-kernel.js';
 
 export const handle: Handle = {
   enableOverflowY: true,
+  enablePageFooter: true,
 };
 
 export default function ChatStart(): React.JSX.Element {

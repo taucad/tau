@@ -39,6 +39,10 @@ export type Handle = {
    * Enable overflow-y on the page. Use this when you have scrollable content in the page.
    */
   enableOverflowY?: boolean;
+  /**
+   * Enable page footer.
+   */
+  enablePageFooter?: boolean;
 };
 
 export type TypedUiMatch = UIMatch & {

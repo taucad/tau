@@ -47,7 +47,7 @@ export function DocsPageActions(): React.JSX.Element {
   ];
 
   return (
-    <div className="mt-5 -mr-4 space-y-1">
+    <div className="sticky bottom-0 mt-5 -mr-4 space-y-1 bg-sidebar pb-2">
       <CopyButton
         getText={getMarkdownContent}
         variant="ghost"
